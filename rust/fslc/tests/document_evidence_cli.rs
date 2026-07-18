@@ -275,13 +275,22 @@ fn changing_the_evidence_changes_artifact_digest_but_not_claim_set_digest() {
 
 #[test]
 fn evidence_file_order_does_not_change_the_recorded_digest() {
-    let evidence_a = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
-    let evidence_b = write_evidence(r#"{"requirement":{"id":"REQ-2"},"result":"conformant"}"#);
+    let evidence_a = write_evidence(
+        r#"{"requirement":{"id":"REQ-1"},"completeness":"bounded","checked_to_depth":8,"result":"verified"}"#,
+    );
+    let evidence_b = write_evidence(
+        r#"{"requirement":{"id":"REQ-1"},"completeness":"bounded","checked_to_depth":8,"result":"violated"}"#,
+    );
     let (out_forward, forward) = generate_to_file(&[&evidence_a, &evidence_b]);
     let (out_reversed, reversed) = generate_to_file(&[&evidence_b, &evidence_a]);
     assert_eq!(
         forward["evidence"]["digest"],
         reversed["evidence"]["digest"]
+    );
+    assert_eq!(forward["artifact_digest"], reversed["artifact_digest"]);
+    assert_eq!(
+        std::fs::read_to_string(&out_forward).expect("read forward artifact"),
+        std::fs::read_to_string(&out_reversed).expect("read reversed artifact")
     );
     let _ = std::fs::remove_file(&out_forward);
     let _ = std::fs::remove_file(&out_reversed);

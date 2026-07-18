@@ -186,9 +186,9 @@ These are trend and review-priority signals for downstream tooling.
 - `conservation_candidate`: counter-like `Int` effects structurally preserve a
   weighted sum. This is a candidate invariant only; proving the invariant is the
   job of `fslc verify` / `--engine induction`.
-- `divergent_choice`: bounded BMC finds two distinct actions enabled in the same
-  reachable state whose successors differ on an invariant or acceptance
-  predicate.
+- `divergent_choice`: the bounded depth-4 probe finds two distinct actions
+  enabled in the same reachable state whose successors differ on an invariant
+  or acceptance predicate.
 - `unconstrained_effect`: a structural `unread_state` candidate has a bounded
   reachable witness where two enabled actions write different next values.
   This supersedes the duplicate `unread_state` finding for that state.
@@ -272,8 +272,12 @@ The analysis package is in `src/fslc/analysis/`:
 - `export.py`: DOT and Mermaid formatting.
 - `findings.py`: AI-readable review findings.
 
-Most structural projections do not call Z3. The bounded underspecification probe
-is the explicit exception: it reuses the verifier's BMC machinery at a fixed
-depth and still reports `formal_status:"not_a_violation"`. If another future
+In the native implementation, `analyze` never calls Z3. The bounded
+underspecification probe is the one non-structural analysis, but it too is
+solver-free: a deterministic depth-4 explicit-state BFS over the
+solver-independent runtime Monitor (see `DESIGN-underspecification.md`), still
+reporting `formal_status:"not_a_violation"`. (The frozen Python reference
+realizes that probe symbolically via the verifier's BMC machinery — the origin
+of the `evidence_basis:"bounded_bmc"` vocabulary.) If another future
 finding needs proof status, it should explicitly call or consume the
 existing verifier/refinement/replay result and state that evidence in the JSON.

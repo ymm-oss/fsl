@@ -54,9 +54,10 @@ the reviewed artifact's bytes to match a fresh rendering exactly — issue #329'
 one editable slot (`background`) may legitimately differ. Instead, the
 reviewed artifact must pass `fslc document check`'s own structural conformance
 gate (claim blocks, markers, and residue text outside the slot must match);
-the digest actually recorded is always the fresh *canonical* rendering's
-digest (the same value `fslc document generate`'s own `artifact_digest`
-envelope field reports), never the reviewed file's literal bytes. A `--kind
+the target records both the fresh *canonical* rendering digest (the same
+value `fslc document generate` reports) and a separate digest of the reviewed
+file's literal bytes. The first detects reproducibility drift; the second
+binds editable background text as part of the presentation actually approved. A `--kind
 requirements_document` approval also accepts the same `--glossary`/`--evidence`
 flags `document generate` does (recorded, not re-supplied at check time from
 the command line — `approval check` re-reads the same paths from the current
@@ -207,6 +208,8 @@ conditional branch inside v1/v2. `spec`/`approval` are byte-identical to v1's;
     "path": "order-requirements.md",
     "digest_algorithm": "fsl-rendered-requirements-document-v1+sha256",
     "digest": "sha256:<64 hex>",
+    "reviewed_digest_algorithm": "fsl-reviewed-requirements-document-v1+sha256",
+    "reviewed_digest": "sha256:<64 hex>",
     "claim_set_digest_algorithm": "fsl-rcir-claim-set-v1+sha256",
     "claim_set_digest": "sha256:<64 hex>",
     "generator": "fslc",
@@ -240,6 +243,10 @@ conditional branch inside v1/v2. `spec`/`approval` are byte-identical to v1's;
   implemented but produce the identical value by construction (see
   `rust/fsl-tools/src/document_digest.rs`'s doc comments, written specifically
   so this issue could join on that identity).
+- **`reviewed_digest_algorithm`/`reviewed_digest`** bind the exact Markdown
+  bytes passed to `approval create`, including the editable background slot.
+  `approval check` re-reads `target.path`; a later replacement or edit is
+  reported as `artifact_changed`, independently of canonical rendering drift.
 - **`inputs`** replaces the solver triple (`depth`/`deadlock`/`engine` —
   meaningless for a deterministic RCIR projection) with the actual
   reproducibility inputs a rendering depends on: `view`/`lang` (read from the
@@ -302,7 +309,8 @@ a recursive artifact hash.
 over the canonical rendered Markdown — the identical recipe `fslc document
 generate`'s own `artifact_digest` envelope field already uses, over the
 identical bytes (the canonical rendering, with the editable slot's fixed
-placeholder text, never the reviewed file's actual edited content). Unlike
+placeholder text). `fsl-reviewed-requirements-document-v1+sha256` separately
+hashes the reviewed file's literal bytes, including that slot. Unlike
 `ledger`/`html`/`scenarios`, there is no execution-only noise to strip: RCIR
 rendering is fully deterministic, so nothing needs normalizing before hashing.
 
@@ -323,6 +331,9 @@ already computed — no live re-render for comparison purposes beyond what
 overlay's job is display, not the authoritative approval-governance check
 `fslc approval check` performs.
 
+Adding the approval frontmatter binding and reference section advances the
+requirements-document renderer from evidence overlay version `1.2.0` to `1.3.0`.
+
 ## Status and failure reasons
 
 An approval is `approved` only when all applicable bindings match:
@@ -331,10 +342,11 @@ An approval is `approved` only when all applicable bindings match:
 - normalized rendered-artifact digest;
 - renderer version;
 - for `requirements_document` only: the RCIR claim-set digest.
+- for `requirements_document` only: the literal reviewed-artifact digest.
 
 Otherwise it is `drifted` with one or more machine reasons: `spec_changed`,
 `rendering_changed`, `renderer_changed`, or (`requirements_document` only)
-`claim_set_changed`. Ledger output shows the complete baseline digest and an
+`claim_set_changed` and `artifact_changed`. Ledger output shows the complete baseline digest and an
 executable `fslc approval diff` command for every drifted requirement.
 Repeatable `--approval` records are applied in CLI order; a later record
 replaces an earlier decision for the same requirement ID.
@@ -400,7 +412,9 @@ Issue #333 adds:
   `schemas/fslc/approval/approval-record.v3.schema.json`;
 - a requirement-text edit produces `drifted` with `spec_changed`,
   `claim_set_changed`, and `rendering_changed` together;
-- editing only the `background` slot does not change the recorded digest
+- editing the `background` slot before approval leaves the canonical digest
+  unchanged but produces a distinct reviewed-artifact digest; changing it
+  after approval reports `artifact_changed`, and restoring it returns to approved
   (creation succeeds and the digest matches an unedited artifact's);
 - tampering a claim block is rejected at `approval create` itself, with the
   same drift `reasons` `fslc document check` would report;

@@ -36,6 +36,11 @@ pub const ARTIFACT_DIGEST_ALGORITHM: &str = "fsl-rendered-artifact-v1+sha256";
 /// compare the two without any approval-specific machinery.
 pub const REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM: &str =
     "fsl-rendered-requirements-document-v1+sha256";
+/// Literal bytes of the requirements document the approver reviewed. This is
+/// separate from the canonical rendering digest because the background slot
+/// is intentionally editable but is still part of the reviewed presentation.
+pub const REVIEWED_REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM: &str =
+    "fsl-reviewed-requirements-document-v1+sha256";
 /// The same `claim_set_digest` identity `fsl_tools::document_digest::
 /// CLAIM_SET_DIGEST_ALGORITHM` uses. Duplicated here rather than imported
 /// cross-crate, mirroring `SPEC_DIGEST_ALGORITHM`'s own precedent: the two
@@ -105,6 +110,10 @@ pub struct TargetBinding {
     pub path: String,
     pub digest_algorithm: String,
     pub digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewed_digest_algorithm: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewed_digest: Option<String>,
     /// Present only for a `requirements_document` target (v3/v4): the RCIR
     /// claim-set digest (issue #325) alongside the rendered artifact's own
     /// digest, so drift in the requirements projection itself is
@@ -603,6 +612,17 @@ pub fn validate_record(record: &ApprovalRecord) -> Result<(), String> {
                 record.target.digest_algorithm
             ));
         }
+        if record.target.reviewed_digest_algorithm.as_deref()
+            != Some(REVIEWED_REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM)
+        {
+            return Err(
+                "requirements_document approval requires a reviewed_digest_algorithm".to_owned(),
+            );
+        }
+        match &record.target.reviewed_digest {
+            Some(digest) if is_sha256(digest) => {}
+            _ => return Err("approval record contains an invalid reviewed_digest".to_owned()),
+        }
         if record.target.claim_set_digest_algorithm.as_deref() != Some(CLAIM_SET_DIGEST_ALGORITHM) {
             return Err(
                 "requirements_document approval requires a claim_set_digest_algorithm".to_owned(),
@@ -652,9 +672,11 @@ pub fn validate_record(record: &ApprovalRecord) -> Result<(), String> {
         }
         if record.target.claim_set_digest_algorithm.is_some()
             || record.target.claim_set_digest.is_some()
+            || record.target.reviewed_digest_algorithm.is_some()
+            || record.target.reviewed_digest.is_some()
         {
             return Err(
-                "ledger/html/scenarios approval must not carry a claim_set_digest".to_owned(),
+                "ledger/html/scenarios approval must not carry document-only digests".to_owned(),
             );
         }
         match &record.target.inputs {
@@ -824,6 +846,7 @@ pub fn evaluate(
     current_artifact_digest: &str,
     current_generator_version: &str,
     current_claim_set_digest: Option<&str>,
+    current_reviewed_digest: Option<&str>,
 ) -> Value {
     let mut reasons = Vec::new();
     if record.spec.digest != current_spec_digest {
@@ -840,6 +863,12 @@ pub fn evaluate(
         && recorded != current
     {
         reasons.push("claim_set_changed");
+    }
+    if let (Some(recorded), Some(current)) =
+        (&record.target.reviewed_digest, current_reviewed_digest)
+        && recorded != current
+    {
+        reasons.push("artifact_changed");
     }
     let status = if reasons.is_empty() {
         "approved"
@@ -871,6 +900,12 @@ pub fn evaluate(
     }
     if let Some(current) = current_claim_set_digest {
         fields.insert("current_claim_set_digest".to_owned(), json!(current));
+    }
+    if let Some(recorded) = &record.target.reviewed_digest {
+        fields.insert("reviewed_digest".to_owned(), json!(recorded));
+    }
+    if let Some(current) = current_reviewed_digest {
+        fields.insert("current_reviewed_digest".to_owned(), json!(current));
     }
     evaluation
 }

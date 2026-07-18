@@ -1,5 +1,8 @@
 name: ci
 
+env:
+  MACOSX_DEPLOYMENT_TARGET: "14.0"
+
 # Python is a frozen reference implementation and optional LSP surface. The
 # required product gate executes only the authoritative Rust and WASM surfaces.
 
@@ -18,10 +21,7 @@ jobs:
   rust-workspace:
     name: rust workspace
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      Z3_SYS_Z3_VERSION: "4.16.0"
-      READ_ONLY_GITHUB_TOKEN: ${{ github.token }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -35,10 +35,7 @@ jobs:
   wasm:
     name: WASM
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      Z3_SYS_Z3_VERSION: "4.16.0"
-      READ_ONLY_GITHUB_TOKEN: ${{ github.token }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -74,14 +71,11 @@ jobs:
   rust-native-z3:
     name: native Z3 4.16 (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
-    env:
-      Z3_SYS_Z3_VERSION: "4.16.0"
-      READ_ONLY_GITHUB_TOKEN: ${{ github.token }}
+        os: [ubuntu-latest, macos-15, windows-latest]
     steps:
       - uses: actions/checkout@v4
 

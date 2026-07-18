@@ -23,8 +23,9 @@ non-normative slots (issue #329). Within that pipeline RCIR guarantees:
    authored semantic target is classified into exactly one of `rendered`,
    `unattributed`, or `unsupported`, and the projector fails closed if that
    partition is not exact;
-2. conditions, negation, effects, simultaneous update, and fairness are carried in
-   a form a deterministic template renderer can consume without re-deriving them;
+2. conditions, negation, effects, simultaneous update, and fairness remain in the
+   embedded Public Kernel v2 contract; RCIR binds document roles to those nodes by
+   stable semantic target, so a renderer does not accept an unpaired model;
 3. digests exist at spec, claim-set, and claim granularity so drift in the
    projected meaning set is mechanically detectable;
 4. unsupported semantic elements and unknown provenance are reported, never
@@ -36,21 +37,22 @@ matches the FSL, or that an implementation conforms to the FSL.
 
 ## Contract position and versioning
 
-RCIR is a second public contract next to the Public Kernel, with independent
-schema and versioning:
+RCIR is a public role-and-traceability sidecar over Public Kernel, with independent
+schema and versioning. The interoperability unit is one RCIR object containing an
+exact Public Kernel v2 object:
 
 - schema file: `schemas/fslc/document/requirement-claims.v1.schema.json`
 - schema `$id`: `https://fsl.dev/schemas/fslc/document/requirement-claims.v1.schema.json`
 - instance fields: `schema_version` (semver; consumers check the major),
   `result: "requirement_claims"`.
 
-RCIR is explicitly not a second semantics. Expressions, lvalues, and statements are
-carried as the location-normalized checked kernel AST JSON (the same
-`normalized_kernel_ast` projection the `spec_digest` uses — location objects
-stripped, object keys sorted). RCIR adds only a document role on top of checked
-nodes ("this expression is an enablement condition of this action"). It defines no
-new logical operators and no evaluator. Public Kernel v1/v2 schemas, the verifier,
-and the frozen Python reference are unchanged.
+RCIR is explicitly not a second semantics. `public_kernel` is validated by
+`kernel.v2.schema.json`; claim records contain typed subjects and stable semantic
+targets, not another expression/statement AST. Trace-case arguments and expression
+expectations, which do not occur in the model contract itself, reuse Public Kernel
+v2's expression projection and schema definition. RCIR defines no new logical
+operators or evaluator. The historical Python-shaped AST is used only as an
+internal, location-neutral digest preimage and is never serialized as RCIR.
 
 Adding an optional field or a new claim kind is a minor version change; changing a
 required field, a digest preimage, assurance meaning, or a classification rule is a
@@ -72,7 +74,7 @@ adapter.
 ## Top-level model
 
 An RCIR artifact is one JSON object with exactly these top-level members:
-`$schema`, `schema_version`, `result`, `spec`, `semantics`, `requirements`,
+`$schema`, `schema_version`, `result`, `spec`, `public_kernel`, `semantics`, `requirements`,
 `claims`, `trace_cases`, `undecided`, `analysis_scope`, `coverage`, `provenance`.
 
 - `spec` names the specification, its dialect, its portable source path
@@ -80,6 +82,9 @@ An RCIR artifact is one JSON object with exactly these top-level members:
   projector never guesses it), and the three digests below together with their
   algorithm-name constants (self-describing, following the approval-record
   convention of naming the algorithm beside the value).
+- `public_kernel` is the exact Public Kernel v2 artifact for the checked model.
+  Its schema is referenced directly by the RCIR schema, so malformed or mismatched
+  semantic payload cannot be hidden behind an otherwise-valid claim sidecar.
 - `semantics` states the fixed FSL execution model the renderer must phrase
   exactly once: `updates: "simultaneous"`, `reads: "pre_state"`,
   `failed_step: "rollback"`, `fairness: "weak"`. These are closed constants in v1.
@@ -92,15 +97,15 @@ kinds and their authoritative sources:
 
 | kind | source | payload |
 | --- | --- | --- |
-| `operation` | `ActionDef` | `subject` (action name, `display_name`, parameters), `enablement` (`guards` in declaration order — `requires`/`let` interleaved as written, mode `all`), `effects` (`statements`, commit `simultaneous`, reads `pre_state`), `postconditions` (`ensures`), `fairness` (`weak` when `fair`, else `none`) |
-| `state_rule` | `KernelModel::invariants` (except requirements-NFR-deadline-generated ones) | `condition` |
-| `transition_rule` | `KernelModel::transitions` | `condition` |
-| `progress_rule` | `KernelModel::leadstos` | `progress` (binders, before, after, optional `within`, optional `decreases`) |
-| `reachability_goal` | `KernelModel::reachables` | `condition` |
+| `operation` | `ActionDef` | `subject` (action name, `display_name`, parameters), `fairness`; guards, effects, and postconditions resolve through `semantic_targets` into Public Kernel |
+| `state_rule` | `KernelModel::invariants` (except requirements-NFR-deadline-generated ones) | property subject and semantic target |
+| `transition_rule` | `KernelModel::transitions` | property subject and semantic target |
+| `progress_rule` | `KernelModel::leadstos` | property subject and semantic target |
+| `reachability_goal` | `KernelModel::reachables` | property subject and semantic target |
 | `acceptance_trace` | `requirements_trace_contract` acceptance cases | `trace` (a reference into `trace_cases`) |
 | `forbidden_trace` | `requirements_trace_contract` forbidden cases | `trace` (a reference into `trace_cases`) |
-| `deadline_rule` | invariants generated by requirements NFR deadline lowering | `condition` |
-| `terminal_rule` | `KernelModel::terminal` | `condition` |
+| `deadline_rule` | invariants generated by requirements NFR deadline lowering | property subject and semantic target |
+| `terminal_rule` | `KernelModel::terminal` | terminal subject and semantic target |
 
 Rules:
 
@@ -153,7 +158,7 @@ rather than by target:
 `trace_cases` holds the executable detail of acceptance and forbidden cases from
 `fsl_core::requirements_trace_contract` (a from-source reparse, independent of the
 `KernelModel`/origin registry): ID, kind, source text, ordered steps (action name,
-argument ASTs, and — unlike the claim-core form below — each step's own source
+typed Public Kernel expressions for arguments, and each step's own source
 position), optional expectation (`expr` or `stage` form), source position, and the
 same requirement-ID list as its `acceptance_trace`/`forbidden_trace` claim. The
 claim itself carries only `{"trace_case": id}` — the resolved steps live in
@@ -320,7 +325,7 @@ classifies checked nodes and serializes them.
 
 ## Verification evidence
 
-`rust/fsl-tools/tests/document.rs` (27 tests) against
+`rust/fsl-tools/tests/document.rs` (29 tests) against
 `examples/pm/cancel_system.fsl` and two dedicated fixtures
 (`document_claims_fixture.fsl` — kernel-wrapper `requirements` covering `trans`,
 `reachable`, `leadsTo`, `terminal`, a deadline, `forbidden`, a multi-statement
@@ -331,7 +336,8 @@ requirement, a multi-requirement action, `@undecided`, and `entity`/`number`/
 - projection completeness (exact target-universe partition, all nine claim kinds,
   unattributed claims are still emitted, dialect rejection is fail-closed);
 - many-to-many requirement relations (no singular compatibility projection
-  anywhere in the serialized artifact);
+  anywhere in the serialized artifact), including identical statement text from
+  distinct source declarations without provenance collapse;
 - nine mutation-sensitivity cases (`not` removal, guard removal, assignment
   removal, assignment retarget, enum-member rename, fairness removal, invariant
   weakening, acceptance-step change, forbidden-step change), each asserting the

@@ -14,8 +14,8 @@ use serde::Serialize;
 use crate::document::RequirementClaimSet;
 use crate::document_digest::{CLAIM_BLOCK_DIGEST_ALGORITHM, framed_text_digest};
 use crate::document_markers::{
-    DOCUMENT_RENDERER, DOCUMENT_RENDERER_VERSION, DOCUMENT_SCHEMA, MarkerIssue, SLOT_NAMES,
-    Segment, parse_body, parse_frontmatter,
+    DOCUMENT_RENDERER, DOCUMENT_RENDERER_VERSION, DOCUMENT_SCHEMA, MarkerIssue, NORMATIVE_SCOPE,
+    SLOT_NAMES, Segment, parse_body, parse_frontmatter,
 };
 use crate::document_render::Locale;
 
@@ -98,6 +98,7 @@ impl std::fmt::Display for CheckError {
 /// `render_requirements_document` output for the same locale) does not
 /// parse as a well-formed generated document — that would be this crate's
 /// own renderer producing an artifact its own parser rejects.
+#[allow(clippy::too_many_lines)]
 pub fn check_requirements_document(
     artifact_text: &str,
     fresh_claims: &RequirementClaimSet,
@@ -125,6 +126,12 @@ pub fn check_requirements_document(
         || frontmatter.renderer_version != DOCUMENT_RENDERER_VERSION;
     if renderer_changed {
         reasons.push(reason("renderer_changed", "FSL-DOC-RENDERER-CHANGED"));
+    }
+    if frontmatter.normative_scope != NORMATIVE_SCOPE {
+        reasons.push(reason(
+            "normative_scope_changed",
+            "FSL-DOC-EDIT-OUTSIDE-SLOT",
+        ));
     }
     if frontmatter.spec_digest != fresh_claims.spec.spec_digest {
         reasons.push(reason("spec_digest_mismatch", "FSL-DOC-SPEC-DRIFT"));

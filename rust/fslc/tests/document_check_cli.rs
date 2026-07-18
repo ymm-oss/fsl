@@ -230,7 +230,7 @@ fn an_old_renderer_version_is_reported_as_renderer_changed() {
     let artifact = generate(&["--lang", "ja"]);
     let edited = edit(
         &artifact,
-        "renderer_version: 1.2.0",
+        "renderer_version: 1.3.0",
         "renderer_version: 0.9.0",
     );
     let output = check(CANCEL_SYSTEM, &edited);
@@ -242,6 +242,28 @@ fn an_old_renderer_version_is_reported_as_renderer_changed() {
             .iter()
             .any(|reason| reason["kind"] == "renderer_changed"
                 && reason["code"] == "FSL-DOC-RENDERER-CHANGED")
+    );
+    let _ = std::fs::remove_file(&artifact);
+    let _ = std::fs::remove_file(&edited);
+}
+
+#[test]
+fn editing_the_normative_scope_fails() {
+    let artifact = generate(&["--lang", "ja"]);
+    let edited = edit(
+        &artifact,
+        "normative_scope: generated-claim-blocks-only",
+        "normative_scope: background-slot-too",
+    );
+    let output = check(CANCEL_SYSTEM, &edited);
+    assert_eq!(output.status.code(), Some(1));
+    let envelope = json_stdout(&output);
+    let reasons = envelope["reasons"].as_array().expect("reasons array");
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason["kind"] == "normative_scope_changed"
+                && reason["code"] == "FSL-DOC-EDIT-OUTSIDE-SLOT")
     );
     let _ = std::fs::remove_file(&artifact);
     let _ = std::fs::remove_file(&edited);
@@ -335,8 +357,8 @@ fn an_unsupported_document_schema_exits_two() {
     let artifact = generate(&["--lang", "ja"]);
     let edited = edit(
         &artifact,
-        "fsl_document_schema: fsl-requirements-document-v1",
         "fsl_document_schema: fsl-requirements-document-v2",
+        "fsl_document_schema: fsl-requirements-document-v999",
     );
     let output = check(CANCEL_SYSTEM, &edited);
     assert_eq!(output.status.code(), Some(2));

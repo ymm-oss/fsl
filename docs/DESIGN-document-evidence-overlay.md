@@ -155,7 +155,7 @@ to still hold after the rewording.
 Frontmatter gains one new optional key, `evidence_digest` (same shape as
 `glossary_digest`: a plain `sha256:`-prefixed digest of the raw evidence file
 bytes, computed by the CLI, not RCIR's canonical-JSON `framed_digest` scheme).
-`DOCUMENT_RENDERER_VERSION` bumped `1.0.0` -> `1.1.0` for this new frontmatter
+`DOCUMENT_RENDERER_VERSION` advances from glossary rendering's `1.1.0` to `1.2.0` for this new frontmatter
 key, the same reasoning issue #329 already established for a frontmatter
 schema change.
 

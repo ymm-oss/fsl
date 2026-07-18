@@ -64,7 +64,7 @@ pub use public_kernel::{
     REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION, REPLAY_TRACE_V1_SCHEMA_ID,
     REPLAY_TRACE_V1_SCHEMA_VERSION, REPLAY_TRACE_V1_STUTTER_SCHEMA_VERSION,
     TESTGEN_TRACE_V1_SCHEMA_ID, TESTGEN_TRACE_V1_SCHEMA_VERSION, public_kernel_contract,
-    public_kernel_contract_for_version,
+    public_kernel_contract_for_version, public_kernel_expression,
 };
 pub use refinement::{
     ActionCorrespondence, ActionCorrespondenceTarget, ActionRef, ImplementsContract, ProgressMap,
@@ -1363,10 +1363,10 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
     expr: Expr,
     replacements: &HashMap<String, Expr, S>,
 ) -> Expr {
-    if let Expr::Var(name) = &expr {
-        if let Some(replacement) = replacements.get(name) {
-            return replacement.clone();
-        }
+    if let Expr::Var(name) = &expr
+        && let Some(replacement) = replacements.get(name)
+    {
+        return replacement.clone();
     }
     match expr {
         Expr::Some(expr) => Expr::Some(Box::new(substitute(*expr, replacements))),

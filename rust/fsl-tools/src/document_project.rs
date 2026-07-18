@@ -12,13 +12,14 @@ use std::path::Path;
 
 use fsl_core::{
     ActionDef, ActionGuard, Annotation, Annotations, FsResolver, INIT_TARGET, KernelModel,
-    KernelSpec, OriginChain, ParamDef, RequirementLink, RequirementsTraceCase,
+    KernelSpec, OriginChain, ParamDef, PublicKernelVersion, RequirementLink, RequirementsTraceCase,
     RequirementsTraceContract, RequirementsTraceExpectation, TERMINAL_TARGET, TypeRef,
     action_target, build_model, display_name, parse_kernel_source, property_target,
-    requirements_trace_contract,
+    public_kernel_contract_for_version, public_kernel_expression, requirements_trace_contract,
 };
 use fsl_syntax::{
-    RequirementsItem, SourceFile, Span, SpecItem, SurfaceDocument, VerifyItem, parse_document,
+    Expr, RequirementsItem, SourceFile, SourcePos, Span, SpecItem, SurfaceDocument, VerifyItem,
+    parse_document,
 };
 use serde_json::{Value, json};
 
@@ -95,7 +96,9 @@ pub struct DocumentInput<'a> {
 /// and leave no trace in the lowered `KernelSpec`/`SurfaceSpec`, so analysis
 /// scope must be read from the surface `requirements` tree directly, the same
 /// way `implements` names are.
-fn requirements_analysis_scope(requirements: &fsl_syntax::SurfaceRequirements) -> AnalysisScope {
+fn requirements_analysis_scope(
+    requirements: &fsl_syntax::SurfaceRequirements,
+) -> Result<AnalysisScope, String> {
     let mut instances = Vec::new();
     let mut values = Vec::new();
     for item in &requirements.items {
@@ -106,17 +109,31 @@ fn requirements_analysis_scope(requirements: &fsl_syntax::SurfaceRequirements) -
                         instances.push(json!({"entity": name, "count": count}));
                     }
                     VerifyItem::Values(name, lo, hi, _) => {
+                        let bound = |expr: &Expr| match expr {
+                            Expr::Num(value) => Some(*value),
+                            Expr::Neg(inner) => match inner.as_ref() {
+                                Expr::Num(value) => value.checked_neg(),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        let lo = bound(lo).ok_or_else(|| {
+                            format!("analysis bound for '{name}' must be an integer literal")
+                        })?;
+                        let hi = bound(hi).ok_or_else(|| {
+                            format!("analysis bound for '{name}' must be an integer literal")
+                        })?;
                         values.push(json!({
                             "number": name,
-                            "lo": normalize(lo.python_ast()),
-                            "hi": normalize(hi.python_ast()),
+                            "lo": lo,
+                            "hi": hi,
                         }));
                     }
                 }
             }
         }
     }
-    AnalysisScope { instances, values }
+    Ok(AnalysisScope { instances, values })
 }
 
 /// Parse, lower, build, and project `source` in one call (test/tooling
@@ -149,7 +166,8 @@ pub fn project_requirement_claims_from_source(
             (
                 DocumentDialect::Requirements,
                 names,
-                requirements_analysis_scope(requirements),
+                requirements_analysis_scope(requirements)
+                    .map_err(DocumentProjectionError::Other)?,
             )
         }
         other => {
@@ -192,7 +210,7 @@ fn surface_dialect_name(document: &SurfaceDocument) -> &'static str {
 
 #[derive(Default)]
 struct RequirementAgg {
-    statements: BTreeMap<Option<String>, SourceRef>,
+    statements: BTreeSet<(Option<String>, SourceRef)>,
     claim_ids: BTreeSet<String>,
     kinds: BTreeSet<String>,
 }
@@ -240,8 +258,7 @@ fn record_links(
         let entry = agg.entry(link.id.clone()).or_default();
         entry
             .statements
-            .entry(link.text.clone())
-            .or_insert_with(|| source_ref_span(source_path, link.span));
+            .insert((link.text.clone(), source_ref_span(source_path, link.span)));
         entry.claim_ids.insert(claim_id.to_owned());
         entry.kinds.extend(kind_ids.iter().cloned());
     }
@@ -300,11 +317,11 @@ fn provenance_for(
             }
         }
     }
-    if assurance.is_none() {
-        if let Some(span) = declared_span {
-            assurance = Some(ProvenanceAssurance::SourceBacked);
-            sources.insert((span.start.line, span.start.column));
-        }
+    if assurance.is_none()
+        && let Some(span) = declared_span
+    {
+        assurance = Some(ProvenanceAssurance::SourceBacked);
+        sources.insert((span.start.line, span.start.column));
     }
     ClaimProvenance {
         assurance: assurance.unwrap_or(ProvenanceAssurance::Unknown),
@@ -574,9 +591,11 @@ struct BuiltTrace {
     core: Value,
 }
 
+#[allow(clippy::too_many_lines)]
 fn push_trace_claims(
     kind: TraceCaseKind,
     cases: &[RequirementsTraceCase],
+    model: &KernelModel,
     source_path: Option<&str>,
     agg: &mut BTreeMap<String, RequirementAgg>,
     built: &mut Vec<BuiltClaim>,
@@ -587,6 +606,15 @@ fn push_trace_claims(
         TraceCaseKind::Forbidden => ("forbidden", ClaimKind::ForbiddenTrace),
     };
     for case in cases {
+        let position = SourcePos {
+            offset: 0,
+            line: case.line,
+            column: case.column,
+        };
+        let span = Span {
+            start: position,
+            end: position,
+        };
         let target = format!("{prefix}:{}", case.id);
         let claim_id = format!("{target}#{}", claim_kind.as_str());
         let links = case
@@ -599,14 +627,52 @@ fn push_trace_claims(
         let steps_full: Vec<Value> = case
             .steps
             .iter()
-            .map(|step| {
-                json!({
+            .map(|step| -> Result<Value, String> {
+                let action = model
+                    .actions
+                    .iter()
+                    .find(|action| action.name == step.name)
+                    .ok_or_else(|| {
+                        format!(
+                            "trace '{}' references unknown action '{}'",
+                            case.id, step.name
+                        )
+                    })?;
+                if action.params.len() != step.args.len() {
+                    return Err(format!(
+                        "trace '{}' action '{}' expects {} arguments but received {}",
+                        case.id,
+                        step.name,
+                        action.params.len(),
+                        step.args.len()
+                    ));
+                }
+                let args = step
+                    .args
+                    .iter()
+                    .zip(&action.params)
+                    .map(|(arg, parameter)| {
+                        let expected = match parameter {
+                            ParamDef::Typed { ty, .. } => ty.clone(),
+                            ParamDef::Range { .. } => TypeRef::Int,
+                        };
+                        public_kernel_expression(
+                            arg,
+                            model,
+                            source_path.unwrap_or(""),
+                            span,
+                            Some(&expected),
+                        )
+                        .map_err(|error| error.to_string())
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(json!({
                     "action": step.name,
-                    "args": step.args.iter().map(|arg| normalize(arg.python_ast())).collect::<Vec<_>>(),
+                    "args": args,
                     "source": source_ref_lc(source_path, step.line, step.column),
-                })
+                }))
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         let steps_core: Vec<Value> = case
             .steps
             .iter()
@@ -622,6 +688,30 @@ fn push_trace_claims(
             .as_ref()
             .map(|expectation| match expectation {
                 RequirementsTraceExpectation::Expr(expr) => {
+                    public_kernel_expression(
+                        expr,
+                        model,
+                        source_path.unwrap_or(""),
+                        span,
+                        Some(&TypeRef::Bool),
+                    )
+                    .map(|expression| json!({"kind": "expr", "expression": expression}))
+                    .map_err(|error| error.to_string())
+                }
+                RequirementsTraceExpectation::Stage {
+                    entity,
+                    instance,
+                    stage,
+                } => {
+                    Ok(json!({"kind": "stage", "entity": entity, "instance": instance, "stage": stage}))
+                }
+            })
+            .transpose()?;
+        let expectation_core = case
+            .expectation
+            .as_ref()
+            .map(|expectation| match expectation {
+                RequirementsTraceExpectation::Expr(expr) => {
                     json!({"kind": "expr", "ast": normalize(expr.python_ast())})
                 }
                 RequirementsTraceExpectation::Stage {
@@ -633,7 +723,8 @@ fn push_trace_claims(
                 }
             });
 
-        let trace_core = json!({"id": case.id, "steps": &steps_core, "expectation": &expectation});
+        let trace_core =
+            json!({"id": case.id, "steps": &steps_core, "expectation": &expectation_core});
         let claim_core = json!({
             "id": claim_id,
             "kind": claim_kind.as_str(),
@@ -860,6 +951,7 @@ pub fn project_requirement_claims(
         push_trace_claims(
             TraceCaseKind::Acceptance,
             &contract.acceptance,
+            model,
             source_path,
             &mut agg,
             &mut built,
@@ -868,6 +960,7 @@ pub fn project_requirement_claims(
         push_trace_claims(
             TraceCaseKind::Forbidden,
             &contract.forbidden,
+            model,
             source_path,
             &mut agg,
             &mut built,
@@ -1012,6 +1105,14 @@ pub fn project_requirement_claims(
             .cmp(&(right["target"].as_str(), right["reason"].as_str()))
     });
 
+    let public_kernel = public_kernel_contract_for_version(
+        input.kernel,
+        model,
+        source_path.unwrap_or(""),
+        input.dialect.as_str(),
+        PublicKernelVersion::V2,
+    )
+    .map_err(|error| error.to_string())?;
     let claim_set_core = json!({
         "analysis_scope": &analysis_scope,
         "claims": claim_cores,
@@ -1076,6 +1177,7 @@ pub fn project_requirement_claims(
             claim_set_digest_algorithm: CLAIM_SET_DIGEST_ALGORITHM.to_owned(),
             claim_digest_algorithm: CLAIM_DIGEST_ALGORITHM.to_owned(),
         },
+        public_kernel,
         semantics: SemanticsInfo::default(),
         requirements,
         claims: built.into_iter().map(|item| item.claim).collect(),
