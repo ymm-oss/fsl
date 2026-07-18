@@ -3795,13 +3795,13 @@ fn run_scenarios_mode(
         insert_requirement_metadata(&mut scenario, &action.annotations, action.meta.as_ref());
         scenarios.push(Value::Object(scenario));
     }
-    if let Some(trace) = &result.deadlock_trace {
-        if deadlock_mode != "ignore" {
-            let mut scenario = scenario_from_trace(trace);
-            scenario.insert("name".to_owned(), json!("deadlock_terminal"));
-            scenario.insert("kind".to_owned(), json!("deadlock"));
-            scenarios.push(Value::Object(scenario));
-        }
+    if let Some(trace) = &result.deadlock_trace
+        && deadlock_mode != "ignore"
+    {
+        let mut scenario = scenario_from_trace(trace);
+        scenario.insert("name".to_owned(), json!("deadlock_terminal"));
+        scenario.insert("kind".to_owned(), json!("deadlock"));
+        scenarios.push(Value::Object(scenario));
     }
     match requirement_trace_scenarios(path, &model) {
         Ok(requirement_scenarios) => scenarios.extend(requirement_scenarios),
