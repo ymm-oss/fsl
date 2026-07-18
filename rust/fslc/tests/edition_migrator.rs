@@ -266,11 +266,12 @@ verify {
     let nested_file = nested.join("a.fsl");
     std::fs::write(&nested_file, business).expect("write nested fixture");
     std::fs::write(nested.join("ignored.txt"), "not FSL").expect("write ignored fixture");
+    let aliased_root_file = nested.join("..").join("z.fsl");
 
     let output = run(&[
         "lint",
         directory.0.to_str().expect("UTF-8 directory path"),
-        root_file.to_str().expect("UTF-8 root path"),
+        aliased_root_file.to_str().expect("UTF-8 aliased root path"),
         "--edition",
         "next",
     ]);

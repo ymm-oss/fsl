@@ -543,7 +543,25 @@ fn expand_lint_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
             files.insert(path.clone());
         }
     }
-    Ok(files.into_iter().collect())
+    let mut unique_files = std::collections::BTreeMap::new();
+    for path in files {
+        let identity =
+            std::fs::canonicalize(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        match unique_files.entry(identity) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(path);
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry)
+                if path.components().count() < entry.get().components().count() =>
+            {
+                entry.insert(path);
+            }
+            std::collections::btree_map::Entry::Occupied(_) => {}
+        }
+    }
+    let mut files = unique_files.into_values().collect::<Vec<_>>();
+    files.sort();
+    Ok(files)
 }
 
 fn collect_lint_directory(
