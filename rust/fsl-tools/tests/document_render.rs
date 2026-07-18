@@ -225,6 +225,7 @@ fn renderer_rejects_a_different_trace_title_with_the_same_payload() {
         Locale::En,
         None,
         None,
+        None,
     )
     .expect_err("mismatched trace title must fail closed");
     assert!(error.contains("renderer roles do not match"));
@@ -257,6 +258,7 @@ fn renderer_rejects_a_state_rule_reclassified_as_a_deadline() {
         &model,
         trace.as_ref(),
         Locale::En,
+        None,
         None,
         None,
     )
@@ -305,6 +307,7 @@ fn renderer_rejects_a_claim_moved_to_another_requirement() {
         &model,
         trace.as_ref(),
         Locale::En,
+        None,
         None,
         None,
     )
