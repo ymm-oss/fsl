@@ -314,7 +314,7 @@ classifies checked nodes and serializes them.
 
 ## Verification evidence
 
-`rust/fsl-tools/tests/document.rs` (27 tests) against
+`rust/fsl-tools/tests/document.rs` (28 tests) against
 `examples/pm/cancel_system.fsl` and two dedicated fixtures
 (`document_claims_fixture.fsl` — kernel-wrapper `requirements` covering `trans`,
 `reachable`, `leadsTo`, `terminal`, a deadline, `forbidden`, a multi-statement
@@ -325,7 +325,8 @@ requirement, a multi-requirement action, `@undecided`, and `entity`/`number`/
 - projection completeness (exact target-universe partition, all nine claim kinds,
   unattributed claims are still emitted, dialect rejection is fail-closed);
 - many-to-many requirement relations (no singular compatibility projection
-  anywhere in the serialized artifact);
+  anywhere in the serialized artifact), including identical statement text from
+  distinct source declarations without provenance collapse;
 - nine mutation-sensitivity cases (`not` removal, guard removal, assignment
   removal, assignment retarget, enum-member rename, fairness removal, invariant
   weakening, acceptance-step change, forbidden-step change), each asserting the

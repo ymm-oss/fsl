@@ -262,6 +262,28 @@ fn keeps_multiple_statements_for_one_requirement_id() {
 }
 
 #[test]
+fn keeps_identical_requirement_text_from_distinct_source_declarations() {
+    let (source, root) = claims_fixture();
+    let source = source.replace(
+        "An escalated case is closed once handled",
+        "An open case can be escalated by staff",
+    );
+    let claims = project(&source, "document_claims_fixture.fsl", &root);
+    let req1 = claims
+        .requirements
+        .iter()
+        .find(|requirement| requirement.id == "REQ-1")
+        .expect("REQ-1 exists");
+    assert_eq!(req1.statements.len(), 2);
+    let source_lines: BTreeSet<u32> = req1
+        .statements
+        .iter()
+        .filter_map(|statement| statement.source.as_ref().map(|source| source.line))
+        .collect();
+    assert_eq!(source_lines.len(), 2);
+}
+
+#[test]
 fn keeps_full_many_to_many_requirement_relation() {
     let (source, root) = claims_fixture();
     let claims = project(&source, "document_claims_fixture.fsl", &root);

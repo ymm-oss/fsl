@@ -156,7 +156,7 @@ fn surface_dialect_name(document: &SurfaceDocument) -> &'static str {
 
 #[derive(Default)]
 struct RequirementAgg {
-    statements: BTreeMap<Option<String>, SourceRef>,
+    statements: BTreeSet<(Option<String>, SourceRef)>,
     claim_ids: BTreeSet<String>,
     kinds: BTreeSet<String>,
 }
@@ -204,8 +204,7 @@ fn record_links(
         let entry = agg.entry(link.id.clone()).or_default();
         entry
             .statements
-            .entry(link.text.clone())
-            .or_insert_with(|| source_ref_span(source_path, link.span));
+            .insert((link.text.clone(), source_ref_span(source_path, link.span)));
         entry.claim_ids.insert(claim_id.to_owned());
         entry.kinds.extend(kind_ids.iter().cloned());
     }

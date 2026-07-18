@@ -80,7 +80,7 @@ pub struct RequirementStatement {
     pub source: Option<SourceRef>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct SourceRef {
     pub path: Option<String>,
     pub line: u32,
