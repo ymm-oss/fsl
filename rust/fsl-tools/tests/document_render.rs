@@ -56,9 +56,8 @@ fn render(fixture: &Fixture, locale: Locale) -> (RequirementClaimSet, RenderedDo
     let resolver = fsl_core::FsResolver::new(&fixture.root);
     let kernel = fsl_core::parse_kernel_source(&fixture.source, &resolver).expect("parse");
     let model = fsl_core::build_model(kernel.clone()).expect("build model");
-    let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
     let doc =
-        fsl_tools::render_requirements_document(&claims, &kernel, &model, trace.as_ref(), locale)
+        fsl_tools::render_requirements_document(&claims, &kernel, &model, &fixture.source, locale)
             .expect("render paired RCIR");
     (claims, doc)
 }
@@ -84,8 +83,14 @@ fn renderer_rejects_rcir_paired_with_another_valid_model() {
         fsl_core::parse_kernel_source(&other.source, &fsl_core::FsResolver::new(&other.root))
             .expect("parse other model");
     let model = fsl_core::build_model(kernel.clone()).expect("build other model");
-    let error = fsl_tools::render_requirements_document(&claims, &kernel, &model, None, Locale::En)
-        .expect_err("mismatched Public Kernel must fail closed");
+    let error = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        &claims_source.source,
+        Locale::En,
+    )
+    .expect_err("mismatched Public Kernel must fail closed");
     assert!(!error.is_empty());
 }
 
@@ -103,16 +108,15 @@ fn renderer_rejects_an_unresolved_semantic_target() {
         fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
             .expect("parse model");
     let model = fsl_core::build_model(kernel.clone()).expect("build model");
-    let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
     let error = fsl_tools::render_requirements_document(
         &claims,
         &kernel,
         &model,
-        trace.as_ref(),
+        &fixture.source,
         Locale::En,
     )
     .expect_err("unresolved target must fail closed");
-    assert!(error.contains("renderer roles do not match"));
+    assert!(error.contains("does not match the paired"));
 }
 
 #[test]
@@ -134,16 +138,15 @@ fn renderer_rejects_a_subject_mapped_to_another_valid_target() {
         fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
             .expect("parse model");
     let model = fsl_core::build_model(kernel.clone()).expect("build model");
-    let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
     let error = fsl_tools::render_requirements_document(
         &claims,
         &kernel,
         &model,
-        trace.as_ref(),
+        &fixture.source,
         Locale::En,
     )
     .expect_err("mismatched RCIR role mapping must fail closed");
-    assert!(error.contains("renderer roles do not match"));
+    assert!(error.contains("does not match the paired"));
 }
 
 #[test]
@@ -159,14 +162,13 @@ fn renderer_rejects_a_different_trace_payload_with_the_same_id() {
         fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
             .expect("parse model");
     let model = fsl_core::build_model(kernel.clone()).expect("build model");
-    let mut trace = fsl_core::requirements_trace_contract(&fixture.source)
-        .expect("trace contract")
-        .expect("requirements trace");
-    trace.acceptance[0].steps[2].name = "decline".to_owned();
+    let source = fixture
+        .source
+        .replacen("    accept(0)", "    decline(0)", 1);
     let error =
-        fsl_tools::render_requirements_document(&claims, &kernel, &model, Some(&trace), Locale::En)
+        fsl_tools::render_requirements_document(&claims, &kernel, &model, &source, Locale::En)
             .expect_err("mismatched trace payload must fail closed");
-    assert!(error.contains("renderer roles do not match"));
+    assert!(error.contains("does not match the paired"));
 }
 
 #[test]
@@ -182,14 +184,15 @@ fn renderer_rejects_a_different_trace_title_with_the_same_payload() {
         fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
             .expect("parse model");
     let model = fsl_core::build_model(kernel.clone()).expect("build model");
-    let mut trace = fsl_core::requirements_trace_contract(&fixture.source)
-        .expect("trace contract")
-        .expect("requirements trace");
-    trace.acceptance[0].text = "a different normative title".to_owned();
+    let source = fixture.source.replacen(
+        "Acceptance flow: request -> show -> accept results in retention",
+        "a different normative title",
+        1,
+    );
     let error =
-        fsl_tools::render_requirements_document(&claims, &kernel, &model, Some(&trace), Locale::En)
+        fsl_tools::render_requirements_document(&claims, &kernel, &model, &source, Locale::En)
             .expect_err("mismatched trace title must fail closed");
-    assert!(error.contains("renderer roles do not match"));
+    assert!(error.contains("does not match the paired"));
 }
 
 #[test]
@@ -212,16 +215,15 @@ fn renderer_rejects_a_state_rule_reclassified_as_a_deadline() {
         fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
             .expect("parse model");
     let model = fsl_core::build_model(kernel.clone()).expect("build model");
-    let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
     let error = fsl_tools::render_requirements_document(
         &claims,
         &kernel,
         &model,
-        trace.as_ref(),
+        &fixture.source,
         Locale::En,
     )
     .expect_err("mismatched claim kind must fail closed");
-    assert!(error.contains("renderer roles do not match"));
+    assert!(error.contains("does not match the paired"));
 }
 
 #[test]
@@ -258,16 +260,62 @@ fn renderer_rejects_a_claim_moved_to_another_requirement() {
         fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
             .expect("parse model");
     let model = fsl_core::build_model(kernel.clone()).expect("build model");
-    let trace = fsl_core::requirements_trace_contract(&fixture.source).expect("trace contract");
     let error = fsl_tools::render_requirements_document(
         &claims,
         &kernel,
         &model,
-        trace.as_ref(),
+        &fixture.source,
         Locale::En,
     )
     .expect_err("mismatched requirement attribution must fail closed");
-    assert!(error.contains("renderer roles do not match"));
+    assert!(error.contains("does not match the paired"));
+}
+
+#[test]
+fn renderer_rejects_changes_to_every_source_derived_rcir_section() {
+    let fixture = claims_fixture();
+    let claims = fsl_tools::project_requirement_claims_from_source(
+        &fixture.source,
+        Some(&fixture.source_path),
+        &fixture.root,
+    )
+    .expect("project fixture");
+    assert!(!claims.undecided.is_empty());
+    assert!(!claims.analysis_scope.instances.is_empty());
+    assert!(!claims.coverage.unsupported.is_empty());
+
+    let mut variants = Vec::new();
+    let mut changed = claims.clone();
+    changed.spec.name = "different name".to_owned();
+    variants.push(changed);
+    let mut changed = claims.clone();
+    changed.undecided.clear();
+    variants.push(changed);
+    let mut changed = claims.clone();
+    changed.analysis_scope.instances.clear();
+    variants.push(changed);
+    let mut changed = claims.clone();
+    changed.coverage.unsupported.clear();
+    variants.push(changed);
+    let mut changed = claims.clone();
+    changed.provenance.identity_stability = "tampered".to_owned();
+    variants.push(changed);
+
+    let kernel =
+        fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
+            .expect("parse model");
+    let model = fsl_core::build_model(kernel.clone()).expect("build model");
+    for changed in variants {
+        let error = fsl_tools::render_requirements_document(
+            &changed,
+            &kernel,
+            &model,
+            &fixture.source,
+            Locale::En,
+        )
+        .expect_err("changed source-derived RCIR section must fail closed");
+        assert!(error.contains("does not match the paired"));
+    }
 }
 
 // --- Acceptance criterion 1: cancel_system.fsl REQ-2 renders both guards, ---
