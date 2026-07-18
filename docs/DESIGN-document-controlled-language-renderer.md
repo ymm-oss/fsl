@@ -36,10 +36,14 @@ this, `trace_contract` must be `requirements_trace_contract(source)`'s result
 for the *same* source RCIR was projected from (`None` for direct `spec`,
 which has no acceptance/forbidden cases). Before producing any Markdown the
 renderer regenerates Public Kernel v2 and requires byte-for-byte equality with
-`claims.public_kernel`; every semantic target must then resolve exactly once.
-A mismatched valid model or a missing/duplicate target therefore fails closed
-instead of degrading to metadata-only prose. Issue #327's CLI computes these
-checked inputs once and passes them to both projector and renderer.
+`claims.public_kernel`; every claim subject must identify its sole semantic
+target and canonical claim ID, and every semantic target must then resolve
+exactly once. Acceptance and forbidden trace IDs, ordered steps, arguments,
+source positions, and expectations must also equal RCIR's projected
+`trace_cases` payload. A mismatched valid model, role mapping, trace payload,
+or missing/duplicate target therefore fails closed instead of degrading to
+metadata-only or contradictory prose. Issue #327's CLI computes these checked
+inputs once and passes them to both projector and renderer.
 
 `fsl_core::expr_text`/`source_expr_text` — the exact function `explain
 --readable` already uses to print a checked expression back as readable FSL
@@ -147,7 +151,7 @@ anywhere in the renderer. Two runs over the same `RequirementClaimSet` and
 
 ## Verification evidence
 
-`rust/fsl-tools/tests/document_render.rs` (22 tests): an exact byte-for-byte
+`rust/fsl-tools/tests/document_render.rs` (24 tests): an exact byte-for-byte
 golden match of `examples/pm/cancel_system.fsl`'s REQ-2 in both locales
 (issue #326's acceptance criterion 1 — two guards, a struct-literal update,
 and fairness, all present); requirement text and formalized meaning kept in
