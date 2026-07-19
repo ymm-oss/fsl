@@ -1,5 +1,8 @@
 name: release-binaries
 
+env:
+  MACOSX_DEPLOYMENT_TARGET: "14.0"
+
 # When a v* tag is pushed, build the native Rust fslc binary for each supported
 # OS/architecture and attach it to the GitHub Release.
 #
@@ -18,7 +21,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # Required to attach assets to the Release
+  contents: read
 
 jobs:
   build:
@@ -28,11 +31,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14        # Apple Silicon
+          - os: macos-15        # Apple Silicon; Clang 17 is required by vendored Z3 4.16
             target: macos-arm64
             asset: fslc-macos-arm64
             lsp_asset: fslc-lsp-macos-arm64
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: linux-x64
             asset: fslc-linux-x64
             lsp_asset: fslc-lsp-linux-x64
@@ -46,14 +49,14 @@ jobs:
             lsp_asset: fslc-lsp-windows-x64.exe
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.88.0
 
       - name: Build native Rust binary
         working-directory: rust
-        env:
-          Z3_SYS_Z3_VERSION: "4.16.0"
         run: cargo build --release --locked -p fslc-rust -p fsl-lsp
 
       # Use a fixed, known spec that is verified and has no counterexample.
@@ -83,6 +86,17 @@ jobs:
           } | ./rust/target/release/fslc-lsp)
           grep -q '"capabilities"' <<<"$response"
 
+      - name: Verify Linux ABI contract
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          for binary in rust/target/release/fslc rust/target/release/fslc-lsp; do
+            required=$(readelf --version-info "$binary" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)
+            test -n "$required"
+            test "$(printf '%s\n' GLIBC_2.39 "$required" | sort -V | tail -1)" = GLIBC_2.39
+            ! ldd "$binary" | grep -q libz3
+          done
+
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -92,7 +106,14 @@ jobs:
             $expected = "fslc $($env:GITHUB_REF_NAME.Substring(1))"
             if ((./rust/target/release/fslc.exe --version) -ne $expected) { throw "binary version does not match tag" }
           }
-          ./rust/target/release/fslc.exe verify examples/pm/cancel_flow.fsl > $null
+          $verifyOutput = ./rust/target/release/fslc.exe verify examples/pm/cancel_flow.fsl | Out-String
+          $verifyExit = $LASTEXITCODE
+          if ($verifyExit -ne 0) {
+            Write-Output $verifyOutput
+            throw "fslc verify smoke test exited $verifyExit"
+          }
+          $verifyResult = $verifyOutput | ConvertFrom-Json
+          if ($verifyResult.result -ne "verified") { throw "fslc verify smoke test was not verified" }
           echo "ok"
 
       - name: Smoke test LSP startup handshake (Windows)
@@ -132,20 +153,10 @@ jobs:
           "$lspHash  ${{ matrix.lsp_asset }}" | Out-File -Encoding ascii "dist/${{ matrix.lsp_asset }}.sha256"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.asset }}
           path: |
-            dist/${{ matrix.asset }}
-            dist/${{ matrix.asset }}.sha256
-            dist/${{ matrix.lsp_asset }}
-            dist/${{ matrix.lsp_asset }}.sha256
-
-      - name: Attach to Release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
             dist/${{ matrix.asset }}
             dist/${{ matrix.asset }}.sha256
             dist/${{ matrix.lsp_asset }}
@@ -155,9 +166,9 @@ jobs:
     name: build vscode extension (.vsix)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
 
@@ -165,26 +176,21 @@ jobs:
         # vscode:prepublish compiles TypeScript before packaging.
         working-directory: editors/vscode
         run: |
-          npm install
-          npx --yes @vscode/vsce package --out fsl-vscode.vsix
+          npm ci
+          cp ../../LICENSE LICENSE
+          npm exec -- vsce package --out fsl-vscode.vsix
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: fsl-vscode-vsix
           path: editors/vscode/fsl-vscode.vsix
-
-      - name: Attach to Release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: editors/vscode/fsl-vscode.vsix
 
   kernel-contract:
     name: package public Kernel contracts v1 and v2
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Package schemas, vectors, and integration guides
         run: |
@@ -247,7 +253,7 @@ jobs:
           ( cd dist && shasum -a 256 fsl-kernel-contract-v2.tar.gz > fsl-kernel-contract-v2.tar.gz.sha256 )
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: fsl-kernel-contract-v1
           path: |
@@ -255,19 +261,121 @@ jobs:
             dist/fsl-kernel-contract-v1.tar.gz.sha256
 
       - name: Upload v2 artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: fsl-kernel-contract-v2
           path: |
             dist/fsl-kernel-contract-v2.tar.gz
             dist/fsl-kernel-contract-v2.tar.gz.sha256
 
-      - name: Attach to Release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  skills:
+    name: package Agent Skills
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Package the installable Agent Skills
+        run: |
+          mkdir -p dist
+          tar -czf dist/fsl-skills.tar.gz \
+            skills/fsl \
+            skills/fsl-business \
+            skills/fsl-requirements \
+            skills/fsl-design \
+            skills/fsl-design-review \
+            skills/fsl-delivery
+          ( cd dist && shasum -a 256 fsl-skills.tar.gz > fsl-skills.tar.gz.sha256 )
+
+      - name: Upload skill bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          files: |
-            dist/fsl-kernel-contract-v1.tar.gz
-            dist/fsl-kernel-contract-v1.tar.gz.sha256
-            dist/fsl-kernel-contract-v2.tar.gz
-            dist/fsl-kernel-contract-v2.tar.gz.sha256
+          name: fsl-skills
+          path: |
+            dist/fsl-skills.tar.gz
+            dist/fsl-skills.tar.gz.sha256
+
+  assemble:
+    name: assemble complete release unit
+    needs: [build, vsix, kernel-contract, skills]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download the complete release unit
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify the complete release unit
+        shell: bash
+        run: |
+          expected=(
+            fslc-macos-arm64 fslc-macos-arm64.sha256
+            fslc-lsp-macos-arm64 fslc-lsp-macos-arm64.sha256
+            fslc-linux-x64 fslc-linux-x64.sha256
+            fslc-lsp-linux-x64 fslc-lsp-linux-x64.sha256
+            fslc-linux-arm64 fslc-linux-arm64.sha256
+            fslc-lsp-linux-arm64 fslc-lsp-linux-arm64.sha256
+            fslc-windows-x64.exe fslc-windows-x64.exe.sha256
+            fslc-lsp-windows-x64.exe fslc-lsp-windows-x64.exe.sha256
+            fsl-vscode.vsix
+            fsl-kernel-contract-v1.tar.gz fsl-kernel-contract-v1.tar.gz.sha256
+            fsl-kernel-contract-v2.tar.gz fsl-kernel-contract-v2.tar.gz.sha256
+            fsl-skills.tar.gz fsl-skills.tar.gz.sha256
+          )
+          test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = "${#expected[@]}"
+          for asset in "${expected[@]}"; do test -f "release-assets/$asset"; done
+          ! find release-assets -maxdepth 1 -type f -name '*macos-x64*' | grep -q .
+
+      - name: Upload the complete release unit
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-unit
+          path: release-assets
+
+  publish:
+    name: publish atomic release unit
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [assemble]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download the verified release unit
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-unit
+          path: release-assets
+
+      - name: Extract release notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v heading="## [$version]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          test -s release-notes.md
+
+      - name: Upload the complete release unit to a draft
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          draft: true
+          body_path: release-notes.md
+          files: release-assets/*
+
+      - name: Verify the remote draft release unit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = true
+          test -n "$(gh release view "$GITHUB_REF_NAME" --json body --jq .body)"
+          find release-assets -maxdepth 1 -type f -exec basename {} \; | sort > expected-assets.txt
+          gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | sort > remote-assets.txt
+          diff -u expected-assets.txt remote-assets.txt
+
+      - name: Make the verified release public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest

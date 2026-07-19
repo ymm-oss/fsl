@@ -139,6 +139,46 @@ fn fmt_help_and_multiple_path_contract_are_fixed() {
     assert_eq!(json(&check)["files"].as_array().map(Vec::len), Some(2));
 }
 
+#[test]
+fn business_ids_keep_canonical_hyphens_without_compacting_subtraction() {
+    let source = r#"business Repro {
+  actor Owner
+  entity Case
+  process Case {
+    stages Open, Closed
+    initial Open
+    transition close Open -> Closed by Owner
+  }
+  control CTRL-REPRO-001 "A case must be reviewed before closure."
+    owner Owner
+    severity high
+    applies_to Case
+  policy POL-REPRO-001 "A case must be reviewed before closure."
+    satisfies CTRL-REPRO-001
+    every Case reaching Closed must have passed through Open
+  goal GOAL-REPRO-001 "A reviewed case can close."
+    satisfies CTRL-REPRO-001
+    some Case can reach Closed
+  policy POL-ARITH-001 "Subtraction remains an expression."
+    invariant { 2-1 == 1 }
+}
+verify { instances Case = 3 }
+"#;
+    let formatted = run_stdin(&["fmt", "-", "--edition", "next"], source);
+    assert!(
+        formatted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&formatted.stdout)
+    );
+    let formatted = String::from_utf8(formatted.stdout).expect("formatted UTF-8");
+    assert!(formatted.contains("control CTRL-REPRO-001"));
+    assert!(formatted.contains("policy POL-REPRO-001"));
+    assert!(formatted.contains("satisfies CTRL-REPRO-001"));
+    assert!(formatted.contains("goal GOAL-REPRO-001"));
+    assert!(formatted.contains("policy POL-ARITH-001"));
+    assert!(formatted.contains("2 - 1 == 1"));
+}
+
 fn fsl_files(directory: &Path, output: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(directory).expect("scan corpus") {
         let path = entry.expect("corpus entry").path();

@@ -57,6 +57,12 @@ a short rationale that isn't a classification. Keep multi-sentence narrative
 in `//` comments — annotation strings have no escape syntax and stop at the
 first `"` or newline.
 
+`@kind` and custom annotations survive in the checked model for in-process
+consumers that explicitly query `KernelModel::annotations_for`. The current
+JSON envelope, LSP index, and audit ledger do not project generic annotations;
+do not assume those public consumers can query a rationale without a separate
+projection contract.
+
 ```fsl
 spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <const expr>             // integer constant (expressions allowed: CAP - 1, etc.)
@@ -836,8 +842,24 @@ fslc typestate <f> [--ts]                       # state machine -> ghost-type ap
 fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-contained HTML review report (dev audience)
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]... [--approval record.json]...
                                                         # business audit ledger by requirement id (PM/audit)
-fslc approval create <f> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--requirement ID]... [-o record.json]
-                                                        # bind the reviewed artifact to normalized spec + Git baseline
+fslc document generate <f> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
+               [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
+                                                        # deterministic ja/en requirements document from RCIR (Requirement Claim IR);
+                                                        # --glossary applies presentation-only display labels (FSL-DOC-LABEL-UNKNOWN/-CONFLICT);
+                                                        # --evidence overlays a per-requirement assurance class (proved/bounded/
+                                                        # replay-observed/statistical/not_run), same envelope shape as `fslc ledger --evidence`;
+                                                        # --approval displays a verified requirements_document approval record, failing
+                                                        # closed (FSL-DOC-APPROVAL-DRIFTED) if it does not match the current rendering;
+                                                        # only spec/requirements dialects project (others: FSL-DOC-DIALECT-UNSUPPORTED)
+fslc document claims <f> [--view requirements] [-o requirements.claims.json]
+                                                        # emit the RCIR claim set as JSON; agents/tools consume this instead of re-parsing .fsl
+fslc document check <f> <document.md> [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]...
+                                                        # structural drift check: generated claim blocks vs a fresh re-render;
+                                                        # document_conformant (0) | document_drifted (1); never interprets prose
+fslc approval create <f> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
+               [--requirement ID]... [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
+                                                        # bind the reviewed artifact to normalized spec + Git baseline;
+                                                        # requirements_document records schema v3/v4 with a claim_set_digest
 fslc approval check <f> --record <record.json>          # approved | drifted with machine reasons
 fslc approval diff <f> --record <record.json> [--depth K]
                                                         # semantic diff from approved commit to current working spec
@@ -864,6 +886,12 @@ fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseli
 fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
+
+Each `lint` path may be a file or directory. Directories recursively expand to
+regular `*.fsl` files; symlink entries and other extensions are skipped while
+walking them, and the combined file set is deduplicated and sorted
+deterministically. Explicit file paths retain their existing extension-agnostic
+behavior.
 
 Native generated-code replay uses `replay-trace.v1`: a closed root carrying
 trace and Kernel versions, exact spec identity, complete tick-0 `initial`, and
@@ -994,7 +1022,11 @@ earliest step does not depend on the requested search bound. Comment/
 whitespace-only edits still miss (diagnostics quote source by line number,
 so entry-file text is hashed verbatim) — that is a deliberate hit-rate/
 staleness trade-off, never a soundness one. `--no-cache` (or `FSLC_CACHE=off`)
-opts a run out entirely. See `docs/DESIGN-incremental-verify.md`.
+opts a run out entirely. Cache writes are atomic, so running `fslc verify` on
+many files as concurrent processes (e.g. `xargs -P`, a CI job matrix) is safe —
+concurrent runs at worst duplicate solving, never corrupt the cache. When
+verifying a whole project's specs, prefer process-level parallelism over a
+sequential per-file loop. See `docs/DESIGN-incremental-verify.md`.
 
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`
 emits a stable Typed Semantic Graph over requirements, actions, state variables,
@@ -1020,8 +1052,10 @@ verification strength. See `docs/DESIGN-code-audit.md`.
 for `divergent_choice` (two same-state enabled actions split an
 invariant/acceptance outcome) and `unconstrained_effect` (an unread state can
 receive different next values from two enabled actions). These add
-`evidence_basis:"bounded_bmc"`, a reachable witness, and `spec_question` ending
-in `?`. Ask that question; do not invent which branch is intended. BMC-backed
+`evidence_basis:"bounded_bmc"` (frozen v0 vocabulary for a bounded reachability
+witness; the native probe is solver-free explicit-state exploration, not
+symbolic BMC), a reachable witness, and `spec_question` ending
+in `?`. Ask that question; do not invent which branch is intended. Bounded-witness
 findings supersede duplicate `unread_state`/`unguarded_action` approximations.
 No finding means only “not witnessed within depth 4,” not proof of determinism.
 Treat all findings as review signals: they carry
@@ -1092,8 +1126,13 @@ first failed layer and later layers are marked `skipped`.
   deletion/negation, assignment deletion, enum swap, integer/type-bound ±1,
   then/else swap, fair deletion), re-runs `build_spec` on each mutant, and reports
   whether it is killed by BMC/acceptance/forbidden/refinement. exit is always 0.
-  A survivor is not a failure but an equivalent mutant or a review candidate for
-  under-constraint. If the baseline is not clean at depth K, no mutation is done and
+  `summary.kill_rate = killed / (killed + survived)` is bounded mutant-set
+  sensitivity: it depends on the operator mix, `--max-mutants` cap, depth, and
+  oracle, and a high value is not a real-bug detection probability, spec
+  correctness, or completeness. A survivor is not a failure and not
+  automatically a missing invariant: it may be an equivalent mutant, behavior
+  dead at baseline, a beyond-depth effect, or genuine under-constraint —
+  triage it as a review queue. If the baseline is not clean at depth K, no mutation is done and
   the baseline result is returned. `--by-requirement` aggregates by the requirement
   tag of the "killed property" and warns on zero kills as `empty_formalization`
   (a lower bound observed for this mutant set and depth).

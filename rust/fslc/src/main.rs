@@ -53,11 +53,16 @@ fn materialize_literate(path: &Path) -> Result<Option<LiterateState>, String> {
         .file_stem()
         .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("literate");
-    // Keep concurrent CLI processes isolated. Verification normalizes this
-    // process-local path back to the source Markdown when computing cache keys.
-    let materialized = path.with_file_name(format!(".{stem}.literate-{}.fsl", std::process::id()));
+    // Each CLI process owns its materialization. The original Markdown path is
+    // passed separately as the stable verify-cache identity, so physical
+    // isolation does not trade away cache hits across invocations.
+    let materialized = literate_materialization_path(path, stem, std::process::id());
     std::fs::write(&materialized, &blanked).map_err(|error| error.to_string())?;
     Ok(Some(LiterateState { path: materialized }))
+}
+
+fn literate_materialization_path(path: &Path, stem: &str, process_id: u32) -> PathBuf {
+    path.with_file_name(format!(".{stem}.literate-{process_id}.fsl"))
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -490,9 +495,13 @@ fn run_lint(options: &MigrationOptions) -> (Value, i32) {
         Ok(policy) => policy,
         Err(error) => return (error_output("config", &error), 2),
     };
+    let paths = match expand_lint_paths(&options.paths) {
+        Ok(paths) => paths,
+        Err(error) => return (error_output("io", &error), 2),
+    };
     let mut files = Vec::new();
     let mut finding_count = 0_usize;
-    for path in &options.paths {
+    for path in &paths {
         let (source, mut plan) = match load_migration_plan(path, options.edition) {
             Ok(loaded) => loaded,
             Err(error) => return (error, 2),
@@ -523,6 +532,62 @@ fn run_lint(options: &MigrationOptions) -> (Value, i32) {
         }),
         i32::from(finding_count > 0),
     )
+}
+
+fn expand_lint_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    let mut files = std::collections::BTreeSet::new();
+    for path in paths {
+        if path.is_dir() {
+            collect_lint_directory(path, &mut files)?;
+        } else {
+            files.insert(path.clone());
+        }
+    }
+    let mut unique_files = std::collections::BTreeMap::new();
+    for path in files {
+        let identity =
+            std::fs::canonicalize(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        match unique_files.entry(identity) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(path);
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry)
+                if path.components().count() < entry.get().components().count() =>
+            {
+                entry.insert(path);
+            }
+            std::collections::btree_map::Entry::Occupied(_) => {}
+        }
+    }
+    let mut files = unique_files.into_values().collect::<Vec<_>>();
+    files.sort();
+    Ok(files)
+}
+
+fn collect_lint_directory(
+    directory: &Path,
+    files: &mut std::collections::BTreeSet<PathBuf>,
+) -> Result<(), String> {
+    let entries = std::fs::read_dir(directory)
+        .map_err(|error| format!("{}: {error}", directory.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("{}: {error}", directory.display()))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            collect_lint_directory(&path, files)?;
+        } else if file_type.is_file()
+            && path.extension().and_then(std::ffi::OsStr::to_str) == Some("fsl")
+        {
+            files.insert(path);
+        }
+    }
+    Ok(())
 }
 
 fn load_id_policy(
@@ -997,6 +1062,7 @@ fn command() -> Result<(Value, i32), String> {
             Ok(run_conformance(&path, depth, version))
         }
         "approval" => approval_command(args),
+        "document" => document_command(args),
         "db" => db_command(args),
         "compat" => {
             if args.next().as_deref() != Some("check") {
@@ -1551,7 +1617,7 @@ fn command() -> Result<(Value, i32), String> {
                 .map_or(&display_path, |state| &state.path);
             let options = parse_verify_options(&mut args)?;
             Ok(if command == "verify" {
-                let result = run_verify_cli(path, &options);
+                let result = run_verify_cli(path, &display_path, &options);
                 with_version_metadata(apply_domain_edition(
                     result,
                     path,
@@ -1598,9 +1664,11 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             let mut artifact = None;
             let mut approver = None;
             let mut requirements = Vec::new();
-            let mut depth = 8_usize;
-            let mut deadlock = "ignore".to_owned();
-            let mut engine = "bmc".to_owned();
+            let mut depth = None;
+            let mut deadlock = None;
+            let mut engine = None;
+            let mut glossary = None;
+            let mut evidence_paths = Vec::new();
             let mut output = None;
             let mut signing_key = None;
             while let Some(option) = args.next() {
@@ -1625,21 +1693,37 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                         )?));
                     }
                     "--depth" => {
-                        depth = required_option_value(&mut args, "--depth")?
-                            .parse()
-                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+                        depth = Some(
+                            required_option_value(&mut args, "--depth")?
+                                .parse::<usize>()
+                                .map_err(|_| "--depth must be a non-negative integer".to_owned())?,
+                        );
                     }
                     "--deadlock" => {
-                        deadlock = required_option_value(&mut args, "--deadlock")?;
-                        if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
+                        let value = required_option_value(&mut args, "--deadlock")?;
+                        if !matches!(value.as_str(), "warn" | "error" | "ignore") {
                             return Err("--deadlock must be warn, error, or ignore".to_owned());
                         }
+                        deadlock = Some(value);
                     }
                     "--engine" => {
-                        engine = required_option_value(&mut args, "--engine")?;
-                        if !matches!(engine.as_str(), "bmc" | "induction") {
+                        let value = required_option_value(&mut args, "--engine")?;
+                        if !matches!(value.as_str(), "bmc" | "induction") {
                             return Err("--engine must be bmc or induction".to_owned());
                         }
+                        engine = Some(value);
+                    }
+                    "--glossary" => {
+                        glossary = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--glossary",
+                        )?));
+                    }
+                    "--evidence" => {
+                        evidence_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--evidence",
+                        )?));
                     }
                     "-o" | "--output" => {
                         output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
@@ -1647,17 +1731,39 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                     _ => return Err(format!("unknown approval create option '{option}'")),
                 }
             }
+            let kind = kind.ok_or_else(|| "approval create requires --kind".to_owned())?;
+            let artifact =
+                artifact.ok_or_else(|| "approval create requires --artifact".to_owned())?;
+            let approver =
+                approver.ok_or_else(|| "approval create requires --approver".to_owned())?;
+            let inputs = if kind == "requirements_document" {
+                if depth.is_some() || deadlock.is_some() || engine.is_some() {
+                    return Err(
+                        "--depth/--deadlock/--engine are not valid with --kind requirements_document"
+                            .to_owned(),
+                    );
+                }
+                document_generation_inputs(&artifact, glossary.as_deref(), &evidence_paths)?
+            } else {
+                if glossary.is_some() || !evidence_paths.is_empty() {
+                    return Err(
+                        "--glossary/--evidence are only valid with --kind requirements_document"
+                            .to_owned(),
+                    );
+                }
+                approval::GenerationInputs::Solver(approval::SolverGenerationInputs {
+                    depth: depth.unwrap_or(8),
+                    deadlock: deadlock.unwrap_or_else(|| "ignore".to_owned()),
+                    engine: engine.unwrap_or_else(|| "bmc".to_owned()),
+                })
+            };
             Ok(run_approval_create(
                 &path,
-                &kind.ok_or_else(|| "approval create requires --kind".to_owned())?,
-                &artifact.ok_or_else(|| "approval create requires --artifact".to_owned())?,
-                &approver.ok_or_else(|| "approval create requires --approver".to_owned())?,
+                &kind,
+                &artifact,
+                &approver,
                 &requirements,
-                &approval::GenerationInputs {
-                    depth,
-                    deadlock,
-                    engine,
-                },
+                &inputs,
                 output.as_deref(),
                 signing_key.as_deref(),
             ))
@@ -1712,6 +1818,960 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             ))
         }
         _ => Err(format!("unknown approval subcommand '{subcommand}'")),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
+    let subcommand = args
+        .next()
+        .ok_or_else(|| "usage: fslc document <generate|claims> SPEC [options]".to_owned())?;
+    let path = PathBuf::from(
+        args.next()
+            .ok_or_else(|| format!("fslc document {subcommand} requires a spec"))?,
+    );
+    match subcommand.as_str() {
+        "generate" => {
+            let mut locale = fsl_tools::Locale::Ja;
+            let mut strict = false;
+            let mut strict_rendering = false;
+            let mut glossary = None;
+            let mut evidence_paths = Vec::new();
+            let mut approval_paths = Vec::new();
+            let mut trust_keys = Vec::new();
+            let mut output = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--view" => {
+                        let value = required_option_value(&mut args, "--view")?;
+                        if value != "requirements" {
+                            return Err(
+                                "--view must be requirements ('business'/'design' are reserved \
+                                 until docs/DESIGN-document-dialect-adapters.md's activation \
+                                 contract is met, issue #334)"
+                                    .to_owned(),
+                            );
+                        }
+                    }
+                    "--lang" => {
+                        let value = required_option_value(&mut args, "--lang")?;
+                        locale = match value.as_str() {
+                            "ja" => fsl_tools::Locale::Ja,
+                            "en" => fsl_tools::Locale::En,
+                            _ => return Err("--lang must be ja or en".to_owned()),
+                        };
+                    }
+                    "--strict" => strict = true,
+                    "--strict-rendering" => strict_rendering = true,
+                    "--glossary" => {
+                        glossary = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--glossary",
+                        )?));
+                    }
+                    "--evidence" => {
+                        evidence_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--evidence",
+                        )?));
+                    }
+                    "--approval" => {
+                        approval_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--approval",
+                        )?));
+                    }
+                    "--trust-key" => trust_keys.push(PathBuf::from(required_option_value(
+                        &mut args,
+                        "--trust-key",
+                    )?)),
+                    "-o" | "--output" => {
+                        output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
+                    }
+                    _ => return Err(format!("unknown document generate option '{option}'")),
+                }
+            }
+            let result = run_document_generate(
+                &path,
+                locale,
+                strict,
+                strict_rendering,
+                glossary.as_deref(),
+                &evidence_paths,
+                &approval_paths,
+                &trust_keys,
+                output.as_deref(),
+            );
+            if output.is_none()
+                && result.0.get("result").and_then(Value::as_str) == Some("generated")
+                && let Some(content) = result.0.get("content").and_then(Value::as_str)
+            {
+                // The envelope (and any `warnings`, e.g. FSL-DOC-LABEL-UNKNOWN)
+                // never reaches stdout in this no-`-o` bypass, since stdout must
+                // stay the raw document; surface warnings on stderr instead of
+                // silently dropping them.
+                if let Some(warnings) = result.0.get("warnings").and_then(Value::as_array) {
+                    for warning in warnings {
+                        eprintln!("warning: {warning}");
+                    }
+                }
+                print!("{content}");
+                std::process::exit(result.1);
+            }
+            Ok(result)
+        }
+        "claims" => {
+            let mut output = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--view" => {
+                        let value = required_option_value(&mut args, "--view")?;
+                        if value != "requirements" {
+                            return Err(
+                                "--view must be requirements ('business'/'design' are reserved \
+                                 until docs/DESIGN-document-dialect-adapters.md's activation \
+                                 contract is met, issue #334)"
+                                    .to_owned(),
+                            );
+                        }
+                    }
+                    "-o" | "--output" => {
+                        output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
+                    }
+                    _ => return Err(format!("unknown document claims option '{option}'")),
+                }
+            }
+            let result = run_document_claims(&path, output.as_deref());
+            if output.is_none()
+                && result.0.get("result").and_then(Value::as_str) == Some("generated")
+                && let Some(content) = result.0.get("content").and_then(Value::as_str)
+            {
+                print!("{content}");
+                std::process::exit(result.1);
+            }
+            Ok(result)
+        }
+        "check" => {
+            let artifact = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc document check requires an artifact path".to_owned())?,
+            );
+            let mut glossary = None;
+            let mut evidence_paths = Vec::new();
+            let mut approval_paths = Vec::new();
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--glossary" => {
+                        glossary = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--glossary",
+                        )?));
+                    }
+                    "--evidence" => {
+                        evidence_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--evidence",
+                        )?));
+                    }
+                    "--approval" => {
+                        approval_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--approval",
+                        )?));
+                    }
+                    _ => return Err(format!("unknown document check option '{option}'")),
+                }
+            }
+            Ok(run_document_check(
+                &path,
+                &artifact,
+                glossary.as_deref(),
+                &evidence_paths,
+                &approval_paths,
+            ))
+        }
+        _ => Err(format!("unknown document subcommand '{subcommand}'")),
+    }
+}
+
+/// An unsupported source dialect is a scope boundary (issue #334,
+/// `docs/DESIGN-document-dialect-adapters.md`), not a defect in the spec: it
+/// gets its own coded `document` envelope so a caller can programmatically
+/// distinguish "RCIR has no adapter for this dialect yet" from a genuine
+/// parse/semantic error in a supported dialect.
+fn document_projection_error_output(error: &fsl_tools::DocumentProjectionError) -> Value {
+    match error {
+        fsl_tools::DocumentProjectionError::UnsupportedDialect { dialect } => {
+            let mut output = error_output("document", &error.to_string());
+            output
+                .as_object_mut()
+                .expect("document error envelope")
+                .extend([
+                    ("code".to_owned(), json!("FSL-DOC-DIALECT-UNSUPPORTED")),
+                    ("dialect".to_owned(), json!(dialect)),
+                    (
+                        "supported_dialects".to_owned(),
+                        json!(fsl_tools::RCIR_SUPPORTED_DIALECTS),
+                    ),
+                ]);
+            output
+        }
+        fsl_tools::DocumentProjectionError::Other(message) => semantic_error_output(message),
+    }
+}
+
+fn load_document_claims(path: &Path) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
+    load_document_claims_with_label(path, &path.to_string_lossy())
+}
+
+/// Like [`load_document_claims`], but projects under an explicit label
+/// rather than `path`'s own spelling. `fslc document check` (issue #329)
+/// needs this: every rendered `出典`/`Source:` line carries the label
+/// verbatim, so re-projecting under a *different* spelling of the same file
+/// (e.g. a relative-path difference from running `check` in another
+/// directory than `generate`) would report false drift. `check` re-projects
+/// under the label the artifact's own frontmatter recorded instead.
+fn load_document_claims_with_label(
+    path: &Path,
+    label: &str,
+) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
+    let source =
+        std::fs::read_to_string(path).map_err(|error| error_output("io", &error.to_string()))?;
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    fsl_tools::project_requirement_claims_from_source(&source, Some(label), base)
+        .map(|claims| (source, claims))
+        .map_err(|error| document_projection_error_output(&error))
+}
+
+fn document_diagnostics_error(
+    claims: &fsl_tools::RequirementClaimSet,
+    strict: bool,
+) -> Option<Value> {
+    let (code, message) = if claims.requirements.is_empty() {
+        (
+            "FSL-DOC-NO-REQUIREMENTS",
+            "the specification declares no requirement IDs".to_owned(),
+        )
+    } else if strict && claims.coverage.counts.unattributed > 0 {
+        (
+            "FSL-DOC-UNTAGGED-TARGET",
+            format!(
+                "{} authored target(s) are not linked to a requirement ID",
+                claims.coverage.counts.unattributed
+            ),
+        )
+    } else if strict && claims.coverage.counts.unsupported > 0 {
+        (
+            "FSL-DOC-UNSUPPORTED-TARGET",
+            format!(
+                "{} authored target(s) use a semantic target RCIR v1 does not project",
+                claims.coverage.counts.unsupported
+            ),
+        )
+    } else {
+        return None;
+    };
+    let mut output = error_output("document", &message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!(code));
+    Some(output)
+}
+
+fn default_document_output(path: &Path, suffix: &str) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("document");
+    PathBuf::from(format!("{stem}{suffix}"))
+}
+
+/// Diagnostic code for a glossary file that fails to load, parse, or self-
+/// validate (issue #330) — everything except a duplicate label target,
+/// which the issue's own diagnostics table gives its own code.
+fn document_glossary_error(message: &str) -> Value {
+    let mut output = error_output("document", message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!("FSL-DOC-GLOSSARY-INVALID"));
+    output
+}
+
+fn document_glossary_issue_error(issues: &[fsl_tools::GlossaryIssue]) -> Value {
+    let message = issues
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ");
+    if issues
+        .iter()
+        .any(|issue| matches!(issue, fsl_tools::GlossaryIssue::DuplicateTarget(_)))
+    {
+        let mut output = error_output("document", &message);
+        output
+            .as_object_mut()
+            .expect("document error envelope")
+            .insert("code".to_owned(), json!("FSL-DOC-LABEL-CONFLICT"));
+        output
+    } else {
+        document_glossary_error(&message)
+    }
+}
+
+/// Load, parse, and validate a `--glossary` sidecar (issue #330) against the
+/// locale it will be rendered under. `None` when no `--glossary` was given.
+/// Shared by `generate` and `check`: both re-render with whatever glossary
+/// (or lack of one) applies, so both need the identical loading rule.
+fn load_glossary(
+    path: Option<&Path>,
+    expected_locale: fsl_tools::Locale,
+) -> Result<Option<(fsl_tools::Glossary, String)>, Value> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+    let digest = approval::sha256_bytes(&bytes);
+    let text = String::from_utf8(bytes)
+        .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
+    let glossary = fsl_tools::parse_glossary(&text)
+        .map_err(|issues| document_glossary_issue_error(&issues))?;
+    if glossary.locale != expected_locale {
+        return Err(document_glossary_error(&format!(
+            "glossary locale '{}' does not match the document locale '{}'",
+            glossary.locale.as_str(),
+            expected_locale.as_str()
+        )));
+    }
+    Ok(Some((glossary, digest)))
+}
+
+fn document_evidence_error(message: &str) -> Value {
+    let mut output = error_output("document", message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!("FSL-DOC-EVIDENCE-INVALID"));
+    output
+}
+
+type EvidenceFiles = Vec<(String, Value)>;
+
+/// Load and parse every `--evidence` file (issue #332) — each must be a JSON
+/// object envelope in the same shape `fslc ledger --evidence` already
+/// accepts; this module classifies nothing itself (`fsl_tools::ledger`'s
+/// `assurance_token`/`assurance_label` remain the sole classifier). Returns
+/// `None` when no `--evidence` flags were given. The combined digest sorts
+/// each file's own digest before hashing them together, so the same file
+/// *set* given in a different `--evidence` order still yields the same
+/// `evidence_digest` frontmatter value.
+fn load_evidence(paths: &[PathBuf]) -> Result<Option<(EvidenceFiles, String)>, Value> {
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let mut files = Vec::new();
+    let mut digests = Vec::new();
+    for path in paths {
+        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        digests.push(approval::sha256_bytes(&bytes));
+        let text = String::from_utf8(bytes)
+            .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
+        let value = serde_json::from_str::<Value>(&text).map_err(|error| {
+            document_evidence_error(&format!("{}: invalid JSON: {error}", path.display()))
+        })?;
+        if !value.is_object() {
+            return Err(document_evidence_error(&format!(
+                "{}: evidence JSON must contain an object envelope",
+                path.display()
+            )));
+        }
+        files.push((path.display().to_string(), value));
+    }
+    digests.sort();
+    let combined = approval::sha256_bytes(digests.join("\n").as_bytes());
+    Ok(Some((files, combined)))
+}
+
+fn document_approval_error(message: &str) -> Value {
+    let mut output = error_output("document", message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!("FSL-DOC-APPROVAL-INVALID"));
+    output
+}
+
+fn document_approval_drifted_error(reasons: &[&'static str]) -> Value {
+    let mut output = error_output(
+        "document",
+        "a supplied --approval record does not match the current rendering",
+    );
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .extend([
+            ("code".to_owned(), json!("FSL-DOC-APPROVAL-DRIFTED")),
+            ("reasons".to_owned(), json!(reasons)),
+        ]);
+    output
+}
+
+/// A `--approval` record loaded and (for a signed schema) verified for
+/// `fslc document generate`'s overlay (issue #333), retaining the full
+/// parsed record so the caller can compare its `spec`/`target` digests
+/// against the current rendering before ever displaying it.
+struct LoadedApproval {
+    record: approval::ApprovalRecord,
+    record_path: String,
+    signature_key_id: Option<String>,
+    current_reviewed_digest: Option<String>,
+}
+
+/// Load and verify every `--approval` record. Each must target
+/// `requirements_document`; a signed (v2/v4) record must verify against
+/// `--trust-key` or this fails closed — a stakeholder document must never
+/// display an unverifiable signed approval. Returns `None` when no
+/// `--approval` flags were given. The combined digest sorts each record
+/// file's own digest before hashing them together, the same order-
+/// independent scheme `load_evidence`/`load_glossary` already use.
+fn load_approvals(
+    paths: &[PathBuf],
+    trust_keys: &[PathBuf],
+) -> Result<Option<(Vec<LoadedApproval>, String)>, Value> {
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let trust =
+        approval::TrustStore::load(trust_keys).map_err(|error| error_output("io", &error))?;
+    let mut loaded = Vec::new();
+    let mut digests = Vec::new();
+    for path in paths {
+        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        digests.push(approval::sha256_bytes(&bytes));
+        let versioned = approval::read_versioned_record(path)
+            .map_err(|error| document_approval_error(&format!("{}: {error}", path.display())))?;
+        let (record, signature_key_id) = match &versioned {
+            approval::VersionedApprovalRecord::V1(record) => (record.clone(), None),
+            approval::VersionedApprovalRecord::V2(record) => {
+                let verified = trust
+                    .verify(record)
+                    .map_err(|error| error_output("io", &error))?;
+                if !verified {
+                    return Err(document_approval_error(&format!(
+                        "{}: signature is invalid or untrusted",
+                        path.display()
+                    )));
+                }
+                (versioned.binding(), Some(record.signature.key_id.clone()))
+            }
+        };
+        if record.target.kind != "requirements_document" {
+            return Err(document_approval_error(&format!(
+                "{}: approval record targets '{}', not requirements_document",
+                path.display(),
+                record.target.kind
+            )));
+        }
+        let current_reviewed_digest = approval::reviewed_artifact_digest(&record)
+            .map_err(|error| error_output("io", &error))?;
+        loaded.push(LoadedApproval {
+            record,
+            record_path: path.display().to_string(),
+            signature_key_id,
+            current_reviewed_digest,
+        });
+    }
+    digests.sort();
+    let combined = approval::sha256_bytes(digests.join("\n").as_bytes());
+    Ok(Some((loaded, combined)))
+}
+
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+fn run_document_generate(
+    path: &Path,
+    locale: fsl_tools::Locale,
+    strict: bool,
+    strict_rendering: bool,
+    glossary_path: Option<&Path>,
+    evidence_paths: &[PathBuf],
+    approval_paths: &[PathBuf],
+    trust_keys: &[PathBuf],
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let (source, claims) = match load_document_claims(path) {
+        Ok(parts) => parts,
+        Err(output) => return (output, 2),
+    };
+    if let Some(error) = document_diagnostics_error(&claims, strict) {
+        return (error, 2);
+    }
+    let loaded_glossary = match load_glossary(glossary_path, locale) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let loaded_evidence = match load_evidence(evidence_paths) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let mut evidence_warnings = Vec::new();
+    if let Some((files, _)) = &loaded_evidence {
+        let requirement_ids: std::collections::BTreeSet<&str> = claims
+            .requirements
+            .iter()
+            .map(|requirement| requirement.id.as_str())
+            .collect();
+        let unmatched = fsl_tools::unmatched_evidence_paths(&requirement_ids, files);
+        if !unmatched.is_empty() {
+            if strict {
+                let message = format!(
+                    "{} evidence file(s) do not match any requirement ID in this specification: {}",
+                    unmatched.len(),
+                    unmatched.join(", ")
+                );
+                let mut output = error_output("document", &message);
+                output
+                    .as_object_mut()
+                    .expect("document error envelope")
+                    .insert("code".to_owned(), json!("FSL-DOC-EVIDENCE-UNMATCHED"));
+                return (output, 2);
+            }
+            evidence_warnings = unmatched;
+        }
+    }
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
+        Ok(kernel) => kernel,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let model = match fsl_core::build_model(kernel.clone()) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let mut label_warnings = Vec::new();
+    if let Some((glossary, _)) = &loaded_glossary {
+        let unknown = fsl_tools::unknown_targets(glossary, &model);
+        if !unknown.is_empty() {
+            if strict {
+                let message = format!(
+                    "{} glossary target(s) do not exist: {}",
+                    unknown.len(),
+                    unknown
+                        .iter()
+                        .map(|target| target.target.clone())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                let mut output = error_output("document", &message);
+                output
+                    .as_object_mut()
+                    .expect("document error envelope")
+                    .insert("code".to_owned(), json!("FSL-DOC-LABEL-UNKNOWN"));
+                return (output, 2);
+            }
+            label_warnings = unknown;
+        }
+    }
+    let applied_glossary = loaded_glossary
+        .as_ref()
+        .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
+    let applied_evidence = loaded_evidence
+        .as_ref()
+        .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
+    let rendered = match fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        &source,
+        locale,
+        applied_glossary.as_ref(),
+        applied_evidence.as_ref(),
+        None,
+    ) {
+        Ok(rendered) => rendered,
+        Err(error) => return (error_output("document", &error), 2),
+    };
+    if strict_rendering && rendered.formula_fallback_count > 0 {
+        let mut output = error_output(
+            "document",
+            &format!(
+                "{} expression(s) fell back to canonical FSL text under --strict-rendering",
+                rendered.formula_fallback_count
+            ),
+        );
+        output
+            .as_object_mut()
+            .expect("document error envelope")
+            .insert("code".to_owned(), json!("FSL-DOC-FORMULA-FALLBACK"));
+        return (output, 2);
+    }
+    let pre_approval_digest = approval::sha256_bytes(rendered.markdown.as_bytes());
+
+    let loaded_approvals = match load_approvals(approval_paths, trust_keys) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let mut applied_approvals_vec = Vec::new();
+    if let Some((loaded, _)) = &loaded_approvals {
+        let mut mismatched: Vec<&'static str> = Vec::new();
+        for approval in loaded {
+            if approval.record.spec.digest != claims.spec.spec_digest {
+                mismatched.push("spec_changed");
+            }
+            if approval.record.target.digest != pre_approval_digest {
+                mismatched.push("rendering_changed");
+            }
+            if approval.record.target.claim_set_digest.as_deref()
+                != Some(claims.spec.claim_set_digest.as_str())
+            {
+                mismatched.push("claim_set_changed");
+            }
+            if approval.record.target.reviewed_digest.as_deref()
+                != approval.current_reviewed_digest.as_deref()
+            {
+                mismatched.push("artifact_changed");
+            }
+        }
+        mismatched.sort_unstable();
+        mismatched.dedup();
+        if !mismatched.is_empty() {
+            return (document_approval_drifted_error(&mismatched), 2);
+        }
+        applied_approvals_vec = loaded
+            .iter()
+            .map(|approval| fsl_tools::AppliedApproval {
+                record_path: approval.record_path.clone(),
+                approver: approval.record.approval.approver.clone(),
+                approved_at: approval.record.approval.approved_at.clone(),
+                requirements: approval.record.approval.requirements.clone(),
+                artifact_digest: approval
+                    .record
+                    .target
+                    .reviewed_digest
+                    .clone()
+                    .expect("validated requirements_document approval"),
+                signature_key_id: approval.signature_key_id.clone(),
+            })
+            .collect();
+    }
+    let rendered = if let Some((_, combined_digest)) = &loaded_approvals {
+        let applied_approvals = fsl_tools::AppliedApprovals {
+            records: &applied_approvals_vec,
+            digest: combined_digest,
+        };
+        match fsl_tools::render_requirements_document(
+            &claims,
+            &kernel,
+            &model,
+            &source,
+            locale,
+            applied_glossary.as_ref(),
+            applied_evidence.as_ref(),
+            Some(&applied_approvals),
+        ) {
+            Ok(rendered) => rendered,
+            Err(error) => return (error_output("document", &error), 2),
+        }
+    } else {
+        rendered
+    };
+    let artifact_digest = approval::sha256_bytes(rendered.markdown.as_bytes());
+    if let Some(path) = output_path
+        && let Err(error) = std::fs::write(path, &rendered.markdown)
+    {
+        return (error_output("io", &error.to_string()), 2);
+    }
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("generated"));
+    output.insert("kind".to_owned(), json!("requirements_document"));
+    output.insert(
+        "output".to_owned(),
+        json!(output_path.map_or_else(
+            || default_document_output(path, "_requirements.md"),
+            Path::to_path_buf
+        )),
+    );
+    output.insert("spec_digest".to_owned(), json!(claims.spec.spec_digest));
+    output.insert(
+        "claim_set_digest".to_owned(),
+        json!(claims.spec.claim_set_digest),
+    );
+    output.insert("artifact_digest".to_owned(), json!(artifact_digest));
+    output.insert(
+        "coverage".to_owned(),
+        json!({
+            "authored_targets": claims.coverage.counts.authored,
+            "rendered_targets": claims.coverage.counts.rendered,
+            "unattributed_targets": claims.coverage.counts.unattributed,
+            "unsupported_targets": claims.coverage.counts.unsupported,
+            "formula_fallbacks": rendered.formula_fallback_count,
+        }),
+    );
+    output.insert(
+        "provenance".to_owned(),
+        json!({"completeness": claims.provenance.completeness}),
+    );
+    if let Some((_, digest)) = &loaded_glossary {
+        output.insert(
+            "glossary".to_owned(),
+            json!({
+                "digest": digest,
+                "labels": loaded_glossary.as_ref().map_or(0, |(glossary, _)| glossary.labels.len()),
+            }),
+        );
+    }
+    if let Some((files, digest)) = &loaded_evidence {
+        output.insert(
+            "evidence".to_owned(),
+            json!({
+                "digest": digest,
+                "files": files.len(),
+            }),
+        );
+    }
+    if let Some((_, digest)) = &loaded_approvals {
+        output.insert(
+            "approvals".to_owned(),
+            json!({
+                "digest": digest,
+                "records": applied_approvals_vec.len(),
+            }),
+        );
+    }
+    let mut warnings = Vec::new();
+    warnings.extend(label_warnings.iter().map(|target| {
+        json!({
+            "kind": "label_unknown",
+            "code": "FSL-DOC-LABEL-UNKNOWN",
+            "target": target.target,
+            "detail": target.detail,
+        })
+    }));
+    warnings.extend(evidence_warnings.iter().map(|path| {
+        json!({
+            "kind": "evidence_unmatched",
+            "code": "FSL-DOC-EVIDENCE-UNMATCHED",
+            "target": path,
+        })
+    }));
+    if !warnings.is_empty() {
+        output.insert("warnings".to_owned(), json!(warnings));
+    }
+    if output_path.is_none() {
+        output.insert("content".to_owned(), json!(rendered.markdown));
+    }
+    (Value::Object(output), 0)
+}
+
+fn run_document_claims(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
+    let (_, claims) = match load_document_claims(path) {
+        Ok(parts) => parts,
+        Err(output) => return (output, 2),
+    };
+    let content = match serde_json::to_string_pretty(&claims) {
+        Ok(content) => content,
+        Err(error) => return (error_output("internal", &error.to_string()), 2),
+    };
+    if let Some(path) = output_path
+        && let Err(error) = std::fs::write(path, &content)
+    {
+        return (error_output("io", &error.to_string()), 2);
+    }
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("generated"));
+    output.insert("kind".to_owned(), json!("requirement_claims"));
+    output.insert(
+        "output".to_owned(),
+        json!(output_path.map_or_else(
+            || default_document_output(path, ".claims.json"),
+            Path::to_path_buf
+        )),
+    );
+    output.insert("spec_digest".to_owned(), json!(claims.spec.spec_digest));
+    output.insert(
+        "claim_set_digest".to_owned(),
+        json!(claims.spec.claim_set_digest),
+    );
+    if output_path.is_none() {
+        output.insert("content".to_owned(), json!(content));
+    }
+    (Value::Object(output), 0)
+}
+
+fn document_schema_error(message: &str) -> Value {
+    let mut output = error_output("document", message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!("FSL-DOC-SCHEMA-UNSUPPORTED"));
+    output
+}
+
+/// Load every `--approval` record for `fslc document check` (issue #333),
+/// which reproduces the "Approval records" section's *text* for structural
+/// comparison only — unlike `document generate`, it never verifies a
+/// signature (admission was `generate`'s job); it only needs the plaintext
+/// display fields to render byte-identically.
+fn load_approvals_for_check(
+    paths: &[PathBuf],
+) -> Result<Option<(Vec<fsl_tools::AppliedApproval>, String)>, Value> {
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let mut applied = Vec::new();
+    let mut digests = Vec::new();
+    for path in paths {
+        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        digests.push(approval::sha256_bytes(&bytes));
+        let versioned = approval::read_versioned_record(path)
+            .map_err(|error| document_approval_error(&format!("{}: {error}", path.display())))?;
+        let (record, signature_key_id) = match &versioned {
+            approval::VersionedApprovalRecord::V1(record) => (record.clone(), None),
+            approval::VersionedApprovalRecord::V2(record) => {
+                (versioned.binding(), Some(record.signature.key_id.clone()))
+            }
+        };
+        if record.target.kind != "requirements_document" {
+            return Err(document_approval_error(&format!(
+                "{}: approval record targets '{}', not requirements_document",
+                path.display(),
+                record.target.kind
+            )));
+        }
+        applied.push(fsl_tools::AppliedApproval {
+            record_path: path.display().to_string(),
+            approver: record.approval.approver,
+            approved_at: record.approval.approved_at,
+            requirements: record.approval.requirements,
+            artifact_digest: record.target.digest,
+            signature_key_id,
+        });
+    }
+    digests.sort();
+    let combined = approval::sha256_bytes(digests.join("\n").as_bytes());
+    Ok(Some((applied, combined)))
+}
+
+/// `fslc document check` (issue #329): a purely structural drift check
+/// between `artifact` (a possibly hand-edited `fslc document generate`
+/// output) and a fresh re-projection + re-render of `spec_path`, under the
+/// locale and source label the artifact's own frontmatter recorded.
+#[allow(clippy::too_many_lines)]
+fn run_document_check(
+    spec_path: &Path,
+    artifact: &Path,
+    glossary_path: Option<&Path>,
+    evidence_paths: &[PathBuf],
+    approval_paths: &[PathBuf],
+) -> (Value, i32) {
+    let artifact_text = match std::fs::read_to_string(artifact) {
+        Ok(text) => text,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let frontmatter = match fsl_tools::parse_frontmatter_only(&artifact_text) {
+        Ok(frontmatter) => frontmatter,
+        Err(issue) => return (document_schema_error(&issue.to_string()), 2),
+    };
+    if frontmatter.schema != fsl_tools::DOCUMENT_SCHEMA {
+        return (
+            document_schema_error(&format!(
+                "unsupported fsl_document_schema '{}' (expected '{}')",
+                frontmatter.schema,
+                fsl_tools::DOCUMENT_SCHEMA
+            )),
+            2,
+        );
+    }
+    if frontmatter.view != "requirements" {
+        return (
+            document_schema_error(&format!("unsupported document view '{}'", frontmatter.view)),
+            2,
+        );
+    }
+    let Some(locale) = fsl_tools::Locale::parse(&frontmatter.lang) else {
+        return (
+            document_schema_error(&format!("unsupported document lang '{}'", frontmatter.lang)),
+            2,
+        );
+    };
+
+    let spec_label = frontmatter
+        .source
+        .clone()
+        .unwrap_or_else(|| spec_path.to_string_lossy().into_owned());
+    let (source, claims) = match load_document_claims_with_label(spec_path, &spec_label) {
+        Ok(parts) => parts,
+        Err(output) => return (output, 2),
+    };
+    let base = spec_path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
+        Ok(kernel) => kernel,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let model = match fsl_core::build_model(kernel.clone()) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let loaded_glossary = match load_glossary(glossary_path, locale) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let loaded_evidence = match load_evidence(evidence_paths) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let loaded_approvals = match load_approvals_for_check(approval_paths) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let applied_glossary = loaded_glossary
+        .as_ref()
+        .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
+    let applied_evidence = loaded_evidence
+        .as_ref()
+        .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
+    let applied_approvals = loaded_approvals
+        .as_ref()
+        .map(|(records, digest)| fsl_tools::AppliedApprovals { records, digest });
+    let rendered = match fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        &source,
+        locale,
+        applied_glossary.as_ref(),
+        applied_evidence.as_ref(),
+        applied_approvals.as_ref(),
+    ) {
+        Ok(rendered) => rendered,
+        Err(error) => return (error_output("document", &error), 2),
+    };
+
+    let report =
+        match fsl_tools::check_requirements_document(&artifact_text, &claims, &rendered.markdown) {
+            Ok(report) => report,
+            Err(error) => return (document_schema_error(&error.to_string()), 2),
+        };
+
+    let mut output = envelope();
+    output.insert("artifact".to_owned(), json!(artifact));
+    output.insert("spec_digest".to_owned(), json!(claims.spec.spec_digest));
+    output.insert(
+        "claim_set_digest".to_owned(),
+        json!(claims.spec.claim_set_digest),
+    );
+    if report.is_conformant() {
+        output.insert("result".to_owned(), json!("document_conformant"));
+        (Value::Object(output), 0)
+    } else {
+        output.insert("result".to_owned(), json!("document_drifted"));
+        output.insert(
+            "reasons".to_owned(),
+            serde_json::to_value(&report.reasons).expect("serialize drift reasons"),
+        );
+        (Value::Object(output), 1)
     }
 }
 
@@ -2239,7 +3299,7 @@ fn run_sweep(
                     from_state: None,
                     edition: "current".to_owned(),
                 };
-                let (mut verification, _) = run_verify_cli(path, &options);
+                let (mut verification, _) = run_verify_cli(path, path, &options);
                 if let Value::Object(envelope) = &mut verification {
                     let trace_type = envelope.remove("trace_type");
                     envelope.insert(
@@ -3790,13 +4850,13 @@ fn run_scenarios_mode(
         insert_requirement_metadata(&mut scenario, &action.annotations, action.meta.as_ref());
         scenarios.push(Value::Object(scenario));
     }
-    if let Some(trace) = &result.deadlock_trace {
-        if deadlock_mode != "ignore" {
-            let mut scenario = scenario_from_trace(trace);
-            scenario.insert("name".to_owned(), json!("deadlock_terminal"));
-            scenario.insert("kind".to_owned(), json!("deadlock"));
-            scenarios.push(Value::Object(scenario));
-        }
+    if let Some(trace) = &result.deadlock_trace
+        && deadlock_mode != "ignore"
+    {
+        let mut scenario = scenario_from_trace(trace);
+        scenario.insert("name".to_owned(), json!("deadlock_terminal"));
+        scenario.insert("kind".to_owned(), json!("deadlock"));
+        scenarios.push(Value::Object(scenario));
     }
     match requirement_trace_scenarios(path, &model) {
         Ok(requirement_scenarios) => scenarios.extend(requirement_scenarios),
@@ -8397,11 +9457,132 @@ fn run_html_report(
     )
 }
 
+fn load_file_input(path: &Path) -> Result<approval::FileInput, String> {
+    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    Ok(approval::FileInput {
+        path: path.display().to_string(),
+        digest: approval::sha256_bytes(&bytes),
+    })
+}
+
+/// Build `--kind requirements_document`'s recorded reproducibility inputs
+/// (issue #333): `view`/`lang` are read from the reviewed artifact's own
+/// frontmatter (no new `--view`/`--lang` flags on `approval create`, mirroring
+/// how `fslc document check` already reads them back rather than trusting a
+/// possibly-inconsistent flag), while `--glossary`/`--evidence` are hashed
+/// the same way `fslc document generate` hashes them.
+fn document_generation_inputs(
+    artifact_path: &Path,
+    glossary_path: Option<&Path>,
+    evidence_paths: &[PathBuf],
+) -> Result<approval::GenerationInputs, String> {
+    let artifact_text =
+        std::fs::read_to_string(artifact_path).map_err(|error| error.to_string())?;
+    let frontmatter =
+        fsl_tools::parse_frontmatter_only(&artifact_text).map_err(|error| error.to_string())?;
+    if frontmatter.view != "requirements" {
+        return Err(format!("unsupported document view '{}'", frontmatter.view));
+    }
+    let glossary = glossary_path.map(load_file_input).transpose()?;
+    let evidence = evidence_paths
+        .iter()
+        .map(|path| load_file_input(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(approval::GenerationInputs::Document(
+        approval::DocumentGenerationInputs {
+            view: "requirements".to_owned(),
+            lang: frontmatter.lang,
+            glossary,
+            evidence,
+        },
+    ))
+}
+
+/// Re-render a `requirements` document deterministically from `(spec,
+/// inputs)` alone, with no `--strict` gate and no approval overlay — used by
+/// both `fslc approval create --kind requirements_document` (to build the
+/// canonical rendering a reviewed artifact must conform to) and `fslc
+/// approval check`/`fslc document generate --approval` (to reproduce the
+/// same rendering's digest at check time). Returns the claims (needed for
+/// `fsl_tools::check_requirements_document`'s conformance gate at create
+/// time) alongside the canonical Markdown.
+fn render_document_for_approval(
+    path: &Path,
+    inputs: &approval::DocumentGenerationInputs,
+) -> Result<(fsl_tools::RequirementClaimSet, String), Value> {
+    let locale = fsl_tools::Locale::parse(&inputs.lang).ok_or_else(|| {
+        error_output(
+            "document",
+            &format!("unsupported document lang '{}'", inputs.lang),
+        )
+    })?;
+    let (source, claims) = load_document_claims(path)?;
+    let loaded_glossary = load_glossary(
+        inputs
+            .glossary
+            .as_ref()
+            .map(|file| Path::new(file.path.as_str())),
+        locale,
+    )?;
+    let evidence_paths: Vec<PathBuf> = inputs
+        .evidence
+        .iter()
+        .map(|file| PathBuf::from(&file.path))
+        .collect();
+    let loaded_evidence = load_evidence(&evidence_paths)?;
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = fsl_core::parse_kernel_source(&source, &resolver)
+        .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let model = fsl_core::build_model(kernel.clone())
+        .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let applied_glossary = loaded_glossary
+        .as_ref()
+        .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
+    let applied_evidence = loaded_evidence
+        .as_ref()
+        .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
+    let rendered = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        &source,
+        locale,
+        applied_glossary.as_ref(),
+        applied_evidence.as_ref(),
+        None,
+    )
+    .map_err(|error| error_output("document", &error))?;
+    Ok((claims, rendered.markdown))
+}
+
+/// Reproduce a target's canonical rendering fresh from `(spec, inputs)` —
+/// the shared re-render dispatch `approval create`'s conformance gate and
+/// `approval check`/`approval diff`'s drift comparison both call. Returns the
+/// rendered bytes plus, for `requirements_document` only, the RCIR claim-set
+/// digest that rendering used (`None` for the three solver-driven kinds,
+/// which have no RCIR concept at all).
 fn approval_artifact(
     path: &Path,
     kind: &str,
     inputs: &approval::GenerationInputs,
-) -> Result<Vec<u8>, Value> {
+) -> Result<(Vec<u8>, Option<String>), Value> {
+    if kind == "requirements_document" {
+        let approval::GenerationInputs::Document(document_inputs) = inputs else {
+            return Err(error_output(
+                "usage",
+                "requirements_document approval requires document generation inputs",
+            ));
+        };
+        let (claims, markdown) = render_document_for_approval(path, document_inputs)?;
+        return Ok((markdown.into_bytes(), Some(claims.spec.claim_set_digest)));
+    }
+    let approval::GenerationInputs::Solver(inputs) = inputs else {
+        return Err(error_output(
+            "usage",
+            "ledger/html/scenarios approval requires solver generation inputs",
+        ));
+    };
     let (result, status) = match kind {
         "ledger" => generate_unapproved_ledger_report(&LedgerReportRequest {
             path,
@@ -8424,18 +9605,19 @@ fn approval_artifact(
     if status != 0 {
         return Err(result);
     }
-    if matches!(kind, "ledger" | "html") {
+    let bytes = if matches!(kind, "ledger" | "html") {
         result
             .get("content")
             .and_then(Value::as_str)
             .map(|content| content.as_bytes().to_vec())
-            .ok_or_else(|| error_output("internal", "generated artifact has no content"))
+            .ok_or_else(|| error_output("internal", "generated artifact has no content"))?
     } else {
         let mut encoded = serde_json::to_vec_pretty(&result)
             .map_err(|error| error_output("internal", &error.to_string()))?;
         encoded.push(b'\n');
-        Ok(encoded)
-    }
+        encoded
+    };
+    Ok((bytes, None))
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -8449,9 +9631,15 @@ fn run_approval_create(
     output_path: Option<&Path>,
     signing_key: Option<&Path>,
 ) -> (Value, i32) {
-    if !matches!(kind, "ledger" | "html" | "scenarios") {
+    if !matches!(
+        kind,
+        "ledger" | "html" | "scenarios" | "requirements_document"
+    ) {
         return (
-            error_output("usage", "--kind must be ledger, html, or scenarios"),
+            error_output(
+                "usage",
+                "--kind must be ledger, html, scenarios, or requirements_document",
+            ),
             2,
         );
     }
@@ -8470,31 +9658,102 @@ fn run_approval_create(
         Ok(digest) => digest,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let expected_artifact = match approval_artifact(path, kind, inputs) {
-        Ok(artifact) => artifact,
-        Err(error) => return (error, 2),
-    };
-    let reviewed_artifact = match std::fs::read(artifact_path) {
-        Ok(artifact) => artifact,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
-    let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact) {
-        Ok(artifact) => artifact,
-        Err(error) => return (error_output("semantics", &error), 2),
-    };
-    let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact) {
-        Ok(artifact) => artifact,
-        Err(error) => return (error_output("internal", &error), 3),
-    };
-    if normalized_reviewed != normalized_expected {
-        return (
-            error_output(
-                "semantics",
-                "reviewed artifact does not match a fresh rendering with the recorded inputs",
-            ),
-            2,
-        );
-    }
+
+    let (target_digest_bytes, target_digest_algorithm, reviewed_digest, claim_set_digest, schema) =
+        if kind == "requirements_document" {
+            let approval::GenerationInputs::Document(document_inputs) = inputs else {
+                return (
+                    error_output(
+                        "usage",
+                        "--kind requirements_document requires document generation inputs",
+                    ),
+                    2,
+                );
+            };
+            let (claims, fresh_markdown) = match render_document_for_approval(path, document_inputs)
+            {
+                Ok(result) => result,
+                Err(error) => return (error, 2),
+            };
+            let reviewed_text = match std::fs::read_to_string(artifact_path) {
+                Ok(text) => text,
+                Err(error) => return (error_output("io", &error.to_string()), 2),
+            };
+            let report = match fsl_tools::check_requirements_document(
+                &reviewed_text,
+                &claims,
+                &fresh_markdown,
+            ) {
+                Ok(report) => report,
+                Err(error) => return (document_schema_error(&error.to_string()), 2),
+            };
+            if !report.is_conformant() {
+                let mut output = error_output(
+                    "semantics",
+                    "reviewed document does not conform to a fresh rendering with the recorded inputs",
+                );
+                output
+                    .as_object_mut()
+                    .expect("approval error envelope")
+                    .insert(
+                        "reasons".to_owned(),
+                        serde_json::to_value(&report.reasons).expect("serialize drift reasons"),
+                    );
+                return (output, 2);
+            }
+            (
+                fresh_markdown.into_bytes(),
+                approval::REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM,
+                Some(approval::sha256_bytes(reviewed_text.as_bytes())),
+                Some(claims.spec.claim_set_digest),
+                approval::APPROVAL_SCHEMA_V3,
+            )
+        } else {
+            let approval::GenerationInputs::Solver(_) = inputs else {
+                return (
+                    error_output(
+                        "usage",
+                        "--kind ledger/html/scenarios requires solver generation inputs",
+                    ),
+                    2,
+                );
+            };
+            let (expected_artifact, _) = match approval_artifact(path, kind, inputs) {
+                Ok(artifact) => artifact,
+                Err(error) => return (error, 2),
+            };
+            let reviewed_artifact = match std::fs::read(artifact_path) {
+                Ok(artifact) => artifact,
+                Err(error) => return (error_output("io", &error.to_string()), 2),
+            };
+            let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact)
+            {
+                Ok(artifact) => artifact,
+                Err(error) => return (error_output("semantics", &error), 2),
+            };
+            let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact)
+            {
+                Ok(artifact) => artifact,
+                Err(error) => return (error_output("internal", &error), 3),
+            };
+            if normalized_reviewed != normalized_expected {
+                return (
+                    error_output(
+                        "semantics",
+                        "reviewed artifact does not match a fresh rendering with the recorded inputs",
+                    ),
+                    2,
+                );
+            }
+            (
+                normalized_reviewed,
+                approval::ARTIFACT_DIGEST_ALGORITHM,
+                None,
+                None,
+                approval::APPROVAL_SCHEMA,
+            )
+        };
+
     let available = approval::requirement_ids(&model);
     if available.is_empty() {
         return (
@@ -8525,7 +9784,7 @@ fn run_approval_create(
         );
     }
     let record = approval::ApprovalRecord {
-        schema: approval::APPROVAL_SCHEMA.to_owned(),
+        schema: schema.to_owned(),
         spec: approval::SpecBinding {
             path: relative_path,
             digest_algorithm: approval::SPEC_DIGEST_ALGORITHM.to_owned(),
@@ -8535,8 +9794,16 @@ fn run_approval_create(
         target: approval::TargetBinding {
             kind: kind.to_owned(),
             path: artifact_path.display().to_string(),
-            digest_algorithm: approval::ARTIFACT_DIGEST_ALGORITHM.to_owned(),
-            digest: approval::sha256_bytes(&normalized_reviewed),
+            digest_algorithm: target_digest_algorithm.to_owned(),
+            digest: approval::sha256_bytes(&target_digest_bytes),
+            reviewed_digest_algorithm: reviewed_digest
+                .as_ref()
+                .map(|_| approval::REVIEWED_REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM.to_owned()),
+            reviewed_digest,
+            claim_set_digest_algorithm: claim_set_digest
+                .as_ref()
+                .map(|_| approval::CLAIM_SET_DIGEST_ALGORITHM.to_owned()),
+            claim_set_digest,
             generator: "fslc".to_owned(),
             generator_version: env!("CARGO_PKG_VERSION").to_owned(),
             inputs: inputs.clone(),
@@ -8629,16 +9896,21 @@ fn approval_evaluation(
         .map_err(|error| error_output("io", &error))?;
     let current_spec_digest =
         approval::spec_digest(path).map_err(|error| semantic_error_output(&error))?;
-    let artifact = approval_artifact(path, &record.target.kind, &record.target.inputs)?;
+    let (artifact, current_claim_set_digest) =
+        approval_artifact(path, &record.target.kind, &record.target.inputs)?;
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
         .map_err(|error| error_output("internal", &error))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
+    let current_reviewed_digest =
+        approval::reviewed_artifact_digest(&record).map_err(|error| error_output("io", &error))?;
     let mut evaluation = approval::evaluate(
         &record,
         record_path,
         &current_spec_digest,
         &current_artifact_digest,
         env!("CARGO_PKG_VERSION"),
+        current_claim_set_digest.as_deref(),
+        current_reviewed_digest.as_deref(),
     );
     let output = evaluation
         .as_object_mut()
@@ -13086,6 +14358,15 @@ mod exit_status_tests {
         assert_eq!(
             normalized_exit_status(&error_output("semantics", "bad spec"), 2),
             2
+        );
+    }
+
+    #[test]
+    fn literate_materialization_paths_are_process_owned() {
+        let source = Path::new("spec.md");
+        assert_ne!(
+            literate_materialization_path(source, "spec", 41),
+            literate_materialization_path(source, "spec", 42)
         );
     }
 

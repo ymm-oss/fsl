@@ -1027,22 +1027,22 @@ fn project_scalar<S: SmtSolver>(
         return Ok(FslValue::Bool(project_bool(solver, term)?));
     }
     let value = project_int(solver, term)?;
-    if let TypeRef::Named(name) = ty {
-        if let Some(TypeDef::Enum { members, .. }) = model.types.get(name) {
-            let index = usize::try_from(value)
-                .map_err(|_| VerifyError::new("negative enum ordinal in solver model"))?;
-            let Some(member) = members.get(index) else {
-                // A type-bound counterexample deliberately assigns an invalid
-                // ordinal. Preserve that raw value so the verifier can emit the
-                // witness instead of turning a valid finding into a projection
-                // error.
-                return Ok(FslValue::Int(value));
-            };
-            return Ok(FslValue::Enum {
-                type_name: name.clone(),
-                member: member.clone(),
-            });
-        }
+    if let TypeRef::Named(name) = ty
+        && let Some(TypeDef::Enum { members, .. }) = model.types.get(name)
+    {
+        let index = usize::try_from(value)
+            .map_err(|_| VerifyError::new("negative enum ordinal in solver model"))?;
+        let Some(member) = members.get(index) else {
+            // A type-bound counterexample deliberately assigns an invalid
+            // ordinal. Preserve that raw value so the verifier can emit the
+            // witness instead of turning a valid finding into a projection
+            // error.
+            return Ok(FslValue::Int(value));
+        };
+        return Ok(FslValue::Enum {
+            type_name: name.clone(),
+            member: member.clone(),
+        });
     }
     Ok(FslValue::Int(value))
 }

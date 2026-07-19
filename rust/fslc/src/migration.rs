@@ -721,7 +721,7 @@ fn id_occurrences(source: &str) -> Vec<IdOccurrence> {
                 source,
                 &tokens,
                 index + 1,
-                IdKind::Requirement,
+                IdKind::Control,
                 &mut occurrences,
             );
             continue;
@@ -1432,12 +1432,12 @@ ai_component Safe {
     #[test]
     fn relationship_references_are_checked_by_their_semantic_kind() {
         let business = r#"business Claims {
-  policy POL-CLAIMS-001 "policy" satisfies REQ-BAD { true }
+  policy POL-CLAIMS-001 "policy" satisfies CTRL-BAD { true }
 }"#;
         assert!(
             id_policy_diagnostics(business, &IdPolicy::default())
                 .iter()
-                .any(|diagnostic| diagnostic.message.contains("requirement ID 'REQ-BAD'"))
+                .any(|diagnostic| diagnostic.message.contains("control ID 'CTRL-BAD'"))
         );
 
         let governance = r#"governance Claims {
