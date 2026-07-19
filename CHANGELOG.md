@@ -72,6 +72,28 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   stronger survivor claim from returning (issue #338).
 
 ### Added
+- Added generated block markers and `fslc document check` (issue #329). Every
+  `fslc document generate` artifact now carries a frontmatter block
+  (`fsl_document_schema`/`view`/`lang`/`source`/`renderer`/`renderer_version`/
+  `normative_scope`/`spec_digest`/`claim_set_digest`) and wraps each claim's rendered
+  block in `<!-- fsl:claim begin id="..." digest="sha256:..." --> ... <!-- fsl:claim
+  end -->` markers, where the digest is a new `fsl-doc-claim-block-v1+sha256` hash of
+  the exact rendered text (`fsl_tools::framed_text_digest`) — distinct from RCIR's own
+  semantics-only `claim_digest`, which never sees rendered prose and so cannot by
+  itself detect a hand-edited sentence. A new fixed, non-normative `background` slot
+  (`<!-- fsl:slot begin name="background" normative="false" --> ... <!-- fsl:slot
+  end -->`) is the only place free text may be edited. `fslc document check <spec.fsl>
+  <document.md>` re-projects and re-renders the spec (reading the locale and source
+  label back from the artifact's own frontmatter, so a check run from a different
+  working directory than generate doesn't report false drift from a path-spelling
+  difference) and reports `document_conformant` (exit 0) or `document_drifted` (exit
+  1) with a `reasons` array — `claim_changed`/`claim_missing`/`claim_duplicate`/
+  `claim_unknown`/`claim_reordered`/`slot_missing`/`slot_duplicate`/`slot_unknown`/
+  `marker_malformed`/`edit_outside_slot`/`renderer_changed`/`spec_digest_mismatch`/
+  `claim_set_digest_mismatch`, each carrying its `FSL-DOC-*` diagnostic code. No
+  natural language is interpreted; only frontmatter values, marker structure, and
+  claim-block digests/text are compared. See
+  `docs/DESIGN-document-generated-markers-and-check.md`.
 - Added `fslc document generate` and `fslc document claims` (issue #327), the CLI entry
   points for the RCIR v1 projector (#325) and its ja/en controlled-language renderer
   (#326). `document generate <spec.fsl> [--view requirements] [--lang ja|en] [--strict]

@@ -66,10 +66,13 @@ fn generate_is_byte_identical_across_repeated_runs() {
     let second = run(&["document", "generate", CANCEL_SYSTEM, "--lang", "ja"]);
     assert!(first.status.success(), "{:?}", first.stderr);
     assert_eq!(first.stdout, second.stdout);
+    let markdown = String::from_utf8_lossy(&first.stdout);
     assert!(
-        String::from_utf8_lossy(&first.stdout).starts_with("# 要件仕様書:"),
-        "no -o: raw markdown goes straight to stdout, matching ledger/html/testgen"
+        markdown.starts_with("---\nfsl_document_schema:"),
+        "no -o: raw markdown (frontmatter first, issue #329) goes straight to stdout, \
+         matching ledger/html/testgen"
     );
+    assert!(markdown.contains("# 要件仕様書:"));
 }
 
 #[test]
@@ -77,7 +80,8 @@ fn generate_lang_en_renders_english_markdown() {
     let output = run(&["document", "generate", CANCEL_SYSTEM, "--lang", "en"]);
     assert!(output.status.success());
     let markdown = String::from_utf8_lossy(&output.stdout);
-    assert!(markdown.starts_with("# Requirements Specification:"));
+    assert!(markdown.contains("\nlang: en\n"));
+    assert!(markdown.contains("# Requirements Specification:"));
 }
 
 // --- Acceptance criterion 3: -o writes the file and a JSON envelope --------
@@ -121,7 +125,8 @@ fn generate_with_output_writes_file_and_envelope_with_digests_and_coverage() {
     );
 
     let written = std::fs::read_to_string(&out).expect("read generated markdown");
-    assert!(written.starts_with("# 要件仕様書:"));
+    assert!(written.starts_with("---\nfsl_document_schema:"));
+    assert!(written.contains("# 要件仕様書:"));
     let _ = std::fs::remove_file(&out);
 }
 

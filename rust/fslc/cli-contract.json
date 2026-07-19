@@ -1567,7 +1567,7 @@
           "document"
         ],
         "prog": "fslc document",
-        "help": "usage: fslc document [-h] {generate,claims}\n\npositional arguments:\n  {generate,claims}\n    generate            render a controlled-language requirements document\n                        (ja/en) from the checked spec\n    claims              emit the Requirement Claim IR (RCIR) claim set as\n                        JSON\n\noptions:\n  -h, --help            show this help message and exit\n",
+        "help": "usage: fslc document [-h] {generate,claims,check}\n\npositional arguments:\n  {generate,claims,check}\n    generate            render a controlled-language requirements document\n                        (ja/en) from the checked spec\n    claims              emit the Requirement Claim IR (RCIR) claim set as\n                        JSON\n    check               detect drift between a generated document and a\n                        fresh re-render of its spec\n\noptions:\n  -h, --help            show this help message and exit\n",
         "actions": [
           {
             "dest": "help",
@@ -1602,6 +1602,17 @@
               {"dest":"file","required":true,"positional":true,"action":"store"},
               {"dest":"view","required":false,"flags":["--view"],"choices":["requirements"],"default":"requirements","action":"store"},
               {"dest":"output","required":false,"flags":["-o","--output"],"action":"store"}
+            ],
+            "commands": []
+          },
+          {
+            "path": ["document", "check"],
+            "prog": "fslc document check",
+            "help": "usage: fslc document check [-h] file document\n\npositional arguments:\n  file      the FSL spec the document was generated from\n  document  the generated Markdown artifact (from 'fslc document generate')\n\noptions:\n  -h, --help  show this help message and exit\n\nStructural drift check only: no natural language is interpreted. Reads the\nlocale and source label back from the artifact's own frontmatter, re-projects\nand re-renders the spec, and compares claim/slot marker structure and\nclaim-block digests. Exit codes: 0 document_conformant, 1 document_drifted,\n2 parse/type/semantics/schema/I/O error, 3 internal error.\n",
+            "actions": [
+              {"dest":"help","required":false,"flags":["-h","--help"],"nargs":0,"action":"store"},
+              {"dest":"file","required":true,"positional":true,"action":"store"},
+              {"dest":"document","required":true,"positional":true,"action":"store"}
             ],
             "commands": []
           }

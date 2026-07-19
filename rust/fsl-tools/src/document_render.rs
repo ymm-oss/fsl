@@ -34,6 +34,27 @@ pub enum Locale {
     En,
 }
 
+impl Locale {
+    /// The short code recorded in a generated document's `lang` frontmatter
+    /// key (issue #329) and accepted by `fslc document generate --lang`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ja => "ja",
+            Self::En => "en",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "ja" => Some(Self::Ja),
+            "en" => Some(Self::En),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct RenderedDocument {
     pub markdown: String,
@@ -74,7 +95,17 @@ pub fn render_requirements_document(
     };
 
     let mut out = String::new();
+    push_section(
+        &mut out,
+        &crate::document_markers::render_frontmatter(
+            claims.spec.source.as_deref(),
+            locale,
+            &claims.spec.spec_digest,
+            &claims.spec.claim_set_digest,
+        ),
+    );
     push_section(&mut out, &title(&claims.spec.name, locale));
+    push_section(&mut out, &background_slot(locale));
     push_section(&mut out, &position_section(locale));
     push_section(&mut out, &semantics_section(locale));
     push_section(&mut out, &requirements_section(claims, &mut ctx));
@@ -133,6 +164,23 @@ fn title(spec_name: &str, locale: Locale) -> String {
         Locale::Ja => format!("# 要件仕様書: {spec_name}"),
         Locale::En => format!("# Requirements Specification: {spec_name}"),
     }
+}
+
+/// The one editable, non-normative slot v1 defines (issue #329). Its
+/// contents are never inspected by `fslc document check` — only that the
+/// `<!-- fsl:slot begin/end -->` markers around it are well-formed and
+/// present exactly once.
+fn background_slot(locale: Locale) -> String {
+    let heading = heading(locale, "##", "背景", "Background");
+    let placeholder = match locale {
+        Locale::Ja => {
+            "（この節は自由に編集できる。規範的な効力はない。規範文はこの節の外の生成ブロックにのみ存在する。）"
+        }
+        Locale::En => {
+            "(This section can be edited freely. It has no normative force; normative text exists only in the generated blocks outside this section.)"
+        }
+    };
+    crate::document_markers::wrap_slot("background", &format!("{heading}\n\n{placeholder}"))
 }
 
 fn position_section(locale: Locale) -> String {
@@ -524,7 +572,7 @@ fn render_claim(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
     }
     ctx.rendered_claims.insert(claim.id.clone());
 
-    match claim.kind {
+    let body = match claim.kind {
         ClaimKind::Operation => render_operation(claim, ctx),
         ClaimKind::StateRule => render_state_rule(claim, ctx),
         ClaimKind::TransitionRule => render_transition_rule(claim, ctx),
@@ -534,7 +582,8 @@ fn render_claim(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         ClaimKind::ForbiddenTrace => render_trace(claim, ctx, false),
         ClaimKind::DeadlineRule => render_deadline_rule(claim, ctx),
         ClaimKind::TerminalRule => render_terminal_rule(claim, ctx),
-    }
+    };
+    crate::document_markers::wrap_claim_block(&claim.id, &body)
 }
 
 fn kind_label(kind: ClaimKind, locale: Locale) -> &'static str {
