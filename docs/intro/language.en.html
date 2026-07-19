@@ -829,6 +829,11 @@ It refuses source/comment movement that cannot be proven safe. <code>&amp;&amp;<
 invalid token and is therefore reported with an <code>and</code> suggestion but is never
 machine-applied. See <code>docs/DESIGN-migration.md</code> for atomicity and bulk-update
 steps.</p>
+<p>Each <code>fslc lint</code> path may be a file or directory. Directories recursively expand
+to regular <code>*.fsl</code> files; symlink entries and other extensions are skipped while
+walking them, and the combined file set is deduplicated and sorted
+deterministically. Explicit file paths retain their existing extension-agnostic
+behavior.</p>
 <p>The native Rust-only <code>kernel</code> command runs after dialect lowering and semantic
 checking. Its versioned JSON contains structural types for every expression,
 source spans, requirement/lowering origin, simultaneous-update semantics, and

@@ -235,6 +235,88 @@ fn builtin_id_policy_reports_each_surface_kind_without_rewriting_ids() {
 }
 
 #[test]
+fn lint_recursively_expands_directories_and_accepts_canonical_control_references() {
+    let directory = FixtureDir::new();
+    let nested = directory.0.join("nested");
+    std::fs::create_dir(&nested).expect("create nested fixture directory");
+    let business = r#"business Repro {
+  actor Owner
+  entity Case
+  process Case {
+    stages Open, Closed
+    initial Open
+    transition close Open -> Closed by Owner
+  }
+  control CTRL-REPRO-001 "A case must be reviewed before closure."
+    owner Owner
+    severity high
+    applies_to Case
+  policy POL-REPRO-001 "A case must be reviewed before closure."
+    satisfies CTRL-REPRO-001
+    every Case reaching Closed must have passed through Open
+  goal GOAL-REPRO-001 "A reviewed case can close."
+    satisfies CTRL-REPRO-001
+    some Case can reach Closed
+}
+verify {
+  instances Case = 3
+}
+"#;
+    let root_file = directory.write("z.fsl", business);
+    let nested_file = nested.join("a.fsl");
+    std::fs::write(&nested_file, business).expect("write nested fixture");
+    std::fs::write(nested.join("ignored.txt"), "not FSL").expect("write ignored fixture");
+    let aliased_root_file = nested.join("..").join("z.fsl");
+
+    let output = run(&[
+        "lint",
+        directory.0.to_str().expect("UTF-8 directory path"),
+        aliased_root_file.to_str().expect("UTF-8 aliased root path"),
+        "--edition",
+        "next",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let output = json(&output);
+    assert_eq!(output["finding_count"], 0);
+    assert_eq!(
+        output["files"]
+            .as_array()
+            .expect("lint files")
+            .iter()
+            .map(|file| file["path"].as_str().expect("path"))
+            .collect::<Vec<_>>(),
+        [
+            nested_file.to_str().expect("UTF-8 nested path"),
+            root_file.to_str().expect("UTF-8 root path"),
+        ]
+    );
+}
+
+#[test]
+fn lint_directory_reports_nested_fsl_errors_instead_of_skipping_them() {
+    let directory = FixtureDir::new();
+    let nested = directory.0.join("nested");
+    std::fs::create_dir(&nested).expect("create nested fixture directory");
+    let malformed = nested.join("malformed.fsl");
+    std::fs::write(&malformed, "spec Broken { invariant P { x ` y } }")
+        .expect("write malformed fixture");
+    std::fs::write(nested.join("ignored.txt"), "not FSL").expect("write ignored fixture");
+
+    let output = run(&["lint", directory.0.to_str().expect("UTF-8 directory path")]);
+    assert_eq!(output.status.code(), Some(2));
+    let output = json(&output);
+    assert_eq!(output["kind"], "parse");
+    assert_eq!(
+        output["file"],
+        malformed.to_str().expect("UTF-8 malformed path")
+    );
+}
+
+#[test]
 fn project_id_policy_partially_overrides_builtin_templates() {
     let directory = FixtureDir::new();
     let project = directory.write(

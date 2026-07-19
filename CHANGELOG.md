@@ -44,6 +44,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   entries fail-closed while removing the engine-independent fixed cost found in issue #349.
 
 ### Fixed
+- `fslc lint` now classifies business `policy`/`goal` `satisfies CTRL-*`
+  operands as control references, recursively expands directory inputs into a
+  sorted, deduplicated list of `.fsl` files, and continues to report nested FSL
+  parse errors instead of silently skipping them (issues #385 and #386).
+- `fslc fmt` now preserves canonical hyphenated IDs in business control,
+  policy, goal, and `satisfies` positions while retaining normal spacing around
+  arithmetic subtraction (issue #387).
 - `docs/LANGUAGE.ja.md` now carries the Japanese translation of the
   "Literate Markdown FSL" subsection added to `docs/LANGUAGE.md` §7 by the
   literate Markdown feature, so `docs/intro/language.ja.html` documents the
