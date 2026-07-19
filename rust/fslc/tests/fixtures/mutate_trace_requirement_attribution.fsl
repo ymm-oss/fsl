@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: Apache-2.0
+
+requirements MutateRequirementAttribution {
+  process Case {
+    stages Draft, Done
+    initial Draft
+    transition finish Draft -> Done by User
+    with allowed: Bool
+    when allowed
+  }
+
+  state { blocked: Bool }
+  init { blocked = false }
+  action prepare() { requires not blocked  blocked = blocked }
+  action deny() { requires blocked  blocked = blocked }
+
+  @requirement("REQ-TEST-001", "only allowed cases finish")
+  acceptance AC-TEST-001 "allowed cases finish" {
+    finish(0, true)
+    expect Case 0 in Done
+  }
+
+  @requirement("REQ-TEST-001", "only allowed cases finish")
+  forbidden FB-TEST-001 "disallowed cases cannot finish" {
+    finish(0, false)
+    expect rejected
+  }
+
+  @requirement("REQ-TEST-001", "only allowed cases finish")
+  forbidden FB-SETUP-001 "forbidden setup must remain executable" {
+    prepare()
+    deny()
+    expect rejected
+  }
+}
+verify { instances Case = 2 }

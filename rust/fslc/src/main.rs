@@ -9715,6 +9715,13 @@ fn annotation_requirement_ids(annotations: &Annotations) -> Vec<String> {
         .collect()
 }
 
+fn trace_case_requirement_ids(case: &fsl_core::RequirementsTraceCase) -> Vec<String> {
+    annotation_requirement_ids(&case.annotations)
+        .into_iter()
+        .filter(|requirement| requirement != &case.id)
+        .collect()
+}
+
 fn property_requirements(model: &KernelModel, name: &str) -> Vec<String> {
     model
         .invariants
@@ -9835,6 +9842,32 @@ fn mutation_oracle_for_model(model: KernelModel, depth: usize) -> MutationOracle
     mutation_model_oracle(model, depth)
 }
 
+fn requirement_trace_failure_requirements(
+    source: &str,
+    failure: &Value,
+) -> Result<Vec<String>, String> {
+    let id = failure
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "requirement trace failure has no declaration id".to_owned())?;
+    let kind = failure
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "requirement trace failure has no kind".to_owned())?;
+    let contract = fsl_core::requirements_trace_contract(source)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "requirement trace failure has no trace contract".to_owned())?;
+    let cases = match kind {
+        "acceptance" => &contract.acceptance,
+        "forbidden" | "forbidden_setup" => &contract.forbidden,
+        _ => return Err(format!("unknown requirement trace failure kind '{kind}'")),
+    };
+    let case = cases.iter().find(|case| case.id == id).ok_or_else(|| {
+        format!("requirement trace failure references unknown declaration '{id}'")
+    })?;
+    Ok(trace_case_requirement_ids(case))
+}
+
 fn apply_requirement_mutation_oracle(
     source: &str,
     model: &KernelModel,
@@ -9858,7 +9891,7 @@ fn apply_requirement_mutation_oracle(
                 }
                 .to_owned(),
             ),
-            killer_requirements: Vec::new(),
+            killer_requirements: requirement_trace_failure_requirements(source, &failure)?,
         };
     }
     Ok(())
@@ -9953,7 +9986,10 @@ fn mutation_summary(mutants: &[Value]) -> Value {
     json!({"total":mutants.len(),"killed":killed,"survived":survived,"invalid":invalid,"kill_rate":mutation_kill_rate(killed,survived),"by_source":{"builtin":builtin,"external":external}})
 }
 
-fn requirement_kill_index(model: &KernelModel) -> Map<String, Value> {
+fn requirement_kill_index(
+    model: &KernelModel,
+    trace_contract: Option<&fsl_core::RequirementsTraceContract>,
+) -> Map<String, Value> {
     let mut result = Map::new();
     for annotations in model
         .actions
@@ -9970,6 +10006,16 @@ fn requirement_kill_index(model: &KernelModel) -> Map<String, Value> {
         .chain(model.leadstos.iter().map(|item| &item.annotations))
     {
         for requirement in annotation_requirement_ids(annotations) {
+            result.entry(requirement).or_insert(json!({"kills":0}));
+        }
+    }
+    if let Some(contract) = trace_contract {
+        for requirement in contract
+            .acceptance
+            .iter()
+            .chain(&contract.forbidden)
+            .flat_map(trace_case_requirement_ids)
+        {
             result.entry(requirement).or_insert(json!({"kills":0}));
         }
     }
@@ -10426,6 +10472,10 @@ fn run_mutate(
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 0),
     };
+    let trace_contract = match fsl_core::requirements_trace_contract(&source) {
+        Ok(contract) => contract,
+        Err(error) => return (semantic_error_output(&error.to_string()), 0),
+    };
     let document = match parse_surface_document(path) {
         Ok(document) => document,
         Err(error) => return (semantic_error_output(&error), 0),
@@ -10461,7 +10511,7 @@ fn run_mutate(
         .map(|(name, _)| name.clone())
         .collect::<std::collections::BTreeSet<_>>();
     let mut by_req = if by_requirement {
-        requirement_kill_index(&model)
+        requirement_kill_index(&model, trace_contract.as_ref())
     } else {
         Map::new()
     };
