@@ -93,7 +93,9 @@ impl DocumentIndex {
     /// Returns the compiler parse diagnostic for invalid source.
     #[allow(clippy::too_many_lines)]
     pub fn build(source: &str, _path: Option<&str>) -> Result<Self, IndexError> {
-        let refinement = if fslc_rust::frontend_output::is_ai_project(source) {
+        let refinement = if fslc_rust::frontend_output::is_ai_project(source)
+            || fsl_syntax::is_causal_source(source)
+        {
             false
         } else {
             matches!(
@@ -603,7 +605,7 @@ fn import_bindings(source: &str, tokens: &[Token]) -> Vec<ImportBinding> {
 fn declaration_keyword(value: &str) -> Option<(Option<SymbolRole>, Option<Context>)> {
     let declaration = match value {
         "spec" | "compose" | "requirements" | "business" | "governance" | "refinement"
-        | "domain" | "dbsystem" | "ai_component" | "agent" => {
+        | "domain" | "dbsystem" | "ai_component" | "agent" | "causal" => {
             (Some(SymbolRole::Namespace), Some(Context::Top))
         }
         "type" | "number" | "entity" => (Some(SymbolRole::Type), None),
@@ -612,11 +614,10 @@ fn declaration_keyword(value: &str) -> Option<(Option<SymbolRole>, Option<Contex
         "action" | "transition" | "tool" | "command" | "effect" | "migration" | "decide"
         | "evolve" => (Some(SymbolRole::Function), Some(Context::Action)),
         "invariant" | "trans" | "reachable" | "until" | "unless" | "leadsTo" | "property"
-        | "requirement" | "acceptance" | "forbidden" | "control" | "policy" | "goal" => {
-            (Some(SymbolRole::Property), Some(Context::Other))
-        }
+        | "requirement" | "acceptance" | "forbidden" | "control" | "policy" | "goal" | "claim"
+        | "expectation" => (Some(SymbolRole::Property), Some(Context::Other)),
         "const" | "actor" | "process" | "kpi" | "authority" | "aggregate" | "projection"
-        | "environment" | "artifact" | "column" => {
+        | "environment" | "artifact" | "column" | "variable" => {
             (Some(SymbolRole::Variable), Some(Context::Other))
         }
         "state" => (None, Some(Context::State)),
@@ -726,6 +727,27 @@ const INDEX_KEYWORDS: &[&str] = &[
     "at",
     "size",
     "contains",
+    "timebase",
+    "horizon",
+    "scope",
+    "clock",
+    "feedback",
+    "evidence",
+    "polarity",
+    "lag",
+    "persists",
+    "basis",
+    "status",
+    "version",
+    "binds",
+    "observes",
+    "latent",
+    "proxy",
+    "cadence",
+    "trigger",
+    "response",
+    "derived_from_claim",
+    "uses",
 ];
 
 pub(crate) fn is_keyword(value: &str) -> bool {

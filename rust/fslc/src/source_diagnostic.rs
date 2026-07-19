@@ -30,6 +30,22 @@ pub fn diagnostics_with_model(
     if crate::frontend_output::is_ai_project(source) {
         return (migration_diagnostics(source), None);
     }
+    // Standalone causal models bypass dialect dispatch (docs/DESIGN-causal.md):
+    // surface their own parse errors, never FSL-DIALECT-UNKNOWN, and no kernel.
+    if fsl_syntax::is_causal_source(source) {
+        return match fsl_syntax::parse_causal(source) {
+            Ok(_) => (Vec::new(), None),
+            Err(error) => (
+                vec![SourceDiagnostic {
+                    kind: "parse",
+                    code: error.code().to_owned(),
+                    message: error.to_string(),
+                    span: error.span,
+                }],
+                None,
+            ),
+        };
+    }
     let parsed = match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)) {
         Ok(parsed) => parsed,
         Err(error) => {

@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+// Log mapping for incident_system production log → IncidentSystem spec.
+refinement IncidentLogMapping {
+  impl IncidentProductionLog
+  abs IncidentSystem
+  maps auto
+}

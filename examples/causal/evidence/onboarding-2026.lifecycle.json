@@ -1,0 +1,15 @@
+{
+  "schema_version": "fsl-causal-evidence-lifecycle.v0",
+  "evidence_id": "EXP_ONBOARDING_2026",
+  "artifact_digest": "sha256:7adbab3132974c7ce42b4036dac17e217762da7f11a4929be93672ff355a58e8",
+  "records": [
+    {
+      "sequence": 1,
+      "status": "active",
+      "superseded_by": null,
+      "recorded_at": "2026-04-01T00:00:00Z",
+      "previous_record_digest": null,
+      "record_digest": "sha256:ebce224e6053031f0bd3a8d42eaebb588d5454ba5667b279643254a798fb2813"
+    }
+  ]
+}

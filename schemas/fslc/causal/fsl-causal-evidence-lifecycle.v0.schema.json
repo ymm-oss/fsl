@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ymm-oss.github.io/fsl/schemas/fslc/causal/fsl-causal-evidence-lifecycle.v0.schema.json",
+  "title": "fsl-causal-evidence-lifecycle v0 append-only record chain",
+  "type": "object",
+  "required": ["schema_version", "evidence_id", "artifact_digest", "records"],
+  "properties": {
+    "schema_version": { "const": "fsl-causal-evidence-lifecycle.v0" },
+    "evidence_id": { "type": "string", "minLength": 1 },
+    "artifact_digest": { "$ref": "#/$defs/digest" },
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/record" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "record": {
+      "type": "object",
+      "required": [
+        "sequence",
+        "status",
+        "superseded_by",
+        "recorded_at",
+        "previous_record_digest",
+        "record_digest"
+      ],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 1 },
+        "status": { "enum": ["active", "retracted", "superseded"] },
+        "superseded_by": { "type": ["string", "null"] },
+        "recorded_at": { "type": "string" },
+        "previous_record_digest": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+        },
+        "record_digest": { "$ref": "#/$defs/digest" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

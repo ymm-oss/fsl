@@ -781,14 +781,20 @@ fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|actio
 fslc html      &lt;file.fsl&gt; [--depth K] [-o report.html] # self-contained review report (§15)
 fslc ledger    &lt;file.fsl&gt; [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
 fslc document generate &lt;file.fsl&gt; [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
-               [--glossary glossary.json] [-o requirements.md]
-                                                  # deterministic ja/en requirements document from the Requirement Claim IR (§13)
+               [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
+                                                  # deterministic ja/en requirements document from the Requirement Claim IR (§13);
+                                                  # --evidence overlays a per-requirement assurance class from saved
+                                                  # external evidence (repeatable; same envelope shape as `fslc ledger --evidence`);
+                                                  # --approval displays a verified requirements_document approval record
+                                                  # (repeatable; fails closed if it does not match the current rendering)
 fslc document claims &lt;file.fsl&gt; [--view requirements] [-o requirements.claims.json]
                                                   # emit the Requirement Claim IR (RCIR) claim set as JSON (§13)
-fslc document check &lt;file.fsl&gt; &lt;document.md&gt; [--glossary glossary.json]
+fslc document check &lt;file.fsl&gt; &lt;document.md&gt; [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]...
                                                   # structural drift check: generated claim blocks vs a
                                                   # fresh re-render; never interprets prose (§13)
-fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios --artifact &lt;reviewed&gt; --approver &lt;name&gt; [--signing-key private.pem] [-o record.json]
+fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios|requirements_document --artifact &lt;reviewed&gt; --approver &lt;name&gt;
+               [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
+                                                  # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
 fslc approval check  &lt;file.fsl&gt; --record &lt;record.json&gt; [--trust-key public.pem] # approved | drifted | signature-invalid
 fslc approval diff   &lt;file.fsl&gt; --record &lt;record.json&gt; [--depth K] [--trust-key public.pem]
 fslc typestate &lt;file.fsl&gt; [--ts]                 # decide applicability of state machine → ghost type (§16)
@@ -1528,6 +1534,14 @@ spec 状態変数をカバーし、<code>action external(params) -&gt; spec_acti
 カーネルは 1 つ(本書の §1–12)で、レイヤーごとのダイアレクトは AST へ展開される
 フロントエンドです。レイヤーは refinement で接続されます: <strong>business ⊒
 requirements ⊒ design ⊒ implementation (testgen/replay)</strong>。</p>
+<p><code>fslc document generate</code>/<code>claims</code>(<code>docs/DESIGN-document-requirement-claim-ir.md</code>
+参照)は、現時点では <code>spec</code> と <code>requirements</code> の2ダイアレクトのみを
+Requirement Claim IR へ投影する。本節で説明する他のダイアレクト(<code>business</code>、
+<code>dbsystem</code>、<code>ai_component</code> など)は、部分的な文書を生成するのではなく、コード化
+されたエラー(<code>FSL-DOC-DIALECT-UNSUPPORTED</code>)で fail-closed に拒否される。
+<code>--view business</code>/<code>--view design</code> は予約済みの未実装フラグ値である —
+将来のcross-layer viewが満たすべき有効化契約については
+<code>docs/DESIGN-document-dialect-adapters.md</code> を参照。</p>
 <h3 id="131">13.1 宣言タグ(全レイヤー共通のトレーサビリティ)</h3>
 <p>正準な関係構文は、リンクされる宣言の直前に置く型付きアノテーションです。違反、
 CTI、カバレッジ診断、シナリオは <code>requirement: {id, text}</code> を運びます:</p>
@@ -2435,7 +2449,90 @@ DESIGN-*.md があります)。</p>
 バージョン付きの公開 Kernel JSON v1 コントラクトから行い、未対応の Kernel
 スキーマバージョンでは fail closed します。その JSON レポートと TypeScript の
 バイト列は、凍結された参照実装の出力と互換のままです。
-→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details></div>
+→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details>
+<details id="17-the-causal-profile-review-only-causal-hypothesis-graphs"><summary>17. causal プロファイル(レビュー専用の因果仮説グラフ)<span class="tree-blurb"> — レビュー専用の因果仮説グラフ — proved/verified は決して付かない。</span></summary><div class="tree-body"><p><code>causal &lt;Name&gt; { ... }</code> は独立したサイドカードキュメント(それ自体が 1 つの
+<code>.fsl</code> ファイルで、kernel spec の一部にはなりません)で、長期の因果仮説 —
+介入、媒介、成果、文脈、時間 lag、持続、遅延 feedback、計測バインディング、
+適用範囲 — を構造化します。<strong>FSL は現実世界の因果関係を証明しません</strong>:
+すべての causal 出力は <code>formal_result: "not_run"</code> と <code>do_not_assume</code> 配列を
+運び、causal claim に <code>proved</code>/<code>verified</code> を付与する出力経路は存在せず、
+<code>fslc causal verify</code> というコマンドは意図的にありません。</p>
+<pre><code class="language-bash">fslc causal check model.fsl
+fslc causal analyze model.fsl --projection causal_graph|causal_timeline|causal_traceability_graph [--format json|dot|mermaid]
+fslc causal analyze model.fsl --profile causal-review
+fslc causal diff before.fsl after.fsl
+</code></pre>
+<p>causal ファイルへの <code>fslc check model.fsl</code> は自動的に causal checker へ
+ルーティングされます。モデルは 1 つの離散 <code>timebase</code>
+(<code>tick | hour | day | week</code>)と有限の <code>horizon</code> を宣言します。<code>uses &lt;alias&gt;
+from "&lt;path&gt;"</code> で kernel/business/requirements spec をインポートし、variable が
+action をバインドしたり(<code>binds action alias.name</code>)、KPI・state・property を
+観測したり(<code>observes kpi alias.name</code> など)できます。claim は方向付き仮説
+<code>claim &lt;Id&gt; a -&gt; b { version N status active|retired polarity
+positive|negative|unknown lag a..b|unknown persists a..b|unknown|unbounded
+basis hypothesis|assumption ... }</code> で、安定 ID と単調増加する content version を
+持ちます。retired な claim は識別性と履歴を保持します。最小 lag 合計が正の
+cycle は許可されますが <code>feedback</code> 宣言による認識が必要です(未認識の cycle は
+warning、lag 合計 0 の cycle は error)。feedback loop は edge polarity の符号積
+(<code>unknown</code> は吸収元)から <code>reinforcing | balancing | unknown</code> に分類され、
+timeline は Minkowski 和の初回反応 window を報告します(最小値は正確、
+feedback SCC を経由するペアの最大値は上界)。
+<code>--profile causal-review</code> は決定的なレビュー findings(すべて
+<code>formal_status: "not_a_violation"</code>)を出力します — 例えば
+<code>single_hypothesis_bottleneck</code>、<code>high_leverage_untested_claim</code>、
+<code>opposing_path_polarity</code>、<code>potential_common_cause</code>、
+<code>feedback_without_damping_story</code>、<code>deadline_before_earliest_effect</code>、
+<code>observation_window_misses_effect</code>、<code>measurement_cadence_too_coarse</code>
+(計測 cadence が到達 claim の最小持続を超えるとき正確に発火します。unknown な
+持続は推測せず <code>not_evaluable</code> として報告)、<code>unknown_lag_blocks_timeline</code>。
+<code>fslc causal diff</code> は 2 つのモデルファイルを安定 claim ID と content version で
+比較します。<code>support_transition</code> は外部 evidence が存在するまで
+<code>not_available</code> のままです。version 対象フィールドを同じ version のまま変更すると
+<code>content_changed_without_version_bump</code>、terminal な retired claim を active に
+戻すと <code>retired_claim_reactivated</code>、新しい claim が retired claim と同じ source、
+target、polarity を繰り返すと <code>retired_hypothesis_reproposed</code> を報告します。</p>
+<p>外部 evidence はバージョン付き artifact で取り込みます
+(<code>fsl-causal-evidence.v0</code>: 閉じた <code>design</code> 語彙
+<code>randomized_experiment | quasi_experiment | observational | expert_judgment</code>、
+方向付き <code>support</code> <code>supports | challenges | inconclusive</code>、claim ID <strong>と
+content version</strong> の pin、scope token、ISO-8601 の <code>period</code>/<code>valid_until</code>、
+canonical payload に対する <code>artifact_digest</code>)。加えて独立した append-only の
+lifecycle chain(<code>fsl-causal-evidence-lifecycle.v0</code>: digest で連結された
+record 列。<code>retracted</code>/<code>superseded</code> は terminal で payload を書き換えません)。
+<code>fslc causal analyze model.fsl --evidence a.json [--lifecycle a.lifecycle.json]
+[--as-of YYYY-MM-DD] --projection causal_evidence_graph</code>(または
+<code>--profile causal-review</code>)は artifact を fail-closed に検証し —
+schema/digest/lifecycle chain の違反は分析を開始させません — 決定的な
+claim ごとの <code>causal_support</code> を集約します: <code>untested</code>、<code>supported</code>、
+<code>challenged</code>、<code>inconclusive</code>、<code>mixed</code>、<code>unsupported_by_current_evidence</code>。
+現行 claim version を pin し、scope が claim scope を <code>subsumes</code> し、
+freshness が宣言され、lifecycle が <code>active</code> で、観測 window が claim の最小
+lag 以上の artifact だけが票になります。同一 source lineage は 1 票に
+collapse されます(lineage 内の矛盾は <code>inconclusive</code>)。staleness は明示的な
+<code>--as-of</code> 日付に対してだけ判定され、実行環境の時計は決して使いません。
+claim 側または artifact 側の片方だけに存在する scope dimension は
+<code>unassessable</code> であり、欠落を universal として扱いません。
+<strong><code>causal_support</code> と <code>formal_assurance</code> は直交する 2 軸</strong>です: evidence は
+<code>formal_assurance: "not_run"</code> を決して変えず、どの support 値も verdict では
+ありません。</p>
+<p>人間は claim から観測可能な契約を <code>expectation</code> として切り出し、既存の
+verifier で検査できます — <strong>claim そのものは決して lowering されません</strong>:
+<code>expectation E { trigger action alias.name</code>(または <code>trigger predicate
+alias { &lt;kernel 式&gt; }</code>)<code>response predicate alias { &lt;kernel 式&gt; } within N
+clock &lt;name&gt; derived_from_claim &lt;Id&gt; }</code>。
+<code>fslc causal verify-expectations model.fsl [--depth K]</code> は各 expectation を
+fail-closed にコンパイルし、インポートした kernel spec 上の通常の
+<code>leadsTo ... within ticks</code> プロパティにします(action trigger は 1 ステップの
+pulse ghost になります。<code>within</code> は名前付き clock の下で正確な整数 kernel tick
+に変換できなければならず、丸めは行わず、clock を別の spec に流用することも
+ありません)。結果は <code>pass</code>/<code>violated</code> と <code>assurance: "bounded"</code> で報告されます。
+どちらの verdict でも、由来 claim の <code>formal_assurance</code> は <code>"not_run"</code> のまま、
+<code>causal_support</code> も不変です: <code>derived_from_claim</code> は双方向とも traceability
+専用で、evidence にはなりません。旧フィールド名 <code>supports</code> は拒否されます。バージョン付き schema は <code>schemas/fslc/causal/</code> に
+あり、ブラウザ Worker は causal コマンドを公開しません。動作するモデルは
+<a href="https://github.com/ymm-oss/fsl/tree/main/examples/causal"><code>examples/causal/</code></a>
+にあります。
+→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-causal.md"><code>DESIGN-causal.md</code></a></p></div></details></div>
   </div>
 </section>
 

@@ -80,6 +80,94 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   stronger survivor claim from returning (issue #338).
 
 ### Added
+- Causal portfolio ledger (Phase 5, issue #364): `fslc causal ledger
+  model.fsl [--plans ... --evidence ... --lifecycle ... --as-of ...]`
+  integrates claims, validation plans, evidence, and observations into
+  a per-claim projection with 12 deterministic attention reasons
+  (`validation_plan_missing`, `current_evidence_missing`,
+  `observation_not_directional_support`, etc.). New
+  `fsl-causal-validation-plan.v0` schema for immutable plan artifacts
+  with claim pins, design, scope, observation window, measurements,
+  and opaque external refs. Plan lifecycle reuses
+  `fsl-causal-evidence-lifecycle.v0`. CLI envelope:
+  `causal-ledger.v0` (inventory 38). Every claim appears regardless of
+  plan/evidence; retired claims have no attention; output is byte-stable.
+- Causal observation bridge (Phase 4, issue #360): `fslc causal
+  observe-expectations model.fsl --from-log events.jsonl --mapping
+  log_mapping.fsl --scope scope.json --period-start ... --period-end ...`
+  replays compiled expectations against a production JSONL log using the
+  solver-free `BoundedLivenessMonitor`. Generates per-expectation
+  `fsl-causal-evidence.v0` artifacts with `design: "observational"`,
+  `support: "inconclusive"`, `assurance: "replay-observed"`, and matching
+  lifecycle records. Pass/violated verdicts never change claim
+  `formal_assurance` or `causal_support`. Nonconformant logs,
+  missing scope/period, and mapping failures are fail-closed.
+  CLI envelope schema: `causal-observation.v0` (inventory 36).
+- Causal expectation lowering (Phase 3, issue #323): explicit `expectation`
+  declarations (trigger action or inline predicate, response predicate,
+  `within N clock <name>`, `derived_from_claim`) compile — fail-closed on
+  missing/foreign clocks, fractional tick conversion, unresolved references,
+  or non-kernel targets — into ordinary `leadsTo ... within ticks` properties
+  on the imported spec; action triggers become one-step pulse ghosts that
+  never change guards. `fslc causal verify-expectations model.fsl [--depth
+  K]` (`causal-expectations.v0`) reports `pass`/`violated` with
+  `assurance: "bounded"`; pass and violated goldens both hold the central
+  invariant that the derived claim's `formal_assurance` stays `"not_run"`
+  and its `causal_support` is untouched — `derived_from_claim` is
+  traceability only, and the legacy `supports` field is a parse error. A
+  generated property is semantically identical to the hand-written pulse
+  encoding (asserted by test), and there is deliberately still no
+  `causal verify` alias.
+- Causal evidence plane (Phase 2, issue #322): `fslc causal analyze --evidence
+  artifact.json [--lifecycle chain.json] [--as-of YYYY-MM-DD]` validates
+  `fsl-causal-evidence.v0` artifacts (closed design/support vocabularies,
+  claim ID + content-version pins, scope tokens, ISO-8601 periods, canonical
+  sha256 `artifact_digest`) and independent append-only
+  `fsl-causal-evidence-lifecycle.v0` digest chains, fail-closed on
+  schema/digest/chain violations. A new `causal_evidence_graph` projection
+  (and the `causal-review` profile) overlays a deterministic per-claim
+  `causal_support` — `untested | supported | challenged | inconclusive |
+  mixed | unsupported_by_current_evidence` — counting only artifacts that pin
+  the current claim version with `subsumes` scope, declared freshness, an
+  active lifecycle, and an observation window at least the claim's minimum
+  lag; one source lineage is one vote and staleness is judged only against an
+  explicit `--as-of` date. Sixteen evidence/measurement review findings
+  (`evidence_scope_mismatch`, `evidence_window_shorter_than_lag`,
+  `duplicate_evidence_source`, `unobserved_mediator`,
+  `unsupported_assumption_chain`, ...) join the causal-review profile, all
+  `formal_status: "not_a_violation"`. Evidence never changes a claim's
+  `formal_assurance: "not_run"` — the two axes stay orthogonal by contract
+  and by test. Ships three new schemas under `schemas/fslc/causal/`, a
+  digest-stamped example artifact + lifecycle chain under
+  `examples/causal/evidence/`, and docs/skills updates.
+- `fslc causal check|analyze|diff` (Phase 1 of the review-only causal profile,
+  `docs/DESIGN-causal.md`): a standalone `causal <Name> { ... }` document —
+  parsed outside the dialect registry via a pre-dispatch sniff, so the frozen
+  Python `DIALECT_KEYWORDS` parity gate does not move — is typed into a
+  `CausalModel` (roles, measurement bindings resolved against imported
+  kernel/business specs, closed scope vocabulary, claim content versions and
+  the `active|retired` lifecycle, clock mappings, fail-closed well-formedness
+  diagnostics including `causal_instantaneous_loop` and
+  `causal_unacknowledged_feedback`). `causal analyze` emits deterministic
+  `causal_graph` / `causal_timeline` / `causal_traceability_graph`
+  projections (JSON/Mermaid/DOT; SCC-condensed, Dijkstra-exact earliest
+  first-pass, upper-bounded latest through feedback, capped representative
+  paths with truncation metadata) and a `causal-review` profile with 15
+  structural/temporal findings, all `formal_status: "not_a_violation"` with
+  `do_not_assume`. `causal diff` compares stable claim IDs and content
+  versions, flags missing version bumps, retired-claim reactivation, and
+  retired-hypothesis re-proposals, with `support_transition: "not_available"`
+  until #322's evidence exists. Evidence/plan scope comparison treats a
+  dimension present on only one side as `unassessable`, never universal. No
+  output path attaches `proved`/`verified` to a causal claim and
+  there is deliberately no `causal verify`; `fsl-runtime`, `fsl-solver*`,
+  `fsl-verifier`, Public Kernel v1, and the frozen Python reference are
+  untouched. Ships `schemas/fslc/causal/` (check/graph/findings/diff v0),
+  three dogfood models under `examples/causal/`, LSP sniff handling,
+  `docs/LANGUAGE.md` §17 + `docs/LANGUAGE.ja.md` §17,
+  `skills/fsl/reference.md` §12 with the agent-facing "never present causal
+  claims as proved/verified" hard rule, and a docs-contract regression
+  (issue #321).
 - Accepted `docs/DESIGN-causal.md`: the design contract for the review-only
   `causal` profile (typed causal hypothesis graphs). It fixes the three-plane
   architecture (causal specification / formal expectation / external

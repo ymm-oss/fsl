@@ -124,6 +124,10 @@ SECTION_BLURBS = {
         "ja": "状態機械を ghost 型 / typestate へ昇格させる判断。",
         "en": "Deciding when a state machine promotes to a ghost type / typestate.",
     },
+    "17. The causal profile (review-only causal hypothesis graphs)": {
+        "ja": "レビュー専用の因果仮説グラフ — proved/verified は決して付かない。",
+        "en": "Review-only causal hypothesis graphs — never proved/verified.",
+    },
 }
 
 

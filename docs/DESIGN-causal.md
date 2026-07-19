@@ -591,7 +591,135 @@ do-calculus/identifiability; effect-size estimation; converting temporal
 co-occurrence into causal support; letting external tools overwrite
 `causal_support`.
 
-## 12. Test obligations for Phase 1
+## 12. Phase 1 implementation notes (fixed by #321)
+
+Deterministic details settled during the Phase 1 implementation; they refine,
+never contradict, the sections above.
+
+- **Variable fields `deadline N` and `window a..b`** (both optional, timebase
+  units, measured from the intervention change): `deadline` on an outcome
+  feeds `deadline_before_earliest_effect`; `window` on an observed variable
+  feeds `observation_window_misses_effect` (a window that ends before an
+  arriving claim's `lag.min` or starts after `lag.max + persists.max` cannot
+  overlap the response).
+- **Measurement kinds in v0** are `action` (via `binds`), `kpi`, `state`, and
+  `property`. Typed-predicate bindings are deferred to a follow-up design.
+- **Diagnostic kinds added for well-formedness**: `causal_invalid_model`
+  (missing/duplicate timebase, horizon, or required claim field; invalid
+  enum values; clock unit ≠ timebase) and `causal_scope_invalid` (undeclared
+  dimension/token, contradictory or cyclic relations, duplicate dimension in a
+  selection). Both are errors; analysis never starts on them.
+- **Unacknowledged-cycle rule** (warning `causal_unacknowledged_feedback` and
+  finding `unacknowledged_feedback_loop`): computed at edge granularity on the
+  SCC condensation — any active claim inside a nontrivial SCC that is not part
+  of a declared feedback's claim list triggers one warning per SCC. No cycle
+  enumeration.
+- **Timeline bounds**: `first_pass.min` is exact (Dijkstra over `lag.min`,
+  known-lag edges only). `first_pass.max` is exact on acyclic routes; when the
+  pair is connected through a nontrivial SCC (`via_feedback: true`), it is an
+  upper bound that charges the SCC with the sum of its internal known
+  `lag.max` values. A reachable pair with no fully-known-lag path reports
+  `first_pass: "unknown"` plus the `unknown_lag_blocks_timeline` finding.
+- **Deterministic thresholds** (integer arithmetic, documented in the finding
+  witness): `long_horizon_without_leading_indicator` fires when
+  `earliest * 2 >= horizon` and no observable path variable has
+  `earliest * 4 <= horizon`; indicator classes compare against the largest
+  outcome earliest `E` — `leading` when `3 * earliest <= E`, `lagging` when
+  `3 * earliest >= 2 * E`, else `intermediate`.
+- **`high_leverage_untested_claim`** requires the evidence-free claim to be a
+  cut (removal disconnects) for at least two distinct outcomes;
+  `single_hypothesis_bottleneck` requires one claim or mediator to be a cut
+  for every outcome reachable from an intervention.
+- **CLI routing**: `fslc check` on a causal document routes to the causal
+  checker via the pre-dispatch `is_causal_source` sniff (the same mechanism as
+  legacy AI project files); `causal` is deliberately not in the dialect
+  registry, so the frozen Python `DIALECT_KEYWORDS` parity gate does not move.
+  LSP diagnostics and the document index apply the same sniff.
+- **Worker waiver**: the browser Worker exposes only `check`/`verify` by
+  standing policy; causal commands are CLI-only and fall through to the
+  Worker's deny-by-default error. This is an explicit waiver, not an omission.
+- **Phase 1 evidence handling**: `evidence <Id> from "<path>"` declarations
+  are recorded and referenced by ID; the artifact file is never opened, parsed,
+  or validated (that is #322), and no support values are emitted anywhere.
+
+## 13. Phase 2 implementation notes (fixed by #322)
+
+- **Digest conventions.** `artifact_digest` = `sha256:` over the canonical
+  JSON (recursively sorted keys, compact separators) of the artifact with the
+  `artifact_digest` field removed. A lifecycle `record_digest` = the same
+  canonicalization of the record with `record_digest` removed plus the
+  chain's `evidence_id` and `artifact_digest` injected. Tampering with either
+  is a fatal `causal_evidence_digest_mismatch` /
+  `causal_evidence_lifecycle_mismatch`.
+- **Fail-closed boundary.** Artifact schema violations (unknown design/
+  support/observation fields, non-`not_run` `formal_result`), digest
+  mismatches, and lifecycle-chain violations (sequence gaps/forks, broken
+  digest links, records after a terminal status, unresolvable
+  `superseded_by`) stop the analysis with exit 2. Applicability conditions
+  (version pin, scope, freshness, lifecycle status, window-vs-lag, lineage)
+  are warnings: the artifact stays in history and in the graph but is
+  excluded from current support.
+- **Staleness needs `--as-of`.** `stale_evidence` compares `valid_until`
+  against an explicit `--as-of YYYY-MM-DD` only; without `--as-of`, a
+  declared `valid_until` is accepted as-declared (never the wall clock, so
+  identical inputs always produce identical output). Missing `valid_until`
+  is `unknown_freshness` and excludes the artifact regardless.
+- **Window conversion.** `period.end - period.start` converts to timebase
+  units from ISO-8601 date differences: exact for `day` and `hour`
+  (days × 24); `week` only when the difference is a whole number of weeks;
+  `tick` and fractional conversions are `not_evaluable` (never rounded).
+  `w < lag_min` excludes with `evidence_window_shorter_than_lag`;
+  `w == lag_min` passes.
+- **Lineage.** The lineage root is the transitive `derived_from` root when
+  present, else `source_study_id`, else the artifact itself. Roots sharing
+  members emit `duplicate_evidence_source`; one root is one vote; support
+  contradictions inside a root collapse to `inconclusive` with
+  `conflicting_evidence`.
+- **Support vocabulary.** Aggregation follows the #322 table verbatim;
+  `unsupported_by_current_evidence` applies when a claim is referenced by
+  artifacts (or declares evidence references) but no artifact is currently
+  applicable. `causal_support` never appears without an adjacent
+  `formal_assurance: "not_run"` in graph output.
+- **CLI surface.** `--evidence` and `--lifecycle` are repeatable;
+  `--projection causal_evidence_graph` requires at least one `--evidence`;
+  `--profile causal-review` with `--evidence` appends evidence findings and
+  a `causal_support` map to the review envelope. Measurement findings
+  (`unobserved_mediator`, `proxy_only_critical_variable`,
+  `unsupported_assumption_chain`) are model-structural and fire without
+  evidence inputs.
+
+## 14. Phase 3 implementation notes (fixed by #323)
+
+- **Syntax.** `expectation <Id> { trigger action alias.name | trigger
+  predicate alias { <expr> }  response predicate alias { <expr> }  within N
+  clock <name>  derived_from_claim <Id> }`. Inline predicate blocks capture
+  raw kernel-expression source; they parse with the ordinary expression
+  grammar and type-check against the target spec's state space when the
+  augmented model builds — anything else (KPI deltas, averages, effect
+  sizes) fails closed there. The legacy field names `supports` /
+  `supports_claim` are parse errors.
+- **Action triggers** lower to a one-step pulse ghost
+  (`_expectation_fired_<id>: Bool`, init false, set true by the trigger
+  action and false by every other action), so the generated
+  `leadsTo pulse ~> within ticks response` reads "within N ticks of the
+  action firing". Guards are untouched — enabledness and deadlock behavior
+  do not change; the ghost only widens the state space by one Bool.
+- **Fail-closed gates** (all `causal_expectation_invalid`): missing
+  trigger/response/within/clock, unknown clock, trigger or response alias ≠
+  the clock's kernel spec, unresolved `derived_from_claim`, a target that is
+  not a plain kernel spec (dialect-lowered state spaces are not stable
+  expectation surfaces in v0), a trigger action absent from the spec, and a
+  `within` that does not convert to an exact integer tick count
+  (`within × ticks ÷ units` must divide evenly; nothing is rounded).
+- **Verdict boundary.** `fslc causal verify-expectations` runs the ordinary
+  bounded verifier per expectation. A violation of the *generated* property
+  is `verdict: "violated"`; a violation of any pre-existing property is an
+  error ("fix the spec first") so expectation verdicts never absorb baseline
+  bugs. Both verdicts leave every claim at `formal_assurance: "not_run"`
+  with untouched `causal_support` (`causal-expectations.v0`, held by pass
+  and violated goldens). There is still no `causal verify` alias.
+
+## 15. Test obligations for Phase 1
 
 The scope three-valued comparison (§4.4), polarity sign product with unknown
 absorption (§6), and `reinforcing / balancing / unknown` loop classification
@@ -600,3 +728,97 @@ tests in #321. Claim version pinning and the retired lifecycle (§4.5) must be
 covered so that old-version evidence never supports a current claim and
 refuted-claim history is never lost. Clock-mapping syntax, placement, and
 integer-conversion fail-closed conditions (§5) are shared verbatim with #323.
+
+## 16. Phase 4 implementation notes (fixed by #360)
+
+- **Observation bridge architecture.** `fslc causal observe-expectations`
+  replays compiled expectations against a production JSONL log using the
+  solver-free `BoundedLivenessMonitor` from `fsl-runtime`. For each compiled
+  expectation, one `BoundedLivenessMonitor` is built from the augmented
+  `KernelModel` (carrying the generated `leadsTo`). The monitor is fed the
+  log's mapped observed state — extended with the pulse ghost for action
+  triggers — at each step. Pass or violated verdicts carry
+  `assurance: "replay-observed"` and never change `formal_assurance` or
+  `causal_support` on any claim.
+- **Ghost state extension.** For action-trigger expectations, the pulse ghost
+  `_expectation_fired_<id>` is computed per log record as
+  `mapped_action == trigger_action`; it is not part of the production state.
+  For predicate-trigger expectations, no ghost is needed — the trigger
+  expression evaluates directly against the mapped observed state.
+- **`--trace` / `--from-log` equivalence (AC 7).** The existing `fslc replay
+  --trace` (schema 1.2) feeds the `Monitor`'s spec-computed state to
+  `BoundedLivenessMonitor`. The observation bridge feeds the log's mapped
+  observed state instead. For conformant logs (observed state ≡ spec-computed
+  state) the two paths produce identical verdicts. Conformance is checked as
+  a precondition — a nonconformant log aborts evidence generation.
+- **Fail-closed conditions.** Missing `--scope`, `--period-start`,
+  `--period-end`, `--from-log`, or `--mapping` is a CLI error (exit 2).
+  A nonconformant log record (action not enabled, state mismatch) aborts
+  with `observation_replay_nonconformant`. A mapping failure (unknown
+  action, parameter mismatch, missing state variable) aborts with
+  `observation_replay_failed`. All failure outputs carry `do_not_assume`.
+- **Evidence artifacts.** Per-expectation `fsl-causal-evidence.v0` artifacts
+  with the `observation` object filled in: `design: "observational"`,
+  `support: "inconclusive"`, `observation.kind: "expectation_replay"`,
+  `observation.assurance: "replay-observed"`. The schema's `if/then` gate
+  rejects any artifact that sets `observation` but declares `support` other
+  than `"inconclusive"` or `design` other than `"observational"` (AC 3/4).
+  `observation.digests` carries sha256 digests of the causal source, JSONL
+  log, and mapping file. Lifecycle records are sequence-1 active chains.
+- **File output.** `--out` and `--lifecycle-out` write one file per artifact
+  (individually consumable by `fslc causal analyze --evidence`). Multiple
+  expectations produce files with the evidence ID embedded in the filename.
+- **`do_not_assume`.** Every envelope and per-expectation result includes the
+  five-item array specified in #360: "The causal claim is proved", "Temporal
+  co-occurrence establishes causality", "No unmodeled common cause exists",
+  "Expectation violation refutes the causal claim", "Unobserved behavior did
+  not occur".
+- **CLI envelope.** `causal-observation.v0` schema (inventory now 36);
+  `result: "causal_expectations_observed"`, `formal_result: "not_run"`.
+- **Worker waiver.** Same policy as other causal commands: CLI-only.
+
+## 17. Phase 5 implementation notes (fixed by #364)
+
+- **Validation plan artifacts.** `fsl-causal-validation-plan.v0` is an
+  immutable JSON artifact pinning claim IDs + content versions, a study
+  `design` (same closed vocabulary as evidence), scope tokens, an
+  observation window (timebase + minimum), measurement variable references,
+  opaque `external_refs`, and a canonical `artifact_digest`. Plan lifecycle
+  reuses the existing `fsl-causal-evidence-lifecycle.v0` chain schema —
+  the `evidence_id` field carries the `plan_id`.
+- **Plan validator.** `parse_plan()` in `fsl-tools/src/causal_plan.rs`
+  validates schema version, claim pins, design vocabulary, scope tokens,
+  observation window, measurements, and artifact digest (fail-closed on
+  mismatch). Lifecycle validation uses the existing
+  `validate_lifecycle_chain()`.
+- **Ledger projection.** `fslc causal ledger model.fsl [--plans ...
+  --evidence ... --lifecycle ... --as-of YYYY-MM-DD]` integrates the
+  model's claims with plans, evidence (via the existing
+  `aggregate_support()`), and per-claim attention reasons into a
+  `causal-ledger.v0` JSON envelope. Every active claim appears regardless
+  of plan/evidence availability (AC 1). Retired claims appear but have no
+  attention reasons. Output is claim-ID-ordered and byte-stable (AC 5).
+- **Attention reasons (closed vocabulary).** 12 deterministic attention
+  reasons derived from facts: `validation_plan_missing`,
+  `validation_plan_version_mismatch`, `validation_plan_scope_unassessable`,
+  `validation_plan_scope_inapplicable`,
+  `validation_window_shorter_than_lag`,
+  `required_measurement_unavailable`, `current_evidence_missing`,
+  `current_evidence_inconclusive`,
+  `conflicting_evidence_requires_decision`,
+  `challenging_evidence_requires_decision`,
+  `evidence_freshness_requires_refresh`,
+  `observation_not_directional_support`. Each carries a typed witness.
+  Attention reasons are review projections, not formal violations (AC 7).
+- **Plan scope checking.** The existing 3-valued scope comparison
+  (`compare_scope`, extracted from `scope_application`) is reused for
+  plan–claim scope assessment with the same `subsumes / partial_overlap /
+  disjoint / unassessable` semantics.
+- **`do_not_assume`.** Every ledger output includes: "The causal claim is
+  proved or verified", "A completed validation plan establishes causality",
+  "No unmodeled common cause exists", "Absence of challenging evidence
+  means the claim is true", "Portfolio readiness is a formal assurance
+  class".
+- **Schemas.** `fsl-causal-validation-plan.v0` and `causal-ledger.v0`
+  (inventory now 38).
+- **Worker waiver.** Same policy as other causal commands: CLI-only.

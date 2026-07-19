@@ -1,0 +1,15 @@
+{
+  "schema_version": "fsl-causal-evidence-lifecycle.v0",
+  "evidence_id": "PLAN_ONBOARDING_2027",
+  "artifact_digest": "sha256:8959bedf0eec67a4d6f883a72d5626fbed3423380082e8966e94fd1fe2c93205",
+  "records": [
+    {
+      "sequence": 1,
+      "status": "active",
+      "superseded_by": null,
+      "recorded_at": "2027-01-01T00:00:00Z",
+      "previous_record_digest": null,
+      "record_digest": "sha256:4590648f4e902dd3528145df74ea81e94adc5d1275c4ab4f367e8d8d1d10cd2f"
+    }
+  ]
+}

@@ -2498,3 +2498,97 @@ JSON v1 contract, not private parser/model structures, and fails closed on an
 unsupported Kernel schema version. Its JSON report and TypeScript bytes remain
 compatible with the frozen reference output.
 → [`DESIGN-typestate.md`](DESIGN-typestate.md)
+
+## 17. The causal profile (review-only causal hypothesis graphs)
+
+`causal <Name> { ... }` is a standalone sidecar document (its own `.fsl` file,
+never part of a kernel spec) that structures long-horizon causal hypotheses:
+interventions, mediators, outcomes, contexts, time lags, persistence, delayed
+feedback, measurement bindings, and applicability scope. **FSL never proves
+real-world causality**: every causal output carries
+`formal_result: "not_run"` and a `do_not_assume` array, no output path
+attaches `proved`/`verified` to a causal claim, and there is deliberately no
+`fslc causal verify` command.
+
+```bash
+fslc causal check model.fsl
+fslc causal analyze model.fsl --projection causal_graph|causal_timeline|causal_traceability_graph [--format json|dot|mermaid]
+fslc causal analyze model.fsl --profile causal-review
+fslc causal diff before.fsl after.fsl
+```
+
+`fslc check model.fsl` on a causal file routes to the causal checker
+automatically. A model declares one discrete `timebase`
+(`tick | hour | day | week`) and a finite `horizon`; `uses <alias> from
+"<path>"` imports kernel/business/requirements specs so variables can bind
+actions (`binds action alias.name`) and observe KPIs, states, or properties
+(`observes kpi alias.name`, etc.). Claims are directed hypotheses
+`claim <Id> a -> b { version N status active|retired polarity
+positive|negative|unknown lag a..b|unknown persists a..b|unknown|unbounded
+basis hypothesis|assumption ... }` with stable IDs and monotonically increasing
+content versions; retired claims keep their identity and history. Cycles with
+a positive minimum lag sum are allowed but must be acknowledged with a
+`feedback` declaration (an unacknowledged cycle is a warning; a zero-lag cycle
+is an error). Feedback loops are classified `reinforcing | balancing |
+unknown` from the sign product of edge polarities (`unknown` absorbs), and the
+timeline reports Minkowski-sum first-response windows (exact minimum; the
+maximum is an upper bound when the pair is connected through a feedback SCC).
+`--profile causal-review` emits deterministic review findings (all
+`formal_status: "not_a_violation"`) such as `single_hypothesis_bottleneck`,
+`high_leverage_untested_claim`, `opposing_path_polarity`,
+`potential_common_cause`, `feedback_without_damping_story`,
+`deadline_before_earliest_effect`, `observation_window_misses_effect`,
+`measurement_cadence_too_coarse` (fires exactly when a measurement cadence
+exceeds an arriving claim's minimum persistence; unknown persistence is
+reported as `not_evaluable`, never guessed), and `unknown_lag_blocks_timeline`.
+`fslc causal diff` compares two model files by stable claim ID and content
+version; its `support_transition` stays `not_available` until external
+evidence exists. It reports `content_changed_without_version_bump` when
+version-relevant fields move under the same version,
+`retired_claim_reactivated` when a terminal retired claim returns to active,
+and `retired_hypothesis_reproposed` when a new claim repeats a retired claim's
+source, target, and polarity.
+
+External evidence enters through versioned artifacts
+(`fsl-causal-evidence.v0`: closed `design` vocabulary
+`randomized_experiment | quasi_experiment | observational | expert_judgment`,
+directed `support` `supports | challenges | inconclusive`, claim-ID **and
+content-version** pins, scope tokens, ISO-8601 `period`/`valid_until`, an
+`artifact_digest` over the canonical payload) plus independent append-only
+lifecycle chains (`fsl-causal-evidence-lifecycle.v0`: digest-linked records;
+`retracted`/`superseded` are terminal and never rewrite the payload).
+`fslc causal analyze model.fsl --evidence a.json [--lifecycle a.lifecycle.json]
+[--as-of YYYY-MM-DD] --projection causal_evidence_graph` (or
+`--profile causal-review`) validates artifacts fail-closed — schema/digest/
+lifecycle-chain violations stop the analysis — and aggregates a deterministic
+per-claim `causal_support`: `untested`, `supported`, `challenged`,
+`inconclusive`, `mixed`, or `unsupported_by_current_evidence`. Only artifacts
+that pin the current claim version, whose scope `subsumes` the claim scope,
+with declared freshness, an `active` lifecycle, and an observation window at
+least the claim's minimum lag count; one source lineage collapses to one vote
+(contradictions inside a lineage are `inconclusive`). Staleness is judged only
+against an explicit `--as-of` date — never the wall clock. A scope dimension
+present on only the claim or artifact side is `unassessable`; absence is never
+treated as universal. **`causal_support`
+and `formal_assurance` are orthogonal axes**: evidence never changes
+`formal_assurance: "not_run"`, and no support value is a verdict.
+
+A human can carve an observable contract out of a claim as an `expectation`
+and check it with the existing verifier — **the claim itself is never
+lowered**: `expectation E { trigger action alias.name` (or `trigger
+predicate alias { <kernel expr> }`) `response predicate alias { <kernel
+expr> } within N clock <name> derived_from_claim <Id> }`.
+`fslc causal verify-expectations model.fsl [--depth K]` compiles each
+expectation, fail-closed, into an ordinary `leadsTo ... within ticks`
+property on the imported kernel spec (an action trigger becomes a one-step
+pulse ghost; `within` must convert to an exact integer number of kernel
+ticks under the named clock — nothing is rounded, and a clock is never
+applied to a different spec) and reports `pass`/`violated` with
+`assurance: "bounded"`. Whatever the verdict, the derived claim's
+`formal_assurance` stays `"not_run"` and its `causal_support` is untouched:
+`derived_from_claim` is traceability in both directions, never evidence.
+The legacy field name `supports` is rejected. Versioned
+schemas live under `schemas/fslc/causal/`; the browser Worker does not expose
+causal commands. Working models live in
+[`examples/causal/`](https://github.com/ymm-oss/fsl/tree/main/examples/causal).
+→ [`DESIGN-causal.md`](DESIGN-causal.md)

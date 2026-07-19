@@ -2460,3 +2460,94 @@ DESIGN-*.md があります)。
 スキーマバージョンでは fail closed します。その JSON レポートと TypeScript の
 バイト列は、凍結された参照実装の出力と互換のままです。
 → [`DESIGN-typestate.md`](DESIGN-typestate.md)
+
+## 17. causal プロファイル(レビュー専用の因果仮説グラフ)
+
+`causal <Name> { ... }` は独立したサイドカードキュメント(それ自体が 1 つの
+`.fsl` ファイルで、kernel spec の一部にはなりません)で、長期の因果仮説 —
+介入、媒介、成果、文脈、時間 lag、持続、遅延 feedback、計測バインディング、
+適用範囲 — を構造化します。**FSL は現実世界の因果関係を証明しません**:
+すべての causal 出力は `formal_result: "not_run"` と `do_not_assume` 配列を
+運び、causal claim に `proved`/`verified` を付与する出力経路は存在せず、
+`fslc causal verify` というコマンドは意図的にありません。
+
+```bash
+fslc causal check model.fsl
+fslc causal analyze model.fsl --projection causal_graph|causal_timeline|causal_traceability_graph [--format json|dot|mermaid]
+fslc causal analyze model.fsl --profile causal-review
+fslc causal diff before.fsl after.fsl
+```
+
+causal ファイルへの `fslc check model.fsl` は自動的に causal checker へ
+ルーティングされます。モデルは 1 つの離散 `timebase`
+(`tick | hour | day | week`)と有限の `horizon` を宣言します。`uses <alias>
+from "<path>"` で kernel/business/requirements spec をインポートし、variable が
+action をバインドしたり(`binds action alias.name`)、KPI・state・property を
+観測したり(`observes kpi alias.name` など)できます。claim は方向付き仮説
+`claim <Id> a -> b { version N status active|retired polarity
+positive|negative|unknown lag a..b|unknown persists a..b|unknown|unbounded
+basis hypothesis|assumption ... }` で、安定 ID と単調増加する content version を
+持ちます。retired な claim は識別性と履歴を保持します。最小 lag 合計が正の
+cycle は許可されますが `feedback` 宣言による認識が必要です(未認識の cycle は
+warning、lag 合計 0 の cycle は error)。feedback loop は edge polarity の符号積
+(`unknown` は吸収元)から `reinforcing | balancing | unknown` に分類され、
+timeline は Minkowski 和の初回反応 window を報告します(最小値は正確、
+feedback SCC を経由するペアの最大値は上界)。
+`--profile causal-review` は決定的なレビュー findings(すべて
+`formal_status: "not_a_violation"`)を出力します — 例えば
+`single_hypothesis_bottleneck`、`high_leverage_untested_claim`、
+`opposing_path_polarity`、`potential_common_cause`、
+`feedback_without_damping_story`、`deadline_before_earliest_effect`、
+`observation_window_misses_effect`、`measurement_cadence_too_coarse`
+(計測 cadence が到達 claim の最小持続を超えるとき正確に発火します。unknown な
+持続は推測せず `not_evaluable` として報告)、`unknown_lag_blocks_timeline`。
+`fslc causal diff` は 2 つのモデルファイルを安定 claim ID と content version で
+比較します。`support_transition` は外部 evidence が存在するまで
+`not_available` のままです。version 対象フィールドを同じ version のまま変更すると
+`content_changed_without_version_bump`、terminal な retired claim を active に
+戻すと `retired_claim_reactivated`、新しい claim が retired claim と同じ source、
+target、polarity を繰り返すと `retired_hypothesis_reproposed` を報告します。
+
+外部 evidence はバージョン付き artifact で取り込みます
+(`fsl-causal-evidence.v0`: 閉じた `design` 語彙
+`randomized_experiment | quasi_experiment | observational | expert_judgment`、
+方向付き `support` `supports | challenges | inconclusive`、claim ID **と
+content version** の pin、scope token、ISO-8601 の `period`/`valid_until`、
+canonical payload に対する `artifact_digest`)。加えて独立した append-only の
+lifecycle chain(`fsl-causal-evidence-lifecycle.v0`: digest で連結された
+record 列。`retracted`/`superseded` は terminal で payload を書き換えません)。
+`fslc causal analyze model.fsl --evidence a.json [--lifecycle a.lifecycle.json]
+[--as-of YYYY-MM-DD] --projection causal_evidence_graph`(または
+`--profile causal-review`)は artifact を fail-closed に検証し —
+schema/digest/lifecycle chain の違反は分析を開始させません — 決定的な
+claim ごとの `causal_support` を集約します: `untested`、`supported`、
+`challenged`、`inconclusive`、`mixed`、`unsupported_by_current_evidence`。
+現行 claim version を pin し、scope が claim scope を `subsumes` し、
+freshness が宣言され、lifecycle が `active` で、観測 window が claim の最小
+lag 以上の artifact だけが票になります。同一 source lineage は 1 票に
+collapse されます(lineage 内の矛盾は `inconclusive`)。staleness は明示的な
+`--as-of` 日付に対してだけ判定され、実行環境の時計は決して使いません。
+claim 側または artifact 側の片方だけに存在する scope dimension は
+`unassessable` であり、欠落を universal として扱いません。
+**`causal_support` と `formal_assurance` は直交する 2 軸**です: evidence は
+`formal_assurance: "not_run"` を決して変えず、どの support 値も verdict では
+ありません。
+
+人間は claim から観測可能な契約を `expectation` として切り出し、既存の
+verifier で検査できます — **claim そのものは決して lowering されません**:
+`expectation E { trigger action alias.name`(または `trigger predicate
+alias { <kernel 式> }`)`response predicate alias { <kernel 式> } within N
+clock <name> derived_from_claim <Id> }`。
+`fslc causal verify-expectations model.fsl [--depth K]` は各 expectation を
+fail-closed にコンパイルし、インポートした kernel spec 上の通常の
+`leadsTo ... within ticks` プロパティにします(action trigger は 1 ステップの
+pulse ghost になります。`within` は名前付き clock の下で正確な整数 kernel tick
+に変換できなければならず、丸めは行わず、clock を別の spec に流用することも
+ありません)。結果は `pass`/`violated` と `assurance: "bounded"` で報告されます。
+どちらの verdict でも、由来 claim の `formal_assurance` は `"not_run"` のまま、
+`causal_support` も不変です: `derived_from_claim` は双方向とも traceability
+専用で、evidence にはなりません。旧フィールド名 `supports` は拒否されます。バージョン付き schema は `schemas/fslc/causal/` に
+あり、ブラウザ Worker は causal コマンドを公開しません。動作するモデルは
+[`examples/causal/`](https://github.com/ymm-oss/fsl/tree/main/examples/causal)
+にあります。
+→ [`DESIGN-causal.md`](DESIGN-causal.md)

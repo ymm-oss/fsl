@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: Apache-2.0
+// Design-layer companion for the MarketingFunnel causal model.
+spec Funnel {
+  state {
+    campaigns: 0..5,
+    visits: 0..100,
+    signups: 0..100
+  }
+  init {
+    campaigns = 0
+    visits = 0
+    signups = 0
+  }
+  action run_campaign() {
+    requires campaigns < 5
+    campaigns = campaigns + 1
+  }
+  action visit() {
+    requires visits < 100
+    visits = visits + 1
+  }
+  action sign_up() {
+    requires signups < visits
+    signups = signups + 1
+  }
+  invariant SignupsWithinVisits { signups <= visits }
+}

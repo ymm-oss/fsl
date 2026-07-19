@@ -12,6 +12,7 @@ mod ai;
 mod annotation;
 mod annotation_parse;
 mod ast;
+mod causal;
 mod db;
 mod dispatch;
 mod domain;
@@ -32,6 +33,12 @@ pub use annotation::{
 };
 pub use ast::{
     AggregateKind, Binder, ConditionalSpans, Expr, Pattern, QualifiedName, SourcePos, Span,
+};
+pub use causal::{
+    CausalClaimDecl, CausalClock, CausalEvidenceDecl, CausalExpectationDecl, CausalFeedbackDecl,
+    CausalInterval, CausalLag, CausalPersistence, CausalRef, CausalScopeDimension, CausalSource,
+    CausalUse, CausalVariableDecl, ExpectationTrigger, MeasurementKind, MeasurementRef,
+    ScopeRelation, ScopeRelationKind, ScopeSelection, is_causal_source, parse_causal,
 };
 pub use db::{
     DbArtifact, DbCheck, DbCheckRule, DbColumn, DbColumnRef, DbDatabase, DbEnvironment,

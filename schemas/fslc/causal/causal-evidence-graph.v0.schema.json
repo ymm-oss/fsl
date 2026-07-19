@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ymm-oss.github.io/fsl/schemas/fslc/causal/causal-evidence-graph.v0.schema.json",
+  "title": "fslc causal analyze --projection causal_evidence_graph v0",
+  "type": "object",
+  "required": [
+    "fsl",
+    "result",
+    "schema_version",
+    "formal_result",
+    "model",
+    "projection",
+    "claims",
+    "evidence",
+    "edges",
+    "findings",
+    "do_not_assume"
+  ],
+  "properties": {
+    "fsl": { "type": "string" },
+    "result": { "const": "causal_analyzed" },
+    "schema_version": { "const": "causal-evidence-graph.v0" },
+    "formal_result": { "const": "not_run" },
+    "model": { "type": "string" },
+    "projection": { "const": "causal_evidence_graph" },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "version", "status", "formal_assurance", "causal_support"],
+        "properties": {
+          "id": { "type": "string" },
+          "version": { "type": "integer", "minimum": 1 },
+          "status": { "enum": ["active", "retired"] },
+          "formal_assurance": { "const": "not_run" },
+          "causal_support": {
+            "enum": [
+              "untested",
+              "supported",
+              "challenged",
+              "inconclusive",
+              "mixed",
+              "unsupported_by_current_evidence"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "design", "support", "lifecycle_status"],
+        "properties": {
+          "id": { "type": "string" },
+          "design": {
+            "enum": [
+              "randomized_experiment",
+              "quasi_experiment",
+              "observational",
+              "expert_judgment"
+            ]
+          },
+          "support": { "enum": ["supports", "challenges", "inconclusive"] },
+          "lifecycle_status": {
+            "enum": ["active", "retracted", "superseded", "unknown"]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "target", "kind", "applicable", "scope_relation"],
+        "properties": {
+          "source": { "type": "string" },
+          "target": { "type": "string" },
+          "kind": { "enum": ["supports", "challenges", "inconclusive"] },
+          "applicable": { "type": "boolean" },
+          "scope_relation": {
+            "enum": ["subsumes", "partial_overlap", "disjoint", "unassessable"]
+          },
+          "exclusions": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "findings": { "type": "array" },
+    "not_evaluable": { "type": "array" },
+    "do_not_assume": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    }
+  },
+  "additionalProperties": true
+}

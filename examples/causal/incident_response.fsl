@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: Apache-2.0
+// Dogfood model 2 (issue #321): reliability program with time-shaped review
+// findings. Expected: deadline_before_earliest_effect (the MTTR deadline is
+// tighter than the shortest causal path) and measurement_cadence_too_coarse
+// (alert-quality sampling every 30 days can miss a 14-day effect).
+causal IncidentResponse {
+  uses ops from "incident_system.fsl"
+
+  timebase day
+  horizon 365
+
+  clock ops_clock {
+    kernel ops
+    1 tick = 1 day
+  }
+
+  variable guardrails {
+    role intervention
+    binds action ops.deploy_guardrails
+    covers REQ-GUARDRAILS
+  }
+
+  variable alert_quality {
+    role mediator
+    observes state ops.alert_precision
+    cadence 30
+  }
+
+  variable mttr {
+    role outcome
+    observes state ops.mttr_hours
+    cadence 7
+    deadline 30
+  }
+
+  claim C_Guardrails_AlertQuality guardrails -> alert_quality {
+    version 1
+    status active
+    polarity positive
+    lag 14..45
+    persists 14..90
+    basis hypothesis
+  }
+
+  claim C_AlertQuality_Mttr alert_quality -> mttr {
+    version 1
+    status active
+    polarity negative
+    lag 31..60
+    persists 30..180
+    basis hypothesis
+  }
+
+  // Observable expectation carved out of C_Guardrails_AlertQuality: after
+  // guardrails deploy, the guardrail counter itself must read 1 within a
+  // day (pass golden). derived_from_claim is traceability only.
+  expectation E_GuardrailsVisible {
+    trigger action ops.deploy_guardrails
+    response predicate ops { guardrails >= 1 }
+    within 1
+    clock ops_clock
+    derived_from_claim C_Guardrails_AlertQuality
+  }
+
+  // Violated golden: nothing forces alert tuning to happen, so precision
+  // is not guaranteed to improve within 5 days of deploying guardrails.
+  expectation E_AlertQualityImproves {
+    trigger action ops.deploy_guardrails
+    response predicate ops { alert_precision >= 4 }
+    within 5
+    clock ops_clock
+    derived_from_claim C_Guardrails_AlertQuality
+  }
+}
