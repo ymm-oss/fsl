@@ -238,8 +238,11 @@ async fn verify_bounded_config<S: SmtSolver>(
                 check_leadsto_deadlines(solver, model, &states, &choices, &instances, step).await?;
         }
 
-        if step == depth || instances.is_empty() {
+        if step == depth {
             continue;
+        }
+        if instances.is_empty() {
+            break;
         }
         let next = symbolic_state(solver, model, step + 1)?;
         let choice = solver.constant(&format!("__choice@{step}"), &fsl_solver::Sort::Int)?;
@@ -254,8 +257,9 @@ async fn verify_bounded_config<S: SmtSolver>(
         choices.push(choice);
     }
     if result.leadsto_violation.is_none() {
+        let unrolled_depth = states.len() - 1;
         result.leadsto_violation =
-            check_leadstos(solver, model, &states, &choices, &instances, depth).await?;
+            check_leadstos(solver, model, &states, &choices, &instances, unrolled_depth).await?;
     }
     Ok(result)
 }
