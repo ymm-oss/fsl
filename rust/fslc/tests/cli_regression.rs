@@ -244,7 +244,11 @@ fn mutate_attributes_trace_oracle_kills_to_attached_requirements() {
     let requirement = &mutated["by_requirement"]["REQ-TEST-001"];
     assert_eq!(requirement["kills"], 3, "{mutated}");
     assert!(requirement.get("warning").is_none(), "{mutated}");
-    for case_id in ["AC-TEST-001", "FB-TEST-001", "FB-SETUP-001"] {
+    assert_eq!(
+        mutated["by_requirement"]["AC-TEST-001"]["kills"], 1,
+        "{mutated}"
+    );
+    for case_id in ["FB-TEST-001", "FB-SETUP-001"] {
         assert!(
             mutated["by_requirement"].get(case_id).is_none(),
             "{mutated}"

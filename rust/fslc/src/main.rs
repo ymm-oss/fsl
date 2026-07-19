@@ -9716,10 +9716,9 @@ fn annotation_requirement_ids(annotations: &Annotations) -> Vec<String> {
 }
 
 fn trace_case_requirement_ids(case: &fsl_core::RequirementsTraceCase) -> Vec<String> {
-    annotation_requirement_ids(&case.annotations)
-        .into_iter()
-        .filter(|requirement| requirement != &case.id)
-        .collect()
+    let mut explicit = Annotations::default();
+    explicit.extend(case.annotations.source_order().iter().skip(1).cloned());
+    annotation_requirement_ids(&explicit)
 }
 
 fn property_requirements(model: &KernelModel, name: &str) -> Vec<String> {
