@@ -2060,20 +2060,11 @@ fn run_document_check(spec_path: &Path, artifact: &Path) -> (Value, i32) {
         Ok(model) => model,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    let trace = match fsl_core::requirements_trace_contract(&source) {
-        Ok(trace) => trace,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
-    };
-    let rendered = match fsl_tools::render_requirements_document(
-        &claims,
-        &kernel,
-        &model,
-        trace.as_ref(),
-        locale,
-    ) {
-        Ok(rendered) => rendered,
-        Err(error) => return (error_output("document", &error), 2),
-    };
+    let rendered =
+        match fsl_tools::render_requirements_document(&claims, &kernel, &model, &source, locale) {
+            Ok(rendered) => rendered,
+            Err(error) => return (error_output("document", &error), 2),
+        };
 
     let report =
         match fsl_tools::check_requirements_document(&artifact_text, &claims, &rendered.markdown) {
