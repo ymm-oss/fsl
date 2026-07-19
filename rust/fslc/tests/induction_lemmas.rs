@@ -122,6 +122,19 @@ fn synthetic_names_do_not_collide_with_unselected_source_properties() {
 }
 
 #[test]
+fn selected_trans_properties_accept_lemma_candidates() {
+    let (output, status) = verify_property(
+        "rust/fslc/tests/fixtures/induction_lemma_trans.fsl",
+        &["x >= 0"],
+        Some("Monotone"),
+    );
+
+    assert_eq!(status, 0, "{output}");
+    assert_eq!(output["result"], "proved");
+    assert_eq!(output["lemmas"][0]["status"], "proved");
+}
+
+#[test]
 fn iterates_until_distinct_candidates_exclude_successive_ctis() {
     let fixture = "rust/fslc/tests/fixtures/induction_lemma_multi_cti.fsl";
     let (output, status) = verify(fixture, &["a == b", "c == d"]);

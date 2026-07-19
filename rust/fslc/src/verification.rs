@@ -1659,20 +1659,6 @@ fn load_lemma_model(
         &options.exclude_properties,
     )
     .map_err(|error| (semantic_error_output(&error), 2))?;
-    if options.property.as_ref().is_some_and(|name| {
-        model
-            .transitions
-            .iter()
-            .any(|property| display(&property.name) == *name)
-    }) {
-        return Err((
-            error_output(
-                "usage",
-                "--lemma can strengthen invariant induction, but cannot be used to prove a trans property",
-            ),
-            2,
-        ));
-    }
     Ok((model, occupied_names))
 }
 
