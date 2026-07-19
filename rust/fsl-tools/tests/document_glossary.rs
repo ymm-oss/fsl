@@ -215,7 +215,6 @@ fn render_cancel_system(locale: Locale, glossary: Option<&fsl_tools::Glossary>) 
     let resolver = fsl_core::FsResolver::new(&root);
     let kernel = fsl_core::parse_kernel_source(&source, &resolver).expect("parse");
     let model = fsl_core::build_model(kernel.clone()).expect("build model");
-    let trace = fsl_core::requirements_trace_contract(&source).expect("trace contract");
     let applied = glossary.map(|glossary| AppliedGlossary {
         glossary,
         digest: "sha256:test",
@@ -224,7 +223,7 @@ fn render_cancel_system(locale: Locale, glossary: Option<&fsl_tools::Glossary>) 
         &claims,
         &kernel,
         &model,
-        trace.as_ref(),
+        &source,
         locale,
         applied.as_ref(),
         None,
