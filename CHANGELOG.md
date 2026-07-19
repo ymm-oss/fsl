@@ -46,8 +46,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ### Fixed
 - `fslc lint` now classifies business `policy`/`goal` `satisfies CTRL-*`
   operands as control references, recursively expands directory inputs into a
-  sorted, deduplicated list of `.fsl` files, and continues to report nested FSL
-  parse errors instead of silently skipping them (issues #385 and #386).
+  sorted list of unique physical `.fsl` files even when operands repeat or alias
+  one another, and continues to report nested FSL parse errors instead of silently
+  skipping them (issues #385 and #386).
 - `fslc fmt` now preserves canonical hyphenated IDs in business control,
   policy, goal, and `satisfies` positions while retaining normal spacing around
   arithmetic subtraction (issue #387).
