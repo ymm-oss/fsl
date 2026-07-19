@@ -8,6 +8,9 @@ mod analysis_export;
 mod analysis_graph;
 mod db;
 mod db_import;
+mod document;
+mod document_digest;
+mod document_project;
 mod domain;
 mod domain_codegen;
 mod html;
@@ -24,6 +27,16 @@ pub use analysis::{analyze_model, build_tsg, review_finding, structural_review_f
 pub use analysis_export::export_analysis_graph;
 pub use db::{DbToolError, check_db, observe_db, validate_db};
 pub use db_import::{DbImport, import_db};
+pub use document::{
+    AnalysisScope, AssuranceCounts, Claim, ClaimKind, ClaimProvenance, Completeness, Coverage,
+    CoverageCounts, ProvenanceAssurance, ProvenanceSummary, RCIR_SCHEMA_ID, RCIR_SCHEMA_VERSION,
+    Requirement, RequirementClaimSet, RequirementStatement, SemanticsInfo, SourceRef, SpecInfo,
+    TraceCase, TraceCaseKind, UndecidedItem, UnsupportedEntry,
+};
+pub use document_project::{
+    DocumentDialect, DocumentInput, project_requirement_claims,
+    project_requirement_claims_from_source,
+};
 pub use domain::{
     analyze_domain, check_domain, domain_adapter_files, domain_kernel_source, domain_scaffold,
     domain_scaffold_metadata,
@@ -36,7 +49,7 @@ pub use testgen::{
     TestgenInput, compose_testgen_input, generate_testgen, public_kernel_testgen_input,
 };
 pub use typestate::analyze_typestate;
-pub use undecided::undecided_declarations;
+pub use undecided::{UndecidedRecord, undecided_declarations, undecided_records};
 
 /// Complete a deterministic graph envelope from already normalized nodes and edges.
 #[must_use]

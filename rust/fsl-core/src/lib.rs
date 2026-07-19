@@ -62,7 +62,7 @@ pub use public_kernel::{
     REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION, REPLAY_TRACE_V1_SCHEMA_ID,
     REPLAY_TRACE_V1_SCHEMA_VERSION, REPLAY_TRACE_V1_STUTTER_SCHEMA_VERSION,
     TESTGEN_TRACE_V1_SCHEMA_ID, TESTGEN_TRACE_V1_SCHEMA_VERSION, public_kernel_contract,
-    public_kernel_contract_for_version,
+    public_kernel_contract_for_version, public_kernel_expression,
 };
 pub use refinement::{
     ActionCorrespondence, ActionCorrespondenceTarget, ActionRef, ImplementsContract, ProgressMap,

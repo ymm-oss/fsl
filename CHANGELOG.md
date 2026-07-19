@@ -67,6 +67,30 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   stronger survivor claim from returning (issue #338).
 
 ### Added
+- Added the Requirement Claim IR (RCIR) v1 schema and native projector (issue #325),
+  the foundation of the upcoming `fslc document` requirements-document generator.
+  `fsl_tools::project_requirement_claims_from_source` compiles a checked `spec` or
+  `requirements` dialect model into `schemas/fslc/document/requirement-claims.v1.schema.json`:
+  nine claim kinds (`operation`, `state_rule`, `transition_rule`, `progress_rule`,
+  `reachability_goal`, `acceptance_trace`, `forbidden_trace`, `deadline_rule`,
+  `terminal_rule`), full many-to-many requirement relations (no singular compatibility
+  projection), a fail-closed `rendered`/`unattributed`/`unsupported` coverage
+  partition over every authored semantic target, `spec_digest`/`claim_set_digest`/
+  `claim_digest` (mutation-sensitive, comment/formatting-stable), and provenance
+  reusing the Public Kernel v2 assurance vocabulary (falling back to the checked
+  declaration's own span, never a guess, when the origin registry has no chain for
+  a target). RCIR is not a second semantics: it embeds the schema-validated Public
+  Kernel v2 artifact, while claims expose typed subjects and stable target references
+  instead of a second, unconstrained Python-shaped AST. Trace-only expressions reuse
+  the Public Kernel expression contract.
+  CLI wiring, the controlled-language renderer, drift checking, the no-silent-omission
+  gate, glossary, evidence overlay, and approval integration are follow-up issues
+  #326-#334; this change ships schema + library projector only. See
+  `docs/DESIGN-document-requirement-claim-ir.md`.
+- `fsl_tools::undecided` gains `undecided_records`, a typed variant of
+  `undecided_declarations` (issue #189) that additionally carries the annotation's
+  source span; the existing JSON-producing function is now a thin projection over it
+  with unchanged output.
 - Documented that the persistent verify cache is safe under concurrent
   processes: writes are atomic, so parallel `fslc verify` invocations over many
   files (`xargs -P`, CI job matrices) at worst duplicate solving and never
