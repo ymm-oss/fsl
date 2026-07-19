@@ -26,7 +26,7 @@ before checking. Reasons:
    `build_spec` produces** — directly mutating the spec dict leaves them stale and the mutation
    has no effect.
 2. Derived consistency such as `phys_vars` can be left to build_spec.
-3. Dialects are handled uniformly. The grammar and verification engine are untouched.
+3. Dialects are handled uniformly without mutation-specific grammar or verification semantics.
 
 ### Mutation operators (deterministic enumeration, no randomness)
 
@@ -39,6 +39,10 @@ before checking. Reasons:
 | integer/bound ±1 | off-by-one | `("num", n)`±1, `("type", n, lo, hi)`'s lo/hi ±1 |
 | then/else swap | mistaken branch | swap an `if` whose both branches are non-empty |
 | fair removal | missing leadsTo fairness assumption | flip the action's fair True→False |
+
+Integer and numeric type-bound mutations that would overflow are omitted. Empty
+numeric domains remain materializable kernel inputs and are adjudicated by the
+ordinary oracle, including its zero-action-instance behavior.
 
 ### External JSONL contract
 
@@ -111,7 +115,8 @@ generation-quality evidence (an `invalid` record says nothing about the spec's
 constraint strength — it failed before reaching the kill oracle, so counting it
 either way would distort the score). Built-in entries have `source:"builtin"`;
 external entries add `id`, `source:"external"`, `input_kind`, and JSONL `line`.
-**The verification engine is unmodified.**
+Mutation uses the ordinary bounded verifier, including its normal termination
+after the initial state when a model has no action instances.
 
 ### What the score means (and does not)
 

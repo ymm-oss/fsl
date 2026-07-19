@@ -219,6 +219,31 @@ fn monitor_boundary_self_spec_is_proved_and_mutation_sensitive() {
 }
 
 #[test]
+fn mutate_rebuilds_singleton_domain_bound_expansions_without_panicking() {
+    let (mutated, status) = run_cli(&[
+        "mutate",
+        "rust/fslc/tests/fixtures/mutate_singleton_domain.fsl",
+        "--depth",
+        "8",
+        "--max-mutants",
+        "2",
+    ]);
+
+    assert_eq!(status, 0, "{mutated}");
+    assert_eq!(mutated["result"], "mutated");
+    let operations = mutated["mutants"]
+        .as_array()
+        .expect("mutants")
+        .iter()
+        .map(|mutant| mutant["op"].as_str().expect("mutation operation"))
+        .collect::<Vec<_>>();
+    assert_eq!(operations, ["type_bound_lo_minus1", "type_bound_lo_plus1"]);
+    let empty_domain = &mutated["mutants"][1];
+    assert_eq!(empty_domain["status"], "survived", "{mutated}");
+    assert!(empty_domain["killed_by"].is_null(), "{mutated}");
+}
+
+#[test]
 fn native_check_and_verify_reject_duplicate_correspondence_origins() {
     let fixture = "rust/fslc/tests/fixtures/action_correspondence_duplicate.fsl";
 
