@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec NondeterministicInitCounter {
+  state { audit: Int, y: Int }
+  init { y = 0 }
+
+  action step() {
+    requires audit < -100
+    audit = 0
+    y = y + 1
+  }
+
+  invariant Sync { y <= 4 }
+}

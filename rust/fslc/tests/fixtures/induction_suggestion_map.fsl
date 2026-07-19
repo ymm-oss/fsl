@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec GhostMapCounter {
+  type Case = 0..1
+
+  state {
+    audit: Map<Case, Int>,
+    y: Int
+  }
+
+  init {
+    forall c: Case { audit[c] = 0 }
+    y = 0
+  }
+
+  action bump(c: Case) {
+    audit[c] = audit[c] + 1
+  }
+
+  action step(c: Case) {
+    requires audit[c] < -100
+    audit[c] = audit[c] + 1
+    y = y + 1
+  }
+
+  invariant Sync { y <= 4 }
+}

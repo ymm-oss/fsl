@@ -6,6 +6,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- Native induction CTIs now emit the documented heuristic `suggested_invariants` for monotone
+  scalar and uniformly initialized Map counters without changing the proof verdict (#337).
 - Explicit domain-effect `success_event`, `failure_event`, and `timeout_event`
   roles now override event-name heuristics, ambiguous cross-role assignments
   fail closed, and completion, retry eligibility, Monitor/BFS execution, and
