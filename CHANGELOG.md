@@ -72,6 +72,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   stronger survivor claim from returning (issue #338).
 
 ### Added
+- Added `fslc document generate` and `fslc document claims` (issue #327), the CLI entry
+  points for the RCIR v1 projector (#325) and its ja/en controlled-language renderer
+  (#326). `document generate <spec.fsl> [--view requirements] [--lang ja|en] [--strict]
+  [--strict-rendering] [-o requirements.md]` renders a deterministic requirements
+  document; `document claims <spec.fsl> [-o requirements.claims.json]` emits the raw
+  RCIR claim set as schema-conformant JSON so agents/tools consume the public contract
+  instead of re-parsing `.fsl`. Both follow the existing `ledger`/`html`/`testgen`
+  convention: with `-o`, the artifact is written to disk and a JSON envelope
+  (`spec_digest`/`claim_set_digest`/`artifact_digest`, coverage counts, provenance
+  completeness) goes to stdout; without `-o`, the raw content is printed directly.
+  `--strict` fails closed (`FSL-DOC-UNTAGGED-TARGET` / `FSL-DOC-UNSUPPORTED-TARGET`) on
+  any authored target the projector could not attribute to a requirement or could not
+  project; `--strict-rendering` fails closed (`FSL-DOC-FORMULA-FALLBACK`) on any
+  expression the renderer could not phrase in natural language. A specification with no
+  requirement IDs at all (`FSL-DOC-NO-REQUIREMENTS`) is always an error. See
+  `docs/DESIGN-document-cli.md`.
 - Added the controlled-language renderer (issue #326):
   `fsl_tools::render_requirements_document` compiles an RCIR v1 claim set (issue #325)
   into deterministic Japanese/English Markdown, using one fixed template per claim kind

@@ -3,7 +3,7 @@
   "root": {
     "path": [],
     "prog": "fslc",
-    "help": "usage: fslc [-h] [-V] {version,check,lint,migrate,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n\npositional arguments:\n  {version,check,lint,migrate,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n    version             show the version\n    lint                report edition migration diagnostics\n    migrate             plan or atomically apply edition migrations\n    fmt                 format one FSL source or check multiple paths\n    kernel              emit the normalized public Kernel JSON contract\n    conformance         emit language-neutral concrete conformance vectors\n    sweep               run bounded verification across a scope grid\n    html                generate a self-contained HTML review report\n    ledger              generate a business audit ledger (markdown) by\n                        requirement id\n    approval            create and check digest-bound approval records\n    diff                compare OLD and NEW specification semantics\n    chain               run a project manifest across business, requirements,\n                        design, and impl\n    typestate           decide whether typestate (ghost types) applies to a\n                        design spec and emit a TS template\n    analyze             emit structural analysis JSON for a spec\n    db                  database compatibility dialect commands\n    compat              shared compatibility commands\n    ai                  AI dialect commands\n    domain              Functional DDD / async effect dialect commands\n\noptions:\n  -h, --help            show this help message and exit\n  -V, --version         show program's version number and exit\n",
+    "help": "usage: fslc [-h] [-V] {version,check,lint,migrate,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,document,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n\npositional arguments:\n  {version,check,lint,migrate,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,document,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n    version             show the version\n    lint                report edition migration diagnostics\n    migrate             plan or atomically apply edition migrations\n    fmt                 format one FSL source or check multiple paths\n    kernel              emit the normalized public Kernel JSON contract\n    conformance         emit language-neutral concrete conformance vectors\n    sweep               run bounded verification across a scope grid\n    html                generate a self-contained HTML review report\n    ledger              generate a business audit ledger (markdown) by\n                        requirement id\n    document            generate a requirements document (ja/en) or emit its\n                        RCIR claim set as JSON\n    approval            create and check digest-bound approval records\n    diff                compare OLD and NEW specification semantics\n    chain               run a project manifest across business, requirements,\n                        design, and impl\n    typestate           decide whether typestate (ghost types) applies to a\n                        design spec and emit a TS template\n    analyze             emit structural analysis JSON for a spec\n    db                  database compatibility dialect commands\n    compat              shared compatibility commands\n    ai                  AI dialect commands\n    domain              Functional DDD / async effect dialect commands\n\noptions:\n  -h, --help            show this help message and exit\n  -V, --version         show program's version number and exit\n",
     "actions": [
       {
         "dest": "help",
@@ -1561,6 +1561,51 @@
           }
         ],
         "commands": []
+      },
+      {
+        "path": [
+          "document"
+        ],
+        "prog": "fslc document",
+        "help": "usage: fslc document [-h] {generate,claims}\n\npositional arguments:\n  {generate,claims}\n    generate            render a controlled-language requirements document\n                        (ja/en) from the checked spec\n    claims              emit the Requirement Claim IR (RCIR) claim set as\n                        JSON\n\noptions:\n  -h, --help            show this help message and exit\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": ["-h", "--help"],
+            "nargs": 0,
+            "action": "store"
+          }
+        ],
+        "commands": [
+          {
+            "path": ["document", "generate"],
+            "prog": "fslc document generate",
+            "help": "usage: fslc document generate [-h] [--view {requirements}] [--lang {ja,en}] [--strict] [--strict-rendering] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --view {requirements}\n                        v1 supports only requirements; reserved for\n                        business/design (#334)\n  --lang {ja,en}        controlled-language locale (default: ja)\n  --strict              fail if an authored target is unattributed or\n                        unsupported (FSL-DOC-UNTAGGED-TARGET /\n                        FSL-DOC-UNSUPPORTED-TARGET)\n  --strict-rendering    fail if an expression falls back to canonical FSL\n                        text (FSL-DOC-FORMULA-FALLBACK)\n  -o, --output OUTPUT\n",
+            "actions": [
+              {"dest":"help","required":false,"flags":["-h","--help"],"nargs":0,"action":"store"},
+              {"dest":"file","required":true,"positional":true,"action":"store"},
+              {"dest":"view","required":false,"flags":["--view"],"choices":["requirements"],"default":"requirements","action":"store"},
+              {"dest":"lang","required":false,"flags":["--lang"],"choices":["ja","en"],"default":"ja","action":"store"},
+              {"dest":"strict","required":false,"flags":["--strict"],"nargs":0,"default":false,"action":"store_true"},
+              {"dest":"strict_rendering","required":false,"flags":["--strict-rendering"],"nargs":0,"default":false,"action":"store_true"},
+              {"dest":"output","required":false,"flags":["-o","--output"],"action":"store"}
+            ],
+            "commands": []
+          },
+          {
+            "path": ["document", "claims"],
+            "prog": "fslc document claims",
+            "help": "usage: fslc document claims [-h] [--view {requirements}] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --view {requirements}\n                        v1 supports only requirements; reserved for\n                        business/design (#334)\n  -o, --output OUTPUT\n",
+            "actions": [
+              {"dest":"help","required":false,"flags":["-h","--help"],"nargs":0,"action":"store"},
+              {"dest":"file","required":true,"positional":true,"action":"store"},
+              {"dest":"view","required":false,"flags":["--view"],"choices":["requirements"],"default":"requirements","action":"store"},
+              {"dest":"output","required":false,"flags":["-o","--output"],"action":"store"}
+            ],
+            "commands": []
+          }
+        ]
       },
       {
         "path": [

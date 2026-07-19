@@ -1002,6 +1002,7 @@ fn command() -> Result<(Value, i32), String> {
             Ok(run_conformance(&path, depth, version))
         }
         "approval" => approval_command(args),
+        "document" => document_command(args),
         "db" => db_command(args),
         "compat" => {
             if args.next().as_deref() != Some("check") {
@@ -1718,6 +1719,258 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
         }
         _ => Err(format!("unknown approval subcommand '{subcommand}'")),
     }
+}
+
+fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
+    let subcommand = args
+        .next()
+        .ok_or_else(|| "usage: fslc document <generate|claims> SPEC [options]".to_owned())?;
+    let path = PathBuf::from(
+        args.next()
+            .ok_or_else(|| format!("fslc document {subcommand} requires a spec"))?,
+    );
+    match subcommand.as_str() {
+        "generate" => {
+            let mut locale = fsl_tools::Locale::Ja;
+            let mut strict = false;
+            let mut strict_rendering = false;
+            let mut output = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--view" => {
+                        let value = required_option_value(&mut args, "--view")?;
+                        if value != "requirements" {
+                            return Err("--view must be requirements".to_owned());
+                        }
+                    }
+                    "--lang" => {
+                        let value = required_option_value(&mut args, "--lang")?;
+                        locale = match value.as_str() {
+                            "ja" => fsl_tools::Locale::Ja,
+                            "en" => fsl_tools::Locale::En,
+                            _ => return Err("--lang must be ja or en".to_owned()),
+                        };
+                    }
+                    "--strict" => strict = true,
+                    "--strict-rendering" => strict_rendering = true,
+                    "-o" | "--output" => {
+                        output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
+                    }
+                    _ => return Err(format!("unknown document generate option '{option}'")),
+                }
+            }
+            let result =
+                run_document_generate(&path, locale, strict, strict_rendering, output.as_deref());
+            if output.is_none()
+                && result.0.get("result").and_then(Value::as_str) == Some("generated")
+                && let Some(content) = result.0.get("content").and_then(Value::as_str)
+            {
+                print!("{content}");
+                std::process::exit(result.1);
+            }
+            Ok(result)
+        }
+        "claims" => {
+            let mut output = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--view" => {
+                        let value = required_option_value(&mut args, "--view")?;
+                        if value != "requirements" {
+                            return Err("--view must be requirements".to_owned());
+                        }
+                    }
+                    "-o" | "--output" => {
+                        output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
+                    }
+                    _ => return Err(format!("unknown document claims option '{option}'")),
+                }
+            }
+            let result = run_document_claims(&path, output.as_deref());
+            if output.is_none()
+                && result.0.get("result").and_then(Value::as_str) == Some("generated")
+                && let Some(content) = result.0.get("content").and_then(Value::as_str)
+            {
+                print!("{content}");
+                std::process::exit(result.1);
+            }
+            Ok(result)
+        }
+        _ => Err(format!("unknown document subcommand '{subcommand}'")),
+    }
+}
+
+fn load_document_claims(path: &Path) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
+    let source =
+        std::fs::read_to_string(path).map_err(|error| error_output("io", &error.to_string()))?;
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    fsl_tools::project_requirement_claims_from_source(&source, Some(&path.to_string_lossy()), base)
+        .map(|claims| (source, claims))
+        .map_err(|error| semantic_error_output(&error))
+}
+
+fn document_diagnostics_error(
+    claims: &fsl_tools::RequirementClaimSet,
+    strict: bool,
+) -> Option<Value> {
+    let (code, message) = if claims.requirements.is_empty() {
+        (
+            "FSL-DOC-NO-REQUIREMENTS",
+            "the specification declares no requirement IDs".to_owned(),
+        )
+    } else if strict && claims.coverage.counts.unattributed > 0 {
+        (
+            "FSL-DOC-UNTAGGED-TARGET",
+            format!(
+                "{} authored target(s) are not linked to a requirement ID",
+                claims.coverage.counts.unattributed
+            ),
+        )
+    } else if strict && claims.coverage.counts.unsupported > 0 {
+        (
+            "FSL-DOC-UNSUPPORTED-TARGET",
+            format!(
+                "{} authored target(s) use a semantic target RCIR v1 does not project",
+                claims.coverage.counts.unsupported
+            ),
+        )
+    } else {
+        return None;
+    };
+    let mut output = error_output("document", &message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!(code));
+    Some(output)
+}
+
+fn default_document_output(path: &Path, suffix: &str) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("document");
+    PathBuf::from(format!("{stem}{suffix}"))
+}
+
+fn run_document_generate(
+    path: &Path,
+    locale: fsl_tools::Locale,
+    strict: bool,
+    strict_rendering: bool,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let (source, claims) = match load_document_claims(path) {
+        Ok(parts) => parts,
+        Err(output) => return (output, 2),
+    };
+    if let Some(error) = document_diagnostics_error(&claims, strict) {
+        return (error, 2);
+    }
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
+        Ok(kernel) => kernel,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let model = match fsl_core::build_model(kernel.clone()) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let rendered =
+        match fsl_tools::render_requirements_document(&claims, &kernel, &model, &source, locale) {
+            Ok(rendered) => rendered,
+            Err(error) => return (error_output("document", &error), 2),
+        };
+    if strict_rendering && rendered.formula_fallback_count > 0 {
+        let mut output = error_output(
+            "document",
+            &format!(
+                "{} expression(s) fell back to canonical FSL text under --strict-rendering",
+                rendered.formula_fallback_count
+            ),
+        );
+        output
+            .as_object_mut()
+            .expect("document error envelope")
+            .insert("code".to_owned(), json!("FSL-DOC-FORMULA-FALLBACK"));
+        return (output, 2);
+    }
+    let artifact_digest = approval::sha256_bytes(rendered.markdown.as_bytes());
+    if let Some(path) = output_path
+        && let Err(error) = std::fs::write(path, &rendered.markdown)
+    {
+        return (error_output("io", &error.to_string()), 2);
+    }
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("generated"));
+    output.insert("kind".to_owned(), json!("requirements_document"));
+    output.insert(
+        "output".to_owned(),
+        json!(output_path.map_or_else(
+            || default_document_output(path, "_requirements.md"),
+            Path::to_path_buf
+        )),
+    );
+    output.insert("spec_digest".to_owned(), json!(claims.spec.spec_digest));
+    output.insert(
+        "claim_set_digest".to_owned(),
+        json!(claims.spec.claim_set_digest),
+    );
+    output.insert("artifact_digest".to_owned(), json!(artifact_digest));
+    output.insert(
+        "coverage".to_owned(),
+        json!({
+            "authored_targets": claims.coverage.counts.authored,
+            "rendered_targets": claims.coverage.counts.rendered,
+            "unattributed_targets": claims.coverage.counts.unattributed,
+            "unsupported_targets": claims.coverage.counts.unsupported,
+            "formula_fallbacks": rendered.formula_fallback_count,
+        }),
+    );
+    output.insert(
+        "provenance".to_owned(),
+        json!({"completeness": claims.provenance.completeness}),
+    );
+    if output_path.is_none() {
+        output.insert("content".to_owned(), json!(rendered.markdown));
+    }
+    (Value::Object(output), 0)
+}
+
+fn run_document_claims(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
+    let (_, claims) = match load_document_claims(path) {
+        Ok(parts) => parts,
+        Err(output) => return (output, 2),
+    };
+    let content = match serde_json::to_string_pretty(&claims) {
+        Ok(content) => content,
+        Err(error) => return (error_output("internal", &error.to_string()), 2),
+    };
+    if let Some(path) = output_path
+        && let Err(error) = std::fs::write(path, &content)
+    {
+        return (error_output("io", &error.to_string()), 2);
+    }
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("generated"));
+    output.insert("kind".to_owned(), json!("requirement_claims"));
+    output.insert(
+        "output".to_owned(),
+        json!(output_path.map_or_else(
+            || default_document_output(path, ".claims.json"),
+            Path::to_path_buf
+        )),
+    );
+    output.insert("spec_digest".to_owned(), json!(claims.spec.spec_digest));
+    output.insert(
+        "claim_set_digest".to_owned(),
+        json!(claims.spec.claim_set_digest),
+    );
+    if output_path.is_none() {
+        output.insert("content".to_owned(), json!(content));
+    }
+    (Value::Object(output), 0)
 }
 
 fn db_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {

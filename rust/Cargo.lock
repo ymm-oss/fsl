@@ -447,6 +447,7 @@ dependencies = [
  "fsl-syntax",
  "fsl-tools",
  "fsl-verifier",
+ "jsonschema",
  "serde",
  "serde_json",
  "sha2",
