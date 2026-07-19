@@ -270,6 +270,9 @@ domain <Name> {
     correlation_id PaymentCaptureRequested.payment_request_id
     handles PaymentCaptureRequested
     emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    success_event PaymentCaptured
+    failure_event PaymentFailed
+    timeout_event PaymentCaptureTimedOut
     retry { max_attempts 3 }
     timeout after 10m emits PaymentCaptureTimedOut
     compensation { emits PaymentFailed }
@@ -315,6 +318,14 @@ missing lowered type/state/action counterparts fail closed; source expressions
 and effect/saga topology are authoritative in the companion because v1 has no
 equivalent nodes. Emitters never receive `DomainSpec`, never reparse source
 text, and the five targets preserve their pre-migration bytes.
+
+Effect completion classification first honors explicit roles:
+`success_event` -> `Succeeded`, `failure_event` -> `Failed`, and `timeout_event`
+-> `TimedOut`, regardless of event spelling. The same event in multiple explicit
+roles is a parse error. Outcomes without an explicit role retain the v0 name
+heuristic in priority order (`timeout`/`timedout`, `fail`, `cancel`, otherwise
+success). Completion status, retry eligibility, and success stickiness therefore
+share the one lowered status classification.
 
 The Rust frontend keeps an internal origin chain across direct domain lowering,
 checked-model construction, verification, counterexamples, and `explain`.

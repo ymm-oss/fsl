@@ -246,6 +246,9 @@ reports stable fsl-domain findings):</p>
     correlation_id PaymentCaptureRequested.payment_request_id
     handles PaymentCaptureRequested
     emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    success_event PaymentCaptured
+    failure_event PaymentFailed
+    timeout_event PaymentCaptureTimedOut
     retry { max_attempts 3 }
     timeout after 10m emits PaymentCaptureTimedOut
     compensation { emits PaymentFailed }
@@ -281,6 +284,16 @@ aggregate and becomes the conjunction of the command's <code>requires</code> cla
 the negation of each rejection condition. Unknown symbols, cross-aggregate
 commands, type mismatches, and unsupported calls are reported at the original
 domain expression.</p>
+<p>An effect can assign completion events explicit outcome roles with
+<code>success_event</code>, <code>failure_event</code>, and <code>timeout_event</code>. These declarations are the
+authoritative classification: they lower to <code>Succeeded</code>, <code>Failed</code>, and <code>TimedOut</code>
+respectively, even when an event name contains <code>fail</code>, <code>cancel</code>, or <code>timeout</code>.
+Assigning one event to more than one explicit role is a parse error. An outcome
+without an explicit role retains the v0 name heuristic, in priority order:
+<code>timeout</code>/<code>timedout</code> -&gt; <code>TimedOut</code>, <code>fail</code> -&gt; <code>Failed</code>, <code>cancel</code> -&gt; <code>Cancelled</code>,
+and otherwise <code>Succeeded</code>. Completion actions, the <code>Failed | TimedOut</code> retry
+guard, and the success-sticky transition property all consume that one lowered
+status.</p>
 <p>Domain declarations use <code>enum Name { Member, ... }</code> for finite variants and
 <code>type Name = lo..hi</code> for bounded numeric ranges. The legacy spelling
 <code>type Name = A | B</code> remains accepted in the current 2.x edition and produces the

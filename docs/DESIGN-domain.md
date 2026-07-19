@@ -161,6 +161,15 @@ boundary. The v0 implementation lowers the lifecycle to finite maps:
 - retry actions respect `max_attempts`
 - successful effect status is sticky
 
+`success_event`, `failure_event`, and `timeout_event` are authoritative outcome
+roles and lower to `Succeeded`, `Failed`, and `TimedOut` before any event-name
+heuristic is considered. A single event assigned to multiple explicit roles is
+rejected before Kernel lowering. Outcomes without an explicit role keep the v0
+heuristic (`timeout`/`timedout`, then `fail`, then `cancel`, otherwise success).
+The completion assignment is the single classification point; retry guards and
+the success-sticky transition consume its resulting status rather than
+reclassifying the event.
+
 The checker reports hard structural errors before running the kernel when an
 async effect has no `correlation_id`, or an irreversible effect lacks an
 `idempotency_key`.

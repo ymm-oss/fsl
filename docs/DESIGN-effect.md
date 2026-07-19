@@ -18,6 +18,14 @@ The v0 implementation lowers that lifecycle to kernel `Map<CorrelationId, Effect
 pending, retry actions require a failed/timed-out status and `attempts < max`,
 and successful completion is sticky.
 
+Explicit `success_event`, `failure_event`, and `timeout_event` declarations are
+authoritative and map to `Succeeded`, `Failed`, and `TimedOut` even when their
+event names suggest another outcome. Assigning one event to multiple explicit
+roles fails closed before Kernel lowering. Only outcomes without an explicit
+role use the v0 event-name heuristic (`timeout`/`timedout`, then `fail`, then
+`cancel`, otherwise success). Retry eligibility and success stickiness consume
+the resulting status and do not classify event names independently.
+
 Irreversible effects must declare `idempotency_key`; otherwise
 `fslc domain check` emits `irreversible_effect_without_idempotency_key` and does
 not run the formal kernel check. Missing timeout/retry/fallback and possible

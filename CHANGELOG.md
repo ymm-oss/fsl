@@ -5,6 +5,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Fixed
+- Explicit domain-effect `success_event`, `failure_event`, and `timeout_event`
+  roles now override event-name heuristics, ambiguous cross-role assignments
+  fail closed, and completion, retry eligibility, Monitor/BFS execution, and
+  symbolic verification share the same lowered status (issue #409).
+
 ### Changed
 - The requirements-document renderer now reprojects and exactly matches the
   complete RCIR renderer role sidecar against its checked Kernel/Model/trace
