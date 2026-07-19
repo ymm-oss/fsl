@@ -40,6 +40,37 @@ pub enum DocumentDialect {
     Requirements,
 }
 
+/// The dialects RCIR v1 projects. Single source of truth for the CLI
+/// envelope's `supported_dialects` field and for the coverage-gate tripwire
+/// test that pins the activation contract (issue #334,
+/// `docs/DESIGN-document-dialect-adapters.md`).
+pub const RCIR_SUPPORTED_DIALECTS: &[&str] = &["requirements", "spec"];
+
+/// Why RCIR projection refused or failed (issue #334). Distinguishes a scope
+/// boundary (`UnsupportedDialect` — the input is a dialect RCIR v1 has no
+/// adapter for, not a defect) from every other parse/lowering/model/
+/// projection failure, so a caller can report the two cases differently
+/// instead of string-matching an opaque message.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DocumentProjectionError {
+    UnsupportedDialect { dialect: &'static str },
+    Other(String),
+}
+
+impl std::fmt::Display for DocumentProjectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedDialect { dialect } => write!(
+                f,
+                "document projection does not support dialect '{dialect}' in RCIR v1"
+            ),
+            Self::Other(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for DocumentProjectionError {}
+
 impl DocumentDialect {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -110,17 +141,21 @@ fn requirements_analysis_scope(
 ///
 /// # Errors
 ///
-/// Returns an error string for an unsupported dialect, a parse/lowering/model
-/// failure, or a projection failure.
+/// Returns [`DocumentProjectionError::UnsupportedDialect`] for a dialect
+/// outside [`RCIR_SUPPORTED_DIALECTS`] (a scope boundary, not a defect in the
+/// input), or [`DocumentProjectionError::Other`] for a parse/lowering/model/
+/// projection failure in a supported dialect.
 pub fn project_requirement_claims_from_source(
     source: &str,
     source_path: Option<&str>,
     resolver_root: &Path,
-) -> Result<RequirementClaimSet, String> {
+) -> Result<RequirementClaimSet, DocumentProjectionError> {
     let (dialect, implements_names, analysis_scope) = projection_context(source)?;
     let resolver = FsResolver::new(resolver_root);
-    let kernel = parse_kernel_source(source, &resolver).map_err(|error| error.to_string())?;
-    let model = build_model(kernel.clone()).map_err(|error| error.to_string())?;
+    let kernel = parse_kernel_source(source, &resolver)
+        .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
+    let model = build_model(kernel.clone())
+        .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
     project_requirement_claims(&DocumentInput {
         kernel: &kernel,
         model: &model,
@@ -130,12 +165,14 @@ pub fn project_requirement_claims_from_source(
         implements_names,
         analysis_scope,
     })
+    .map_err(DocumentProjectionError::Other)
 }
 
 fn projection_context(
     source: &str,
-) -> Result<(DocumentDialect, Vec<String>, AnalysisScope), String> {
-    let parsed = parse_document(SourceFile::new(source)).map_err(|error| error.to_string())?;
+) -> Result<(DocumentDialect, Vec<String>, AnalysisScope), DocumentProjectionError> {
+    let parsed = parse_document(SourceFile::new(source))
+        .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
     Ok(match &parsed.surface {
         SurfaceDocument::Spec(_) => (DocumentDialect::Spec, Vec::new(), AnalysisScope::default()),
         SurfaceDocument::Requirements(requirements) => {
@@ -150,14 +187,14 @@ fn projection_context(
             (
                 DocumentDialect::Requirements,
                 names,
-                requirements_analysis_scope(requirements)?,
+                requirements_analysis_scope(requirements)
+                    .map_err(DocumentProjectionError::Other)?,
             )
         }
         other => {
-            return Err(format!(
-                "document projection does not support dialect '{}' in RCIR v1",
-                surface_dialect_name(other)
-            ));
+            return Err(DocumentProjectionError::UnsupportedDialect {
+                dialect: surface_dialect_name(other),
+            });
         }
     })
 }
@@ -1186,7 +1223,8 @@ pub(crate) fn project_renderer_contract(
     source_path: Option<&str>,
     trace: Option<&RequirementsTraceContract>,
 ) -> Result<RequirementClaimSet, String> {
-    let (dialect, implements_names, analysis_scope) = projection_context(source)?;
+    let (dialect, implements_names, analysis_scope) =
+        projection_context(source).map_err(|error| error.to_string())?;
     project_requirement_claims_with_trace(
         &DocumentInput {
             kernel,

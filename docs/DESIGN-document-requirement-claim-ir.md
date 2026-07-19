@@ -60,10 +60,16 @@ major change.
 
 ## Supported dialects
 
-v1 supports direct `spec` and `requirements` only. `business`, `governance`,
-`dbsystem`, `domain`, `ai_component`, `compose`, `refinement`, and `agent` are
-rejected at the entry point with `"document projection does not support dialect
-'<name>' in RCIR v1"`; the projector never emits a partial artifact for them.
+v1 supports direct `spec` and `requirements` only (`fsl_tools::
+RCIR_SUPPORTED_DIALECTS`). `business`, `governance`, `dbsystem`, `domain`,
+`ai_component`, `compose`, `refinement`, and `agent` are rejected at the entry
+point with `"document projection does not support dialect '<name>' in RCIR
+v1"`; the projector never emits a partial artifact for them. Issue #334
+(`docs/DESIGN-document-dialect-adapters.md`) makes this rejection a typed
+`DocumentProjectionError::UnsupportedDialect` and gives it a coded CLI
+envelope (`FSL-DOC-DIALECT-UNSUPPORTED`); that design note also records the
+binding activation contract for any dialect that eventually gains a document
+adapter.
 
 ## Top-level model
 

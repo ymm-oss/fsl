@@ -61,8 +61,8 @@ pub use document_markers::{
     parse_generated_document,
 };
 pub use document_project::{
-    DocumentDialect, DocumentInput, project_requirement_claims,
-    project_requirement_claims_from_source,
+    DocumentDialect, DocumentInput, DocumentProjectionError, RCIR_SUPPORTED_DIALECTS,
+    project_requirement_claims, project_requirement_claims_from_source,
 };
 pub use document_render::{
     AppliedApproval, AppliedApprovals, Locale, RenderedDocument, render_requirements_document,

@@ -849,7 +849,8 @@ fslc document generate <f> [--view requirements] [--lang ja|en] [--strict] [--st
                                                         # --evidence overlays a per-requirement assurance class (proved/bounded/
                                                         # replay-observed/statistical/not_run), same envelope shape as `fslc ledger --evidence`;
                                                         # --approval displays a verified requirements_document approval record, failing
-                                                        # closed (FSL-DOC-APPROVAL-DRIFTED) if it does not match the current rendering
+                                                        # closed (FSL-DOC-APPROVAL-DRIFTED) if it does not match the current rendering;
+                                                        # only spec/requirements dialects project (others: FSL-DOC-DIALECT-UNSUPPORTED)
 fslc document claims <f> [--view requirements] [-o requirements.claims.json]
                                                         # emit the RCIR claim set as JSON; agents/tools consume this instead of re-parsing .fsl
 fslc document check <f> <document.md> [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]...

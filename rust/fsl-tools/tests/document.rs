@@ -204,9 +204,19 @@ spec DeadlineNamingIsNotSpecial {
     assert_eq!(claim.kind.as_str(), "state_rule");
 }
 
+/// Every dialect RCIR v1 does not project (issue #334): rejection happens
+/// right after `parse_document`, before `parse_kernel_source` is ever
+/// called, so a fixture only needs to parse standalone — no cross-file
+/// resolution is attempted for any of these. All 8 non-`spec`/`requirements`
+/// keywords in `fsl_syntax::DIALECT_KEYWORDS` are covered, not only the
+/// dialects issue #334 names by example, since the invariant (never
+/// silently omitted) is per-dialect universal and the registry is closed.
+/// `rust/fsl-tools/tests/document_coverage.rs`'s
+/// `rcir_supported_dialects_are_exactly_spec_and_requirements` is the
+/// coupled-change tripwire keeping this table exhaustive.
 #[test]
-fn rejects_unsupported_dialect_fail_closed() {
-    let source = r"
+fn rejects_every_unsupported_dialect_fail_closed() {
+    let business_source = r"
 business NotSupportedYet {
   entity Case
   process Case {
@@ -219,13 +229,59 @@ verify {
   instances Case = 2
 }
 ";
-    let root = manifest_path("tests/fixtures");
-    let error = fsl_tools::project_requirement_claims_from_source(source, None, &root)
-        .expect_err("business dialect is rejected");
-    assert!(
-        error.contains("business"),
-        "unexpected error message: {error}"
-    );
+    let fixtures_root = manifest_path("tests/fixtures");
+    let workspace_root = manifest_path("../..");
+    let cases: Vec<(&str, String, &Path)> = vec![
+        ("business", business_source.to_owned(), &fixtures_root),
+        (
+            "governance",
+            read("../../examples/consulting/governance_controls.fsl"),
+            &workspace_root,
+        ),
+        (
+            "compose",
+            read("../../specs/order_system.fsl"),
+            &workspace_root,
+        ),
+        (
+            "refinement",
+            read("../../examples/layers/return_impl_refines.fsl"),
+            &workspace_root,
+        ),
+        (
+            "domain",
+            read("../../examples/annotations/annotated_domain.fsl"),
+            &workspace_root,
+        ),
+        (
+            "dbsystem",
+            read("../../examples/annotations/annotated_dbsystem.fsl"),
+            &workspace_root,
+        ),
+        (
+            "ai_component",
+            read("../../examples/annotations/annotated_ai_component.fsl"),
+            &workspace_root,
+        ),
+        (
+            "agent",
+            read("../../examples/ai/recursive_support_agent.fsl"),
+            &workspace_root,
+        ),
+    ];
+    for (dialect, source, root) in cases {
+        let error = fsl_tools::project_requirement_claims_from_source(&source, None, root)
+            .expect_err(&format!("{dialect} dialect is rejected"));
+        assert_eq!(
+            error,
+            fsl_tools::DocumentProjectionError::UnsupportedDialect { dialect },
+            "unexpected error for {dialect}"
+        );
+        assert_eq!(
+            error.to_string(),
+            format!("document projection does not support dialect '{dialect}' in RCIR v1")
+        );
+    }
 }
 
 #[test]

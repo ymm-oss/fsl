@@ -98,6 +98,14 @@ option").
 any consumer decides its own policy over `coverage`/`provenance`, consistent with
 scoping the diagnostics table (issue #327's own heading) to `generate` only.
 
+One error precedes the table above and applies to *both* `generate` and
+`claims` (it happens during projection itself, before either command's own
+diagnostics run): `FSL-DOC-DIALECT-UNSUPPORTED`, when the input is a dialect
+RCIR v1 has no adapter for. See `docs/DESIGN-document-dialect-adapters.md`
+(issue #334) for the full contract, including the `dialect`/
+`supported_dialects` envelope fields and the activation contract for a
+future dialect adapter.
+
 ## Deferred flags
 
 The issue's CLI table for `generate` also lists `--glossary PATH` (#330),
