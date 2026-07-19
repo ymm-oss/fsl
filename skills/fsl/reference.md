@@ -843,18 +843,22 @@ fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-cont
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]... [--approval record.json]...
                                                         # business audit ledger by requirement id (PM/audit)
 fslc document generate <f> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
-               [--glossary glossary.json] [--evidence evidence.json]... [-o requirements.md]
+               [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
                                                         # deterministic ja/en requirements document from RCIR (Requirement Claim IR);
                                                         # --glossary applies presentation-only display labels (FSL-DOC-LABEL-UNKNOWN/-CONFLICT);
                                                         # --evidence overlays a per-requirement assurance class (proved/bounded/
-                                                        # replay-observed/statistical/not_run), same envelope shape as `fslc ledger --evidence`
+                                                        # replay-observed/statistical/not_run), same envelope shape as `fslc ledger --evidence`;
+                                                        # --approval displays a verified requirements_document approval record, failing
+                                                        # closed (FSL-DOC-APPROVAL-DRIFTED) if it does not match the current rendering
 fslc document claims <f> [--view requirements] [-o requirements.claims.json]
                                                         # emit the RCIR claim set as JSON; agents/tools consume this instead of re-parsing .fsl
-fslc document check <f> <document.md> [--glossary glossary.json] [--evidence evidence.json]...
+fslc document check <f> <document.md> [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]...
                                                         # structural drift check: generated claim blocks vs a fresh re-render;
                                                         # document_conformant (0) | document_drifted (1); never interprets prose
-fslc approval create <f> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--requirement ID]... [-o record.json]
-                                                        # bind the reviewed artifact to normalized spec + Git baseline
+fslc approval create <f> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
+               [--requirement ID]... [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
+                                                        # bind the reviewed artifact to normalized spec + Git baseline;
+                                                        # requirements_document records schema v3/v4 with a claim_set_digest
 fslc approval check <f> --record <record.json>          # approved | drifted with machine reasons
 fslc approval diff <f> --record <record.json> [--depth K]
                                                         # semantic diff from approved commit to current working spec

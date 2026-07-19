@@ -46,6 +46,10 @@ sections itself.
   every dimension (issue #332) as a review note — never supply evidence
   yourself or assert a stronger class than the document already shows; the
   `--evidence` files come from real verification runs, not from the agent.
+- Point a stakeholder at a document with no "Approval records" section (issue
+  #333) as a review note ("this document is not yet approved") — never
+  fabricate an approval record or assert that a document is approved without
+  one.
 
 ## Forbidden operations
 
@@ -65,6 +69,10 @@ sections itself.
 - Collapsing a claim's many-to-many requirement relation into a single
   requirement. RCIR's relations are intentionally many-to-many; do not simplify
   them away when writing review notes or a summary.
+- Presenting an approval record as proof of intent fidelity (issue #333). It
+  records that a named approver reviewed the spec-document correspondence at
+  a specific digest — report it like an assurance class, never upgrade it
+  into a claim that the document matches stakeholder intent.
 
 ## Recommended workflow
 
@@ -82,6 +90,14 @@ fslc ledger spec.fsl --depth 8 -o requirements-ledger.md
 # --evidence set or it reports evidence_changed, not a hard error
 fslc document generate spec.fsl --lang ja --evidence verify-run.json -o requirements.md
 fslc document check spec.fsl requirements.md --evidence verify-run.json
+
+# optional: bind a reviewed artifact to a digest (issue #333) and display it
+# in the document — a human approves, the agent never creates the record
+fslc approval create spec.fsl --kind requirements_document \
+  --artifact requirements.md --approver alice -o requirements.approval.json
+fslc document generate spec.fsl --lang ja \
+  --approval requirements.approval.json -o requirements.md
+fslc document check spec.fsl requirements.md --approval requirements.approval.json
 ```
 
 1. Confirm the spec is checked (`fslc check`, or the existing verification flow

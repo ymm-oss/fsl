@@ -64,6 +64,7 @@ fn render(fixture: &Fixture, locale: Locale) -> (RequirementClaimSet, RenderedDo
         locale,
         None,
         None,
+        None,
     )
     .expect("render paired RCIR");
     (claims, doc)
@@ -98,6 +99,7 @@ fn renderer_rejects_rcir_paired_with_another_valid_model() {
         Locale::En,
         None,
         None,
+        None,
     )
     .expect_err("mismatched Public Kernel must fail closed");
     assert!(!error.is_empty());
@@ -123,6 +125,7 @@ fn renderer_rejects_an_unresolved_semantic_target() {
         &model,
         &fixture.source,
         Locale::En,
+        None,
         None,
         None,
     )
@@ -157,6 +160,7 @@ fn renderer_rejects_a_subject_mapped_to_another_valid_target() {
         Locale::En,
         None,
         None,
+        None,
     )
     .expect_err("mismatched RCIR role mapping must fail closed");
     assert!(error.contains("does not match the paired"));
@@ -184,6 +188,7 @@ fn renderer_rejects_a_different_trace_payload_with_the_same_id() {
         &model,
         &source,
         Locale::En,
+        None,
         None,
         None,
     )
@@ -217,6 +222,7 @@ fn renderer_rejects_a_different_trace_title_with_the_same_payload() {
         Locale::En,
         None,
         None,
+        None,
     )
     .expect_err("mismatched trace title must fail closed");
     assert!(error.contains("does not match the paired"));
@@ -248,6 +254,7 @@ fn renderer_rejects_a_state_rule_reclassified_as_a_deadline() {
         &model,
         &fixture.source,
         Locale::En,
+        None,
         None,
         None,
     )
@@ -297,6 +304,7 @@ fn renderer_rejects_a_claim_moved_to_another_requirement() {
         Locale::En,
         None,
         None,
+        None,
     )
     .expect_err("mismatched requirement attribution must fail closed");
     assert!(error.contains("does not match the paired"));
@@ -343,6 +351,7 @@ fn renderer_rejects_changes_to_every_source_derived_rcir_section() {
             &model,
             &fixture.source,
             Locale::En,
+            None,
             None,
             None,
         )

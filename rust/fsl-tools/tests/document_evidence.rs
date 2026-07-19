@@ -205,7 +205,7 @@ fn claims_fixture_render(
     let kernel = fsl_core::parse_kernel_source(&source, &resolver).expect("parse");
     let model = fsl_core::build_model(kernel.clone()).expect("build model");
     let doc = fsl_tools::render_requirements_document(
-        &claims, &kernel, &model, &source, locale, None, evidence,
+        &claims, &kernel, &model, &source, locale, None, evidence, None,
     )
     .expect("render paired RCIR");
     (claims, doc.markdown)

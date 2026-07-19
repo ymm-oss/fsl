@@ -64,7 +64,9 @@ pub use document_project::{
     DocumentDialect, DocumentInput, project_requirement_claims,
     project_requirement_claims_from_source,
 };
-pub use document_render::{Locale, RenderedDocument, render_requirements_document};
+pub use document_render::{
+    AppliedApproval, AppliedApprovals, Locale, RenderedDocument, render_requirements_document,
+};
 pub use domain::{
     analyze_domain, check_domain, domain_adapter_files, domain_kernel_source, domain_scaffold,
     domain_scaffold_metadata,

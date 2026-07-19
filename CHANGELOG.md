@@ -72,6 +72,38 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   stronger survivor claim from returning (issue #338).
 
 ### Added
+- Added a `requirements_document` target kind to `fslc approval` (issue #333),
+  binding a reviewed `fslc document generate` artifact to a digest-bound
+  approval record without implicitly widening the existing closed `kind`
+  enum: a new schema revision, `fslc.approval.v3` (unsigned) /
+  `fslc.approval.v4` (signed), constrains `kind` to `requirements_document`
+  only, and existing v1/v2 records for `ledger`/`html`/`scenarios` stay
+  byte-shape compatible. `target.digest_algorithm` is
+  `fsl-rendered-requirements-document-v1+sha256` — the same plain-`sha256`
+  value `fslc document generate`'s own `artifact_digest` reports — and
+  `target` additionally records the literal reviewed-document digest and the RCIR claim-set digest
+  (`claim_set_digest_algorithm`/`claim_set_digest`), so `fslc approval check`
+  can report `artifact_changed` and `claim_set_changed` drift reasons distinct from
+  `spec_changed`/`rendering_changed`. Unlike the other three kinds,
+  `approval create --kind requirements_document` does not require the
+  reviewed artifact's bytes to match a fresh rendering exactly — it reuses
+  `fslc document check`'s own structural conformance gate, tolerating an edit
+  inside the one editable slot (issue #329) while still rejecting a tampered
+  claim block. `--glossary`/`--evidence` (rejected for the other three
+  kinds) are recorded as `{path, digest}` reproducibility inputs instead of
+  `--depth`/`--deadlock`/`--engine` (rejected for `requirements_document`),
+  since a deterministic RCIR projection has no solver-depth concept at all.
+  `fslc document generate --approval RECORD` (repeatable, plus `--trust-key`
+  for a signed record) newly displays a verified approval record as an
+  "Approval records" section — always paired with a fixed disclaimer that
+  approval is an organizational record, never proof of intent fidelity —
+  and fails closed (`FSL-DOC-APPROVAL-DRIFTED`) if the record does not match
+  the current rendering or the literal reviewed file has changed. The section
+  displays the reviewed-file digest rather than the canonical rendering
+  digest; `fslc document check --approval RECORD` reproduces
+  the same section for structural comparison (never verifying a signature)
+  via a new `approval_digest` frontmatter key and `approval_changed`/
+  `FSL-DOC-APPROVAL-CHANGED` drift reason. See `docs/DESIGN-approval.md`.
 - Added an evidence/assurance overlay to `fslc document generate`/`check`
   (issue #332): a repeatable `--evidence evidence.json` flag accepts the same
   saved verification-evidence envelope shape `fslc ledger --evidence` already

@@ -5,9 +5,9 @@
 //!
 //! The framing follows `fslc::approval`'s convention exactly
 //! (`sha256(algorithm_name || 0x00 || canonical_json)`, rendered as
-//! `"sha256:<64 hex>"`) so a future approval integration (issue #333) can join
-//! on the same `spec_digest` identity. The algorithm name is reused verbatim;
-//! the byte-framing implementation here is intentionally independent from
+//! `"sha256:<64 hex>"`) so the approval integration (issue #333) joins on the
+//! same `spec_digest` identity. The algorithm name is reused verbatim; the
+//! byte-framing implementation here is intentionally independent from
 //! `fslc::approval`'s (rather than a cross-crate refactor of already-shipped,
 //! tested code) to keep this issue's change small and low-risk.
 
@@ -106,8 +106,9 @@ pub fn framed_text_digest(algorithm: &str, text: &str) -> String {
     sha256_bytes(&framed)
 }
 
-/// The same `spec_digest` identity `fslc approval` binds to (issue #333 joins
-/// on this), computed from an already-parsed [`KernelSpec`] with no file I/O.
+/// The same `spec_digest` identity `fslc approval` binds to (issue #333
+/// joins on this identity), computed from an already-parsed [`KernelSpec`]
+/// with no file I/O.
 ///
 /// # Errors
 ///

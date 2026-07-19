@@ -33,9 +33,11 @@ fn cancel_system_markdown(locale: Locale) -> String {
     let resolver = fsl_core::FsResolver::new(&root);
     let kernel = fsl_core::parse_kernel_source(&source, &resolver).expect("parse");
     let model = fsl_core::build_model(kernel.clone()).expect("build model");
-    fsl_tools::render_requirements_document(&claims, &kernel, &model, &source, locale, None, None)
-        .expect("render paired RCIR")
-        .markdown
+    fsl_tools::render_requirements_document(
+        &claims, &kernel, &model, &source, locale, None, None, None,
+    )
+    .expect("render paired RCIR")
+    .markdown
 }
 
 #[test]
@@ -121,6 +123,7 @@ fn back_references_carry_no_markers() {
         &model,
         &source,
         Locale::Ja,
+        None,
         None,
         None,
     )
