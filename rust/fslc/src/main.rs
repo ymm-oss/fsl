@@ -1736,6 +1736,7 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             let mut strict = false;
             let mut strict_rendering = false;
             let mut glossary = None;
+            let mut evidence_paths = Vec::new();
             let mut output = None;
             while let Some(option) = args.next() {
                 match option.as_str() {
@@ -1761,6 +1762,12 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                             "--glossary",
                         )?));
                     }
+                    "--evidence" => {
+                        evidence_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--evidence",
+                        )?));
+                    }
                     "-o" | "--output" => {
                         output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
                     }
@@ -1773,6 +1780,7 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                 strict,
                 strict_rendering,
                 glossary.as_deref(),
+                &evidence_paths,
                 output.as_deref(),
             );
             if output.is_none()
@@ -1825,6 +1833,7 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                     .ok_or_else(|| "fslc document check requires an artifact path".to_owned())?,
             );
             let mut glossary = None;
+            let mut evidence_paths = Vec::new();
             while let Some(option) = args.next() {
                 match option.as_str() {
                     "--glossary" => {
@@ -1833,10 +1842,21 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                             "--glossary",
                         )?));
                     }
+                    "--evidence" => {
+                        evidence_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--evidence",
+                        )?));
+                    }
                     _ => return Err(format!("unknown document check option '{option}'")),
                 }
             }
-            Ok(run_document_check(&path, &artifact, glossary.as_deref()))
+            Ok(run_document_check(
+                &path,
+                &artifact,
+                glossary.as_deref(),
+                &evidence_paths,
+            ))
         }
         _ => Err(format!("unknown document subcommand '{subcommand}'")),
     }
@@ -1969,6 +1989,52 @@ fn load_glossary(
     Ok(Some((glossary, digest)))
 }
 
+fn document_evidence_error(message: &str) -> Value {
+    let mut output = error_output("document", message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!("FSL-DOC-EVIDENCE-INVALID"));
+    output
+}
+
+type EvidenceFiles = Vec<(String, Value)>;
+
+/// Load and parse every `--evidence` file (issue #332) — each must be a JSON
+/// object envelope in the same shape `fslc ledger --evidence` already
+/// accepts; this module classifies nothing itself (`fsl_tools::ledger`'s
+/// `assurance_token`/`assurance_label` remain the sole classifier). Returns
+/// `None` when no `--evidence` flags were given. The combined digest sorts
+/// each file's own digest before hashing them together, so the same file
+/// *set* given in a different `--evidence` order still yields the same
+/// `evidence_digest` frontmatter value.
+fn load_evidence(paths: &[PathBuf]) -> Result<Option<(EvidenceFiles, String)>, Value> {
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let mut files = Vec::new();
+    let mut digests = Vec::new();
+    for path in paths {
+        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        digests.push(approval::sha256_bytes(&bytes));
+        let text = String::from_utf8(bytes)
+            .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
+        let value = serde_json::from_str::<Value>(&text).map_err(|error| {
+            document_evidence_error(&format!("{}: invalid JSON: {error}", path.display()))
+        })?;
+        if !value.is_object() {
+            return Err(document_evidence_error(&format!(
+                "{}: evidence JSON must contain an object envelope",
+                path.display()
+            )));
+        }
+        files.push((path.display().to_string(), value));
+    }
+    digests.sort();
+    let combined = approval::sha256_bytes(digests.join("\n").as_bytes());
+    Ok(Some((files, combined)))
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_document_generate(
     path: &Path,
@@ -1976,6 +2042,7 @@ fn run_document_generate(
     strict: bool,
     strict_rendering: bool,
     glossary_path: Option<&Path>,
+    evidence_paths: &[PathBuf],
     output_path: Option<&Path>,
 ) -> (Value, i32) {
     let (source, claims) = match load_document_claims(path) {
@@ -1989,6 +2056,35 @@ fn run_document_generate(
         Ok(loaded) => loaded,
         Err(output) => return (output, 2),
     };
+    let loaded_evidence = match load_evidence(evidence_paths) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let mut evidence_warnings = Vec::new();
+    if let Some((files, _)) = &loaded_evidence {
+        let requirement_ids: std::collections::BTreeSet<&str> = claims
+            .requirements
+            .iter()
+            .map(|requirement| requirement.id.as_str())
+            .collect();
+        let unmatched = fsl_tools::unmatched_evidence_paths(&requirement_ids, files);
+        if !unmatched.is_empty() {
+            if strict {
+                let message = format!(
+                    "{} evidence file(s) do not match any requirement ID in this specification: {}",
+                    unmatched.len(),
+                    unmatched.join(", ")
+                );
+                let mut output = error_output("document", &message);
+                output
+                    .as_object_mut()
+                    .expect("document error envelope")
+                    .insert("code".to_owned(), json!("FSL-DOC-EVIDENCE-UNMATCHED"));
+                return (output, 2);
+            }
+            evidence_warnings = unmatched;
+        }
+    }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
     let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
@@ -2026,6 +2122,9 @@ fn run_document_generate(
     let applied_glossary = loaded_glossary
         .as_ref()
         .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
+    let applied_evidence = loaded_evidence
+        .as_ref()
+        .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
     let rendered = match fsl_tools::render_requirements_document(
         &claims,
         &kernel,
@@ -2033,6 +2132,7 @@ fn run_document_generate(
         &source,
         locale,
         applied_glossary.as_ref(),
+        applied_evidence.as_ref(),
     ) {
         Ok(rendered) => rendered,
         Err(error) => return (error_output("document", &error), 2),
@@ -2096,21 +2196,33 @@ fn run_document_generate(
             }),
         );
     }
-    if !label_warnings.is_empty() {
+    if let Some((files, digest)) = &loaded_evidence {
         output.insert(
-            "warnings".to_owned(),
-            json!(
-                label_warnings
-                    .iter()
-                    .map(|target| json!({
-                        "kind": "label_unknown",
-                        "code": "FSL-DOC-LABEL-UNKNOWN",
-                        "target": target.target,
-                        "detail": target.detail,
-                    }))
-                    .collect::<Vec<_>>()
-            ),
+            "evidence".to_owned(),
+            json!({
+                "digest": digest,
+                "files": files.len(),
+            }),
         );
+    }
+    let mut warnings = Vec::new();
+    warnings.extend(label_warnings.iter().map(|target| {
+        json!({
+            "kind": "label_unknown",
+            "code": "FSL-DOC-LABEL-UNKNOWN",
+            "target": target.target,
+            "detail": target.detail,
+        })
+    }));
+    warnings.extend(evidence_warnings.iter().map(|path| {
+        json!({
+            "kind": "evidence_unmatched",
+            "code": "FSL-DOC-EVIDENCE-UNMATCHED",
+            "target": path,
+        })
+    }));
+    if !warnings.is_empty() {
+        output.insert("warnings".to_owned(), json!(warnings));
     }
     if output_path.is_none() {
         output.insert("content".to_owned(), json!(rendered.markdown));
@@ -2166,10 +2278,12 @@ fn document_schema_error(message: &str) -> Value {
 /// between `artifact` (a possibly hand-edited `fslc document generate`
 /// output) and a fresh re-projection + re-render of `spec_path`, under the
 /// locale and source label the artifact's own frontmatter recorded.
+#[allow(clippy::too_many_lines)]
 fn run_document_check(
     spec_path: &Path,
     artifact: &Path,
     glossary_path: Option<&Path>,
+    evidence_paths: &[PathBuf],
 ) -> (Value, i32) {
     let artifact_text = match std::fs::read_to_string(artifact) {
         Ok(text) => text,
@@ -2224,9 +2338,16 @@ fn run_document_check(
         Ok(loaded) => loaded,
         Err(output) => return (output, 2),
     };
+    let loaded_evidence = match load_evidence(evidence_paths) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
     let applied_glossary = loaded_glossary
         .as_ref()
         .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
+    let applied_evidence = loaded_evidence
+        .as_ref()
+        .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
     let rendered = match fsl_tools::render_requirements_document(
         &claims,
         &kernel,
@@ -2234,6 +2355,7 @@ fn run_document_check(
         &source,
         locale,
         applied_glossary.as_ref(),
+        applied_evidence.as_ref(),
     ) {
         Ok(rendered) => rendered,
         Err(error) => return (error_output("document", &error), 2),

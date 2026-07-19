@@ -63,6 +63,7 @@ fn render(fixture: &Fixture, locale: Locale) -> (RequirementClaimSet, RenderedDo
         &fixture.source,
         locale,
         None,
+        None,
     )
     .expect("render paired RCIR");
     (claims, doc)
@@ -96,6 +97,7 @@ fn renderer_rejects_rcir_paired_with_another_valid_model() {
         &claims_source.source,
         Locale::En,
         None,
+        None,
     )
     .expect_err("mismatched Public Kernel must fail closed");
     assert!(!error.is_empty());
@@ -121,6 +123,7 @@ fn renderer_rejects_an_unresolved_semantic_target() {
         &model,
         &fixture.source,
         Locale::En,
+        None,
         None,
     )
     .expect_err("unresolved target must fail closed");
@@ -153,6 +156,7 @@ fn renderer_rejects_a_subject_mapped_to_another_valid_target() {
         &fixture.source,
         Locale::En,
         None,
+        None,
     )
     .expect_err("mismatched RCIR role mapping must fail closed");
     assert!(error.contains("does not match the paired"));
@@ -180,6 +184,7 @@ fn renderer_rejects_a_different_trace_payload_with_the_same_id() {
         &model,
         &source,
         Locale::En,
+        None,
         None,
     )
     .expect_err("mismatched trace payload must fail closed");
@@ -210,6 +215,7 @@ fn renderer_rejects_a_different_trace_title_with_the_same_payload() {
         &model,
         &source,
         Locale::En,
+        None,
         None,
     )
     .expect_err("mismatched trace title must fail closed");
@@ -242,6 +248,7 @@ fn renderer_rejects_a_state_rule_reclassified_as_a_deadline() {
         &model,
         &fixture.source,
         Locale::En,
+        None,
         None,
     )
     .expect_err("mismatched claim kind must fail closed");
@@ -288,6 +295,7 @@ fn renderer_rejects_a_claim_moved_to_another_requirement() {
         &model,
         &fixture.source,
         Locale::En,
+        None,
         None,
     )
     .expect_err("mismatched requirement attribution must fail closed");
@@ -336,6 +344,7 @@ fn renderer_rejects_changes_to_every_source_derived_rcir_section() {
             &fixture.source,
             Locale::En,
             None,
+            None,
         )
         .expect_err("changed source-derived RCIR section must fail closed");
         assert!(error.contains("does not match the paired"));
@@ -376,7 +385,13 @@ fn req2_ja_golden_matches_exactly() {
 1. `scr[c]` を `SubView { offered: true, st: OfferDialog }` に置き換える。すなわち、`scr[c].offered` を `true` に、`scr[c].st` を `OfferDialog` にする。\n\
 \n\
 この操作には弱い公平性（weak fairness）を仮定する。これはスケジューリング上の仮定であり、この操作が実行可能（enabled）であり続けるならば、いつかは実行される、という意味である。直ちに実行されることを意味しない。\n\
-<!-- fsl:claim end -->";
+<!-- fsl:claim end -->\n\
+\n\
+**保証クラス**\n\
+\n\
+- 形式検証: `not_run` — 対応するエビデンスは供給されていない。\n\
+- 実装適合: `not_run` — 対応するエビデンスは供給されていない。\n\
+- 統計的裏付け: `not_run` — 対応するエビデンスは供給されていない。";
     assert_eq!(req2_block(&doc.markdown), expected);
 }
 
@@ -411,7 +426,13 @@ When the action succeeds, the following updates are applied simultaneously withi
 1. Replace `scr[c]` with `SubView { offered: true, st: OfferDialog }`; that is, set `scr[c].offered` to `true` and `scr[c].st` to `OfferDialog`.\n\
 \n\
 Weak fairness is assumed for this action. This is a scheduling assumption: if the action remains continuously enabled, it is eventually executed. It does not mean that the action is executed immediately.\n\
-<!-- fsl:claim end -->";
+<!-- fsl:claim end -->\n\
+\n\
+**Assurance class**\n\
+\n\
+- Formal verification: `not_run` — no corresponding evidence was supplied.\n\
+- Implementation conformance: `not_run` — no corresponding evidence was supplied.\n\
+- Statistical support: `not_run` — no corresponding evidence was supplied.";
     assert_eq!(req2_block(&doc.markdown), expected);
 }
 
@@ -637,9 +658,13 @@ fn progress_rule_never_claims_established_evidence() {
     let (_, ja) = render(&fixture, Locale::Ja);
     assert!(ja.markdown.contains("#### 進行条件"));
     assert!(ja.markdown.contains("成立が確認済みであることを意味しない"));
+    let progress_start = ja.markdown.find("#### 進行条件").unwrap();
+    let claim_end = ja.markdown[progress_start..]
+        .find("<!-- fsl:claim end -->")
+        .map(|offset| progress_start + offset)
+        .expect("a claim end marker follows the progress rule heading");
+    let progress_section = &ja.markdown[progress_start..claim_end];
     for banned in ["proved", "証明済み", "bounded"] {
-        let progress_start = ja.markdown.find("#### 進行条件").unwrap();
-        let progress_section = &ja.markdown[progress_start..progress_start + 800];
         assert!(
             !progress_section.contains(banned),
             "banned phrase present: {banned}"

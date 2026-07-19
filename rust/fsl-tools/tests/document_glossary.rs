@@ -226,6 +226,7 @@ fn render_cancel_system(locale: Locale, glossary: Option<&fsl_tools::Glossary>) 
         &source,
         locale,
         applied.as_ref(),
+        None,
     )
     .expect("render paired RCIR")
     .markdown

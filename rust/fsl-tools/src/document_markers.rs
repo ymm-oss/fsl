@@ -24,7 +24,7 @@ pub const DOCUMENT_RENDERER: &str = "fslc-document-renderer";
 /// Deliberately independent of the crate version: keying this to
 /// `CARGO_PKG_VERSION` would mark every previously generated document
 /// drifted on every unrelated `fslc` release, not only when a template did.
-pub const DOCUMENT_RENDERER_VERSION: &str = "1.1.0";
+pub const DOCUMENT_RENDERER_VERSION: &str = "1.2.0";
 pub const NORMATIVE_SCOPE: &str = "generated-claim-blocks-only";
 
 /// The closed set of editable slot names `fslc document generate` emits and
@@ -56,6 +56,12 @@ pub struct Frontmatter {
     /// glossary sidecar file bytes (issue #330) used to generate this
     /// document, present only when a glossary was applied.
     pub glossary_digest: Option<String>,
+    /// A plain `sha256:`-prefixed digest of the combined `--evidence`
+    /// file set (issue #332), order-independent (each file's own digest is
+    /// sorted before combining, so the same files in a different CLI order
+    /// digest identically) — present only when at least one evidence file
+    /// was supplied.
+    pub evidence_digest: Option<String>,
 }
 
 #[derive(Debug)]
@@ -135,6 +141,7 @@ pub fn render_frontmatter(
     spec_digest: &str,
     claim_set_digest: &str,
     glossary_digest: Option<&str>,
+    evidence_digest: Option<&str>,
 ) -> String {
     let mut lines = vec![
         FRONTMATTER_DELIMITER.to_owned(),
@@ -152,6 +159,9 @@ pub fn render_frontmatter(
     lines.push(format!("claim_set_digest: {claim_set_digest}"));
     if let Some(glossary_digest) = glossary_digest {
         lines.push(format!("glossary_digest: {glossary_digest}"));
+    }
+    if let Some(evidence_digest) = evidence_digest {
+        lines.push(format!("evidence_digest: {evidence_digest}"));
     }
     lines.push(FRONTMATTER_DELIMITER.to_owned());
     lines.join("\n")
@@ -211,6 +221,7 @@ pub(crate) fn parse_frontmatter(text: &str) -> Result<(Frontmatter, usize), Mark
     };
     let source = raw.get("source").cloned();
     let glossary_digest = raw.get("glossary_digest").cloned();
+    let evidence_digest = raw.get("evidence_digest").cloned();
     let mut known: std::collections::BTreeSet<&str> = [
         "fsl_document_schema",
         "view",
@@ -222,6 +233,7 @@ pub(crate) fn parse_frontmatter(text: &str) -> Result<(Frontmatter, usize), Mark
         "spec_digest",
         "claim_set_digest",
         "glossary_digest",
+        "evidence_digest",
     ]
     .into_iter()
     .collect();
@@ -241,6 +253,7 @@ pub(crate) fn parse_frontmatter(text: &str) -> Result<(Frontmatter, usize), Mark
         spec_digest: required("spec_digest")?,
         claim_set_digest: required("claim_set_digest")?,
         glossary_digest,
+        evidence_digest,
     };
     Ok((frontmatter, consumed_bytes))
 }

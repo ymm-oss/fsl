@@ -156,12 +156,36 @@ pub fn check_requirements_document(
         drift.detail = Some(detail.to_owned());
         reasons.push(drift);
     }
-    // A changed renderer or glossary means the rendered *text* legitimately
-    // differs for a reason unrelated to a hand-edit; skip per-claim-body and
-    // residue text comparison in either case rather than burying the one
-    // meaningful reason under a flood of `claim_changed`/`edit_outside_slot`
-    // noise. Structural checks (below) stay renderer/glossary-independent.
-    let skip_text = renderer_changed || glossary_changed;
+    // Same trick as `glossary_changed`: the fresh side's own `evidence_digest`
+    // reflects whatever `--evidence` files `check`'s caller supplied when it
+    // re-rendered `fresh_markdown`.
+    let evidence_changed = frontmatter.evidence_digest != fresh_frontmatter.evidence_digest;
+    if evidence_changed {
+        let detail = match (
+            &frontmatter.evidence_digest,
+            &fresh_frontmatter.evidence_digest,
+        ) {
+            (Some(_), None) => "generated_with_evidence",
+            (None, Some(_)) => "generated_without_evidence",
+            _ => "evidence_digest_mismatch",
+        };
+        let mut drift = reason("evidence_changed", "FSL-DOC-EVIDENCE-CHANGED");
+        drift.detail = Some(detail.to_owned());
+        reasons.push(drift);
+    }
+    // A changed renderer or glossary means the rendered claim *text*
+    // legitimately differs for a reason unrelated to a hand-edit; skip
+    // per-claim-body comparison in either case rather than burying the one
+    // meaningful reason under a flood of `claim_changed` noise. Evidence
+    // never appears inside a claim block (the assurance overlay renders as
+    // residue, outside every `<!-- fsl:claim -->` marker — see
+    // `docs/DESIGN-document-evidence-overlay.md`), so a pure evidence change
+    // does not skip claim-body comparison: it must still catch a genuine
+    // hand-edit even when the checker's own `--evidence` set does not match
+    // what `generate` was given. Residue text, however, legitimately shifts
+    // whenever evidence changes, so residue comparison skips on all three.
+    let skip_claim_text = renderer_changed || glossary_changed;
+    let skip_residue_text = renderer_changed || glossary_changed || evidence_changed;
 
     let artifact_body = artifact_text.get(consumed..).unwrap_or("");
     let artifact_segments = match parse_body(artifact_body) {
@@ -174,9 +198,19 @@ pub fn check_requirements_document(
     let fresh_segments = parse_body(fresh_markdown.get(fresh_consumed..).unwrap_or(""))
         .expect("this build's own render always has well-formed markers");
 
-    check_claims(&artifact_segments, &fresh_segments, skip_text, &mut reasons);
+    check_claims(
+        &artifact_segments,
+        &fresh_segments,
+        skip_claim_text,
+        &mut reasons,
+    );
     check_slots(&artifact_segments, &mut reasons);
-    check_residue(&artifact_segments, &fresh_segments, skip_text, &mut reasons);
+    check_residue(
+        &artifact_segments,
+        &fresh_segments,
+        skip_residue_text,
+        &mut reasons,
+    );
 
     Ok(DocumentCheckReport { reasons })
 }

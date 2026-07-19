@@ -843,12 +843,14 @@ fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-cont
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]... [--approval record.json]...
                                                         # business audit ledger by requirement id (PM/audit)
 fslc document generate <f> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
-               [--glossary glossary.json] [-o requirements.md]
+               [--glossary glossary.json] [--evidence evidence.json]... [-o requirements.md]
                                                         # deterministic ja/en requirements document from RCIR (Requirement Claim IR);
-                                                        # --glossary applies presentation-only display labels (FSL-DOC-LABEL-UNKNOWN/-CONFLICT)
+                                                        # --glossary applies presentation-only display labels (FSL-DOC-LABEL-UNKNOWN/-CONFLICT);
+                                                        # --evidence overlays a per-requirement assurance class (proved/bounded/
+                                                        # replay-observed/statistical/not_run), same envelope shape as `fslc ledger --evidence`
 fslc document claims <f> [--view requirements] [-o requirements.claims.json]
                                                         # emit the RCIR claim set as JSON; agents/tools consume this instead of re-parsing .fsl
-fslc document check <f> <document.md> [--glossary glossary.json]
+fslc document check <f> <document.md> [--glossary glossary.json] [--evidence evidence.json]...
                                                         # structural drift check: generated claim blocks vs a fresh re-render;
                                                         # document_conformant (0) | document_drifted (1); never interprets prose
 fslc approval create <f> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--requirement ID]... [-o record.json]

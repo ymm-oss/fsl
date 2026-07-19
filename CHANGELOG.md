@@ -72,6 +72,30 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   stronger survivor claim from returning (issue #338).
 
 ### Added
+- Added an evidence/assurance overlay to `fslc document generate`/`check`
+  (issue #332): a repeatable `--evidence evidence.json` flag accepts the same
+  saved verification-evidence envelope shape `fslc ledger --evidence` already
+  does, and overlays a per-requirement assurance class
+  (`proved`/`bounded`/`replay-observed`/`statistical`/`not_run`) using the
+  exact classifier `fslc ledger` already established (issue #171) — no new
+  judgment is invented. Assurance renders as residue *after* every
+  requirement's claim blocks, never inside a `<!-- fsl:claim -->` marker, so a
+  claim's own digest never depends on whether evidence was supplied; a
+  `violated` BMC run still shows `bounded`, never silently downgraded, since
+  assurance class (method coverage) is orthogonal to pass/fail verdict. A
+  liveness requirement (linking a `leadsTo`/`reachable` claim) gets an extra
+  caveat when its only formal evidence is `bounded`. v1 is evidence-file-only
+  — `generate` never runs a live verify pass itself, preserving the
+  byte-identical-per-spec determinism contract. A new frontmatter key,
+  `evidence_digest` (order-independent across repeated `--evidence` flags),
+  lets `fslc document check --evidence ...` detect evidence that differs from
+  generation time as its own drift reason
+  (`evidence_changed`/`FSL-DOC-EVIDENCE-CHANGED`); unlike a renderer or
+  glossary change, an evidence-only change skips only residue comparison, not
+  per-claim-body comparison, so a genuine hand-edit inside a claim is still
+  caught regardless of the evidence given to `check`. An evidence file naming
+  an unknown requirement ID is a warning by default, an error under `--strict`
+  (`FSL-DOC-EVIDENCE-UNMATCHED`). See `docs/DESIGN-document-evidence-overlay.md`.
 - Added a presentation-only glossary sidecar to `fslc document generate`/`check`
   (issue #330): `--glossary glossary.json` (schema `fslc.document-glossary.v1`)
   maps a target string (`action:NAME`/`state:NAME`/`enum:Type.Member`, validated
