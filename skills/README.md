@@ -27,6 +27,7 @@ re-verified as it changes (regression, drift, cross-layer change-impact via
 | [`fsl-requirements/`](fsl-requirements/) | PM/PdM requirements, acceptance criteria, forbidden flows, NFR/SLA | `requirements` spec |
 | [`fsl-design/`](fsl-design/) | engineering design, internal state/actions, refinement mapping, testgen/replay handoff | kernel `spec` + mapping |
 | [`fsl-design-review/`](fsl-design-review/) | design review, variants, SOLID/LSP/OCP/substitutability judgment | contract-conformance report |
+| [`fsl-requirements-document/`](fsl-requirements-document/) | generating a stakeholder-facing requirements document from an already-checked spec; editing only its non-normative slot | Markdown requirements document + drift check |
 | [`fsl-from-code/`](fsl-from-code/) | reverse-engineering a design spec from existing code, anchored by conformance back to that code | kernel `spec` + conformance harness |
 | [`fsl-delivery/`](fsl-delivery/) | end-to-end FSL delivery orchestration from planning through implementation conformance | lifecycle status and gated handoff |
 
@@ -72,6 +73,9 @@ whole job; use `fsl-delivery/` whenever keeping the layers aligned is the delive
   refinement guardrails
 - [`fsl-design-review/SKILL.md`](fsl-design-review/SKILL.md) — review procedure and
   design-principle interpretation
+- [`fsl-requirements-document/SKILL.md`](fsl-requirements-document/SKILL.md) —
+  requirements-document generation/editing procedure, permitted/forbidden agent
+  operations, and the `fslc document generate`/`claims`/`check` workflow
 - [`fsl-from-code/SKILL.md`](fsl-from-code/SKILL.md) — code→design extraction
   procedure, the formalization-memo question set, and the two-axis anti-hollow
   conformance gate

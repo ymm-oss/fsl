@@ -72,6 +72,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   stronger survivor claim from returning (issue #338).
 
 ### Added
+- Added the `fsl-requirements-document` Agent Skill (issue #331):
+  `skills/fsl-requirements-document/SKILL.md` (symlinked under `.claude/skills/`
+  and `.agents/skills/`, per the existing skill convention) documents the
+  `fslc document generate`/`claims`/`check` workflow (issues #325-#329) for an
+  agent used as a non-normative editor and review-support assistant, never a
+  compiler: permitted operations (editing the `background` slot, drafting
+  glossary candidates, flagging a source-text/formalized-meaning mismatch as
+  advisory) and forbidden ones (rewriting a generated claim block, inventing
+  normative language, rewording an assurance class, collapsing a many-to-many
+  requirement relation), a CI example that fails a build on `document_drifted`,
+  and cross-references from `fsl`/`fsl-requirements` clarifying the handoff.
 - Added generated block markers and `fslc document check` (issue #329). Every
   `fslc document generate` artifact now carries a frontmatter block
   (`fsl_document_schema`/`view`/`lang`/`source`/`renderer`/`renderer_version`/
