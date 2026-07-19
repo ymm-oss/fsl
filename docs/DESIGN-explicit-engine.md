@@ -9,9 +9,10 @@ quantifier is finite-domain, breadth-first exploration of concrete states is
 the composite `--engine auto` (issue #226) built on top of it.
 
 The engine is **Rust-native only** (`rust/`), like `fslc approval`: the frozen
-Python reference implementation is intentionally unchanged. The Python tree
-still supplies the *semantic* reference — `runtime.py Monitor` and the BFS
-oracle `tests/oracle.py` are the specification this engine productizes.
+Python reference implementation is intentionally unchanged. The original port
+was grounded against the Python Monitor and BFS oracle; those results are now
+historical derivation evidence. Current executable semantics are owned by
+`fsl-runtime`, with concrete/symbolic agreement checked against `fsl-verifier`.
 
 ## 1. Goals and non-goals
 
@@ -21,9 +22,10 @@ oracle `tests/oracle.py` are the specification this engine productizes.
     thousands): `violated` with the shortest concrete counterexample,
     `verified` (bounded, BMC-equivalent), and — when exploration closes —
     `proved` (unbounded, subsumes k-induction for finite systems).
-  - A **third independent evaluator** of FSL semantics next to the symbolic
-    BMC (`bmc.py`) and the concrete step interpreter (`runtime.py Monitor`),
-    strengthening the cross-check regime rather than weakening it.
+  - A solver-free exploration and verdict engine that reuses
+    `fsl-runtime::Monitor` transitions and is checked against the symbolic BMC
+    (`fsl-verifier`). It is an independent search path, not an independent
+    evaluator of concrete step semantics.
   - Fail-closed truncation: exceeding the state budget yields an explicit
     `unknown_budget` verdict, never a silent `verified`.
 - **Non-goals (this design)**:
@@ -222,13 +224,12 @@ both engines at once — a possible future extension, not this one.
 
 ## 7. Soundness argument and gates
 
-The engine's claims reduce to: (a) the concrete step semantics are correct,
-and (b) the dedup key captures full state identity. (a) is the already-tested
-ported Monitor semantics (`fsl-runtime`) — the same evaluator family the
-Python BFS oracle uses to catch Z3-side false negatives. (b) uses the ordered
-`State` value itself (`BTreeSet<State>`), the same canonical identity
-`fsl_runtime::bfs` already relies on. On top of that, the repo's standing
-gates apply:
+The engine's claims reduce to: (a) the shared concrete step semantics are
+correct, and (b) the dedup key captures full state identity. (a) is the
+already-tested `fsl-runtime::Monitor`; concrete/symbolic agreement catches
+Z3-side drift. (b) uses the ordered `State` value itself
+(`BTreeSet<State>`), the same canonical identity `fsl_runtime::bfs` already
+relies on. On top of that, the Rust-native gates apply:
 
 - Verdict agreement on the corpus: explicit vs the Rust BMC engine (explicit
   `proved` subsumes BMC `verified`; `violated_at_step` equal), as Rust
@@ -236,10 +237,8 @@ gates apply:
 - Violated traces must replay through the concrete interpreter
   (`fsl_runtime::replay_trace`) — every counterexample is a checked concrete
   execution.
-- The Python corpus snapshot (`tests/test_corpus_snapshot.py`) must be
-  byte-identical: the frozen Python tree is untouched.
-- The Rust/Python parity harnesses (`tools/check_rust_*_parity.py`) keep
-  passing via the established Rust-only-command pattern (as with `approval`).
+- `tools/check-native-integration.sh` runs the Rust workspace and dependency
+  checks without making the frozen Python reference a product gate.
 
 ## 8. Placement in the Rust workspace
 

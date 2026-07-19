@@ -1,9 +1,9 @@
 # fslc Rust port: native CLI and browser WASM architecture
 
-Status: accepted migration design (issue #195). This document does **not** claim
-that a Rust implementation exists. Each phase below has an explicit parity gate;
-until that gate passes, the Python implementation remains authoritative for that
-surface.
+Status: accepted migration design (issue #195), now implemented. This document
+retains the phase gates and original migration rationale; the current component
+authority is the native Rust workspace, as recorded in section 9 and
+[`DESIGN-rust-components.md`](DESIGN-rust-components.md).
 
 The objective is to produce two distribution targets without changing the FSL
 language or its evidence contract:
@@ -351,7 +351,7 @@ drift:
 | Z3 witnesses differ | compare verdict/envelope structure and replay traces instead of byte-comparing traces |
 | npm solver cannot be interrupted | terminate and recreate the Worker and solver context |
 | browser payload is large | lazy loading and Service Worker caching |
-| Python evolves during port | dual-implementation change policy and permanent parity CI |
+| New native behavior is accidentally assigned to the frozen Python reference | Rust-native product gate and explicitly scoped, optional compatibility evidence |
 
 This design intentionally separates architectural acceptance from implementation
 progress. Follow-up implementation PRs should cite the phase and gate they move;
