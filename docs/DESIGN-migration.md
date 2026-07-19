@@ -13,6 +13,12 @@ taxonomies `deprecated`, `non_canonical`, `ambiguous_intent`, or
 `unsupported_in_edition`, severity, exact span, edition, canonical replacement,
 and whether its edits are machine-applicable.
 
+Each lint operand may be a file or directory. Directory operands expand
+recursively to regular `*.fsl` files; symlink entries and other extensions are
+skipped while walking them, and the combined file set is deduplicated and sorted
+before diagnostics run. Explicit file operands retain their existing
+extension-agnostic behavior.
+
 `fslc migrate PATH... --edition next` is a dry run. It emits the same findings
 plus a complete replacement edit for each changed file. `--write` is the only
 mutating mode. The command plans every input in memory, parses and checks the

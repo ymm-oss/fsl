@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use fsl_core::{
     ActionDef, Annotations, KernelBinder, KernelExpr, KernelLValue, KernelModel, KernelStatement,
 };
+use fsl_syntax::Span;
 use serde_json::{Value, json};
 
 #[allow(clippy::too_many_lines)]
@@ -215,41 +216,56 @@ fn requirement_roots(model: &KernelModel) -> BTreeMap<String, BTreeSet<String>> 
     output
 }
 
+/// One `undecided:`-tagged declaration, typed and carrying the annotation's
+/// source span for consumers that need per-item provenance (issue #325's
+/// Requirement Claim IR) that the JSON projection below does not expose.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UndecidedRecord {
+    pub declaration: String,
+    pub node: String,
+    pub reason: String,
+    pub requirement_ids: Vec<String>,
+    pub span: Span,
+}
+
 fn record(
     declaration: &str,
     node: &str,
     reason: &str,
+    span: Span,
     roots: &BTreeSet<String>,
     requirements: &BTreeMap<String, BTreeSet<String>>,
-) -> Value {
+) -> UndecidedRecord {
     let requirement_ids = requirements
         .iter()
         .filter(|(_, requirement_roots)| !roots.is_disjoint(requirement_roots))
-        .map(|(id, _)| id)
+        .map(|(id, _)| id.clone())
         .collect::<Vec<_>>();
-    json!({
-        "declaration": declaration,
-        "node": node,
-        "reason": reason,
-        "requirement_ids": requirement_ids,
-    })
+    UndecidedRecord {
+        declaration: declaration.to_owned(),
+        node: node.to_owned(),
+        reason: reason.to_owned(),
+        requirement_ids,
+        span,
+    }
 }
 
 /// Return every declaration tagged with the reserved `undecided:` marker.
 #[must_use]
-pub fn undecided_declarations(model: &KernelModel) -> Vec<Value> {
+pub fn undecided_records(model: &KernelModel) -> Vec<UndecidedRecord> {
     let requirements = requirement_roots(model);
     let mut output = Vec::new();
-    for (reason, _) in model.init_annotations.undecided() {
+    for (reason, span) in model.init_annotations.undecided() {
         let roots = statement_roots(model, &model.init);
-        output.push(record("init", "init", reason, &roots, &requirements));
+        output.push(record("init", "init", reason, span, &roots, &requirements));
     }
     for action in &model.actions {
-        for (reason, _) in action.annotations.undecided() {
+        for (reason, span) in action.annotations.undecided() {
             output.push(record(
                 &format!("action {}", action.name),
                 &format!("action:{}", action.name),
                 reason,
+                span,
                 &action_roots(model, action),
                 &requirements,
             ));
@@ -261,11 +277,12 @@ pub fn undecided_declarations(model: &KernelModel) -> Vec<Value> {
         ("reachable", &model.reachables),
     ] {
         for property in properties {
-            for (reason, _) in property.annotations.undecided() {
+            for (reason, span) in property.annotations.undecided() {
                 output.push(record(
                     &format!("{kind} {}", property.name),
                     &format!("{kind}:{}", property.name),
                     reason,
+                    span,
                     &expression_roots(model, &property.expr),
                     &requirements,
                 ));
@@ -273,17 +290,34 @@ pub fn undecided_declarations(model: &KernelModel) -> Vec<Value> {
         }
     }
     for property in &model.leadstos {
-        for (reason, _) in property.annotations.undecided() {
+        for (reason, span) in property.annotations.undecided() {
             let mut roots = expression_roots(model, &property.before);
             roots.extend(expression_roots(model, &property.after));
             output.push(record(
                 &format!("leadsTo {}", property.name),
                 &format!("leadsTo:{}", property.name),
                 reason,
+                span,
                 &roots,
                 &requirements,
             ));
         }
     }
     output
+}
+
+/// Return every declaration tagged with the reserved `undecided:` marker.
+#[must_use]
+pub fn undecided_declarations(model: &KernelModel) -> Vec<Value> {
+    undecided_records(model)
+        .into_iter()
+        .map(|record| {
+            json!({
+                "declaration": record.declaration,
+                "node": record.node,
+                "reason": record.reason,
+                "requirement_ids": record.requirement_ids,
+            })
+        })
+        .collect()
 }

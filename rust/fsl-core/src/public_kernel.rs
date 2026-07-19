@@ -176,6 +176,31 @@ fn base_env(model: &KernelModel) -> TypeEnv {
     env
 }
 
+/// Project one already-checked expression with the same typed JSON contract
+/// used inside Public Kernel v2. Sidecar contracts use this instead of
+/// publishing the historical Python-shaped AST.
+///
+/// # Errors
+///
+/// Returns [`PublicKernelError`] when the expression cannot be represented or
+/// does not have the expected type.
+pub fn public_kernel_expression(
+    expression: &Expr,
+    model: &KernelModel,
+    source_path: &str,
+    span: Span,
+    expected_type: Option<&TypeRef>,
+) -> Result<Value, PublicKernelError> {
+    expr_json(
+        expression,
+        &base_env(model),
+        model,
+        source_path,
+        span,
+        expected_type,
+    )
+}
+
 pub(crate) fn validate_expression_type(
     expr: &Expr,
     expected: &TypeRef,

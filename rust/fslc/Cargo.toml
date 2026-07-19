@@ -39,5 +39,8 @@ sha2 = { workspace = true, optional = true }
 [build-dependencies]
 sha2.workspace = true
 
+[dev-dependencies]
+jsonschema = { version = "0.48.0", default-features = false }
+
 [lints]
 workspace = true

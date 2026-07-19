@@ -699,7 +699,21 @@ fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable t
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
 fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
-fslc approval create <file.fsl> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--signing-key private.pem] [-o record.json]
+fslc document generate <file.fsl> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
+               [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
+                                                  # deterministic ja/en requirements document from the Requirement Claim IR (§13);
+                                                  # --evidence overlays a per-requirement assurance class from saved
+                                                  # external evidence (repeatable; same envelope shape as `fslc ledger --evidence`);
+                                                  # --approval displays a verified requirements_document approval record
+                                                  # (repeatable; fails closed if it does not match the current rendering)
+fslc document claims <file.fsl> [--view requirements] [-o requirements.claims.json]
+                                                  # emit the Requirement Claim IR (RCIR) claim set as JSON (§13)
+fslc document check <file.fsl> <document.md> [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]...
+                                                  # structural drift check: generated claim blocks vs a
+                                                  # fresh re-render; never interprets prose (§13)
+fslc approval create <file.fsl> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
+               [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
+                                                  # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
 fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem] # approved | drifted | signature-invalid
 fslc approval diff   <file.fsl> --record <record.json> [--depth K] [--trust-key public.pem]
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
@@ -723,6 +737,12 @@ fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime eve
 扱います。安全と証明できないソース/コメントの移動は拒否します。`&&` は引き続き
 不正なトークンであり、そのため `and` の提案つきで報告されますが、機械適用される
 ことはありません。原子性と一括更新の手順は `docs/DESIGN-migration.md` を参照。
+
+`fslc lint` の各 path にはファイルまたはディレクトリを指定できます。ディレクトリは
+通常ファイルの `*.fsl` へ再帰的に展開され、その走査中はシンボリックリンクの
+エントリと他の拡張子が除外されます。統合されたファイル集合は重複排除され、決定的に
+ソートされます。明示的なファイル path については、既存の拡張子に依存しない挙動を
+維持します。
 
 ネイティブ Rust 専用の `kernel` コマンドは、ダイアレクトの lowering と意味検査の
 後に実行されます。そのバージョン付き JSON は、すべての式の構造的な型、ソースの
@@ -1485,6 +1505,15 @@ spec 状態変数をカバーし、`action external(params) -> spec_action(exprs
 カーネルは 1 つ(本書の §1–12)で、レイヤーごとのダイアレクトは AST へ展開される
 フロントエンドです。レイヤーは refinement で接続されます: **business ⊒
 requirements ⊒ design ⊒ implementation (testgen/replay)**。
+
+`fslc document generate`/`claims`(`docs/DESIGN-document-requirement-claim-ir.md`
+参照)は、現時点では `spec` と `requirements` の2ダイアレクトのみを
+Requirement Claim IR へ投影する。本節で説明する他のダイアレクト(`business`、
+`dbsystem`、`ai_component` など)は、部分的な文書を生成するのではなく、コード化
+されたエラー(`FSL-DOC-DIALECT-UNSUPPORTED`)で fail-closed に拒否される。
+`--view business`/`--view design` は予約済みの未実装フラグ値である —
+将来のcross-layer viewが満たすべき有効化契約については
+`docs/DESIGN-document-dialect-adapters.md` を参照。
 
 ### 13.1 宣言タグ(全レイヤー共通のトレーサビリティ)
 
@@ -2326,20 +2355,29 @@ DESIGN-*.md があります)。
   されない要件(欠落の候補。空の requirement ブロックを含む)を警告します。存在
   レベルの突合です。→ [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md)
 - **`fslc mutate`** — spec を機械的に変異させ、各ミュータントが既存の検査の網に
-  よって殺されるかを測定します。生き残ったミュータント = どのプロパティにも制約
-  されない振る舞い = invariant が欠けている場所です。
+  よって殺されるかを測定します。スコアは**有界ミュータント集合への感度
+  (bounded mutant-set sensitivity)**です: 選択された有限のミュータント集合・
+  選択された `--depth`・verify/acceptance/forbidden/refinement オラクルの下での
+  `kill_rate = killed / (killed + survived)`。値はオペレーターの構成、
+  `--max-mutants` の上限、深さ、オラクルに依存して動きます — 本番の欠陥検出率
+  でも、spec が正しい確率でも、完全性の尺度でもありません。生存者は自動的に
+  「invariant が欠けている場所」なのではなくレビューキューです: 生存者は
+  等価ミュータント、ベースラインで死んでいる振る舞い、深さの境界を超えて
+  初めて見える効果、あるいは本物の制約不足かもしれません。
   `--from mutants.jsonl` はさらに、完全な `mutated_spec`、または正確な
   `replace:{target,replacement,occurrence?}` 命令として表現された、外部で生成
   された変異を裁定します。valid な外部ミュータントは、同じ
   verify/acceptance/forbidden/refinement のオラクルを使います。JSON、命令、
   パース、名前、型、構築のエラーは `invalid` で、決して killed にはならず、
-  combined/per-source のキル率の分母から除外されます。
+  combined/per-source のキル率の分母から除外されます(これらは spec の強さでは
+  なく、外部ジェネレーターの品質を測ります)。
   すべてのエントリは `source:"builtin"|"external"` を運びます。`--max-mutants` は
   組み込みのカタログだけを上限にするので、`--max-mutants 0 --from ...` は外部のみ
   を実行します。
   `--by-requirement` は「どの振る舞いミュータントも殺さない要件」を
   `empty_formalization` 警告としてフラグします(`--strict-tags` の意味レベルの
-  拡張)。→ [`DESIGN-mutate.md`](DESIGN-mutate.md)
+  拡張)。要件ごとのキル数とこの警告は、選択されたミュータント集合と深さの中で
+  観測された下界です。→ [`DESIGN-mutate.md`](DESIGN-mutate.md)
 - **`fslc explain --readable`** — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement
   マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で

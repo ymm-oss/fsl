@@ -646,6 +646,12 @@ mixed in one spec.
 The flagship example threading all three roles through one domain is
 `examples/e2e/` (expense reimbursement).
 
+Once a `requirements`/`spec` dialect file is authored and checked, generating a
+stakeholder-facing requirements document from it (rather than authoring or
+repairing the `.fsl` itself) is a separate downstream activity — use
+`fsl-requirements-document` for that (`fslc document generate`/`claims`/`check`).
+It edits only the document's non-normative slot and never the FSL.
+
 ## Three-layer dialects (consulting / requirements / design)
 
 A spec can be written in three layers. Chain **business ⊒ requirements ⊒ design ⊒

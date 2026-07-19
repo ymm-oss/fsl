@@ -1,0 +1,34 @@
+// Synthetic fixture for the RCIR v1 projector (issue #325). Adapted from the
+// process+data profile example in skills/fsl/reference.md sec. 10. Exercises
+// the alternate (non-kernel-wrapper) requirements authoring surface and the
+// `kpi` projection, which RCIR v1 reports as an unsupported target rather
+// than silently omitting it.
+requirements KpiFixture {
+  number Amount
+  const AUTO_LIMIT = 1
+
+  process Claim with amount: Amount {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit       Draft     -> Submitted by Employee with a: Amount when a > 0 set amount = a covers REQ-K1 "The applicant submits an expense claim by entering an amount"
+    transition auto_approve Submitted -> Approved  by System  when amount <= AUTO_LIMIT covers REQ-K2 "Claims at or below AUTO_LIMIT are auto-approved by the system"
+    transition mgr_approve  Submitted -> Approved  by Manager when amount >  AUTO_LIMIT covers REQ-K3 "Claims above AUTO_LIMIT are approved by a manager"
+    transition reject       Submitted -> Rejected  by Manager when amount >  AUTO_LIMIT covers REQ-K3 "Claims above AUTO_LIMIT may be rejected by a manager"
+    transition pay          Approved  -> Paid      by Finance covers REQ-K4 "Only approved claims are paid"
+  }
+
+  kpi paid_claims = count Claim in Paid
+
+  acceptance AC-K1 "Approval flow: a low-amount claim is auto-approved and paid" {
+    submit(0, 1) auto_approve(0) pay(0)
+    expect Claim 0 in Paid
+  }
+  acceptance AC-K2 "Rejection flow: a high-amount claim ends in manager rejection" {
+    submit(1, 2) reject(1)
+    expect Claim 1 in Rejected
+  }
+}
+verify {
+  instances Claim = 3
+  values Amount = 0..3
+}

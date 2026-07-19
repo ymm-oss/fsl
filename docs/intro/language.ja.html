@@ -780,6 +780,14 @@ fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; read
 fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
 fslc html      &lt;file.fsl&gt; [--depth K] [-o report.html] # self-contained review report (§15)
 fslc ledger    &lt;file.fsl&gt; [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
+fslc document generate &lt;file.fsl&gt; [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
+               [--glossary glossary.json] [-o requirements.md]
+                                                  # deterministic ja/en requirements document from the Requirement Claim IR (§13)
+fslc document claims &lt;file.fsl&gt; [--view requirements] [-o requirements.claims.json]
+                                                  # emit the Requirement Claim IR (RCIR) claim set as JSON (§13)
+fslc document check &lt;file.fsl&gt; &lt;document.md&gt; [--glossary glossary.json]
+                                                  # structural drift check: generated claim blocks vs a
+                                                  # fresh re-render; never interprets prose (§13)
 fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios --artifact &lt;reviewed&gt; --approver &lt;name&gt; [--signing-key private.pem] [-o record.json]
 fslc approval check  &lt;file.fsl&gt; --record &lt;record.json&gt; [--trust-key public.pem] # approved | drifted | signature-invalid
 fslc approval diff   &lt;file.fsl&gt; --record &lt;record.json&gt; [--depth K] [--trust-key public.pem]
@@ -803,6 +811,11 @@ fslc ai replay &lt;file.fsl&gt; --logs events.jsonl                   # AI runti
 扱います。安全と証明できないソース/コメントの移動は拒否します。<code>&amp;&amp;</code> は引き続き
 不正なトークンであり、そのため <code>and</code> の提案つきで報告されますが、機械適用される
 ことはありません。原子性と一括更新の手順は <code>docs/DESIGN-migration.md</code> を参照。</p>
+<p><code>fslc lint</code> の各 path にはファイルまたはディレクトリを指定できます。ディレクトリは
+通常ファイルの <code>*.fsl</code> へ再帰的に展開され、その走査中はシンボリックリンクの
+エントリと他の拡張子が除外されます。統合されたファイル集合は重複排除され、決定的に
+ソートされます。明示的なファイル path については、既存の拡張子に依存しない挙動を
+維持します。</p>
 <p>ネイティブ Rust 専用の <code>kernel</code> コマンドは、ダイアレクトの lowering と意味検査の
 後に実行されます。そのバージョン付き JSON は、すべての式の構造的な型、ソースの
 スパン、要件/lowering の origin、同時更新の意味論、明示的な部分演算の失敗条件を
@@ -2321,20 +2334,29 @@ DESIGN-*.md があります)。</p>
   されない要件(欠落の候補。空の requirement ブロックを含む)を警告します。存在
   レベルの突合です。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a></li>
 <li><strong><code>fslc mutate</code></strong> — spec を機械的に変異させ、各ミュータントが既存の検査の網に
-  よって殺されるかを測定します。生き残ったミュータント = どのプロパティにも制約
-  されない振る舞い = invariant が欠けている場所です。
+  よって殺されるかを測定します。スコアは<strong>有界ミュータント集合への感度
+  (bounded mutant-set sensitivity)</strong>です: 選択された有限のミュータント集合・
+  選択された <code>--depth</code>・verify/acceptance/forbidden/refinement オラクルの下での
+  <code>kill_rate = killed / (killed + survived)</code>。値はオペレーターの構成、
+  <code>--max-mutants</code> の上限、深さ、オラクルに依存して動きます — 本番の欠陥検出率
+  でも、spec が正しい確率でも、完全性の尺度でもありません。生存者は自動的に
+  「invariant が欠けている場所」なのではなくレビューキューです: 生存者は
+  等価ミュータント、ベースラインで死んでいる振る舞い、深さの境界を超えて
+  初めて見える効果、あるいは本物の制約不足かもしれません。
   <code>--from mutants.jsonl</code> はさらに、完全な <code>mutated_spec</code>、または正確な
   <code>replace:{target,replacement,occurrence?}</code> 命令として表現された、外部で生成
   された変異を裁定します。valid な外部ミュータントは、同じ
   verify/acceptance/forbidden/refinement のオラクルを使います。JSON、命令、
   パース、名前、型、構築のエラーは <code>invalid</code> で、決して killed にはならず、
-  combined/per-source のキル率の分母から除外されます。
+  combined/per-source のキル率の分母から除外されます(これらは spec の強さでは
+  なく、外部ジェネレーターの品質を測ります)。
   すべてのエントリは <code>source:"builtin"|"external"</code> を運びます。<code>--max-mutants</code> は
   組み込みのカタログだけを上限にするので、<code>--max-mutants 0 --from ...</code> は外部のみ
   を実行します。
   <code>--by-requirement</code> は「どの振る舞いミュータントも殺さない要件」を
   <code>empty_formalization</code> 警告としてフラグします(<code>--strict-tags</code> の意味レベルの
-  拡張)。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
+  拡張)。要件ごとのキル数とこの警告は、選択されたミュータント集合と深さの中で
+  観測された下界です。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
 <li><strong><code>fslc explain --readable</code></strong> — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement
   マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で
