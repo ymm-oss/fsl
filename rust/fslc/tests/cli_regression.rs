@@ -513,6 +513,40 @@ fn typed_requirement_relations_reach_strict_tags_scenarios_and_diagnostics() {
 }
 
 #[test]
+fn scenarios_cover_a_bool_guarded_transition_into_a_terminal_state() {
+    let (scenarios, status) = run_cli(&[
+        "scenarios",
+        "rust/fslc/tests/fixtures/scenario_bool_guard_terminal.fsl",
+        "--depth",
+        "8",
+    ]);
+
+    assert_eq!(status, 0, "{scenarios}");
+    let generated = scenarios["scenarios"].as_array().expect("scenarios");
+    let cover = generated
+        .iter()
+        .find(|scenario| scenario["name"] == "cover_accept")
+        .expect("accept coverage scenario");
+    let steps = cover["steps"].as_array().expect("coverage steps");
+    assert_eq!(steps.len(), 1, "{cover}");
+    assert_eq!(steps[0]["action"], "accept", "{cover}");
+    assert_eq!(steps[0]["params"]["c"], 0, "{cover}");
+    assert_eq!(steps[0]["params"]["allowed"], true, "{cover}");
+    assert_eq!(
+        cover["expected_states"][0]["item_stage"]["0"], "Accepted",
+        "{cover}"
+    );
+    assert_eq!(cover["requirement"]["id"], "REQ-SCENARIO-001", "{cover}");
+    assert!(
+        generated
+            .iter()
+            .any(|scenario| scenario["name"] == "acceptance_AC-SCENARIO-001"),
+        "{scenarios}"
+    );
+    assert_eq!(scenarios["warnings"], serde_json::json!([]), "{scenarios}");
+}
+
+#[test]
 fn native_cli_replays_witnesses_from_partially_initialized_state() {
     let (violated, status) = run_cli(&[
         "verify",

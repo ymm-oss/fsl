@@ -6,6 +6,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- `fslc scenarios` now emits the shortest replayable action-coverage trace even
+  when the covered action reaches a terminal state before the requested depth,
+  including requirements transitions guarded by `Bool` inputs (issue #405).
 - Explicit domain-effect `success_event`, `failure_event`, and `timeout_event`
   roles now override event-name heuristics, ambiguous cross-role assignments
   fail closed, and completion, retry eligibility, Monitor/BFS execution, and
