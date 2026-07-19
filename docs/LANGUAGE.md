@@ -718,11 +718,13 @@ fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable t
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
 fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
-fslc document generate <file.fsl> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering] [-o requirements.md]
+fslc document generate <file.fsl> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
+               [--glossary glossary.json] [-o requirements.md]
                                                   # deterministic ja/en requirements document from the Requirement Claim IR (§13)
 fslc document claims <file.fsl> [--view requirements] [-o requirements.claims.json]
                                                   # emit the Requirement Claim IR (RCIR) claim set as JSON (§13)
-fslc document check <file.fsl> <document.md>     # structural drift check: generated claim blocks vs a
+fslc document check <file.fsl> <document.md> [--glossary glossary.json]
+                                                  # structural drift check: generated claim blocks vs a
                                                   # fresh re-render; never interprets prose (§13)
 fslc approval create <file.fsl> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--signing-key private.pem] [-o record.json]
 fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem] # approved | drifted | signature-invalid

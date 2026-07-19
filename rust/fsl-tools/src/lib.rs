@@ -12,6 +12,7 @@ mod document;
 mod document_check;
 mod document_coverage;
 mod document_digest;
+mod document_glossary;
 mod document_markers;
 mod document_project;
 mod document_render;
@@ -45,6 +46,10 @@ pub use document_coverage::{
     RCIR_TARGET_KIND_REGISTRY, TargetKindRow, TargetTreatment, target_kind,
 };
 pub use document_digest::{CLAIM_BLOCK_DIGEST_ALGORITHM, framed_text_digest};
+pub use document_glossary::{
+    AppliedGlossary, GLOSSARY_SCHEMA, Glossary, GlossaryIssue, UnknownTarget, parse_glossary,
+    unknown_targets,
+};
 pub use document_markers::{
     DOCUMENT_RENDERER, DOCUMENT_RENDERER_VERSION, DOCUMENT_SCHEMA, Frontmatter, MarkerIssue,
     NORMATIVE_SCOPE, ParsedDocument, SLOT_NAMES, Segment, parse_frontmatter_only,

@@ -106,6 +106,10 @@ yet, and a flag accepted now but silently ignored is worse than one that does no
 exist yet — a caller has no way to tell "ignored" from "applied." Each of those
 issues adds its own flag when the feature behind it exists.
 
+`--glossary` landed in issue #330 (`docs/DESIGN-document-glossary.md`), on both
+`generate` and `check`. `--evidence` (#332) and `--approval` (#333) remain
+deferred for the same reason stated above.
+
 ## Verification evidence
 
 `rust/fslc/tests/document_cli.rs`: byte-identical repeated `generate` runs

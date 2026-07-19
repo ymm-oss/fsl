@@ -1721,6 +1721,7 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
     let subcommand = args
         .next()
@@ -1734,6 +1735,7 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             let mut locale = fsl_tools::Locale::Ja;
             let mut strict = false;
             let mut strict_rendering = false;
+            let mut glossary = None;
             let mut output = None;
             while let Some(option) = args.next() {
                 match option.as_str() {
@@ -1753,18 +1755,39 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                     }
                     "--strict" => strict = true,
                     "--strict-rendering" => strict_rendering = true,
+                    "--glossary" => {
+                        glossary = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--glossary",
+                        )?));
+                    }
                     "-o" | "--output" => {
                         output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
                     }
                     _ => return Err(format!("unknown document generate option '{option}'")),
                 }
             }
-            let result =
-                run_document_generate(&path, locale, strict, strict_rendering, output.as_deref());
+            let result = run_document_generate(
+                &path,
+                locale,
+                strict,
+                strict_rendering,
+                glossary.as_deref(),
+                output.as_deref(),
+            );
             if output.is_none()
                 && result.0.get("result").and_then(Value::as_str) == Some("generated")
                 && let Some(content) = result.0.get("content").and_then(Value::as_str)
             {
+                // The envelope (and any `warnings`, e.g. FSL-DOC-LABEL-UNKNOWN)
+                // never reaches stdout in this no-`-o` bypass, since stdout must
+                // stay the raw document; surface warnings on stderr instead of
+                // silently dropping them.
+                if let Some(warnings) = result.0.get("warnings").and_then(Value::as_array) {
+                    for warning in warnings {
+                        eprintln!("warning: {warning}");
+                    }
+                }
                 print!("{content}");
                 std::process::exit(result.1);
             }
@@ -1801,10 +1824,19 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                 args.next()
                     .ok_or_else(|| "fslc document check requires an artifact path".to_owned())?,
             );
-            if let Some(option) = args.next() {
-                return Err(format!("unknown document check option '{option}'"));
+            let mut glossary = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--glossary" => {
+                        glossary = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--glossary",
+                        )?));
+                    }
+                    _ => return Err(format!("unknown document check option '{option}'")),
+                }
             }
-            Ok(run_document_check(&path, &artifact))
+            Ok(run_document_check(&path, &artifact, glossary.as_deref()))
         }
         _ => Err(format!("unknown document subcommand '{subcommand}'")),
     }
@@ -1877,11 +1909,73 @@ fn default_document_output(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(format!("{stem}{suffix}"))
 }
 
+/// Diagnostic code for a glossary file that fails to load, parse, or self-
+/// validate (issue #330) — everything except a duplicate label target,
+/// which the issue's own diagnostics table gives its own code.
+fn document_glossary_error(message: &str) -> Value {
+    let mut output = error_output("document", message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!("FSL-DOC-GLOSSARY-INVALID"));
+    output
+}
+
+fn document_glossary_issue_error(issues: &[fsl_tools::GlossaryIssue]) -> Value {
+    let message = issues
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ");
+    if issues
+        .iter()
+        .any(|issue| matches!(issue, fsl_tools::GlossaryIssue::DuplicateTarget(_)))
+    {
+        let mut output = error_output("document", &message);
+        output
+            .as_object_mut()
+            .expect("document error envelope")
+            .insert("code".to_owned(), json!("FSL-DOC-LABEL-CONFLICT"));
+        output
+    } else {
+        document_glossary_error(&message)
+    }
+}
+
+/// Load, parse, and validate a `--glossary` sidecar (issue #330) against the
+/// locale it will be rendered under. `None` when no `--glossary` was given.
+/// Shared by `generate` and `check`: both re-render with whatever glossary
+/// (or lack of one) applies, so both need the identical loading rule.
+fn load_glossary(
+    path: Option<&Path>,
+    expected_locale: fsl_tools::Locale,
+) -> Result<Option<(fsl_tools::Glossary, String)>, Value> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+    let digest = approval::sha256_bytes(&bytes);
+    let text = String::from_utf8(bytes)
+        .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
+    let glossary = fsl_tools::parse_glossary(&text)
+        .map_err(|issues| document_glossary_issue_error(&issues))?;
+    if glossary.locale != expected_locale {
+        return Err(document_glossary_error(&format!(
+            "glossary locale '{}' does not match the document locale '{}'",
+            glossary.locale.as_str(),
+            expected_locale.as_str()
+        )));
+    }
+    Ok(Some((glossary, digest)))
+}
+
+#[allow(clippy::too_many_lines)]
 fn run_document_generate(
     path: &Path,
     locale: fsl_tools::Locale,
     strict: bool,
     strict_rendering: bool,
+    glossary_path: Option<&Path>,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
     let (source, claims) = match load_document_claims(path) {
@@ -1891,6 +1985,10 @@ fn run_document_generate(
     if let Some(error) = document_diagnostics_error(&claims, strict) {
         return (error, 2);
     }
+    let loaded_glossary = match load_glossary(glossary_path, locale) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
     let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
@@ -1901,11 +1999,44 @@ fn run_document_generate(
         Ok(model) => model,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    let rendered =
-        match fsl_tools::render_requirements_document(&claims, &kernel, &model, &source, locale) {
-            Ok(rendered) => rendered,
-            Err(error) => return (error_output("document", &error), 2),
-        };
+    let mut label_warnings = Vec::new();
+    if let Some((glossary, _)) = &loaded_glossary {
+        let unknown = fsl_tools::unknown_targets(glossary, &model);
+        if !unknown.is_empty() {
+            if strict {
+                let message = format!(
+                    "{} glossary target(s) do not exist: {}",
+                    unknown.len(),
+                    unknown
+                        .iter()
+                        .map(|target| target.target.clone())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                let mut output = error_output("document", &message);
+                output
+                    .as_object_mut()
+                    .expect("document error envelope")
+                    .insert("code".to_owned(), json!("FSL-DOC-LABEL-UNKNOWN"));
+                return (output, 2);
+            }
+            label_warnings = unknown;
+        }
+    }
+    let applied_glossary = loaded_glossary
+        .as_ref()
+        .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
+    let rendered = match fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        &source,
+        locale,
+        applied_glossary.as_ref(),
+    ) {
+        Ok(rendered) => rendered,
+        Err(error) => return (error_output("document", &error), 2),
+    };
     if strict_rendering && rendered.formula_fallback_count > 0 {
         let mut output = error_output(
             "document",
@@ -1956,6 +2087,31 @@ fn run_document_generate(
         "provenance".to_owned(),
         json!({"completeness": claims.provenance.completeness}),
     );
+    if let Some((_, digest)) = &loaded_glossary {
+        output.insert(
+            "glossary".to_owned(),
+            json!({
+                "digest": digest,
+                "labels": loaded_glossary.as_ref().map_or(0, |(glossary, _)| glossary.labels.len()),
+            }),
+        );
+    }
+    if !label_warnings.is_empty() {
+        output.insert(
+            "warnings".to_owned(),
+            json!(
+                label_warnings
+                    .iter()
+                    .map(|target| json!({
+                        "kind": "label_unknown",
+                        "code": "FSL-DOC-LABEL-UNKNOWN",
+                        "target": target.target,
+                        "detail": target.detail,
+                    }))
+                    .collect::<Vec<_>>()
+            ),
+        );
+    }
     if output_path.is_none() {
         output.insert("content".to_owned(), json!(rendered.markdown));
     }
@@ -2010,7 +2166,11 @@ fn document_schema_error(message: &str) -> Value {
 /// between `artifact` (a possibly hand-edited `fslc document generate`
 /// output) and a fresh re-projection + re-render of `spec_path`, under the
 /// locale and source label the artifact's own frontmatter recorded.
-fn run_document_check(spec_path: &Path, artifact: &Path) -> (Value, i32) {
+fn run_document_check(
+    spec_path: &Path,
+    artifact: &Path,
+    glossary_path: Option<&Path>,
+) -> (Value, i32) {
     let artifact_text = match std::fs::read_to_string(artifact) {
         Ok(text) => text,
         Err(error) => return (error_output("io", &error.to_string()), 2),
@@ -2060,11 +2220,24 @@ fn run_document_check(spec_path: &Path, artifact: &Path) -> (Value, i32) {
         Ok(model) => model,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    let rendered =
-        match fsl_tools::render_requirements_document(&claims, &kernel, &model, &source, locale) {
-            Ok(rendered) => rendered,
-            Err(error) => return (error_output("document", &error), 2),
-        };
+    let loaded_glossary = match load_glossary(glossary_path, locale) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let applied_glossary = loaded_glossary
+        .as_ref()
+        .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
+    let rendered = match fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        &source,
+        locale,
+        applied_glossary.as_ref(),
+    ) {
+        Ok(rendered) => rendered,
+        Err(error) => return (error_output("document", &error), 2),
+    };
 
     let report =
         match fsl_tools::check_requirements_document(&artifact_text, &claims, &rendered.markdown) {

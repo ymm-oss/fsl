@@ -72,6 +72,27 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   stronger survivor claim from returning (issue #338).
 
 ### Added
+- Added a presentation-only glossary sidecar to `fslc document generate`/`check`
+  (issue #330): `--glossary glossary.json` (schema `fslc.document-glossary.v1`)
+  maps a target string (`action:NAME`/`state:NAME`/`enum:Type.Member`, validated
+  against the checked `KernelModel`, not RCIR's own claim vocabulary) to a display
+  label. A label can only ever change identifier *display* — an action's own claim
+  heading, and a new "Glossary" reference section listing every accepted label —
+  never modality, negation, or conditional structure; v1 does not substitute a
+  label inside rendered expression/condition text. A duplicate label target is
+  always `FSL-DOC-LABEL-CONFLICT` (detected via a hand-written `serde` `Visitor`
+  that preserves every JSON object entry including duplicates, since ordinary
+  deserialization into a map silently collapses a repeated key to its last
+  occurrence before the code could ever see the conflict); an unresolvable target
+  is `FSL-DOC-LABEL-UNKNOWN` (warning by default, error under `--strict`). The
+  glossary is threaded only into rendering, never into RCIR projection, so
+  `claim_set_digest`/`spec_digest` are provably unaffected by a glossary edit
+  while `artifact_digest` changes; a new frontmatter key, `glossary_digest`,
+  lets `fslc document check --glossary glossary.json` detect a glossary that
+  differs from generation time as its own drift reason
+  (`glossary_changed`/`FSL-DOC-GLOSSARY-CHANGED`), gating per-claim-body and
+  residue comparison the same way a changed renderer already does. See
+  `docs/DESIGN-document-glossary.md`.
 - Added an explicit RCIR coverage registry and a no-silent-omission gate (issue
   #328). `fsl_tools::RCIR_TARGET_KIND_REGISTRY` names every semantic-target kind
   the RCIR v1 projector (#325) can classify (`action`, four `property:*` kinds,

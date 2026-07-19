@@ -1581,7 +1581,7 @@
           {
             "path": ["document", "generate"],
             "prog": "fslc document generate",
-            "help": "usage: fslc document generate [-h] [--view {requirements}] [--lang {ja,en}] [--strict] [--strict-rendering] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --view {requirements}\n                        v1 supports only requirements; reserved for\n                        business/design (#334)\n  --lang {ja,en}        controlled-language locale (default: ja)\n  --strict              fail if an authored target is unattributed or\n                        unsupported (FSL-DOC-UNTAGGED-TARGET /\n                        FSL-DOC-UNSUPPORTED-TARGET)\n  --strict-rendering    fail if an expression falls back to canonical FSL\n                        text (FSL-DOC-FORMULA-FALLBACK)\n  -o, --output OUTPUT\n",
+            "help": "usage: fslc document generate [-h] [--view {requirements}] [--lang {ja,en}] [--strict] [--strict-rendering] [--glossary GLOSSARY] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --view {requirements}\n                        v1 supports only requirements; reserved for\n                        business/design (#334)\n  --lang {ja,en}        controlled-language locale (default: ja)\n  --strict              fail if an authored target is unattributed or\n                        unsupported (FSL-DOC-UNTAGGED-TARGET /\n                        FSL-DOC-UNSUPPORTED-TARGET), or a glossary target\n                        does not exist (FSL-DOC-LABEL-UNKNOWN)\n  --strict-rendering    fail if an expression falls back to canonical FSL\n                        text (FSL-DOC-FORMULA-FALLBACK)\n  --glossary GLOSSARY   presentation-only display-label sidecar\n                        (fslc.document-glossary.v1); a duplicate target is\n                        always an error (FSL-DOC-LABEL-CONFLICT)\n  -o, --output OUTPUT\n",
             "actions": [
               {"dest":"help","required":false,"flags":["-h","--help"],"nargs":0,"action":"store"},
               {"dest":"file","required":true,"positional":true,"action":"store"},
@@ -1589,6 +1589,7 @@
               {"dest":"lang","required":false,"flags":["--lang"],"choices":["ja","en"],"default":"ja","action":"store"},
               {"dest":"strict","required":false,"flags":["--strict"],"nargs":0,"default":false,"action":"store_true"},
               {"dest":"strict_rendering","required":false,"flags":["--strict-rendering"],"nargs":0,"default":false,"action":"store_true"},
+              {"dest":"glossary","required":false,"flags":["--glossary"],"action":"store"},
               {"dest":"output","required":false,"flags":["-o","--output"],"action":"store"}
             ],
             "commands": []
@@ -1608,11 +1609,12 @@
           {
             "path": ["document", "check"],
             "prog": "fslc document check",
-            "help": "usage: fslc document check [-h] file document\n\npositional arguments:\n  file      the FSL spec the document was generated from\n  document  the generated Markdown artifact (from 'fslc document generate')\n\noptions:\n  -h, --help  show this help message and exit\n\nStructural drift check only: no natural language is interpreted. Reads the\nlocale and source label back from the artifact's own frontmatter, re-projects\nand re-renders the spec, and compares claim/slot marker structure and\nclaim-block digests. Exit codes: 0 document_conformant, 1 document_drifted,\n2 parse/type/semantics/schema/I/O error, 3 internal error.\n",
+            "help": "usage: fslc document check [-h] [--glossary GLOSSARY] file document\n\npositional arguments:\n  file      the FSL spec the document was generated from\n  document  the generated Markdown artifact (from 'fslc document generate')\n\noptions:\n  -h, --help            show this help message and exit\n  --glossary GLOSSARY   the same glossary sidecar 'generate' was given, if\n                        any; a mismatch (missing, extra, or different\n                        content) is reported as glossary_changed\n                        (FSL-DOC-GLOSSARY-CHANGED), not a hard error\n\nStructural drift check only: no natural language is interpreted. Reads the\nlocale and source label back from the artifact's own frontmatter, re-projects\nand re-renders the spec, and compares claim/slot marker structure and\nclaim-block digests. Exit codes: 0 document_conformant, 1 document_drifted,\n2 parse/type/semantics/schema/I/O error, 3 internal error.\n",
             "actions": [
               {"dest":"help","required":false,"flags":["-h","--help"],"nargs":0,"action":"store"},
               {"dest":"file","required":true,"positional":true,"action":"store"},
-              {"dest":"document","required":true,"positional":true,"action":"store"}
+              {"dest":"document","required":true,"positional":true,"action":"store"},
+              {"dest":"glossary","required":false,"flags":["--glossary"],"action":"store"}
             ],
             "commands": []
           }

@@ -56,9 +56,15 @@ fn render(fixture: &Fixture, locale: Locale) -> (RequirementClaimSet, RenderedDo
     let resolver = fsl_core::FsResolver::new(&fixture.root);
     let kernel = fsl_core::parse_kernel_source(&fixture.source, &resolver).expect("parse");
     let model = fsl_core::build_model(kernel.clone()).expect("build model");
-    let doc =
-        fsl_tools::render_requirements_document(&claims, &kernel, &model, &fixture.source, locale)
-            .expect("render paired RCIR");
+    let doc = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        &fixture.source,
+        locale,
+        None,
+    )
+    .expect("render paired RCIR");
     (claims, doc)
 }
 
@@ -89,6 +95,7 @@ fn renderer_rejects_rcir_paired_with_another_valid_model() {
         &model,
         &claims_source.source,
         Locale::En,
+        None,
     )
     .expect_err("mismatched Public Kernel must fail closed");
     assert!(!error.is_empty());
@@ -114,6 +121,7 @@ fn renderer_rejects_an_unresolved_semantic_target() {
         &model,
         &fixture.source,
         Locale::En,
+        None,
     )
     .expect_err("unresolved target must fail closed");
     assert!(error.contains("does not match the paired"));
@@ -144,6 +152,7 @@ fn renderer_rejects_a_subject_mapped_to_another_valid_target() {
         &model,
         &fixture.source,
         Locale::En,
+        None,
     )
     .expect_err("mismatched RCIR role mapping must fail closed");
     assert!(error.contains("does not match the paired"));
@@ -165,9 +174,15 @@ fn renderer_rejects_a_different_trace_payload_with_the_same_id() {
     let source = fixture
         .source
         .replacen("    accept(0)", "    decline(0)", 1);
-    let error =
-        fsl_tools::render_requirements_document(&claims, &kernel, &model, &source, Locale::En)
-            .expect_err("mismatched trace payload must fail closed");
+    let error = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        &source,
+        Locale::En,
+        None,
+    )
+    .expect_err("mismatched trace payload must fail closed");
     assert!(error.contains("does not match the paired"));
 }
 
@@ -189,9 +204,15 @@ fn renderer_rejects_a_different_trace_title_with_the_same_payload() {
         "a different normative title",
         1,
     );
-    let error =
-        fsl_tools::render_requirements_document(&claims, &kernel, &model, &source, Locale::En)
-            .expect_err("mismatched trace title must fail closed");
+    let error = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        &source,
+        Locale::En,
+        None,
+    )
+    .expect_err("mismatched trace title must fail closed");
     assert!(error.contains("does not match the paired"));
 }
 
@@ -221,6 +242,7 @@ fn renderer_rejects_a_state_rule_reclassified_as_a_deadline() {
         &model,
         &fixture.source,
         Locale::En,
+        None,
     )
     .expect_err("mismatched claim kind must fail closed");
     assert!(error.contains("does not match the paired"));
@@ -266,6 +288,7 @@ fn renderer_rejects_a_claim_moved_to_another_requirement() {
         &model,
         &fixture.source,
         Locale::En,
+        None,
     )
     .expect_err("mismatched requirement attribution must fail closed");
     assert!(error.contains("does not match the paired"));
@@ -312,6 +335,7 @@ fn renderer_rejects_changes_to_every_source_derived_rcir_section() {
             &model,
             &fixture.source,
             Locale::En,
+            None,
         )
         .expect_err("changed source-derived RCIR section must fail closed");
         assert!(error.contains("does not match the paired"));

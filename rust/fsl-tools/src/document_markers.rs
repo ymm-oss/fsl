@@ -18,13 +18,13 @@ use crate::document_render::Locale;
 /// Versions the *artifact format* (frontmatter key set + marker grammar) —
 /// distinct from `RCIR_SCHEMA_VERSION`, which versions the claims JSON, not
 /// the Markdown envelope around it.
-pub const DOCUMENT_SCHEMA: &str = "fsl-requirements-document-v1";
+pub const DOCUMENT_SCHEMA: &str = "fsl-requirements-document-v2";
 pub const DOCUMENT_RENDERER: &str = "fslc-document-renderer";
 /// Bumped by hand whenever a template string or section skeleton changes.
 /// Deliberately independent of the crate version: keying this to
 /// `CARGO_PKG_VERSION` would mark every previously generated document
 /// drifted on every unrelated `fslc` release, not only when a template did.
-pub const DOCUMENT_RENDERER_VERSION: &str = "1.0.0";
+pub const DOCUMENT_RENDERER_VERSION: &str = "1.1.0";
 pub const NORMATIVE_SCOPE: &str = "generated-claim-blocks-only";
 
 /// The closed set of editable slot names `fslc document generate` emits and
@@ -52,6 +52,10 @@ pub struct Frontmatter {
     pub normative_scope: String,
     pub spec_digest: String,
     pub claim_set_digest: String,
+    /// A plain (non-framed) `sha256:`-prefixed digest of the exact
+    /// glossary sidecar file bytes (issue #330) used to generate this
+    /// document, present only when a glossary was applied.
+    pub glossary_digest: Option<String>,
 }
 
 #[derive(Debug)]
@@ -130,6 +134,7 @@ pub fn render_frontmatter(
     locale: Locale,
     spec_digest: &str,
     claim_set_digest: &str,
+    glossary_digest: Option<&str>,
 ) -> String {
     let mut lines = vec![
         FRONTMATTER_DELIMITER.to_owned(),
@@ -145,6 +150,9 @@ pub fn render_frontmatter(
     lines.push(format!("normative_scope: {NORMATIVE_SCOPE}"));
     lines.push(format!("spec_digest: {spec_digest}"));
     lines.push(format!("claim_set_digest: {claim_set_digest}"));
+    if let Some(glossary_digest) = glossary_digest {
+        lines.push(format!("glossary_digest: {glossary_digest}"));
+    }
     lines.push(FRONTMATTER_DELIMITER.to_owned());
     lines.join("\n")
 }
@@ -202,6 +210,7 @@ pub(crate) fn parse_frontmatter(text: &str) -> Result<(Frontmatter, usize), Mark
             .ok_or(MarkerIssue::MissingFrontmatterKey(key))
     };
     let source = raw.get("source").cloned();
+    let glossary_digest = raw.get("glossary_digest").cloned();
     let mut known: std::collections::BTreeSet<&str> = [
         "fsl_document_schema",
         "view",
@@ -212,6 +221,7 @@ pub(crate) fn parse_frontmatter(text: &str) -> Result<(Frontmatter, usize), Mark
         "normative_scope",
         "spec_digest",
         "claim_set_digest",
+        "glossary_digest",
     ]
     .into_iter()
     .collect();
@@ -230,6 +240,7 @@ pub(crate) fn parse_frontmatter(text: &str) -> Result<(Frontmatter, usize), Mark
         normative_scope: required("normative_scope")?,
         spec_digest: required("spec_digest")?,
         claim_set_digest: required("claim_set_digest")?,
+        glossary_digest,
     };
     Ok((frontmatter, consumed_bytes))
 }

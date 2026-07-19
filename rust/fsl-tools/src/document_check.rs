@@ -117,6 +117,10 @@ pub fn check_requirements_document(
 
     let mut reasons = Vec::new();
 
+    let (fresh_frontmatter, fresh_consumed) =
+        parse_frontmatter(fresh_markdown).expect("this build's own render always has frontmatter");
+    debug_assert_eq!(fresh_frontmatter.schema, DOCUMENT_SCHEMA);
+
     let renderer_changed = frontmatter.renderer != DOCUMENT_RENDERER
         || frontmatter.renderer_version != DOCUMENT_RENDERER_VERSION;
     if renderer_changed {
@@ -134,6 +138,30 @@ pub fn check_requirements_document(
     if frontmatter.claim_set_digest != fresh_claims.spec.claim_set_digest {
         reasons.push(reason("claim_set_digest_mismatch", "FSL-DOC-SPEC-DRIFT"));
     }
+    // The fresh side's own `glossary_digest` reflects whatever glossary the
+    // caller supplied to `check` (or none) when it re-rendered
+    // `fresh_markdown` — no separate parameter is needed here to compare
+    // "what check was given" against "what generate recorded".
+    let glossary_changed = frontmatter.glossary_digest != fresh_frontmatter.glossary_digest;
+    if glossary_changed {
+        let detail = match (
+            &frontmatter.glossary_digest,
+            &fresh_frontmatter.glossary_digest,
+        ) {
+            (Some(_), None) => "generated_with_glossary",
+            (None, Some(_)) => "generated_without_glossary",
+            _ => "glossary_digest_mismatch",
+        };
+        let mut drift = reason("glossary_changed", "FSL-DOC-GLOSSARY-CHANGED");
+        drift.detail = Some(detail.to_owned());
+        reasons.push(drift);
+    }
+    // A changed renderer or glossary means the rendered *text* legitimately
+    // differs for a reason unrelated to a hand-edit; skip per-claim-body and
+    // residue text comparison in either case rather than burying the one
+    // meaningful reason under a flood of `claim_changed`/`edit_outside_slot`
+    // noise. Structural checks (below) stay renderer/glossary-independent.
+    let skip_text = renderer_changed || glossary_changed;
 
     let artifact_body = artifact_text.get(consumed..).unwrap_or("");
     let artifact_segments = match parse_body(artifact_body) {
@@ -143,25 +171,12 @@ pub fn check_requirements_document(
             return Ok(DocumentCheckReport { reasons });
         }
     };
-    let (fresh_frontmatter, fresh_consumed) =
-        parse_frontmatter(fresh_markdown).expect("this build's own render always has frontmatter");
-    debug_assert_eq!(fresh_frontmatter.schema, DOCUMENT_SCHEMA);
     let fresh_segments = parse_body(fresh_markdown.get(fresh_consumed..).unwrap_or(""))
         .expect("this build's own render always has well-formed markers");
 
-    check_claims(
-        &artifact_segments,
-        &fresh_segments,
-        renderer_changed,
-        &mut reasons,
-    );
+    check_claims(&artifact_segments, &fresh_segments, skip_text, &mut reasons);
     check_slots(&artifact_segments, &mut reasons);
-    check_residue(
-        &artifact_segments,
-        &fresh_segments,
-        renderer_changed,
-        &mut reasons,
-    );
+    check_residue(&artifact_segments, &fresh_segments, skip_text, &mut reasons);
 
     Ok(DocumentCheckReport { reasons })
 }
@@ -187,7 +202,7 @@ fn claim_segments(segments: &[Segment]) -> Vec<(&str, &str, &str)> {
 fn check_claims(
     artifact_segments: &[Segment],
     fresh_segments: &[Segment],
-    renderer_changed: bool,
+    skip_text: bool,
     reasons: &mut Vec<DriftReason>,
 ) {
     let artifact_claims = claim_segments(artifact_segments);
@@ -227,7 +242,7 @@ fn check_claims(
         }
     }
 
-    if renderer_changed {
+    if skip_text {
         return;
     }
     let fresh_bodies: BTreeMap<&str, &str> = fresh_claims
@@ -287,10 +302,10 @@ fn check_slots(artifact_segments: &[Segment], reasons: &mut Vec<DriftReason>) {
 fn check_residue(
     artifact_segments: &[Segment],
     fresh_segments: &[Segment],
-    renderer_changed: bool,
+    skip_text: bool,
     reasons: &mut Vec<DriftReason>,
 ) {
-    if renderer_changed || artifact_segments.len() != fresh_segments.len() {
+    if skip_text || artifact_segments.len() != fresh_segments.len() {
         return;
     }
     let aligned = artifact_segments
