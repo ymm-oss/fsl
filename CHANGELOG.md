@@ -6,6 +6,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- Native induction lemma handling now proves each `--lemma` candidate without original user
+  properties, then uses and recommends only the first independently proved candidate excluding each
+  successive CTI (#336).
 - Explicit domain-effect `success_event`, `failure_event`, and `timeout_event`
   roles now override event-name heuristics, ambiguous cross-role assignments
   fail closed, and completion, retry eligibility, Monitor/BFS execution, and
