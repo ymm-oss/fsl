@@ -688,6 +688,55 @@ fn run_observe(extra: &[&str]) -> (Value, i32) {
     run_cli(&args)
 }
 
+fn generated_evidence_paths(directory: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let mut evidence = Vec::new();
+    let mut lifecycle = Vec::new();
+    for entry in std::fs::read_dir(directory).expect("read generated artifacts") {
+        let path = entry.expect("artifact entry").path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&source) else {
+            continue;
+        };
+        match value["schema_version"].as_str() {
+            Some("fsl-causal-evidence.v0") => evidence.push(path),
+            Some("fsl-causal-evidence-lifecycle.v0") => lifecycle.push(path),
+            _ => {}
+        }
+    }
+    evidence.sort();
+    lifecycle.sort();
+    (evidence, lifecycle)
+}
+
+fn analyze_with_generated_evidence(
+    model: &Path,
+    evidence: &[PathBuf],
+    lifecycle: &[PathBuf],
+) -> (Value, i32) {
+    let mut args = vec![
+        "causal".to_owned(),
+        "analyze".to_owned(),
+        model.to_str().expect("utf-8 model path").to_owned(),
+        "--projection".to_owned(),
+        "causal_evidence_graph".to_owned(),
+    ];
+    for path in evidence {
+        args.push("--evidence".to_owned());
+        args.push(path.to_str().expect("utf-8 evidence path").to_owned());
+    }
+    for path in lifecycle {
+        args.push("--lifecycle".to_owned());
+        args.push(path.to_str().expect("utf-8 lifecycle path").to_owned());
+    }
+    let arguments: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_cli(&arguments)
+}
+
 #[test]
 fn observe_expectations_pass_and_violated_golden() {
     let (output, status) = run_observe(&[]);
@@ -916,23 +965,58 @@ fn observe_expectations_rejects_tampered_mapping() {
 
 #[test]
 fn observe_expectations_rejects_short_observation_window() {
-    // period is 1 day; claim C_Guardrails_AlertQuality has lag 14..45.
-    // The observation should still succeed (window check is at the evidence
-    // consumption layer, not the replay layer), but the generated artifact
-    // must be excludable by the evidence overlay's window check.
-    let (output, status) = run_observe(&[]);
+    let scratch = tempfile_dir();
+    let out = scratch.join("short.causal.json");
+    let lifecycle_out = scratch.join("short.lifecycle.json");
+    let (output, status) = run_cli(&[
+        "causal",
+        "observe-expectations",
+        INCIDENT,
+        "--from-log",
+        OBS_LOG,
+        "--mapping",
+        OBS_MAPPING,
+        "--scope",
+        OBS_SCOPE,
+        "--period-start",
+        "2026-01-01",
+        "--period-end",
+        "2026-01-02",
+        "--out",
+        out.to_str().expect("utf-8"),
+        "--lifecycle-out",
+        lifecycle_out.to_str().expect("utf-8"),
+    ]);
     assert_eq!(status, 0, "{output}");
-    // The observation itself succeeds — short window is an evidence-plane
-    // applicability exclusion, not a replay abort.
     assert_eq!(output["result"], "causal_expectations_observed");
+
+    let (evidence, lifecycle) = generated_evidence_paths(&scratch);
+    assert!(!evidence.is_empty(), "observation must generate evidence");
+    let (analyzed, status) =
+        analyze_with_generated_evidence(&repository_root().join(INCIDENT), &evidence, &lifecycle);
+    assert_eq!(status, 0, "{analyzed}");
+    let finding = analyzed["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .find(|finding| finding["finding_type"] == "evidence_window_shorter_than_lag")
+        .expect("short observation window must be excluded at consumption");
+    assert_eq!(finding["witness"]["window"], 1);
 }
 
 #[test]
 fn observe_expectations_claim_version_change_does_not_auto_update_support() {
-    // Change claim version in the model to 2; observe with the same log.
-    // The observation generates artifacts pinning version 2.
-    // When consumed by analyze, old version-1 evidence is excluded.
     let scratch = tempfile_dir();
+    let out = scratch.join("version-one.causal.json");
+    let lifecycle_out = scratch.join("version-one.lifecycle.json");
+    let (observed, observed_status) = run_observe(&[
+        "--out",
+        out.to_str().expect("utf-8"),
+        "--lifecycle-out",
+        lifecycle_out.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(observed_status, 0, "{observed}");
+
     std::fs::copy(
         repository_root().join("examples/causal/incident_system.fsl"),
         scratch.join("incident_system.fsl"),
@@ -946,27 +1030,29 @@ fn observe_expectations_claim_version_change_does_not_auto_update_support() {
         );
     let model_path = scratch.join("model.fsl");
     std::fs::write(&model_path, source).expect("write model");
-    let (output, status) = run_cli(&[
-        "causal",
-        "observe-expectations",
-        model_path.to_str().expect("utf-8"),
-        "--from-log",
-        OBS_LOG,
-        "--mapping",
-        OBS_MAPPING,
-        "--scope",
-        OBS_SCOPE,
-        "--period-start",
-        "2026-01-01",
-        "--period-end",
-        "2026-03-31",
-    ]);
+
+    let (evidence, lifecycle) = generated_evidence_paths(&scratch);
+    assert!(!evidence.is_empty(), "observation must generate evidence");
+    let (output, status) = analyze_with_generated_evidence(&model_path, &evidence, &lifecycle);
     assert_eq!(status, 0, "{output}");
-    // Claims still at not_run/untested — observation never touches them.
-    for claim in output["claims"].as_array().expect("claims") {
-        assert_eq!(claim["formal_assurance"], "not_run");
-        assert_eq!(claim["causal_support"], "untested");
-    }
+    let mismatch = output["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .find(|finding| {
+            finding["finding_type"] == "evidence_claim_version_mismatch"
+                && finding["witness"]["current_version"] == 2
+        })
+        .expect("version-one evidence must not apply to version two claim");
+    assert_eq!(mismatch["witness"]["pinned_version"], 1);
+    let claim = output["claims"]
+        .as_array()
+        .expect("claims")
+        .iter()
+        .find(|claim| claim["id"] == "claim:C_Guardrails_AlertQuality")
+        .expect("changed claim");
+    assert_eq!(claim["formal_assurance"], "not_run");
+    assert_eq!(claim["causal_support"], "unsupported_by_current_evidence");
 }
 
 // ── ledger (issue #364) ────────────────────────────────────────────

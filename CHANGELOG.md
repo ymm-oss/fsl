@@ -154,8 +154,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   paths with truncation metadata) and a `causal-review` profile with 15
   structural/temporal findings, all `formal_status: "not_a_violation"` with
   `do_not_assume`. `causal diff` compares stable claim IDs and content
-  versions with `support_transition: "not_available"` until #322's evidence
-  exists. No output path attaches `proved`/`verified` to a causal claim and
+  versions, flags missing version bumps, retired-claim reactivation, and
+  retired-hypothesis re-proposals, with `support_transition: "not_available"`
+  until #322's evidence exists. Evidence/plan scope comparison treats a
+  dimension present on only one side as `unassessable`, never universal. No
+  output path attaches `proved`/`verified` to a causal claim and
   there is deliberately no `causal verify`; `fsl-runtime`, `fsl-solver*`,
   `fsl-verifier`, Public Kernel v1, and the frozen Python reference are
   untouched. Ships `schemas/fslc/causal/` (check/graph/findings/diff v0),

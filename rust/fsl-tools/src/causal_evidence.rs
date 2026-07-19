@@ -616,7 +616,14 @@ pub(crate) fn compare_scope(
     if claim_scope.is_empty() || other_scope.is_empty() {
         return ScopeApplication::Unassessable;
     }
-    let mut composed = ScopeApplication::Subsumes;
+    let mut composed = if other_scope
+        .keys()
+        .any(|dimension| !claim_scope.contains_key(dimension))
+    {
+        ScopeApplication::Unassessable
+    } else {
+        ScopeApplication::Subsumes
+    };
     for (dimension, claim_token) in claim_scope {
         let Some(tokens) = other_scope.get(dimension) else {
             composed = ScopeApplication::Unassessable;
@@ -1492,6 +1499,24 @@ mod aggregation_tests {
         exact.lifecycle_status = LifecycleStatus::Active;
         let overlay = overlay_for(vec![exact], None);
         assert_eq!(overlay.support["C_SupportHabit"], "supported");
+    }
+
+    #[test]
+    fn scope_dimension_present_on_only_one_side_is_unassessable() {
+        let source = VALID_MODEL.replace(
+            "  default_scope { population all_users }",
+            "  scope environment {\n    token production\n  }\n  default_scope { population all_users }",
+        );
+        let (model, _) = build(&source).expect("model");
+        let claim = &model.claims["C_SupportHabit"];
+        let other_scope = BTreeMap::from([
+            ("population".to_owned(), vec!["all_users".to_owned()]),
+            ("environment".to_owned(), vec!["production".to_owned()]),
+        ]);
+        assert_eq!(
+            compare_scope(&model, claim, &other_scope),
+            ScopeApplication::Unassessable
+        );
     }
 
     #[test]

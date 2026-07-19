@@ -61,7 +61,10 @@
             "claim_added",
             "claim_removed",
             "claim_content_changed",
+            "content_changed_without_version_bump",
             "claim_lifecycle_changed",
+            "retired_claim_reactivated",
+            "retired_hypothesis_reproposed",
             "variable_added",
             "variable_removed",
             "variable_changed",
@@ -92,6 +95,13 @@
           "items": {
             "type": "string"
           }
+        },
+        "retired_claims": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
         },
         "before_status": {
           "enum": [

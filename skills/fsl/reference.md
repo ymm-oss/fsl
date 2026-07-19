@@ -1758,7 +1758,9 @@ positive-lag cycles are warnings (`causal_unacknowledged_feedback`); zero-lag
 cycles are errors. `measurement_cadence_too_coarse` fires exactly when
 `cadence > persists.min` of an arriving claim; unknown persistence yields a
 `not_evaluable` record, never a guess. `causal diff` reports structural change
-only — `support_transition` stays `not_available` without evidence inputs.
+only — `support_transition` stays `not_available` without evidence inputs. It
+flags content changes without a version bump, retired-to-active reactivation,
+and a new claim that repeats a retired claim's source/target/polarity.
 
 External evidence: `fslc causal analyze model.fsl --evidence artifact.json
 [--lifecycle chain.json] [--as-of YYYY-MM-DD] --projection
@@ -1773,7 +1775,8 @@ deterministic per-claim `causal_support`
 unsupported_by_current_evidence`) counts only artifacts pinning the current
 claim version with `subsumes` scope, declared freshness, an `active`
 lifecycle, and an observation window ≥ the claim's minimum lag; one source
-lineage is one vote. Staleness needs an explicit `--as-of` — never the wall
+lineage is one vote. A scope dimension present on only one side is
+`unassessable`, never universal. Staleness needs an explicit `--as-of` — never the wall
 clock. **Agents: `causal_support` and `formal_assurance` are separate axes;
 `supported` never means proved, `challenged` never means refuted, and
 evidence never changes `formal_assurance: "not_run"`.**

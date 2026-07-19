@@ -2503,7 +2503,10 @@ feedback SCC を経由するペアの最大値は上界)。
 持続は推測せず `not_evaluable` として報告)、`unknown_lag_blocks_timeline`。
 `fslc causal diff` は 2 つのモデルファイルを安定 claim ID と content version で
 比較します。`support_transition` は外部 evidence が存在するまで
-`not_available` のままです。
+`not_available` のままです。version 対象フィールドを同じ version のまま変更すると
+`content_changed_without_version_bump`、terminal な retired claim を active に
+戻すと `retired_claim_reactivated`、新しい claim が retired claim と同じ source、
+target、polarity を繰り返すと `retired_hypothesis_reproposed` を報告します。
 
 外部 evidence はバージョン付き artifact で取り込みます
 (`fsl-causal-evidence.v0`: 閉じた `design` 語彙
@@ -2524,6 +2527,8 @@ freshness が宣言され、lifecycle が `active` で、観測 window が claim
 lag 以上の artifact だけが票になります。同一 source lineage は 1 票に
 collapse されます(lineage 内の矛盾は `inconclusive`)。staleness は明示的な
 `--as-of` 日付に対してだけ判定され、実行環境の時計は決して使いません。
+claim 側または artifact 側の片方だけに存在する scope dimension は
+`unassessable` であり、欠落を universal として扱いません。
 **`causal_support` と `formal_assurance` は直交する 2 軸**です: evidence は
 `formal_assurance: "not_run"` を決して変えず、どの support 値も verdict では
 ありません。

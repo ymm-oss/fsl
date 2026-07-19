@@ -40,9 +40,9 @@ pub use ai::{check_ai, replay_ai};
 pub use analysis::{analyze_model, build_tsg, review_finding, structural_review_findings};
 pub use analysis_export::export_analysis_graph;
 pub use causal::{
-    Binding, BindingKind, CausalError, CausalModel, CausalWarning, Claim, ClaimStatus, Clock,
-    Feedback, ImportedSpec, Interval, Lag, Persistence, Polarity, ScopeVocabulary, Variable,
-    VariableRole, active_adjacency, build_causal_model, reachable_from,
+    Binding, BindingKind, CausalError, CausalModel, CausalWarning, Claim as CausalClaim,
+    ClaimStatus, Clock, Feedback, ImportedSpec, Interval, Lag, Persistence, Polarity,
+    ScopeVocabulary, Variable, VariableRole, active_adjacency, build_causal_model, reachable_from,
     strongly_connected_components,
 };
 pub use causal_analysis::{

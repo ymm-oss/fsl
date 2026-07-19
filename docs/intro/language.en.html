@@ -798,14 +798,20 @@ fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|actio
 fslc html      &lt;file.fsl&gt; [--depth K] [-o report.html] # self-contained review report (§15)
 fslc ledger    &lt;file.fsl&gt; [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
 fslc document generate &lt;file.fsl&gt; [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
-               [--glossary glossary.json] [-o requirements.md]
-                                                  # deterministic ja/en requirements document from the Requirement Claim IR (§13)
+               [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
+                                                  # deterministic ja/en requirements document from the Requirement Claim IR (§13);
+                                                  # --evidence overlays a per-requirement assurance class from saved
+                                                  # external evidence (repeatable; same envelope shape as `fslc ledger --evidence`);
+                                                  # --approval displays a verified requirements_document approval record
+                                                  # (repeatable; fails closed if it does not match the current rendering)
 fslc document claims &lt;file.fsl&gt; [--view requirements] [-o requirements.claims.json]
                                                   # emit the Requirement Claim IR (RCIR) claim set as JSON (§13)
-fslc document check &lt;file.fsl&gt; &lt;document.md&gt; [--glossary glossary.json]
+fslc document check &lt;file.fsl&gt; &lt;document.md&gt; [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]...
                                                   # structural drift check: generated claim blocks vs a
                                                   # fresh re-render; never interprets prose (§13)
-fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios --artifact &lt;reviewed&gt; --approver &lt;name&gt; [--signing-key private.pem] [-o record.json]
+fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios|requirements_document --artifact &lt;reviewed&gt; --approver &lt;name&gt;
+               [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
+                                                  # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
 fslc approval check  &lt;file.fsl&gt; --record &lt;record.json&gt; [--trust-key public.pem] # approved | drifted | signature-invalid
 fslc approval diff   &lt;file.fsl&gt; --record &lt;record.json&gt; [--depth K] [--trust-key public.pem]
 fslc typestate &lt;file.fsl&gt; [--ts]                 # decide applicability of state machine → ghost type (§16)
@@ -1558,6 +1564,14 @@ spec in <code>DESIGN-dialects.md</code>. There is a single kernel (§1–12 of t
 and the per-layer dialects are a front-end that expands into the AST. The layers
 are connected by refinement: <strong>business ⊒ requirements ⊒ design ⊒ implementation
 (testgen/replay)</strong>.</p>
+<p><code>fslc document generate</code>/<code>claims</code> (see <code>docs/DESIGN-document-requirement-claim-ir.md</code>)
+projects only the <code>spec</code> and <code>requirements</code> dialects into its Requirement Claim
+IR today. Every other dialect described in this section — <code>business</code>,
+<code>dbsystem</code>, <code>ai_component</code>, and the rest — is rejected fail-closed with a coded
+error (<code>FSL-DOC-DIALECT-UNSUPPORTED</code>) rather than producing a partial document.
+<code>--view business</code>/<code>--view design</code> are reserved, not yet implemented, flag
+values — see <code>docs/DESIGN-document-dialect-adapters.md</code> for the activation
+contract a future cross-layer view must satisfy.</p>
 <h3 id="131-declaration-tags-traceability-common-to-all-layers">13.1 Declaration tags (traceability common to all layers)</h3>
 <p>The canonical relationship syntax is a typed annotation immediately before the
 linked declaration. Violations, CTIs, coverage diagnoses, and scenarios then
@@ -2511,7 +2525,11 @@ exceeds an arriving claim's minimum persistence; unknown persistence is
 reported as <code>not_evaluable</code>, never guessed), and <code>unknown_lag_blocks_timeline</code>.
 <code>fslc causal diff</code> compares two model files by stable claim ID and content
 version; its <code>support_transition</code> stays <code>not_available</code> until external
-evidence exists.</p>
+evidence exists. It reports <code>content_changed_without_version_bump</code> when
+version-relevant fields move under the same version,
+<code>retired_claim_reactivated</code> when a terminal retired claim returns to active,
+and <code>retired_hypothesis_reproposed</code> when a new claim repeats a retired claim's
+source, target, and polarity.</p>
 <p>External evidence enters through versioned artifacts
 (<code>fsl-causal-evidence.v0</code>: closed <code>design</code> vocabulary
 <code>randomized_experiment | quasi_experiment | observational | expert_judgment</code>,
@@ -2530,7 +2548,9 @@ that pin the current claim version, whose scope <code>subsumes</code> the claim 
 with declared freshness, an <code>active</code> lifecycle, and an observation window at
 least the claim's minimum lag count; one source lineage collapses to one vote
 (contradictions inside a lineage are <code>inconclusive</code>). Staleness is judged only
-against an explicit <code>--as-of</code> date — never the wall clock. <strong><code>causal_support</code>
+against an explicit <code>--as-of</code> date — never the wall clock. A scope dimension
+present on only the claim or artifact side is <code>unassessable</code>; absence is never
+treated as universal. <strong><code>causal_support</code>
 and <code>formal_assurance</code> are orthogonal axes</strong>: evidence never changes
 <code>formal_assurance: "not_run"</code>, and no support value is a verdict.</p>
 <p>A human can carve an observable contract out of a claim as an <code>expectation</code>

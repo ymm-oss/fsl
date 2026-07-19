@@ -1184,6 +1184,60 @@ mod tests {
     }
 
     #[test]
+    fn diff_rejects_content_change_without_version_bump() {
+        let (before, _) = build(VALID_MODEL).expect("valid model");
+        let changed = VALID_MODEL.replace(
+            "polarity positive\n    lag 30..90",
+            "polarity negative\n    lag 30..90",
+        );
+        let (after, _) = build(&changed).expect("valid model");
+        let diff = causal_diff_json(&before, &after);
+        let finding = diff["changes"]
+            .as_array()
+            .expect("changes")
+            .iter()
+            .find(|change| change["kind"] == "content_changed_without_version_bump")
+            .expect("missing-version-bump finding");
+        assert_eq!(finding["id"], "claim:C_HabitRetention");
+        assert_eq!(finding["before_version"], 1);
+        assert_eq!(finding["after_version"], 1);
+        assert_eq!(finding["fields"], json!(["polarity"]));
+    }
+
+    #[test]
+    fn diff_rejects_retired_reactivation_and_detects_reproposal() {
+        let retired_source = VALID_MODEL.replace(
+            "claim C_HabitRetention habit -> retention {\n    version 1\n    status active",
+            "claim C_HabitRetention habit -> retention {\n    version 1\n    status retired",
+        );
+        let (retired, _) = build(&retired_source).expect("retired model");
+        let (active, _) = build(VALID_MODEL).expect("active model");
+        let reactivation = causal_diff_json(&retired, &active);
+        assert!(
+            reactivation["changes"]
+                .as_array()
+                .expect("changes")
+                .iter()
+                .any(|change| change["kind"] == "retired_claim_reactivated")
+        );
+
+        let reproposed_source = retired_source.replace(
+            "  evidence E1 from \"evidence/e1.causal.json\"",
+            "  claim C_HabitRetentionV2 habit -> retention {\n    version 1\n    status active\n    polarity positive\n    lag 30..90\n    persists 90..365\n    basis hypothesis\n  }\n  evidence E1 from \"evidence/e1.causal.json\"",
+        );
+        let (reproposed, _) = build(&reproposed_source).expect("reproposed model");
+        let diff = causal_diff_json(&retired, &reproposed);
+        let finding = diff["changes"]
+            .as_array()
+            .expect("changes")
+            .iter()
+            .find(|change| change["kind"] == "retired_hypothesis_reproposed")
+            .expect("reproposal finding");
+        assert_eq!(finding["id"], "claim:C_HabitRetentionV2");
+        assert_eq!(finding["retired_claims"], json!(["claim:C_HabitRetention"]));
+    }
+
+    #[test]
     fn indicator_classes_use_thirds_of_outcome_earliest() {
         let (model, _) = build(VALID_MODEL).expect("valid model");
         let classes = indicator_classes(&model);

@@ -781,14 +781,20 @@ fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|actio
 fslc html      &lt;file.fsl&gt; [--depth K] [-o report.html] # self-contained review report (§15)
 fslc ledger    &lt;file.fsl&gt; [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
 fslc document generate &lt;file.fsl&gt; [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
-               [--glossary glossary.json] [-o requirements.md]
-                                                  # deterministic ja/en requirements document from the Requirement Claim IR (§13)
+               [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
+                                                  # deterministic ja/en requirements document from the Requirement Claim IR (§13);
+                                                  # --evidence overlays a per-requirement assurance class from saved
+                                                  # external evidence (repeatable; same envelope shape as `fslc ledger --evidence`);
+                                                  # --approval displays a verified requirements_document approval record
+                                                  # (repeatable; fails closed if it does not match the current rendering)
 fslc document claims &lt;file.fsl&gt; [--view requirements] [-o requirements.claims.json]
                                                   # emit the Requirement Claim IR (RCIR) claim set as JSON (§13)
-fslc document check &lt;file.fsl&gt; &lt;document.md&gt; [--glossary glossary.json]
+fslc document check &lt;file.fsl&gt; &lt;document.md&gt; [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]...
                                                   # structural drift check: generated claim blocks vs a
                                                   # fresh re-render; never interprets prose (§13)
-fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios --artifact &lt;reviewed&gt; --approver &lt;name&gt; [--signing-key private.pem] [-o record.json]
+fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios|requirements_document --artifact &lt;reviewed&gt; --approver &lt;name&gt;
+               [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
+                                                  # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
 fslc approval check  &lt;file.fsl&gt; --record &lt;record.json&gt; [--trust-key public.pem] # approved | drifted | signature-invalid
 fslc approval diff   &lt;file.fsl&gt; --record &lt;record.json&gt; [--depth K] [--trust-key public.pem]
 fslc typestate &lt;file.fsl&gt; [--ts]                 # decide applicability of state machine → ghost type (§16)
@@ -1528,6 +1534,14 @@ spec 状態変数をカバーし、<code>action external(params) -&gt; spec_acti
 カーネルは 1 つ(本書の §1–12)で、レイヤーごとのダイアレクトは AST へ展開される
 フロントエンドです。レイヤーは refinement で接続されます: <strong>business ⊒
 requirements ⊒ design ⊒ implementation (testgen/replay)</strong>。</p>
+<p><code>fslc document generate</code>/<code>claims</code>(<code>docs/DESIGN-document-requirement-claim-ir.md</code>
+参照)は、現時点では <code>spec</code> と <code>requirements</code> の2ダイアレクトのみを
+Requirement Claim IR へ投影する。本節で説明する他のダイアレクト(<code>business</code>、
+<code>dbsystem</code>、<code>ai_component</code> など)は、部分的な文書を生成するのではなく、コード化
+されたエラー(<code>FSL-DOC-DIALECT-UNSUPPORTED</code>)で fail-closed に拒否される。
+<code>--view business</code>/<code>--view design</code> は予約済みの未実装フラグ値である —
+将来のcross-layer viewが満たすべき有効化契約については
+<code>docs/DESIGN-document-dialect-adapters.md</code> を参照。</p>
 <h3 id="131">13.1 宣言タグ(全レイヤー共通のトレーサビリティ)</h3>
 <p>正準な関係構文は、リンクされる宣言の直前に置く型付きアノテーションです。違反、
 CTI、カバレッジ診断、シナリオは <code>requirement: {id, text}</code> を運びます:</p>
@@ -2473,7 +2487,10 @@ feedback SCC を経由するペアの最大値は上界)。
 持続は推測せず <code>not_evaluable</code> として報告)、<code>unknown_lag_blocks_timeline</code>。
 <code>fslc causal diff</code> は 2 つのモデルファイルを安定 claim ID と content version で
 比較します。<code>support_transition</code> は外部 evidence が存在するまで
-<code>not_available</code> のままです。</p>
+<code>not_available</code> のままです。version 対象フィールドを同じ version のまま変更すると
+<code>content_changed_without_version_bump</code>、terminal な retired claim を active に
+戻すと <code>retired_claim_reactivated</code>、新しい claim が retired claim と同じ source、
+target、polarity を繰り返すと <code>retired_hypothesis_reproposed</code> を報告します。</p>
 <p>外部 evidence はバージョン付き artifact で取り込みます
 (<code>fsl-causal-evidence.v0</code>: 閉じた <code>design</code> 語彙
 <code>randomized_experiment | quasi_experiment | observational | expert_judgment</code>、
@@ -2493,6 +2510,8 @@ freshness が宣言され、lifecycle が <code>active</code> で、観測 windo
 lag 以上の artifact だけが票になります。同一 source lineage は 1 票に
 collapse されます(lineage 内の矛盾は <code>inconclusive</code>)。staleness は明示的な
 <code>--as-of</code> 日付に対してだけ判定され、実行環境の時計は決して使いません。
+claim 側または artifact 側の片方だけに存在する scope dimension は
+<code>unassessable</code> であり、欠落を universal として扱いません。
 <strong><code>causal_support</code> と <code>formal_assurance</code> は直交する 2 軸</strong>です: evidence は
 <code>formal_assurance: "not_run"</code> を決して変えず、どの support 値も verdict では
 ありません。</p>

@@ -456,7 +456,29 @@ pub fn causal_diff_json(before: &CausalModel, after: &CausalModel) -> Value {
     }
     for (id, claim) in &after.claims {
         match before.claims.get(id) {
-            None => change("claim_added", format!("claim:{id}"), Map::new()),
+            None => {
+                change("claim_added", format!("claim:{id}"), Map::new());
+                let retired_claims: Vec<String> = before
+                    .claims
+                    .values()
+                    .filter(|previous| {
+                        previous.status == ClaimStatus::Retired
+                            && previous.source == claim.source
+                            && previous.target == claim.target
+                            && previous.polarity == claim.polarity
+                    })
+                    .map(|previous| format!("claim:{}", previous.id))
+                    .collect();
+                if !retired_claims.is_empty() {
+                    let mut extra = Map::new();
+                    extra.insert("retired_claims".to_owned(), json!(retired_claims));
+                    change(
+                        "retired_hypothesis_reproposed",
+                        format!("claim:{id}"),
+                        extra,
+                    );
+                }
+            }
             Some(previous) => {
                 let mut fields = Vec::new();
                 if previous.source != claim.source {
@@ -485,7 +507,12 @@ pub fn causal_diff_json(before: &CausalModel, after: &CausalModel) -> Value {
                     extra.insert("before_version".to_owned(), json!(previous.version));
                     extra.insert("after_version".to_owned(), json!(claim.version));
                     extra.insert("fields".to_owned(), json!(fields));
-                    change("claim_content_changed", format!("claim:{id}"), extra);
+                    let kind = if !fields.is_empty() && previous.version == claim.version {
+                        "content_changed_without_version_bump"
+                    } else {
+                        "claim_content_changed"
+                    };
+                    change(kind, format!("claim:{id}"), extra);
                 }
                 if previous.status != claim.status || previous.superseded_by != claim.superseded_by
                 {
@@ -495,7 +522,14 @@ pub fn causal_diff_json(before: &CausalModel, after: &CausalModel) -> Value {
                         json!(status_str(previous.status)),
                     );
                     extra.insert("after_status".to_owned(), json!(status_str(claim.status)));
-                    change("claim_lifecycle_changed", format!("claim:{id}"), extra);
+                    let kind = if previous.status == ClaimStatus::Retired
+                        && claim.status == ClaimStatus::Active
+                    {
+                        "retired_claim_reactivated"
+                    } else {
+                        "claim_lifecycle_changed"
+                    };
+                    change(kind, format!("claim:{id}"), extra);
                 }
                 if previous.evidence != claim.evidence {
                     let added: Vec<&String> = claim

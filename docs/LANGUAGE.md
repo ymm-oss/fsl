@@ -2543,7 +2543,11 @@ exceeds an arriving claim's minimum persistence; unknown persistence is
 reported as `not_evaluable`, never guessed), and `unknown_lag_blocks_timeline`.
 `fslc causal diff` compares two model files by stable claim ID and content
 version; its `support_transition` stays `not_available` until external
-evidence exists.
+evidence exists. It reports `content_changed_without_version_bump` when
+version-relevant fields move under the same version,
+`retired_claim_reactivated` when a terminal retired claim returns to active,
+and `retired_hypothesis_reproposed` when a new claim repeats a retired claim's
+source, target, and polarity.
 
 External evidence enters through versioned artifacts
 (`fsl-causal-evidence.v0`: closed `design` vocabulary
@@ -2563,7 +2567,9 @@ that pin the current claim version, whose scope `subsumes` the claim scope,
 with declared freshness, an `active` lifecycle, and an observation window at
 least the claim's minimum lag count; one source lineage collapses to one vote
 (contradictions inside a lineage are `inconclusive`). Staleness is judged only
-against an explicit `--as-of` date — never the wall clock. **`causal_support`
+against an explicit `--as-of` date — never the wall clock. A scope dimension
+present on only the claim or artifact side is `unassessable`; absence is never
+treated as universal. **`causal_support`
 and `formal_assurance` are orthogonal axes**: evidence never changes
 `formal_assurance: "not_run"`, and no support value is a verdict.
 
