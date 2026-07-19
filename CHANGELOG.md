@@ -80,6 +80,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   stronger survivor claim from returning (issue #338).
 
 ### Added
+- Accepted `docs/DESIGN-causal.md`: the design contract for the review-only
+  `causal` profile (typed causal hypothesis graphs). It fixes the three-plane
+  architecture (causal specification / formal expectation / external
+  evidence), surface syntax and field contracts, scope-token declaration and
+  three-valued containment, claim content-versioning and retired lifecycle,
+  discrete time semantics (lag/persists Minkowski sums, fail-closed clock
+  mappings), delayed-feedback polarity classification, the typed CausalModel
+  IR boundary, and versioned JSON contracts under `schemas/fslc/causal/`.
+  Causal claims never receive `proved`/`verified`; Public Kernel v1, runtime,
+  solver, and verifier are unchanged by design (issue #320).
 - Added an explicit dialect boundary to `fslc document` (issue #334). RCIR v1
   supports exactly `spec` and `requirements` (`fsl_tools::
   RCIR_SUPPORTED_DIALECTS`); every other dialect (`business`, `governance`,

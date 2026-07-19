@@ -16,6 +16,7 @@
 | [`intro/db.ja.html`](intro/db.ja.html) / [`intro/db.en.html`](intro/db.en.html) / [`DESIGN-db.md`](DESIGN-db.md) | **fsl-db DB / multi-environment compatibility dialect**. Site pages and implementation design for `dbsystem`, schema/artifact/environment compatibility, rollout windows, and DB-specific findings |
 | [`intro/ai.ja.html`](intro/ai.ja.html) / [`intro/ai.en.html`](intro/ai.en.html) / [`DESIGN-ai-hard.md`](DESIGN-ai-hard.md) | **fsl-ai hard-contract and agent-structure dialect**. Site pages and implementation design for `ai_component`, recursive `agent` composition, tool authority, human approval guards, runtime replay, and AI-specific findings |
 | [`DESIGN-stochastic.md`](DESIGN-stochastic.md) | **fsl-stochastic external evidence layer**. Implemented semantics for precomputed eval JSONL, Bernoulli/proportion metrics, Wilson intervals, result statuses, and the boundary between statistical support and formal proof |
+| [`DESIGN-causal.md`](DESIGN-causal.md) | **`causal` profile (review-only causal hypothesis graphs)**. Typed CausalModel, scope containment, lag/persists time semantics, delayed-feedback classification, evidence/expectation plane boundaries, and JSON contracts — causal claims never receive `proved`/`verified` |
 | [`DESIGN-v1.md`](DESIGN-v1.md) | Language design document (design principles G1-G5, type-system design decisions, the repair protocol, and the roadmap) |
 
 ## Implementation design by architecture and feature (DESIGN-*)
