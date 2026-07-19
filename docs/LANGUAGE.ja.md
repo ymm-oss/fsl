@@ -208,6 +208,9 @@ domain <Name> {
     correlation_id PaymentCaptureRequested.payment_request_id
     handles PaymentCaptureRequested
     emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    success_event PaymentCaptured
+    failure_event PaymentFailed
+    timeout_event PaymentCaptureTimedOut
     retry { max_attempts 3 }
     timeout after 10m emits PaymentCaptureTimedOut
     compensation { emits PaymentFailed }
@@ -243,6 +246,16 @@ lowering します。domain の enum メンバーは lowering 時に名前空間
 aggregate 内で解決され、そのコマンドの `requires` 節の連言と、各拒否条件の否定に
 なります。未知のシンボル、aggregate をまたぐコマンド、型の不一致、未対応の呼び出し
 は、元の domain 式の位置で報告されます。
+
+effect は `success_event`、`failure_event`、`timeout_event` により、完了イベントへ
+明示的な outcome role を割り当てられます。これらの宣言が分類の正規契約であり、
+イベント名に `fail`、`cancel`、`timeout` が含まれていても、それぞれ `Succeeded`、
+`Failed`、`TimedOut` へ lowering されます。同じイベントを複数の明示 role に
+割り当てると parse error になります。明示 role のない outcome には、v0 の名前
+ヒューリスティクスが次の優先順で残ります: `timeout`/`timedout` -> `TimedOut`、
+`fail` -> `Failed`、`cancel` -> `Cancelled`、それ以外 -> `Succeeded`。完了 action、
+`Failed | TimedOut` の retry guard、success-sticky transition property は、すべて
+この単一の lowering 済み status を利用します。
 
 domain 宣言では、有限のバリアントに `enum Name { Member, ... }` を、有界の数値範囲
 に `type Name = lo..hi` を使います。レガシーな書き方 `type Name = A | B` は現行の

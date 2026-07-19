@@ -248,6 +248,9 @@ fsl-domain findings を報告します):</p>
     correlation_id PaymentCaptureRequested.payment_request_id
     handles PaymentCaptureRequested
     emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    success_event PaymentCaptured
+    failure_event PaymentFailed
+    timeout_event PaymentCaptureTimedOut
     retry { max_attempts 3 }
     timeout after 10m emits PaymentCaptureTimedOut
     compensation { emits PaymentFailed }
@@ -282,6 +285,15 @@ lowering します。domain の enum メンバーは lowering 時に名前空間
 aggregate 内で解決され、そのコマンドの <code>requires</code> 節の連言と、各拒否条件の否定に
 なります。未知のシンボル、aggregate をまたぐコマンド、型の不一致、未対応の呼び出し
 は、元の domain 式の位置で報告されます。</p>
+<p>effect は <code>success_event</code>、<code>failure_event</code>、<code>timeout_event</code> により、完了イベントへ
+明示的な outcome role を割り当てられます。これらの宣言が分類の正規契約であり、
+イベント名に <code>fail</code>、<code>cancel</code>、<code>timeout</code> が含まれていても、それぞれ <code>Succeeded</code>、
+<code>Failed</code>、<code>TimedOut</code> へ lowering されます。同じイベントを複数の明示 role に
+割り当てると parse error になります。明示 role のない outcome には、v0 の名前
+ヒューリスティクスが次の優先順で残ります: <code>timeout</code>/<code>timedout</code> -&gt; <code>TimedOut</code>、
+<code>fail</code> -&gt; <code>Failed</code>、<code>cancel</code> -&gt; <code>Cancelled</code>、それ以外 -&gt; <code>Succeeded</code>。完了 action、
+<code>Failed | TimedOut</code> の retry guard、success-sticky transition property は、すべて
+この単一の lowering 済み status を利用します。</p>
 <p>domain 宣言では、有限のバリアントに <code>enum Name { Member, ... }</code> を、有界の数値範囲
 に <code>type Name = lo..hi</code> を使います。レガシーな書き方 <code>type Name = A | B</code> は現行の
 2.x エディションでは引き続き受理され、宣言全体に対して安定した

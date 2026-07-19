@@ -8,6 +8,11 @@ use fsl_syntax::{
     SyntaxExprKind,
 };
 
+use crate::{
+    CoreError,
+    domain_lowering::{effect_outcome_member, validate_effect_outcome_roles},
+};
+
 fn synthetic_num(value: i64, loc: DomainLoc) -> SyntaxExpr {
     let position = SourcePos {
         offset: 0,
@@ -479,24 +484,6 @@ fn evolve_assignments(
     output
 }
 
-fn outcome_status(context: &Context<'_>, effect: &DomainEffect, event: &str) -> String {
-    let lowered = event.to_ascii_lowercase();
-    let member = if effect.timeout_event.as_deref() == Some(event)
-        || lowered.contains("timeout")
-        || lowered.contains("timedout")
-    {
-        "TimedOut"
-    } else if effect.failure_event.as_deref() == Some(event) || lowered.contains("fail") {
-        "Failed"
-    } else if lowered.contains("cancel") {
-        "Cancelled"
-    } else {
-        "Succeeded"
-    };
-    let _ = context;
-    Context::status_member(effect, member)
-}
-
 fn render_effect_actions(context: &Context<'_>, effect: &DomainEffect) -> Vec<String> {
     let Some(correlation) = Context::correlation_field(effect) else {
         return Vec::new();
@@ -540,7 +527,7 @@ fn render_effect_actions(context: &Context<'_>, effect: &DomainEffect) -> Vec<St
         );
         lines.push(format!(
             "  {status}[{correlation}] = {}",
-            outcome_status(context, effect, event_name)
+            Context::status_member(effect, effect_outcome_member(effect, event_name))
         ));
         let mut environment = aggregate
             .state
@@ -737,9 +724,13 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
 }
 
 /// Render the full executable kernel source for a Functional-DDD document.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns [`CoreError`] when an effect event has conflicting explicit outcome roles.
 #[allow(clippy::too_many_lines)]
-pub fn domain_kernel_source(domain: &DomainSpec) -> String {
+pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
+    validate_effect_outcome_roles(domain)?;
     let context = Context::new(domain);
     let mut lines = vec![format!(
         "spec {} \"domain: generated from fsl-domain/fsl-effect\" {{",
@@ -1032,5 +1023,5 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> String {
     lines.push("}".to_owned());
     let mut source = lines.join("\n");
     source.push('\n');
-    source
+    Ok(source)
 }

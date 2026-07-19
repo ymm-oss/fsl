@@ -123,8 +123,11 @@ fn actions(domain: &DomainSpec) -> Vec<String> {
 }
 
 /// Build a specialized domain check envelope around the shared kernel result.
-#[must_use]
-pub fn check_domain(domain: &DomainSpec, kernel: &Value) -> Value {
+///
+/// # Errors
+///
+/// Returns an error when textual Kernel rendering rejects the domain AST.
+pub fn check_domain(domain: &DomainSpec, kernel: &Value) -> Result<Value, fsl_core::CoreError> {
     let assumptions = assumptions(domain);
     let findings = domain
         .effects
@@ -135,9 +138,13 @@ pub fn check_domain(domain: &DomainSpec, kernel: &Value) -> Value {
         .iter()
         .any(|finding| finding["severity"] == "error");
     if hard {
-        json!({"result":"violated","dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"formal_result":"not_run","findings":findings,"assumptions":assumptions,"kernel_source":domain_kernel_source(domain)})
+        Ok(
+            json!({"result":"violated","dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"formal_result":"not_run","findings":findings,"assumptions":assumptions,"kernel_source":domain_kernel_source(domain)?}),
+        )
     } else {
-        json!({"result":"verified_under_assumptions","dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"spec":domain.name,"formal_result":"verified","kernel":kernel,"findings":findings,"assumptions":assumptions,"generated_actions":actions(domain)})
+        Ok(
+            json!({"result":"verified_under_assumptions","dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"spec":domain.name,"formal_result":"verified","kernel":kernel,"findings":findings,"assumptions":assumptions,"generated_actions":actions(domain)}),
+        )
     }
 }
 
@@ -154,8 +161,11 @@ pub fn analyze_domain(domain: &DomainSpec) -> Value {
 }
 
 /// Render a compact executable kernel catalog used by expand and review tools.
-#[must_use]
-pub fn domain_kernel_source(domain: &DomainSpec) -> String {
+///
+/// # Errors
+///
+/// Returns an error when the domain AST has conflicting explicit outcome roles.
+pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, fsl_core::CoreError> {
     fsl_core::domain_kernel_source(domain)
 }
 

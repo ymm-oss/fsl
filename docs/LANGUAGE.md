@@ -208,6 +208,9 @@ domain <Name> {
     correlation_id PaymentCaptureRequested.payment_request_id
     handles PaymentCaptureRequested
     emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    success_event PaymentCaptured
+    failure_event PaymentFailed
+    timeout_event PaymentCaptureTimedOut
     retry { max_attempts 3 }
     timeout after 10m emits PaymentCaptureTimedOut
     compensation { emits PaymentFailed }
@@ -244,6 +247,17 @@ aggregate and becomes the conjunction of the command's `requires` clauses and
 the negation of each rejection condition. Unknown symbols, cross-aggregate
 commands, type mismatches, and unsupported calls are reported at the original
 domain expression.
+
+An effect can assign completion events explicit outcome roles with
+`success_event`, `failure_event`, and `timeout_event`. These declarations are the
+authoritative classification: they lower to `Succeeded`, `Failed`, and `TimedOut`
+respectively, even when an event name contains `fail`, `cancel`, or `timeout`.
+Assigning one event to more than one explicit role is a parse error. An outcome
+without an explicit role retains the v0 name heuristic, in priority order:
+`timeout`/`timedout` -> `TimedOut`, `fail` -> `Failed`, `cancel` -> `Cancelled`,
+and otherwise `Succeeded`. Completion actions, the `Failed | TimedOut` retry
+guard, and the success-sticky transition property all consume that one lowered
+status.
 
 Domain declarations use `enum Name { Member, ... }` for finite variants and
 `type Name = lo..hi` for bounded numeric ranges. The legacy spelling

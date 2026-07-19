@@ -7680,15 +7680,11 @@ fn run_domain_check(
     if status == 2 {
         return apply_domain_edition((kernel, status), path, path, edition);
     }
-    apply_domain_edition(
-        wrap_specialized(fsl_tools::check_domain(
-            &domain,
-            &stable_kernel_projection(kernel),
-        )),
-        path,
-        path,
-        edition,
-    )
+    let result = match fsl_tools::check_domain(&domain, &stable_kernel_projection(kernel)) {
+        Ok(result) => wrap_specialized(result),
+        Err(error) => (semantic_error_output(&error.to_string()), 2),
+    };
+    apply_domain_edition(result, path, path, edition)
 }
 
 fn run_domain_analyze(path: &Path) -> (Value, i32) {
@@ -7703,7 +7699,10 @@ fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
         Ok(domain) => domain,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let source = fsl_tools::domain_kernel_source(&domain);
+    let source = match fsl_tools::domain_kernel_source(&domain) {
+        Ok(source) => source,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
     if let Some(output_path) = output_path
         && let Err(error) = std::fs::write(output_path, &source)
     {

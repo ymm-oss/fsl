@@ -94,7 +94,6 @@ spec Agreement {
   }
   invariant Bound { x <= 2 }
 }
-
 ";
     let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
     let model = build_model(kernel).expect("build model");
@@ -130,6 +129,101 @@ spec Agreement {
             &wrong,
         ))
         .expect("reject different successor")
+    );
+}
+
+#[test]
+fn explicit_effect_success_disables_retry_across_monitor_and_symbolic_semantics() {
+    let source = r"
+domain ExplicitEffectSuccess {
+  type RequestId = 0..0
+  aggregate Request {
+    command Start { id: RequestId }
+    event Requested { id: RequestId }
+    event FailureRecovered { id: RequestId }
+    decide Start { emits Requested }
+    evolve Requested {}
+    evolve FailureRecovered {}
+  }
+  effect Work {
+    async
+    correlation_id Requested.id
+    handles Requested
+    success_event FailureRecovered
+    retry { max_attempts 2 }
+  }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("lower domain");
+    let model = build_model(kernel).expect("build model");
+    assert!(
+        model
+            .transitions
+            .iter()
+            .any(|property| property.name == "Work_SuccessSticky")
+    );
+
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let start = monitor
+        .enabled()
+        .expect("enumerate start")
+        .into_iter()
+        .find(|action| action.action == "request_start")
+        .expect("request start action");
+    monitor.step(&start).expect("start effect");
+
+    let completion = monitor
+        .enabled()
+        .expect("enumerate completion")
+        .into_iter()
+        .find(|action| action.action == "work_complete_failure_recovered")
+        .expect("explicit success completion");
+    let before = monitor.state.clone();
+    let result = monitor.step(&completion).expect("complete effect");
+    assert!(result.violation.is_none());
+    assert!(
+        monitor
+            .enabled()
+            .expect("enumerate after success")
+            .iter()
+            .all(|action| action.action != "work_retry")
+    );
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    assert!(
+        block_on(fsl_verifier::transition_matches_step(
+            &model,
+            &mut solver,
+            &before,
+            &completion.action,
+            &completion.params,
+            &result.state,
+        ))
+        .expect("accept Monitor successor")
+    );
+
+    let mut wrong = result.state;
+    let FslValue::Map(statuses) = wrong.get_mut("work_status").expect("effect status state") else {
+        panic!("effect status must be a map");
+    };
+    statuses.insert(
+        FslValue::Int(0),
+        FslValue::Enum {
+            type_name: "WorkEffectStatus".to_owned(),
+            member: "WorkEffectStatus_Failed".to_owned(),
+        },
+    );
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create rejection solver");
+    assert!(
+        !block_on(fsl_verifier::transition_matches_step(
+            &model,
+            &mut solver,
+            &before,
+            &completion.action,
+            &completion.params,
+            &wrong,
+        ))
+        .expect("reject name-heuristic failure successor")
     );
 }
 

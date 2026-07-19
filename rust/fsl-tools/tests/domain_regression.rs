@@ -24,7 +24,7 @@ domain Example {
     let fsl_syntax::SurfaceDocument::Domain(domain) = document else {
         panic!("expected domain document");
     };
-    let expanded = fsl_tools::domain_kernel_source(&domain);
+    let expanded = fsl_tools::domain_kernel_source(&domain).expect("render domain kernel");
     assert!(expanded.contains("enum Status { Status_New, Status_Done }"));
     assert!(expanded.contains("action item_complete()"));
     assert!(expanded.contains("item_status = Status_Done"));

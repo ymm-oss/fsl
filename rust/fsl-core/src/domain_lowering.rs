@@ -141,6 +141,37 @@ fn attempt_var(effect: &DomainEffect) -> String {
     format!("{}_attempts", lower_name(&effect.name))
 }
 
+pub(crate) fn effect_outcome_member(effect: &DomainEffect, event: &str) -> &'static str {
+    if effect.success_event.as_deref() == Some(event) {
+        return "Succeeded";
+    }
+    if effect.failure_event.as_deref() == Some(event) {
+        return "Failed";
+    }
+    if effect.timeout_event.as_deref() == Some(event) {
+        return "TimedOut";
+    }
+    let lowered = event.to_ascii_lowercase();
+    if lowered.contains("timeout") || lowered.contains("timedout") {
+        "TimedOut"
+    } else if lowered.contains("fail") {
+        "Failed"
+    } else if lowered.contains("cancel") {
+        "Cancelled"
+    } else {
+        "Succeeded"
+    }
+}
+
+pub(crate) fn validate_effect_outcome_roles(domain: &DomainSpec) -> Result<(), CoreError> {
+    for effect in &domain.effects {
+        if let Some(message) = effect.outcome_role_conflict() {
+            return Err(error_at(message, span_at(effect.loc)));
+        }
+    }
+    Ok(())
+}
+
 fn and_all(mut values: Vec<Expr>) -> Expr {
     if values.is_empty() {
         return Expr::Bool(true);
@@ -2006,6 +2037,7 @@ fn field_params(resolver: &Resolver<'_>, fields: &[DomainField]) -> Result<Vec<P
 pub(crate) fn lower_domain_surface(
     domain: &DomainSpec,
 ) -> Result<(SurfaceSpec, OriginRegistry), CoreError> {
+    validate_effect_outcome_roles(domain)?;
     let resolver = Resolver::new(domain);
     resolver.validate_document_expressions()?;
     let mut items = Vec::new();
@@ -2394,23 +2426,6 @@ fn lower_aggregate_actions(
     Ok(())
 }
 
-fn outcome_status(effect: &DomainEffect, event: &str) -> String {
-    let lowered = event.to_ascii_lowercase();
-    let member = if effect.timeout_event.as_deref() == Some(event)
-        || lowered.contains("timeout")
-        || lowered.contains("timedout")
-    {
-        "TimedOut"
-    } else if effect.failure_event.as_deref() == Some(event) || lowered.contains("fail") {
-        "Failed"
-    } else if lowered.contains("cancel") {
-        "Cancelled"
-    } else {
-        "Succeeded"
-    };
-    status_member(effect, member)
-}
-
 #[allow(clippy::too_many_lines)]
 fn lower_effect_actions(
     resolver: &Resolver<'_>,
@@ -2464,7 +2479,10 @@ fn lower_effect_actions(
             );
             action_items.push(ActionItem::Statement(Statement::Assign {
                 target: LValue::Index(status_var(effect), Expr::Var(correlation.clone())),
-                value: Expr::Var(outcome_status(effect, event_name)),
+                value: Expr::Var(status_member(
+                    effect,
+                    effect_outcome_member(effect, event_name),
+                )),
                 span,
             }));
             action_items.extend(resolver.evolve_items(aggregate, event_name, &scope)?);

@@ -402,6 +402,34 @@ impl DomainEffect {
         }
     }
 
+    /// Describe an event assigned to more than one explicit outcome role.
+    #[must_use]
+    pub fn outcome_role_conflict(&self) -> Option<String> {
+        for ((left_role, left_event), (right_role, right_event)) in [
+            (
+                ("success_event", self.success_event.as_deref()),
+                ("failure_event", self.failure_event.as_deref()),
+            ),
+            (
+                ("success_event", self.success_event.as_deref()),
+                ("timeout_event", self.timeout_event.as_deref()),
+            ),
+            (
+                ("failure_event", self.failure_event.as_deref()),
+                ("timeout_event", self.timeout_event.as_deref()),
+            ),
+        ] {
+            if let (Some(left_event), Some(right_event)) = (left_event, right_event)
+                && left_event == right_event
+            {
+                return Some(format!(
+                    "effect outcome event '{left_event}' has multiple explicit roles ({left_role}, {right_role})"
+                ));
+            }
+        }
+        None
+    }
+
     fn python_ast(&self) -> Value {
         json!({
             "$type":"DomainEffect","name":self.name,"async_effect":self.async_effect,
@@ -1101,6 +1129,9 @@ impl DomainParser {
             } else {
                 return Err(self.error("expected effect declaration"));
             }
+        }
+        if let Some(message) = effect.outcome_role_conflict() {
+            return Err(ParseError::new(message, effect.loc.span()));
         }
         for event in [
             effect.success_event.clone(),
