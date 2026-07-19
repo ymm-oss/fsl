@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
+requirements SingletonDomainMutation {
+  process Item {
+    stages Ready, Done
+    initial Ready
+    transition finish Ready -> Done by System
+  }
+}
+verify { instances Item = 1 }
