@@ -176,6 +176,20 @@ fn omits_suggestions_for_a_nonmonotone_cti() {
 }
 
 #[test]
+fn avoids_a_binder_collision_with_a_map_named_k() {
+    let (output, status) = verify(
+        "rust/fslc/tests/fixtures/induction_suggestion_map_named_k.fsl",
+        1,
+    );
+
+    assert_eq!(status, 1, "{output}");
+    assert_eq!(
+        output["suggested_invariants"],
+        serde_json::json!(["forall key: Case { k[key] >= 0 }"])
+    );
+}
+
+#[test]
 fn ranked_leadsto_failures_never_receive_suggestions() {
     let (output, status) = verify(
         "tests/fixtures/rust_port/ranked_leadsto_non_decreasing.fsl",

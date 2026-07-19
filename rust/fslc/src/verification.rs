@@ -397,8 +397,9 @@ fn map_suggestion(
         "<="
     };
     let public_name = display(name);
+    let binder = if public_name == "k" { "key" } else { "k" };
     let expression = format!(
-        "forall k: {} {{ {public_name}[k] {operator} {initial} }}",
+        "forall {binder}: {} {{ {public_name}[{binder}] {operator} {initial} }}",
         display(key_name)
     );
     monotone_suggestion(&public_name, direction, start, *initial, &expression)
