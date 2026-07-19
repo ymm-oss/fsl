@@ -479,9 +479,11 @@ fn parse_migration_options(
                 .to_owned()
         });
     }
-    let mut unique = std::collections::BTreeSet::new();
-    if paths.iter().any(|path| !unique.insert(path.clone())) {
-        return Err("the same migration path cannot be supplied twice".to_owned());
+    if migrate {
+        let mut unique = std::collections::BTreeSet::new();
+        if paths.iter().any(|path| !unique.insert(path.clone())) {
+            return Err("the same migration path cannot be supplied twice".to_owned());
+        }
     }
     Ok(MigrationOptions {
         paths,

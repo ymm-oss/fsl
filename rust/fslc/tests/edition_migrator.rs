@@ -235,7 +235,7 @@ fn builtin_id_policy_reports_each_surface_kind_without_rewriting_ids() {
 }
 
 #[test]
-fn lint_recursively_expands_directories_and_accepts_canonical_control_references() {
+fn lint_deduplicates_recursive_alias_and_repeated_paths() {
     let directory = FixtureDir::new();
     let nested = directory.0.join("nested");
     std::fs::create_dir(&nested).expect("create nested fixture directory");
@@ -267,10 +267,13 @@ verify {
     std::fs::write(&nested_file, business).expect("write nested fixture");
     std::fs::write(nested.join("ignored.txt"), "not FSL").expect("write ignored fixture");
     let aliased_root_file = nested.join("..").join("z.fsl");
+    let root_file_text = root_file.to_str().expect("UTF-8 root path");
 
     let output = run(&[
         "lint",
         directory.0.to_str().expect("UTF-8 directory path"),
+        root_file_text,
+        root_file_text,
         aliased_root_file.to_str().expect("UTF-8 aliased root path"),
         "--edition",
         "next",
@@ -293,6 +296,15 @@ verify {
             nested_file.to_str().expect("UTF-8 nested path"),
             root_file.to_str().expect("UTF-8 root path"),
         ]
+    );
+
+    let migrate = run(&["migrate", root_file_text, root_file_text]);
+    assert_eq!(migrate.status.code(), Some(2));
+    let migrate = json(&migrate);
+    assert_eq!(migrate["kind"], "usage");
+    assert_eq!(
+        migrate["message"],
+        "the same migration path cannot be supplied twice"
     );
 }
 
