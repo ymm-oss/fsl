@@ -430,6 +430,29 @@ impl DomainEffect {
         None
     }
 
+    /// Iterate the events assigned to an explicit outcome role.
+    pub fn explicit_outcome_events(&self) -> impl Iterator<Item = &String> {
+        [
+            self.success_event.as_ref(),
+            self.failure_event.as_ref(),
+            self.timeout_event.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+    }
+
+    /// Return every completion event, including programmatically assigned roles.
+    #[must_use]
+    pub fn outcome_events(&self) -> Vec<&String> {
+        let mut events = self.outcomes.iter().collect::<Vec<_>>();
+        for event in self.explicit_outcome_events() {
+            if !events.contains(&event) {
+                events.push(event);
+            }
+        }
+        events
+    }
+
     fn python_ast(&self) -> Value {
         json!({
             "$type":"DomainEffect","name":self.name,"async_effect":self.async_effect,
@@ -1133,13 +1156,10 @@ impl DomainParser {
         if let Some(message) = effect.outcome_role_conflict() {
             return Err(ParseError::new(message, effect.loc.span()));
         }
-        for event in [
-            effect.success_event.clone(),
-            effect.failure_event.clone(),
-            effect.timeout_event.clone(),
-        ]
-        .into_iter()
-        .flatten()
+        for event in effect
+            .explicit_outcome_events()
+            .cloned()
+            .collect::<Vec<_>>()
         {
             push_unique(&mut effect.outcomes, event);
         }

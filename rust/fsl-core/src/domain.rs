@@ -494,7 +494,7 @@ fn render_effect_actions(context: &Context<'_>, effect: &DomainEffect) -> Vec<St
     let mut lines = Vec::new();
     let status = Context::status_var(effect);
     let attempts = Context::attempt_var(effect);
-    for event_name in &effect.outcomes {
+    for event_name in effect.outcome_events() {
         let Some((aggregate, event)) = context.event(event_name) else {
             continue;
         };

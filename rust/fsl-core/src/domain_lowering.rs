@@ -6,8 +6,8 @@ use fsl_syntax::{
     ActionItem, AggregateKind, Annotations, Binder, DomainAggregate, DomainDecide, DomainEffect,
     DomainField, DomainLoc, DomainSaga, DomainSagaStep, DomainSpec, DomainType,
     DomainTypeSourceForm, Expr, LValue, MetaTag, Param, Pattern, QualifiedName, Span, SpecItem,
-    StateField, Statement, SurfaceSpec, SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxLValue,
-    SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind, TypeExpr,
+    StateField, Statement, SurfaceSpec, SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent,
+    SyntaxLValue, SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind, TypeExpr,
 };
 
 use crate::CoreError;
@@ -167,6 +167,19 @@ pub(crate) fn validate_effect_outcome_roles(domain: &DomainSpec) -> Result<(), C
     for effect in &domain.effects {
         if let Some(message) = effect.outcome_role_conflict() {
             return Err(error_at(message, span_at(effect.loc)));
+        }
+        for event in effect.explicit_outcome_events() {
+            if !domain
+                .aggregates
+                .iter()
+                .flat_map(|aggregate| &aggregate.events)
+                .any(|candidate| candidate.name == *event)
+            {
+                return Err(error_at(
+                    format!("unknown domain event '{event}'"),
+                    span_at(effect.loc),
+                ));
+            }
         }
     }
     Ok(())
@@ -2434,7 +2447,7 @@ fn lower_effect_actions(
 ) -> Result<(), CoreError> {
     for effect in &domain.effects {
         let (correlation, correlation_type) = resolver.correlation(effect)?;
-        for event_name in &effect.outcomes {
+        for event_name in effect.outcome_events() {
             let (aggregate, event) = resolver.event(event_name, effect.loc)?;
             let span = span_at(event.loc);
             let mut scope = resolver.scope_for_aggregate(aggregate)?;
@@ -2450,14 +2463,19 @@ fn lower_effect_actions(
             }
             let mut params = event.fields.clone();
             if !params.iter().any(|field| field.name.text == correlation) {
-                let mut synthetic = event
-                    .fields
-                    .first()
-                    .cloned()
-                    .ok_or_else(|| error_at("cannot synthesize correlation parameter", span))?;
-                synthetic.name.text.clone_from(&correlation);
-                synthetic.type_name = correlation_type.clone();
-                params.insert(0, synthetic);
+                params.insert(
+                    0,
+                    DomainField {
+                        name: SyntaxIdent {
+                            text: correlation.clone(),
+                            span,
+                        },
+                        type_name: correlation_type.clone(),
+                        default: None,
+                        span,
+                        loc: event.loc,
+                    },
+                );
             }
             let current = Expr::Index(
                 Box::new(Expr::Var(status_var(effect))),

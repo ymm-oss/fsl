@@ -643,7 +643,7 @@ domain AmbiguousEffectOutcome {
   type RequestId = 0..0
   aggregate Request {
     event Requested { id: RequestId }
-    event Finished { id: RequestId }
+    event Finished {}
   }
   effect Work {
     async
@@ -697,4 +697,43 @@ domain ProgrammaticConflict {
             .message
             .contains("effect outcome event 'Finished' has multiple explicit roles")
     );
+}
+
+#[test]
+fn programmatic_explicit_effect_role_is_an_outcome_for_both_lowering_paths() {
+    let SurfaceDocument::Domain(mut domain) = parse_surface_document(
+        r"
+domain ProgrammaticRole {
+  type RequestId = 0..0
+  aggregate Request {
+    event Requested { id: RequestId }
+    event Finished {}
+  }
+  effect Work {
+    async
+    correlation_id Requested.id
+    handles Requested
+  }
+}
+",
+    )
+    .expect("parse valid domain") else {
+        panic!("expected domain document");
+    };
+    domain.effects[0].success_event = Some("Finished".to_owned());
+
+    let kernel = lower_domain(&domain).expect("lower programmatic explicit role");
+    assert!(kernel.syntax().items.iter().any(
+        |item| matches!(item, SpecItem::Action { name, .. } if name == "work_complete_finished")
+    ));
+    let source =
+        fsl_core::domain_kernel_source(&domain).expect("render programmatic explicit role");
+    assert!(source.contains("action work_complete_finished("));
+
+    domain.effects[0].success_event = Some("Missing".to_owned());
+    let error = lower_domain(&domain).expect_err("checked lowering must reject unknown role event");
+    assert!(error.message.contains("unknown domain event 'Missing'"));
+    let error = fsl_core::domain_kernel_source(&domain)
+        .expect_err("textual lowering must reject unknown role event");
+    assert!(error.message.contains("unknown domain event 'Missing'"));
 }

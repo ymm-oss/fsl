@@ -7889,7 +7889,7 @@ fn run_domain_testgen(
             format!("{}_attempts", snake_case(&effect.name)),
             format!("effect.{}.attempts", effect.name),
         ));
-        for event in &effect.outcomes {
+        for event in effect.outcome_events() {
             display_names.push((
                 format!(
                     "{}_complete_{}",

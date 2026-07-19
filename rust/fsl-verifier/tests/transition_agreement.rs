@@ -30,6 +30,26 @@ fn monitor_boundary_model() -> fsl_core::KernelModel {
     build_model(kernel).expect("build model")
 }
 
+fn assert_success_is_sticky(
+    model: &fsl_core::KernelModel,
+    succeeded: &BTreeMap<String, FslValue>,
+    violated: &BTreeMap<String, FslValue>,
+) {
+    let sticky = model
+        .transitions
+        .iter()
+        .find(|property| property.name == "Work_SuccessSticky")
+        .expect("success-sticky transition property");
+    for (state, expected) in [(succeeded, true), (violated, false)] {
+        let mut bindings = BTreeMap::new();
+        assert_eq!(
+            fsl_runtime::eval(&sticky.expr, state, &mut bindings, model, Some(succeeded),)
+                .expect("evaluate success-stickiness"),
+            FslValue::Bool(expected)
+        );
+    }
+}
+
 #[test]
 fn collection_and_option_transitions_agree_across_bounded_reachable_states() {
     let fixture =
@@ -156,12 +176,6 @@ domain ExplicitEffectSuccess {
 ";
     let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("lower domain");
     let model = build_model(kernel).expect("build model");
-    assert!(
-        model
-            .transitions
-            .iter()
-            .any(|property| property.name == "Work_SuccessSticky")
-    );
 
     let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
     let start = monitor
@@ -202,7 +216,7 @@ domain ExplicitEffectSuccess {
         .expect("accept Monitor successor")
     );
 
-    let mut wrong = result.state;
+    let mut wrong = result.state.clone();
     let FslValue::Map(statuses) = wrong.get_mut("work_status").expect("effect status state") else {
         panic!("effect status must be a map");
     };
@@ -213,6 +227,7 @@ domain ExplicitEffectSuccess {
             member: "WorkEffectStatus_Failed".to_owned(),
         },
     );
+    assert_success_is_sticky(&model, &result.state, &wrong);
     let mut solver = fsl_solver_z3::Z3Solver::new().expect("create rejection solver");
     assert!(
         !block_on(fsl_verifier::transition_matches_step(
