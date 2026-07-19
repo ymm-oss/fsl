@@ -699,7 +699,21 @@ fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable t
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
 fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
-fslc approval create <file.fsl> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--signing-key private.pem] [-o record.json]
+fslc document generate <file.fsl> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
+               [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
+                                                  # deterministic ja/en requirements document from the Requirement Claim IR (§13);
+                                                  # --evidence overlays a per-requirement assurance class from saved
+                                                  # external evidence (repeatable; same envelope shape as `fslc ledger --evidence`);
+                                                  # --approval displays a verified requirements_document approval record
+                                                  # (repeatable; fails closed if it does not match the current rendering)
+fslc document claims <file.fsl> [--view requirements] [-o requirements.claims.json]
+                                                  # emit the Requirement Claim IR (RCIR) claim set as JSON (§13)
+fslc document check <file.fsl> <document.md> [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]...
+                                                  # structural drift check: generated claim blocks vs a
+                                                  # fresh re-render; never interprets prose (§13)
+fslc approval create <file.fsl> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
+               [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
+                                                  # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
 fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem] # approved | drifted | signature-invalid
 fslc approval diff   <file.fsl> --record <record.json> [--depth K] [--trust-key public.pem]
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
@@ -1491,6 +1505,15 @@ spec 状態変数をカバーし、`action external(params) -> spec_action(exprs
 カーネルは 1 つ(本書の §1–12)で、レイヤーごとのダイアレクトは AST へ展開される
 フロントエンドです。レイヤーは refinement で接続されます: **business ⊒
 requirements ⊒ design ⊒ implementation (testgen/replay)**。
+
+`fslc document generate`/`claims`(`docs/DESIGN-document-requirement-claim-ir.md`
+参照)は、現時点では `spec` と `requirements` の2ダイアレクトのみを
+Requirement Claim IR へ投影する。本節で説明する他のダイアレクト(`business`、
+`dbsystem`、`ai_component` など)は、部分的な文書を生成するのではなく、コード化
+されたエラー(`FSL-DOC-DIALECT-UNSUPPORTED`)で fail-closed に拒否される。
+`--view business`/`--view design` は予約済みの未実装フラグ値である —
+将来のcross-layer viewが満たすべき有効化契約については
+`docs/DESIGN-document-dialect-adapters.md` を参照。
 
 ### 13.1 宣言タグ(全レイヤー共通のトレーサビリティ)
 
