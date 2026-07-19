@@ -6,6 +6,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Changed
+- The requirements-document renderer now reprojects and exactly matches the
+  complete RCIR renderer role sidecar against its checked Kernel/Model/trace
+  and original source inputs, failing closed on any changed spec metadata,
+  claim classification, requirement attribution, trace data, undecided item,
+  analysis bound, coverage entry, or provenance field.
 - The native installer no longer clones the repository into `~/.fsl`. It now
   installs an exact-tag, checksummed CLI/LSP pair under the user data directory,
   atomically activates the complete payload, safely migrates recognized Python
@@ -67,6 +72,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   stronger survivor claim from returning (issue #338).
 
 ### Added
+- Added the controlled-language renderer (issue #326):
+  `fsl_tools::render_requirements_document` compiles an RCIR v1 claim set (issue #325)
+  into deterministic Japanese/English Markdown, using one fixed template per claim kind
+  and a safe-pattern expression recognizer (equality/comparison, `and`/`or`/`not`,
+  `forall`/`exists`, `count`/`sum`/`unique`/`exactlyOne`, `old(...)`, option `is none`/
+  `is some`) that falls back to the canonical FSL text (never a paraphrase failure) for
+  anything outside that whitelist, counted in `formula_fallback_count`. `requires` always
+  reads as an enablement condition, `not`/negation is never dropped, weak fairness is
+  always "a scheduling assumption" and never "immediately", `acceptance`/`forbidden`
+  always carry a non-generalization disclaimer, and a progress/reachability claim never
+  claims established evidence (RCIR v1 carries none). The renderer verifies the embedded
+  Public Kernel and requires every semantic
+  target to resolve exactly once before emitting Markdown, rejecting mismatched models.
+  `fsl_core::expr_text`/
+  `source_expr_text` (the `explain --readable` canonical-text renderer) moved from the
+  `fslc` binary crate into `fsl_core` so `fsl-tools` could reuse it without a
+  second implementation; `fslc` re-exports both names unchanged. CLI wiring is issue
+  #327. See `docs/DESIGN-document-controlled-language-renderer.md`.
 - Added the Requirement Claim IR (RCIR) v1 schema and native projector (issue #325),
   the foundation of the upcoming `fslc document` requirements-document generator.
   `fsl_tools::project_requirement_claims_from_source` compiles a checked `spec` or

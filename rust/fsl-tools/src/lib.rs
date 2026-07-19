@@ -11,6 +11,8 @@ mod db_import;
 mod document;
 mod document_digest;
 mod document_project;
+mod document_render;
+mod document_render_expr;
 mod domain;
 mod domain_codegen;
 mod html;
@@ -37,6 +39,7 @@ pub use document_project::{
     DocumentDialect, DocumentInput, project_requirement_claims,
     project_requirement_claims_from_source,
 };
+pub use document_render::{Locale, RenderedDocument, render_requirements_document};
 pub use domain::{
     analyze_domain, check_domain, domain_adapter_files, domain_kernel_source, domain_scaffold,
     domain_scaffold_metadata,

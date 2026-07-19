@@ -117,8 +117,26 @@ pub fn project_requirement_claims_from_source(
     source_path: Option<&str>,
     resolver_root: &Path,
 ) -> Result<RequirementClaimSet, String> {
+    let (dialect, implements_names, analysis_scope) = projection_context(source)?;
+    let resolver = FsResolver::new(resolver_root);
+    let kernel = parse_kernel_source(source, &resolver).map_err(|error| error.to_string())?;
+    let model = build_model(kernel.clone()).map_err(|error| error.to_string())?;
+    project_requirement_claims(&DocumentInput {
+        kernel: &kernel,
+        model: &model,
+        source,
+        source_path,
+        dialect,
+        implements_names,
+        analysis_scope,
+    })
+}
+
+fn projection_context(
+    source: &str,
+) -> Result<(DocumentDialect, Vec<String>, AnalysisScope), String> {
     let parsed = parse_document(SourceFile::new(source)).map_err(|error| error.to_string())?;
-    let (dialect, implements_names, analysis_scope) = match &parsed.surface {
+    Ok(match &parsed.surface {
         SurfaceDocument::Spec(_) => (DocumentDialect::Spec, Vec::new(), AnalysisScope::default()),
         SurfaceDocument::Requirements(requirements) => {
             let names = requirements
@@ -141,18 +159,6 @@ pub fn project_requirement_claims_from_source(
                 surface_dialect_name(other)
             ));
         }
-    };
-    let resolver = FsResolver::new(resolver_root);
-    let kernel = parse_kernel_source(source, &resolver).map_err(|error| error.to_string())?;
-    let model = build_model(kernel.clone()).map_err(|error| error.to_string())?;
-    project_requirement_claims(&DocumentInput {
-        kernel: &kernel,
-        model: &model,
-        source,
-        source_path,
-        dialect,
-        implements_names,
-        analysis_scope,
     })
 }
 
@@ -569,15 +575,6 @@ fn push_trace_claims(
         TraceCaseKind::Forbidden => ("forbidden", ClaimKind::ForbiddenTrace),
     };
     for case in cases {
-        let position = SourcePos {
-            offset: 0,
-            line: case.line,
-            column: case.column,
-        };
-        let span = Span {
-            start: position,
-            end: position,
-        };
         let target = format!("{prefix}:{}", case.id);
         let claim_id = format!("{target}#{}", claim_kind.as_str());
         let links = case
@@ -587,55 +584,7 @@ fn push_trace_claims(
         let kind_ids = kind_ids_from(&case.annotations);
         let requirement_ids = record_links(&links, &kind_ids, &claim_id, source_path, agg);
 
-        let steps_full: Vec<Value> = case
-            .steps
-            .iter()
-            .map(|step| -> Result<Value, String> {
-                let action = model
-                    .actions
-                    .iter()
-                    .find(|action| action.name == step.name)
-                    .ok_or_else(|| {
-                        format!(
-                            "trace '{}' references unknown action '{}'",
-                            case.id, step.name
-                        )
-                    })?;
-                if action.params.len() != step.args.len() {
-                    return Err(format!(
-                        "trace '{}' action '{}' expects {} arguments but received {}",
-                        case.id,
-                        step.name,
-                        action.params.len(),
-                        step.args.len()
-                    ));
-                }
-                let args = step
-                    .args
-                    .iter()
-                    .zip(&action.params)
-                    .map(|(arg, parameter)| {
-                        let expected = match parameter {
-                            ParamDef::Typed { ty, .. } => ty.clone(),
-                            ParamDef::Range { .. } => TypeRef::Int,
-                        };
-                        public_kernel_expression(
-                            arg,
-                            model,
-                            source_path.unwrap_or(""),
-                            span,
-                            Some(&expected),
-                        )
-                        .map_err(|error| error.to_string())
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(json!({
-                    "action": step.name,
-                    "args": args,
-                    "source": source_ref_lc(source_path, step.line, step.column),
-                }))
-            })
-            .collect::<Result<_, _>>()?;
+        let (steps_full, expectation) = project_trace_case_payload(case, model, source_path)?;
         let steps_core: Vec<Value> = case
             .steps
             .iter()
@@ -646,30 +595,6 @@ fn push_trace_claims(
                 })
             })
             .collect();
-        let expectation = case
-            .expectation
-            .as_ref()
-            .map(|expectation| match expectation {
-                RequirementsTraceExpectation::Expr(expr) => {
-                    public_kernel_expression(
-                        expr,
-                        model,
-                        source_path.unwrap_or(""),
-                        span,
-                        Some(&TypeRef::Bool),
-                    )
-                    .map(|expression| json!({"kind": "expr", "expression": expression}))
-                    .map_err(|error| error.to_string())
-                }
-                RequirementsTraceExpectation::Stage {
-                    entity,
-                    instance,
-                    stage,
-                } => {
-                    Ok(json!({"kind": "stage", "entity": entity, "instance": instance, "stage": stage}))
-                }
-            })
-            .transpose()?;
         let expectation_core = case
             .expectation
             .as_ref()
@@ -741,6 +666,97 @@ fn push_trace_claims(
     Ok(())
 }
 
+pub(crate) fn project_trace_case_payload(
+    case: &RequirementsTraceCase,
+    model: &KernelModel,
+    source_path: Option<&str>,
+) -> Result<(Vec<Value>, Option<Value>), String> {
+    let position = SourcePos {
+        offset: 0,
+        line: case.line,
+        column: case.column,
+    };
+    let span = Span {
+        start: position,
+        end: position,
+    };
+    let steps = case
+        .steps
+        .iter()
+        .map(|step| -> Result<Value, String> {
+            let action = model
+                .actions
+                .iter()
+                .find(|action| action.name == step.name)
+                .ok_or_else(|| {
+                    format!(
+                        "trace '{}' references unknown action '{}'",
+                        case.id, step.name
+                    )
+                })?;
+            if action.params.len() != step.args.len() {
+                return Err(format!(
+                    "trace '{}' action '{}' expects {} arguments but received {}",
+                    case.id,
+                    step.name,
+                    action.params.len(),
+                    step.args.len()
+                ));
+            }
+            let args = step
+                .args
+                .iter()
+                .zip(&action.params)
+                .map(|(arg, parameter)| {
+                    let expected = match parameter {
+                        ParamDef::Typed { ty, .. } => ty.clone(),
+                        ParamDef::Range { .. } => TypeRef::Int,
+                    };
+                    public_kernel_expression(
+                        arg,
+                        model,
+                        source_path.unwrap_or(""),
+                        span,
+                        Some(&expected),
+                    )
+                    .map_err(|error| error.to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(json!({
+                "action": step.name,
+                "args": args,
+                "source": source_ref_lc(source_path, step.line, step.column),
+            }))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let expectation = case
+        .expectation
+        .as_ref()
+        .map(|expectation| match expectation {
+            RequirementsTraceExpectation::Expr(expr) => public_kernel_expression(
+                expr,
+                model,
+                source_path.unwrap_or(""),
+                span,
+                Some(&TypeRef::Bool),
+            )
+            .map(|expression| json!({"kind": "expr", "expression": expression}))
+            .map_err(|error| error.to_string()),
+            RequirementsTraceExpectation::Stage {
+                entity,
+                instance,
+                stage,
+            } => Ok(json!({
+                "kind": "stage",
+                "entity": entity,
+                "instance": instance,
+                "stage": stage
+            })),
+        })
+        .transpose()?;
+    Ok((steps, expectation))
+}
+
 /// Compile a checked model into the RCIR v1 contract.
 ///
 /// # Errors
@@ -752,6 +768,15 @@ fn push_trace_claims(
 #[allow(clippy::too_many_lines)]
 pub fn project_requirement_claims(
     input: &DocumentInput<'_>,
+) -> Result<RequirementClaimSet, String> {
+    let trace = requirements_trace_contract(input.source).map_err(|error| error.to_string())?;
+    project_requirement_claims_with_trace(input, trace.as_ref())
+}
+
+#[allow(clippy::too_many_lines)]
+fn project_requirement_claims_with_trace(
+    input: &DocumentInput<'_>,
+    trace_contract: Option<&RequirementsTraceContract>,
 ) -> Result<RequirementClaimSet, String> {
     let model = input.model;
     let source_path = input.source_path;
@@ -902,9 +927,7 @@ pub fn project_requirement_claims(
         push_terminal_claim(expr, model, source_path, &mut agg, &mut built);
     }
 
-    let trace_contract: Option<RequirementsTraceContract> =
-        requirements_trace_contract(input.source).map_err(|error| error.to_string())?;
-    if let Some(contract) = &trace_contract {
+    if let Some(contract) = trace_contract {
         for case in &contract.acceptance {
             universe.push(format!("acceptance:{}", case.id));
         }
@@ -1154,4 +1177,26 @@ pub fn project_requirement_claims(
             counts: assurance_counts,
         },
     })
+}
+
+pub(crate) fn project_renderer_contract(
+    kernel: &KernelSpec,
+    model: &KernelModel,
+    source: &str,
+    source_path: Option<&str>,
+    trace: Option<&RequirementsTraceContract>,
+) -> Result<RequirementClaimSet, String> {
+    let (dialect, implements_names, analysis_scope) = projection_context(source)?;
+    project_requirement_claims_with_trace(
+        &DocumentInput {
+            kernel,
+            model,
+            source,
+            source_path,
+            dialect,
+            implements_names,
+            analysis_scope,
+        },
+        trace,
+    )
 }
