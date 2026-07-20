@@ -6,6 +6,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- Native induction lemma handling now proves each `--lemma` candidate without original user
+  properties, then uses and recommends only the first independently proved candidate excluding each
+  successive CTI (#336).
 - `fslc scenarios` now emits the shortest replayable action-coverage trace even
   when the covered action reaches a terminal state before the requested depth,
   including requirements transitions guarded by `Bool` inputs (issue #405).

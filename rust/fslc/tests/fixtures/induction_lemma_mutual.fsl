@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec MutuallyReinforcing {
+  state { x: Bool, y: Bool }
+  init { x = false  y = false }
+
+  action swap() {
+    x = y
+    y = x
+  }
+
+  invariant Target { not x or y }
+}

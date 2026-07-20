@@ -1442,6 +1442,10 @@ fn adjudicate_lemma(
     k_ind: usize,
 ) -> Value {
     let mut candidate = model.clone();
+    candidate.invariants.clear();
+    candidate.transitions.clear();
+    candidate.leadstos.clear();
+    candidate.reachables.clear();
     candidate.invariants.push(fsl_core::PropertyDef {
         name: name.to_owned(),
         expr: expression.clone(),
@@ -1499,18 +1503,38 @@ fn adjudicate_lemma(
                 "checked_to_depth":depth,"completeness":"unbounded",
             },
         }),
-        Ok(proof) => json!({
-            "expression":source,"name":name,"status":"rejected","used":false,
-            "proof":{
-                "result":"unknown_cti","k":proof.cti.as_ref().map_or(k_ind,|cti|cti.k),
-                "checked_to_depth":depth,"completeness":"bounded",
-            },
-        }),
+        Ok(proof) => {
+            let cti = proof.cti.as_ref().expect("non-proved induction has a CTI");
+            json!({
+                "expression":source,"name":name,"status":"rejected","used":false,
+                "proof":{
+                    "result":"unknown_cti","invariant":display(&cti.name),"k":cti.k,
+                    "checked_to_depth":depth,"completeness":"bounded",
+                    "trace_type":"induction_cti",
+                    "cti":{
+                        "states": ::fslc_rust::trace_json(&candidate, &cti.trace),
+                        "violated_at":cti.k,
+                    },
+                },
+            })
+        }
         Err(error) => json!({
             "expression":source,"name":name,"status":"rejected","used":false,
             "proof":{"result":"error","kind":"semantics","message":error.to_string()},
         }),
     }
+}
+
+fn collision_free_lemma_name(
+    index: usize,
+    occupied_names: &mut std::collections::BTreeSet<String>,
+) -> String {
+    let mut name = format!("AuxiliaryLemma{}", index + 1);
+    while occupied_names.contains(&name) {
+        name.push_str("Candidate");
+    }
+    occupied_names.insert(name.clone());
+    name
 }
 
 pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions) -> (Value, i32) {
@@ -1525,28 +1549,16 @@ pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions)
         property: options.property.as_deref(),
         excluded: &options.exclude_properties,
     };
-    let model = match load_lemma_model(path, options) {
+    let (model, mut occupied_names) = match load_lemma_model(path, options) {
         Ok(model) => model,
         Err(output) => return output,
     };
-    let (original, _) = run_induction_filtered(InductionRequest {
-        selection,
-        depth: options.depth,
-        deadlock,
-        k: options.k_ind,
-        auxiliary: &[],
-    });
-    let target = original
-        .get("invariant")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
     let mut entries = Vec::new();
-    let mut auxiliary = Vec::new();
-    let mut auxiliary_sources = Vec::new();
+    let mut proved_candidates = Vec::new();
+    let (mut auxiliary, mut auxiliary_sources) = (Vec::new(), Vec::new());
     let mut exclusions = Vec::new();
     for (index, source) in options.lemmas.iter().enumerate() {
-        let name = format!("AuxiliaryLemma{}", index + 1);
+        let name = collision_free_lemma_name(index, &mut occupied_names);
         let expression = match fsl_syntax::parse_expr(source) {
             Ok(expression) => expression,
             Err(error) => {
@@ -1558,7 +1570,7 @@ pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions)
                 continue;
             }
         };
-        let mut entry = adjudicate_lemma(
+        let entry = adjudicate_lemma(
             &model,
             &name,
             &expression,
@@ -1567,33 +1579,53 @@ pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions)
             options.k_ind,
         );
         if entry.get("status").and_then(Value::as_str) == Some("proved") {
-            let violated_steps = lemma_violated_steps(&original, &expression, &model);
-            if !violated_steps.is_empty() {
-                if let Value::Object(entry) = &mut entry {
-                    entry.insert("used".to_owned(), json!(true));
-                }
-                exclusions.push(json!({
-                    "lemma":source,"target":target,"k":options.k_ind,
-                    "violated_steps":violated_steps,
-                    "cti":original.get("cti").cloned().unwrap_or(Value::Null),
-                }));
-                auxiliary.push((name.clone(), expression.clone()));
-                auxiliary_sources.push(source.clone());
-            }
+            proved_candidates.push((entries.len(), name.clone(), expression, source.clone()));
         }
         entries.push(entry);
     }
-    let (mut result, status) = run_induction_filtered(InductionRequest {
-        selection,
-        depth: options.depth,
-        deadlock,
-        k: options.k_ind,
-        auxiliary: &auxiliary,
-    });
+    let (mut result, status) = loop {
+        let (current, status) = run_induction_filtered(InductionRequest {
+            selection,
+            depth: options.depth,
+            deadlock,
+            k: options.k_ind,
+            auxiliary: &auxiliary,
+        });
+        if current.get("result").and_then(Value::as_str) != Some("unknown_cti")
+            || current.get("violation_kind").and_then(Value::as_str) == Some("leadsTo_rank")
+        {
+            break (current, status);
+        }
+        let Some((candidate_index, violated_steps)) = proved_candidates
+            .iter()
+            .enumerate()
+            .find_map(|(index, (_, _, expression, _))| {
+                let steps = lemma_violated_steps(&current, expression, &model);
+                (!steps.is_empty()).then_some((index, steps))
+            })
+        else {
+            break (current, status);
+        };
+        let (entry_index, name, expression, source) = proved_candidates.remove(candidate_index);
+        if let Value::Object(entry) = &mut entries[entry_index] {
+            entry.insert("used".to_owned(), json!(true));
+        }
+        exclusions.push(json!({
+            "lemma":source,
+            "target":current.get("trans").or_else(|| current.get("invariant"))
+                .cloned().unwrap_or(Value::Null),
+            "k":current.get("k").cloned().unwrap_or_else(|| json!(options.k_ind)),
+            "violated_steps":violated_steps,
+            "cti":current.get("cti").cloned().unwrap_or(Value::Null),
+        }));
+        auxiliary.push((name, expression));
+        auxiliary_sources.push(source);
+    };
+    let proved = result.get("result").and_then(Value::as_str) == Some("proved");
     if let Value::Object(output) = &mut result {
         output.insert("lemmas".to_owned(), Value::Array(entries));
         output.insert("lemma_cti_exclusions".to_owned(), Value::Array(exclusions));
-        if !auxiliary.is_empty() {
+        if proved && !auxiliary.is_empty() {
             output.insert(
                 "auxiliary_invariant_recommendation".to_owned(),
                 json!({
@@ -1608,29 +1640,26 @@ pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions)
     (result, status)
 }
 
-fn load_lemma_model(path: &Path, options: &CliVerifyOptions) -> Result<KernelModel, CommandResult> {
+fn load_lemma_model(
+    path: &Path,
+    options: &CliVerifyOptions,
+) -> Result<(KernelModel, std::collections::BTreeSet<String>), CommandResult> {
     let mut model = load_model(path).map_err(|error| (semantic_error_output(&error), 2))?;
+    let occupied_names = model
+        .invariants
+        .iter()
+        .chain(&model.transitions)
+        .chain(&model.reachables)
+        .map(|property| property.name.clone())
+        .chain(model.leadstos.iter().map(|property| property.name.clone()))
+        .collect();
     select_properties(
         &mut model,
         options.property.as_deref(),
         &options.exclude_properties,
     )
     .map_err(|error| (semantic_error_output(&error), 2))?;
-    if options.property.as_ref().is_some_and(|name| {
-        model
-            .transitions
-            .iter()
-            .any(|property| display(&property.name) == *name)
-    }) {
-        return Err((
-            error_output(
-                "usage",
-                "--lemma can strengthen invariant induction, but cannot be used to prove a trans property",
-            ),
-            2,
-        ));
-    }
-    Ok(model)
+    Ok((model, occupied_names))
 }
 
 fn cache_enabled(options: &CliVerifyOptions) -> bool {
