@@ -59,6 +59,19 @@ fn rebuild_one<T: Clone>(values: &[T], index: usize, replacement: T) -> Vec<T> {
     result
 }
 
+fn adjacent_integers(value: i64) -> impl Iterator<Item = (i64, &'static str, &'static str)> {
+    [
+        (-1, "minus1", "integer_literal_minus1"),
+        (1, "plus1", "integer_literal_plus1"),
+    ]
+    .into_iter()
+    .filter_map(move |(delta, suffix, literal_op)| {
+        value
+            .checked_add(delta)
+            .map(|candidate| (candidate, suffix, literal_op))
+    })
+}
+
 fn mutate_binder(
     binder: &Binder,
     enums: &BTreeMap<String, Vec<String>>,
@@ -162,16 +175,13 @@ fn expr_mutations(expr: &Expr, enums: &BTreeMap<String, Vec<String>>) -> Vec<Exp
     let mut output = Vec::new();
     match expr {
         Expr::Num(value) => {
-            output.push(ExprMutation {
-                expr: Expr::Num(value - 1),
-                op: "integer_literal_minus1",
-                enum_swap: None,
-            });
-            output.push(ExprMutation {
-                expr: Expr::Num(value + 1),
-                op: "integer_literal_plus1",
-                enum_swap: None,
-            });
+            for (candidate, _, op) in adjacent_integers(*value) {
+                output.push(ExprMutation {
+                    expr: Expr::Num(candidate),
+                    op,
+                    enum_swap: None,
+                });
+            }
         }
         Expr::Var(name) if enums.contains_key(name) => {
             for sibling in &enums[name] {
@@ -739,12 +749,12 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                     let Expr::Num(value) = value else {
                         continue;
                     };
-                    for (delta, suffix) in [(-1, "minus1"), (1, "plus1")] {
+                    for (candidate, suffix, _) in adjacent_integers(*value) {
                         let mut mutated = spec.clone();
                         mutated.items[item_index] = if bound == "lo" {
                             SpecItem::Type {
                                 name: name.clone(),
-                                lo: Box::new(Expr::Num(value + delta)),
+                                lo: Box::new(Expr::Num(candidate)),
                                 hi: hi.clone(),
                                 symmetric: *symmetric,
                             }
@@ -752,7 +762,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                             SpecItem::Type {
                                 name: name.clone(),
                                 lo: lo.clone(),
-                                hi: Box::new(Expr::Num(value + delta)),
+                                hi: Box::new(Expr::Num(candidate)),
                                 symmetric: *symmetric,
                             }
                         };

@@ -345,6 +345,31 @@ requirements TraceCases {
 }
 
 #[test]
+fn trace_case_ids_are_unique_within_each_kind() {
+    for keyword in ["acceptance", "forbidden"] {
+        let expectation = if keyword == "acceptance" {
+            "expect ready"
+        } else {
+            "expect rejected"
+        };
+        let source = format!(
+            r#"
+requirements DuplicateTraceCase {{
+  state {{ ready: Bool }}
+  init {{ ready = false }}
+  action publish() {{ ready = true }}
+  {keyword} CASE-1 "first" {{ publish() {expectation} }}
+  {keyword} CASE-1 "second" {{ publish() {expectation} }}
+}}
+"#
+        );
+        let error = requirements_trace_contract(&source).expect_err("duplicate trace case id");
+        assert_eq!(error.message, format!("duplicate {keyword} id 'CASE-1'"));
+        assert_eq!(error.line, 7);
+    }
+}
+
+#[test]
 fn nested_annotation_syntax_reaches_the_checked_model() {
     let source = r#"
 spec NestedAnnotations {

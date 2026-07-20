@@ -2390,7 +2390,10 @@ DESIGN-*.md があります)。
   `--by-requirement` は「どの振る舞いミュータントも殺さない要件」を
   `empty_formalization` 警告としてフラグします(`--strict-tags` の意味レベルの
   拡張)。要件ごとのキル数とこの警告は、選択されたミュータント集合と深さの中で
-  観測された下界です。→ [`DESIGN-mutate.md`](DESIGN-mutate.md)
+  観測された下界です。acceptance と forbidden の kill は、失敗した trace 宣言の
+  明示的な requirement annotation を使います。AC/FB case ID は暗黙の requirement
+  ではなく、trace case ID は宣言種別ごとに一意です。→
+  [`DESIGN-mutate.md`](DESIGN-mutate.md)
 - **`fslc explain --readable`** — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement
   マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で
