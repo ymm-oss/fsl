@@ -249,6 +249,185 @@ fn load_induction_model(
     Ok(model)
 }
 
+fn integer_state_type(model: &KernelModel, ty: &fsl_core::TypeRef) -> bool {
+    match ty {
+        fsl_core::TypeRef::Int | fsl_core::TypeRef::Range(_, _) => true,
+        fsl_core::TypeRef::Named(name) => matches!(
+            model.types.get(name),
+            Some(fsl_core::TypeDef::Domain { .. })
+        ),
+        _ => false,
+    }
+}
+
+fn monotone_direction(values: &[i64]) -> Result<Option<std::cmp::Ordering>, ()> {
+    let mut direction = None;
+    for pair in values.windows(2) {
+        let current = pair[1].cmp(&pair[0]);
+        if current == std::cmp::Ordering::Equal {
+            continue;
+        }
+        if direction.is_some_and(|direction| direction != current) {
+            return Err(());
+        }
+        direction = Some(current);
+    }
+    Ok(direction)
+}
+
+fn monotone_qualifies(direction: std::cmp::Ordering, start: i64, initial: i64) -> bool {
+    match direction {
+        std::cmp::Ordering::Greater => start < initial,
+        std::cmp::Ordering::Less => start > initial,
+        std::cmp::Ordering::Equal => false,
+    }
+}
+
+fn monotone_suggestion(
+    name: &str,
+    direction: std::cmp::Ordering,
+    start: i64,
+    initial: i64,
+    expression: &str,
+) -> Option<(String, String)> {
+    let (motion, side) = match direction {
+        std::cmp::Ordering::Greater => ("increasing", "below"),
+        std::cmp::Ordering::Less => ("decreasing", "above"),
+        std::cmp::Ordering::Equal => return None,
+    };
+    monotone_qualifies(direction, start, initial).then(|| (
+        expression.to_owned(),
+        format!(
+            "'{name}' only {motion} in this CTI but starts {side} its initial value {initial}; adding invariant {expression} may exclude this unreachable start state"
+        ),
+    ))
+}
+
+fn scalar_suggestion(
+    initial_state: &std::collections::BTreeMap<String, FslValue>,
+    trace: &[fsl_core::TraceStep],
+    name: &str,
+) -> Option<(String, String)> {
+    let FslValue::Int(initial) = initial_state.get(name)? else {
+        return None;
+    };
+    let values = trace
+        .iter()
+        .map(|step| match step.state.get(name) {
+            Some(FslValue::Int(value)) => Some(*value),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let direction = monotone_direction(&values).ok()??;
+    let public_name = display(name);
+    let operator = if direction == std::cmp::Ordering::Greater {
+        ">="
+    } else {
+        "<="
+    };
+    let expression = format!("{public_name} {operator} {initial}");
+    monotone_suggestion(&public_name, direction, values[0], *initial, &expression)
+}
+
+fn map_suggestion(
+    model: &KernelModel,
+    initial_state: &std::collections::BTreeMap<String, FslValue>,
+    trace: &[fsl_core::TraceStep],
+    name: &str,
+    ty: &fsl_core::TypeRef,
+) -> Option<(String, String)> {
+    let fsl_core::TypeRef::Map(key_ty, value_ty) = ty else {
+        return None;
+    };
+    let fsl_core::TypeRef::Named(key_name) = key_ty.as_ref() else {
+        return None;
+    };
+    if !integer_state_type(model, value_ty) {
+        return None;
+    }
+    let FslValue::Map(initial_map) = initial_state.get(name)? else {
+        return None;
+    };
+    let mut initial_values = initial_map.values();
+    let FslValue::Int(initial) = initial_values.next()? else {
+        return None;
+    };
+    if initial_values.any(|value| value != &FslValue::Int(*initial)) {
+        return None;
+    }
+    let maps = trace
+        .iter()
+        .map(|step| match step.state.get(name) {
+            Some(FslValue::Map(map)) => Some(map),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let keys = maps
+        .iter()
+        .flat_map(|map| map.keys().cloned())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut directions = std::collections::BTreeSet::new();
+    let mut qualifying_start = None;
+    for key in keys {
+        let values = maps
+            .iter()
+            .map(|map| match map.get(&key) {
+                Some(FslValue::Int(value)) => Some(*value),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let direction = match monotone_direction(&values) {
+            Ok(Some(direction)) => direction,
+            Ok(None) => continue,
+            Err(()) => return None,
+        };
+        directions.insert(direction);
+        if monotone_qualifies(direction, values[0], *initial) {
+            qualifying_start.get_or_insert(values[0]);
+        }
+    }
+    if directions.len() != 1 {
+        return None;
+    }
+    let start = qualifying_start?;
+    let direction = directions.into_iter().next()?;
+    let operator = if direction == std::cmp::Ordering::Greater {
+        ">="
+    } else {
+        "<="
+    };
+    let public_name = display(name);
+    let binder = if public_name == "k" { "key" } else { "k" };
+    let expression = format!(
+        "forall {binder}: {} {{ {public_name}[{binder}] {operator} {initial} }}",
+        display(key_name)
+    );
+    monotone_suggestion(&public_name, direction, start, *initial, &expression)
+}
+
+fn suggested_invariants(
+    model: &KernelModel,
+    trace: &[fsl_core::TraceStep],
+) -> Vec<(String, String)> {
+    if trace.len() < 2 {
+        return Vec::new();
+    }
+    let Ok(initial_state) = fsl_runtime::deterministic_initial_state(model) else {
+        return Vec::new();
+    };
+    model
+        .state
+        .iter()
+        .filter_map(|(name, ty)| {
+            if integer_state_type(model, ty) {
+                scalar_suggestion(&initial_state, trace, name)
+            } else {
+                map_suggestion(model, &initial_state, trace, name, ty)
+            }
+        })
+        .collect()
+}
+
 fn render_induction_cti(
     model: &KernelModel,
     cti: &fsl_verifier::InductionCti,
@@ -280,10 +459,26 @@ fn render_induction_cti(
             "violated_at": cti.k,
         }),
     );
-    output.insert(
-        "hint".to_owned(),
-        json!("this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run"),
-    );
+    let mut hint = "this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run".to_owned();
+    if cti.kind == "invariant" {
+        let suggestions = suggested_invariants(model, &cti.trace);
+        if !suggestions.is_empty() {
+            for (_, sentence) in &suggestions {
+                hint.push(' ');
+                hint.push_str(sentence);
+            }
+            output.insert(
+                "suggested_invariants".to_owned(),
+                Value::Array(
+                    suggestions
+                        .into_iter()
+                        .map(|(expression, _)| Value::String(expression))
+                        .collect(),
+                ),
+            );
+        }
+    }
+    output.insert("hint".to_owned(), Value::String(hint));
     if cti.kind == "trans" {
         output.insert(
             "invariants_checked".to_owned(),

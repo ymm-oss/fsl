@@ -179,16 +179,20 @@ JSON (the shape finalized in §9, generalized to multiple states):
   length 2). The JSON example in DESIGN-v1.md §9 should be updated to follow this document's shape.
 - **Monotone-counter suggestions (#74, post-processing only, no solver/engine
   change):** after the CTI trace is built for an invariant `unknown_cti`
-  (not `leadsTo_rank`), `_suggest_monotone_invariants` (`bmc.py`) scans it for
-  a state variable — scalar `Int`/domain, or a `Map<K, Int>` key-wise — that
+  (not `leadsTo_rank`), native `suggested_invariants` in
+  `rust/fslc/src/verification.rs` scans it for a state variable — scalar
+  `Int`/domain, or a `Map<K, Int>` key-wise — that
   moves in only one direction across the trace *and* starts on the
   unreachable side of the concrete initial value obtained from
-  `runtime.Monitor(spec).reset()`. When found, the result gains
+  `fsl_runtime::deterministic_initial_state`. Map candidates additionally
+  require every changed key to move in the same direction. When found, the
+  result gains
   `"suggested_invariants": ["<expr>", ...]` and one sentence is appended to
   `hint` per suggestion, e.g. `"audit >= 0"` or, for a uniformly-initialized
-  map, `"forall k: Case { audit[k] >= 0 }"`. If `reset()` fails, the relevant
-  variable's init isn't a concrete `Int`, or the CTI start does not actually
-  violate the would-be bound, no suggestion is added for it. This is
+  map, `"forall k: Case { audit[k] >= 0 }"`. If deterministic initial-state
+  construction fails, the relevant variable's init isn't a concrete `Int`, or
+  the CTI start does not actually violate the would-be bound, no suggestion is
+  added for it. This is
   trace-monotonicity, not a global-monotonicity proof, so it is phrased as a
   suggestion — see `docs/LANGUAGE.md` §9 "Auxiliary invariants from a CTI".
 - The exit code is **not 2, not 1 of a new kind, and not 0**, but reuses `1`

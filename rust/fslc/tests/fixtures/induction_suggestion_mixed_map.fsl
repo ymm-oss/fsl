@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec MixedMapCounter {
+  type Case = 0..1
+
+  state {
+    audit: Map<Case, Int>,
+    y: Int
+  }
+
+  init {
+    forall c: Case { audit[c] = 0 }
+    y = 0
+  }
+
+  action step() {
+    requires audit[0] < -100
+    audit[0] = audit[0] + 1
+    audit[1] = audit[1] - 1
+    y = y + 1
+  }
+
+  invariant Sync { y <= 4 }
+}

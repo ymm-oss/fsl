@@ -6,6 +6,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- Native induction CTIs now emit the documented heuristic `suggested_invariants` for monotone
+  scalar and uniformly initialized Map counters without changing the proof verdict (#337).
 - Native induction lemma handling now proves each `--lemma` candidate without original user
   properties, then uses and recommends only the first independently proved candidate excluding each
   successive CTI (#336).
