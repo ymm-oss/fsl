@@ -2518,8 +2518,9 @@ feedback SCC を経由するペアの最大値は上界)。
 (計測 cadence が到達 claim の最小持続を超えるとき正確に発火します。unknown な
 持続は推測せず `not_evaluable` として報告)、`unknown_lag_blocks_timeline`。
 `fslc causal diff` は 2 つのモデルファイルを安定 claim ID と content version で
-比較します。`support_transition` は外部 evidence が存在するまで
-`not_available` のままです。version 対象フィールドを同じ version のまま変更すると
+比較します。`causal-diff.v0` は evidence 入力を受け取らないため、
+`support_transition` は `not_available` のままです。evidence 集約は analyze/ledger
+projection が別に報告します。version 対象フィールドを同じ version のまま変更すると
 `content_changed_without_version_bump`、terminal な retired claim を active に
 戻すと `retired_claim_reactivated`、新しい claim が retired claim と同じ source、
 target、polarity を繰り返すと `retired_hypothesis_reproposed` を報告します。

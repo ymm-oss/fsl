@@ -5,20 +5,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-07-20
+
 ### Fixed
 - Native induction CTIs now emit the documented heuristic `suggested_invariants` for monotone
-  scalar and uniformly initialized Map counters without changing the proof verdict (#337).
-- Native induction lemma handling now proves each `--lemma` candidate without original user
-  properties, then uses and recommends only the first independently proved candidate excluding each
-  successive CTI (#336).
+  scalar and uniformly initialized Map counters without changing the proof verdict; quantified Map
+  suggestions choose a collision-free binder so the emitted expression remains reusable (#337).
+- Native induction lemma handling accepts candidates for selected invariant and `trans` properties,
+  proves each candidate without original user properties, then uses and recommends only the first
+  independently proved candidate excluding each successive CTI (#336).
 - `fslc scenarios` now emits the shortest replayable action-coverage trace even
   when the covered action reaches a terminal state before the requested depth,
   including requirements transitions guarded by `Bool` inputs (issue #405).
 - `fslc mutate --by-requirement` now attributes acceptance and forbidden kills
   through explicit requirement annotations on the failed trace declaration
   instead of reporting the linked requirement as `empty_formalization` (issue
-  #407). Duplicate acceptance or forbidden IDs are rejected so attribution is
-  unambiguous.
+  #407). Explicit requirement relations are preserved even when their ID equals
+  a trace-case ID, while synthetic case relations remain excluded. Duplicate
+  acceptance or forbidden IDs are rejected so attribution is unambiguous.
 - `fslc mutate` now adjudicates singleton bound mutants whose empty domain
   produces no action instances instead of panicking in bounded verification;
   overflowing integer and bound neighbors are omitted (issue #406).
@@ -26,7 +30,6 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   roles now override event-name heuristics, ambiguous cross-role assignments
   fail closed, and completion, retry eligibility, Monitor/BFS execution, and
   symbolic verification share the same lowered status (issue #409).
-
 - `fslc lint` now classifies business `policy`/`goal` `satisfies CTRL-*`
   operands as control references, recursively expands directory inputs into a
   sorted list of unique physical `.fsl` files even when operands repeat or alias
@@ -63,11 +66,6 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   stronger survivor claim from returning (issue #338).
 
 ### Changed
-- The requirements-document renderer now reprojects and exactly matches the
-  complete RCIR renderer role sidecar against its checked Kernel/Model/trace
-  and original source inputs, failing closed on any changed spec metadata,
-  claim classification, requirement attribution, trace data, undecided item,
-  analysis bound, coverage entry, or provenance field.
 - The native installer no longer clones the repository into `~/.fsl`. It now
   installs an exact-tag, checksummed CLI/LSP pair under the user data directory,
   atomically activates the complete payload, safely migrates recognized Python
@@ -153,8 +151,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   structural/temporal findings, all `formal_status: "not_a_violation"` with
   `do_not_assume`. `causal diff` compares stable claim IDs and content
   versions, flags missing version bumps, retired-claim reactivation, and
-  retired-hypothesis re-proposals, with `support_transition: "not_available"`
-  until #322's evidence exists. Evidence/plan scope comparison treats a
+  retired-hypothesis re-proposals. `causal-diff.v0` accepts no evidence inputs,
+  so `support_transition` remains `"not_available"`; evidence aggregation is a
+  separate analyze/ledger projection. Evidence/plan scope comparison treats a
   dimension present on only one side as `unassessable`, never universal. No
   output path attaches `proved`/`verified` to a causal claim and
   there is deliberately no `causal verify`; `fsl-runtime`, `fsl-solver*`,
@@ -349,15 +348,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   always "a scheduling assumption" and never "immediately", `acceptance`/`forbidden`
   always carry a non-generalization disclaimer, and a progress/reachability claim never
   claims established evidence (RCIR v1 carries none). The renderer verifies the embedded
-  Public Kernel and requires every semantic
-  target to resolve exactly once before emitting Markdown, rejecting mismatched models.
+  Public Kernel, reprojects and exactly matches the complete RCIR renderer role sidecar against
+  its checked Kernel/Model/trace and original source inputs, and requires every semantic target to
+  resolve exactly once before emitting Markdown, failing closed on any mismatched input.
   `fsl_core::expr_text`/
   `source_expr_text` (the `explain --readable` canonical-text renderer) moved from the
   `fslc` binary crate into `fsl_core` so `fsl-tools` could reuse it without a
   second implementation; `fslc` re-exports both names unchanged. CLI wiring is issue
   #327. See `docs/DESIGN-document-controlled-language-renderer.md`.
 - Added the Requirement Claim IR (RCIR) v1 schema and native projector (issue #325),
-  the foundation of the upcoming `fslc document` requirements-document generator.
+  the semantic foundation used by the `fslc document` requirements-document workflow.
   `fsl_tools::project_requirement_claims_from_source` compiles a checked `spec` or
   `requirements` dialect model into `schemas/fslc/document/requirement-claims.v1.schema.json`:
   nine claim kinds (`operation`, `state_rule`, `transition_rule`, `progress_rule`,
@@ -371,10 +371,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   a target). RCIR is not a second semantics: it embeds the schema-validated Public
   Kernel v2 artifact, while claims expose typed subjects and stable target references
   instead of a second, unconstrained Python-shaped AST. Trace-only expressions reuse
-  the Public Kernel expression contract.
-  CLI wiring, the controlled-language renderer, drift checking, the no-silent-omission
-  gate, glossary, evidence overlay, and approval integration are follow-up issues
-  #326-#334; this change ships schema + library projector only. See
+  the Public Kernel expression contract. The controlled-language renderer, CLI, drift
+  checking, no-silent-omission gate, glossary, evidence overlay, and approval integration
+  are included in the same release through issues #326-#334. See
   `docs/DESIGN-document-requirement-claim-ir.md`.
 - `fsl_tools::undecided` gains `undecided_records`, a typed variant of
   `undecided_declarations` (issue #189) that additionally carries the annotation's
@@ -2512,7 +2511,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/ymm-oss/fsl/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/ymm-oss/fsl/compare/v2.7.0...v3.0.0
 [2.7.0]: https://github.com/ymm-oss/fsl/compare/v2.6.3...v2.7.0
 [2.6.3]: https://github.com/ymm-oss/fsl/compare/v2.6.2...v2.6.3

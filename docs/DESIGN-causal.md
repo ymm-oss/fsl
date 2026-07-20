@@ -522,8 +522,9 @@ with claim-ID witnesses as first-class attributes (§6). The evidence artifact
 schema (`fsl-causal-evidence.v0`), the lifecycle record chain, and the
 deterministic support-aggregation table are defined by #322. `causal-diff.v0`
 (claim identity by ID, content by version and typed fields) is defined by
-#321; its support transitions stay `not_available` until #322's evidence
-inputs exist.
+#321. Version 0 accepts no evidence inputs and therefore reports every support
+transition as `not_available`; #322's evidence aggregation remains a separate
+analyze/ledger projection.
 
 ## 9. Authority surface and algorithm constraints
 

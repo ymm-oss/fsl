@@ -2422,7 +2422,10 @@ DESIGN-*.md).</p>
   <code>--by-requirement</code> flags "a requirement that kills no behavior mutant" as an
   <code>empty_formalization</code> warning (the semantic-level extension of
   <code>--strict-tags</code>); per-requirement kill counts and this warning are observed
-  lower bounds within the chosen mutant set and depth.
+  lower bounds within the chosen mutant set and depth. Acceptance and forbidden
+  kills use explicit requirement annotations on the failed trace declaration;
+  AC/FB case IDs are not implicit requirements. Trace case IDs are unique
+  within each declaration kind.
   → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
 <li><strong><code>fslc explain --readable</code></strong> — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,
@@ -2537,8 +2540,10 @@ maximum is an upper bound when the pair is connected through a feedback SCC).
 exceeds an arriving claim's minimum persistence; unknown persistence is
 reported as <code>not_evaluable</code>, never guessed), and <code>unknown_lag_blocks_timeline</code>.
 <code>fslc causal diff</code> compares two model files by stable claim ID and content
-version; its <code>support_transition</code> stays <code>not_available</code> until external
-evidence exists. It reports <code>content_changed_without_version_bump</code> when
+version. <code>causal-diff.v0</code> accepts no evidence inputs, so its
+<code>support_transition</code> stays <code>not_available</code>; evidence aggregation is reported
+separately by analyze/ledger projections. It reports
+<code>content_changed_without_version_bump</code> when
 version-relevant fields move under the same version,
 <code>retired_claim_reactivated</code> when a terminal retired claim returns to active,
 and <code>retired_hypothesis_reproposed</code> when a new claim repeats a retired claim's

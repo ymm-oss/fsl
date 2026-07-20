@@ -434,8 +434,8 @@ fn sanitize(id: &str) -> String {
 }
 
 /// `fslc causal diff` (`causal-diff.v0`): claim identity by ID, content by
-/// version and typed fields. Support transitions are `not_available` until
-/// evidence inputs exist (#322).
+/// version and typed fields. Version 0 accepts no evidence inputs, so support
+/// transitions are always `not_available`; evidence aggregation is separate.
 #[must_use]
 #[allow(clippy::too_many_lines)]
 pub fn causal_diff_json(before: &CausalModel, after: &CausalModel) -> Value {

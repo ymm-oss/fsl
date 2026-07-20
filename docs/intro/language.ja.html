@@ -2382,7 +2382,10 @@ DESIGN-*.md があります)。</p>
   <code>--by-requirement</code> は「どの振る舞いミュータントも殺さない要件」を
   <code>empty_formalization</code> 警告としてフラグします(<code>--strict-tags</code> の意味レベルの
   拡張)。要件ごとのキル数とこの警告は、選択されたミュータント集合と深さの中で
-  観測された下界です。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
+  観測された下界です。acceptance と forbidden の kill は、失敗した trace 宣言の
+  明示的な requirement annotation を使います。AC/FB case ID は暗黙の requirement
+  ではなく、trace case ID は宣言種別ごとに一意です。→
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
 <li><strong><code>fslc explain --readable</code></strong> — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement
   マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で
@@ -2498,8 +2501,9 @@ feedback SCC を経由するペアの最大値は上界)。
 (計測 cadence が到達 claim の最小持続を超えるとき正確に発火します。unknown な
 持続は推測せず <code>not_evaluable</code> として報告)、<code>unknown_lag_blocks_timeline</code>。
 <code>fslc causal diff</code> は 2 つのモデルファイルを安定 claim ID と content version で
-比較します。<code>support_transition</code> は外部 evidence が存在するまで
-<code>not_available</code> のままです。version 対象フィールドを同じ version のまま変更すると
+比較します。<code>causal-diff.v0</code> は evidence 入力を受け取らないため、
+<code>support_transition</code> は <code>not_available</code> のままです。evidence 集約は analyze/ledger
+projection が別に報告します。version 対象フィールドを同じ version のまま変更すると
 <code>content_changed_without_version_bump</code>、terminal な retired claim を active に
 戻すと <code>retired_claim_reactivated</code>、新しい claim が retired claim と同じ source、
 target、polarity を繰り返すと <code>retired_hypothesis_reproposed</code> を報告します。</p>
