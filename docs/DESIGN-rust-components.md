@@ -17,7 +17,9 @@ a blind temporal holdout are unavailable. Re-evaluate it when one of the trigger
 occurs.
 
 This decision is at the module/package level. It does not redesign individual language features,
-change public schemas or process contracts, or make the frozen Python reference authoritative.
+change public schemas or process contracts, or make the frozen Python reference authoritative. The
+corresponding function/type and in-crate module design is recorded in
+[`DESIGN-rust-component-internals.md`](DESIGN-rust-component-internals.md).
 
 ## 2. Decision frame and readiness
 
