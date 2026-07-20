@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec LemmaTrans {
+  state { x: Int }
+  init { x = 0 }
+  action increment() { x = x + 1 }
+  trans Monotone { x >= old(x) }
+}

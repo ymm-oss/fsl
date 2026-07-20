@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec DomainGhostCounter {
+  type Counter = -200..200
+
+  state { audit: Counter, y: Int }
+  init { audit = 0  y = 0 }
+
+  action step() {
+    requires audit < -100
+    audit = audit + 1
+    y = y + 1
+  }
+
+  invariant Sync { y <= 4 }
+}

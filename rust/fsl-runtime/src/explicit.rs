@@ -89,6 +89,17 @@ pub fn explicit_unsupported_reason(model: &KernelModel) -> Option<String> {
     None
 }
 
+/// Build the concrete initial state only when init definitely assigns every state component.
+///
+/// # Errors
+///
+/// Returns [`RuntimeError`] when init is nondeterministic, partially assigned, or cannot be
+/// evaluated concretely.
+pub fn deterministic_initial_state(model: &KernelModel) -> Result<State, RuntimeError> {
+    check_deterministic_init(model)?;
+    Ok(Monitor::new(model.clone())?.state)
+}
+
 /// Verify with an optional set of selected implicit state-bound properties.
 ///
 /// # Errors

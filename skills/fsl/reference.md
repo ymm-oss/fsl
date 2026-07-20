@@ -1145,8 +1145,11 @@ first failed layer and later layers are marked `skipped`.
   dead at baseline, a beyond-depth effect, or genuine under-constraint —
   triage it as a review queue. If the baseline is not clean at depth K, no mutation is done and
   the baseline result is returned. `--by-requirement` aggregates by the requirement
-  tag of the "killed property" and warns on zero kills as `empty_formalization`
-  (a lower bound observed for this mutant set and depth).
+  tag of the killed property or failed acceptance/forbidden trace declaration
+  and warns on zero kills as `empty_formalization` (a lower bound observed for
+  this mutant set and depth). Trace attribution uses explicit requirement
+  annotations; AC/FB case IDs are not implicit requirements and are unique
+  within each declaration kind.
   `--from` appends external JSONL mutants. Each line supplies either full
   `mutated_spec` source (`spec` alias accepted) or an exact
   `replace:{target,replacement,occurrence?}` instruction. Valid records use the
