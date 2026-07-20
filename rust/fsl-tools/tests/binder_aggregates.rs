@@ -27,3 +27,24 @@ spec AggregateMutation {
             >= 6
     );
 }
+
+#[test]
+fn integer_literal_mutation_omits_overflowing_neighbor() {
+    let source = r"
+spec MaximumIntegerMutation {
+  const MAX = 9223372036854775807
+  state { flag: Bool }
+  init { flag = false }
+  action stay() { flag = flag }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("lower source");
+    let mutants = enumerate_builtin_mutants(kernel.syntax());
+    let operations = mutants
+        .iter()
+        .filter(|mutant| mutant.target.starts_with("const MAX"))
+        .map(|mutant| mutant.op.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(operations, ["integer_literal_minus1"]);
+}

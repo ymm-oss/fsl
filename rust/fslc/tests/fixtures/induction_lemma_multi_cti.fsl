@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec MultipleCtis {
+  state { a: Int, b: Int, c: Int, d: Int }
+  init { a = 0  b = 0  c = 0  d = 0 }
+
+  action step_ab() {
+    requires a < 2
+    a = a + 1
+    b = b + 1
+  }
+
+  action step_cd() {
+    requires c < 2
+    c = c + 1
+    d = d + 1
+  }
+
+  invariant Target { b <= 2 and d <= 2 }
+}
