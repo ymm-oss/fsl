@@ -27,45 +27,6 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   fail closed, and completion, retry eligibility, Monitor/BFS execution, and
   symbolic verification share the same lowered status (issue #409).
 
-### Changed
-- The requirements-document renderer now reprojects and exactly matches the
-  complete RCIR renderer role sidecar against its checked Kernel/Model/trace
-  and original source inputs, failing closed on any changed spec metadata,
-  claim classification, requirement attribution, trace data, undecided item,
-  analysis bound, coverage entry, or provenance field.
-- The native installer no longer clones the repository into `~/.fsl`. It now
-  installs an exact-tag, checksummed CLI/LSP pair under the user data directory,
-  atomically activates the complete payload, safely migrates recognized Python
-  2.7 links, and rejects binaries whose reported version differs from the
-  Release tag. Agent Skills are packaged as a checksummed Release asset; the
-  v3.0.0 compatibility path verifies a pinned tag-archive checksum and extracts
-  only the six installed skills.
-
-## [3.0.0] - 2026-07-17
-
-### Changed
-- Native v3 releases now assemble and validate all four CLI/LSP pairs, checksums,
-  VSIX, and Kernel bundles before one tag-only publication step. Release actions,
-  the Rust toolchain, and the VSIX packager are pinned; publication verifies a
-  remote draft inventory before making it public, and manual dry runs validate
-  the same assembled unit without publishing it. Native crates and release
-  builds require Rust 1.88 or newer.
-- The installer rejects unsupported Intel macOS, pins repository content and
-  binaries to the same latest Release tag, and stages both checksummed native
-  binaries before replacing either installed command. Linux artifacts now have
-  an explicit Ubuntu 24.04 / glibc 2.39 baseline. All native targets build the
-  vendored Z3 4.16 source so the distributed binaries do not require `libz3` or
-  `z3.dll` at runtime. macOS builds use the Clang 17 runner required by Z3 while
-  retaining a macOS 14 deployment target, and CI timeouts accommodate clean Z3
-  source builds on every supported runner.
-- Release distribution checks now run in the authoritative native Rust gate;
-  the redundant Python-only release workflow test was removed.
-- Native `fslc verify` cache keys now use a build-time implementation fingerprint instead of
-  hashing the full executable on every invocation, and CLI preparation reuses its validated
-  `KernelModel` across property selection and engine dispatch. Cache schema v2 invalidates old
-  entries fail-closed while removing the engine-independent fixed cost found in issue #349.
-
-### Fixed
 - `fslc lint` now classifies business `policy`/`goal` `satisfies CTRL-*`
   operands as control references, recursively expands directory inputs into a
   sorted list of unique physical `.fsl` files even when operands repeat or alias
@@ -100,6 +61,20 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `README.md`, `skills/fsl/reference.md`, and the generated site reference; a
   new `rust/fslc/tests/mutation_docs_contract.rs` regression keeps the
   stronger survivor claim from returning (issue #338).
+
+### Changed
+- The requirements-document renderer now reprojects and exactly matches the
+  complete RCIR renderer role sidecar against its checked Kernel/Model/trace
+  and original source inputs, failing closed on any changed spec metadata,
+  claim classification, requirement attribution, trace data, undecided item,
+  analysis bound, coverage entry, or provenance field.
+- The native installer no longer clones the repository into `~/.fsl`. It now
+  installs an exact-tag, checksummed CLI/LSP pair under the user data directory,
+  atomically activates the complete payload, safely migrates recognized Python
+  2.7 links, and rejects binaries whose reported version differs from the
+  Release tag. Agent Skills are packaged as a checksummed Release asset; the
+  v3.0.0 compatibility path verifies a pinned tag-archive checksum and extracts
+  only the six installed skills.
 
 ### Added
 - Causal portfolio ledger (Phase 5, issue #364): `fslc causal ledger
@@ -412,6 +387,32 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `skills/fsl/reference.md` now state this explicitly so users and AI agents
   choose process-level parallelism instead of a sequential per-file loop
   (issue #353). No implementation change.
+
+## [3.0.0] - 2026-07-17
+
+### Changed
+- Native v3 releases now assemble and validate all four CLI/LSP pairs, checksums,
+  VSIX, and Kernel bundles before one tag-only publication step. Release actions,
+  the Rust toolchain, and the VSIX packager are pinned; publication verifies a
+  remote draft inventory before making it public, and manual dry runs validate
+  the same assembled unit without publishing it. Native crates and release
+  builds require Rust 1.88 or newer.
+- The installer rejects unsupported Intel macOS, pins repository content and
+  binaries to the same latest Release tag, and stages both checksummed native
+  binaries before replacing either installed command. Linux artifacts now have
+  an explicit Ubuntu 24.04 / glibc 2.39 baseline. All native targets build the
+  vendored Z3 4.16 source so the distributed binaries do not require `libz3` or
+  `z3.dll` at runtime. macOS builds use the Clang 17 runner required by Z3 while
+  retaining a macOS 14 deployment target, and CI timeouts accommodate clean Z3
+  source builds on every supported runner.
+- Release distribution checks now run in the authoritative native Rust gate;
+  the redundant Python-only release workflow test was removed.
+- Native `fslc verify` cache keys now use a build-time implementation fingerprint instead of
+  hashing the full executable on every invocation, and CLI preparation reuses its validated
+  `KernelModel` across property selection and engine dispatch. Cache schema v2 invalidates old
+  entries fail-closed while removing the engine-independent fixed cost found in issue #349.
+
+### Added
 - Documented a rationale convention for preserving a declaration's "why" in
   the checked model instead of only in `//` comments (lexer trivia): use the
   existing `@kind(id, text?)` to classify and explain a declaration in one
