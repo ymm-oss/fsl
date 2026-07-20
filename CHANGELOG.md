@@ -6,6 +6,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- `fslc mutate --by-requirement` now attributes acceptance and forbidden kills
+  through explicit requirement annotations on the failed trace declaration
+  instead of reporting the linked requirement as `empty_formalization` (issue
+  #407). Duplicate acceptance or forbidden IDs are rejected so attribution is
+  unambiguous.
 - `fslc mutate` now adjudicates singleton bound mutants whose empty domain
   produces no action instances instead of panicking in bounded verification;
   overflowing integer and bound neighbors are omitted (issue #406).

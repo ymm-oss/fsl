@@ -219,6 +219,76 @@ fn monitor_boundary_self_spec_is_proved_and_mutation_sensitive() {
 }
 
 #[test]
+fn mutate_attributes_trace_oracle_kills_to_attached_requirements() {
+    let (mutated, status) = run_cli(&[
+        "mutate",
+        "rust/fslc/tests/fixtures/mutate_trace_requirement_attribution.fsl",
+        "--depth",
+        "8",
+        "--by-requirement",
+        "--max-mutants",
+        "0",
+        "--from",
+        "rust/fslc/tests/fixtures/mutate_trace_requirement_attribution.jsonl",
+    ]);
+
+    assert_eq!(status, 0, "{mutated}");
+    let mutants = mutated["mutants"].as_array().expect("mutants");
+    assert_eq!(mutants.len(), 3, "{mutated}");
+    assert_eq!(mutants[0]["status"], "killed", "{mutated}");
+    assert_eq!(mutants[0]["killed_by"], "acceptance", "{mutated}");
+    assert_eq!(mutants[1]["status"], "killed", "{mutated}");
+    assert_eq!(mutants[1]["killed_by"], "forbidden", "{mutated}");
+    assert_eq!(mutants[2]["status"], "killed", "{mutated}");
+    assert_eq!(mutants[2]["killed_by"], "forbidden", "{mutated}");
+    let requirement = &mutated["by_requirement"]["REQ-TEST-001"];
+    assert_eq!(requirement["kills"], 3, "{mutated}");
+    assert!(requirement.get("warning").is_none(), "{mutated}");
+    assert_eq!(
+        mutated["by_requirement"]["AC-TEST-001"]["kills"], 1,
+        "{mutated}"
+    );
+    for case_id in ["FB-TEST-001", "FB-SETUP-001"] {
+        assert!(
+            mutated["by_requirement"].get(case_id).is_none(),
+            "{mutated}"
+        );
+    }
+
+    let (builtin, builtin_status) = run_cli(&[
+        "mutate",
+        "rust/fslc/tests/fixtures/mutate_trace_requirement_attribution.fsl",
+        "--depth",
+        "8",
+        "--by-requirement",
+        "--max-mutants",
+        "100",
+    ]);
+    assert_eq!(builtin_status, 0, "{builtin}");
+    let prepare_guard = builtin["mutants"]
+        .as_array()
+        .expect("builtin mutants")
+        .iter()
+        .find(|mutant| {
+            mutant["op"] == "requires_negate"
+                && mutant["target"]
+                    .as_str()
+                    .is_some_and(|target| target.starts_with("prepare requires"))
+        })
+        .expect("prepare guard mutant");
+    assert_eq!(prepare_guard["status"], "killed", "{builtin}");
+    assert_eq!(prepare_guard["killed_by"], "forbidden", "{builtin}");
+    let builtin_requirement = &builtin["by_requirement"]["REQ-TEST-001"];
+    assert!(
+        builtin_requirement["kills"]
+            .as_u64()
+            .is_some_and(|kills| kills > 0),
+        "{builtin}"
+    );
+    assert!(builtin_requirement.get("warning").is_none(), "{builtin}");
+}
+
+#[test]
 fn mutate_rebuilds_singleton_domain_bound_expansions_without_panicking() {
     let (mutated, status) = run_cli(&[
         "mutate",

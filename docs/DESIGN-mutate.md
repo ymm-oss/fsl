@@ -94,6 +94,8 @@ mechanization is reversed: the kill oracle records each mutant's killer → aggr
 `killed_by` requirement tag. **A requirement that killed no behavior mutation = an empty
 formalization**, warned as `empty_formalization`. v1 records the first-killer and explicitly
 labels this "lower observation bound" (sole-killer redundancy analysis is future work).
+Acceptance and forbidden kills are attributed through explicit requirement annotations on the
+failed trace declaration; their AC/FB case IDs remain unique scenario identities, not requirements.
 
 ## 5. Output / ripple
 
