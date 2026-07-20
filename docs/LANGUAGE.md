@@ -2559,8 +2559,10 @@ maximum is an upper bound when the pair is connected through a feedback SCC).
 exceeds an arriving claim's minimum persistence; unknown persistence is
 reported as `not_evaluable`, never guessed), and `unknown_lag_blocks_timeline`.
 `fslc causal diff` compares two model files by stable claim ID and content
-version; its `support_transition` stays `not_available` until external
-evidence exists. It reports `content_changed_without_version_bump` when
+version. `causal-diff.v0` accepts no evidence inputs, so its
+`support_transition` stays `not_available`; evidence aggregation is reported
+separately by analyze/ledger projections. It reports
+`content_changed_without_version_bump` when
 version-relevant fields move under the same version,
 `retired_claim_reactivated` when a terminal retired claim returns to active,
 and `retired_hypothesis_reproposed` when a new claim repeats a retired claim's
