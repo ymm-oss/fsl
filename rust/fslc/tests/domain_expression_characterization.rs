@@ -335,7 +335,7 @@ fn public_projection(name: &str) -> Value {
 }
 
 fn generated_fragments(domain: &DomainSpec, needles: &[&str]) -> Value {
-    let source = fsl_core::domain_kernel_source(domain);
+    let source = fsl_core::domain_kernel_source(domain).expect("render domain kernel");
     Value::Array(
         needles
             .iter()

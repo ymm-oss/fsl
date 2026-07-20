@@ -9,8 +9,9 @@ use std::task::{Context, Poll, Waker};
 use std::time::Instant;
 
 use fsl_core::{
-    Annotations, FslValue, KernelExpr, KernelLValue, KernelModel, KernelSpec, KernelStatement,
-    ParamDef, TypeDef, TypeRef, insert_requirement_metadata, model_warnings, requirement_metadata,
+    Annotations, FileResolver, FslValue, KernelExpr, KernelLValue, KernelModel, KernelSpec,
+    KernelStatement, ParamDef, TypeDef, TypeRef, insert_requirement_metadata, model_warnings,
+    requirement_metadata,
 };
 use serde_json::{Map, Value, json};
 
@@ -478,9 +479,11 @@ fn parse_migration_options(
                 .to_owned()
         });
     }
-    let mut unique = std::collections::BTreeSet::new();
-    if paths.iter().any(|path| !unique.insert(path.clone())) {
-        return Err("the same migration path cannot be supplied twice".to_owned());
+    if migrate {
+        let mut unique = std::collections::BTreeSet::new();
+        if paths.iter().any(|path| !unique.insert(path.clone())) {
+            return Err("the same migration path cannot be supplied twice".to_owned());
+        }
     }
     Ok(MigrationOptions {
         paths,
@@ -495,9 +498,13 @@ fn run_lint(options: &MigrationOptions) -> (Value, i32) {
         Ok(policy) => policy,
         Err(error) => return (error_output("config", &error), 2),
     };
+    let paths = match expand_lint_paths(&options.paths) {
+        Ok(paths) => paths,
+        Err(error) => return (error_output("io", &error), 2),
+    };
     let mut files = Vec::new();
     let mut finding_count = 0_usize;
-    for path in &options.paths {
+    for path in &paths {
         let (source, mut plan) = match load_migration_plan(path, options.edition) {
             Ok(loaded) => loaded,
             Err(error) => return (error, 2),
@@ -528,6 +535,62 @@ fn run_lint(options: &MigrationOptions) -> (Value, i32) {
         }),
         i32::from(finding_count > 0),
     )
+}
+
+fn expand_lint_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    let mut files = std::collections::BTreeSet::new();
+    for path in paths {
+        if path.is_dir() {
+            collect_lint_directory(path, &mut files)?;
+        } else {
+            files.insert(path.clone());
+        }
+    }
+    let mut unique_files = std::collections::BTreeMap::new();
+    for path in files {
+        let identity =
+            std::fs::canonicalize(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        match unique_files.entry(identity) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(path);
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry)
+                if path.components().count() < entry.get().components().count() =>
+            {
+                entry.insert(path);
+            }
+            std::collections::btree_map::Entry::Occupied(_) => {}
+        }
+    }
+    let mut files = unique_files.into_values().collect::<Vec<_>>();
+    files.sort();
+    Ok(files)
+}
+
+fn collect_lint_directory(
+    directory: &Path,
+    files: &mut std::collections::BTreeSet<PathBuf>,
+) -> Result<(), String> {
+    let entries = std::fs::read_dir(directory)
+        .map_err(|error| format!("{}: {error}", directory.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("{}: {error}", directory.display()))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            collect_lint_directory(&path, files)?;
+        } else if file_type.is_file()
+            && path.extension().and_then(std::ffi::OsStr::to_str) == Some("fsl")
+        {
+            files.insert(path);
+        }
+    }
+    Ok(())
 }
 
 fn load_id_policy(
@@ -912,6 +975,19 @@ fn command() -> Result<(Value, i32), String> {
             let path = literate_guard
                 .as_ref()
                 .map_or(&display_path, |state| &state.path);
+            // Standalone causal models are never kernel specs; route them to
+            // the causal checker instead of failing dialect dispatch.
+            if std::fs::read_to_string(path)
+                .is_ok_and(|source| fsl_syntax::is_causal_source(&source))
+            {
+                if args.next().is_some() {
+                    return Err(
+                        "fslc check on a causal model accepts no options; use fslc causal check"
+                            .to_owned(),
+                    );
+                }
+                return Ok(run_causal_check(path));
+            }
             let mut strict_tags = false;
             let mut requirements = None;
             let mut edition = "current".to_owned();
@@ -1002,6 +1078,7 @@ fn command() -> Result<(Value, i32), String> {
             Ok(run_conformance(&path, depth, version))
         }
         "approval" => approval_command(args),
+        "document" => document_command(args),
         "db" => db_command(args),
         "compat" => {
             if args.next().as_deref() != Some("check") {
@@ -1026,6 +1103,7 @@ fn command() -> Result<(Value, i32), String> {
             Ok((result, status))
         }
         "ai" => ai_command(args),
+        "causal" => causal_command(args),
         "domain" => domain_command(args),
         "explain" | "mutate" | "typestate" => {
             let path = PathBuf::from(
@@ -1603,9 +1681,11 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             let mut artifact = None;
             let mut approver = None;
             let mut requirements = Vec::new();
-            let mut depth = 8_usize;
-            let mut deadlock = "ignore".to_owned();
-            let mut engine = "bmc".to_owned();
+            let mut depth = None;
+            let mut deadlock = None;
+            let mut engine = None;
+            let mut glossary = None;
+            let mut evidence_paths = Vec::new();
             let mut output = None;
             let mut signing_key = None;
             while let Some(option) = args.next() {
@@ -1630,21 +1710,37 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                         )?));
                     }
                     "--depth" => {
-                        depth = required_option_value(&mut args, "--depth")?
-                            .parse()
-                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+                        depth = Some(
+                            required_option_value(&mut args, "--depth")?
+                                .parse::<usize>()
+                                .map_err(|_| "--depth must be a non-negative integer".to_owned())?,
+                        );
                     }
                     "--deadlock" => {
-                        deadlock = required_option_value(&mut args, "--deadlock")?;
-                        if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
+                        let value = required_option_value(&mut args, "--deadlock")?;
+                        if !matches!(value.as_str(), "warn" | "error" | "ignore") {
                             return Err("--deadlock must be warn, error, or ignore".to_owned());
                         }
+                        deadlock = Some(value);
                     }
                     "--engine" => {
-                        engine = required_option_value(&mut args, "--engine")?;
-                        if !matches!(engine.as_str(), "bmc" | "induction") {
+                        let value = required_option_value(&mut args, "--engine")?;
+                        if !matches!(value.as_str(), "bmc" | "induction") {
                             return Err("--engine must be bmc or induction".to_owned());
                         }
+                        engine = Some(value);
+                    }
+                    "--glossary" => {
+                        glossary = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--glossary",
+                        )?));
+                    }
+                    "--evidence" => {
+                        evidence_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--evidence",
+                        )?));
                     }
                     "-o" | "--output" => {
                         output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
@@ -1652,17 +1748,39 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                     _ => return Err(format!("unknown approval create option '{option}'")),
                 }
             }
+            let kind = kind.ok_or_else(|| "approval create requires --kind".to_owned())?;
+            let artifact =
+                artifact.ok_or_else(|| "approval create requires --artifact".to_owned())?;
+            let approver =
+                approver.ok_or_else(|| "approval create requires --approver".to_owned())?;
+            let inputs = if kind == "requirements_document" {
+                if depth.is_some() || deadlock.is_some() || engine.is_some() {
+                    return Err(
+                        "--depth/--deadlock/--engine are not valid with --kind requirements_document"
+                            .to_owned(),
+                    );
+                }
+                document_generation_inputs(&artifact, glossary.as_deref(), &evidence_paths)?
+            } else {
+                if glossary.is_some() || !evidence_paths.is_empty() {
+                    return Err(
+                        "--glossary/--evidence are only valid with --kind requirements_document"
+                            .to_owned(),
+                    );
+                }
+                approval::GenerationInputs::Solver(approval::SolverGenerationInputs {
+                    depth: depth.unwrap_or(8),
+                    deadlock: deadlock.unwrap_or_else(|| "ignore".to_owned()),
+                    engine: engine.unwrap_or_else(|| "bmc".to_owned()),
+                })
+            };
             Ok(run_approval_create(
                 &path,
-                &kind.ok_or_else(|| "approval create requires --kind".to_owned())?,
-                &artifact.ok_or_else(|| "approval create requires --artifact".to_owned())?,
-                &approver.ok_or_else(|| "approval create requires --approver".to_owned())?,
+                &kind,
+                &artifact,
+                &approver,
                 &requirements,
-                &approval::GenerationInputs {
-                    depth,
-                    deadlock,
-                    engine,
-                },
+                &inputs,
                 output.as_deref(),
                 signing_key.as_deref(),
             ))
@@ -1717,6 +1835,960 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             ))
         }
         _ => Err(format!("unknown approval subcommand '{subcommand}'")),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
+    let subcommand = args
+        .next()
+        .ok_or_else(|| "usage: fslc document <generate|claims> SPEC [options]".to_owned())?;
+    let path = PathBuf::from(
+        args.next()
+            .ok_or_else(|| format!("fslc document {subcommand} requires a spec"))?,
+    );
+    match subcommand.as_str() {
+        "generate" => {
+            let mut locale = fsl_tools::Locale::Ja;
+            let mut strict = false;
+            let mut strict_rendering = false;
+            let mut glossary = None;
+            let mut evidence_paths = Vec::new();
+            let mut approval_paths = Vec::new();
+            let mut trust_keys = Vec::new();
+            let mut output = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--view" => {
+                        let value = required_option_value(&mut args, "--view")?;
+                        if value != "requirements" {
+                            return Err(
+                                "--view must be requirements ('business'/'design' are reserved \
+                                 until docs/DESIGN-document-dialect-adapters.md's activation \
+                                 contract is met, issue #334)"
+                                    .to_owned(),
+                            );
+                        }
+                    }
+                    "--lang" => {
+                        let value = required_option_value(&mut args, "--lang")?;
+                        locale = match value.as_str() {
+                            "ja" => fsl_tools::Locale::Ja,
+                            "en" => fsl_tools::Locale::En,
+                            _ => return Err("--lang must be ja or en".to_owned()),
+                        };
+                    }
+                    "--strict" => strict = true,
+                    "--strict-rendering" => strict_rendering = true,
+                    "--glossary" => {
+                        glossary = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--glossary",
+                        )?));
+                    }
+                    "--evidence" => {
+                        evidence_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--evidence",
+                        )?));
+                    }
+                    "--approval" => {
+                        approval_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--approval",
+                        )?));
+                    }
+                    "--trust-key" => trust_keys.push(PathBuf::from(required_option_value(
+                        &mut args,
+                        "--trust-key",
+                    )?)),
+                    "-o" | "--output" => {
+                        output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
+                    }
+                    _ => return Err(format!("unknown document generate option '{option}'")),
+                }
+            }
+            let result = run_document_generate(
+                &path,
+                locale,
+                strict,
+                strict_rendering,
+                glossary.as_deref(),
+                &evidence_paths,
+                &approval_paths,
+                &trust_keys,
+                output.as_deref(),
+            );
+            if output.is_none()
+                && result.0.get("result").and_then(Value::as_str) == Some("generated")
+                && let Some(content) = result.0.get("content").and_then(Value::as_str)
+            {
+                // The envelope (and any `warnings`, e.g. FSL-DOC-LABEL-UNKNOWN)
+                // never reaches stdout in this no-`-o` bypass, since stdout must
+                // stay the raw document; surface warnings on stderr instead of
+                // silently dropping them.
+                if let Some(warnings) = result.0.get("warnings").and_then(Value::as_array) {
+                    for warning in warnings {
+                        eprintln!("warning: {warning}");
+                    }
+                }
+                print!("{content}");
+                std::process::exit(result.1);
+            }
+            Ok(result)
+        }
+        "claims" => {
+            let mut output = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--view" => {
+                        let value = required_option_value(&mut args, "--view")?;
+                        if value != "requirements" {
+                            return Err(
+                                "--view must be requirements ('business'/'design' are reserved \
+                                 until docs/DESIGN-document-dialect-adapters.md's activation \
+                                 contract is met, issue #334)"
+                                    .to_owned(),
+                            );
+                        }
+                    }
+                    "-o" | "--output" => {
+                        output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
+                    }
+                    _ => return Err(format!("unknown document claims option '{option}'")),
+                }
+            }
+            let result = run_document_claims(&path, output.as_deref());
+            if output.is_none()
+                && result.0.get("result").and_then(Value::as_str) == Some("generated")
+                && let Some(content) = result.0.get("content").and_then(Value::as_str)
+            {
+                print!("{content}");
+                std::process::exit(result.1);
+            }
+            Ok(result)
+        }
+        "check" => {
+            let artifact = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc document check requires an artifact path".to_owned())?,
+            );
+            let mut glossary = None;
+            let mut evidence_paths = Vec::new();
+            let mut approval_paths = Vec::new();
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--glossary" => {
+                        glossary = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--glossary",
+                        )?));
+                    }
+                    "--evidence" => {
+                        evidence_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--evidence",
+                        )?));
+                    }
+                    "--approval" => {
+                        approval_paths.push(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--approval",
+                        )?));
+                    }
+                    _ => return Err(format!("unknown document check option '{option}'")),
+                }
+            }
+            Ok(run_document_check(
+                &path,
+                &artifact,
+                glossary.as_deref(),
+                &evidence_paths,
+                &approval_paths,
+            ))
+        }
+        _ => Err(format!("unknown document subcommand '{subcommand}'")),
+    }
+}
+
+/// An unsupported source dialect is a scope boundary (issue #334,
+/// `docs/DESIGN-document-dialect-adapters.md`), not a defect in the spec: it
+/// gets its own coded `document` envelope so a caller can programmatically
+/// distinguish "RCIR has no adapter for this dialect yet" from a genuine
+/// parse/semantic error in a supported dialect.
+fn document_projection_error_output(error: &fsl_tools::DocumentProjectionError) -> Value {
+    match error {
+        fsl_tools::DocumentProjectionError::UnsupportedDialect { dialect } => {
+            let mut output = error_output("document", &error.to_string());
+            output
+                .as_object_mut()
+                .expect("document error envelope")
+                .extend([
+                    ("code".to_owned(), json!("FSL-DOC-DIALECT-UNSUPPORTED")),
+                    ("dialect".to_owned(), json!(dialect)),
+                    (
+                        "supported_dialects".to_owned(),
+                        json!(fsl_tools::RCIR_SUPPORTED_DIALECTS),
+                    ),
+                ]);
+            output
+        }
+        fsl_tools::DocumentProjectionError::Other(message) => semantic_error_output(message),
+    }
+}
+
+fn load_document_claims(path: &Path) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
+    load_document_claims_with_label(path, &path.to_string_lossy())
+}
+
+/// Like [`load_document_claims`], but projects under an explicit label
+/// rather than `path`'s own spelling. `fslc document check` (issue #329)
+/// needs this: every rendered `出典`/`Source:` line carries the label
+/// verbatim, so re-projecting under a *different* spelling of the same file
+/// (e.g. a relative-path difference from running `check` in another
+/// directory than `generate`) would report false drift. `check` re-projects
+/// under the label the artifact's own frontmatter recorded instead.
+fn load_document_claims_with_label(
+    path: &Path,
+    label: &str,
+) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
+    let source =
+        std::fs::read_to_string(path).map_err(|error| error_output("io", &error.to_string()))?;
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    fsl_tools::project_requirement_claims_from_source(&source, Some(label), base)
+        .map(|claims| (source, claims))
+        .map_err(|error| document_projection_error_output(&error))
+}
+
+fn document_diagnostics_error(
+    claims: &fsl_tools::RequirementClaimSet,
+    strict: bool,
+) -> Option<Value> {
+    let (code, message) = if claims.requirements.is_empty() {
+        (
+            "FSL-DOC-NO-REQUIREMENTS",
+            "the specification declares no requirement IDs".to_owned(),
+        )
+    } else if strict && claims.coverage.counts.unattributed > 0 {
+        (
+            "FSL-DOC-UNTAGGED-TARGET",
+            format!(
+                "{} authored target(s) are not linked to a requirement ID",
+                claims.coverage.counts.unattributed
+            ),
+        )
+    } else if strict && claims.coverage.counts.unsupported > 0 {
+        (
+            "FSL-DOC-UNSUPPORTED-TARGET",
+            format!(
+                "{} authored target(s) use a semantic target RCIR v1 does not project",
+                claims.coverage.counts.unsupported
+            ),
+        )
+    } else {
+        return None;
+    };
+    let mut output = error_output("document", &message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!(code));
+    Some(output)
+}
+
+fn default_document_output(path: &Path, suffix: &str) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("document");
+    PathBuf::from(format!("{stem}{suffix}"))
+}
+
+/// Diagnostic code for a glossary file that fails to load, parse, or self-
+/// validate (issue #330) — everything except a duplicate label target,
+/// which the issue's own diagnostics table gives its own code.
+fn document_glossary_error(message: &str) -> Value {
+    let mut output = error_output("document", message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!("FSL-DOC-GLOSSARY-INVALID"));
+    output
+}
+
+fn document_glossary_issue_error(issues: &[fsl_tools::GlossaryIssue]) -> Value {
+    let message = issues
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ");
+    if issues
+        .iter()
+        .any(|issue| matches!(issue, fsl_tools::GlossaryIssue::DuplicateTarget(_)))
+    {
+        let mut output = error_output("document", &message);
+        output
+            .as_object_mut()
+            .expect("document error envelope")
+            .insert("code".to_owned(), json!("FSL-DOC-LABEL-CONFLICT"));
+        output
+    } else {
+        document_glossary_error(&message)
+    }
+}
+
+/// Load, parse, and validate a `--glossary` sidecar (issue #330) against the
+/// locale it will be rendered under. `None` when no `--glossary` was given.
+/// Shared by `generate` and `check`: both re-render with whatever glossary
+/// (or lack of one) applies, so both need the identical loading rule.
+fn load_glossary(
+    path: Option<&Path>,
+    expected_locale: fsl_tools::Locale,
+) -> Result<Option<(fsl_tools::Glossary, String)>, Value> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+    let digest = approval::sha256_bytes(&bytes);
+    let text = String::from_utf8(bytes)
+        .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
+    let glossary = fsl_tools::parse_glossary(&text)
+        .map_err(|issues| document_glossary_issue_error(&issues))?;
+    if glossary.locale != expected_locale {
+        return Err(document_glossary_error(&format!(
+            "glossary locale '{}' does not match the document locale '{}'",
+            glossary.locale.as_str(),
+            expected_locale.as_str()
+        )));
+    }
+    Ok(Some((glossary, digest)))
+}
+
+fn document_evidence_error(message: &str) -> Value {
+    let mut output = error_output("document", message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!("FSL-DOC-EVIDENCE-INVALID"));
+    output
+}
+
+type EvidenceFiles = Vec<(String, Value)>;
+
+/// Load and parse every `--evidence` file (issue #332) — each must be a JSON
+/// object envelope in the same shape `fslc ledger --evidence` already
+/// accepts; this module classifies nothing itself (`fsl_tools::ledger`'s
+/// `assurance_token`/`assurance_label` remain the sole classifier). Returns
+/// `None` when no `--evidence` flags were given. The combined digest sorts
+/// each file's own digest before hashing them together, so the same file
+/// *set* given in a different `--evidence` order still yields the same
+/// `evidence_digest` frontmatter value.
+fn load_evidence(paths: &[PathBuf]) -> Result<Option<(EvidenceFiles, String)>, Value> {
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let mut files = Vec::new();
+    let mut digests = Vec::new();
+    for path in paths {
+        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        digests.push(approval::sha256_bytes(&bytes));
+        let text = String::from_utf8(bytes)
+            .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
+        let value = serde_json::from_str::<Value>(&text).map_err(|error| {
+            document_evidence_error(&format!("{}: invalid JSON: {error}", path.display()))
+        })?;
+        if !value.is_object() {
+            return Err(document_evidence_error(&format!(
+                "{}: evidence JSON must contain an object envelope",
+                path.display()
+            )));
+        }
+        files.push((path.display().to_string(), value));
+    }
+    digests.sort();
+    let combined = approval::sha256_bytes(digests.join("\n").as_bytes());
+    Ok(Some((files, combined)))
+}
+
+fn document_approval_error(message: &str) -> Value {
+    let mut output = error_output("document", message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!("FSL-DOC-APPROVAL-INVALID"));
+    output
+}
+
+fn document_approval_drifted_error(reasons: &[&'static str]) -> Value {
+    let mut output = error_output(
+        "document",
+        "a supplied --approval record does not match the current rendering",
+    );
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .extend([
+            ("code".to_owned(), json!("FSL-DOC-APPROVAL-DRIFTED")),
+            ("reasons".to_owned(), json!(reasons)),
+        ]);
+    output
+}
+
+/// A `--approval` record loaded and (for a signed schema) verified for
+/// `fslc document generate`'s overlay (issue #333), retaining the full
+/// parsed record so the caller can compare its `spec`/`target` digests
+/// against the current rendering before ever displaying it.
+struct LoadedApproval {
+    record: approval::ApprovalRecord,
+    record_path: String,
+    signature_key_id: Option<String>,
+    current_reviewed_digest: Option<String>,
+}
+
+/// Load and verify every `--approval` record. Each must target
+/// `requirements_document`; a signed (v2/v4) record must verify against
+/// `--trust-key` or this fails closed — a stakeholder document must never
+/// display an unverifiable signed approval. Returns `None` when no
+/// `--approval` flags were given. The combined digest sorts each record
+/// file's own digest before hashing them together, the same order-
+/// independent scheme `load_evidence`/`load_glossary` already use.
+fn load_approvals(
+    paths: &[PathBuf],
+    trust_keys: &[PathBuf],
+) -> Result<Option<(Vec<LoadedApproval>, String)>, Value> {
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let trust =
+        approval::TrustStore::load(trust_keys).map_err(|error| error_output("io", &error))?;
+    let mut loaded = Vec::new();
+    let mut digests = Vec::new();
+    for path in paths {
+        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        digests.push(approval::sha256_bytes(&bytes));
+        let versioned = approval::read_versioned_record(path)
+            .map_err(|error| document_approval_error(&format!("{}: {error}", path.display())))?;
+        let (record, signature_key_id) = match &versioned {
+            approval::VersionedApprovalRecord::V1(record) => (record.clone(), None),
+            approval::VersionedApprovalRecord::V2(record) => {
+                let verified = trust
+                    .verify(record)
+                    .map_err(|error| error_output("io", &error))?;
+                if !verified {
+                    return Err(document_approval_error(&format!(
+                        "{}: signature is invalid or untrusted",
+                        path.display()
+                    )));
+                }
+                (versioned.binding(), Some(record.signature.key_id.clone()))
+            }
+        };
+        if record.target.kind != "requirements_document" {
+            return Err(document_approval_error(&format!(
+                "{}: approval record targets '{}', not requirements_document",
+                path.display(),
+                record.target.kind
+            )));
+        }
+        let current_reviewed_digest = approval::reviewed_artifact_digest(&record)
+            .map_err(|error| error_output("io", &error))?;
+        loaded.push(LoadedApproval {
+            record,
+            record_path: path.display().to_string(),
+            signature_key_id,
+            current_reviewed_digest,
+        });
+    }
+    digests.sort();
+    let combined = approval::sha256_bytes(digests.join("\n").as_bytes());
+    Ok(Some((loaded, combined)))
+}
+
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+fn run_document_generate(
+    path: &Path,
+    locale: fsl_tools::Locale,
+    strict: bool,
+    strict_rendering: bool,
+    glossary_path: Option<&Path>,
+    evidence_paths: &[PathBuf],
+    approval_paths: &[PathBuf],
+    trust_keys: &[PathBuf],
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let (source, claims) = match load_document_claims(path) {
+        Ok(parts) => parts,
+        Err(output) => return (output, 2),
+    };
+    if let Some(error) = document_diagnostics_error(&claims, strict) {
+        return (error, 2);
+    }
+    let loaded_glossary = match load_glossary(glossary_path, locale) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let loaded_evidence = match load_evidence(evidence_paths) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let mut evidence_warnings = Vec::new();
+    if let Some((files, _)) = &loaded_evidence {
+        let requirement_ids: std::collections::BTreeSet<&str> = claims
+            .requirements
+            .iter()
+            .map(|requirement| requirement.id.as_str())
+            .collect();
+        let unmatched = fsl_tools::unmatched_evidence_paths(&requirement_ids, files);
+        if !unmatched.is_empty() {
+            if strict {
+                let message = format!(
+                    "{} evidence file(s) do not match any requirement ID in this specification: {}",
+                    unmatched.len(),
+                    unmatched.join(", ")
+                );
+                let mut output = error_output("document", &message);
+                output
+                    .as_object_mut()
+                    .expect("document error envelope")
+                    .insert("code".to_owned(), json!("FSL-DOC-EVIDENCE-UNMATCHED"));
+                return (output, 2);
+            }
+            evidence_warnings = unmatched;
+        }
+    }
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
+        Ok(kernel) => kernel,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let model = match fsl_core::build_model(kernel.clone()) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let mut label_warnings = Vec::new();
+    if let Some((glossary, _)) = &loaded_glossary {
+        let unknown = fsl_tools::unknown_targets(glossary, &model);
+        if !unknown.is_empty() {
+            if strict {
+                let message = format!(
+                    "{} glossary target(s) do not exist: {}",
+                    unknown.len(),
+                    unknown
+                        .iter()
+                        .map(|target| target.target.clone())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                let mut output = error_output("document", &message);
+                output
+                    .as_object_mut()
+                    .expect("document error envelope")
+                    .insert("code".to_owned(), json!("FSL-DOC-LABEL-UNKNOWN"));
+                return (output, 2);
+            }
+            label_warnings = unknown;
+        }
+    }
+    let applied_glossary = loaded_glossary
+        .as_ref()
+        .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
+    let applied_evidence = loaded_evidence
+        .as_ref()
+        .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
+    let rendered = match fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        &source,
+        locale,
+        applied_glossary.as_ref(),
+        applied_evidence.as_ref(),
+        None,
+    ) {
+        Ok(rendered) => rendered,
+        Err(error) => return (error_output("document", &error), 2),
+    };
+    if strict_rendering && rendered.formula_fallback_count > 0 {
+        let mut output = error_output(
+            "document",
+            &format!(
+                "{} expression(s) fell back to canonical FSL text under --strict-rendering",
+                rendered.formula_fallback_count
+            ),
+        );
+        output
+            .as_object_mut()
+            .expect("document error envelope")
+            .insert("code".to_owned(), json!("FSL-DOC-FORMULA-FALLBACK"));
+        return (output, 2);
+    }
+    let pre_approval_digest = approval::sha256_bytes(rendered.markdown.as_bytes());
+
+    let loaded_approvals = match load_approvals(approval_paths, trust_keys) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let mut applied_approvals_vec = Vec::new();
+    if let Some((loaded, _)) = &loaded_approvals {
+        let mut mismatched: Vec<&'static str> = Vec::new();
+        for approval in loaded {
+            if approval.record.spec.digest != claims.spec.spec_digest {
+                mismatched.push("spec_changed");
+            }
+            if approval.record.target.digest != pre_approval_digest {
+                mismatched.push("rendering_changed");
+            }
+            if approval.record.target.claim_set_digest.as_deref()
+                != Some(claims.spec.claim_set_digest.as_str())
+            {
+                mismatched.push("claim_set_changed");
+            }
+            if approval.record.target.reviewed_digest.as_deref()
+                != approval.current_reviewed_digest.as_deref()
+            {
+                mismatched.push("artifact_changed");
+            }
+        }
+        mismatched.sort_unstable();
+        mismatched.dedup();
+        if !mismatched.is_empty() {
+            return (document_approval_drifted_error(&mismatched), 2);
+        }
+        applied_approvals_vec = loaded
+            .iter()
+            .map(|approval| fsl_tools::AppliedApproval {
+                record_path: approval.record_path.clone(),
+                approver: approval.record.approval.approver.clone(),
+                approved_at: approval.record.approval.approved_at.clone(),
+                requirements: approval.record.approval.requirements.clone(),
+                artifact_digest: approval
+                    .record
+                    .target
+                    .reviewed_digest
+                    .clone()
+                    .expect("validated requirements_document approval"),
+                signature_key_id: approval.signature_key_id.clone(),
+            })
+            .collect();
+    }
+    let rendered = if let Some((_, combined_digest)) = &loaded_approvals {
+        let applied_approvals = fsl_tools::AppliedApprovals {
+            records: &applied_approvals_vec,
+            digest: combined_digest,
+        };
+        match fsl_tools::render_requirements_document(
+            &claims,
+            &kernel,
+            &model,
+            &source,
+            locale,
+            applied_glossary.as_ref(),
+            applied_evidence.as_ref(),
+            Some(&applied_approvals),
+        ) {
+            Ok(rendered) => rendered,
+            Err(error) => return (error_output("document", &error), 2),
+        }
+    } else {
+        rendered
+    };
+    let artifact_digest = approval::sha256_bytes(rendered.markdown.as_bytes());
+    if let Some(path) = output_path
+        && let Err(error) = std::fs::write(path, &rendered.markdown)
+    {
+        return (error_output("io", &error.to_string()), 2);
+    }
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("generated"));
+    output.insert("kind".to_owned(), json!("requirements_document"));
+    output.insert(
+        "output".to_owned(),
+        json!(output_path.map_or_else(
+            || default_document_output(path, "_requirements.md"),
+            Path::to_path_buf
+        )),
+    );
+    output.insert("spec_digest".to_owned(), json!(claims.spec.spec_digest));
+    output.insert(
+        "claim_set_digest".to_owned(),
+        json!(claims.spec.claim_set_digest),
+    );
+    output.insert("artifact_digest".to_owned(), json!(artifact_digest));
+    output.insert(
+        "coverage".to_owned(),
+        json!({
+            "authored_targets": claims.coverage.counts.authored,
+            "rendered_targets": claims.coverage.counts.rendered,
+            "unattributed_targets": claims.coverage.counts.unattributed,
+            "unsupported_targets": claims.coverage.counts.unsupported,
+            "formula_fallbacks": rendered.formula_fallback_count,
+        }),
+    );
+    output.insert(
+        "provenance".to_owned(),
+        json!({"completeness": claims.provenance.completeness}),
+    );
+    if let Some((_, digest)) = &loaded_glossary {
+        output.insert(
+            "glossary".to_owned(),
+            json!({
+                "digest": digest,
+                "labels": loaded_glossary.as_ref().map_or(0, |(glossary, _)| glossary.labels.len()),
+            }),
+        );
+    }
+    if let Some((files, digest)) = &loaded_evidence {
+        output.insert(
+            "evidence".to_owned(),
+            json!({
+                "digest": digest,
+                "files": files.len(),
+            }),
+        );
+    }
+    if let Some((_, digest)) = &loaded_approvals {
+        output.insert(
+            "approvals".to_owned(),
+            json!({
+                "digest": digest,
+                "records": applied_approvals_vec.len(),
+            }),
+        );
+    }
+    let mut warnings = Vec::new();
+    warnings.extend(label_warnings.iter().map(|target| {
+        json!({
+            "kind": "label_unknown",
+            "code": "FSL-DOC-LABEL-UNKNOWN",
+            "target": target.target,
+            "detail": target.detail,
+        })
+    }));
+    warnings.extend(evidence_warnings.iter().map(|path| {
+        json!({
+            "kind": "evidence_unmatched",
+            "code": "FSL-DOC-EVIDENCE-UNMATCHED",
+            "target": path,
+        })
+    }));
+    if !warnings.is_empty() {
+        output.insert("warnings".to_owned(), json!(warnings));
+    }
+    if output_path.is_none() {
+        output.insert("content".to_owned(), json!(rendered.markdown));
+    }
+    (Value::Object(output), 0)
+}
+
+fn run_document_claims(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
+    let (_, claims) = match load_document_claims(path) {
+        Ok(parts) => parts,
+        Err(output) => return (output, 2),
+    };
+    let content = match serde_json::to_string_pretty(&claims) {
+        Ok(content) => content,
+        Err(error) => return (error_output("internal", &error.to_string()), 2),
+    };
+    if let Some(path) = output_path
+        && let Err(error) = std::fs::write(path, &content)
+    {
+        return (error_output("io", &error.to_string()), 2);
+    }
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("generated"));
+    output.insert("kind".to_owned(), json!("requirement_claims"));
+    output.insert(
+        "output".to_owned(),
+        json!(output_path.map_or_else(
+            || default_document_output(path, ".claims.json"),
+            Path::to_path_buf
+        )),
+    );
+    output.insert("spec_digest".to_owned(), json!(claims.spec.spec_digest));
+    output.insert(
+        "claim_set_digest".to_owned(),
+        json!(claims.spec.claim_set_digest),
+    );
+    if output_path.is_none() {
+        output.insert("content".to_owned(), json!(content));
+    }
+    (Value::Object(output), 0)
+}
+
+fn document_schema_error(message: &str) -> Value {
+    let mut output = error_output("document", message);
+    output
+        .as_object_mut()
+        .expect("document error envelope")
+        .insert("code".to_owned(), json!("FSL-DOC-SCHEMA-UNSUPPORTED"));
+    output
+}
+
+/// Load every `--approval` record for `fslc document check` (issue #333),
+/// which reproduces the "Approval records" section's *text* for structural
+/// comparison only — unlike `document generate`, it never verifies a
+/// signature (admission was `generate`'s job); it only needs the plaintext
+/// display fields to render byte-identically.
+fn load_approvals_for_check(
+    paths: &[PathBuf],
+) -> Result<Option<(Vec<fsl_tools::AppliedApproval>, String)>, Value> {
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let mut applied = Vec::new();
+    let mut digests = Vec::new();
+    for path in paths {
+        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        digests.push(approval::sha256_bytes(&bytes));
+        let versioned = approval::read_versioned_record(path)
+            .map_err(|error| document_approval_error(&format!("{}: {error}", path.display())))?;
+        let (record, signature_key_id) = match &versioned {
+            approval::VersionedApprovalRecord::V1(record) => (record.clone(), None),
+            approval::VersionedApprovalRecord::V2(record) => {
+                (versioned.binding(), Some(record.signature.key_id.clone()))
+            }
+        };
+        if record.target.kind != "requirements_document" {
+            return Err(document_approval_error(&format!(
+                "{}: approval record targets '{}', not requirements_document",
+                path.display(),
+                record.target.kind
+            )));
+        }
+        applied.push(fsl_tools::AppliedApproval {
+            record_path: path.display().to_string(),
+            approver: record.approval.approver,
+            approved_at: record.approval.approved_at,
+            requirements: record.approval.requirements,
+            artifact_digest: record.target.digest,
+            signature_key_id,
+        });
+    }
+    digests.sort();
+    let combined = approval::sha256_bytes(digests.join("\n").as_bytes());
+    Ok(Some((applied, combined)))
+}
+
+/// `fslc document check` (issue #329): a purely structural drift check
+/// between `artifact` (a possibly hand-edited `fslc document generate`
+/// output) and a fresh re-projection + re-render of `spec_path`, under the
+/// locale and source label the artifact's own frontmatter recorded.
+#[allow(clippy::too_many_lines)]
+fn run_document_check(
+    spec_path: &Path,
+    artifact: &Path,
+    glossary_path: Option<&Path>,
+    evidence_paths: &[PathBuf],
+    approval_paths: &[PathBuf],
+) -> (Value, i32) {
+    let artifact_text = match std::fs::read_to_string(artifact) {
+        Ok(text) => text,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let frontmatter = match fsl_tools::parse_frontmatter_only(&artifact_text) {
+        Ok(frontmatter) => frontmatter,
+        Err(issue) => return (document_schema_error(&issue.to_string()), 2),
+    };
+    if frontmatter.schema != fsl_tools::DOCUMENT_SCHEMA {
+        return (
+            document_schema_error(&format!(
+                "unsupported fsl_document_schema '{}' (expected '{}')",
+                frontmatter.schema,
+                fsl_tools::DOCUMENT_SCHEMA
+            )),
+            2,
+        );
+    }
+    if frontmatter.view != "requirements" {
+        return (
+            document_schema_error(&format!("unsupported document view '{}'", frontmatter.view)),
+            2,
+        );
+    }
+    let Some(locale) = fsl_tools::Locale::parse(&frontmatter.lang) else {
+        return (
+            document_schema_error(&format!("unsupported document lang '{}'", frontmatter.lang)),
+            2,
+        );
+    };
+
+    let spec_label = frontmatter
+        .source
+        .clone()
+        .unwrap_or_else(|| spec_path.to_string_lossy().into_owned());
+    let (source, claims) = match load_document_claims_with_label(spec_path, &spec_label) {
+        Ok(parts) => parts,
+        Err(output) => return (output, 2),
+    };
+    let base = spec_path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
+        Ok(kernel) => kernel,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let model = match fsl_core::build_model(kernel.clone()) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let loaded_glossary = match load_glossary(glossary_path, locale) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let loaded_evidence = match load_evidence(evidence_paths) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let loaded_approvals = match load_approvals_for_check(approval_paths) {
+        Ok(loaded) => loaded,
+        Err(output) => return (output, 2),
+    };
+    let applied_glossary = loaded_glossary
+        .as_ref()
+        .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
+    let applied_evidence = loaded_evidence
+        .as_ref()
+        .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
+    let applied_approvals = loaded_approvals
+        .as_ref()
+        .map(|(records, digest)| fsl_tools::AppliedApprovals { records, digest });
+    let rendered = match fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        &source,
+        locale,
+        applied_glossary.as_ref(),
+        applied_evidence.as_ref(),
+        applied_approvals.as_ref(),
+    ) {
+        Ok(rendered) => rendered,
+        Err(error) => return (error_output("document", &error), 2),
+    };
+
+    let report =
+        match fsl_tools::check_requirements_document(&artifact_text, &claims, &rendered.markdown) {
+            Ok(report) => report,
+            Err(error) => return (document_schema_error(&error.to_string()), 2),
+        };
+
+    let mut output = envelope();
+    output.insert("artifact".to_owned(), json!(artifact));
+    output.insert("spec_digest".to_owned(), json!(claims.spec.spec_digest));
+    output.insert(
+        "claim_set_digest".to_owned(),
+        json!(claims.spec.claim_set_digest),
+    );
+    if report.is_conformant() {
+        output.insert("result".to_owned(), json!("document_conformant"));
+        (Value::Object(output), 0)
+    } else {
+        output.insert("result".to_owned(), json!("document_drifted"));
+        output.insert(
+            "reasons".to_owned(),
+            serde_json::to_value(&report.reasons).expect("serialize drift reasons"),
+        );
+        (Value::Object(output), 1)
     }
 }
 
@@ -1970,6 +3042,1461 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
         }
         _ => Err(format!("unknown ai subcommand '{subcommand}'")),
     }
+}
+
+#[allow(clippy::too_many_lines)]
+fn causal_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
+    let subcommand = args.next().ok_or_else(|| {
+        "usage: fslc causal <check|analyze|verify-expectations|observe-expectations|diff|ledger> ..."
+            .to_owned()
+    })?;
+    match subcommand.as_str() {
+        "check" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc causal check requires a file".to_owned())?,
+            );
+            if let Some(option) = args.next() {
+                return Err(format!("unknown causal check option '{option}'"));
+            }
+            Ok(run_causal_check(&path))
+        }
+        "analyze" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc causal analyze requires a file".to_owned())?,
+            );
+            let mut projection = None;
+            let mut profile = None;
+            let mut format = "json".to_owned();
+            let mut evidence = Vec::new();
+            let mut lifecycle = Vec::new();
+            let mut as_of = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--projection" => {
+                        projection = Some(required_option_value(&mut args, "--projection")?);
+                    }
+                    "--profile" => {
+                        profile = Some(required_option_value(&mut args, "--profile")?);
+                    }
+                    "--format" => format = required_option_value(&mut args, "--format")?,
+                    "--evidence" => evidence.push(PathBuf::from(required_option_value(
+                        &mut args,
+                        "--evidence",
+                    )?)),
+                    "--lifecycle" => lifecycle.push(PathBuf::from(required_option_value(
+                        &mut args,
+                        "--lifecycle",
+                    )?)),
+                    "--as-of" => as_of = Some(required_option_value(&mut args, "--as-of")?),
+                    _ => return Err(format!("unknown causal analyze option '{option}'")),
+                }
+            }
+            Ok(run_causal_analyze(
+                &path,
+                projection.as_deref(),
+                profile.as_deref(),
+                &format,
+                &evidence,
+                &lifecycle,
+                as_of.as_deref(),
+            ))
+        }
+        "verify-expectations" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc causal verify-expectations requires a file".to_owned())?,
+            );
+            let mut depth = 8_usize;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--depth" => {
+                        depth = required_option_value(&mut args, "--depth")?
+                            .parse()
+                            .map_err(|_| "--depth requires a positive integer".to_owned())?;
+                    }
+                    _ => {
+                        return Err(format!(
+                            "unknown causal verify-expectations option '{option}'"
+                        ));
+                    }
+                }
+            }
+            Ok(run_causal_verify_expectations(&path, depth))
+        }
+        "observe-expectations" => {
+            let path =
+                PathBuf::from(args.next().ok_or_else(|| {
+                    "fslc causal observe-expectations requires a file".to_owned()
+                })?);
+            let mut from_log = None;
+            let mut mapping = None;
+            let mut scope_path = None;
+            let mut period_start = None;
+            let mut period_end = None;
+            let mut out = None;
+            let mut lifecycle_out = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--from-log" => {
+                        from_log = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--from-log",
+                        )?));
+                    }
+                    "--mapping" => {
+                        mapping = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--mapping",
+                        )?));
+                    }
+                    "--scope" => {
+                        scope_path =
+                            Some(PathBuf::from(required_option_value(&mut args, "--scope")?));
+                    }
+                    "--period-start" => {
+                        period_start = Some(required_option_value(&mut args, "--period-start")?);
+                    }
+                    "--period-end" => {
+                        period_end = Some(required_option_value(&mut args, "--period-end")?);
+                    }
+                    "--out" => {
+                        out = Some(PathBuf::from(required_option_value(&mut args, "--out")?));
+                    }
+                    "--lifecycle-out" => {
+                        lifecycle_out = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--lifecycle-out",
+                        )?));
+                    }
+                    _ => {
+                        return Err(format!(
+                            "unknown causal observe-expectations option '{option}'"
+                        ));
+                    }
+                }
+            }
+            let Some(from_log) = from_log else {
+                return Ok((error_output("usage", "--from-log is required"), 2));
+            };
+            let Some(mapping) = mapping else {
+                return Ok((error_output("usage", "--mapping is required"), 2));
+            };
+            let Some(scope_path) = scope_path else {
+                return Ok((
+                    error_output(
+                        "usage",
+                        "--scope is required (observation scope is never inferred from log content)",
+                    ),
+                    2,
+                ));
+            };
+            let Some(period_start) = period_start else {
+                return Ok((
+                    error_output(
+                        "usage",
+                        "--period-start is required (observation period is never inferred from log content)",
+                    ),
+                    2,
+                ));
+            };
+            let Some(period_end) = period_end else {
+                return Ok((
+                    error_output(
+                        "usage",
+                        "--period-end is required (observation period is never inferred from log content)",
+                    ),
+                    2,
+                ));
+            };
+            Ok(run_causal_observe_expectations(
+                &path,
+                &from_log,
+                &mapping,
+                &scope_path,
+                &period_start,
+                &period_end,
+                out.as_deref(),
+                lifecycle_out.as_deref(),
+            ))
+        }
+        "diff" => {
+            let before = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc causal diff requires two files".to_owned())?,
+            );
+            let after = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc causal diff requires two files".to_owned())?,
+            );
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--format" => {
+                        if required_option_value(&mut args, "--format")? != "json" {
+                            return Err("causal diff supports only --format json".to_owned());
+                        }
+                    }
+                    _ => return Err(format!("unknown causal diff option '{option}'")),
+                }
+            }
+            Ok(run_causal_diff(&before, &after))
+        }
+        "ledger" => {
+            let path = PathBuf::from(
+                args.next()
+                    .ok_or_else(|| "fslc causal ledger requires a file".to_owned())?,
+            );
+            let mut plans = Vec::new();
+            let mut evidence = Vec::new();
+            let mut lifecycle = Vec::new();
+            let mut as_of = None;
+            let mut format = "json".to_owned();
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--plans" => {
+                        plans.push(PathBuf::from(required_option_value(&mut args, "--plans")?));
+                    }
+                    "--evidence" => evidence.push(PathBuf::from(required_option_value(
+                        &mut args,
+                        "--evidence",
+                    )?)),
+                    "--lifecycle" => lifecycle.push(PathBuf::from(required_option_value(
+                        &mut args,
+                        "--lifecycle",
+                    )?)),
+                    "--as-of" => as_of = Some(required_option_value(&mut args, "--as-of")?),
+                    "--format" => format = required_option_value(&mut args, "--format")?,
+                    _ => return Err(format!("unknown causal ledger option '{option}'")),
+                }
+            }
+            if format != "json" {
+                return Err("causal ledger supports only --format json".to_owned());
+            }
+            Ok(run_causal_ledger(
+                &path,
+                &plans,
+                &evidence,
+                &lifecycle,
+                as_of.as_deref(),
+            ))
+        }
+        other => Err(format!(
+            "unknown causal subcommand '{other}' (expected check | analyze | verify-expectations | observe-expectations | diff | ledger; there is deliberately no 'causal verify')"
+        )),
+    }
+}
+
+fn causal_error_output(error: &fsl_tools::CausalError) -> (Value, i32) {
+    let kind = if error.kind == "parse" {
+        "parse"
+    } else {
+        "semantics"
+    };
+    let mut output = error_output(kind, &error.message);
+    if let Some(object) = output.as_object_mut() {
+        object.insert("diagnostic".to_owned(), json!(error.kind));
+        object.insert(
+            "loc".to_owned(),
+            json!({"line": error.line, "column": error.column}),
+        );
+    }
+    (output, 2)
+}
+
+fn load_causal_model(
+    path: &Path,
+) -> Result<(fsl_tools::CausalModel, Vec<fsl_tools::CausalWarning>), (Value, i32)> {
+    let source = std::fs::read_to_string(path).map_err(|error| {
+        (
+            error_output("io", &format!("cannot read {}: {error}", path.display())),
+            2,
+        )
+    })?;
+    let base = path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let resolver = fsl_core::FsResolver::new(base);
+    fsl_tools::build_causal_model(&source, &resolver).map_err(|error| causal_error_output(&error))
+}
+
+fn merge_causal_envelope(value: Value) -> (Value, i32) {
+    let Value::Object(body) = value else {
+        return (error_output("internal", "invalid causal result"), 3);
+    };
+    let mut output = envelope();
+    output.extend(body);
+    (Value::Object(output), 0)
+}
+
+fn run_causal_check(path: &Path) -> (Value, i32) {
+    match load_causal_model(path) {
+        Ok((model, warnings)) => {
+            merge_causal_envelope(fsl_tools::causal_check_json(&model, &warnings))
+        }
+        Err(error) => error,
+    }
+}
+
+type LoadedEvidence = (
+    std::collections::BTreeMap<String, fsl_tools::EvidenceArtifact>,
+    fsl_tools::SupportOverlay,
+);
+
+fn load_causal_evidence(
+    model: &fsl_tools::CausalModel,
+    evidence_paths: &[PathBuf],
+    lifecycle_paths: &[PathBuf],
+    as_of: Option<&str>,
+) -> Result<LoadedEvidence, (Value, i32)> {
+    let read_json = |path: &PathBuf| -> Result<Value, (Value, i32)> {
+        let source = std::fs::read_to_string(path).map_err(|error| {
+            (
+                error_output("io", &format!("cannot read {}: {error}", path.display())),
+                2,
+            )
+        })?;
+        serde_json::from_str(&source).map_err(|error| {
+            (
+                error_output(
+                    "parse",
+                    &format!("invalid JSON in {}: {error}", path.display()),
+                ),
+                2,
+            )
+        })
+    };
+    let evidence_error = |error: &fsl_tools::EvidenceError| {
+        let mut output = error_output("semantics", &error.message);
+        if let Some(object) = output.as_object_mut() {
+            object.insert("diagnostic".to_owned(), json!(error.kind));
+        }
+        (output, 2)
+    };
+    let mut artifacts = std::collections::BTreeMap::new();
+    for path in evidence_paths {
+        let value = read_json(path)?;
+        let artifact = fsl_tools::parse_artifact(&value).map_err(|error| evidence_error(&error))?;
+        if artifacts
+            .insert(artifact.evidence_id.clone(), artifact)
+            .is_some()
+        {
+            return Err((
+                error_output(
+                    "semantics",
+                    "duplicate evidence_id across --evidence inputs",
+                ),
+                2,
+            ));
+        }
+    }
+    for path in lifecycle_paths {
+        let value = read_json(path)?;
+        let (evidence_id, status) = fsl_tools::validate_lifecycle_chain(&value, &artifacts)
+            .map_err(|error| evidence_error(&error))?;
+        if let Some(artifact) = artifacts.get_mut(&evidence_id) {
+            artifact.lifecycle_status = status;
+        }
+    }
+    let overlay = fsl_tools::aggregate_support(model, &artifacts, as_of);
+    Ok((artifacts, overlay))
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_causal_analyze(
+    path: &Path,
+    projection: Option<&str>,
+    profile: Option<&str>,
+    format: &str,
+    evidence_paths: &[PathBuf],
+    lifecycle_paths: &[PathBuf],
+    as_of: Option<&str>,
+) -> (Value, i32) {
+    if !matches!(format, "json" | "dot" | "mermaid") {
+        return (
+            error_output(
+                "usage",
+                &format!("unsupported causal analyze format: {format}"),
+            ),
+            2,
+        );
+    }
+    let (model, _) = match load_causal_model(path) {
+        Ok(loaded) => loaded,
+        Err(error) => return error,
+    };
+    let evidence = if evidence_paths.is_empty() {
+        None
+    } else {
+        match load_causal_evidence(&model, evidence_paths, lifecycle_paths, as_of) {
+            Ok(loaded) => Some(loaded),
+            Err(error) => return error,
+        }
+    };
+    let analysis = match (projection, profile) {
+        (Some(projection), None) => match projection {
+            "causal_graph" => fsl_tools::causal_graph_projection(&model),
+            "causal_timeline" => fsl_tools::causal_timeline_projection(&model),
+            "causal_traceability_graph" => fsl_tools::causal_traceability_projection(&model),
+            "causal_evidence_graph" => {
+                let Some((artifacts, overlay)) = &evidence else {
+                    return (
+                        error_output(
+                            "usage",
+                            "--projection causal_evidence_graph requires at least one --evidence artifact",
+                        ),
+                        2,
+                    );
+                };
+                fsl_tools::causal_evidence_graph(&model, artifacts, overlay)
+            }
+            other => {
+                return (
+                    error_output("usage", &format!("unknown causal projection '{other}'")),
+                    2,
+                );
+            }
+        },
+        (None, Some("causal-review")) => {
+            if format != "json" {
+                return (
+                    error_output(
+                        "usage",
+                        "--profile causal-review supports only --format json",
+                    ),
+                    2,
+                );
+            }
+            let mut review = fsl_tools::causal_review_json(&model);
+            if let Some((_, overlay)) = &evidence
+                && let Some(object) = review.as_object_mut()
+            {
+                if let Some(Value::Array(findings)) = object.get_mut("findings") {
+                    findings.extend(overlay.findings.iter().cloned());
+                }
+                if let Some(Value::Array(entries)) = object.get_mut("not_evaluable") {
+                    entries.extend(overlay.not_evaluable.iter().cloned());
+                }
+                object.insert("causal_support".to_owned(), json!(overlay.support));
+            }
+            review
+        }
+        (None, Some(other)) => {
+            return (
+                error_output("usage", &format!("unknown causal profile '{other}'")),
+                2,
+            );
+        }
+        (Some(_), Some(_)) | (None, None) => {
+            return (
+                error_output(
+                    "usage",
+                    "fslc causal analyze requires exactly one of --projection or --profile",
+                ),
+                2,
+            );
+        }
+    };
+    if format == "json" {
+        return merge_causal_envelope(analysis);
+    }
+    let content = if format == "mermaid" {
+        fsl_tools::causal_mermaid(&analysis)
+    } else {
+        fsl_tools::causal_dot(&analysis)
+    };
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("causal_analyzed"));
+    output.insert("formal_result".to_owned(), json!("not_run"));
+    output.insert(
+        "projection".to_owned(),
+        analysis.get("projection").cloned().unwrap_or(Value::Null),
+    );
+    output.insert("format".to_owned(), json!(format));
+    output.insert("content".to_owned(), json!(content));
+    (Value::Object(output), 0)
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => {
+            return (
+                error_output("io", &format!("cannot read {}: {error}", path.display())),
+                2,
+            );
+        }
+    };
+    let surface = match fsl_syntax::parse_causal(&source) {
+        Ok(surface) => surface,
+        Err(error) => {
+            let mut output = error_output("parse", &error.to_string());
+            if let Some(object) = output.as_object_mut() {
+                object.insert("loc".to_owned(), error.span.python_loc());
+            }
+            return (output, 2);
+        }
+    };
+    let (model, _) = match load_causal_model(path) {
+        Ok(loaded) => loaded,
+        Err(error) => return error,
+    };
+    let base = path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let resolver = fsl_core::FsResolver::new(base);
+    let compiled = match fsl_tools::compile_expectations(&surface, &model, &resolver) {
+        Ok(compiled) => compiled,
+        Err(error) => return causal_error_output(&error),
+    };
+    let mut expectations = Vec::new();
+    for expectation in &compiled {
+        let mut solver = match fsl_solver_z3::Z3Solver::new() {
+            Ok(solver) => solver,
+            Err(error) => return (error_output("internal", &error.to_string()), 3),
+        };
+        let result = match block_on_native(fsl_verifier::verify_bounded(
+            &expectation.model,
+            &mut solver,
+            depth,
+        )) {
+            Ok(result) => result,
+            Err(error) => {
+                return (
+                    error_output(
+                        "semantics",
+                        &format!("expectation '{}': {error}", expectation.id),
+                    ),
+                    2,
+                );
+            }
+        };
+        let violated_here = result
+            .leadsto_violation
+            .as_ref()
+            .is_some_and(|violation| violation.name == expectation.property);
+        let base_violation = result.violation.is_some()
+            || result
+                .leadsto_violation
+                .as_ref()
+                .is_some_and(|violation| violation.name != expectation.property);
+        if base_violation {
+            return (
+                error_output(
+                    "semantics",
+                    &format!(
+                        "expectation '{}': the target spec itself is not clean at depth {depth}; fix the spec before checking expectations",
+                        expectation.id
+                    ),
+                ),
+                2,
+            );
+        }
+        expectations.push(json!({
+            "id": format!("expectation:{}", expectation.id),
+            "verdict": if violated_here { "violated" } else { "pass" },
+            "assurance": "bounded",
+            "checked_to_depth": depth,
+            "within_ticks": expectation.within_ticks,
+            "clock": expectation.clock,
+            "trigger_kind": expectation.trigger_kind,
+            "derived_from_claim": expectation
+                .derived_from_claim
+                .as_ref()
+                .map(|claim| format!("claim:{claim}")),
+            "do_not_assume": [
+                "The causal claim is proved",
+                "No unmodeled common cause exists",
+                "Expectation violation refutes the causal claim"
+            ],
+        }));
+    }
+    let claims: Vec<Value> = model
+        .claims
+        .values()
+        .map(|claim| {
+            json!({
+                "id": format!("claim:{}", claim.id),
+                "formal_assurance": fsl_tools::FORMAL_ASSURANCE_NOT_RUN,
+                "causal_support": fsl_tools::CAUSAL_SUPPORT_UNTESTED,
+            })
+        })
+        .collect();
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("causal_expectations_checked"));
+    output.insert("schema_version".to_owned(), json!("causal-expectations.v0"));
+    output.insert(
+        "formal_result".to_owned(),
+        json!(fsl_tools::FORMAL_ASSURANCE_NOT_RUN),
+    );
+    output.insert("model".to_owned(), json!(model.name));
+    output.insert("claims".to_owned(), json!(claims));
+    output.insert("expectations".to_owned(), json!(expectations));
+    output.insert(
+        "do_not_assume".to_owned(),
+        json!([
+            "The causal claims are true",
+            "A passing expectation proves the causal claim",
+            "Expectation violation refutes the causal claim"
+        ]),
+    );
+    (Value::Object(output), 0)
+}
+
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+fn run_causal_observe_expectations(
+    path: &Path,
+    log_path: &Path,
+    mapping_path: &Path,
+    scope_path: &Path,
+    period_start: &str,
+    period_end: &str,
+    out_path: Option<&Path>,
+    lifecycle_out_path: Option<&Path>,
+) -> (Value, i32) {
+    // ── Parse causal source and compile expectations ──────────────────
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => {
+            return (
+                error_output("io", &format!("cannot read {}: {error}", path.display())),
+                2,
+            );
+        }
+    };
+    let surface = match fsl_syntax::parse_causal(&source) {
+        Ok(surface) => surface,
+        Err(error) => {
+            let mut output = error_output("parse", &error.to_string());
+            if let Some(object) = output.as_object_mut() {
+                object.insert("loc".to_owned(), error.span.python_loc());
+            }
+            return (output, 2);
+        }
+    };
+    let (model, _) = match load_causal_model(path) {
+        Ok(loaded) => loaded,
+        Err(error) => return error,
+    };
+    let base = path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let resolver = fsl_core::FsResolver::new(base);
+    let compiled = match fsl_tools::compile_expectations(&surface, &model, &resolver) {
+        Ok(compiled) => compiled,
+        Err(error) => return causal_error_output(&error),
+    };
+    if compiled.is_empty() {
+        return (
+            error_output("semantics", "causal model has no expectations to observe"),
+            2,
+        );
+    }
+
+    // ── Parse mapping and log ────────────────────────────────────────
+    let mapping_source = match std::fs::read_to_string(mapping_path) {
+        Ok(source) => source,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let mapping = match fsl_syntax::parse_surface_document(&mapping_source) {
+        Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
+        Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
+        Err(error) => return (error_output("parse", &error.to_string()), 2),
+    };
+    let records = match read_jsonl_records(log_path) {
+        Ok(records) => records,
+        Err(error) => return (error_output("io", &error), 2),
+    };
+
+    // ── Parse scope ──────────────────────────────────────────────────
+    let scope_raw = match std::fs::read_to_string(scope_path) {
+        Ok(source) => source,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let scope: Value = match serde_json::from_str(&scope_raw) {
+        Ok(scope) => scope,
+        Err(error) => {
+            return (
+                error_output("io", &format!("invalid scope JSON: {error}")),
+                2,
+            );
+        }
+    };
+
+    // ── Provenance digests ───────────────────────────────────────────
+    let model_digest = fsl_tools::canonical_json(&json!(source));
+    let model_digest = sha256_digest(&model_digest);
+    let log_raw = match std::fs::read_to_string(log_path) {
+        Ok(raw) => raw,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let log_digest = sha256_digest(&log_raw);
+    let mapping_digest = sha256_digest(&mapping_source);
+
+    // ── Build mapping lookup tables ──────────────────────────────────
+    let maps_auto = mapping
+        .items
+        .iter()
+        .any(|item| matches!(item, fsl_syntax::RefinementItem::MapsAuto(_)));
+    let state_maps: std::collections::BTreeMap<&str, (Option<&fsl_syntax::Binder>, &KernelExpr)> =
+        mapping
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                fsl_syntax::RefinementItem::Map {
+                    name, binder, expr, ..
+                } => Some((name.as_str(), (binder.as_ref(), expr.as_ref()))),
+                _ => None,
+            })
+            .collect();
+    let action_maps: std::collections::BTreeMap<
+        &str,
+        (&[fsl_syntax::RefinementParam], &fsl_syntax::ActionTarget),
+    > = mapping
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            fsl_syntax::RefinementItem::Action {
+                name,
+                params,
+                target,
+                ..
+            } => Some((name.as_str(), (params.as_slice(), target))),
+            _ => None,
+        })
+        .collect();
+
+    // ── Load the original kernel spec for conformance ────────────────
+    // Each compiled expectation has its own augmented model, but we need
+    // the original spec model to run conformance and mapping evaluation.
+    let first_import = surface.uses.first().map(|import| &import.path);
+    let spec_model = if let Some(import_path) = first_import {
+        let spec_source = match resolver.read(import_path) {
+            Ok(source) => source,
+            Err(error) => {
+                return (
+                    error_output(
+                        "io",
+                        &format!("cannot read '{}': {}", import_path, error.message),
+                    ),
+                    2,
+                );
+            }
+        };
+        let kernel = match fsl_core::parse_kernel_source(&spec_source, &resolver) {
+            Ok(kernel) => kernel,
+            Err(error) => return (error_output("semantics", &error.to_string()), 2),
+        };
+        match fsl_core::build_model(kernel) {
+            Ok(model) => model,
+            Err(error) => return (error_output("semantics", &error.to_string()), 2),
+        }
+    } else {
+        return (
+            error_output("semantics", "causal model has no uses imports"),
+            2,
+        );
+    };
+
+    // ── Replay: conformance + bounded liveness per expectation ───────
+    let mut monitor = match fsl_runtime::Monitor::new(spec_model.clone()) {
+        Ok(monitor) => monitor,
+        Err(error) => {
+            return (
+                error_output("internal", &format!("monitor init: {error}")),
+                3,
+            );
+        }
+    };
+
+    // Build a BoundedLivenessMonitor per compiled expectation.
+    let mut liveness_monitors: Vec<fsl_runtime::BoundedLivenessMonitor> = Vec::new();
+    for expectation in &compiled {
+        match fsl_runtime::BoundedLivenessMonitor::new(expectation.model.clone()) {
+            Ok(liveness) => liveness_monitors.push(liveness),
+            Err(error) => {
+                return (
+                    error_output(
+                        "internal",
+                        &format!("liveness monitor for '{}': {error}", expectation.id),
+                    ),
+                    3,
+                );
+            }
+        }
+    }
+
+    // Observe initial state (step 0).
+    let init_state = monitor.state.clone();
+    for (index, (expectation, liveness)) in compiled
+        .iter()
+        .zip(liveness_monitors.iter_mut())
+        .enumerate()
+    {
+        let extended = extend_with_ghost(&init_state, expectation, "", &spec_model);
+        if let Err(error) = liveness.observe(&extended, 0) {
+            return (
+                error_output(
+                    "internal",
+                    &format!(
+                        "liveness observe init for '{}': {error}",
+                        compiled[index].id
+                    ),
+                ),
+                3,
+            );
+        }
+    }
+
+    // Track per-expectation verdicts and violation step.
+    let mut verdicts: Vec<Option<usize>> = vec![None; compiled.len()];
+    let mut events_observed = 0_usize;
+    let events_unmapped = 0_usize;
+
+    for (record_index, (_line_number, record)) in records.iter().enumerate() {
+        let step = record_index + 1;
+        let mapped = (|| -> Result<(String, String, Map<String, Value>, Value), String> {
+            let record = record
+                .as_object()
+                .ok_or_else(|| "log record must be an object".to_owned())?;
+            let source_action = record
+                .get("action")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "record.action must be a string".to_owned())?;
+            let params = record
+                .get("params")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "record.params must be an object".to_owned())?;
+            let raw = record
+                .get("state")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "record.state must be an object".to_owned())?;
+            let mapping_result = action_maps.get(source_action).map_or_else(
+                || {
+                    if maps_auto {
+                        let action = spec_model
+                            .actions
+                            .iter()
+                            .find(|action| display(&action.name) == source_action)
+                            .ok_or_else(|| {
+                                format!("no action mapping for log action '{source_action}'")
+                            })?;
+                        Ok((
+                            None,
+                            fsl_syntax::ActionTarget::Action(
+                                action.name.clone(),
+                                action
+                                    .params
+                                    .iter()
+                                    .map(|param| KernelExpr::Var(param.name().to_owned()))
+                                    .collect(),
+                            ),
+                        ))
+                    } else {
+                        Err(format!(
+                            "no action mapping for log action '{source_action}'"
+                        ))
+                    }
+                },
+                |(source_params, target)| Ok((Some(*source_params), (*target).clone())),
+            )?;
+            let (source_params, target) = mapping_result;
+            if let Some(source_params) = source_params {
+                let expected = source_params
+                    .iter()
+                    .map(|param| param.name.as_str())
+                    .collect::<std::collections::BTreeSet<_>>();
+                let observed = params
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<std::collections::BTreeSet<_>>();
+                if expected != observed {
+                    return Err(format!(
+                        "parameter mismatch for log action '{source_action}'"
+                    ));
+                }
+            }
+            let (target_action, expressions) = match target {
+                fsl_syntax::ActionTarget::Stutter => ("stutter".to_owned(), Vec::new()),
+                fsl_syntax::ActionTarget::Action(name, expressions) => (name, expressions),
+            };
+            let mut mapped_params = Map::new();
+            if target_action != "stutter" {
+                let action = spec_model
+                    .actions
+                    .iter()
+                    .find(|action| action.name == target_action)
+                    .ok_or_else(|| format!("unknown mapped action '{target_action}'"))?;
+                if action.params.len() != expressions.len() {
+                    return Err(format!(
+                        "parameter mismatch for mapped action '{target_action}'"
+                    ));
+                }
+                for (param, expression) in action.params.iter().zip(&expressions) {
+                    mapped_params.insert(
+                        param.name().to_owned(),
+                        mapping_json_expr(expression, raw, params, &spec_model)?,
+                    );
+                }
+            }
+            let mut observed = Map::new();
+            for (name, ty) in &spec_model.state {
+                let display_name = display(name);
+                let value = if let Some((binder, expression)) = state_maps.get::<str>(name) {
+                    if binder.is_some() {
+                        let TypeRef::Map(key_ty, _) = ty else {
+                            return Err(format!(
+                                "indexed map on non-Map variable '{display_name}'"
+                            ));
+                        };
+                        let binder_name = match binder.expect("checked") {
+                            fsl_syntax::Binder::Typed { name, .. }
+                            | fsl_syntax::Binder::Range { name, .. }
+                            | fsl_syntax::Binder::Collection { name, .. } => name,
+                        };
+                        let mut values = Map::new();
+                        for key in spec_model
+                            .map_key_values(key_ty)
+                            .map_err(|error| error.to_string())?
+                        {
+                            let key_json = fslc_rust::fsl_value_json(&key);
+                            let key_name = key_json
+                                .as_str()
+                                .map_or_else(|| key_json.to_string(), str::to_owned);
+                            let mut bindings = Map::new();
+                            bindings.insert(binder_name.clone(), key_json);
+                            values.insert(
+                                key_name,
+                                mapping_json_expr(expression, raw, &bindings, &spec_model)?,
+                            );
+                        }
+                        Value::Object(values)
+                    } else {
+                        mapping_json_expr(expression, raw, &Map::new(), &spec_model)?
+                    }
+                } else if maps_auto {
+                    raw.get(&display_name)
+                        .or_else(|| raw.get(name))
+                        .cloned()
+                        .ok_or_else(|| format!("mapped state is missing '{display_name}'"))?
+                } else {
+                    return Err(format!(
+                        "no map for abstract state variable '{display_name}'"
+                    ));
+                };
+                observed.insert(display_name, value);
+            }
+            Ok((
+                source_action.to_owned(),
+                target_action,
+                mapped_params,
+                Value::Object(observed),
+            ))
+        })();
+        let (source_action, target_action, mapped_params, observed) = match mapped {
+            Ok(mapped) => mapped,
+            Err(error) => {
+                return (
+                    json!({
+                        "fsl": "1.0",
+                        "result": "error",
+                        "kind": "observation_replay_failed",
+                        "message": format!("log record {record_index}: {error}"),
+                        "failed_at_record": record_index,
+                        "do_not_assume": DO_NOT_ASSUME_CAUSAL_OBSERVATION,
+                    }),
+                    2,
+                );
+            }
+        };
+
+        // Step the conformance monitor.
+        if target_action != "stutter" {
+            let action = spec_model
+                .actions
+                .iter()
+                .find(|action| action.name == target_action)
+                .expect("validated mapped action");
+            let parsed = match parse_params(&spec_model, action, &mapped_params) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    return (
+                        json!({
+                            "fsl": "1.0",
+                            "result": "error",
+                            "kind": "observation_replay_failed",
+                            "message": format!("log record {record_index}: param mapping: {error}"),
+                            "failed_at_record": record_index,
+                            "do_not_assume": DO_NOT_ASSUME_CAUSAL_OBSERVATION,
+                        }),
+                        2,
+                    );
+                }
+            };
+            let enabled = match monitor.enabled() {
+                Ok(enabled) => enabled,
+                Err(error) => return (error_output("internal", &error.to_string()), 3),
+            };
+            let Some(instance) = enabled
+                .iter()
+                .find(|instance| instance.action == target_action && instance.params == parsed)
+            else {
+                return (
+                    json!({
+                        "fsl": "1.0",
+                        "result": "error",
+                        "kind": "observation_replay_nonconformant",
+                        "message": format!(
+                            "log record {record_index}: action '{source_action}' (mapped to '{}') is not enabled; evidence cannot be generated from a nonconformant log",
+                            display(&target_action)
+                        ),
+                        "failed_at_record": record_index,
+                        "do_not_assume": DO_NOT_ASSUME_CAUSAL_OBSERVATION,
+                    }),
+                    2,
+                );
+            };
+            if let Err(error) = monitor.step(instance) {
+                return (error_output("internal", &error.to_string()), 3);
+            }
+        }
+
+        // Convert observed state to FslValue for liveness monitoring.
+        let observed_fsl = match load_snapshot_value_object(
+            observed.as_object().expect("mapped state is an object"),
+            &spec_model,
+        ) {
+            Ok(state) => state,
+            Err(error) => {
+                return (
+                    json!({
+                        "fsl": "1.0",
+                        "result": "error",
+                        "kind": "observation_replay_failed",
+                        "message": format!("log record {record_index}: state conversion: {error}"),
+                        "failed_at_record": record_index,
+                        "do_not_assume": DO_NOT_ASSUME_CAUSAL_OBSERVATION,
+                    }),
+                    2,
+                );
+            }
+        };
+
+        // Compare observed state against the monitor's computed state.
+        let expected = fslc_rust::state_json(&monitor.state);
+        let parsed_observed = fslc_rust::state_json(&observed_fsl);
+        let mismatches = json_mismatches(&expected, &parsed_observed, "");
+        if !mismatches.is_empty() {
+            return (
+                json!({
+                    "fsl": "1.0",
+                    "result": "error",
+                    "kind": "observation_replay_nonconformant",
+                    "message": format!(
+                        "log record {record_index}: state mismatch between observed and spec-computed state; evidence cannot be generated from a nonconformant log"
+                    ),
+                    "failed_at_record": record_index,
+                    "expected_state": expected,
+                    "observed_state": parsed_observed,
+                    "mismatches": mismatches,
+                    "do_not_assume": DO_NOT_ASSUME_CAUSAL_OBSERVATION,
+                }),
+                2,
+            );
+        }
+
+        events_observed += 1;
+
+        // Feed extended state (with ghost) to each expectation's liveness monitor.
+        for (index, (expectation, liveness)) in compiled
+            .iter()
+            .zip(liveness_monitors.iter_mut())
+            .enumerate()
+        {
+            if verdicts[index].is_some() {
+                continue;
+            }
+            let extended =
+                extend_with_ghost(&observed_fsl, expectation, &target_action, &spec_model);
+            match liveness.observe(&extended, step) {
+                Ok(Some(_violation)) => {
+                    verdicts[index] = Some(step);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    return (
+                        error_output(
+                            "internal",
+                            &format!(
+                                "liveness observe for '{}' at step {step}: {error}",
+                                expectation.id
+                            ),
+                        ),
+                        3,
+                    );
+                }
+            }
+        }
+    }
+
+    // ── Build per-expectation results and evidence artifacts ─────────
+    let mut expectation_results = Vec::new();
+    let mut artifacts = Vec::new();
+    let mut lifecycle_records = Vec::new();
+
+    for (index, expectation) in compiled.iter().enumerate() {
+        let verdict = if verdicts[index].is_some() {
+            "violated"
+        } else {
+            "pass"
+        };
+
+        let expectation_id = format!("expectation:{}", expectation.id);
+        let expectation_digest = sha256_digest(&fsl_tools::canonical_json(&json!({
+            "id": expectation.id,
+            "property": expectation.property,
+            "within_ticks": expectation.within_ticks,
+            "trigger_kind": expectation.trigger_kind,
+        })));
+
+        expectation_results.push(json!({
+            "id": expectation_id,
+            "verdict": verdict,
+            "assurance": "replay-observed",
+            "within_ticks": expectation.within_ticks,
+            "clock": expectation.clock,
+            "trigger_kind": expectation.trigger_kind,
+            "derived_from_claim": expectation.derived_from_claim.as_ref().map(|id| format!("claim:{id}")),
+            "event_counts": {
+                "observed": events_observed,
+                "unmapped": events_unmapped,
+                "missing_required": 0
+            },
+            "do_not_assume": DO_NOT_ASSUME_CAUSAL_OBSERVATION,
+        }));
+
+        // Generate evidence artifact only for expectations linked to claims.
+        if let Some(claim_id) = &expectation.derived_from_claim {
+            let claim = model.claims.get(claim_id);
+            let claim_version = claim.map_or(1, |claim| claim.version);
+
+            let evidence_id = format!("OBS_{}_{}", expectation.id, model.name);
+
+            let mut artifact = json!({
+                "schema_version": fsl_tools::EVIDENCE_SCHEMA_VERSION,
+                "evidence_id": evidence_id,
+                "claims": [{
+                    "id": format!("claim:{claim_id}"),
+                    "version": claim_version
+                }],
+                "design": "observational",
+                "source_study_id": null,
+                "derived_from": [],
+                "support": "inconclusive",
+                "scope": scope,
+                "period": {
+                    "start": period_start,
+                    "end": period_end,
+                    "valid_until": period_end
+                },
+                "observation": {
+                    "kind": "expectation_replay",
+                    "expectation_id": expectation_id,
+                    "expectation_digest": expectation_digest,
+                    "verdict": verdict,
+                    "assurance": "replay-observed",
+                    "event_counts": {
+                        "observed": events_observed,
+                        "unmapped": events_unmapped,
+                        "missing_required": 0
+                    },
+                    "digests": {
+                        "model": model_digest,
+                        "log": log_digest,
+                        "mapping": mapping_digest,
+                        "study_protocol": null
+                    }
+                },
+                "formal_result": fsl_tools::FORMAL_ASSURANCE_NOT_RUN,
+                "artifact_digest": ""
+            });
+            let digest = fsl_tools::artifact_digest(&artifact);
+            artifact
+                .as_object_mut()
+                .expect("artifact is object")
+                .insert("artifact_digest".to_owned(), json!(digest));
+
+            // Build lifecycle record.
+            let mut lifecycle_record = json!({
+                "sequence": 1,
+                "status": "active",
+                "superseded_by": null,
+                "recorded_at": format!("{}T00:00:00Z", period_end),
+                "previous_record_digest": null,
+                "record_digest": ""
+            });
+            let record_digest =
+                fsl_tools::lifecycle_record_digest(&evidence_id, &digest, &lifecycle_record);
+            lifecycle_record
+                .as_object_mut()
+                .expect("record is object")
+                .insert("record_digest".to_owned(), json!(record_digest));
+
+            let lifecycle_chain = json!({
+                "schema_version": fsl_tools::LIFECYCLE_SCHEMA_VERSION,
+                "evidence_id": evidence_id,
+                "artifact_digest": digest,
+                "records": [lifecycle_record]
+            });
+
+            artifacts.push(artifact);
+            lifecycle_records.push(lifecycle_chain);
+        }
+    }
+
+    // ── Write output files ───────────────────────────────────────────
+    // One file per artifact so each is independently consumable by
+    // `fslc causal analyze --evidence`. Single artifact uses --out as-is;
+    // multiple artifacts suffix the expectation id.
+    let mut evidence_paths = Vec::new();
+    let mut lifecycle_paths = Vec::new();
+    for (index, artifact) in artifacts.iter().enumerate() {
+        let evidence_id = artifact
+            .get("evidence_id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        if let Some(base) = out_path {
+            let file_path = if artifacts.len() == 1 {
+                base.to_path_buf()
+            } else {
+                let stem = base
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("evidence");
+                let extension = base
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("json");
+                base.with_file_name(format!("{stem}.{evidence_id}.{extension}"))
+            };
+            let out_json = serde_json::to_string_pretty(artifact).expect("valid JSON");
+            if let Err(error) = std::fs::write(&file_path, format!("{out_json}\n")) {
+                return (
+                    error_output(
+                        "io",
+                        &format!("cannot write {}: {error}", file_path.display()),
+                    ),
+                    2,
+                );
+            }
+            evidence_paths.push(file_path.display().to_string());
+        }
+        if let Some(base) = lifecycle_out_path
+            && let Some(lifecycle) = lifecycle_records.get(index)
+        {
+            let file_path = if lifecycle_records.len() == 1 {
+                base.to_path_buf()
+            } else {
+                let stem = base
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("lifecycle");
+                let extension = base
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("json");
+                base.with_file_name(format!("{stem}.{evidence_id}.{extension}"))
+            };
+            let lifecycle_json = serde_json::to_string_pretty(lifecycle).expect("valid JSON");
+            if let Err(error) = std::fs::write(&file_path, format!("{lifecycle_json}\n")) {
+                return (
+                    error_output(
+                        "io",
+                        &format!("cannot write {}: {error}", file_path.display()),
+                    ),
+                    2,
+                );
+            }
+            lifecycle_paths.push(file_path.display().to_string());
+        }
+    }
+
+    // ── Build CLI envelope ───────────────────────────────────────────
+    let claims: Vec<Value> = model
+        .claims
+        .values()
+        .map(|claim| {
+            json!({
+                "id": format!("claim:{}", claim.id),
+                "formal_assurance": fsl_tools::FORMAL_ASSURANCE_NOT_RUN,
+                "causal_support": fsl_tools::CAUSAL_SUPPORT_UNTESTED,
+            })
+        })
+        .collect();
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("causal_expectations_observed"));
+    output.insert("schema_version".to_owned(), json!("causal-observation.v0"));
+    output.insert(
+        "formal_result".to_owned(),
+        json!(fsl_tools::FORMAL_ASSURANCE_NOT_RUN),
+    );
+    output.insert("model".to_owned(), json!(model.name));
+    output.insert("claims".to_owned(), json!(claims));
+    output.insert("expectations".to_owned(), json!(expectation_results));
+    output.insert("events_observed".to_owned(), json!(events_observed));
+    output.insert("artifacts_generated".to_owned(), json!(artifacts.len()));
+    if !artifacts.is_empty() {
+        output.insert(
+            "artifact_digests".to_owned(),
+            json!(
+                artifacts
+                    .iter()
+                    .filter_map(|artifact| artifact.get("artifact_digest").cloned())
+                    .collect::<Vec<_>>()
+            ),
+        );
+    }
+    output.insert(
+        "do_not_assume".to_owned(),
+        json!(DO_NOT_ASSUME_CAUSAL_OBSERVATION),
+    );
+    (Value::Object(output), 0)
+}
+
+const DO_NOT_ASSUME_CAUSAL_OBSERVATION: [&str; 5] = [
+    "The causal claim is proved",
+    "Temporal co-occurrence establishes causality",
+    "No unmodeled common cause exists",
+    "Expectation violation refutes the causal claim",
+    "Unobserved behavior did not occur",
+];
+
+fn extend_with_ghost(
+    base_state: &std::collections::BTreeMap<String, FslValue>,
+    expectation: &fsl_tools::CompiledExpectation,
+    target_action: &str,
+    _spec_model: &KernelModel,
+) -> std::collections::BTreeMap<String, FslValue> {
+    let mut extended = base_state.clone();
+    if expectation.trigger_kind == "action" {
+        let ghost_name = format!("_expectation_fired_{}", expectation.id);
+        let fires = expectation
+            .trigger_action
+            .as_ref()
+            .is_some_and(|trigger| trigger == target_action);
+        extended.insert(ghost_name, FslValue::Bool(fires));
+    }
+    extended
+}
+
+fn sha256_digest(text: &str) -> String {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(text.as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+fn run_causal_ledger(
+    path: &Path,
+    plan_paths: &[PathBuf],
+    evidence_paths: &[PathBuf],
+    lifecycle_paths: &[PathBuf],
+    as_of: Option<&str>,
+) -> (Value, i32) {
+    let (model, _) = match load_causal_model(path) {
+        Ok(loaded) => loaded,
+        Err(error) => return error,
+    };
+
+    // Load plan artifacts.
+    let mut plans = std::collections::BTreeMap::new();
+    for plan_path in plan_paths {
+        let source = match std::fs::read_to_string(plan_path) {
+            Ok(source) => source,
+            Err(error) => return (error_output("io", &error.to_string()), 2),
+        };
+        let value: Value = match serde_json::from_str(&source) {
+            Ok(value) => value,
+            Err(error) => {
+                return (
+                    error_output(
+                        "io",
+                        &format!("invalid JSON in {}: {error}", plan_path.display()),
+                    ),
+                    2,
+                );
+            }
+        };
+        let plan = match fsl_tools::parse_plan(&value) {
+            Ok(plan) => plan,
+            Err(error) => return (error_output(error.kind, &error.message), 2),
+        };
+        plans.insert(plan.plan_id.clone(), plan);
+    }
+
+    // Load evidence + lifecycle (reuse existing pattern).
+    let (artifacts, overlay) =
+        match load_causal_evidence(&model, evidence_paths, lifecycle_paths, as_of) {
+            Ok(loaded) => loaded,
+            Err(error) => return error,
+        };
+
+    // Apply lifecycle status to plans from the same lifecycle files.
+    for lifecycle_path in lifecycle_paths {
+        let Ok(source) = std::fs::read_to_string(lifecycle_path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&source) else {
+            continue;
+        };
+        if let Some(plan_id) = value.get("evidence_id").and_then(Value::as_str)
+            && let Some(plan) = plans.get_mut(plan_id)
+        {
+            // Cross-check lifecycle chain's artifact_digest against the plan's.
+            if let Some(chain_digest) = value.get("artifact_digest").and_then(Value::as_str)
+                && chain_digest != plan.declared_digest
+            {
+                return (
+                    error_output(
+                        "causal_plan_digest_mismatch",
+                        &format!(
+                            "lifecycle chain for plan '{plan_id}' declares artifact_digest {chain_digest} but plan has {}",
+                            plan.declared_digest
+                        ),
+                    ),
+                    2,
+                );
+            }
+            let empty_artifacts = std::collections::BTreeMap::new();
+            let Ok((_, status)) = fsl_tools::validate_lifecycle_chain(&value, &empty_artifacts)
+            else {
+                continue;
+            };
+            plan.lifecycle_status = status;
+        }
+    }
+
+    // Build ledger projection.
+    let ledger_body = fsl_tools::build_ledger(&model, &plans, &artifacts, &overlay, as_of);
+    let Value::Object(body) = ledger_body else {
+        return (error_output("internal", "invalid ledger result"), 3);
+    };
+    let mut output = envelope();
+    output.extend(body);
+    (Value::Object(output), 0)
+}
+
+fn run_causal_diff(before: &Path, after: &Path) -> (Value, i32) {
+    let (before_model, _) = match load_causal_model(before) {
+        Ok(loaded) => loaded,
+        Err(error) => return error,
+    };
+    let (after_model, _) = match load_causal_model(after) {
+        Ok(loaded) => loaded,
+        Err(error) => return error,
+    };
+    merge_causal_envelope(fsl_tools::causal_diff_json(&before_model, &after_model))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -5153,15 +7680,11 @@ fn run_domain_check(
     if status == 2 {
         return apply_domain_edition((kernel, status), path, path, edition);
     }
-    apply_domain_edition(
-        wrap_specialized(fsl_tools::check_domain(
-            &domain,
-            &stable_kernel_projection(kernel),
-        )),
-        path,
-        path,
-        edition,
-    )
+    let result = match fsl_tools::check_domain(&domain, &stable_kernel_projection(kernel)) {
+        Ok(result) => wrap_specialized(result),
+        Err(error) => (semantic_error_output(&error.to_string()), 2),
+    };
+    apply_domain_edition(result, path, path, edition)
 }
 
 fn run_domain_analyze(path: &Path) -> (Value, i32) {
@@ -5176,7 +7699,10 @@ fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
         Ok(domain) => domain,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let source = fsl_tools::domain_kernel_source(&domain);
+    let source = match fsl_tools::domain_kernel_source(&domain) {
+        Ok(source) => source,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
     if let Some(output_path) = output_path
         && let Err(error) = std::fs::write(output_path, &source)
     {
@@ -5363,7 +7889,7 @@ fn run_domain_testgen(
             format!("{}_attempts", snake_case(&effect.name)),
             format!("effect.{}.attempts", effect.name),
         ));
-        for event in &effect.outcomes {
+        for event in effect.outcome_events() {
             display_names.push((
                 format!(
                     "{}_complete_{}",
@@ -7189,6 +9715,12 @@ fn annotation_requirement_ids(annotations: &Annotations) -> Vec<String> {
         .collect()
 }
 
+fn trace_case_requirement_ids(case: &fsl_core::RequirementsTraceCase) -> Vec<String> {
+    let mut explicit = Annotations::default();
+    explicit.extend(case.annotations.source_order().iter().skip(1).cloned());
+    annotation_requirement_ids(&explicit)
+}
+
 fn property_requirements(model: &KernelModel, name: &str) -> Vec<String> {
     model
         .invariants
@@ -7309,6 +9841,32 @@ fn mutation_oracle_for_model(model: KernelModel, depth: usize) -> MutationOracle
     mutation_model_oracle(model, depth)
 }
 
+fn requirement_trace_failure_requirements(
+    source: &str,
+    failure: &Value,
+) -> Result<Vec<String>, String> {
+    let id = failure
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "requirement trace failure has no declaration id".to_owned())?;
+    let kind = failure
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "requirement trace failure has no kind".to_owned())?;
+    let contract = fsl_core::requirements_trace_contract(source)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "requirement trace failure has no trace contract".to_owned())?;
+    let cases = match kind {
+        "acceptance" => &contract.acceptance,
+        "forbidden" | "forbidden_setup" => &contract.forbidden,
+        _ => return Err(format!("unknown requirement trace failure kind '{kind}'")),
+    };
+    let case = cases.iter().find(|case| case.id == id).ok_or_else(|| {
+        format!("requirement trace failure references unknown declaration '{id}'")
+    })?;
+    Ok(trace_case_requirement_ids(case))
+}
+
 fn apply_requirement_mutation_oracle(
     source: &str,
     model: &KernelModel,
@@ -7332,7 +9890,7 @@ fn apply_requirement_mutation_oracle(
                 }
                 .to_owned(),
             ),
-            killer_requirements: Vec::new(),
+            killer_requirements: requirement_trace_failure_requirements(source, &failure)?,
         };
     }
     Ok(())
@@ -7427,7 +9985,10 @@ fn mutation_summary(mutants: &[Value]) -> Value {
     json!({"total":mutants.len(),"killed":killed,"survived":survived,"invalid":invalid,"kill_rate":mutation_kill_rate(killed,survived),"by_source":{"builtin":builtin,"external":external}})
 }
 
-fn requirement_kill_index(model: &KernelModel) -> Map<String, Value> {
+fn requirement_kill_index(
+    model: &KernelModel,
+    trace_contract: Option<&fsl_core::RequirementsTraceContract>,
+) -> Map<String, Value> {
     let mut result = Map::new();
     for annotations in model
         .actions
@@ -7444,6 +10005,16 @@ fn requirement_kill_index(model: &KernelModel) -> Map<String, Value> {
         .chain(model.leadstos.iter().map(|item| &item.annotations))
     {
         for requirement in annotation_requirement_ids(annotations) {
+            result.entry(requirement).or_insert(json!({"kills":0}));
+        }
+    }
+    if let Some(contract) = trace_contract {
+        for requirement in contract
+            .acceptance
+            .iter()
+            .chain(&contract.forbidden)
+            .flat_map(trace_case_requirement_ids)
+        {
             result.entry(requirement).or_insert(json!({"kills":0}));
         }
     }
@@ -7900,6 +10471,10 @@ fn run_mutate(
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 0),
     };
+    let trace_contract = match fsl_core::requirements_trace_contract(&source) {
+        Ok(contract) => contract,
+        Err(error) => return (semantic_error_output(&error.to_string()), 0),
+    };
     let document = match parse_surface_document(path) {
         Ok(document) => document,
         Err(error) => return (semantic_error_output(&error), 0),
@@ -7935,7 +10510,7 @@ fn run_mutate(
         .map(|(name, _)| name.clone())
         .collect::<std::collections::BTreeSet<_>>();
     let mut by_req = if by_requirement {
-        requirement_kill_index(&model)
+        requirement_kill_index(&model, trace_contract.as_ref())
     } else {
         Map::new()
     };
@@ -8402,11 +10977,132 @@ fn run_html_report(
     )
 }
 
+fn load_file_input(path: &Path) -> Result<approval::FileInput, String> {
+    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    Ok(approval::FileInput {
+        path: path.display().to_string(),
+        digest: approval::sha256_bytes(&bytes),
+    })
+}
+
+/// Build `--kind requirements_document`'s recorded reproducibility inputs
+/// (issue #333): `view`/`lang` are read from the reviewed artifact's own
+/// frontmatter (no new `--view`/`--lang` flags on `approval create`, mirroring
+/// how `fslc document check` already reads them back rather than trusting a
+/// possibly-inconsistent flag), while `--glossary`/`--evidence` are hashed
+/// the same way `fslc document generate` hashes them.
+fn document_generation_inputs(
+    artifact_path: &Path,
+    glossary_path: Option<&Path>,
+    evidence_paths: &[PathBuf],
+) -> Result<approval::GenerationInputs, String> {
+    let artifact_text =
+        std::fs::read_to_string(artifact_path).map_err(|error| error.to_string())?;
+    let frontmatter =
+        fsl_tools::parse_frontmatter_only(&artifact_text).map_err(|error| error.to_string())?;
+    if frontmatter.view != "requirements" {
+        return Err(format!("unsupported document view '{}'", frontmatter.view));
+    }
+    let glossary = glossary_path.map(load_file_input).transpose()?;
+    let evidence = evidence_paths
+        .iter()
+        .map(|path| load_file_input(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(approval::GenerationInputs::Document(
+        approval::DocumentGenerationInputs {
+            view: "requirements".to_owned(),
+            lang: frontmatter.lang,
+            glossary,
+            evidence,
+        },
+    ))
+}
+
+/// Re-render a `requirements` document deterministically from `(spec,
+/// inputs)` alone, with no `--strict` gate and no approval overlay — used by
+/// both `fslc approval create --kind requirements_document` (to build the
+/// canonical rendering a reviewed artifact must conform to) and `fslc
+/// approval check`/`fslc document generate --approval` (to reproduce the
+/// same rendering's digest at check time). Returns the claims (needed for
+/// `fsl_tools::check_requirements_document`'s conformance gate at create
+/// time) alongside the canonical Markdown.
+fn render_document_for_approval(
+    path: &Path,
+    inputs: &approval::DocumentGenerationInputs,
+) -> Result<(fsl_tools::RequirementClaimSet, String), Value> {
+    let locale = fsl_tools::Locale::parse(&inputs.lang).ok_or_else(|| {
+        error_output(
+            "document",
+            &format!("unsupported document lang '{}'", inputs.lang),
+        )
+    })?;
+    let (source, claims) = load_document_claims(path)?;
+    let loaded_glossary = load_glossary(
+        inputs
+            .glossary
+            .as_ref()
+            .map(|file| Path::new(file.path.as_str())),
+        locale,
+    )?;
+    let evidence_paths: Vec<PathBuf> = inputs
+        .evidence
+        .iter()
+        .map(|file| PathBuf::from(&file.path))
+        .collect();
+    let loaded_evidence = load_evidence(&evidence_paths)?;
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = fsl_core::parse_kernel_source(&source, &resolver)
+        .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let model = fsl_core::build_model(kernel.clone())
+        .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let applied_glossary = loaded_glossary
+        .as_ref()
+        .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
+    let applied_evidence = loaded_evidence
+        .as_ref()
+        .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
+    let rendered = fsl_tools::render_requirements_document(
+        &claims,
+        &kernel,
+        &model,
+        &source,
+        locale,
+        applied_glossary.as_ref(),
+        applied_evidence.as_ref(),
+        None,
+    )
+    .map_err(|error| error_output("document", &error))?;
+    Ok((claims, rendered.markdown))
+}
+
+/// Reproduce a target's canonical rendering fresh from `(spec, inputs)` —
+/// the shared re-render dispatch `approval create`'s conformance gate and
+/// `approval check`/`approval diff`'s drift comparison both call. Returns the
+/// rendered bytes plus, for `requirements_document` only, the RCIR claim-set
+/// digest that rendering used (`None` for the three solver-driven kinds,
+/// which have no RCIR concept at all).
 fn approval_artifact(
     path: &Path,
     kind: &str,
     inputs: &approval::GenerationInputs,
-) -> Result<Vec<u8>, Value> {
+) -> Result<(Vec<u8>, Option<String>), Value> {
+    if kind == "requirements_document" {
+        let approval::GenerationInputs::Document(document_inputs) = inputs else {
+            return Err(error_output(
+                "usage",
+                "requirements_document approval requires document generation inputs",
+            ));
+        };
+        let (claims, markdown) = render_document_for_approval(path, document_inputs)?;
+        return Ok((markdown.into_bytes(), Some(claims.spec.claim_set_digest)));
+    }
+    let approval::GenerationInputs::Solver(inputs) = inputs else {
+        return Err(error_output(
+            "usage",
+            "ledger/html/scenarios approval requires solver generation inputs",
+        ));
+    };
     let (result, status) = match kind {
         "ledger" => generate_unapproved_ledger_report(&LedgerReportRequest {
             path,
@@ -8429,18 +11125,19 @@ fn approval_artifact(
     if status != 0 {
         return Err(result);
     }
-    if matches!(kind, "ledger" | "html") {
+    let bytes = if matches!(kind, "ledger" | "html") {
         result
             .get("content")
             .and_then(Value::as_str)
             .map(|content| content.as_bytes().to_vec())
-            .ok_or_else(|| error_output("internal", "generated artifact has no content"))
+            .ok_or_else(|| error_output("internal", "generated artifact has no content"))?
     } else {
         let mut encoded = serde_json::to_vec_pretty(&result)
             .map_err(|error| error_output("internal", &error.to_string()))?;
         encoded.push(b'\n');
-        Ok(encoded)
-    }
+        encoded
+    };
+    Ok((bytes, None))
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -8454,9 +11151,15 @@ fn run_approval_create(
     output_path: Option<&Path>,
     signing_key: Option<&Path>,
 ) -> (Value, i32) {
-    if !matches!(kind, "ledger" | "html" | "scenarios") {
+    if !matches!(
+        kind,
+        "ledger" | "html" | "scenarios" | "requirements_document"
+    ) {
         return (
-            error_output("usage", "--kind must be ledger, html, or scenarios"),
+            error_output(
+                "usage",
+                "--kind must be ledger, html, scenarios, or requirements_document",
+            ),
             2,
         );
     }
@@ -8475,31 +11178,102 @@ fn run_approval_create(
         Ok(digest) => digest,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let expected_artifact = match approval_artifact(path, kind, inputs) {
-        Ok(artifact) => artifact,
-        Err(error) => return (error, 2),
-    };
-    let reviewed_artifact = match std::fs::read(artifact_path) {
-        Ok(artifact) => artifact,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
-    let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact) {
-        Ok(artifact) => artifact,
-        Err(error) => return (error_output("semantics", &error), 2),
-    };
-    let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact) {
-        Ok(artifact) => artifact,
-        Err(error) => return (error_output("internal", &error), 3),
-    };
-    if normalized_reviewed != normalized_expected {
-        return (
-            error_output(
-                "semantics",
-                "reviewed artifact does not match a fresh rendering with the recorded inputs",
-            ),
-            2,
-        );
-    }
+
+    let (target_digest_bytes, target_digest_algorithm, reviewed_digest, claim_set_digest, schema) =
+        if kind == "requirements_document" {
+            let approval::GenerationInputs::Document(document_inputs) = inputs else {
+                return (
+                    error_output(
+                        "usage",
+                        "--kind requirements_document requires document generation inputs",
+                    ),
+                    2,
+                );
+            };
+            let (claims, fresh_markdown) = match render_document_for_approval(path, document_inputs)
+            {
+                Ok(result) => result,
+                Err(error) => return (error, 2),
+            };
+            let reviewed_text = match std::fs::read_to_string(artifact_path) {
+                Ok(text) => text,
+                Err(error) => return (error_output("io", &error.to_string()), 2),
+            };
+            let report = match fsl_tools::check_requirements_document(
+                &reviewed_text,
+                &claims,
+                &fresh_markdown,
+            ) {
+                Ok(report) => report,
+                Err(error) => return (document_schema_error(&error.to_string()), 2),
+            };
+            if !report.is_conformant() {
+                let mut output = error_output(
+                    "semantics",
+                    "reviewed document does not conform to a fresh rendering with the recorded inputs",
+                );
+                output
+                    .as_object_mut()
+                    .expect("approval error envelope")
+                    .insert(
+                        "reasons".to_owned(),
+                        serde_json::to_value(&report.reasons).expect("serialize drift reasons"),
+                    );
+                return (output, 2);
+            }
+            (
+                fresh_markdown.into_bytes(),
+                approval::REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM,
+                Some(approval::sha256_bytes(reviewed_text.as_bytes())),
+                Some(claims.spec.claim_set_digest),
+                approval::APPROVAL_SCHEMA_V3,
+            )
+        } else {
+            let approval::GenerationInputs::Solver(_) = inputs else {
+                return (
+                    error_output(
+                        "usage",
+                        "--kind ledger/html/scenarios requires solver generation inputs",
+                    ),
+                    2,
+                );
+            };
+            let (expected_artifact, _) = match approval_artifact(path, kind, inputs) {
+                Ok(artifact) => artifact,
+                Err(error) => return (error, 2),
+            };
+            let reviewed_artifact = match std::fs::read(artifact_path) {
+                Ok(artifact) => artifact,
+                Err(error) => return (error_output("io", &error.to_string()), 2),
+            };
+            let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact)
+            {
+                Ok(artifact) => artifact,
+                Err(error) => return (error_output("semantics", &error), 2),
+            };
+            let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact)
+            {
+                Ok(artifact) => artifact,
+                Err(error) => return (error_output("internal", &error), 3),
+            };
+            if normalized_reviewed != normalized_expected {
+                return (
+                    error_output(
+                        "semantics",
+                        "reviewed artifact does not match a fresh rendering with the recorded inputs",
+                    ),
+                    2,
+                );
+            }
+            (
+                normalized_reviewed,
+                approval::ARTIFACT_DIGEST_ALGORITHM,
+                None,
+                None,
+                approval::APPROVAL_SCHEMA,
+            )
+        };
+
     let available = approval::requirement_ids(&model);
     if available.is_empty() {
         return (
@@ -8530,7 +11304,7 @@ fn run_approval_create(
         );
     }
     let record = approval::ApprovalRecord {
-        schema: approval::APPROVAL_SCHEMA.to_owned(),
+        schema: schema.to_owned(),
         spec: approval::SpecBinding {
             path: relative_path,
             digest_algorithm: approval::SPEC_DIGEST_ALGORITHM.to_owned(),
@@ -8540,8 +11314,16 @@ fn run_approval_create(
         target: approval::TargetBinding {
             kind: kind.to_owned(),
             path: artifact_path.display().to_string(),
-            digest_algorithm: approval::ARTIFACT_DIGEST_ALGORITHM.to_owned(),
-            digest: approval::sha256_bytes(&normalized_reviewed),
+            digest_algorithm: target_digest_algorithm.to_owned(),
+            digest: approval::sha256_bytes(&target_digest_bytes),
+            reviewed_digest_algorithm: reviewed_digest
+                .as_ref()
+                .map(|_| approval::REVIEWED_REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM.to_owned()),
+            reviewed_digest,
+            claim_set_digest_algorithm: claim_set_digest
+                .as_ref()
+                .map(|_| approval::CLAIM_SET_DIGEST_ALGORITHM.to_owned()),
+            claim_set_digest,
             generator: "fslc".to_owned(),
             generator_version: env!("CARGO_PKG_VERSION").to_owned(),
             inputs: inputs.clone(),
@@ -8634,16 +11416,21 @@ fn approval_evaluation(
         .map_err(|error| error_output("io", &error))?;
     let current_spec_digest =
         approval::spec_digest(path).map_err(|error| semantic_error_output(&error))?;
-    let artifact = approval_artifact(path, &record.target.kind, &record.target.inputs)?;
+    let (artifact, current_claim_set_digest) =
+        approval_artifact(path, &record.target.kind, &record.target.inputs)?;
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
         .map_err(|error| error_output("internal", &error))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
+    let current_reviewed_digest =
+        approval::reviewed_artifact_digest(&record).map_err(|error| error_output("io", &error))?;
     let mut evaluation = approval::evaluate(
         &record,
         record_path,
         &current_spec_digest,
         &current_artifact_digest,
         env!("CARGO_PKG_VERSION"),
+        current_claim_set_digest.as_deref(),
+        current_reviewed_digest.as_deref(),
     );
     let output = evaluation
         .as_object_mut()

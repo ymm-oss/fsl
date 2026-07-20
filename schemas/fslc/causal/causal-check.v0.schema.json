@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ymm-oss.github.io/fsl/schemas/fslc/causal/causal-check.v0.schema.json",
+  "title": "fslc causal check v0",
+  "type": "object",
+  "required": [
+    "fsl",
+    "result",
+    "schema_version",
+    "formal_result",
+    "model",
+    "variables_checked",
+    "claims_checked",
+    "feedbacks_checked",
+    "warnings",
+    "do_not_assume"
+  ],
+  "properties": {
+    "fsl": {
+      "type": "string"
+    },
+    "result": {
+      "const": "causal_model_checked"
+    },
+    "schema_version": {
+      "const": "causal-check.v0"
+    },
+    "formal_result": {
+      "const": "not_run"
+    },
+    "model": {
+      "type": "string"
+    },
+    "variables_checked": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "claims_checked": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "feedbacks_checked": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "evidence_refs_checked": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "retired_claims": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      }
+    },
+    "do_not_assume": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "loc": {
+      "type": "object",
+      "required": [
+        "line",
+        "column"
+      ],
+      "properties": {
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": [
+        "kind",
+        "severity",
+        "message"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "causal_unacknowledged_feedback",
+            "causal_outcome_unmeasured",
+            "causal_intervention_unbound",
+            "causal_latent_without_proxy"
+          ]
+        },
+        "severity": {
+          "const": "warning"
+        },
+        "message": {
+          "type": "string"
+        },
+        "loc": {
+          "$ref": "#/$defs/loc"
+        },
+        "involved_nodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

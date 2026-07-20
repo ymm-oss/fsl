@@ -32,6 +32,54 @@ fn assert_windows_release_smoke(workflow: &str) {
     assert!(workflow.contains("$verifyResult.result -ne \"verified\""));
 }
 
+fn assert_installer_release_contract(root: &Path) {
+    let installer = std::fs::read_to_string(root.join("install.sh")).expect("installer");
+    assert!(!installer.contains("echo \"macos-x64\""));
+    assert!(installer.contains("RELEASE_TAG=$(latest_release_tag)"));
+    assert!(!installer.contains("git clone"));
+    assert!(!installer.contains("command -v git"));
+    assert!(installer.contains("releases/download/$RELEASE_TAG"));
+    assert!(!installer.contains("releases/latest/download"));
+    assert!(installer.contains("$DATA_HOME/fsl"));
+    assert!(installer.contains("RELEASE_NAME=\"$RELEASE_TAG-${CLI_HASH:0:12}\""));
+    assert!(installer.contains("mktemp -d \"$INSTALL_DIR/.activate.XXXXXX\""));
+    assert!(installer.contains("mv -fh \"$ACTIVATION_LINK\" \"$CURRENT_LINK\""));
+    assert!(installer.contains("mv -fT \"$ACTIVATION_LINK\" \"$CURRENT_LINK\""));
+    assert!(installer.contains("stage_release_asset \"fsl-skills.tar.gz\""));
+    assert!(installer.contains("[ \"$RELEASE_TAG\" != \"v3.0.0\" ]"));
+    assert!(installer.contains("archive/refs/tags/$RELEASE_TAG.tar.gz"));
+    assert!(installer.contains("d2d691a98af28f4aaa77ded08b35978539a0d1e3c65e8b7f29783f143a447598"));
+    assert!(installer.contains("EXPECTED_VERSION=\"fslc ${RELEASE_TAG#v}\""));
+    assert!(installer.contains("RESOLVED_VERSION=$(fslc --version"));
+    assert!(installer.contains("diff -qr \"$STAGING_DIR\" \"$RELEASE_DIR\""));
+    assert!(installer.contains("FSL_DATA_DIR must be an absolute path"));
+    assert!(installer.contains("$HOME/.fsl/.venv/bin/$cmd_name"));
+    assert!(!installer.contains("*\"/.venv/bin/$cmd_name\""));
+    assert!(installer.contains("ln -s \"$SKILL_SRC\" \"$SKILL_DST\""));
+    assert!(installer.contains("$SKILL_DST.pre-native-v3"));
+    let stage_cli = installer
+        .find("stage_release_asset \"fslc-$TARGET\"")
+        .unwrap();
+    let stage_lsp = installer
+        .find("stage_release_asset \"fslc-lsp-$TARGET\"")
+        .unwrap();
+    let activate = installer
+        .find("mv -fh \"$ACTIVATION_LINK\" \"$CURRENT_LINK\"")
+        .unwrap();
+    let preflight = installer
+        .find("preflight_command_link fslc \"$FSL_BIN\"")
+        .unwrap();
+    let prepare_lsp = installer
+        .find("link_command fslc-lsp \"$FSL_LSP_BIN\"")
+        .unwrap();
+    assert!(
+        stage_cli < stage_lsp
+            && stage_lsp < preflight
+            && preflight < prepare_lsp
+            && prepare_lsp < activate
+    );
+}
+
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(args)
@@ -274,7 +322,7 @@ fn published_schema_inventory_is_complete_and_parseable() {
     let mut schemas = Vec::new();
     collect_schemas(&root().join("schemas/fslc"), &mut schemas);
     schemas.sort();
-    assert_eq!(schemas.len(), 27, "published schema inventory changed");
+    assert_eq!(schemas.len(), 41, "published schema inventory changed");
     let mut ids = BTreeSet::new();
     for path in schemas {
         let schema: Value =
@@ -327,7 +375,7 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
         .replace("\r\n", "\n");
     assert_eq!(workflow.matches("softprops/action-gh-release@").count(), 1);
     assert!(workflow.contains("name: assemble complete release unit"));
-    assert!(workflow.contains("needs: [build, vsix, kernel-contract]"));
+    assert!(workflow.contains("needs: [build, vsix, kernel-contract, skills]"));
     assert!(workflow.contains("name: release-unit"));
     assert!(workflow.contains("name: publish atomic release unit"));
     assert!(workflow.contains("needs: [assemble]"));
@@ -340,6 +388,8 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     assert!(workflow.contains("npm ci"));
     assert!(workflow.contains("cp ../../LICENSE LICENSE"));
     assert!(workflow.contains("npm exec -- vsce package"));
+    assert!(workflow.contains("tar -czf dist/fsl-skills.tar.gz"));
+    assert!(workflow.contains("fsl-skills.tar.gz fsl-skills.tar.gz.sha256"));
     assert!(!workflow.contains("npx --yes @vscode/vsce"));
     assert_eq!(workflow.matches("            target: ").count(), 4);
     for target in ["macos-arm64", "linux-x64", "linux-arm64", "windows-x64"] {
@@ -365,25 +415,7 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     }
     assert!(workflow.contains("toolchain: 1.88.0"));
     assert_vendored_z3(&root, &workflow);
-
-    let installer = std::fs::read_to_string(root.join("install.sh")).expect("installer");
-    assert!(!installer.contains("echo \"macos-x64\""));
-    assert!(installer.contains("RELEASE_TAG=$(latest_release_tag)"));
-    assert!(installer.contains("git clone --branch \"$RELEASE_TAG\" --depth 1"));
-    assert!(installer.contains("releases/download/$RELEASE_TAG"));
-    assert!(!installer.contains("releases/latest/download"));
-    assert!(installer.contains("ln -s \"$SKILL_SRC\" \"$SKILL_DST\""));
-    assert!(installer.contains("$SKILL_DST.pre-native-v3"));
-    let stage_cli = installer
-        .find("stage_release_asset \"fslc-$TARGET\"")
-        .unwrap();
-    let stage_lsp = installer
-        .find("stage_release_asset \"fslc-lsp-$TARGET\"")
-        .unwrap();
-    let install_cli = installer
-        .find("mv \"$STAGING_DIR/fslc.download\" \"$FSL_BIN\"")
-        .unwrap();
-    assert!(stage_cli < stage_lsp && stage_lsp < install_cli);
+    assert_installer_release_contract(&root);
 
     let package: Value = serde_json::from_str(
         &std::fs::read_to_string(root.join("editors/vscode/package.json"))

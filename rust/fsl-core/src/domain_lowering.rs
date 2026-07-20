@@ -6,8 +6,8 @@ use fsl_syntax::{
     ActionItem, AggregateKind, Annotations, Binder, DomainAggregate, DomainDecide, DomainEffect,
     DomainField, DomainLoc, DomainSaga, DomainSagaStep, DomainSpec, DomainType,
     DomainTypeSourceForm, Expr, LValue, MetaTag, Param, Pattern, QualifiedName, Span, SpecItem,
-    StateField, Statement, SurfaceSpec, SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxLValue,
-    SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind, TypeExpr,
+    StateField, Statement, SurfaceSpec, SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent,
+    SyntaxLValue, SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind, TypeExpr,
 };
 
 use crate::CoreError;
@@ -139,6 +139,50 @@ fn attempt_type(effect: &DomainEffect) -> String {
 
 fn attempt_var(effect: &DomainEffect) -> String {
     format!("{}_attempts", lower_name(&effect.name))
+}
+
+pub(crate) fn effect_outcome_member(effect: &DomainEffect, event: &str) -> &'static str {
+    if effect.success_event.as_deref() == Some(event) {
+        return "Succeeded";
+    }
+    if effect.failure_event.as_deref() == Some(event) {
+        return "Failed";
+    }
+    if effect.timeout_event.as_deref() == Some(event) {
+        return "TimedOut";
+    }
+    let lowered = event.to_ascii_lowercase();
+    if lowered.contains("timeout") || lowered.contains("timedout") {
+        "TimedOut"
+    } else if lowered.contains("fail") {
+        "Failed"
+    } else if lowered.contains("cancel") {
+        "Cancelled"
+    } else {
+        "Succeeded"
+    }
+}
+
+pub(crate) fn validate_effect_outcome_roles(domain: &DomainSpec) -> Result<(), CoreError> {
+    for effect in &domain.effects {
+        if let Some(message) = effect.outcome_role_conflict() {
+            return Err(error_at(message, span_at(effect.loc)));
+        }
+        for event in effect.explicit_outcome_events() {
+            if !domain
+                .aggregates
+                .iter()
+                .flat_map(|aggregate| &aggregate.events)
+                .any(|candidate| candidate.name == *event)
+            {
+                return Err(error_at(
+                    format!("unknown domain event '{event}'"),
+                    span_at(effect.loc),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn and_all(mut values: Vec<Expr>) -> Expr {
@@ -2006,6 +2050,7 @@ fn field_params(resolver: &Resolver<'_>, fields: &[DomainField]) -> Result<Vec<P
 pub(crate) fn lower_domain_surface(
     domain: &DomainSpec,
 ) -> Result<(SurfaceSpec, OriginRegistry), CoreError> {
+    validate_effect_outcome_roles(domain)?;
     let resolver = Resolver::new(domain);
     resolver.validate_document_expressions()?;
     let mut items = Vec::new();
@@ -2394,23 +2439,6 @@ fn lower_aggregate_actions(
     Ok(())
 }
 
-fn outcome_status(effect: &DomainEffect, event: &str) -> String {
-    let lowered = event.to_ascii_lowercase();
-    let member = if effect.timeout_event.as_deref() == Some(event)
-        || lowered.contains("timeout")
-        || lowered.contains("timedout")
-    {
-        "TimedOut"
-    } else if effect.failure_event.as_deref() == Some(event) || lowered.contains("fail") {
-        "Failed"
-    } else if lowered.contains("cancel") {
-        "Cancelled"
-    } else {
-        "Succeeded"
-    };
-    status_member(effect, member)
-}
-
 #[allow(clippy::too_many_lines)]
 fn lower_effect_actions(
     resolver: &Resolver<'_>,
@@ -2419,7 +2447,7 @@ fn lower_effect_actions(
 ) -> Result<(), CoreError> {
     for effect in &domain.effects {
         let (correlation, correlation_type) = resolver.correlation(effect)?;
-        for event_name in &effect.outcomes {
+        for event_name in effect.outcome_events() {
             let (aggregate, event) = resolver.event(event_name, effect.loc)?;
             let span = span_at(event.loc);
             let mut scope = resolver.scope_for_aggregate(aggregate)?;
@@ -2435,14 +2463,19 @@ fn lower_effect_actions(
             }
             let mut params = event.fields.clone();
             if !params.iter().any(|field| field.name.text == correlation) {
-                let mut synthetic = event
-                    .fields
-                    .first()
-                    .cloned()
-                    .ok_or_else(|| error_at("cannot synthesize correlation parameter", span))?;
-                synthetic.name.text.clone_from(&correlation);
-                synthetic.type_name = correlation_type.clone();
-                params.insert(0, synthetic);
+                params.insert(
+                    0,
+                    DomainField {
+                        name: SyntaxIdent {
+                            text: correlation.clone(),
+                            span,
+                        },
+                        type_name: correlation_type.clone(),
+                        default: None,
+                        span,
+                        loc: event.loc,
+                    },
+                );
             }
             let current = Expr::Index(
                 Box::new(Expr::Var(status_var(effect))),
@@ -2464,7 +2497,10 @@ fn lower_effect_actions(
             );
             action_items.push(ActionItem::Statement(Statement::Assign {
                 target: LValue::Index(status_var(effect), Expr::Var(correlation.clone())),
-                value: Expr::Var(outcome_status(effect, event_name)),
+                value: Expr::Var(status_member(
+                    effect,
+                    effect_outcome_member(effect, event_name),
+                )),
                 span,
             }));
             action_items.extend(resolver.evolve_items(aggregate, event_name, &scope)?);

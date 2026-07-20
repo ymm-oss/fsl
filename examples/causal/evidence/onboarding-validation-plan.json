@@ -1,0 +1,38 @@
+{
+  "schema_version": "fsl-causal-validation-plan.v0",
+  "plan_id": "PLAN_ONBOARDING_2027",
+  "claims": [
+    {
+      "id": "claim:C_Onboarding_FirstSuccess",
+      "version": 1
+    }
+  ],
+  "design": "randomized_experiment",
+  "scope": {
+    "population": [
+      "new_users"
+    ],
+    "environment": [
+      "production"
+    ],
+    "segment": [
+      "self_serve"
+    ]
+  },
+  "observation_window": {
+    "timebase": "day",
+    "minimum": 30
+  },
+  "measurements": [
+    "variable:onboarding_support",
+    "variable:first_success"
+  ],
+  "external_refs": [
+    {
+      "kind": "issue",
+      "system": "github",
+      "id": "org/repo#123"
+    }
+  ],
+  "artifact_digest": "sha256:8959bedf0eec67a4d6f883a72d5626fbed3423380082e8966e94fd1fe2c93205"
+}

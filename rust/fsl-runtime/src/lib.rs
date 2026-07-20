@@ -18,8 +18,8 @@ use serde_json::{Value as JsonValue, json};
 mod explicit;
 
 pub use explicit::{
-    ExplicitReachableWitness, ExplicitResult, ExplicitViolation, explicit_unsupported_reason,
-    verify_explicit, verify_explicit_selected,
+    ExplicitReachableWitness, ExplicitResult, ExplicitViolation, deterministic_initial_state,
+    explicit_unsupported_reason, verify_explicit, verify_explicit_selected,
 };
 
 pub type State = BTreeMap<String, Value>;
@@ -1985,7 +1985,6 @@ pub fn action_cover_traces(
         changes: BTreeMap::new(),
     }];
     let mut covered = BTreeMap::new();
-    let mut first_enabled_seen = BTreeSet::new();
     let mut visited = BTreeSet::from([initial.state.clone()]);
     let mut queue = VecDeque::from([(initial, initial_trace, 0_usize)]);
     while let Some((monitor, trace, step)) = queue.pop_front() {
@@ -2003,33 +2002,17 @@ pub fn action_cover_traces(
                 &instance,
                 &result,
             ));
-            if first_enabled_seen.insert(instance.action.clone())
-                && can_extend_exactly(&child, depth - step - 1)?
-            {
+            if result.violation.is_none() {
                 covered
                     .entry(instance.action.clone())
                     .or_insert_with(|| child_trace.clone());
-            }
-            if result.violation.is_none() && visited.insert(child.state.clone()) {
-                queue.push_back((child, child_trace, step + 1));
+                if visited.insert(child.state.clone()) {
+                    queue.push_back((child, child_trace, step + 1));
+                }
             }
         }
     }
     Ok(covered)
-}
-
-fn can_extend_exactly(monitor: &Monitor, remaining: usize) -> Result<bool, RuntimeError> {
-    if remaining == 0 {
-        return Ok(true);
-    }
-    for instance in monitor.enabled()? {
-        let mut child = monitor.clone();
-        let result = child.step(&instance)?;
-        if result.violation.is_none() && can_extend_exactly(&child, remaining - 1)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

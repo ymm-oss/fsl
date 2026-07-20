@@ -5,6 +5,388 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-07-20
+
+### Fixed
+- Native induction CTIs now emit the documented heuristic `suggested_invariants` for monotone
+  scalar and uniformly initialized Map counters without changing the proof verdict; quantified Map
+  suggestions choose a collision-free binder so the emitted expression remains reusable (#337).
+- Native induction lemma handling accepts candidates for selected invariant and `trans` properties,
+  proves each candidate without original user properties, then uses and recommends only the first
+  independently proved candidate excluding each successive CTI (#336).
+- `fslc scenarios` now emits the shortest replayable action-coverage trace even
+  when the covered action reaches a terminal state before the requested depth,
+  including requirements transitions guarded by `Bool` inputs (issue #405).
+- `fslc mutate --by-requirement` now attributes acceptance and forbidden kills
+  through explicit requirement annotations on the failed trace declaration
+  instead of reporting the linked requirement as `empty_formalization` (issue
+  #407). Explicit requirement relations are preserved even when their ID equals
+  a trace-case ID, while synthetic case relations remain excluded. Duplicate
+  acceptance or forbidden IDs are rejected so attribution is unambiguous.
+- `fslc mutate` now adjudicates singleton bound mutants whose empty domain
+  produces no action instances instead of panicking in bounded verification;
+  overflowing integer and bound neighbors are omitted (issue #406).
+- Explicit domain-effect `success_event`, `failure_event`, and `timeout_event`
+  roles now override event-name heuristics, ambiguous cross-role assignments
+  fail closed, and completion, retry eligibility, Monitor/BFS execution, and
+  symbolic verification share the same lowered status (issue #409).
+- `fslc lint` now classifies business `policy`/`goal` `satisfies CTRL-*`
+  operands as control references, recursively expands directory inputs into a
+  sorted list of unique physical `.fsl` files even when operands repeat or alias
+  one another, and continues to report nested FSL parse errors instead of silently
+  skipping them (issues #385 and #386).
+- `fslc fmt` now preserves canonical hyphenated IDs in business control,
+  policy, goal, and `satisfies` positions while retaining normal spacing around
+  arithmetic subtraction (issue #387).
+- `docs/LANGUAGE.ja.md` now carries the Japanese translation of the
+  "Literate Markdown FSL" subsection added to `docs/LANGUAGE.md` §7 by the
+  literate Markdown feature, so `docs/intro/language.ja.html` documents the
+  `.md` input support instead of silently omitting it (issue #346).
+- Documentation for the depth-4 underspecification probe (`divergent_choice`,
+  `unconstrained_effect`) now matches the native implementation: a solver-free
+  explicit-state BFS over the runtime Monitor, not symbolic BMC/Z3.
+  `docs/DESIGN-underspecification.md`, `docs/DESIGN-analysis.md`,
+  `docs/LANGUAGE.md`/`docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md` are
+  corrected; the `evidence_basis:"bounded_bmc"` schema enum value is retained
+  unchanged as frozen v0 vocabulary for "backed by a bounded reachability
+  witness", so no output or schema contract moves (issue #318).
+- Mutation documentation no longer overstates the score: `kill_rate =
+  killed / (killed + survived)` is now defined everywhere as bounded
+  mutant-set sensitivity — dependent on the operator mix, `--max-mutants`
+  cap, `--depth`, and the verify/acceptance/forbidden/refinement oracle — not
+  a production defect-detection rate, spec-correctness probability, or
+  completeness measure. Survivors are documented as a review queue
+  (equivalent mutants, dead-at-baseline behavior, beyond-depth effects, or
+  genuine under-constraint) instead of "a place where an invariant is
+  missing", and `empty_formalization`/per-requirement kills as observed lower
+  bounds within the chosen mutant set and depth. Aligned across
+  `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `docs/DESIGN-mutate.md`,
+  `README.md`, `skills/fsl/reference.md`, and the generated site reference; a
+  new `rust/fslc/tests/mutation_docs_contract.rs` regression keeps the
+  stronger survivor claim from returning (issue #338).
+
+### Changed
+- The native installer no longer clones the repository into `~/.fsl`. It now
+  installs an exact-tag, checksummed CLI/LSP pair under the user data directory,
+  atomically activates the complete payload, safely migrates recognized Python
+  2.7 links, and rejects binaries whose reported version differs from the
+  Release tag. Agent Skills are packaged as a checksummed Release asset; the
+  v3.0.0 compatibility path verifies a pinned tag-archive checksum and extracts
+  only the six installed skills.
+
+### Added
+- Causal portfolio ledger (Phase 5, issue #364): `fslc causal ledger
+  model.fsl [--plans ... --evidence ... --lifecycle ... --as-of ...]`
+  integrates claims, validation plans, evidence, and observations into
+  a per-claim projection with 12 deterministic attention reasons
+  (`validation_plan_missing`, `current_evidence_missing`,
+  `observation_not_directional_support`, etc.). New
+  `fsl-causal-validation-plan.v0` schema for immutable plan artifacts
+  with claim pins, design, scope, observation window, measurements,
+  and opaque external refs. Plan lifecycle reuses
+  `fsl-causal-evidence-lifecycle.v0`. CLI envelope:
+  `causal-ledger.v0` (inventory 38). Every claim appears regardless of
+  plan/evidence; retired claims have no attention; output is byte-stable.
+- Causal observation bridge (Phase 4, issue #360): `fslc causal
+  observe-expectations model.fsl --from-log events.jsonl --mapping
+  log_mapping.fsl --scope scope.json --period-start ... --period-end ...`
+  replays compiled expectations against a production JSONL log using the
+  solver-free `BoundedLivenessMonitor`. Generates per-expectation
+  `fsl-causal-evidence.v0` artifacts with `design: "observational"`,
+  `support: "inconclusive"`, `assurance: "replay-observed"`, and matching
+  lifecycle records. Pass/violated verdicts never change claim
+  `formal_assurance` or `causal_support`. Nonconformant logs,
+  missing scope/period, and mapping failures are fail-closed.
+  CLI envelope schema: `causal-observation.v0` (inventory 36).
+- Causal expectation lowering (Phase 3, issue #323): explicit `expectation`
+  declarations (trigger action or inline predicate, response predicate,
+  `within N clock <name>`, `derived_from_claim`) compile — fail-closed on
+  missing/foreign clocks, fractional tick conversion, unresolved references,
+  or non-kernel targets — into ordinary `leadsTo ... within ticks` properties
+  on the imported spec; action triggers become one-step pulse ghosts that
+  never change guards. `fslc causal verify-expectations model.fsl [--depth
+  K]` (`causal-expectations.v0`) reports `pass`/`violated` with
+  `assurance: "bounded"`; pass and violated goldens both hold the central
+  invariant that the derived claim's `formal_assurance` stays `"not_run"`
+  and its `causal_support` is untouched — `derived_from_claim` is
+  traceability only, and the legacy `supports` field is a parse error. A
+  generated property is semantically identical to the hand-written pulse
+  encoding (asserted by test), and there is deliberately still no
+  `causal verify` alias.
+- Causal evidence plane (Phase 2, issue #322): `fslc causal analyze --evidence
+  artifact.json [--lifecycle chain.json] [--as-of YYYY-MM-DD]` validates
+  `fsl-causal-evidence.v0` artifacts (closed design/support vocabularies,
+  claim ID + content-version pins, scope tokens, ISO-8601 periods, canonical
+  sha256 `artifact_digest`) and independent append-only
+  `fsl-causal-evidence-lifecycle.v0` digest chains, fail-closed on
+  schema/digest/chain violations. A new `causal_evidence_graph` projection
+  (and the `causal-review` profile) overlays a deterministic per-claim
+  `causal_support` — `untested | supported | challenged | inconclusive |
+  mixed | unsupported_by_current_evidence` — counting only artifacts that pin
+  the current claim version with `subsumes` scope, declared freshness, an
+  active lifecycle, and an observation window at least the claim's minimum
+  lag; one source lineage is one vote and staleness is judged only against an
+  explicit `--as-of` date. Sixteen evidence/measurement review findings
+  (`evidence_scope_mismatch`, `evidence_window_shorter_than_lag`,
+  `duplicate_evidence_source`, `unobserved_mediator`,
+  `unsupported_assumption_chain`, ...) join the causal-review profile, all
+  `formal_status: "not_a_violation"`. Evidence never changes a claim's
+  `formal_assurance: "not_run"` — the two axes stay orthogonal by contract
+  and by test. Ships three new schemas under `schemas/fslc/causal/`, a
+  digest-stamped example artifact + lifecycle chain under
+  `examples/causal/evidence/`, and docs/skills updates.
+- `fslc causal check|analyze|diff` (Phase 1 of the review-only causal profile,
+  `docs/DESIGN-causal.md`): a standalone `causal <Name> { ... }` document —
+  parsed outside the dialect registry via a pre-dispatch sniff, so the frozen
+  Python `DIALECT_KEYWORDS` parity gate does not move — is typed into a
+  `CausalModel` (roles, measurement bindings resolved against imported
+  kernel/business specs, closed scope vocabulary, claim content versions and
+  the `active|retired` lifecycle, clock mappings, fail-closed well-formedness
+  diagnostics including `causal_instantaneous_loop` and
+  `causal_unacknowledged_feedback`). `causal analyze` emits deterministic
+  `causal_graph` / `causal_timeline` / `causal_traceability_graph`
+  projections (JSON/Mermaid/DOT; SCC-condensed, Dijkstra-exact earliest
+  first-pass, upper-bounded latest through feedback, capped representative
+  paths with truncation metadata) and a `causal-review` profile with 15
+  structural/temporal findings, all `formal_status: "not_a_violation"` with
+  `do_not_assume`. `causal diff` compares stable claim IDs and content
+  versions, flags missing version bumps, retired-claim reactivation, and
+  retired-hypothesis re-proposals. `causal-diff.v0` accepts no evidence inputs,
+  so `support_transition` remains `"not_available"`; evidence aggregation is a
+  separate analyze/ledger projection. Evidence/plan scope comparison treats a
+  dimension present on only one side as `unassessable`, never universal. No
+  output path attaches `proved`/`verified` to a causal claim and
+  there is deliberately no `causal verify`; `fsl-runtime`, `fsl-solver*`,
+  `fsl-verifier`, Public Kernel v1, and the frozen Python reference are
+  untouched. Ships `schemas/fslc/causal/` (check/graph/findings/diff v0),
+  three dogfood models under `examples/causal/`, LSP sniff handling,
+  `docs/LANGUAGE.md` §17 + `docs/LANGUAGE.ja.md` §17,
+  `skills/fsl/reference.md` §12 with the agent-facing "never present causal
+  claims as proved/verified" hard rule, and a docs-contract regression
+  (issue #321).
+- Accepted `docs/DESIGN-causal.md`: the design contract for the review-only
+  `causal` profile (typed causal hypothesis graphs). It fixes the three-plane
+  architecture (causal specification / formal expectation / external
+  evidence), surface syntax and field contracts, scope-token declaration and
+  three-valued containment, claim content-versioning and retired lifecycle,
+  discrete time semantics (lag/persists Minkowski sums, fail-closed clock
+  mappings), delayed-feedback polarity classification, the typed CausalModel
+  IR boundary, and versioned JSON contracts under `schemas/fslc/causal/`.
+  Causal claims never receive `proved`/`verified`; Public Kernel v1, runtime,
+  solver, and verifier are unchanged by design (issue #320).
+- Added an explicit dialect boundary to `fslc document` (issue #334). RCIR v1
+  supports exactly `spec` and `requirements` (`fsl_tools::
+  RCIR_SUPPORTED_DIALECTS`); every other dialect (`business`, `governance`,
+  `domain`, `dbsystem`, `ai_component`, `compose`, `refinement`, `agent`) was
+  already rejected before projection, but the rejection surfaced as a generic
+  `semantics` error indistinguishable from a defect in the input. The
+  projector now returns a typed `DocumentProjectionError`, and
+  `generate`/`claims`/`check`/`approval create --kind requirements_document`
+  all report `kind: "document"`, `code: FSL-DOC-DIALECT-UNSUPPORTED` with
+  machine-readable `dialect` and `supported_dialects` fields — an explicit
+  unsupported report, never a partial or plausible-looking document.
+  Negative controls now cover all eight rejected dialects (previously only
+  `business`), and a coupled-change test derived from
+  `fsl_syntax::DIALECT_KEYWORDS` pins the supported set as a scope-change
+  tripwire. It does not replace the still-required adapter and dialect-scoped
+  coverage row. `--view business`/`--view
+  design` remain reserved usage errors: "design" is a refinement-chain
+  position, not a dialect keyword, and a cross-layer view is gated on the
+  recorded activation contract (explicit `refinement`/`implements` metadata
+  only; liveness re-verification shown as a separate fact; `compose`
+  rejected until truthful multi-source provenance). See
+  `docs/DESIGN-document-dialect-adapters.md`.
+- Added a `requirements_document` target kind to `fslc approval` (issue #333),
+  binding a reviewed `fslc document generate` artifact to a digest-bound
+  approval record without implicitly widening the existing closed `kind`
+  enum: a new schema revision, `fslc.approval.v3` (unsigned) /
+  `fslc.approval.v4` (signed), constrains `kind` to `requirements_document`
+  only, and existing v1/v2 records for `ledger`/`html`/`scenarios` stay
+  byte-shape compatible. `target.digest_algorithm` is
+  `fsl-rendered-requirements-document-v1+sha256` — the same plain-`sha256`
+  value `fslc document generate`'s own `artifact_digest` reports — and
+  `target` additionally records the literal reviewed-document digest and the RCIR claim-set digest
+  (`claim_set_digest_algorithm`/`claim_set_digest`), so `fslc approval check`
+  can report `artifact_changed` and `claim_set_changed` drift reasons distinct from
+  `spec_changed`/`rendering_changed`. Unlike the other three kinds,
+  `approval create --kind requirements_document` does not require the
+  reviewed artifact's bytes to match a fresh rendering exactly — it reuses
+  `fslc document check`'s own structural conformance gate, tolerating an edit
+  inside the one editable slot (issue #329) while still rejecting a tampered
+  claim block. `--glossary`/`--evidence` (rejected for the other three
+  kinds) are recorded as `{path, digest}` reproducibility inputs instead of
+  `--depth`/`--deadlock`/`--engine` (rejected for `requirements_document`),
+  since a deterministic RCIR projection has no solver-depth concept at all.
+  `fslc document generate --approval RECORD` (repeatable, plus `--trust-key`
+  for a signed record) newly displays a verified approval record as an
+  "Approval records" section — always paired with a fixed disclaimer that
+  approval is an organizational record, never proof of intent fidelity —
+  and fails closed (`FSL-DOC-APPROVAL-DRIFTED`) if the record does not match
+  the current rendering or the literal reviewed file has changed. The section
+  displays the reviewed-file digest rather than the canonical rendering
+  digest; `fslc document check --approval RECORD` reproduces
+  the same section for structural comparison (never verifying a signature)
+  via a new `approval_digest` frontmatter key and `approval_changed`/
+  `FSL-DOC-APPROVAL-CHANGED` drift reason. See `docs/DESIGN-approval.md`.
+- Added an evidence/assurance overlay to `fslc document generate`/`check`
+  (issue #332): a repeatable `--evidence evidence.json` flag accepts the same
+  saved verification-evidence envelope shape `fslc ledger --evidence` already
+  does, and overlays a per-requirement assurance class
+  (`proved`/`bounded`/`replay-observed`/`statistical`/`not_run`) using the
+  exact classifier `fslc ledger` already established (issue #171) — no new
+  judgment is invented. Assurance renders as residue *after* every
+  requirement's claim blocks, never inside a `<!-- fsl:claim -->` marker, so a
+  claim's own digest never depends on whether evidence was supplied; a
+  `violated` BMC run still shows `bounded`, never silently downgraded, since
+  assurance class (method coverage) is orthogonal to pass/fail verdict. A
+  liveness requirement (linking a `leadsTo`/`reachable` claim) gets an extra
+  caveat when its only formal evidence is `bounded`. v1 is evidence-file-only
+  — `generate` never runs a live verify pass itself, preserving the
+  byte-identical-per-spec determinism contract. A new frontmatter key,
+  `evidence_digest` (order-independent across repeated `--evidence` flags),
+  lets `fslc document check --evidence ...` detect evidence that differs from
+  generation time as its own drift reason
+  (`evidence_changed`/`FSL-DOC-EVIDENCE-CHANGED`); unlike a renderer or
+  glossary change, an evidence-only change skips only residue comparison, not
+  per-claim-body comparison, so a genuine hand-edit inside a claim is still
+  caught regardless of the evidence given to `check`. An evidence file naming
+  an unknown requirement ID is a warning by default, an error under `--strict`
+  (`FSL-DOC-EVIDENCE-UNMATCHED`). See `docs/DESIGN-document-evidence-overlay.md`.
+- Added a presentation-only glossary sidecar to `fslc document generate`/`check`
+  (issue #330): `--glossary glossary.json` (schema `fslc.document-glossary.v1`)
+  maps a target string (`action:NAME`/`state:NAME`/`enum:Type.Member`, validated
+  against the checked `KernelModel`, not RCIR's own claim vocabulary) to a display
+  label. A label can only ever change identifier *display* — an action's own claim
+  heading, and a new "Glossary" reference section listing every accepted label —
+  never modality, negation, or conditional structure; v1 does not substitute a
+  label inside rendered expression/condition text. A duplicate label target is
+  always `FSL-DOC-LABEL-CONFLICT` (detected via a hand-written `serde` `Visitor`
+  that preserves every JSON object entry including duplicates, since ordinary
+  deserialization into a map silently collapses a repeated key to its last
+  occurrence before the code could ever see the conflict); an unresolvable target
+  is `FSL-DOC-LABEL-UNKNOWN` (warning by default, error under `--strict`). The
+  glossary is threaded only into rendering, never into RCIR projection, so
+  `claim_set_digest`/`spec_digest` are provably unaffected by a glossary edit
+  while `artifact_digest` changes; a new frontmatter key, `glossary_digest`,
+  lets `fslc document check --glossary glossary.json` detect a glossary that
+  differs from generation time as its own drift reason
+  (`glossary_changed`/`FSL-DOC-GLOSSARY-CHANGED`), gating per-claim-body and
+  residue comparison the same way a changed renderer already does. See
+  `docs/DESIGN-document-glossary.md`.
+- Added an explicit RCIR coverage registry and a no-silent-omission gate (issue
+  #328). `fsl_tools::RCIR_TARGET_KIND_REGISTRY` names every semantic-target kind
+  the RCIR v1 projector (#325) can classify (`action`, four `property:*` kinds,
+  `terminal`, `acceptance`, `forbidden`, `init`, `projection`, `refinement`) and
+  whether it renders as a claim or reports as unsupported. Two coupled-change
+  tests keep it honest: one cross-references the Kernel-native rows against
+  `kernel.v1.schema.json`'s own required-key lists (catching a wholly new
+  Kernel-level construct that the projector was never updated to handle at all,
+  which the projector's existing runtime completeness invariant cannot see on its
+  own), the other cross-references every kind actually observed across the
+  fixture corpus. A third test pins the projection-completeness guarantee itself
+  (`rendered + unattributed + unsupported == authored`, as a disjoint-union-of-
+  sets check, not just a count). `--strict` erroring on an unattributed or
+  unsupported authored target was already implemented in #327 and needed no
+  change. See `docs/DESIGN-document-coverage-registry.md`.
+- Added the `fsl-requirements-document` Agent Skill (issue #331):
+  `skills/fsl-requirements-document/SKILL.md` (symlinked under `.claude/skills/`
+  and `.agents/skills/`, per the existing skill convention) documents the
+  `fslc document generate`/`claims`/`check` workflow (issues #325-#329) for an
+  agent used as a non-normative editor and review-support assistant, never a
+  compiler: permitted operations (editing the `background` slot, drafting
+  glossary candidates, flagging a source-text/formalized-meaning mismatch as
+  advisory) and forbidden ones (rewriting a generated claim block, inventing
+  normative language, rewording an assurance class, collapsing a many-to-many
+  requirement relation), a CI example that fails a build on `document_drifted`,
+  and cross-references from `fsl`/`fsl-requirements` clarifying the handoff.
+- Added generated block markers and `fslc document check` (issue #329). Every
+  `fslc document generate` artifact now carries a frontmatter block
+  (`fsl_document_schema`/`view`/`lang`/`source`/`renderer`/`renderer_version`/
+  `normative_scope`/`spec_digest`/`claim_set_digest`) and wraps each claim's rendered
+  block in `<!-- fsl:claim begin id="..." digest="sha256:..." --> ... <!-- fsl:claim
+  end -->` markers, where the digest is a new `fsl-doc-claim-block-v1+sha256` hash of
+  the exact rendered text (`fsl_tools::framed_text_digest`) — distinct from RCIR's own
+  semantics-only `claim_digest`, which never sees rendered prose and so cannot by
+  itself detect a hand-edited sentence. A new fixed, non-normative `background` slot
+  (`<!-- fsl:slot begin name="background" normative="false" --> ... <!-- fsl:slot
+  end -->`) is the only place free text may be edited. `fslc document check <spec.fsl>
+  <document.md>` re-projects and re-renders the spec (reading the locale and source
+  label back from the artifact's own frontmatter, so a check run from a different
+  working directory than generate doesn't report false drift from a path-spelling
+  difference) and reports `document_conformant` (exit 0) or `document_drifted` (exit
+  1) with a `reasons` array — `claim_changed`/`claim_missing`/`claim_duplicate`/
+  `claim_unknown`/`claim_reordered`/`slot_missing`/`slot_duplicate`/`slot_unknown`/
+  `marker_malformed`/`edit_outside_slot`/`renderer_changed`/`spec_digest_mismatch`/
+  `claim_set_digest_mismatch`, each carrying its `FSL-DOC-*` diagnostic code. No
+  natural language is interpreted; only frontmatter values, marker structure, and
+  claim-block digests/text are compared. See
+  `docs/DESIGN-document-generated-markers-and-check.md`.
+- Added `fslc document generate` and `fslc document claims` (issue #327), the CLI entry
+  points for the RCIR v1 projector (#325) and its ja/en controlled-language renderer
+  (#326). `document generate <spec.fsl> [--view requirements] [--lang ja|en] [--strict]
+  [--strict-rendering] [-o requirements.md]` renders a deterministic requirements
+  document; `document claims <spec.fsl> [-o requirements.claims.json]` emits the raw
+  RCIR claim set as schema-conformant JSON so agents/tools consume the public contract
+  instead of re-parsing `.fsl`. Both follow the existing `ledger`/`html`/`testgen`
+  convention: with `-o`, the artifact is written to disk and a JSON envelope
+  (`spec_digest`/`claim_set_digest`/`artifact_digest`, coverage counts, provenance
+  completeness) goes to stdout; without `-o`, the raw content is printed directly.
+  `--strict` fails closed (`FSL-DOC-UNTAGGED-TARGET` / `FSL-DOC-UNSUPPORTED-TARGET`) on
+  any authored target the projector could not attribute to a requirement or could not
+  project; `--strict-rendering` fails closed (`FSL-DOC-FORMULA-FALLBACK`) on any
+  expression the renderer could not phrase in natural language. A specification with no
+  requirement IDs at all (`FSL-DOC-NO-REQUIREMENTS`) is always an error. See
+  `docs/DESIGN-document-cli.md`.
+- Added the controlled-language renderer (issue #326):
+  `fsl_tools::render_requirements_document` compiles an RCIR v1 claim set (issue #325)
+  into deterministic Japanese/English Markdown, using one fixed template per claim kind
+  and a safe-pattern expression recognizer (equality/comparison, `and`/`or`/`not`,
+  `forall`/`exists`, `count`/`sum`/`unique`/`exactlyOne`, `old(...)`, option `is none`/
+  `is some`) that falls back to the canonical FSL text (never a paraphrase failure) for
+  anything outside that whitelist, counted in `formula_fallback_count`. `requires` always
+  reads as an enablement condition, `not`/negation is never dropped, weak fairness is
+  always "a scheduling assumption" and never "immediately", `acceptance`/`forbidden`
+  always carry a non-generalization disclaimer, and a progress/reachability claim never
+  claims established evidence (RCIR v1 carries none). The renderer verifies the embedded
+  Public Kernel, reprojects and exactly matches the complete RCIR renderer role sidecar against
+  its checked Kernel/Model/trace and original source inputs, and requires every semantic target to
+  resolve exactly once before emitting Markdown, failing closed on any mismatched input.
+  `fsl_core::expr_text`/
+  `source_expr_text` (the `explain --readable` canonical-text renderer) moved from the
+  `fslc` binary crate into `fsl_core` so `fsl-tools` could reuse it without a
+  second implementation; `fslc` re-exports both names unchanged. CLI wiring is issue
+  #327. See `docs/DESIGN-document-controlled-language-renderer.md`.
+- Added the Requirement Claim IR (RCIR) v1 schema and native projector (issue #325),
+  the semantic foundation used by the `fslc document` requirements-document workflow.
+  `fsl_tools::project_requirement_claims_from_source` compiles a checked `spec` or
+  `requirements` dialect model into `schemas/fslc/document/requirement-claims.v1.schema.json`:
+  nine claim kinds (`operation`, `state_rule`, `transition_rule`, `progress_rule`,
+  `reachability_goal`, `acceptance_trace`, `forbidden_trace`, `deadline_rule`,
+  `terminal_rule`), full many-to-many requirement relations (no singular compatibility
+  projection), a fail-closed `rendered`/`unattributed`/`unsupported` coverage
+  partition over every authored semantic target, `spec_digest`/`claim_set_digest`/
+  `claim_digest` (mutation-sensitive, comment/formatting-stable), and provenance
+  reusing the Public Kernel v2 assurance vocabulary (falling back to the checked
+  declaration's own span, never a guess, when the origin registry has no chain for
+  a target). RCIR is not a second semantics: it embeds the schema-validated Public
+  Kernel v2 artifact, while claims expose typed subjects and stable target references
+  instead of a second, unconstrained Python-shaped AST. Trace-only expressions reuse
+  the Public Kernel expression contract. The controlled-language renderer, CLI, drift
+  checking, no-silent-omission gate, glossary, evidence overlay, and approval integration
+  are included in the same release through issues #326-#334. See
+  `docs/DESIGN-document-requirement-claim-ir.md`.
+- `fsl_tools::undecided` gains `undecided_records`, a typed variant of
+  `undecided_declarations` (issue #189) that additionally carries the annotation's
+  source span; the existing JSON-producing function is now a thin projection over it
+  with unchanged output.
+- Documented that the persistent verify cache is safe under concurrent
+  processes: writes are atomic, so parallel `fslc verify` invocations over many
+  files (`xargs -P`, CI job matrices) at worst duplicate solving and never
+  corrupt or poison the cache. `docs/DESIGN-incremental-verify.md` §3 and
+  `skills/fsl/reference.md` now state this explicitly so users and AI agents
+  choose process-level parallelism instead of a sequential per-file loop
+  (issue #353). No implementation change.
+
 ## [3.0.0] - 2026-07-17
 
 ### Changed
@@ -2129,7 +2511,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/ymm-oss/fsl/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/ymm-oss/fsl/compare/v2.7.0...v3.0.0
 [2.7.0]: https://github.com/ymm-oss/fsl/compare/v2.6.3...v2.7.0
 [2.6.3]: https://github.com/ymm-oss/fsl/compare/v2.6.2...v2.6.3

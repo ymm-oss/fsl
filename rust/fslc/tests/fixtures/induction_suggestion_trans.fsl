@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec TransGhostCounter {
+  state { audit: Int, y: Int }
+  init { audit = 0  y = 0 }
+
+  action step() {
+    requires audit < -100
+    audit = audit + 1
+    y = y + 1
+  }
+
+  trans NeverIncrease { y <= old(y) }
+}

@@ -1,0 +1,116 @@
+// SPDX-License-Identifier: Apache-2.0
+// Dogfood model 1 (issue #321): long-horizon retention hypothesis graph with
+// a delayed feedback loop. Expected review findings include
+// single_hypothesis_bottleneck (the habit chain) and
+// feedback_without_damping_story (the reinforcing loop has no declared
+// balancing loop sharing a variable).
+causal SubscriptionRetention {
+  uses biz from "subscription_business.fsl"
+
+  timebase day
+  horizon 730
+
+  scope population {
+    token all_users
+    token new_users subset_of all_users
+  }
+  scope environment { token production }
+  scope segment {
+    token self_serve
+    token enterprise
+    self_serve disjoint_with enterprise
+  }
+  default_scope {
+    population all_users
+    environment production
+    segment self_serve
+  }
+
+  clock biz_clock {
+    kernel biz
+    1 tick = 1 day
+  }
+
+  variable onboarding_support {
+    role intervention
+    binds action biz.enable_onboarding_support
+    covers REQ-ONBOARDING
+  }
+
+  variable first_success {
+    role mediator
+    observes kpi biz.first_success_7d
+    cadence 1
+  }
+
+  variable habit_formation {
+    role mediator
+    latent
+    proxy kpi biz.weekly_active_days
+    cadence 7
+  }
+
+  variable retention_90d {
+    role outcome
+    observes kpi biz.retention_90d
+    cadence 7
+  }
+
+  variable seasonality {
+    role context
+    observes kpi biz.seasonality_index
+    cadence 30
+  }
+
+  claim C_Onboarding_FirstSuccess onboarding_support -> first_success {
+    version 1
+    status active
+    polarity positive
+    lag 0..7
+    persists 7..30
+    basis hypothesis
+    evidence EXP_ONBOARDING_2026
+    scope {
+      population new_users
+      environment production
+      segment self_serve
+    }
+  }
+
+  claim C_FirstSuccess_Habit first_success -> habit_formation {
+    version 1
+    status active
+    polarity positive
+    lag 14..90
+    persists 30..180
+    basis hypothesis
+  }
+
+  claim C_Habit_Retention habit_formation -> retention_90d {
+    version 1
+    status active
+    polarity positive
+    lag 60..180
+    persists 90..365
+    basis hypothesis
+  }
+
+  claim C_Retention_Onboarding retention_90d -> onboarding_support {
+    version 1
+    status active
+    polarity positive
+    lag 1..30
+    persists unknown
+    basis assumption
+  }
+
+  feedback F_RetentionLoop {
+    claims C_Retention_Onboarding,
+           C_Onboarding_FirstSuccess,
+           C_FirstSuccess_Habit,
+           C_Habit_Retention
+  }
+
+  evidence EXP_ONBOARDING_2026
+    from "evidence/onboarding-2026.causal.json"
+}

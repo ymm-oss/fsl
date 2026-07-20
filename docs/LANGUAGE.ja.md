@@ -208,6 +208,9 @@ domain <Name> {
     correlation_id PaymentCaptureRequested.payment_request_id
     handles PaymentCaptureRequested
     emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    success_event PaymentCaptured
+    failure_event PaymentFailed
+    timeout_event PaymentCaptureTimedOut
     retry { max_attempts 3 }
     timeout after 10m emits PaymentCaptureTimedOut
     compensation { emits PaymentFailed }
@@ -243,6 +246,16 @@ lowering します。domain の enum メンバーは lowering 時に名前空間
 aggregate 内で解決され、そのコマンドの `requires` 節の連言と、各拒否条件の否定に
 なります。未知のシンボル、aggregate をまたぐコマンド、型の不一致、未対応の呼び出し
 は、元の domain 式の位置で報告されます。
+
+effect は `success_event`、`failure_event`、`timeout_event` により、完了イベントへ
+明示的な outcome role を割り当てられます。これらの宣言が分類の正規契約であり、
+イベント名に `fail`、`cancel`、`timeout` が含まれていても、それぞれ `Succeeded`、
+`Failed`、`TimedOut` へ lowering されます。同じイベントを複数の明示 role に
+割り当てると parse error になります。明示 role のない outcome には、v0 の名前
+ヒューリスティクスが次の優先順で残ります: `timeout`/`timedout` -> `TimedOut`、
+`fail` -> `Failed`、`cancel` -> `Cancelled`、それ以外 -> `Succeeded`。完了 action、
+`Failed | TimedOut` の retry guard、success-sticky transition property は、すべて
+この単一の lowering 済み status を利用します。
 
 domain 宣言では、有限のバリアントに `enum Name { Member, ... }` を、有界の数値範囲
 に `type Name = lo..hi` を使います。レガシーな書き方 `type Name = A | B` は現行の
@@ -699,7 +712,21 @@ fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable t
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
 fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
-fslc approval create <file.fsl> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--signing-key private.pem] [-o record.json]
+fslc document generate <file.fsl> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
+               [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
+                                                  # deterministic ja/en requirements document from the Requirement Claim IR (§13);
+                                                  # --evidence overlays a per-requirement assurance class from saved
+                                                  # external evidence (repeatable; same envelope shape as `fslc ledger --evidence`);
+                                                  # --approval displays a verified requirements_document approval record
+                                                  # (repeatable; fails closed if it does not match the current rendering)
+fslc document claims <file.fsl> [--view requirements] [-o requirements.claims.json]
+                                                  # emit the Requirement Claim IR (RCIR) claim set as JSON (§13)
+fslc document check <file.fsl> <document.md> [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]...
+                                                  # structural drift check: generated claim blocks vs a
+                                                  # fresh re-render; never interprets prose (§13)
+fslc approval create <file.fsl> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
+               [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
+                                                  # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
 fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem] # approved | drifted | signature-invalid
 fslc approval diff   <file.fsl> --record <record.json> [--depth K] [--trust-key public.pem]
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
@@ -723,6 +750,12 @@ fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime eve
 扱います。安全と証明できないソース/コメントの移動は拒否します。`&&` は引き続き
 不正なトークンであり、そのため `and` の提案つきで報告されますが、機械適用される
 ことはありません。原子性と一括更新の手順は `docs/DESIGN-migration.md` を参照。
+
+`fslc lint` の各 path にはファイルまたはディレクトリを指定できます。ディレクトリは
+通常ファイルの `*.fsl` へ再帰的に展開され、その走査中はシンボリックリンクの
+エントリと他の拡張子が除外されます。統合されたファイル集合は重複排除され、決定的に
+ソートされます。明示的なファイル path については、既存の拡張子に依存しない挙動を
+維持します。
 
 ネイティブ Rust 専用の `kernel` コマンドは、ダイアレクトの lowering と意味検査の
 後に実行されます。そのバージョン付き JSON は、すべての式の構造的な型、ソースの
@@ -968,6 +1001,37 @@ leadsTo が宣言されていて結果が `verified` / `proved` のとき、
   "hint": "target predicate is unsatisfiable under type bounds/invariants (_bounds_x); ..."
 }
 ```
+
+### Literate Markdown FSL
+
+` ```fsl ` フェンス付きコードブロックを含む Markdown ファイル(`.md`)は、
+`fslc check`・`fslc verify`・`fslc scenarios` がそのまま受け付けます — フラグも
+抽出ステップも不要です。fsl ブロックの外側の行は空行に置き換えられる(blank 化)
+ため、すべての診断位置(エラーメッセージや反例の行番号・桁)は元の Markdown
+ドキュメントを指します。1 つのドキュメント内の複数の fsl ブロックは 1 つの
+コンパイル単位として扱われるため、定義をセクションをまたいで分割できます:
+
+    # Cart invariant
+
+    ```fsl
+    spec Cart {
+      state { count: 0..3 }
+      init  { count = 0 }
+    ```
+
+    ## Actions (continued in a second fsl block)
+
+    ```fsl
+      action inc() { requires count < 3  count = count + 1 }
+      invariant Bounded { count >= 0 and count <= 3 }
+    }
+    ```
+
+` ```fsl ` フェンスを 1 つも含まない `.md` ファイルは明確な診断とともに拒否されます。
+fsl 以外のフェンス付きブロック(` ```python ` など)は無視されます。`use`/compose の
+パスは(`.fsl` ファイルと同様に)Markdown ファイルのディレクトリを基準に解決されます。
+literate な `.md` はこの方法で `.fsl` ファイルを `use`/compose できますが、別の
+`.md` ファイルを compose のターゲットにすることはサポートされません。
 
 ## 8. 推奨ワークフロー: proved を標準にする
 
@@ -1454,6 +1518,15 @@ spec 状態変数をカバーし、`action external(params) -> spec_action(exprs
 カーネルは 1 つ(本書の §1–12)で、レイヤーごとのダイアレクトは AST へ展開される
 フロントエンドです。レイヤーは refinement で接続されます: **business ⊒
 requirements ⊒ design ⊒ implementation (testgen/replay)**。
+
+`fslc document generate`/`claims`(`docs/DESIGN-document-requirement-claim-ir.md`
+参照)は、現時点では `spec` と `requirements` の2ダイアレクトのみを
+Requirement Claim IR へ投影する。本節で説明する他のダイアレクト(`business`、
+`dbsystem`、`ai_component` など)は、部分的な文書を生成するのではなく、コード化
+されたエラー(`FSL-DOC-DIALECT-UNSUPPORTED`)で fail-closed に拒否される。
+`--view business`/`--view design` は予約済みの未実装フラグ値である —
+将来のcross-layer viewが満たすべき有効化契約については
+`docs/DESIGN-document-dialect-adapters.md` を参照。
 
 ### 13.1 宣言タグ(全レイヤー共通のトレーサビリティ)
 
@@ -2295,20 +2368,32 @@ DESIGN-*.md があります)。
   されない要件(欠落の候補。空の requirement ブロックを含む)を警告します。存在
   レベルの突合です。→ [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md)
 - **`fslc mutate`** — spec を機械的に変異させ、各ミュータントが既存の検査の網に
-  よって殺されるかを測定します。生き残ったミュータント = どのプロパティにも制約
-  されない振る舞い = invariant が欠けている場所です。
+  よって殺されるかを測定します。スコアは**有界ミュータント集合への感度
+  (bounded mutant-set sensitivity)**です: 選択された有限のミュータント集合・
+  選択された `--depth`・verify/acceptance/forbidden/refinement オラクルの下での
+  `kill_rate = killed / (killed + survived)`。値はオペレーターの構成、
+  `--max-mutants` の上限、深さ、オラクルに依存して動きます — 本番の欠陥検出率
+  でも、spec が正しい確率でも、完全性の尺度でもありません。生存者は自動的に
+  「invariant が欠けている場所」なのではなくレビューキューです: 生存者は
+  等価ミュータント、ベースラインで死んでいる振る舞い、深さの境界を超えて
+  初めて見える効果、あるいは本物の制約不足かもしれません。
   `--from mutants.jsonl` はさらに、完全な `mutated_spec`、または正確な
   `replace:{target,replacement,occurrence?}` 命令として表現された、外部で生成
   された変異を裁定します。valid な外部ミュータントは、同じ
   verify/acceptance/forbidden/refinement のオラクルを使います。JSON、命令、
   パース、名前、型、構築のエラーは `invalid` で、決して killed にはならず、
-  combined/per-source のキル率の分母から除外されます。
+  combined/per-source のキル率の分母から除外されます(これらは spec の強さでは
+  なく、外部ジェネレーターの品質を測ります)。
   すべてのエントリは `source:"builtin"|"external"` を運びます。`--max-mutants` は
   組み込みのカタログだけを上限にするので、`--max-mutants 0 --from ...` は外部のみ
   を実行します。
   `--by-requirement` は「どの振る舞いミュータントも殺さない要件」を
   `empty_formalization` 警告としてフラグします(`--strict-tags` の意味レベルの
-  拡張)。→ [`DESIGN-mutate.md`](DESIGN-mutate.md)
+  拡張)。要件ごとのキル数とこの警告は、選択されたミュータント集合と深さの中で
+  観測された下界です。acceptance と forbidden の kill は、失敗した trace 宣言の
+  明示的な requirement annotation を使います。AC/FB case ID は暗黙の requirement
+  ではなく、trace case ID は宣言種別ごとに一意です。→
+  [`DESIGN-mutate.md`](DESIGN-mutate.md)
 - **`fslc explain --readable`** — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement
   マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で
@@ -2340,11 +2425,13 @@ DESIGN-*.md があります)。
   `unanchored_property`、`progressless_cycle`、`unwritten_state`、
   `unread_state`、`unguarded_action`、`conservation_candidate`、
   `divergent_choice`、`unconstrained_effect` のようなレビュー findings を出力
-  します。最後の 2 つは固定の深さ 4 の BMC プローブを使います:
-  `evidence_basis:"bounded_bmc"`、reachable な分岐の witness、どの成果が意図されて
+  します。最後の 2 つは固定の深さ 4 の有界プローブ(ランタイム Monitor による
+  solver 非依存の明示的状態探索)を使います:
+  `evidence_basis:"bounded_bmc"`(「有界の到達可能性 witness に裏付けられている」
+  ことを意味する凍結された v0 語彙)、reachable な分岐の witness、どの成果が意図されて
   いるかを問う疑問形の `spec_question` を含みます。`undecided:` の宣言との完全一致
   は `acknowledged:true` と `acknowledged_by` つきで可視のままです。一致しない
-  意味的な findings は acknowledgement のフィールドを運びません。BMC に裏付け
+  意味的な findings は acknowledgement のフィールドを運びません。有界 witness に裏付け
   られた `unconstrained_effect` は、同じ状態の
   構造的な `unread_state` を抑制します。意味的な action の witness は、同様に重複
   する `unguarded_action` を抑制します。不在は、境界を超えた決定性の証明では
@@ -2389,3 +2476,95 @@ DESIGN-*.md があります)。
 スキーマバージョンでは fail closed します。その JSON レポートと TypeScript の
 バイト列は、凍結された参照実装の出力と互換のままです。
 → [`DESIGN-typestate.md`](DESIGN-typestate.md)
+
+## 17. causal プロファイル(レビュー専用の因果仮説グラフ)
+
+`causal <Name> { ... }` は独立したサイドカードキュメント(それ自体が 1 つの
+`.fsl` ファイルで、kernel spec の一部にはなりません)で、長期の因果仮説 —
+介入、媒介、成果、文脈、時間 lag、持続、遅延 feedback、計測バインディング、
+適用範囲 — を構造化します。**FSL は現実世界の因果関係を証明しません**:
+すべての causal 出力は `formal_result: "not_run"` と `do_not_assume` 配列を
+運び、causal claim に `proved`/`verified` を付与する出力経路は存在せず、
+`fslc causal verify` というコマンドは意図的にありません。
+
+```bash
+fslc causal check model.fsl
+fslc causal analyze model.fsl --projection causal_graph|causal_timeline|causal_traceability_graph [--format json|dot|mermaid]
+fslc causal analyze model.fsl --profile causal-review
+fslc causal diff before.fsl after.fsl
+```
+
+causal ファイルへの `fslc check model.fsl` は自動的に causal checker へ
+ルーティングされます。モデルは 1 つの離散 `timebase`
+(`tick | hour | day | week`)と有限の `horizon` を宣言します。`uses <alias>
+from "<path>"` で kernel/business/requirements spec をインポートし、variable が
+action をバインドしたり(`binds action alias.name`)、KPI・state・property を
+観測したり(`observes kpi alias.name` など)できます。claim は方向付き仮説
+`claim <Id> a -> b { version N status active|retired polarity
+positive|negative|unknown lag a..b|unknown persists a..b|unknown|unbounded
+basis hypothesis|assumption ... }` で、安定 ID と単調増加する content version を
+持ちます。retired な claim は識別性と履歴を保持します。最小 lag 合計が正の
+cycle は許可されますが `feedback` 宣言による認識が必要です(未認識の cycle は
+warning、lag 合計 0 の cycle は error)。feedback loop は edge polarity の符号積
+(`unknown` は吸収元)から `reinforcing | balancing | unknown` に分類され、
+timeline は Minkowski 和の初回反応 window を報告します(最小値は正確、
+feedback SCC を経由するペアの最大値は上界)。
+`--profile causal-review` は決定的なレビュー findings(すべて
+`formal_status: "not_a_violation"`)を出力します — 例えば
+`single_hypothesis_bottleneck`、`high_leverage_untested_claim`、
+`opposing_path_polarity`、`potential_common_cause`、
+`feedback_without_damping_story`、`deadline_before_earliest_effect`、
+`observation_window_misses_effect`、`measurement_cadence_too_coarse`
+(計測 cadence が到達 claim の最小持続を超えるとき正確に発火します。unknown な
+持続は推測せず `not_evaluable` として報告)、`unknown_lag_blocks_timeline`。
+`fslc causal diff` は 2 つのモデルファイルを安定 claim ID と content version で
+比較します。`causal-diff.v0` は evidence 入力を受け取らないため、
+`support_transition` は `not_available` のままです。evidence 集約は analyze/ledger
+projection が別に報告します。version 対象フィールドを同じ version のまま変更すると
+`content_changed_without_version_bump`、terminal な retired claim を active に
+戻すと `retired_claim_reactivated`、新しい claim が retired claim と同じ source、
+target、polarity を繰り返すと `retired_hypothesis_reproposed` を報告します。
+
+外部 evidence はバージョン付き artifact で取り込みます
+(`fsl-causal-evidence.v0`: 閉じた `design` 語彙
+`randomized_experiment | quasi_experiment | observational | expert_judgment`、
+方向付き `support` `supports | challenges | inconclusive`、claim ID **と
+content version** の pin、scope token、ISO-8601 の `period`/`valid_until`、
+canonical payload に対する `artifact_digest`)。加えて独立した append-only の
+lifecycle chain(`fsl-causal-evidence-lifecycle.v0`: digest で連結された
+record 列。`retracted`/`superseded` は terminal で payload を書き換えません)。
+`fslc causal analyze model.fsl --evidence a.json [--lifecycle a.lifecycle.json]
+[--as-of YYYY-MM-DD] --projection causal_evidence_graph`(または
+`--profile causal-review`)は artifact を fail-closed に検証し —
+schema/digest/lifecycle chain の違反は分析を開始させません — 決定的な
+claim ごとの `causal_support` を集約します: `untested`、`supported`、
+`challenged`、`inconclusive`、`mixed`、`unsupported_by_current_evidence`。
+現行 claim version を pin し、scope が claim scope を `subsumes` し、
+freshness が宣言され、lifecycle が `active` で、観測 window が claim の最小
+lag 以上の artifact だけが票になります。同一 source lineage は 1 票に
+collapse されます(lineage 内の矛盾は `inconclusive`)。staleness は明示的な
+`--as-of` 日付に対してだけ判定され、実行環境の時計は決して使いません。
+claim 側または artifact 側の片方だけに存在する scope dimension は
+`unassessable` であり、欠落を universal として扱いません。
+**`causal_support` と `formal_assurance` は直交する 2 軸**です: evidence は
+`formal_assurance: "not_run"` を決して変えず、どの support 値も verdict では
+ありません。
+
+人間は claim から観測可能な契約を `expectation` として切り出し、既存の
+verifier で検査できます — **claim そのものは決して lowering されません**:
+`expectation E { trigger action alias.name`(または `trigger predicate
+alias { <kernel 式> }`)`response predicate alias { <kernel 式> } within N
+clock <name> derived_from_claim <Id> }`。
+`fslc causal verify-expectations model.fsl [--depth K]` は各 expectation を
+fail-closed にコンパイルし、インポートした kernel spec 上の通常の
+`leadsTo ... within ticks` プロパティにします(action trigger は 1 ステップの
+pulse ghost になります。`within` は名前付き clock の下で正確な整数 kernel tick
+に変換できなければならず、丸めは行わず、clock を別の spec に流用することも
+ありません)。結果は `pass`/`violated` と `assurance: "bounded"` で報告されます。
+どちらの verdict でも、由来 claim の `formal_assurance` は `"not_run"` のまま、
+`causal_support` も不変です: `derived_from_claim` は双方向とも traceability
+専用で、evidence にはなりません。旧フィールド名 `supports` は拒否されます。バージョン付き schema は `schemas/fslc/causal/` に
+あり、ブラウザ Worker は causal コマンドを公開しません。動作するモデルは
+[`examples/causal/`](https://github.com/ymm-oss/fsl/tree/main/examples/causal)
+にあります。
+→ [`DESIGN-causal.md`](DESIGN-causal.md)

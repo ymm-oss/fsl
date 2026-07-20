@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use fsl_core::{
-    FsResolver, KernelExpr, KernelLValue, KernelStatement, build_model, parse_kernel_source,
+    FsResolver, KernelExpr, KernelLValue, KernelStatement, build_model, lower_domain,
+    parse_kernel_source,
 };
-use fsl_syntax::{ActionItem, SpecItem};
+use fsl_syntax::{ActionItem, SpecItem, SurfaceDocument, parse_surface_document};
 
 fn lower(source: &str) -> fsl_core::KernelSpec {
     parse_kernel_source(source, &FsResolver::new(".")).expect("lower domain directly")
@@ -575,4 +576,164 @@ fn canonical_domain_enum_rejects_empty_and_duplicate_members_at_source_spans() {
             .contains("duplicate enum member 'Pending'")
     );
     assert_eq!((duplicate.line, duplicate.column), (1, 43));
+}
+
+#[test]
+fn explicit_effect_outcome_roles_override_event_name_heuristics() {
+    let kernel = lower(
+        r"
+domain ExplicitEffectOutcomes {
+  type RequestId = 0..0
+  aggregate Request {
+    event Requested { id: RequestId }
+    event FailureRecovered { id: RequestId }
+    event RequestTimedOutPermanently { id: RequestId }
+    event FailureTimeout { id: RequestId }
+  }
+  effect Work {
+    async
+    correlation_id Requested.id
+    handles Requested
+    success_event FailureRecovered
+    failure_event RequestTimedOutPermanently
+    timeout_event FailureTimeout
+    retry { max_attempts 2 }
+  }
+}
+",
+    );
+    let surface = kernel.syntax();
+    for (action_name, expected_status) in [
+        (
+            "work_complete_failure_recovered",
+            "WorkEffectStatus_Succeeded",
+        ),
+        (
+            "work_complete_request_timed_out_permanently",
+            "WorkEffectStatus_Failed",
+        ),
+        ("work_complete_failure_timeout", "WorkEffectStatus_TimedOut"),
+    ] {
+        let assigned_status = surface
+            .items
+            .iter()
+            .find_map(|item| match item {
+                SpecItem::Action { name, items, .. } if name == action_name => {
+                    items.iter().find_map(|item| match item {
+                        ActionItem::Statement(KernelStatement::Assign {
+                            target: KernelLValue::Index(name, _),
+                            value: KernelExpr::Var(value),
+                            ..
+                        }) if name == "work_status" => Some(value),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            })
+            .expect("completion status assignment");
+        assert_eq!(assigned_status, expected_status);
+    }
+}
+
+#[test]
+fn rejects_an_event_assigned_to_multiple_explicit_effect_roles() {
+    let error = lowering_error(
+        r"
+domain AmbiguousEffectOutcome {
+  type RequestId = 0..0
+  aggregate Request {
+    event Requested { id: RequestId }
+    event Finished {}
+  }
+  effect Work {
+    async
+    correlation_id Requested.id
+    handles Requested
+    success_event Finished
+    failure_event Finished
+  }
+}
+",
+    );
+    assert!(
+        error
+            .message
+            .contains("effect outcome event 'Finished' has multiple explicit roles"),
+        "{}",
+        error.message
+    );
+
+    let SurfaceDocument::Domain(mut domain) = parse_surface_document(
+        r"
+domain ProgrammaticConflict {
+  type RequestId = 0..0
+  aggregate Request {
+    event Requested { id: RequestId }
+    event Finished { id: RequestId }
+  }
+  effect Work {
+    async
+    correlation_id Requested.id
+    handles Requested
+    success_event Finished
+  }
+}
+",
+    )
+    .expect("parse valid domain") else {
+        panic!("expected domain document");
+    };
+    domain.effects[0].failure_event = Some("Finished".to_owned());
+    let error = lower_domain(&domain).expect_err("programmatic conflict must fail closed");
+    assert!(
+        error
+            .message
+            .contains("effect outcome event 'Finished' has multiple explicit roles")
+    );
+    let error = fsl_core::domain_kernel_source(&domain)
+        .expect_err("programmatic textual lowering conflict must fail closed");
+    assert!(
+        error
+            .message
+            .contains("effect outcome event 'Finished' has multiple explicit roles")
+    );
+}
+
+#[test]
+fn programmatic_explicit_effect_role_is_an_outcome_for_both_lowering_paths() {
+    let SurfaceDocument::Domain(mut domain) = parse_surface_document(
+        r"
+domain ProgrammaticRole {
+  type RequestId = 0..0
+  aggregate Request {
+    event Requested { id: RequestId }
+    event Finished {}
+  }
+  effect Work {
+    async
+    correlation_id Requested.id
+    handles Requested
+  }
+}
+",
+    )
+    .expect("parse valid domain") else {
+        panic!("expected domain document");
+    };
+    domain.effects[0].success_event = Some("Finished".to_owned());
+
+    let kernel = lower_domain(&domain).expect("lower programmatic explicit role");
+    assert!(kernel.syntax().items.iter().any(
+        |item| matches!(item, SpecItem::Action { name, .. } if name == "work_complete_finished")
+    ));
+    let source =
+        fsl_core::domain_kernel_source(&domain).expect("render programmatic explicit role");
+    assert!(source.contains("action work_complete_finished("));
+
+    domain.effects[0].success_event = Some("Missing".to_owned());
+    let error = lower_domain(&domain).expect_err("checked lowering must reject unknown role event");
+    assert!(error.message.contains("unknown domain event 'Missing'"));
+    let error = fsl_core::domain_kernel_source(&domain)
+        .expect_err("textual lowering must reject unknown role event");
+    assert!(error.message.contains("unknown domain event 'Missing'"));
 }

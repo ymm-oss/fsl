@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: Apache-2.0
+// Dogfood model 3 (issue #321): structural review findings. Expected:
+// opposing_path_polarity (ads help signups through traffic but hurt them
+// through fatigue), potential_common_cause (seasonality feeds both endpoints
+// of the traffic -> signups claim), and a causal_latent_without_proxy check
+// warning (fatigue is latent, on the path, and has no proxy measurement).
+causal MarketingFunnel {
+  uses f from "funnel.fsl"
+
+  timebase week
+  horizon 52
+
+  variable ads {
+    role intervention
+    binds action f.run_campaign
+  }
+
+  variable traffic {
+    role mediator
+    observes state f.visits
+    cadence 1
+  }
+
+  variable fatigue {
+    role mediator
+    latent
+  }
+
+  variable signups {
+    role outcome
+    observes state f.signups
+    cadence 1
+  }
+
+  variable seasonality {
+    role context
+    observes state f.visits
+    cadence 4
+  }
+
+  claim C_Ads_Traffic ads -> traffic {
+    version 1
+    status active
+    polarity positive
+    lag 0..1
+    persists 1..4
+    basis hypothesis
+  }
+
+  claim C_Traffic_Signups traffic -> signups {
+    version 1
+    status active
+    polarity positive
+    lag 0..1
+    persists 1..2
+    basis hypothesis
+  }
+
+  claim C_Ads_Fatigue ads -> fatigue {
+    version 1
+    status active
+    polarity positive
+    lag 2..6
+    persists 4..12
+    basis assumption
+  }
+
+  claim C_Fatigue_Signups fatigue -> signups {
+    version 1
+    status active
+    polarity negative
+    lag 1..4
+    persists 2..8
+    basis assumption
+  }
+
+  claim C_Season_Traffic seasonality -> traffic {
+    version 1
+    status active
+    polarity positive
+    lag 0..2
+    persists 2..8
+    basis assumption
+  }
+
+  claim C_Season_Signups seasonality -> signups {
+    version 1
+    status active
+    polarity positive
+    lag 0..2
+    persists 2..8
+    basis assumption
+  }
+}

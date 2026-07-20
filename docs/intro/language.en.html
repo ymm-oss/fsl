@@ -246,6 +246,9 @@ reports stable fsl-domain findings):</p>
     correlation_id PaymentCaptureRequested.payment_request_id
     handles PaymentCaptureRequested
     emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    success_event PaymentCaptured
+    failure_event PaymentFailed
+    timeout_event PaymentCaptureTimedOut
     retry { max_attempts 3 }
     timeout after 10m emits PaymentCaptureTimedOut
     compensation { emits PaymentFailed }
@@ -281,6 +284,16 @@ aggregate and becomes the conjunction of the command's <code>requires</code> cla
 the negation of each rejection condition. Unknown symbols, cross-aggregate
 commands, type mismatches, and unsupported calls are reported at the original
 domain expression.</p>
+<p>An effect can assign completion events explicit outcome roles with
+<code>success_event</code>, <code>failure_event</code>, and <code>timeout_event</code>. These declarations are the
+authoritative classification: they lower to <code>Succeeded</code>, <code>Failed</code>, and <code>TimedOut</code>
+respectively, even when an event name contains <code>fail</code>, <code>cancel</code>, or <code>timeout</code>.
+Assigning one event to more than one explicit role is a parse error. An outcome
+without an explicit role retains the v0 name heuristic, in priority order:
+<code>timeout</code>/<code>timedout</code> -&gt; <code>TimedOut</code>, <code>fail</code> -&gt; <code>Failed</code>, <code>cancel</code> -&gt; <code>Cancelled</code>,
+and otherwise <code>Succeeded</code>. Completion actions, the <code>Failed | TimedOut</code> retry
+guard, and the success-sticky transition property all consume that one lowered
+status.</p>
 <p>Domain declarations use <code>enum Name { Member, ... }</code> for finite variants and
 <code>type Name = lo..hi</code> for bounded numeric ranges. The legacy spelling
 <code>type Name = A | B</code> remains accepted in the current 2.x edition and produces the
@@ -797,7 +810,21 @@ fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; read
 fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
 fslc html      &lt;file.fsl&gt; [--depth K] [-o report.html] # self-contained review report (§15)
 fslc ledger    &lt;file.fsl&gt; [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
-fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios --artifact &lt;reviewed&gt; --approver &lt;name&gt; [--signing-key private.pem] [-o record.json]
+fslc document generate &lt;file.fsl&gt; [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
+               [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
+                                                  # deterministic ja/en requirements document from the Requirement Claim IR (§13);
+                                                  # --evidence overlays a per-requirement assurance class from saved
+                                                  # external evidence (repeatable; same envelope shape as `fslc ledger --evidence`);
+                                                  # --approval displays a verified requirements_document approval record
+                                                  # (repeatable; fails closed if it does not match the current rendering)
+fslc document claims &lt;file.fsl&gt; [--view requirements] [-o requirements.claims.json]
+                                                  # emit the Requirement Claim IR (RCIR) claim set as JSON (§13)
+fslc document check &lt;file.fsl&gt; &lt;document.md&gt; [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]...
+                                                  # structural drift check: generated claim blocks vs a
+                                                  # fresh re-render; never interprets prose (§13)
+fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios|requirements_document --artifact &lt;reviewed&gt; --approver &lt;name&gt;
+               [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
+                                                  # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
 fslc approval check  &lt;file.fsl&gt; --record &lt;record.json&gt; [--trust-key public.pem] # approved | drifted | signature-invalid
 fslc approval diff   &lt;file.fsl&gt; --record &lt;record.json&gt; [--depth K] [--trust-key public.pem]
 fslc typestate &lt;file.fsl&gt; [--ts]                 # decide applicability of state machine → ghost type (§16)
@@ -821,6 +848,11 @@ It refuses source/comment movement that cannot be proven safe. <code>&amp;&amp;<
 invalid token and is therefore reported with an <code>and</code> suggestion but is never
 machine-applied. See <code>docs/DESIGN-migration.md</code> for atomicity and bulk-update
 steps.</p>
+<p>Each <code>fslc lint</code> path may be a file or directory. Directories recursively expand
+to regular <code>*.fsl</code> files; symlink entries and other extensions are skipped while
+walking them, and the combined file set is deduplicated and sorted
+deterministically. Explicit file paths retain their existing extension-agnostic
+behavior.</p>
 <p>The native Rust-only <code>kernel</code> command runs after dialect lowering and semantic
 checking. Its versioned JSON contains structural types for every expression,
 source spans, requirement/lowering origin, simultaneous-update semantics, and
@@ -1545,6 +1577,14 @@ spec in <code>DESIGN-dialects.md</code>. There is a single kernel (§1–12 of t
 and the per-layer dialects are a front-end that expands into the AST. The layers
 are connected by refinement: <strong>business ⊒ requirements ⊒ design ⊒ implementation
 (testgen/replay)</strong>.</p>
+<p><code>fslc document generate</code>/<code>claims</code> (see <code>docs/DESIGN-document-requirement-claim-ir.md</code>)
+projects only the <code>spec</code> and <code>requirements</code> dialects into its Requirement Claim
+IR today. Every other dialect described in this section — <code>business</code>,
+<code>dbsystem</code>, <code>ai_component</code>, and the rest — is rejected fail-closed with a coded
+error (<code>FSL-DOC-DIALECT-UNSUPPORTED</code>) rather than producing a partial document.
+<code>--view business</code>/<code>--view design</code> are reserved, not yet implemented, flag
+values — see <code>docs/DESIGN-document-dialect-adapters.md</code> for the activation
+contract a future cross-layer view must satisfy.</p>
 <h3 id="131-declaration-tags-traceability-common-to-all-layers">13.1 Declaration tags (traceability common to all layers)</h3>
 <p>The canonical relationship syntax is a typed annotation immediately before the
 linked declaration. Violations, CTIs, coverage diagnoses, and scenarios then
@@ -2360,19 +2400,33 @@ DESIGN-*.md).</p>
   (fabrication candidates) and unreferenced requirements (omission candidates,
   including empty requirement blocks). Existence-level matching. → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a></li>
 <li><strong><code>fslc mutate</code></strong> — mechanically mutates the spec and measures whether each
-  mutant is killed by the existing net of checks. A surviving mutant = behavior
-  constrained by no property = a place where an invariant is missing.
+  mutant is killed by the existing net of checks. The score is <strong>bounded
+  mutant-set sensitivity</strong>: <code>kill_rate = killed / (killed + survived)</code> over a
+  selected finite mutant set, at the selected <code>--depth</code>, under the
+  verify/acceptance/forbidden/refinement oracle. It moves with the operator
+  mix, the <code>--max-mutants</code> cap, the depth, and the oracle — it is not a
+  production defect-detection rate, not a probability that the spec is
+  correct, and not a completeness measure. Survivors are a review queue, not
+  automatic missing-invariant findings: a survivor may be an equivalent
+  mutant, behavior dead at baseline, an effect visible only beyond the depth
+  bound, or genuine under-constraint.
   <code>--from mutants.jsonl</code> additionally adjudicates externally generated
   mutations expressed as a full <code>mutated_spec</code> or an exact
   <code>replace:{target,replacement,occurrence?}</code> instruction. Valid external
   mutants use the same verify/acceptance/forbidden/refinement oracle. JSON,
   instruction, parse, name, type, and construction errors are <code>invalid</code>, never
-  killed, and are excluded from combined/per-source kill-rate denominators.
+  killed, and are excluded from combined/per-source kill-rate denominators
+  (they measure external generator quality, not spec strength).
   Every entry carries <code>source:"builtin"|"external"</code>; <code>--max-mutants</code> caps only
   the built-in catalog, so <code>--max-mutants 0 --from ...</code> runs external-only.
   <code>--by-requirement</code> flags "a requirement that kills no behavior mutant" as an
   <code>empty_formalization</code> warning (the semantic-level extension of
-  <code>--strict-tags</code>). → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
+  <code>--strict-tags</code>); per-requirement kill counts and this warning are observed
+  lower bounds within the chosen mutant set and depth. Acceptance and forbidden
+  kills use explicit requirement annotations on the failed trace declaration;
+  AC/FB case IDs are not implicit requirements. Trace case IDs are unique
+  within each declaration kind.
+  → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
 <li><strong><code>fslc explain --readable</code></strong> — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,
   branch lowering, synthesized refinement mappings, automatic checks, tags) +
@@ -2403,11 +2457,13 @@ DESIGN-*.md).</p>
   <code>unanchored_property</code>, <code>progressless_cycle</code>, <code>unwritten_state</code>,
   <code>unread_state</code>, <code>unguarded_action</code>, <code>conservation_candidate</code>,
   <code>divergent_choice</code>, and <code>unconstrained_effect</code>. The last two use a fixed
-  depth-4 BMC probe: they include <code>evidence_basis:"bounded_bmc"</code>, the reachable
+  depth-4 bounded probe (solver-free explicit-state exploration via the runtime
+  Monitor): they include <code>evidence_basis:"bounded_bmc"</code> (frozen v0 vocabulary
+  for "backed by a bounded reachability witness"), the reachable
   branch witness, and a question-form <code>spec_question</code> asking which outcome is
   intended. Exact matches with <code>undecided:</code> declarations remain visible with
   <code>acknowledged:true</code> and <code>acknowledged_by</code>; unmatched semantic findings carry
-  no acknowledgement fields. A BMC-backed <code>unconstrained_effect</code> suppresses the same state's
+  no acknowledgement fields. A bounded-witness-backed <code>unconstrained_effect</code> suppresses the same state's
   structural <code>unread_state</code>; semantic action witnesses similarly suppress a
   duplicate <code>unguarded_action</code>. Absence is not proof of determinism beyond the
   bound. See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-underspecification.md"><code>DESIGN-underspecification.md</code></a>.
@@ -2445,7 +2501,95 @@ The native Rust command performs this judgment from the versioned public Kernel
 JSON v1 contract, not private parser/model structures, and fails closed on an
 unsupported Kernel schema version. Its JSON report and TypeScript bytes remain
 compatible with the frozen reference output.
-→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details></div>
+→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details>
+<details id="17-the-causal-profile-review-only-causal-hypothesis-graphs"><summary>17. The causal profile (review-only causal hypothesis graphs)<span class="tree-blurb"> — Review-only causal hypothesis graphs — never proved/verified.</span></summary><div class="tree-body"><p><code>causal &lt;Name&gt; { ... }</code> is a standalone sidecar document (its own <code>.fsl</code> file,
+never part of a kernel spec) that structures long-horizon causal hypotheses:
+interventions, mediators, outcomes, contexts, time lags, persistence, delayed
+feedback, measurement bindings, and applicability scope. <strong>FSL never proves
+real-world causality</strong>: every causal output carries
+<code>formal_result: "not_run"</code> and a <code>do_not_assume</code> array, no output path
+attaches <code>proved</code>/<code>verified</code> to a causal claim, and there is deliberately no
+<code>fslc causal verify</code> command.</p>
+<pre><code class="language-bash">fslc causal check model.fsl
+fslc causal analyze model.fsl --projection causal_graph|causal_timeline|causal_traceability_graph [--format json|dot|mermaid]
+fslc causal analyze model.fsl --profile causal-review
+fslc causal diff before.fsl after.fsl
+</code></pre>
+<p><code>fslc check model.fsl</code> on a causal file routes to the causal checker
+automatically. A model declares one discrete <code>timebase</code>
+(<code>tick | hour | day | week</code>) and a finite <code>horizon</code>; <code>uses &lt;alias&gt; from
+"&lt;path&gt;"</code> imports kernel/business/requirements specs so variables can bind
+actions (<code>binds action alias.name</code>) and observe KPIs, states, or properties
+(<code>observes kpi alias.name</code>, etc.). Claims are directed hypotheses
+<code>claim &lt;Id&gt; a -&gt; b { version N status active|retired polarity
+positive|negative|unknown lag a..b|unknown persists a..b|unknown|unbounded
+basis hypothesis|assumption ... }</code> with stable IDs and monotonically increasing
+content versions; retired claims keep their identity and history. Cycles with
+a positive minimum lag sum are allowed but must be acknowledged with a
+<code>feedback</code> declaration (an unacknowledged cycle is a warning; a zero-lag cycle
+is an error). Feedback loops are classified <code>reinforcing | balancing |
+unknown</code> from the sign product of edge polarities (<code>unknown</code> absorbs), and the
+timeline reports Minkowski-sum first-response windows (exact minimum; the
+maximum is an upper bound when the pair is connected through a feedback SCC).
+<code>--profile causal-review</code> emits deterministic review findings (all
+<code>formal_status: "not_a_violation"</code>) such as <code>single_hypothesis_bottleneck</code>,
+<code>high_leverage_untested_claim</code>, <code>opposing_path_polarity</code>,
+<code>potential_common_cause</code>, <code>feedback_without_damping_story</code>,
+<code>deadline_before_earliest_effect</code>, <code>observation_window_misses_effect</code>,
+<code>measurement_cadence_too_coarse</code> (fires exactly when a measurement cadence
+exceeds an arriving claim's minimum persistence; unknown persistence is
+reported as <code>not_evaluable</code>, never guessed), and <code>unknown_lag_blocks_timeline</code>.
+<code>fslc causal diff</code> compares two model files by stable claim ID and content
+version. <code>causal-diff.v0</code> accepts no evidence inputs, so its
+<code>support_transition</code> stays <code>not_available</code>; evidence aggregation is reported
+separately by analyze/ledger projections. It reports
+<code>content_changed_without_version_bump</code> when
+version-relevant fields move under the same version,
+<code>retired_claim_reactivated</code> when a terminal retired claim returns to active,
+and <code>retired_hypothesis_reproposed</code> when a new claim repeats a retired claim's
+source, target, and polarity.</p>
+<p>External evidence enters through versioned artifacts
+(<code>fsl-causal-evidence.v0</code>: closed <code>design</code> vocabulary
+<code>randomized_experiment | quasi_experiment | observational | expert_judgment</code>,
+directed <code>support</code> <code>supports | challenges | inconclusive</code>, claim-ID <strong>and
+content-version</strong> pins, scope tokens, ISO-8601 <code>period</code>/<code>valid_until</code>, an
+<code>artifact_digest</code> over the canonical payload) plus independent append-only
+lifecycle chains (<code>fsl-causal-evidence-lifecycle.v0</code>: digest-linked records;
+<code>retracted</code>/<code>superseded</code> are terminal and never rewrite the payload).
+<code>fslc causal analyze model.fsl --evidence a.json [--lifecycle a.lifecycle.json]
+[--as-of YYYY-MM-DD] --projection causal_evidence_graph</code> (or
+<code>--profile causal-review</code>) validates artifacts fail-closed — schema/digest/
+lifecycle-chain violations stop the analysis — and aggregates a deterministic
+per-claim <code>causal_support</code>: <code>untested</code>, <code>supported</code>, <code>challenged</code>,
+<code>inconclusive</code>, <code>mixed</code>, or <code>unsupported_by_current_evidence</code>. Only artifacts
+that pin the current claim version, whose scope <code>subsumes</code> the claim scope,
+with declared freshness, an <code>active</code> lifecycle, and an observation window at
+least the claim's minimum lag count; one source lineage collapses to one vote
+(contradictions inside a lineage are <code>inconclusive</code>). Staleness is judged only
+against an explicit <code>--as-of</code> date — never the wall clock. A scope dimension
+present on only the claim or artifact side is <code>unassessable</code>; absence is never
+treated as universal. <strong><code>causal_support</code>
+and <code>formal_assurance</code> are orthogonal axes</strong>: evidence never changes
+<code>formal_assurance: "not_run"</code>, and no support value is a verdict.</p>
+<p>A human can carve an observable contract out of a claim as an <code>expectation</code>
+and check it with the existing verifier — <strong>the claim itself is never
+lowered</strong>: <code>expectation E { trigger action alias.name</code> (or <code>trigger
+predicate alias { &lt;kernel expr&gt; }</code>) <code>response predicate alias { &lt;kernel
+expr&gt; } within N clock &lt;name&gt; derived_from_claim &lt;Id&gt; }</code>.
+<code>fslc causal verify-expectations model.fsl [--depth K]</code> compiles each
+expectation, fail-closed, into an ordinary <code>leadsTo ... within ticks</code>
+property on the imported kernel spec (an action trigger becomes a one-step
+pulse ghost; <code>within</code> must convert to an exact integer number of kernel
+ticks under the named clock — nothing is rounded, and a clock is never
+applied to a different spec) and reports <code>pass</code>/<code>violated</code> with
+<code>assurance: "bounded"</code>. Whatever the verdict, the derived claim's
+<code>formal_assurance</code> stays <code>"not_run"</code> and its <code>causal_support</code> is untouched:
+<code>derived_from_claim</code> is traceability in both directions, never evidence.
+The legacy field name <code>supports</code> is rejected. Versioned
+schemas live under <code>schemas/fslc/causal/</code>; the browser Worker does not expose
+causal commands. Working models live in
+<a href="https://github.com/ymm-oss/fsl/tree/main/examples/causal"><code>examples/causal/</code></a>.
+→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-causal.md"><code>DESIGN-causal.md</code></a></p></div></details></div>
   </div>
 </section>
 

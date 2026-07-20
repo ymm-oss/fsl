@@ -21,8 +21,7 @@ reading the verification results as it repairs it.
 1. **Install FSL and the skill**
 
    ```bash
-   git clone https://github.com/ymm-oss/fsl.git ~/.fsl
-   bash ~/.fsl/install.sh
+   curl -fsSL https://raw.githubusercontent.com/ymm-oss/fsl/main/install.sh | bash
    ```
 
    A standard install gives you the verifier `fslc` and the Claude Code skills
@@ -136,47 +135,49 @@ The Linux binaries target the Ubuntu 24.04 ABI baseline (glibc 2.39 or newer).
 
 ## Easy setup (for PMs, consultants, and non-engineers)
 
-No programming knowledge is required. Git is used to keep every installed file
-on one published Release tag.
+No programming knowledge or Git installation is required. The installer keeps
+the native commands and Agent Skills on one published Release tag.
 
-1. **Install Git** from [git-scm.com](https://git-scm.com/) if `git --version`
-   does not work in your terminal.
-2. **Open a terminal** (on Mac, "Terminal.app"; search your apps for "terminal").
-3. **Run the install commands**:
+1. **Open a terminal** (on Mac, "Terminal.app"; search your apps for "terminal").
+2. **Run the install command**:
 
    ```bash
-   git clone https://github.com/ymm-oss/fsl.git ~/.fsl
-   bash ~/.fsl/install.sh
+   curl -fsSL https://raw.githubusercontent.com/ymm-oss/fsl/main/install.sh | bash
    ```
 
-This places FSL itself in `~/.fsl`, the `fslc` command in `~/.local/bin/fslc`, and
-the Claude Code skills in `~/.claude/skills/`.
-The installer checks out the latest published Release tag in `~/.fsl`, so the
-skills, examples, `fslc`, and `fslc-lsp` always come from the same release.
-
-> If you use the GitHub CLI, `gh repo clone ymm-oss/fsl ~/.fsl` can replace the
-> `git clone` command above.
+This places only the versioned release payload under `~/.local/share/fsl`, links
+the commands from `~/.local/bin`, and links the Claude Code skills from
+`~/.claude/skills/`. It does not clone the repository or install examples,
+documentation, Python sources, or Rust sources. `FSL_DATA_DIR` overrides the
+release-payload location and `FSL_BIN_DIR` overrides the command-link location.
 
 What gets installed:
 
 - the native Rust `fslc` and `fslc-lsp` commands (used from `~/.local/bin`; Python is not required)
-  — the VSCode extension in `editors/vscode/` launches `fslc-lsp` from `PATH`
+  — the VSCode extension launches `fslc-lsp` from `PATH`
 - the Claude Code skills (`~/.claude/skills/fsl*`)
-- samples for PMs and consultants (`examples/pm/`, `examples/consulting/`)
+
+The installer verifies both native checksums and rejects a binary whose reported
+version differs from the latest Release tag. It also migrates recognized links
+to the old Python 2.7 or `~/.fsl` installations. Use `--no-skill` to skip creating
+the Claude Code skill links.
 
 Windows users should use WSL or refer to the developer instructions (PowerShell).
 
 Uninstall:
 
 ```bash
-rm -rf ~/.fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery
+rm -rf ~/.local/share/fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery
 ```
 
-Official releases are the checksummed native binaries, VSCode extension, and
-Kernel bundles attached to GitHub Releases. The retained Python compatibility
-reference is installed from this repository and is not published to PyPI; the
-Rust workspace crates are not published to crates.io. Publishing either surface
-requires an explicit manifest, workflow, and documentation change.
+Official releases contain checksummed native binaries, VSCode extension, and
+Kernel bundles. Releases after v3.0.0 also contain the checksummed Agent Skill
+bundle; the installer verifies a pinned source-archive checksum for the v3.0.0
+compatibility path. The Python
+compatibility reference remains in this repository at version 2.7.0, but this
+installer does not install it and it is not published to PyPI. The Rust workspace
+crates are not published to crates.io. Publishing either surface requires an
+explicit manifest, workflow, and documentation change.
 Maintainers cut releases using the documented [`docs/RELEASE.md`](docs/RELEASE.md)
 procedure and the internal [`release` Agent Skill](.claude/skills/release/SKILL.md).
 
@@ -230,7 +231,7 @@ fslc verify specs/order_system.fsl --depth 8    # compose: synchronized composit
 # Validation suite (closes the gap between spec ≠ intent; see docs/DESIGN-{forbidden,vacuity,...})
 fslc verify specs/cart_v1.fsl --vacuity error   # detect vacuous properties (unreachable antecedent/trigger, always-true requires)
 fslc verify specs/cart_v1.fsl --strict-tags     # match untagged declarations (fabrication candidates) and unreferenced requirements (omission candidates)
-fslc mutate specs/cart_v1.fsl                    # spec mutation: measure how much the properties constrain behavior
+fslc mutate specs/cart_v1.fsl                    # spec mutation: bounded mutant-set sensitivity of the property net (survivors are a review queue)
 fslc explain specs/cart_v1.fsl                   # skeleton enumeration + counterfactuals (what would happen without this rule)
 fslc analyze specs/cart_v1.fsl --profile ai-review # structural review findings (not proof failures)
 fslc html specs/cart_v1.fsl -o cart_report.html  # self-contained HTML report for team review

@@ -1,0 +1,96 @@
+// Synthetic fixture for the RCIR v1 projector (issue #325). Exercises the
+// claim kinds and requirement-relation shapes that examples/pm/cancel_system.fsl
+// does not: trans, reachable, leadsTo, terminal, a requirements NFR deadline,
+// forbidden, one requirement with two distinct statements, one action with two
+// requirement IDs, an undecided marker, and analysis-scope bounds.
+requirements DocumentClaimsFixture {
+  entity Case
+  number Budget
+  const DEADLINE = 3
+
+  enum St { Open, Escalated, Closed }
+  type CaseId = 0..1
+
+  state {
+    cases: Map<CaseId, St>,
+    handled: Int
+  }
+  init {
+    forall c: CaseId { cases[c] = Open }
+    handled = 0
+  }
+
+  @requirement("REQ-1", "An open case can be escalated by staff")
+  fair action escalate(c: CaseId) {
+    requires cases[c] == Open
+    let allowed = true
+    requires allowed
+    cases[c] = Escalated
+  }
+
+  @requirement("REQ-1", "An escalated case is closed once handled")
+  @requirement("REQ-2", "Only an escalated case may be closed")
+  fair action close(c: CaseId) {
+    requires cases[c] == Escalated
+    cases[c] = Closed
+    handled = handled + 1
+    ensures handled >= 1
+  }
+
+  @requirement("REQ-3", "A closed case is never re-opened")
+  invariant NoReopen {
+    forall c: CaseId { cases[c] == Closed => not (cases[c] == Open) }
+  }
+
+  @requirement("REQ-3", "A case never both starts open and ends closed in one step")
+  trans NoDirectClose {
+    forall c: CaseId { not (old(cases[c]) == Open and cases[c] == Closed) }
+  }
+
+  @requirement("REQ-4", "Every case can eventually be closed")
+  reachable AllClosed {
+    forall c: CaseId { cases[c] == Closed }
+  }
+
+  @requirement("REQ-4", "An escalated case is eventually closed")
+  leadsTo EscalatedGetsClosed "an escalated case eventually closes" {
+    forall c: CaseId { cases[c] == Escalated ~> within 20 cases[c] == Closed }
+  }
+
+  @undecided("the retention policy after closing is not yet decided")
+  invariant RetentionPlaceholder {
+    forall c: CaseId { cases[c] == Closed or cases[c] != Closed }
+  }
+
+  time {
+    urgent close_due
+    age escalate_age[c: CaseId] while cases[c] == Escalated
+  }
+
+  requirement REQ-5 "A case that has reached its deadline is closed" {
+    fair action close_due(c: CaseId) {
+      requires cases[c] == Escalated
+      requires escalate_age[c] >= DEADLINE
+      cases[c] = Closed
+      handled = handled + 1
+    }
+    deadline escalate_age <= DEADLINE
+  }
+
+  terminal { forall c: CaseId { cases[c] == Closed } }
+
+  acceptance AC-1 "Escalate then close within the deadline" {
+    escalate(0)
+    close(0)
+    expect cases[0] == Closed
+  }
+
+  forbidden FB-1 "A case cannot be closed while still open" {
+    close(0)
+    expect rejected
+  }
+}
+verify {
+  instances Case = 2
+  values Budget = 1..5
+}

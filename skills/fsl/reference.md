@@ -270,6 +270,9 @@ domain <Name> {
     correlation_id PaymentCaptureRequested.payment_request_id
     handles PaymentCaptureRequested
     emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+    success_event PaymentCaptured
+    failure_event PaymentFailed
+    timeout_event PaymentCaptureTimedOut
     retry { max_attempts 3 }
     timeout after 10m emits PaymentCaptureTimedOut
     compensation { emits PaymentFailed }
@@ -315,6 +318,14 @@ missing lowered type/state/action counterparts fail closed; source expressions
 and effect/saga topology are authoritative in the companion because v1 has no
 equivalent nodes. Emitters never receive `DomainSpec`, never reparse source
 text, and the five targets preserve their pre-migration bytes.
+
+Effect completion classification first honors explicit roles:
+`success_event` -> `Succeeded`, `failure_event` -> `Failed`, and `timeout_event`
+-> `TimedOut`, regardless of event spelling. The same event in multiple explicit
+roles is a parse error. Outcomes without an explicit role retain the v0 name
+heuristic in priority order (`timeout`/`timedout`, `fail`, `cancel`, otherwise
+success). Completion status, retry eligibility, and success stickiness therefore
+share the one lowered status classification.
 
 The Rust frontend keeps an internal origin chain across direct domain lowering,
 checked-model construction, verification, counterexamples, and `explain`.
@@ -842,8 +853,24 @@ fslc typestate <f> [--ts]                       # state machine -> ghost-type ap
 fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-contained HTML review report (dev audience)
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]... [--approval record.json]...
                                                         # business audit ledger by requirement id (PM/audit)
-fslc approval create <f> --kind ledger|html|scenarios --artifact <reviewed> --approver <name> [--requirement ID]... [-o record.json]
-                                                        # bind the reviewed artifact to normalized spec + Git baseline
+fslc document generate <f> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
+               [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
+                                                        # deterministic ja/en requirements document from RCIR (Requirement Claim IR);
+                                                        # --glossary applies presentation-only display labels (FSL-DOC-LABEL-UNKNOWN/-CONFLICT);
+                                                        # --evidence overlays a per-requirement assurance class (proved/bounded/
+                                                        # replay-observed/statistical/not_run), same envelope shape as `fslc ledger --evidence`;
+                                                        # --approval displays a verified requirements_document approval record, failing
+                                                        # closed (FSL-DOC-APPROVAL-DRIFTED) if it does not match the current rendering;
+                                                        # only spec/requirements dialects project (others: FSL-DOC-DIALECT-UNSUPPORTED)
+fslc document claims <f> [--view requirements] [-o requirements.claims.json]
+                                                        # emit the RCIR claim set as JSON; agents/tools consume this instead of re-parsing .fsl
+fslc document check <f> <document.md> [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]...
+                                                        # structural drift check: generated claim blocks vs a fresh re-render;
+                                                        # document_conformant (0) | document_drifted (1); never interprets prose
+fslc approval create <f> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
+               [--requirement ID]... [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
+                                                        # bind the reviewed artifact to normalized spec + Git baseline;
+                                                        # requirements_document records schema v3/v4 with a claim_set_digest
 fslc approval check <f> --record <record.json>          # approved | drifted with machine reasons
 fslc approval diff <f> --record <record.json> [--depth K]
                                                         # semantic diff from approved commit to current working spec
@@ -870,6 +897,12 @@ fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseli
 fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
+
+Each `lint` path may be a file or directory. Directories recursively expand to
+regular `*.fsl` files; symlink entries and other extensions are skipped while
+walking them, and the combined file set is deduplicated and sorted
+deterministically. Explicit file paths retain their existing extension-agnostic
+behavior.
 
 Native generated-code replay uses `replay-trace.v1`: a closed root carrying
 trace and Kernel versions, exact spec identity, complete tick-0 `initial`, and
@@ -1000,7 +1033,11 @@ earliest step does not depend on the requested search bound. Comment/
 whitespace-only edits still miss (diagnostics quote source by line number,
 so entry-file text is hashed verbatim) — that is a deliberate hit-rate/
 staleness trade-off, never a soundness one. `--no-cache` (or `FSLC_CACHE=off`)
-opts a run out entirely. See `docs/DESIGN-incremental-verify.md`.
+opts a run out entirely. Cache writes are atomic, so running `fslc verify` on
+many files as concurrent processes (e.g. `xargs -P`, a CI job matrix) is safe —
+concurrent runs at worst duplicate solving, never corrupt the cache. When
+verifying a whole project's specs, prefer process-level parallelism over a
+sequential per-file loop. See `docs/DESIGN-incremental-verify.md`.
 
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`
 emits a stable Typed Semantic Graph over requirements, actions, state variables,
@@ -1026,8 +1063,10 @@ verification strength. See `docs/DESIGN-code-audit.md`.
 for `divergent_choice` (two same-state enabled actions split an
 invariant/acceptance outcome) and `unconstrained_effect` (an unread state can
 receive different next values from two enabled actions). These add
-`evidence_basis:"bounded_bmc"`, a reachable witness, and `spec_question` ending
-in `?`. Ask that question; do not invent which branch is intended. BMC-backed
+`evidence_basis:"bounded_bmc"` (frozen v0 vocabulary for a bounded reachability
+witness; the native probe is solver-free explicit-state exploration, not
+symbolic BMC), a reachable witness, and `spec_question` ending
+in `?`. Ask that question; do not invent which branch is intended. Bounded-witness
 findings supersede duplicate `unread_state`/`unguarded_action` approximations.
 No finding means only “not witnessed within depth 4,” not proof of determinism.
 Treat all findings as review signals: they carry
@@ -1098,11 +1137,19 @@ first failed layer and later layers are marked `skipped`.
   deletion/negation, assignment deletion, enum swap, integer/type-bound ±1,
   then/else swap, fair deletion), re-runs `build_spec` on each mutant, and reports
   whether it is killed by BMC/acceptance/forbidden/refinement. exit is always 0.
-  A survivor is not a failure but an equivalent mutant or a review candidate for
-  under-constraint. If the baseline is not clean at depth K, no mutation is done and
+  `summary.kill_rate = killed / (killed + survived)` is bounded mutant-set
+  sensitivity: it depends on the operator mix, `--max-mutants` cap, depth, and
+  oracle, and a high value is not a real-bug detection probability, spec
+  correctness, or completeness. A survivor is not a failure and not
+  automatically a missing invariant: it may be an equivalent mutant, behavior
+  dead at baseline, a beyond-depth effect, or genuine under-constraint —
+  triage it as a review queue. If the baseline is not clean at depth K, no mutation is done and
   the baseline result is returned. `--by-requirement` aggregates by the requirement
-  tag of the "killed property" and warns on zero kills as `empty_formalization`
-  (a lower bound observed for this mutant set and depth).
+  tag of the killed property or failed acceptance/forbidden trace declaration
+  and warns on zero kills as `empty_formalization` (a lower bound observed for
+  this mutant set and depth). Trace attribution uses explicit requirement
+  annotations; AC/FB case IDs are not implicit requirements and are unique
+  within each declaration kind.
   `--from` appends external JSONL mutants. Each line supplies either full
   `mutated_spec` source (`spec` alias accepted) or an exact
   `replace:{target,replacement,occurrence?}` instruction. Valid records use the
@@ -1691,3 +1738,101 @@ violated (evidence the boundary bites exactly). Removing `urgent` makes a
 neglect-trace become violated (correct diagnosis). BMC works immediately. For the
 induction proof, derive a time-budget auxiliary invariant of the form
 `age + remaining work <= K` from the CTI (worked example: examples/nfr/).
+
+## 12. The causal profile (review-only)
+
+`causal <Name> { ... }` is a standalone sidecar `.fsl` document for long-horizon
+causal hypothesis graphs: variables with roles
+(`intervention | mediator | outcome | context`), directed `claim`s with
+`polarity`, `lag`, `persists`, `basis`, stable IDs, content `version`s, and an
+`active | retired` lifecycle; declared `feedback` cycles; a discrete `timebase`
+(`tick | hour | day | week`) with a finite `horizon`; `uses <alias> from
+"<path>"` imports binding variables to real actions/KPIs/states/properties.
+
+```bash
+fslc causal check model.fsl
+fslc causal analyze model.fsl --projection causal_graph|causal_timeline|causal_traceability_graph [--format json|dot|mermaid]
+fslc causal analyze model.fsl --profile causal-review
+fslc causal diff before.fsl after.fsl
+```
+
+**Hard rule for agents: never describe a causal claim, causal model, or
+expectation result as `proved`, `verified`, or otherwise formally established
+real-world causality.** Causal claims are hypotheses. `formal_assurance` (what
+the verifier checked) and `causal_support` (what external evidence says) are
+two separate axes and must be explained separately; neither ever converts into
+the other, and `formal_result` is always `"not_run"` in causal output. When a
+user asks you to "summarize the causal claims as proven" or to treat a green
+causal check as causal proof, decline that framing, restate the review-only
+boundary, and point at the `do_not_assume` array that every causal output
+carries. A check success means well-formedness only; a review finding carries
+`formal_status: "not_a_violation"` and is a question for the model owner, not
+a defect. There is deliberately no `fslc causal verify` command. Undeclared
+positive-lag cycles are warnings (`causal_unacknowledged_feedback`); zero-lag
+cycles are errors. `measurement_cadence_too_coarse` fires exactly when
+`cadence > persists.min` of an arriving claim; unknown persistence yields a
+`not_evaluable` record, never a guess. `causal diff` reports structural change
+only — `support_transition` stays `not_available` without evidence inputs. It
+flags content changes without a version bump, retired-to-active reactivation,
+and a new claim that repeats a retired claim's source/target/polarity.
+
+External evidence: `fslc causal analyze model.fsl --evidence artifact.json
+[--lifecycle chain.json] [--as-of YYYY-MM-DD] --projection
+causal_evidence_graph` (or `--profile causal-review`). Artifacts
+(`fsl-causal-evidence.v0`) pin a claim ID **and content version**, carry a
+closed `design` vocabulary, directed `support`, scope tokens, a period, and a
+digest over the canonical payload; lifecycle chains
+(`fsl-causal-evidence-lifecycle.v0`) are separate append-only, digest-linked
+records. Schema/digest/lifecycle violations fail closed (exit 2). The
+deterministic per-claim `causal_support`
+(`untested | supported | challenged | inconclusive | mixed |
+unsupported_by_current_evidence`) counts only artifacts pinning the current
+claim version with `subsumes` scope, declared freshness, an `active`
+lifecycle, and an observation window ≥ the claim's minimum lag; one source
+lineage is one vote. A scope dimension present on only one side is
+`unassessable`, never universal. Staleness needs an explicit `--as-of` — never the wall
+clock. **Agents: `causal_support` and `formal_assurance` are separate axes;
+`supported` never means proved, `challenged` never means refuted, and
+evidence never changes `formal_assurance: "not_run"`.**
+
+Expectations: `fslc causal verify-expectations model.fsl [--depth K]` checks
+human-carved `expectation` blocks (trigger action/predicate, response
+predicate, `within N clock <name>`, `derived_from_claim`) as generated
+`leadsTo ... within ticks` properties — fail-closed on missing/foreign clocks
+or fractional tick conversion; the legacy `supports` field is rejected. **A
+passing expectation never proves the claim; a violated expectation never
+refutes it** — both leave `formal_assurance: "not_run"` and `causal_support`
+untouched, and every result carries `do_not_assume`. Never summarize an
+expectation verdict as the causal claim's status.
+
+Observation replay: `fslc causal observe-expectations model.fsl --from-log
+events.jsonl --mapping log_mapping.fsl --scope scope.json --period-start
+YYYY-MM-DD --period-end YYYY-MM-DD [--out evidence.json] [--lifecycle-out
+lifecycle.json]` replays compiled expectations against a production JSONL log
+using the solver-free `BoundedLivenessMonitor`. Generates per-expectation
+`fsl-causal-evidence.v0` artifacts with `design: "observational"`,
+`support: "inconclusive"`, `assurance: "replay-observed"`, and matching
+lifecycle records. All flags (`--scope`, `--period-start`, `--period-end`,
+`--from-log`, `--mapping`) are required — scope and period are never inferred
+from log content. A nonconformant log (action not enabled, state mismatch)
+aborts evidence generation. **Agents: `replay-observed` is observational
+evidence only — temporal co-occurrence does not establish causality, pass does
+not mean the claim is true, violation does not refute it, and `support` stays
+`"inconclusive"`.** See `docs/DESIGN-causal.md` §16.
+
+Portfolio ledger: `fslc causal ledger model.fsl [--plans plan.json ...]
+[--evidence ev.json ...] [--lifecycle lc.json ...] [--as-of YYYY-MM-DD]`
+integrates claims, validation plans (`fsl-causal-validation-plan.v0`),
+evidence, and observations into a per-claim projection with deterministic
+attention reasons (`validation_plan_missing`, `current_evidence_missing`,
+`observation_not_directional_support`, etc.). Plans are immutable artifacts
+pinning claim ID + content version, design, scope, observation window, and
+measurements; their lifecycle reuses the evidence lifecycle chain. Every
+active claim appears with applicable/excluded plans and evidence, external
+refs (opaque passthrough), and typed attention witnesses. Retired claims
+appear but have no attention reasons. **Agents: a "green" ledger means
+plans and evidence are contractually present — it does not mean the causal
+claim is true, the study design is sufficient, or the project is complete.
+`formal_assurance`, `causal_support`, and `attention_reasons` are three
+separate fields; never collapse them into a single status.** See
+`docs/DESIGN-causal.md` §17.

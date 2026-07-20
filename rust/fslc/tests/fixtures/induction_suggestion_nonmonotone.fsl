@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec NonmonotoneCounter {
+  state { audit: Int, y: Int, up: Bool }
+  init { audit = 0  y = 0  up = true }
+
+  action zigzag() {
+    requires audit < -99
+    if up {
+      audit = audit + 1
+      up = false
+    } else {
+      audit = audit - 1
+      up = true
+    }
+    y = y + 1
+  }
+
+  invariant Sync { y <= 4 }
+}

@@ -441,7 +441,37 @@ fn next_action(finding: &Finding) -> String {
     })
 }
 
-fn assurance_token(value: &Value) -> &'static str {
+/// Every requirement ID an evidence envelope declares itself attached to —
+/// its own `requirements` string array, plus a singular `requirement.id`
+/// field. Shared with `document_evidence.rs` (issue #332) so claim-level
+/// evidence matching can never silently diverge from ledger's own.
+pub(crate) fn evidence_requirement_ids(item: &Value) -> Vec<&str> {
+    let mut ids = item
+        .get("requirements")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    if let Some(id) = item
+        .get("requirement")
+        .and_then(Value::as_object)
+        .and_then(|requirement| requirement.get("id"))
+        .and_then(Value::as_str)
+    {
+        ids.push(id);
+    }
+    ids
+}
+
+/// Classify one JSON envelope (an evidence file's parsed contents, or a
+/// `fslc verify` result) into the shared assurance vocabulary (issue #171,
+/// `docs/DESIGN-assurance-classes.md`): `proved` / `bounded` /
+/// `replay-observed` / `statistical` / `not_run`. `pub(crate)` so
+/// `document_evidence.rs` (issue #332) reuses this exact classification
+/// rather than re-deriving it — acceptance criterion 3 ("`bounded` never
+/// displays as `proved`") reduces to this already-tested function.
+pub(crate) fn assurance_token(value: &Value) -> &'static str {
     let completeness = value
         .get("completeness")
         .and_then(Value::as_str)
@@ -495,7 +525,10 @@ fn assurance_token(value: &Value) -> &'static str {
     "not_run"
 }
 
-fn assurance_label(token: &str, depth: Option<u64>) -> String {
+/// Turn an `assurance_token` result into its display string
+/// (`"bounded"` + `Some(8)` -> `"bounded(BMC depth 8)"`). `pub(crate)` for
+/// the same reason as `assurance_token`.
+pub(crate) fn assurance_label(token: &str, depth: Option<u64>) -> String {
     match token {
         "proved" => "proved(induction)".to_owned(),
         "bounded" => depth.map_or_else(
@@ -560,22 +593,7 @@ fn assurance_cell(
         }
     }
     for (_, item) in evidence {
-        let mut ids = item
-            .get("requirements")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>();
-        if let Some(id) = item
-            .get("requirement")
-            .and_then(Value::as_object)
-            .and_then(|requirement| requirement.get("id"))
-            .and_then(Value::as_str)
-        {
-            ids.push(id);
-        }
-        if ids.contains(&requirement_id) {
+        if evidence_requirement_ids(item).contains(&requirement_id) {
             sources.push(assurance_token(item));
         }
     }
@@ -1013,22 +1031,10 @@ pub fn render_ledger_with_approvals(
             "## 外部エビデンス\n\n| ファイル | producer結果 | 保証クラス | 対象要件ID |\n|---|---|---|---|\n",
         );
         for (source, item) in evidence {
-            let mut ids = item
-                .get("requirements")
-                .and_then(Value::as_array)
+            let ids = evidence_requirement_ids(item)
                 .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
                 .map(str::to_owned)
                 .collect::<Vec<_>>();
-            if let Some(id) = item
-                .get("requirement")
-                .and_then(Value::as_object)
-                .and_then(|requirement| requirement.get("id"))
-                .and_then(Value::as_str)
-            {
-                ids.push(id.to_owned());
-            }
             let ids = if ids.is_empty() {
                 "（仕様全体）".to_owned()
             } else {

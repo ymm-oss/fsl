@@ -1,0 +1,3 @@
+{"id":"acceptance","replace":{"target":"when allowed","replacement":"when false"}}
+{"id":"forbidden","replace":{"target":"when allowed","replacement":"when true"}}
+{"id":"forbidden-setup","replace":{"target":"requires not blocked","replacement":"requires blocked"}}

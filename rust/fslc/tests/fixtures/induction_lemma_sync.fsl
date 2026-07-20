@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec LemmaSync {
+  state { x: Int, y: Int }
+  init { x = 0  y = 0 }
+
+  action step() {
+    requires x < 4
+    x = x + 1
+    y = y + 1
+  }
+
+  invariant Target { y <= 4 }
+}

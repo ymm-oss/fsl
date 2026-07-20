@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ymm-oss.github.io/fsl/schemas/fslc/causal/causal-expectations.v0.schema.json",
+  "title": "fslc causal verify-expectations v0",
+  "type": "object",
+  "required": [
+    "fsl",
+    "result",
+    "schema_version",
+    "formal_result",
+    "model",
+    "claims",
+    "expectations",
+    "do_not_assume"
+  ],
+  "properties": {
+    "fsl": { "type": "string" },
+    "result": { "const": "causal_expectations_checked" },
+    "schema_version": { "const": "causal-expectations.v0" },
+    "formal_result": { "const": "not_run" },
+    "model": { "type": "string" },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "formal_assurance", "causal_support"],
+        "properties": {
+          "id": { "type": "string" },
+          "formal_assurance": { "const": "not_run" },
+          "causal_support": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "expectations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "verdict",
+          "assurance",
+          "checked_to_depth",
+          "do_not_assume"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "verdict": { "enum": ["pass", "violated"] },
+          "assurance": { "const": "bounded" },
+          "checked_to_depth": { "type": "integer", "minimum": 1 },
+          "within_ticks": { "type": "integer", "minimum": 0 },
+          "clock": { "type": "string" },
+          "trigger_kind": { "enum": ["action", "predicate"] },
+          "derived_from_claim": { "type": ["string", "null"] },
+          "do_not_assume": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "do_not_assume": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    }
+  },
+  "additionalProperties": true
+}

@@ -53,6 +53,12 @@ database schemas, implementation adapters, or design-to-requirements refinement
 maps unless the user explicitly moves to design work. If a requirement implies a
 design decision but does not state it, ask rather than choosing.
 
+Once this spec is checked, generating a stakeholder-facing requirements document
+from it is a separate downstream activity, not part of this skill — use
+`fsl-requirements-document` (`fslc document generate`/`claims`/`check`) for that.
+It edits only the document's non-normative slot; it never edits the `.fsl` this
+skill produced.
+
 ## Workflow
 
 1. Post a requirements formalization memo in chat before writing `.fsl`:

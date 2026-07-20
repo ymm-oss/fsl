@@ -249,6 +249,185 @@ fn load_induction_model(
     Ok(model)
 }
 
+fn integer_state_type(model: &KernelModel, ty: &fsl_core::TypeRef) -> bool {
+    match ty {
+        fsl_core::TypeRef::Int | fsl_core::TypeRef::Range(_, _) => true,
+        fsl_core::TypeRef::Named(name) => matches!(
+            model.types.get(name),
+            Some(fsl_core::TypeDef::Domain { .. })
+        ),
+        _ => false,
+    }
+}
+
+fn monotone_direction(values: &[i64]) -> Result<Option<std::cmp::Ordering>, ()> {
+    let mut direction = None;
+    for pair in values.windows(2) {
+        let current = pair[1].cmp(&pair[0]);
+        if current == std::cmp::Ordering::Equal {
+            continue;
+        }
+        if direction.is_some_and(|direction| direction != current) {
+            return Err(());
+        }
+        direction = Some(current);
+    }
+    Ok(direction)
+}
+
+fn monotone_qualifies(direction: std::cmp::Ordering, start: i64, initial: i64) -> bool {
+    match direction {
+        std::cmp::Ordering::Greater => start < initial,
+        std::cmp::Ordering::Less => start > initial,
+        std::cmp::Ordering::Equal => false,
+    }
+}
+
+fn monotone_suggestion(
+    name: &str,
+    direction: std::cmp::Ordering,
+    start: i64,
+    initial: i64,
+    expression: &str,
+) -> Option<(String, String)> {
+    let (motion, side) = match direction {
+        std::cmp::Ordering::Greater => ("increasing", "below"),
+        std::cmp::Ordering::Less => ("decreasing", "above"),
+        std::cmp::Ordering::Equal => return None,
+    };
+    monotone_qualifies(direction, start, initial).then(|| (
+        expression.to_owned(),
+        format!(
+            "'{name}' only {motion} in this CTI but starts {side} its initial value {initial}; adding invariant {expression} may exclude this unreachable start state"
+        ),
+    ))
+}
+
+fn scalar_suggestion(
+    initial_state: &std::collections::BTreeMap<String, FslValue>,
+    trace: &[fsl_core::TraceStep],
+    name: &str,
+) -> Option<(String, String)> {
+    let FslValue::Int(initial) = initial_state.get(name)? else {
+        return None;
+    };
+    let values = trace
+        .iter()
+        .map(|step| match step.state.get(name) {
+            Some(FslValue::Int(value)) => Some(*value),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let direction = monotone_direction(&values).ok()??;
+    let public_name = display(name);
+    let operator = if direction == std::cmp::Ordering::Greater {
+        ">="
+    } else {
+        "<="
+    };
+    let expression = format!("{public_name} {operator} {initial}");
+    monotone_suggestion(&public_name, direction, values[0], *initial, &expression)
+}
+
+fn map_suggestion(
+    model: &KernelModel,
+    initial_state: &std::collections::BTreeMap<String, FslValue>,
+    trace: &[fsl_core::TraceStep],
+    name: &str,
+    ty: &fsl_core::TypeRef,
+) -> Option<(String, String)> {
+    let fsl_core::TypeRef::Map(key_ty, value_ty) = ty else {
+        return None;
+    };
+    let fsl_core::TypeRef::Named(key_name) = key_ty.as_ref() else {
+        return None;
+    };
+    if !integer_state_type(model, value_ty) {
+        return None;
+    }
+    let FslValue::Map(initial_map) = initial_state.get(name)? else {
+        return None;
+    };
+    let mut initial_values = initial_map.values();
+    let FslValue::Int(initial) = initial_values.next()? else {
+        return None;
+    };
+    if initial_values.any(|value| value != &FslValue::Int(*initial)) {
+        return None;
+    }
+    let maps = trace
+        .iter()
+        .map(|step| match step.state.get(name) {
+            Some(FslValue::Map(map)) => Some(map),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let keys = maps
+        .iter()
+        .flat_map(|map| map.keys().cloned())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut directions = std::collections::BTreeSet::new();
+    let mut qualifying_start = None;
+    for key in keys {
+        let values = maps
+            .iter()
+            .map(|map| match map.get(&key) {
+                Some(FslValue::Int(value)) => Some(*value),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let direction = match monotone_direction(&values) {
+            Ok(Some(direction)) => direction,
+            Ok(None) => continue,
+            Err(()) => return None,
+        };
+        directions.insert(direction);
+        if monotone_qualifies(direction, values[0], *initial) {
+            qualifying_start.get_or_insert(values[0]);
+        }
+    }
+    if directions.len() != 1 {
+        return None;
+    }
+    let start = qualifying_start?;
+    let direction = directions.into_iter().next()?;
+    let operator = if direction == std::cmp::Ordering::Greater {
+        ">="
+    } else {
+        "<="
+    };
+    let public_name = display(name);
+    let binder = if public_name == "k" { "key" } else { "k" };
+    let expression = format!(
+        "forall {binder}: {} {{ {public_name}[{binder}] {operator} {initial} }}",
+        display(key_name)
+    );
+    monotone_suggestion(&public_name, direction, start, *initial, &expression)
+}
+
+fn suggested_invariants(
+    model: &KernelModel,
+    trace: &[fsl_core::TraceStep],
+) -> Vec<(String, String)> {
+    if trace.len() < 2 {
+        return Vec::new();
+    }
+    let Ok(initial_state) = fsl_runtime::deterministic_initial_state(model) else {
+        return Vec::new();
+    };
+    model
+        .state
+        .iter()
+        .filter_map(|(name, ty)| {
+            if integer_state_type(model, ty) {
+                scalar_suggestion(&initial_state, trace, name)
+            } else {
+                map_suggestion(model, &initial_state, trace, name, ty)
+            }
+        })
+        .collect()
+}
+
 fn render_induction_cti(
     model: &KernelModel,
     cti: &fsl_verifier::InductionCti,
@@ -280,10 +459,26 @@ fn render_induction_cti(
             "violated_at": cti.k,
         }),
     );
-    output.insert(
-        "hint".to_owned(),
-        json!("this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run"),
-    );
+    let mut hint = "this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run".to_owned();
+    if cti.kind == "invariant" {
+        let suggestions = suggested_invariants(model, &cti.trace);
+        if !suggestions.is_empty() {
+            for (_, sentence) in &suggestions {
+                hint.push(' ');
+                hint.push_str(sentence);
+            }
+            output.insert(
+                "suggested_invariants".to_owned(),
+                Value::Array(
+                    suggestions
+                        .into_iter()
+                        .map(|(expression, _)| Value::String(expression))
+                        .collect(),
+                ),
+            );
+        }
+    }
+    output.insert("hint".to_owned(), Value::String(hint));
     if cti.kind == "trans" {
         output.insert(
             "invariants_checked".to_owned(),
@@ -1442,6 +1637,10 @@ fn adjudicate_lemma(
     k_ind: usize,
 ) -> Value {
     let mut candidate = model.clone();
+    candidate.invariants.clear();
+    candidate.transitions.clear();
+    candidate.leadstos.clear();
+    candidate.reachables.clear();
     candidate.invariants.push(fsl_core::PropertyDef {
         name: name.to_owned(),
         expr: expression.clone(),
@@ -1499,18 +1698,38 @@ fn adjudicate_lemma(
                 "checked_to_depth":depth,"completeness":"unbounded",
             },
         }),
-        Ok(proof) => json!({
-            "expression":source,"name":name,"status":"rejected","used":false,
-            "proof":{
-                "result":"unknown_cti","k":proof.cti.as_ref().map_or(k_ind,|cti|cti.k),
-                "checked_to_depth":depth,"completeness":"bounded",
-            },
-        }),
+        Ok(proof) => {
+            let cti = proof.cti.as_ref().expect("non-proved induction has a CTI");
+            json!({
+                "expression":source,"name":name,"status":"rejected","used":false,
+                "proof":{
+                    "result":"unknown_cti","invariant":display(&cti.name),"k":cti.k,
+                    "checked_to_depth":depth,"completeness":"bounded",
+                    "trace_type":"induction_cti",
+                    "cti":{
+                        "states": ::fslc_rust::trace_json(&candidate, &cti.trace),
+                        "violated_at":cti.k,
+                    },
+                },
+            })
+        }
         Err(error) => json!({
             "expression":source,"name":name,"status":"rejected","used":false,
             "proof":{"result":"error","kind":"semantics","message":error.to_string()},
         }),
     }
+}
+
+fn collision_free_lemma_name(
+    index: usize,
+    occupied_names: &mut std::collections::BTreeSet<String>,
+) -> String {
+    let mut name = format!("AuxiliaryLemma{}", index + 1);
+    while occupied_names.contains(&name) {
+        name.push_str("Candidate");
+    }
+    occupied_names.insert(name.clone());
+    name
 }
 
 pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions) -> (Value, i32) {
@@ -1525,28 +1744,16 @@ pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions)
         property: options.property.as_deref(),
         excluded: &options.exclude_properties,
     };
-    let model = match load_lemma_model(path, options) {
+    let (model, mut occupied_names) = match load_lemma_model(path, options) {
         Ok(model) => model,
         Err(output) => return output,
     };
-    let (original, _) = run_induction_filtered(InductionRequest {
-        selection,
-        depth: options.depth,
-        deadlock,
-        k: options.k_ind,
-        auxiliary: &[],
-    });
-    let target = original
-        .get("invariant")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
     let mut entries = Vec::new();
-    let mut auxiliary = Vec::new();
-    let mut auxiliary_sources = Vec::new();
+    let mut proved_candidates = Vec::new();
+    let (mut auxiliary, mut auxiliary_sources) = (Vec::new(), Vec::new());
     let mut exclusions = Vec::new();
     for (index, source) in options.lemmas.iter().enumerate() {
-        let name = format!("AuxiliaryLemma{}", index + 1);
+        let name = collision_free_lemma_name(index, &mut occupied_names);
         let expression = match fsl_syntax::parse_expr(source) {
             Ok(expression) => expression,
             Err(error) => {
@@ -1558,7 +1765,7 @@ pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions)
                 continue;
             }
         };
-        let mut entry = adjudicate_lemma(
+        let entry = adjudicate_lemma(
             &model,
             &name,
             &expression,
@@ -1567,33 +1774,53 @@ pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions)
             options.k_ind,
         );
         if entry.get("status").and_then(Value::as_str) == Some("proved") {
-            let violated_steps = lemma_violated_steps(&original, &expression, &model);
-            if !violated_steps.is_empty() {
-                if let Value::Object(entry) = &mut entry {
-                    entry.insert("used".to_owned(), json!(true));
-                }
-                exclusions.push(json!({
-                    "lemma":source,"target":target,"k":options.k_ind,
-                    "violated_steps":violated_steps,
-                    "cti":original.get("cti").cloned().unwrap_or(Value::Null),
-                }));
-                auxiliary.push((name.clone(), expression.clone()));
-                auxiliary_sources.push(source.clone());
-            }
+            proved_candidates.push((entries.len(), name.clone(), expression, source.clone()));
         }
         entries.push(entry);
     }
-    let (mut result, status) = run_induction_filtered(InductionRequest {
-        selection,
-        depth: options.depth,
-        deadlock,
-        k: options.k_ind,
-        auxiliary: &auxiliary,
-    });
+    let (mut result, status) = loop {
+        let (current, status) = run_induction_filtered(InductionRequest {
+            selection,
+            depth: options.depth,
+            deadlock,
+            k: options.k_ind,
+            auxiliary: &auxiliary,
+        });
+        if current.get("result").and_then(Value::as_str) != Some("unknown_cti")
+            || current.get("violation_kind").and_then(Value::as_str) == Some("leadsTo_rank")
+        {
+            break (current, status);
+        }
+        let Some((candidate_index, violated_steps)) = proved_candidates
+            .iter()
+            .enumerate()
+            .find_map(|(index, (_, _, expression, _))| {
+                let steps = lemma_violated_steps(&current, expression, &model);
+                (!steps.is_empty()).then_some((index, steps))
+            })
+        else {
+            break (current, status);
+        };
+        let (entry_index, name, expression, source) = proved_candidates.remove(candidate_index);
+        if let Value::Object(entry) = &mut entries[entry_index] {
+            entry.insert("used".to_owned(), json!(true));
+        }
+        exclusions.push(json!({
+            "lemma":source,
+            "target":current.get("trans").or_else(|| current.get("invariant"))
+                .cloned().unwrap_or(Value::Null),
+            "k":current.get("k").cloned().unwrap_or_else(|| json!(options.k_ind)),
+            "violated_steps":violated_steps,
+            "cti":current.get("cti").cloned().unwrap_or(Value::Null),
+        }));
+        auxiliary.push((name, expression));
+        auxiliary_sources.push(source);
+    };
+    let proved = result.get("result").and_then(Value::as_str) == Some("proved");
     if let Value::Object(output) = &mut result {
         output.insert("lemmas".to_owned(), Value::Array(entries));
         output.insert("lemma_cti_exclusions".to_owned(), Value::Array(exclusions));
-        if !auxiliary.is_empty() {
+        if proved && !auxiliary.is_empty() {
             output.insert(
                 "auxiliary_invariant_recommendation".to_owned(),
                 json!({
@@ -1608,29 +1835,26 @@ pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions)
     (result, status)
 }
 
-fn load_lemma_model(path: &Path, options: &CliVerifyOptions) -> Result<KernelModel, CommandResult> {
+fn load_lemma_model(
+    path: &Path,
+    options: &CliVerifyOptions,
+) -> Result<(KernelModel, std::collections::BTreeSet<String>), CommandResult> {
     let mut model = load_model(path).map_err(|error| (semantic_error_output(&error), 2))?;
+    let occupied_names = model
+        .invariants
+        .iter()
+        .chain(&model.transitions)
+        .chain(&model.reachables)
+        .map(|property| property.name.clone())
+        .chain(model.leadstos.iter().map(|property| property.name.clone()))
+        .collect();
     select_properties(
         &mut model,
         options.property.as_deref(),
         &options.exclude_properties,
     )
     .map_err(|error| (semantic_error_output(&error), 2))?;
-    if options.property.as_ref().is_some_and(|name| {
-        model
-            .transitions
-            .iter()
-            .any(|property| display(&property.name) == *name)
-    }) {
-        return Err((
-            error_output(
-                "usage",
-                "--lemma can strengthen invariant induction, but cannot be used to prove a trans property",
-            ),
-            2,
-        ));
-    }
-    Ok(model)
+    Ok((model, occupied_names))
 }
 
 fn cache_enabled(options: &CliVerifyOptions) -> bool {
