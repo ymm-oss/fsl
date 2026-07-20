@@ -2432,7 +2432,10 @@ DESIGN-*.md).
   `--by-requirement` flags "a requirement that kills no behavior mutant" as an
   `empty_formalization` warning (the semantic-level extension of
   `--strict-tags`); per-requirement kill counts and this warning are observed
-  lower bounds within the chosen mutant set and depth.
+  lower bounds within the chosen mutant set and depth. Acceptance and forbidden
+  kills use explicit requirement annotations on the failed trace declaration;
+  AC/FB case IDs are not implicit requirements. Trace case IDs are unique
+  within each declaration kind.
   → [`DESIGN-mutate.md`](DESIGN-mutate.md)
 - **`fslc explain --readable`** — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,

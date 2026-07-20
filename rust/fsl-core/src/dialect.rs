@@ -2296,6 +2296,8 @@ pub fn requirements_trace_contract(
     let stage_resolver = StageResolver::new(&stage_processes);
     let mut acceptance = Vec::new();
     let mut forbidden = Vec::new();
+    let mut acceptance_ids = BTreeSet::new();
+    let mut forbidden_ids = BTreeSet::new();
     for item in requirements.items {
         let convert_steps = |steps: Vec<fsl_syntax::AcceptanceStep>| {
             steps
@@ -2317,6 +2319,9 @@ pub fn requirements_trace_contract(
                 span,
                 annotations: surface_annotations,
             } => {
+                if !acceptance_ids.insert(id.clone()) {
+                    return Err(core_error(format!("duplicate acceptance id '{id}'"), span));
+                }
                 let annotations = trace_case_annotations(&id, &text, span, &surface_annotations)?;
                 let expectation = match expectation {
                     fsl_syntax::AcceptanceExpectation::Expr(mut expr, _) => {
@@ -2351,6 +2356,9 @@ pub fn requirements_trace_contract(
                 span,
                 annotations: surface_annotations,
             } => {
+                if !forbidden_ids.insert(id.clone()) {
+                    return Err(core_error(format!("duplicate forbidden id '{id}'"), span));
+                }
                 let annotations = trace_case_annotations(&id, &text, span, &surface_annotations)?;
                 forbidden.push(RequirementsTraceCase {
                     annotations,

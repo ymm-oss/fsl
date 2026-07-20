@@ -118,6 +118,70 @@ spec NestedOptionEquality {
 }
 
 #[test]
+fn bounded_verification_stops_after_initial_state_without_action_instances() {
+    let source = r"
+spec EmptyActionDomain {
+  type Empty = 1..0
+  state { done: Bool }
+  init { done = false }
+  action finish(item: Empty) { done = true }
+  invariant InitiallyPending { not done }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let result = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 2))
+        .expect("verify initial state");
+
+    assert!(result.violation.is_none(), "{result:?}");
+    assert_eq!(result.deadlock_step, Some(0));
+}
+
+#[test]
+fn bounded_verification_checks_liveness_at_the_actual_zero_action_depth() {
+    let source = r"
+spec EmptyActionLiveness {
+  type Empty = 1..0
+  state { done: Bool }
+  init { done = false }
+  action finish(item: Empty) { done = true }
+  leadsTo NeverTriggered { done ~> not done }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let result = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 2))
+        .expect("verify initial state");
+
+    assert!(result.leadsto_violation.is_none(), "{result:?}");
+    assert_eq!(result.deadlock_step, Some(0));
+}
+
+#[test]
+fn bounded_verification_rejects_initial_violation_without_action_instances() {
+    let source = r"
+spec EmptyActionInitialViolation {
+  type Empty = 1..0
+  state { done: Bool }
+  init { done = false }
+  action finish(item: Empty) { done = true }
+  invariant MustBeDone { done }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let result = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 2))
+        .expect("verify initial state");
+
+    let violation = result.violation.expect("initial invariant violation");
+    assert_eq!(violation.name, "MustBeDone");
+    assert_eq!(violation.step, 0);
+}
+
+#[test]
 fn binder_aggregates_agree_for_ranges_sets_and_duplicate_sequences() {
     let source = r"
 spec BinderAggregateAgreement {

@@ -9,6 +9,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 - `fslc scenarios` now emits the shortest replayable action-coverage trace even
   when the covered action reaches a terminal state before the requested depth,
   including requirements transitions guarded by `Bool` inputs (issue #405).
+- `fslc mutate --by-requirement` now attributes acceptance and forbidden kills
+  through explicit requirement annotations on the failed trace declaration
+  instead of reporting the linked requirement as `empty_formalization` (issue
+  #407). Duplicate acceptance or forbidden IDs are rejected so attribution is
+  unambiguous.
+- `fslc mutate` now adjudicates singleton bound mutants whose empty domain
+  produces no action instances instead of panicking in bounded verification;
+  overflowing integer and bound neighbors are omitted (issue #406).
 - Explicit domain-effect `success_event`, `failure_event`, and `timeout_event`
   roles now override event-name heuristics, ambiguous cross-role assignments
   fail closed, and completion, retry eligibility, Monitor/BFS execution, and
