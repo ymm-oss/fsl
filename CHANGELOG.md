@@ -6,6 +6,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- `fslc scenarios` now emits the shortest replayable action-coverage trace even
+  when the covered action reaches a terminal state before the requested depth,
+  including requirements transitions guarded by `Bool` inputs (issue #405).
 - `fslc mutate --by-requirement` now attributes acceptance and forbidden kills
   through explicit requirement annotations on the failed trace declaration
   instead of reporting the linked requirement as `empty_formalization` (issue

@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+
+requirements ScenarioBoolGuardTerminal {
+  process Item {
+    stages Ready, Accepted
+    initial Ready
+    transition accept Ready -> Accepted by System
+      with allowed: Bool
+      when allowed
+      covers REQ-SCENARIO-001 "An allowed item can be accepted"
+  }
+
+  acceptance AC-SCENARIO-001 "Allowed item is accepted" {
+    accept(0, true)
+    expect Item 0 in Accepted
+  }
+
+  terminal { forall i: Item { stage(i) == Accepted } }
+}
+
+verify {
+  instances Item = 1
+}

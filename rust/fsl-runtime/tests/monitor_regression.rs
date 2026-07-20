@@ -82,6 +82,47 @@ fn replay_rejects_a_trace_that_is_not_enabled() {
 }
 
 #[test]
+fn action_cover_trace_uses_the_enabling_bool_value_and_may_end_at_terminal() {
+    let model = model(
+        "spec BoolGuard { state { done: Bool } init { done = false } ".to_owned()
+            + "action accept(allowed: Bool) { requires not done requires allowed done = true } "
+            + "terminal { done } }",
+    );
+
+    let traces = fsl_runtime::action_cover_traces(model.clone(), 8).expect("cover traces");
+    let trace = &traces["accept"];
+    assert_eq!(trace.len(), 2, "{trace:?}");
+    assert_eq!(
+        trace[1].action.as_ref().expect("covered action").params["allowed"],
+        FslValue::Bool(true)
+    );
+    fsl_runtime::replay_trace(model.clone(), trace).expect("replay cover trace");
+
+    let mut monitor = fsl_runtime::Monitor::new(model).expect("initialize monitor");
+    let rejected = monitor
+        .attempt(
+            "accept",
+            &BTreeMap::from([("allowed".to_owned(), FslValue::Bool(false))]),
+        )
+        .expect("observe disabled Bool binding");
+    assert_eq!(
+        rejected.violation.expect("false must be rejected").kind,
+        "requires_failed"
+    );
+}
+
+#[test]
+fn action_cover_traces_exclude_violating_steps() {
+    let model = model(
+        "spec UnsafeCover { state { safe: Bool } init { safe = true } ".to_owned()
+            + "action break_safety() { safe = false } invariant Safe { safe } }",
+    );
+
+    let traces = fsl_runtime::action_cover_traces(model, 1).expect("cover traces");
+    assert!(!traces.contains_key("break_safety"), "{traces:?}");
+}
+
+#[test]
 fn failed_steps_leave_the_monitor_state_unchanged() {
     for (suffix, expected_kind) in [
         ("invariant Safe { x == 0 }", "invariant"),
