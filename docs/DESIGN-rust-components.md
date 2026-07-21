@@ -2,7 +2,7 @@
 
 # Rust component boundaries
 
-Status: proposed current-architecture record at revision
+Status: accepted current-architecture record. Evidence baseline:
 `dc0f3fb3b6b22f84bf5f37432379641d4a08c0ca`.
 
 ## 1. Decision

@@ -2,8 +2,8 @@
 
 # Rust component internal design
 
-Status: proposed current-architecture record at revision
-`8c5bc168eb9a84f1a1b0b63202887570afee0d4e`.
+Status: accepted current-architecture record. Evidence baseline:
+`c37a81a1418f98c701e22729f3dff4d5e7ddbe5f`.
 
 ## 1. Decision
 
@@ -77,7 +77,7 @@ inference), and E0 (assumption).
 | E-02 | E2 | `dispatch::parse_document`, `build_model`, `Monitor`, `SmtSolver`, verification engines, tool-family facades, CLI/Worker entrypoints, and `DocumentIndex` form observable transformation stages. | Establishes the target direction. |
 | E-03 | E2 | `fsl-core::public_kernel` owns checked-model type validation used by `model` and `refinement`; `fsl-verifier::induction` imports liveness/trace helpers from `bmc`; document helpers import `document_render::Locale`; `fslc::verification` uses `super::*`. | Identifies concrete wrong-direction or hidden dependencies. |
 | E-04 | E2 | `fsl-tools` has independent document, causal, specialized-dialect, and Kernel-derived families behind root re-exports; the document and causal families also have distinct schemas and focused histories. | Justifies family-level internal boundaries without a crate split. |
-| E-05 | E1 | In `295508e9^..8c5bc168eb9a84f1a1b0b63202887570afee0d4e`, 35 non-merge commits touched `fslc/src/main.rs`, while its command families already have separate integration suites and distinct failure/state contracts. | Justifies a command-family extraction experiment, not a new crate. |
+| E-05 | E1 | In `295508e9^..c37a81a1418f98c701e22729f3dff4d5e7ddbe5f`, 37 non-merge commits touched `fslc/src/main.rs`, while its command families already have separate integration suites and distinct failure/state contracts. | Justifies a command-family extraction experiment, not a new crate. |
 | E-06 | E2 | Runtime rollback, explicit search, symbolic agreement, Public Kernel, document rendering, CLI, browser parity, and LSP tests contain rejecting cases. | Supplies existing fitness functions. |
 | E-07 | E3 | Focused syntax/core/runtime/solver/native-Z3/verifier tests passed 219 tests, and `cargo check -p fsl-solver-z3js --locked` passed at the baseline. | Confirms the semantic internals used as design evidence are reproducible. |
 | E-08 | E0 | Production load, third-party Rust API use, team ownership, and future feature frequency. | Limits eager restructuring and API-removal claims. |
