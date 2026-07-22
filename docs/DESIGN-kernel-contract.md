@@ -234,10 +234,23 @@ Concrete/symbolic agreement is a separate mechanical gate:
 parameters, and successor into the symbolic transition relation. Tests require
 every checked successful Monitor transition to be satisfiable and a deliberately
 altered successor to be rejected. `transition_outcome_matches_step` additionally
-checks disabled actions, concrete partial-operation rollback, and the attempted
-symbolic successor plus unchanged committed state for type-bound, invariant,
-transition, and ensures failures. The solver-free `fsl-runtime` dependency
-boundary remains intact.
+checks that disabled actions have an actually false guard and distinguishes
+representable successful, type-bound, invariant, transition, and ensures
+outcomes in native evaluation order. It rejects malformed calls and state
+shapes, corrupted attempted/committed states, and substituted outcome kinds.
+Because the symbolic value evaluator totalizes partial operators and uses
+unbounded integer terms, agreement uses a separate typed definedness predicate
+that follows native short-circuit, statement-branch, guard, post-property, and
+checked-i64 evaluation order. A non-partial claim is rejected when its reached
+path is undefined; an untaken partial expression does not make a valid outcome
+unsupported. Agreement-only fallback values let zero-capacity sequence terms
+be constructed under those predicates; ordinary BMC and induction retain their
+existing fail-closed evaluation. Exact `partial_op` classification and concrete
+evidence that the bounded symbolic representation cannot retain, such as an
+over-capacity sequence suffix, return an error rather than green until an exact
+partial-evidence oracle is available. Concrete conformance vectors remain
+authoritative for `partial_op` rollback meanwhile.
+The solver-free `fsl-runtime` dependency boundary remains intact.
 
 ## CLI and API
 

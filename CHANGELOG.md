@@ -5,6 +5,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Fixed
+- Verifier transition-outcome agreement now proves actual guard failure and
+  representable defined post-update failure phases in native evaluation order,
+  rejects malformed, relabelled, partial, or checked-arithmetic evidence, and
+  fails closed for `partial_op` or concrete evidence outside the bounded
+  symbolic representation (#428).
+
 ### Changed
 - The authoritative Rust workspace now has one evidence-backed component design
   record covering all eleven crates, their state and responsibility ownership,
