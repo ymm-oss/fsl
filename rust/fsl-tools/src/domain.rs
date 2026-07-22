@@ -3,16 +3,8 @@
 use fsl_syntax::{DomainEffect, DomainSpec, SyntaxExpr};
 use serde_json::{Value, json};
 
-fn snake(value: &str) -> String {
-    let mut out = String::new();
-    for (i, c) in value.chars().enumerate() {
-        if c.is_ascii_uppercase() && i > 0 {
-            out.push('_');
-        }
-        out.push(c.to_ascii_lowercase());
-    }
-    out
-}
+use crate::domain_naming::snake;
+
 fn assumptions(domain: &DomainSpec) -> Vec<Value> {
     let mut values = vec![
         json!({"id":"DOMAIN-ASSUME-FINITE-DOMAIN-MODEL","text":"domain IDs and undeclared scalar input types are modeled as finite 0..1 ranges unless declared explicitly"}),

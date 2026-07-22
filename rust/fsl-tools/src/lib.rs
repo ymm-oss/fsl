@@ -27,6 +27,7 @@ mod document_render;
 mod document_render_expr;
 mod domain;
 mod domain_codegen;
+mod domain_naming;
 mod html;
 mod ledger;
 mod mutate;
