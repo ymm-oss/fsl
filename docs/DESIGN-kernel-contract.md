@@ -78,13 +78,28 @@ Action right-hand sides read the same pre-state and updates commit
 simultaneously. `old(expr)` also reads the pre-state. A false `requires` clause
 means the action instance is not enabled.
 
+The native Monitor evaluates and classifies one selected action in this order:
+
+1. guards (`let` and `requires`) in source order;
+2. body statements, with all right-hand sides reading the pre-state;
+3. state-variable type bounds in model order;
+4. invariants in declaration order;
+5. transition properties in declaration order; and
+6. action `ensures` in declaration order.
+
+The first reached failed check or partial expression determines the outcome. A
+false guard is `requires_failed`; a reached partial expression is `partial_op`;
+and false post-update phases are respectively `type_bound`, `invariant`, `trans`,
+or `ensures`. Guard/body failures have no attempted state. Failures after the
+body retain the exact uncommitted successor as `attempted_state`.
+
 Partial operations (`head`, `pop`, `at`, sequence indexing, division, and
-remainder) are listed with a typed failure condition. A partial operation,
-invariant violation, transition-property violation, or failed `ensures` rolls
-back the whole step. The Monitor returns the input state and leaves its internal
-state unchanged. For diagnostics it separately retains `attempted_state`, the
-uncommitted candidate that violated an invariant, transition property, or
-ensure. This rollback rule is shared by the schema and executable vectors.
+remainder) are listed with a typed failure condition. Every classified failure
+above rolls back the whole step: the Monitor returns the input state and leaves
+its internal state unchanged. For diagnostics, `attempted_state` is absent for
+guard/body failures and is the exact uncommitted candidate for any later
+`type_bound`, `partial_op`, `invariant`, `trans`, or `ensures` failure. This
+rollback rule is shared by the schema and executable vectors.
 
 ## Conformance corpus
 

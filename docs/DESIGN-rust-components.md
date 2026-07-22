@@ -148,6 +148,10 @@ source
 
 ## 5. Component designs
 
+This section records current ownership and necessary conditions for possible
+future boundaries. A condition or trigger is evidence for a C2 candidate, not
+authorization to move source; section 8 remains the selection gate.
+
 ### `fsl-syntax` — source fidelity owner
 
 - Owns lexing, parsing, dialect dispatch, surface ASTs, annotations, source spans, lossless tokens,
@@ -159,8 +163,8 @@ source
   recognizer remains an explicitly bounded compatibility gate.
 - Primary oracles are typed/spanned dialect parser tests, declaration-annotation tests, formatter
   idempotence, and LSP corpus coverage.
-- Split only if a source representation gains an independent compatibility/version lifecycle; file
-  count or AST size is insufficient.
+- An independent compatibility/version lifecycle is necessary evidence for a future C2 split; it is
+  not authorization, and file count or AST size is insufficient.
 
 ### `fsl-core` — checked semantic model owner
 
@@ -185,8 +189,8 @@ source
 - It depends on `fsl-core` only. It must remain isolated from every solver and delivery surface.
 - Primary oracles include failed-step rollback, shortest replayable explicit traces, inclusive
   bounded-liveness deadlines, and verifier agreement tests.
-- Move behavior out only if it is not part of concrete FSL semantics; convenience for one frontend
-  is not a reason to duplicate a transition rule.
+- Moving behavior out is a C2 candidate only if it is not part of concrete FSL semantics;
+  convenience for one frontend is not authorization or a reason to duplicate a transition rule.
 
 ### `fsl-solver` — backend protocol owner
 
@@ -243,9 +247,9 @@ source
   filesystem writes and process lifecycle belong to a delivery adapter.
 - Primary oracles are schema/digest checks, renderer tamper rejection, domain regression tests,
   and refinement correspondence tests.
-- Its breadth is not evidence for splitting. Split only when a tool family has an independent
-  public lifecycle, dependency/failure boundary, and repeated changes that do not share Kernel or
-  artifact infrastructure.
+- Its breadth is not evidence for splitting. An independent public lifecycle, dependency/failure
+  boundary, and repeated changes that do not share Kernel or artifact infrastructure are necessary,
+  not sufficient, evidence for a future C2 split.
 
 ### `fslc-rust` — native composition and process-contract owner
 
@@ -259,9 +263,9 @@ source
   dependencies.
 - Primary oracles are the embedded CLI contract, native integration tests, Kernel/replay schemas
   and goldens, CLI/LSP diagnostic identity, and native/Worker parity.
-- `main.rs` is a real change hotspot. Continue local extraction only when a command family can move
-  with unchanged process contracts and a narrow rollback; do not create a new crate from line count
-  alone.
+- `main.rs` is a real change hotspot. A local extraction is a C2 candidate only when a command
+  family could move with unchanged process contracts and a narrow rollback; it still requires the
+  separate authorization gate in section 8. Do not create a new crate from line count alone.
 
 ### `fsl-wasm` — browser composition owner
 
@@ -286,15 +290,15 @@ source
   reserved for LSP framing.
 - Primary oracles are latest-buffer stdio lifecycle, corpus identifier coverage, UTF-16 range and
   resolved-edit tests, and CLI/LSP diagnostic identity.
-- Move an editor operation into shared code only when its result is a compiler contract rather than
-  an LSP projection.
+- Treat moving an editor operation into shared code as a C2 candidate only when its result is a
+  compiler contract rather than an LSP projection; this ownership test is not authorization.
 
 ## 6. Design pressures and unknowns
 
 | Pressure | Evidence | Priority | Current response |
 |---|---|---|---|
 | Cross-layer semantic changes touch many crates. | Multiple language/effect/liveness commits plus coupled-change tests. | High consequence, high recurrence, medium uncertainty. | Preserve explicit ownership and agreement gates; do not hide required coupling behind a facade. |
-| Native command orchestration is concentrated in `fslc/src/main.rs`. | Responsibility inventory and the reproducible `295508e9^..dc0f3fb` non-merge history range. | Medium consequence and recurrence, medium uncertainty. | Permit small in-crate extractions; require scenario evidence before a crate split. |
+| Native command orchestration is concentrated in `fslc/src/main.rs`. | Responsibility inventory and the reproducible `295508e9^..dc0f3fb` non-merge history range. | Medium consequence and recurrence, medium uncertainty. | Record small in-crate extractions as C2 candidates requiring separate authorization and scenario evidence; line count does not authorize a crate split. |
 | Browser backend behavior is opaque to Rust-only analysis. | JavaScript global bridge and absence of standalone Rust backend tests. | High consequence, medium recurrence. | Keep browser parity/cancellation as a required separate gate. |
 | Architecture authority text drifted after migration. | Migration-era Python statements contradicted the native integration contract. | Medium consequence, observed recurrence. | Consolidate this record and correct stale authority wording. |
 | Production-log replay lacks comprehensive coverage in the required Rust gate. | The native implementation is direct, while focused and broader cases are Python-driven tests excluded from the product gate. | High consequence, unknown recurrence. | Treat coverage as unknown; add Rust-native regression cases before changing mapped-log semantics. |
@@ -318,7 +322,7 @@ holdout; later commits were already visible to the same evaluator.
 | Add a review-only specialized dialect/tool. | Historical/roadmap | It remains in syntax/tools unless it intentionally enters Kernel semantics; no false formal assurance is emitted. |
 | Change a shared diagnostic. | Delivery interaction | CLI and LSP preserve identity; Worker uses the same semantic gate; LSP ranges and CLI envelope stay transport-specific. |
 | Upgrade or fail one solver backend. | Adversarial/portability | `SmtSolver` contract holds, runtime stays solver-free, native Z3 stays out of WASM, and witness replay validates nondeterminism. |
-| Add a large CLI command family. | Roadmap | Semantic work remains below the composition root; I/O and exit contracts are tested; local extraction is possible without a new public boundary. |
+| Add a large CLI command family. | Roadmap | Semantic work remains below the composition root; I/O and exit contracts are tested; a local-extraction C2 candidate may be evaluated without assuming a new public boundary. |
 | Release on every supported target. | Interaction/transition | CLI/LSP pair, schemas, and checksums remain an atomic release unit; required native gate stays green. |
 
 ## 8. Candidates and adjudication
@@ -345,7 +349,11 @@ holdout; later commits were already visible to the same evaluator.
 - Gate result: no observed gate violation and the Rust half passed at E3. The unchanged browser
   boundary retains E2 contract evidence, but its npm/browser gate was not freshly rerun.
 
-### C2 — structurally extract native command orchestration
+### C2 — structurally extract native command orchestration (not authorized)
+
+This counterfactual candidate is evidence for reevaluation, not approval to move
+source. Any C2 slice requires its own issue, accepted scope/design, positive and
+rejecting oracle, pre-PR audit, and independently revertible pull request.
 
 - Transformation: move independently testable command families out of `fslc/src/main.rs` behind
   existing in-crate modules; consider a new shared crate only after those modules demonstrate an

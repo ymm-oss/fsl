@@ -1,5 +1,12 @@
 # fslc Rust porting method and evidence gates
 
+Status: historical migration execution record for issue #195. Its phase evidence
+and gates remain useful history, but current product authority is the native Rust
+workspace under the policy in
+[`DESIGN-rust-port.md`](DESIGN-rust-port.md#9-migration-policy) and the ownership
+map in [`DESIGN-rust-components.md`](DESIGN-rust-components.md). The frozen Python
+package is compatibility evidence, not the arbiter of new behavior.
+
 This is the execution procedure for issue #195. The accepted architecture is
 in [`DESIGN-rust-port.md`](DESIGN-rust-port.md); this document defines how a
 rewrite slice earns equivalence rather than merely compiling.
@@ -13,10 +20,10 @@ During the migration, evidence is interpreted in this order:
 3. the Python post-frontend tuple AST exported by `tools/export_ast.py`;
 4. Python implementation structure, used only to explain the behavior above.
 
-Python is a reference implementation and arbiter, not a template that Rust must
-copy line for line. A disagreement with Python is a migration failure unless a
-language/CLI contract proves Python wrong and both implementations plus their
-goldens are deliberately changed in the same commit.
+During the migration, Python was a reference implementation and arbiter, not a
+template that Rust had to copy line for line. A disagreement with Python was a
+migration failure unless a language/CLI contract proved Python wrong and both
+implementations plus their goldens were deliberately changed in the same commit.
 
 ## 2. Rewrite loop
 

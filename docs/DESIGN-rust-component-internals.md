@@ -25,10 +25,10 @@ and projections toward policy-free internal values, never the reverse.
 
 The selected intervention is **a contract-first internal role map without source restructuring**.
 It records the logical design, accepted exceptions, and evidence required before a structural
-slice. The target direction is to correct observed wrong-direction dependencies in small,
-behavior-preserving changes when the affected responsibility next changes. This record itself does
-not authorize a workspace-wide file move or introduce a crate, public schema, language behavior,
-solver protocol, or process contract.
+slice. It catalogs small, behavior-preserving target directions for observed wrong-direction
+dependencies, but each source move requires the separately scoped C2 authorization gate in
+sections 6 and 7. This record itself authorizes no source move and does not introduce a crate,
+public schema, language behavior, solver protocol, or process contract.
 
 This decision is at function/type and in-crate module level (L0/L1), with a twelve-month horizon.
 It supersedes neither feature-specific accepted design notes nor the parent crate-boundary record.
@@ -109,14 +109,16 @@ duplication problems whose correction must preserve existing behavior and negati
 
 ### 4.1 Facade and dependency direction
 
-`lib.rs` is the public contract surface. In a multi-module crate it should converge toward explicit
-module declarations and re-exports, not act as an unnamed shared namespace. Private modules import
-the exact lower-level items they need; `use super::*` is forbidden in production modules. A
-single-file protocol or backend adapter may implement its cohesive responsibility directly.
+`lib.rs` is the public contract surface. Inside a separately authorized C2 slice, a multi-module
+crate should converge toward explicit module declarations and re-exports, not act as an unnamed
+shared namespace. Private modules import the exact lower-level items they need; `use super::*` is
+forbidden in production modules. A single-file protocol or backend adapter may implement its
+cohesive responsibility directly.
 
-No module may own policy solely because it is a convenient import location. When two siblings need
-the same rule, move the smallest rule to a neutral lower-level module; do not introduce a service,
-registry, context object, or trait unless multiple implementations or state ownership require one.
+No module may own policy solely because it is a convenient import location. When a separately
+authorized C2 slice addresses a rule needed by two siblings, move the smallest rule to a neutral
+lower-level module; do not introduce a service, registry, context object, or trait unless multiple
+implementations or state ownership require one.
 
 ### 4.2 State and transformations
 
@@ -142,6 +144,11 @@ or unchanged positive snapshot alone does not establish semantic preservation.
 
 ## 5. Component internal designs
 
+This section records current ownership and possible target directions. Any
+source movement described as a target, trigger, or experiment is a candidate,
+not authorization. Selecting one requires the independently scoped C2 gate in
+sections 6 and 7; until then, the current physical layout remains the decision.
+
 ### `fsl-syntax`
 
 Logical direction:
@@ -162,8 +169,8 @@ ast / surface / annotation value types
 - `causal.rs` remains an explicit review-only sibling outside standard dispatch. `literate.rs` is
   preprocessing, not a second parser. `lossless.rs` may consume parser results but must not decide
   semantic acceptance.
-- **Action:** retain the current physical layout. Add a module only when a new dialect has an
-  independent grammar/value contract; do not split the large shared parser by production count.
+- **Current decision:** retain the current physical layout. Add a module only when a new dialect has
+  an independent grammar/value contract; do not split the large shared parser by production count.
 
 ### `fsl-core`
 
@@ -182,13 +189,14 @@ syntax + lowering vocabulary + origin sidecar
   `ModelBuilder` owns construction-only maps and releases an immutable model.
 - `compose.rs::FileResolver` is the I/O boundary. `FsResolver` is a native convenience adapter, not
   permission for lowerers or validators to read paths directly.
-- Move `validate_expression_type`, `validate_statement_types`, and
-  `validate_model_expression_types` from the outward `public_kernel` projection to a neutral
-  checked-model/typecheck owner used by `model`, `refinement`, and the exporter.
+- **Candidate target (not authorization):** move `validate_expression_type`,
+  `validate_statement_types`, and `validate_model_expression_types` from the outward
+  `public_kernel` projection to a neutral checked-model/typecheck owner used by `model`,
+  `refinement`, and the exporter.
 - Structural Domain lowering and generated-Kernel-source projection remain different outputs, but
   effect-outcome role normalization must have one low-level owner consumed by both paths.
-- **Action:** perform those two policy moves when either area next changes; otherwise retain the
-  current file tree and public re-exports.
+- **Candidate trigger (not authorization):** consider those two policy moves when either area next
+  changes; otherwise retain the current file tree and public re-exports.
 
 ### `fsl-runtime`
 
@@ -210,27 +218,28 @@ State / Bindings / RuntimeError
   different result contracts, but any shared successor enumeration must call `Monitor` rather than
   copy transition policy.
 - `lib.rs` currently contains the public facade, evaluator, monitor, liveness, replay, refinement,
-  legacy BFS, and trace helpers. Their distinct state and failure contracts justify a target split
-  into `eval`, `monitor`, `liveness`, `replay`, `refinement`, and `search`, while preserving root
-  re-exports.
-- **Action:** extract only the responsibility being changed, one move-only slice at a time. Do not
-  perform an eager 2,600-line re-layout, and do not merge the independent symbolic evaluator here.
+  legacy BFS, and trace helpers. Their distinct state and failure contracts identify a candidate
+  split into `eval`, `monitor`, `liveness`, `replay`, `refinement`, and `search`, while preserving
+  root re-exports.
+- **Candidate slice (not authorization):** if selected through the C2 gate, extract only the
+  responsibility being changed, one move-only slice at a time. Do not perform an eager 2,600-line
+  re-layout, and do not merge the independent symbolic evaluator here.
 
 ### `fsl-solver`
 
 - Keep the cohesive single module ordered as immutable SMT vocabulary and result values, error and
   statistics values, `SolverMetrics`, then `SmtSolver`.
 - `SolverMetrics` owns query attribution; an adapter owns its assertion stack and model state.
-- **Action:** no structural change. Add a private module only if a second independent protocol
-  responsibility appears; backend convenience is not sufficient.
+- **Current decision:** no structural change. Add a private module only if a second independent
+  protocol responsibility appears; backend convenience is not sufficient.
 
 ### `fsl-solver-z3`
 
 - `Z3Solver` alone owns the native solver, stack depth, version, and metrics. `Z3Term` is the typed
   backend handle; conversion and statistics helpers remain subordinate to the trait implementation.
 - Seed/version setup stays in construction. Verification policy never enters this adapter.
-- **Action:** retain one module. Any split must follow a new independently testable backend state,
-  not term/helper count.
+- **Current decision:** retain one module. Any split must follow a new independently testable
+  backend state, not term/helper count.
 
 ### `fsl-solver-z3js`
 
@@ -238,8 +247,8 @@ State / Bindings / RuntimeError
   actual assertion/model state and opaque term handles.
 - Promise-based `check` is the async failure boundary; Rust-only compilation cannot establish
   handle lifetime or bridge completeness.
-- **Action:** retain one Rust adapter module and the separate JavaScript bridge. Browser parity,
-  cancellation, rejection, and teardown remain mandatory external oracles.
+- **Current decision:** retain one Rust adapter module and the separate JavaScript bridge. Browser
+  parity, cancellation, rejection, and teardown remain mandatory external oracles.
 
 ### `fsl-verifier`
 
@@ -260,11 +269,13 @@ bmc -> refinement progress
 - `value`, `eval`, and `transition` are the shared symbolic semantic kernel. `agreement` observes
   that kernel and does not become a production execution dependency on `fsl-runtime`.
 - `induction` currently imports `leadsto_bindings`, `leadsto_condition`, and `project_trace` from
-  `bmc`. Move those helpers to neutral `liveness` and `trace` owners before extending either engine.
+  `bmc`. A candidate target moves those helpers to neutral `liveness` and `trace` owners before
+  extending either engine.
 - `refinement` may compose the public bounded verifier, but it must not reach into another engine's
   private encoding.
-- **Action:** make the neutral-helper move as one behavior-preserving slice, guarded by BMC,
-  induction, deadline, and transition-agreement rejecting tests.
+- **Candidate slice (not authorization):** if selected through the C2 gate, make the neutral-helper
+  move as one behavior-preserving slice, guarded by BMC, induction, deadline, and
+  transition-agreement rejecting tests.
 
 ### `fsl-tools`
 
@@ -279,24 +290,28 @@ Within each family, the direction is checked family model -> analysis/classifica
 or rendering. Values such as `RequirementClaimSet` and `CausalModel` are immutable results; private
 builders/contexts are per-call accumulators. No family owns process lifecycle or artifact writes.
 
-- Move `Locale` out of `document_render` to a neutral document presentation value so markers,
-  glossary, expression rendering, checking, and the renderer do not depend upward on the renderer.
+- **Candidate target (not authorization):** move `Locale` out of `document_render` to a neutral
+  document presentation value so markers, glossary, expression rendering, checking, and the
+  renderer do not depend upward on the renderer.
 - Keep the assurance classifier shared by ledger and document evidence at
   `ledger::assurance_token`/`assurance_label`, as required by the accepted evidence-overlay design.
   Moving it to a neutral module requires that design to be explicitly superseded and is not part of
   this decision.
-- Consolidate the identical private `domain::snake` and `domain_codegen::snake` transform into one
-  Domain-family helper because it affects generated names in both paths.
+- **Candidate target (not authorization):** consolidate the identical private `domain::snake` and
+  `domain_codegen::snake` transform into one Domain-family helper because it affects generated
+  names in both paths.
 - Retain the fail-closed `public_kernel` adapter shared by typestate, test generation, and Domain
   code generation. Do not merge those distinct tools merely because they share input validation.
-- Treat `testgen::relative_spec_path` as a bounded I/O debt: when its path behavior next changes,
-  move canonicalization to the caller and pass normalized path context into the pure generator,
-  preserving generated pytest output and embedded paths byte-for-byte for existing, missing, and
-  symlinked path inputs.
-- **Action:** the future structural candidates are the locale owner, duplicated Domain naming
-  helper, and test-generation path input. Decide and verify each independently. Do not replace the
-  flat root API or create subcrates; family directories are optional presentation after the
-  dependency graph is acyclic.
+- Treat `testgen::relative_spec_path` as a bounded I/O debt. A candidate triggered by its next path
+  behavior change would move canonicalization to the caller and pass normalized path context into
+  the pure generator, preserving generated pytest output and embedded paths byte-for-byte for
+  existing, missing, and symlinked path inputs.
+- **Candidate inventory (not authorization):** the future structural candidates are the locale
+  owner, duplicated Domain naming helper, and test-generation path input. Decide and verify each
+  independently under its own issue, accepted scope/design, positive and rejecting oracle,
+  pre-PR audit, and independently revertible pull request. Do not replace the flat root API or
+  create subcrates; family directories are optional presentation after the dependency graph is
+  acyclic.
 
 ### `fslc-rust`
 
@@ -315,23 +330,26 @@ native binary: argument parsing
 
 - The default-feature-free library keeps reusable delivery policy needed by Worker and LSP. Native
   solver, signing, report, cache, and filesystem responsibilities remain behind `native-cli`.
-- `main.rs` should converge to metadata/help, top-level dispatch, serialization, and exit. Command
-  families are formatting/migration, document/approval, causal, Domain/DB/AI, replay/scenarios,
-  verification, analysis/mutation/reporting, and refinement/project composition.
+- **Candidate target (not authorization):** `main.rs` could converge to metadata/help, top-level
+  dispatch, serialization, and exit. Command families are formatting/migration, document/approval,
+  causal, Domain/DB/AI, replay/scenarios, verification, analysis/mutation/reporting, and
+  refinement/project composition.
 - A family module parses its own options, owns its I/O preparation, calls lower owners, and returns
   its existing output plus status. JSON families retain `(Value, i32)`; `fmt`, readable explain,
   TypeScript, and other raw modes remain raw. If emission is later centralized, the maximum needed
   abstraction is a two-variant `Json`/`Raw` output value, not a command framework or generic context
   object.
-- `verification.rs` retains prepare/solve/cache/finalize staging, but replaces `use super::*` with
-  explicit imports. Shared native/Worker result policy belongs in `verification_output`; native-only
-  selection and cache policy belongs in `verification`; `main` must not keep forwarding wrappers or
-  duplicate property/output classification.
+- In that candidate, `verification.rs` would retain prepare/solve/cache/finalize staging but replace
+  `use super::*` with explicit imports. Shared native/Worker result policy belongs in
+  `verification_output`; native-only selection and cache policy belongs in `verification`; `main`
+  must not keep forwarding wrappers or duplicate property/output classification.
 - `LiterateState`, atomic migration, verify cache, approval trust, and solver execution remain
   distinct state/failure owners rather than a single application state.
-- **Action:** first make dependencies explicit, then extract one command family per change. Use the
-  causal family and its focused CLI suite as the first reversible experiment; a successful file move
-  is insufficient unless a later representative change touches fewer unrelated responsibilities.
+- **Candidate experiment (not authorization):** if selected through the C2 gate, first make
+  dependencies explicit, then extract at most one command family in the independently revertible
+  change. The causal family and its focused CLI suite are the first proposed experiment; a
+  successful file move is insufficient unless a later representative change touches fewer
+  unrelated responsibilities.
 
 ### `fsl-wasm`
 
@@ -342,8 +360,8 @@ native binary: argument parsing
 - Native and browser preparation differ because their host and async boundaries differ. Share
   semantic/result functions where already appropriate, and use parity rather than forcing both
   frontends through a native-oriented orchestration abstraction.
-- **Action:** retain the cohesive Rust module. Split request/resolver/handlers only after one gains
-  independent reuse or state; line count alone is insufficient.
+- **Current decision:** retain the cohesive Rust module. A split remains a C2 candidate even after
+  one gains independent reuse or state; line count alone is insufficient.
 
 ### `fsl-lsp`
 
@@ -361,14 +379,14 @@ authoritative parse gate
   authoritative parser accepts the source and must not become a semantic model.
 - `ServerState` alone owns latest open buffers, versions, and workspace roots. `StoreResolver`
   reads the open overlay before the filesystem.
-- Keep `index.rs` separate from protocol/state. `server.rs` may remain physically combined until
-  overlay lifecycle or transport changes; then extract `store` before handlers so state and I/O can
-  be tested without stdio.
-- Completion, declaration recognition, and indexing currently have overlapping keyword tables.
-  Give shared editor vocabulary one LSP-internal owner if the next grammar change touches more than
-  one table; do not move editor-role classification into semantic crates.
-- **Action:** retain the current two-module split and its corpus/stdio oracles; use the stated trigger
-  rather than performing a speculative rewrite.
+- Keep `index.rs` separate from protocol/state. `server.rs` may remain physically combined. If
+  overlay lifecycle or transport changes, extracting `store` before handlers is a C2 candidate so
+  state and I/O can be tested without stdio.
+- Completion, declaration recognition, and indexing currently have overlapping keyword tables. A
+  shared LSP-internal vocabulary owner is a C2 candidate if the next grammar change touches more
+  than one table; editor-role classification must not move into semantic crates.
+- **Current decision:** retain the current two-module split and its corpus/stdio oracles; use the
+  stated trigger rather than performing a speculative rewrite.
 
 ## 6. Candidates and adjudication
 
@@ -377,11 +395,14 @@ validation follows construction of both `KernelModel` inputs, the accepted ledge
 classifier remains authoritative, and the direct test-generation path normalization is recorded as
 a bounded exception rather than silently declared compliant.
 
+The candidates below compare future choices; none authorizes source movement by
+itself. Selection still requires a dedicated issue and accepted scope/design.
+
 | Candidate | Transformation | Benefit | Cost and risk | Result |
 |---|---|---|---|---|
 | C0 — retain undocumented internals | Apply only the mandatory factual/contract corrections; add no maintained role map or source change. | Almost zero transition work. | Wrong-direction imports, duplicate policy, and overloaded entry modules remain unowned; does not answer the design question. | Rejected. |
 | C1 — publish the internal contract without source moves | Add this role map, hard gates, exceptions, target owners, triggers, and fitness functions. | Gives every future change a target owner while retaining full rollback and avoiding speculative file churn. | Does not itself remove any dependency defect or reduce `main.rs` edit breadth. | **Selected.** |
-| C2 — one minimal local structural correction | In a separate change, move one exact duplicated or wrongly owned rule behind current re-exports; the smallest first candidate is the duplicated Domain naming transform. | Tests whether directional normalization reduces duplicate ownership with a narrow diff and rollback. | Visibility/import churn; no measured maintenance benefit yet. | Deferred until an implementation request or the affected code changes. |
+| C2 — one minimal local structural correction | In a separate change, move one exact duplicated or wrongly owned rule behind current re-exports; the smallest first candidate is the duplicated Domain naming transform. | Tests whether directional normalization reduces duplicate ownership with a narrow diff and rollback. | Visibility/import churn; no measured maintenance benefit yet. | Not authorized; deferred until an implementation request or the affected code changes. |
 | C3 — immediately impose the full target module tree | Move all logical roles into physical modules now. | Uniform visible layout and smaller files. | Large review surface, merge pressure, and no demonstrated semantic or operational gain for cohesive adapters. | Rejected for current evidence. |
 
 C1 is the least-regret current intervention under correctness-first, delivery-speed, and
