@@ -826,7 +826,7 @@ impl ModelBuilder {
             .map(|(index, name, span)| (index, (name, span)))
             .collect::<BTreeMap<_, _>>();
         for (index, statement) in model.init.iter().enumerate() {
-            crate::public_kernel::validate_statement_types(statement, &model).map_err(|error| {
+            crate::typecheck::validate_statement_types(statement, &model).map_err(|error| {
                 let origin = error.span.map(type_diagnostic_origin);
                 if let Some((name, _)) = inline_initializers.get(&index) {
                     model_error(format!(
@@ -840,12 +840,12 @@ impl ModelBuilder {
                 }
             })?;
         }
-        crate::public_kernel::validate_model_expression_types(&model).map_err(|error| {
+        crate::typecheck::validate_model_expression_types(&model).map_err(|error| {
             let origin = error.span.map(type_diagnostic_origin);
             model_error(format!("invalid model expression: {}", error.message)).with_origin(origin)
         })?;
         for projection in &model.projections {
-            crate::public_kernel::validate_expression_type(
+            crate::typecheck::validate_expression_type(
                 &projection.expr,
                 &TypeRef::Int,
                 &[],

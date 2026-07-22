@@ -13,6 +13,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- Checked-model type validation now has one private neutral `fsl-core` owner
+  shared by model construction, refinement, and Public Kernel export, with
+  unchanged Kernel schemas, ordering, diagnostics, and fail-closed controls
+  (#420).
 - The duplicated Domain naming transform now has one private neutral owner used
   by analysis, Kernel grounding, and code generation, with mixed-case, digit,
   consecutive-underscore, and one-sided divergence controls (#419).
