@@ -13,6 +13,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- Claude's path-scoped Rust rule now links the accepted component and internal
+  architecture, names all crate owners and hard delivery boundaries, rejects
+  eager or unscoped C2 rewrites, and has positive/negative loading controls for
+  Rust versus frozen-Python paths (#392).
 - Migration-era porting, Python bridge, and sequence design text now marks its
   historical authority explicitly and links to the maintained native Rust
   contracts. The Kernel contract now records native outcome priority, while
