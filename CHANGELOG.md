@@ -13,6 +13,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- The duplicated Domain naming transform now has one private neutral owner used
+  by analysis, Kernel grounding, and code generation, with mixed-case, digit,
+  consecutive-underscore, and one-sided divergence controls (#419).
 - Claude's path-scoped Rust rule now links the accepted component and internal
   architecture, names all crate owners and hard delivery boundaries, rejects
   eager or unscoped C2 rewrites, and has positive/negative loading controls for
