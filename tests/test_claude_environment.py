@@ -2,6 +2,7 @@
 # Copyright 2026 Ryoichi Izumita
 """Contract tests for the checked-in Claude Code environment."""
 
+from fnmatch import fnmatchcase
 import json
 import os
 from pathlib import Path
@@ -47,6 +48,66 @@ def test_required_environment_files_exist() -> None:
         "hooks/session_context.py",
     ]
     assert all((CLAUDE / path).is_file() for path in required)
+
+
+def test_normal_entrypoint_triggers_rust_architecture_rule_for_rust_only() -> None:
+    entrypoint = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    assert entrypoint.startswith("@AGENTS.md\n")
+    assert (
+        "Inspect `git status --short` and the relevant implementation before editing."
+        in entrypoint
+    )
+
+    rule = (CLAUDE / "rules" / "rust-verifier.md").read_text(encoding="utf-8")
+    front_matter = rule.split("---", 2)[1]
+    patterns = [
+        line.removeprefix('- "').removesuffix('"')
+        for line in map(str.strip, front_matter.splitlines())
+        if line.startswith('- "')
+    ]
+
+    def applies_to(path: str) -> bool:
+        return any(fnmatchcase(path, pattern) for pattern in patterns)
+
+    assert applies_to("rust/fsl-runtime/src/lib.rs")
+    assert applies_to("rust/fslc/src/main.rs")
+    assert applies_to("rust/Cargo.toml")
+    assert applies_to("rust/fsl-runtime/Cargo.toml")
+    assert not applies_to("src/fslc/runtime.py")
+    assert not applies_to("pyproject.toml")
+    assert not applies_to("docs/DESIGN-rust-components.md")
+
+
+def test_rust_architecture_rule_carries_the_accepted_contract() -> None:
+    rule = (CLAUDE / "rules" / "rust-verifier.md").read_text(encoding="utf-8")
+    normalized_rule = " ".join(rule.split())
+    required_contracts = [
+        "DESIGN-rust-components.md",
+        "DESIGN-rust-component-internals.md",
+        "`fsl-syntax` owns source fidelity",
+        "`fsl-core` owns checked models and Public Kernel",
+        "`fsl-runtime` owns concrete Monitor/replay/BFS semantics",
+        "`fsl-solver` owns the backend-neutral boundary",
+        "`fsl-solver-z3` and `fsl-solver-z3js` are native and browser adapters",
+        "`fsl-verifier` owns symbolic engines",
+        "`fsl-tools` owns derived artifacts",
+        "`fslc-rust`, `fsl-wasm`, and `fsl-lsp` own native delivery, Worker delivery, and "
+        "editor projection",
+        "`fsl-runtime` must not depend directly or transitively on solver or Z3 crates",
+        "raw-output",
+        "JSON envelopes",
+        "exit codes",
+        "Public Kernel",
+        "replay contracts",
+        "native/Worker parity",
+        "not permission for an eager rewrite",
+        "source-changing C2",
+        "negative control",
+        "testgen::relative_spec_path",
+        "#423",
+        "implicit filesystem dependency",
+    ]
+    assert all(contract in normalized_rule for contract in required_contracts)
 
 
 def test_settings_use_project_root_and_protect_snapshot() -> None:
