@@ -1,5 +1,13 @@
 # FSL v2.0 — Implementation Bridge (runtime monitor / replay / testgen) Implementation Design
 
+Status: migration-era bridge design with later compatibility updates. Its
+execution sections record the original v2.0 design and remain useful history,
+but they are not current product authority. The native
+Rust ownership map is in
+[`DESIGN-rust-components.md`](DESIGN-rust-components.md), and current transition,
+failure-order, and rollback authority is in
+[`DESIGN-kernel-contract.md`](DESIGN-kernel-contract.md#transition-and-failure-semantics).
+
 DESIGN-v1.md §10 v2.0 "the body of the implementation bridge." Three bridges are
 built between the spec and the implementation:
 
@@ -62,10 +70,13 @@ The result of `step` (the same vocabulary as verify's JSON):
   type_bound / ensures / invariant all roll back before the transition). No
   exception is thrown — always return a result dict (easy to embed as a monitor,
   and readable by the LLM).
-- The semantics of `step` are identical to BMC: evaluate all requires (no
+- The historical bridge design modeled `step`/BMC as evaluating all requires (no
   short-circuit) → apply the body by simultaneous assignment (all RHS read the
   old state) → partial_op check (considering path conditions) → ensures
   (old = old state) → invariant of the new state + automatic bounds check.
+- That sequence is retained as migration history, not as the current contract.
+  Current guard and outcome priority must be read from the maintained Kernel
+  transition/failure contract linked above, not inferred from this paragraph.
 - An unknown action name, a missing parameter, or being out of type range is `kind: "bad_call"`.
 
 ### 1.3 Determinism of init

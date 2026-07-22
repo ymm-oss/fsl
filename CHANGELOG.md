@@ -13,6 +13,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- Migration-era porting, Python bridge, and sequence design text now marks its
+  historical authority explicitly and links to the maintained native Rust
+  contracts. The Kernel contract now records native outcome priority, while
+  future C2 ownership candidates are explicitly non-authorizing and require
+  separately scoped, audited, independently revertible changes (#430).
 - The authoritative Rust workspace now has one evidence-backed component design
   record covering all eleven crates, their state and responsibility ownership,
   dependency gates, public contracts, design pressures, and reevaluation
