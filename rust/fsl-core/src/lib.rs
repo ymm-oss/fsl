@@ -33,6 +33,7 @@ mod public_kernel;
 mod refinement;
 mod trace;
 mod trace_json;
+mod typecheck;
 
 pub use compose::{
     FileResolver, FsResolver, lower_compose, parse_kernel_source, parse_kernel_source_with_file,

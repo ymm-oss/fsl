@@ -177,6 +177,26 @@ fn refinement_conditionals_use_the_shared_static_type_rules() {
 }
 
 #[test]
+fn refinement_rejects_dynamic_aggregate_ranges() {
+    let implementation = build(
+        "spec Impl { state { lo: Int, hi: Int, total: Int } init { lo = 0 hi = 2 total = 0 } action stay() { lo = lo hi = hi total = total } invariant I { true } }",
+    )
+    .expect("implementation");
+    let abstraction = build(
+        "spec Abs { state { total: Int } init { total = 0 } action stay() { total = total } invariant I { true } }",
+    )
+    .expect("abstraction");
+
+    let error = parse_refinement(
+        "refinement R { impl Impl abs Abs map total = count(i in lo..hi) action stay() -> stay() }",
+        &implementation,
+        &abstraction,
+    )
+    .expect_err("dynamic refinement aggregate range must fail closed");
+    assert!(error.message.contains("'lo' is not an integer const"));
+}
+
+#[test]
 fn requirements_and_domain_dialects_share_conditional_syntax() {
     build(
         "requirements R { type N = 0..1 state { x: N, gate: Bool } init { x = 0 gate = true } action choose() { x = if gate then 1 else 0 gate = gate } invariant Choice { if gate then x == 0 else x == 1 } }",

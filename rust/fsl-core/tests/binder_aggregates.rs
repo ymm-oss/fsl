@@ -328,3 +328,22 @@ spec AggregatePartialOperations {
     }
     assert!(saw_existential);
 }
+
+#[test]
+fn checked_model_rejects_dynamic_aggregate_ranges_in_every_expression_position() {
+    let sources = [
+        "spec DynamicInit { state { lo: Int, hi: Int, total: Int } init { lo = 0 hi = 2 total = count(i in lo..hi) } action stay() { lo = lo hi = hi total = total } invariant I { true } }",
+        "spec DynamicAction { state { lo: Int, hi: Int, total: Int } init { lo = 0 hi = 2 total = 0 } action stay() { lo = lo hi = hi total = count(i in lo..hi) } invariant I { true } }",
+        "spec DynamicProperty { state { lo: Int, hi: Int, total: Int } init { lo = 0 hi = 2 total = 0 } action stay() { lo = lo hi = hi total = total } invariant I { count(i in lo..hi) >= 0 } }",
+    ];
+
+    for source in sources {
+        let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse source");
+        let error = build_model(kernel).expect_err("dynamic aggregate range must fail closed");
+        assert!(
+            error.message.contains("'lo' is not an integer const"),
+            "{}",
+            error.message
+        );
+    }
+}

@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use fsl_core::{FsResolver, KernelExpr, build_model, parse_kernel_source};
+use fsl_core::{FsResolver, KernelExpr, ProjectionDef, build_model, parse_kernel_source};
 use serde_json::{Value, json};
 
 fn fixture(name: &str) -> PathBuf {
@@ -65,6 +65,28 @@ fn public_kernel_rejects_an_unlowered_expression() {
     };
     let error = fsl_core::public_kernel_contract(&kernel, &model, "fixture.fsl", "kernel")
         .expect_err("unlowered expression must fail");
+    assert!(error.message.contains("unlowered predicate call"));
+}
+
+#[test]
+fn public_kernel_uses_checked_model_validation_for_unprojected_metadata() {
+    let path = fixture("kernel_contract.fsl");
+    let (kernel, mut model) = load(&path);
+    let span = model.invariants[0].span;
+    model.projections.push(ProjectionDef {
+        name: "corrupted_kpi".to_owned(),
+        entity: "Corrupted".to_owned(),
+        stage: "Corrupted".to_owned(),
+        expr: KernelExpr::Call {
+            name: "not_lowered".to_owned(),
+            args: Vec::new(),
+            span,
+        },
+        span,
+    });
+
+    let error = fsl_core::public_kernel_contract(&kernel, &model, "fixture.fsl", "kernel")
+        .expect_err("exporter must use the neutral checked-model validator");
     assert!(error.message.contains("unlowered predicate call"));
 }
 

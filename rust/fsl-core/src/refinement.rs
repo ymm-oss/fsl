@@ -317,7 +317,7 @@ fn validate_state_map(
         .clone();
     let mut bindings = Vec::new();
     if let Some(binder) = &state_map.binder {
-        let binder_ty = crate::public_kernel::expression_binder_type(binder, context)
+        let binder_ty = crate::typecheck::expression_binder_type(binder, context)
             .map_err(|error| invalid_state_map_at_map(state_map, "binder", &error.message))?;
         let TypeRef::Map(key, value) = expected else {
             return Err(refinement_error(
@@ -333,7 +333,7 @@ fn validate_state_map(
             | Binder::Range { name, .. }
             | Binder::Collection { name, .. } => name.clone(),
         };
-        crate::public_kernel::validate_expression_type(
+        crate::typecheck::validate_expression_type(
             &Expr::Var(binder_name.clone()),
             &key,
             &[(binder_name.clone(), binder_ty.clone())],
@@ -343,7 +343,7 @@ fn validate_state_map(
         bindings.push((binder_name, binder_ty));
         expected = *value;
     }
-    crate::public_kernel::validate_expression_type(&state_map.expr, &expected, &bindings, context)
+    crate::typecheck::validate_expression_type(&state_map.expr, &expected, &bindings, context)
         .map_err(|error| {
             invalid_state_map(
                 state_map,
@@ -634,7 +634,7 @@ fn lower_action_target(
             for (index, (argument, parameter)) in
                 args.iter().zip(&abstraction_action.params).enumerate()
             {
-                crate::public_kernel::validate_expression_type(
+                crate::typecheck::validate_expression_type(
                     argument,
                     &parameter_type(parameter),
                     &bindings,
