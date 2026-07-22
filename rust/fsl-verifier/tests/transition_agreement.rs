@@ -293,6 +293,30 @@ fn disabled_and_failed_monitor_outcomes_agree_and_rollback() {
                 action.name,
                 violation.kind
             );
+
+            let mut rejection_solver =
+                fsl_solver_z3::Z3Solver::new().expect("create rejection solver");
+            let corrupted_attempted = if result.attempted_state.is_some() {
+                None
+            } else {
+                Some(&current)
+            };
+            assert!(
+                !block_on(fsl_verifier::transition_outcome_matches_step(
+                    &model,
+                    &mut rejection_solver,
+                    &current,
+                    &action.name,
+                    &params,
+                    &result.state,
+                    corrupted_attempted,
+                    &violation.kind,
+                ))
+                .expect("reject corrupted failure evidence"),
+                "{} {} accepted the wrong attempted-state presence",
+                action.name,
+                violation.kind
+            );
         } else {
             let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
             assert!(

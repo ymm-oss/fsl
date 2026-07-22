@@ -5,6 +5,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Changed
+- The authoritative Rust workspace now has one evidence-backed component design
+  record covering all eleven crates, their state and responsibility ownership,
+  dependency gates, public contracts, design pressures, and reevaluation
+  triggers, plus a companion internal design covering directed value flow,
+  mutable-state and failure ownership, targeted dependency normalization, and
+  touch-driven extraction. Migration-era documentation now consistently treats
+  Python as frozen compatibility evidence rather than the active product
+  authority, and concrete/symbolic failure agreement now includes a
+  corrupted-evidence negative control.
+
 ## [3.1.0] - 2026-07-20
 
 ### Fixed

@@ -3,8 +3,8 @@ name: ci
 env:
   MACOSX_DEPLOYMENT_TARGET: "14.0"
 
-# Python is a frozen reference implementation and optional LSP surface. The
-# required product gate executes only the authoritative Rust and WASM surfaces.
+# Python is a frozen compatibility reference and repository-hook runtime. The
+# required product gate executes the authoritative Rust CLI, LSP, and WASM surfaces.
 
 on:
   push:
