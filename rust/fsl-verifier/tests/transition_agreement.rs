@@ -50,6 +50,136 @@ fn assert_success_is_sticky(
     }
 }
 
+fn assert_post_failure_kind_rejections(
+    model: &fsl_core::KernelModel,
+    current: &BTreeMap<String, FslValue>,
+    action: &str,
+    params: &BTreeMap<String, FslValue>,
+    result: &fsl_runtime::StepResult,
+    actual_kind: &str,
+) {
+    let Some(attempted) = result.attempted_state.as_ref() else {
+        return;
+    };
+    for substituted_kind in ["type_bound", "invariant", "trans", "ensures"] {
+        if substituted_kind == actual_kind {
+            continue;
+        }
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create substitution solver");
+        let substituted = block_on(fsl_verifier::transition_outcome_matches_step(
+            model,
+            &mut solver,
+            current,
+            action,
+            params,
+            &result.state,
+            Some(attempted),
+            substituted_kind,
+        ));
+        assert_ne!(
+            substituted,
+            Ok(true),
+            "{action} {actual_kind} accepted as {substituted_kind}"
+        );
+    }
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create success mutant solver");
+    assert_ne!(
+        block_on(fsl_verifier::transition_outcome_matches_step(
+            model,
+            &mut solver,
+            current,
+            action,
+            params,
+            attempted,
+            None,
+            "ok",
+        )),
+        Ok(true),
+        "{action} {actual_kind} accepted as ok"
+    );
+}
+
+fn assert_failure_outcome_agreement(
+    model: &fsl_core::KernelModel,
+    current: &BTreeMap<String, FslValue>,
+    action: &str,
+    params: &BTreeMap<String, FslValue>,
+    result: &fsl_runtime::StepResult,
+    kind: &str,
+) {
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create failure solver");
+    let agreement = block_on(fsl_verifier::transition_outcome_matches_step(
+        model,
+        &mut solver,
+        current,
+        action,
+        params,
+        &result.state,
+        result.attempted_state.as_ref(),
+        kind,
+    ));
+    if kind == "partial_op" {
+        assert!(
+            agreement
+                .expect_err("partial outcome must fail closed without an exact oracle")
+                .message
+                .contains("partial-operation")
+        );
+    } else if kind == "type_bound" {
+        match agreement {
+            Ok(true) => {}
+            Err(error) if error.message.contains("over-capacity sequence") => {}
+            other => panic!("{action} {kind} disagreed: {other:?}"),
+        }
+    } else {
+        assert!(
+            agreement.expect("check failure agreement"),
+            "{action} {kind} disagreed"
+        );
+        assert_post_failure_kind_rejections(model, current, action, params, result, kind);
+    }
+}
+
+fn assert_attempted_presence_corruption_rejected(
+    model: &fsl_core::KernelModel,
+    current: &BTreeMap<String, FslValue>,
+    action: &str,
+    params: &BTreeMap<String, FslValue>,
+    result: &fsl_runtime::StepResult,
+    kind: &str,
+) {
+    let corrupted_attempted = if result.attempted_state.is_some() {
+        None
+    } else {
+        Some(current)
+    };
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create corruption solver");
+    let corrupted = block_on(fsl_verifier::transition_outcome_matches_step(
+        model,
+        &mut solver,
+        current,
+        action,
+        params,
+        &result.state,
+        corrupted_attempted,
+        kind,
+    ));
+    if kind == "partial_op" {
+        assert!(
+            corrupted
+                .expect_err("partial corruption must fail closed")
+                .message
+                .contains("partial-operation")
+        );
+    } else {
+        assert!(
+            !corrupted.expect("reject corrupted failure evidence"),
+            "{action} {kind} accepted the wrong attempted-state presence"
+        );
+    }
+}
+
 #[test]
 fn collection_and_option_transitions_agree_across_bounded_reachable_states() {
     let fixture =
@@ -89,6 +219,22 @@ fn collection_and_option_transitions_agree_across_bounded_reachable_states() {
                 ))
                 .expect("check transition agreement"),
                 "{} disagreed from {current:?}",
+                enabled.action
+            );
+            let mut solver = fsl_solver_z3::Z3Solver::new().expect("create outcome solver");
+            assert!(
+                block_on(fsl_verifier::transition_outcome_matches_step(
+                    &model,
+                    &mut solver,
+                    &current,
+                    &enabled.action,
+                    &enabled.params,
+                    &result.state,
+                    None,
+                    "ok",
+                ))
+                .expect("check successful outcome agreement"),
+                "{} outcome disagreed from {current:?}",
                 enabled.action
             );
             checked += 1;
@@ -276,46 +422,21 @@ fn disabled_and_failed_monitor_outcomes_agree_and_rollback() {
                 "{} committed a failed step",
                 action.name
             );
-            let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
-            assert!(
-                block_on(fsl_verifier::transition_outcome_matches_step(
-                    &model,
-                    &mut solver,
-                    &current,
-                    &action.name,
-                    &params,
-                    &result.state,
-                    result.attempted_state.as_ref(),
-                    &violation.kind,
-                ))
-                .expect("check failure agreement"),
-                "{} {} disagreed",
-                action.name,
-                violation.kind
+            assert_failure_outcome_agreement(
+                &model,
+                &current,
+                &action.name,
+                &params,
+                &result,
+                &violation.kind,
             );
-
-            let mut rejection_solver =
-                fsl_solver_z3::Z3Solver::new().expect("create rejection solver");
-            let corrupted_attempted = if result.attempted_state.is_some() {
-                None
-            } else {
-                Some(&current)
-            };
-            assert!(
-                !block_on(fsl_verifier::transition_outcome_matches_step(
-                    &model,
-                    &mut rejection_solver,
-                    &current,
-                    &action.name,
-                    &params,
-                    &result.state,
-                    corrupted_attempted,
-                    &violation.kind,
-                ))
-                .expect("reject corrupted failure evidence"),
-                "{} {} accepted the wrong attempted-state presence",
-                action.name,
-                violation.kind
+            assert_attempted_presence_corruption_rejected(
+                &model,
+                &current,
+                &action.name,
+                &params,
+                &result,
+                &violation.kind,
             );
         } else {
             let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
@@ -332,8 +453,756 @@ fn disabled_and_failed_monitor_outcomes_agree_and_rollback() {
                 "{} disagreed from {current:?}",
                 action.name
             );
+            if action.name == "flip" {
+                let mut solver = fsl_solver_z3::Z3Solver::new().expect("create outcome solver");
+                assert!(
+                    block_on(fsl_verifier::transition_outcome_matches_step(
+                        &model,
+                        &mut solver,
+                        &current,
+                        &action.name,
+                        &params,
+                        &result.state,
+                        None,
+                        "ok",
+                    ))
+                    .expect("check successful outcome agreement")
+                );
+            }
         }
     }
+}
+
+#[test]
+fn enabled_non_stuttering_success_cannot_be_relabelled_as_a_failure() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fslc/tests/fixtures/conformance_failures.fsl");
+    let source = std::fs::read_to_string(&fixture).expect("read failure fixture");
+    let kernel = parse_kernel_source(
+        &source,
+        &FsResolver::new(fixture.parent().expect("fixture directory")),
+    )
+    .expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let current = monitor.state.clone();
+    let result = monitor
+        .attempt("flip", &BTreeMap::new())
+        .expect("execute enabled success");
+    assert!(result.violation.is_none());
+    assert_ne!(result.state, current, "negative control must not stutter");
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create rejection solver");
+    assert!(
+        !block_on(fsl_verifier::transition_outcome_matches_step(
+            &model,
+            &mut solver,
+            &current,
+            "flip",
+            &BTreeMap::new(),
+            &current,
+            None,
+            "requires_failed",
+        ))
+        .expect("reject fabricated requires failure")
+    );
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create fail-closed solver");
+    let error = block_on(fsl_verifier::transition_outcome_matches_step(
+        &model,
+        &mut solver,
+        &current,
+        "flip",
+        &BTreeMap::new(),
+        &current,
+        None,
+        "partial_op",
+    ))
+    .expect_err("partial-operation evidence must not pass without an exact oracle");
+    assert!(error.message.contains("partial-operation agreement"));
+}
+
+#[test]
+fn agreement_queries_do_not_contaminate_a_reused_solver() {
+    let source = r"
+spec ReusedAgreementSolver {
+  type Bit = 0..1
+  state { x: Bit }
+  init { x = 0 }
+  action flip() { x = 1 }
+  action blocked() { requires false  x = 1 }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let initial = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let current = initial.state.clone();
+    let params = BTreeMap::new();
+    let mut flip = initial.clone();
+    let success = flip.attempt("flip", &params).expect("execute flip");
+    let mut blocked = initial.clone();
+    let rejected = blocked
+        .attempt("blocked", &params)
+        .expect("execute blocked");
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create reused solver");
+    assert!(
+        !block_on(fsl_verifier::transition_outcome_matches_step(
+            &model,
+            &mut solver,
+            &current,
+            "flip",
+            &params,
+            &current,
+            None,
+            "requires_failed",
+        ))
+        .expect("reject fabricated guard failure")
+    );
+    assert!(
+        block_on(fsl_verifier::transition_outcome_matches_step(
+            &model,
+            &mut solver,
+            &current,
+            "blocked",
+            &params,
+            &rejected.state,
+            None,
+            "requires_failed",
+        ))
+        .expect("accept genuine guard failure")
+    );
+    assert!(
+        block_on(fsl_verifier::transition_outcome_matches_step(
+            &model,
+            &mut solver,
+            &current,
+            "flip",
+            &params,
+            &success.state,
+            None,
+            "ok",
+        ))
+        .expect("accept success after failure queries")
+    );
+    assert!(
+        !block_on(fsl_verifier::transition_outcome_matches_step(
+            &model,
+            &mut solver,
+            &current,
+            "flip",
+            &params,
+            &current,
+            None,
+            "ok",
+        ))
+        .expect("reject wrong successor after successful query")
+    );
+}
+
+fn reached_partial_paths_model() -> fsl_core::KernelModel {
+    let source = r"
+spec ReachedPartialPaths {
+  type Bit = 0..1
+  state {
+    x: Bit,
+    queue: Seq<Bit, 0>,
+    values: Map<Bit, Bit>
+  }
+  init {
+    x = 0
+    queue = Seq {}
+    forall i: Bit { values[i] = i }
+  }
+  action skipped_guard() {
+    requires false
+    requires queue.head() == 0
+    x = 1
+  }
+  action skipped_quantified_guard() {
+    requires false
+    requires forall i in 0..0 { queue.head() == i }
+    x = 1
+  }
+  action reached_guard() {
+    requires queue.head() == 0
+    x = 1
+  }
+  action safe_branch() {
+    if false { x = queue.head() } else { x = 1 }
+  }
+  action reached_branch() {
+    if true { x = queue.head() } else { x = 1 }
+  }
+  action map_read() { x = values[1] }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    build_model(kernel).expect("build model")
+}
+
+#[test]
+fn agreement_accepts_unreached_partial_operation_paths() {
+    let model = reached_partial_paths_model();
+    let initial = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let params = BTreeMap::new();
+
+    for action in ["skipped_guard", "skipped_quantified_guard"] {
+        let mut skipped = initial.clone();
+        let rejected = skipped
+            .attempt(action, &params)
+            .expect("short-circuit later guard");
+        assert_eq!(
+            rejected
+                .violation
+                .as_ref()
+                .map(|violation| violation.kind.as_str()),
+            Some("requires_failed")
+        );
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create guard solver");
+        assert!(
+            block_on(fsl_verifier::transition_outcome_matches_step(
+                &model,
+                &mut solver,
+                &initial.state,
+                action,
+                &params,
+                &rejected.state,
+                None,
+                "requires_failed",
+            ))
+            .expect("accept short-circuited guard failure")
+        );
+    }
+
+    for action in ["safe_branch", "map_read"] {
+        let mut monitor = initial.clone();
+        let result = monitor
+            .attempt(action, &params)
+            .expect("execute defined operation path");
+        assert!(result.violation.is_none(), "{action} must succeed");
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create success solver");
+        assert!(
+            block_on(fsl_verifier::transition_outcome_matches_step(
+                &model,
+                &mut solver,
+                &initial.state,
+                action,
+                &params,
+                &result.state,
+                None,
+                "ok",
+            ))
+            .expect("accept reached defined operation path"),
+            "{action} outcome disagreed"
+        );
+    }
+}
+
+#[test]
+fn disabled_guard_does_not_evaluate_an_unreachable_body() {
+    let source = r"
+spec DisabledPartialBody {
+  type Bit = 0..1
+  state { x: Bit, dead: Seq<Bit, 0> }
+  init { x = 0  dead = Seq {} }
+  action disabled() {
+    requires false
+    x = dead.head()
+  }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let current = fsl_runtime::Monitor::new(model.clone())
+        .expect("create monitor")
+        .state;
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create disabled solver");
+    assert!(
+        block_on(fsl_verifier::transition_outcome_matches_step(
+            &model,
+            &mut solver,
+            &current,
+            "disabled",
+            &BTreeMap::new(),
+            &current,
+            None,
+            "requires_failed",
+        ))
+        .expect("accept disabled guard without evaluating its body")
+    );
+}
+
+#[test]
+fn ordinary_bmc_remains_fail_closed_for_reached_zero_capacity_access() {
+    let source = r"
+spec ZeroCapacityBmc {
+  type Bit = 0..1
+  state { x: Bit, queue: Seq<Bit, 0> }
+  init { x = 0  queue = Seq {} }
+  action bad() { x = queue.head() }
+  invariant Stay { x == 0 }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let concrete = monitor
+        .attempt("bad", &BTreeMap::new())
+        .expect("classify concrete partial operation");
+    assert_eq!(
+        concrete
+            .violation
+            .as_ref()
+            .map(|violation| violation.kind.as_str()),
+        Some("partial_op")
+    );
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create BMC solver");
+    let error = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 1))
+        .expect_err("ordinary BMC must not consume agreement-only fallback values");
+    assert!(
+        error.message.contains("zero-capacity sequence"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn agreement_rejects_reached_partial_operation_paths() {
+    let model = reached_partial_paths_model();
+    let initial = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let params = BTreeMap::new();
+
+    let mut reached_guard = initial.clone();
+    let partial_guard = reached_guard
+        .attempt("reached_guard", &params)
+        .expect("classify reached partial guard");
+    assert_eq!(
+        partial_guard
+            .violation
+            .as_ref()
+            .map(|violation| violation.kind.as_str()),
+        Some("partial_op")
+    );
+    let mut fabricated_success = initial.state.clone();
+    fabricated_success.insert("x".to_owned(), FslValue::Int(1));
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create partial-guard solver");
+    assert!(
+        !block_on(fsl_verifier::transition_outcome_matches_step(
+            &model,
+            &mut solver,
+            &initial.state,
+            "reached_guard",
+            &params,
+            &fabricated_success,
+            None,
+            "ok",
+        ))
+        .expect("reject reached partial guard as success")
+    );
+
+    let mut reached_branch = initial.clone();
+    let partial_branch = reached_branch
+        .attempt("reached_branch", &params)
+        .expect("classify reached partial branch");
+    assert_eq!(
+        partial_branch
+            .violation
+            .as_ref()
+            .map(|violation| violation.kind.as_str()),
+        Some("partial_op")
+    );
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create partial-branch solver");
+    assert!(
+        !block_on(fsl_verifier::transition_outcome_matches_step(
+            &model,
+            &mut solver,
+            &initial.state,
+            "reached_branch",
+            &params,
+            &initial.state,
+            None,
+            "ok",
+        ))
+        .expect("reject reached partial branch as success")
+    );
+}
+
+#[test]
+fn earlier_post_phase_failure_dominates_later_partial_syntax() {
+    let source = r"
+spec OrderedPostFailure {
+  type Bit = 0..1
+  state { x: Bit, queue: Seq<Bit, 0> }
+  init { x = 0  queue = Seq {} }
+  action overflow() { x = 2 }
+  action fail_invariant() { x = 1 }
+  invariant FirstFailure { x == 0 }
+  invariant LaterPartial { queue.head() == 0 }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let current = monitor.state.clone();
+    let result = monitor
+        .attempt("overflow", &BTreeMap::new())
+        .expect("execute bound failure before invariant");
+    assert_eq!(
+        result
+            .violation
+            .as_ref()
+            .map(|violation| violation.kind.as_str()),
+        Some("type_bound")
+    );
+    let attempted = result
+        .attempted_state
+        .as_ref()
+        .expect("bound failure preserves attempted state");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create ordered-phase solver");
+    assert!(
+        block_on(fsl_verifier::transition_outcome_matches_step(
+            &model,
+            &mut solver,
+            &current,
+            "overflow",
+            &BTreeMap::new(),
+            &result.state,
+            Some(attempted),
+            "type_bound",
+        ))
+        .expect("accept first reached post failure")
+    );
+
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let current = monitor.state.clone();
+    let result = monitor
+        .attempt("fail_invariant", &BTreeMap::new())
+        .expect("execute invariant failure before later partial invariant");
+    assert_eq!(
+        result
+            .violation
+            .as_ref()
+            .map(|violation| violation.kind.as_str()),
+        Some("invariant")
+    );
+    let attempted = result
+        .attempted_state
+        .as_ref()
+        .expect("invariant failure preserves attempted state");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create invariant-phase solver");
+    assert!(
+        block_on(fsl_verifier::transition_outcome_matches_step(
+            &model,
+            &mut solver,
+            &current,
+            "fail_invariant",
+            &BTreeMap::new(),
+            &result.state,
+            Some(attempted),
+            "invariant",
+        ))
+        .expect("accept earlier invariant failure")
+    );
+}
+
+#[test]
+fn old_expression_definedness_uses_the_pre_state() {
+    let source = r"
+spec OldDefinedness {
+  type Bit = 0..1
+  state { queue: Seq<Bit, 1> }
+  init { queue = Seq {} }
+  action fill() { queue = queue.push(0) }
+  trans OldHead { old(queue.head()) == 0 }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let current = monitor.state.clone();
+    let result = monitor
+        .attempt("fill", &BTreeMap::new())
+        .expect("classify partial old-state expression");
+    assert_eq!(
+        result
+            .violation
+            .as_ref()
+            .map(|violation| violation.kind.as_str()),
+        Some("partial_op")
+    );
+    let attempted = result
+        .attempted_state
+        .as_ref()
+        .expect("post-update partial preserves attempted state");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create old-state solver");
+    assert!(
+        !block_on(fsl_verifier::transition_outcome_matches_step(
+            &model,
+            &mut solver,
+            &current,
+            "fill",
+            &BTreeMap::new(),
+            attempted,
+            None,
+            "ok",
+        ))
+        .expect("reject partial old-state expression as success")
+    );
+}
+
+#[test]
+fn checked_integer_overflow_cannot_be_relabelled_as_success() {
+    let source = r"
+spec CheckedIntegerAgreement {
+  state { minimum: Int, maximum: Int, values: Seq<Int, 3> }
+  init {
+    minimum = -9223372036854775807 - 1
+    maximum = 9223372036854775807
+    values = Seq { 9223372036854775807, 1, -1 }
+  }
+  action abs_overflow() {
+    minimum = minimum
+    values = values
+    ensures abs(minimum) > 0
+  }
+  action sum_overflow() {
+    minimum = minimum
+    values = values
+    ensures sum(item in values of item) > 0
+  }
+  action negation_overflow() {
+    ensures -minimum > 0
+  }
+  action addition_overflow() {
+    ensures maximum + 1 > maximum
+  }
+  action subtraction_overflow() {
+    ensures minimum - 1 < minimum
+  }
+  action multiplication_overflow() {
+    ensures maximum * 2 > maximum
+  }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let initial = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+
+    for (action, expected_error) in [
+        ("abs_overflow", "integer overflow in abs"),
+        ("sum_overflow", "integer overflow in sum"),
+        ("negation_overflow", "integer overflow in negation"),
+        ("addition_overflow", "integer overflow in addition"),
+        ("subtraction_overflow", "integer overflow in subtraction"),
+        (
+            "multiplication_overflow",
+            "integer overflow in multiplication",
+        ),
+    ] {
+        let mut monitor = initial.clone();
+        let error = monitor
+            .attempt(action, &BTreeMap::new())
+            .expect_err("native checked arithmetic must reject the action");
+        assert!(error.message.contains(expected_error), "{error:?}");
+
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create overflow solver");
+        assert!(
+            !block_on(fsl_verifier::transition_outcome_matches_step(
+                &model,
+                &mut solver,
+                &initial.state,
+                action,
+                &BTreeMap::new(),
+                &initial.state,
+                None,
+                "ok",
+            ))
+            .expect("reject fabricated checked-arithmetic success"),
+            "{action} overflow was accepted as success"
+        );
+    }
+}
+
+#[test]
+fn representable_scalar_type_bound_outcome_agrees() {
+    let source = r"
+spec ScalarTypeBoundAgreement {
+  type Bit = 0..1
+  state { x: Bit }
+  init { x = 0 }
+  action overflow() { x = 2 }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let current = monitor.state.clone();
+    let result = monitor
+        .attempt("overflow", &BTreeMap::new())
+        .expect("execute overflowing assignment");
+    assert_eq!(
+        result
+            .violation
+            .as_ref()
+            .map(|violation| violation.kind.as_str()),
+        Some("type_bound")
+    );
+    let attempted = result
+        .attempted_state
+        .as_ref()
+        .expect("type-bound failure preserves attempted state");
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create type-bound solver");
+    assert!(
+        block_on(fsl_verifier::transition_outcome_matches_step(
+            &model,
+            &mut solver,
+            &current,
+            "overflow",
+            &BTreeMap::new(),
+            &result.state,
+            Some(attempted),
+            "type_bound",
+        ))
+        .expect("check representable type-bound agreement")
+    );
+}
+
+#[test]
+fn over_capacity_sequence_suffix_cannot_pass_exact_agreement() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fslc/tests/fixtures/conformance_failures.fsl");
+    let source = std::fs::read_to_string(&fixture).expect("read failure fixture");
+    let kernel = parse_kernel_source(
+        &source,
+        &FsResolver::new(fixture.parent().expect("fixture directory")),
+    )
+    .expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let current = monitor.state.clone();
+    let result = monitor
+        .attempt("type_bound", &BTreeMap::new())
+        .expect("execute sequence overflow");
+    let mut altered = result
+        .attempted_state
+        .expect("sequence overflow preserves attempted state");
+    let FslValue::Seq(values) = altered.get_mut("queue").expect("queue state") else {
+        panic!("queue must be a sequence");
+    };
+    assert!(
+        values.len() > 1,
+        "negative control needs an overflow suffix"
+    );
+    values[1] = FslValue::Int(1);
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create overflow-suffix solver");
+    let error = block_on(fsl_verifier::transition_outcome_matches_step(
+        &model,
+        &mut solver,
+        &current,
+        "type_bound",
+        &BTreeMap::new(),
+        &result.state,
+        Some(&altered),
+        "type_bound",
+    ))
+    .expect_err("unrepresentable overflow suffix must fail closed");
+    assert!(error.message.contains("over-capacity sequence"));
+}
+
+#[test]
+fn outcome_agreement_rejects_malformed_calls_and_state_shapes() {
+    let source = r"
+spec MalformedAgreement {
+  type Bit = 0..1
+  struct Pair { value: Bit }
+  state { x: Bit, pair: Pair }
+  init { x = 0  pair = Pair { value: 0 } }
+  action set(v: Bit) { requires false  x = v }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let current = fsl_runtime::Monitor::new(model.clone())
+        .expect("create monitor")
+        .state;
+
+    for malformed_params in [
+        BTreeMap::new(),
+        BTreeMap::from([("v".to_owned(), FslValue::Int(2))]),
+        BTreeMap::from([("wrong".to_owned(), FslValue::Int(0))]),
+    ] {
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create malformed-call solver");
+        assert!(
+            block_on(fsl_verifier::transition_outcome_matches_step(
+                &model,
+                &mut solver,
+                &current,
+                "set",
+                &malformed_params,
+                &current,
+                None,
+                "requires_failed",
+            ))
+            .is_err()
+        );
+    }
+
+    let good_params = BTreeMap::from([("v".to_owned(), FslValue::Int(0))]);
+    let mut missing_state = current.clone();
+    missing_state.remove("x");
+    let mut extra_state = current.clone();
+    extra_state.insert("extra".to_owned(), FslValue::Bool(false));
+    let mut wrong_state_type = current.clone();
+    wrong_state_type.insert("x".to_owned(), FslValue::Bool(false));
+    let mut out_of_bound_state = current.clone();
+    out_of_bound_state.insert("x".to_owned(), FslValue::Int(2));
+    let mut extra_struct_field = current.clone();
+    let FslValue::Struct { fields, .. } = extra_struct_field.get_mut("pair").expect("pair state")
+    else {
+        panic!("pair must be a struct");
+    };
+    fields.insert("extra".to_owned(), FslValue::Int(0));
+
+    for malformed_state in [
+        missing_state,
+        extra_state,
+        wrong_state_type,
+        out_of_bound_state,
+        extra_struct_field,
+    ] {
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create malformed-state solver");
+        assert!(
+            block_on(fsl_verifier::transition_outcome_matches_step(
+                &model,
+                &mut solver,
+                &malformed_state,
+                "set",
+                &good_params,
+                &malformed_state,
+                None,
+                "requires_failed",
+            ))
+            .is_err()
+        );
+    }
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create unknown-action solver");
+    assert!(
+        block_on(fsl_verifier::transition_outcome_matches_step(
+            &model,
+            &mut solver,
+            &current,
+            "missing",
+            &BTreeMap::new(),
+            &current,
+            None,
+            "partial_op",
+        ))
+        .is_err()
+    );
 }
 
 #[test]

@@ -379,7 +379,7 @@ Existing fitness functions remain authoritative:
 |---|---|---|
 | Keep runtime solver-independent. | `tools/check-native-integration.sh` dependency inspection | No `fsl-solver` or Z3 in the normal `fsl-runtime` tree. |
 | Keep WASM free of native Z3. | Same dependency inspection | No normal `fsl-solver-z3` dependency. |
-| Keep semantic paths aligned. | verifier expression/transition agreement tests | Valid Monitor facts are accepted and deliberately altered facts are rejected. |
+| Keep semantic paths aligned. | verifier expression/transition agreement tests | Solver-supported Monitor facts are accepted, deliberately altered facts are rejected, and unsupported partial-operation paths or unrepresentable concrete evidence fail closed rather than returning green. |
 | Keep Public Kernel complete and fail closed. | Kernel schema, conformance coverage, and negative tests | Every registered semantic/outcome feature is covered; unsupported nodes fail. |
 | Keep replay evidence executable. | replay schema/goldens and Monitor replay tests | Complete typed observations conform; malformed input and wrong states fail with the contracted exit. |
 | Keep delivery projections stable. | native integration, LSP stdio/corpus, and browser parity tests | CLI, LSP, and Worker preserve their shared identities and transport-specific contracts. |

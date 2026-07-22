@@ -194,6 +194,427 @@ pub(crate) fn eval<S: SmtSolver>(
     }
 }
 
+/// Build the condition under which concrete evaluation of `expr` completes
+/// without a partial operation, checked integer overflow, or invalid finite
+/// lookup. Unlike [`eval`], this preserves native short-circuit and conditional
+/// evaluation paths.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub(crate) fn definedness<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<S::Term, VerifyError> {
+    match expr {
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) => Ok(solver.bool_value(true)),
+        Expr::UnaryNamed {
+            name, expr: inner, ..
+        } if name == "old" => definedness(
+            solver,
+            model,
+            inner,
+            old_state.ok_or_else(|| VerifyError::new("old() used without old state"))?,
+            bindings,
+            None,
+        ),
+        Expr::Neg(inner) => {
+            let mut local = bindings.clone();
+            let inner_defined = definedness(solver, model, inner, state, &local, old_state)?;
+            let inner = eval(solver, model, inner, state, &mut local, old_state)?;
+            Ok(solver.and(&[
+                inner_defined,
+                solver.not(&solver.equal(int_term(&inner)?, &solver.int_value(i64::MIN))?)?,
+            ])?)
+        }
+        Expr::UnaryNamed {
+            name, expr: inner, ..
+        } if name == "abs" => {
+            let mut local = bindings.clone();
+            let inner_defined = definedness(solver, model, inner, state, &local, old_state)?;
+            let inner = eval(solver, model, inner, state, &mut local, old_state)?;
+            Ok(solver.and(&[
+                inner_defined,
+                solver.not(&solver.equal(int_term(&inner)?, &solver.int_value(i64::MIN))?)?,
+            ])?)
+        }
+        Expr::Some(inner)
+        | Expr::Not(inner)
+        | Expr::Field(inner, _)
+        | Expr::Is { expr: inner, .. }
+        | Expr::Stage { entity: inner, .. }
+        | Expr::UnaryNamed { expr: inner, .. } => {
+            definedness(solver, model, inner, state, bindings, old_state)
+        }
+        Expr::Set(items) | Expr::Seq(items) | Expr::Call { args: items, .. } => {
+            ordered_definedness(solver, model, items, state, bindings, old_state)
+        }
+        Expr::Struct { name, fields } => {
+            let TypeDef::Struct {
+                fields: expected, ..
+            } = model
+                .types
+                .get(name)
+                .ok_or_else(|| VerifyError::new(format!("unknown struct type '{name}'")))?
+            else {
+                return Err(VerifyError::new(format!("'{name}' is not a struct")));
+            };
+            let expressions = fields
+                .iter()
+                .map(|(field, expression)| (field.as_str(), expression))
+                .collect::<BTreeMap<_, _>>();
+            let items = expected
+                .iter()
+                .map(|(field, _)| {
+                    expressions
+                        .get(field.as_str())
+                        .copied()
+                        .ok_or_else(|| VerifyError::new(format!("missing struct field '{field}'")))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if expressions.len() != expected.len() {
+                return Err(VerifyError::new(format!(
+                    "struct '{name}' has the wrong number of fields"
+                )));
+            }
+            ordered_definedness_refs(solver, model, &items, state, bindings, old_state)
+        }
+        Expr::Index(base, index) => {
+            let mut local = bindings.clone();
+            let base_defined = definedness(solver, model, base, state, &local, old_state)?;
+            let base_value = eval(solver, model, base, state, &mut local, old_state)?;
+            let index_defined = definedness(solver, model, index, state, &local, old_state)?;
+            let index_value = eval(solver, model, index, state, &mut local, old_state)?;
+            let accessible = index_accessible(solver, model, &base_value, &index_value)?;
+            Ok(solver.and(&[base_defined, index_defined, accessible])?)
+        }
+        Expr::Method {
+            receiver,
+            name,
+            args,
+        } => {
+            let mut local = bindings.clone();
+            let receiver_defined = definedness(solver, model, receiver, state, &local, old_state)?;
+            let receiver_value = eval(solver, model, receiver, state, &mut local, old_state)?;
+            let arguments_defined =
+                ordered_definedness(solver, model, args, state, &local, old_state)?;
+            let argument_values = args
+                .iter()
+                .map(|argument| eval(solver, model, argument, state, &mut local, old_state))
+                .collect::<Result<Vec<_>, _>>()?;
+            let operation_defined =
+                method_definedness(solver, name, &receiver_value, argument_values.as_slice())?;
+            Ok(solver.and(&[receiver_defined, arguments_defined, operation_defined])?)
+        }
+        Expr::Binary { op, left, right } => {
+            let mut local = bindings.clone();
+            let left_defined = definedness(solver, model, left, state, &local, old_state)?;
+            let left_value = eval(solver, model, left, state, &mut local, old_state)?;
+            let right_defined = definedness(solver, model, right, state, &local, old_state)?;
+            let right_value = eval(solver, model, right, state, &mut local, old_state)?;
+            let reached_right = match op.as_str() {
+                "and" | "=>" => bool_term(&left_value)?.clone(),
+                "or" => solver.not(bool_term(&left_value)?)?,
+                _ => solver.bool_value(true),
+            };
+            let mut parts = vec![
+                left_defined,
+                solver.implies(&reached_right, &right_defined)?,
+            ];
+            if matches!(op.as_str(), "/" | "%") {
+                parts.push(
+                    solver.not(&solver.equal(int_term(&right_value)?, &solver.int_value(0))?)?,
+                );
+                let overflow = solver.and(&[
+                    solver.equal(int_term(&left_value)?, &solver.int_value(i64::MIN))?,
+                    solver.equal(int_term(&right_value)?, &solver.int_value(-1))?,
+                ])?;
+                parts.push(solver.not(&overflow)?);
+            } else if matches!(op.as_str(), "+" | "-" | "*") {
+                let result = match op.as_str() {
+                    "+" => solver.add(int_term(&left_value)?, int_term(&right_value)?)?,
+                    "-" => solver.sub(int_term(&left_value)?, int_term(&right_value)?)?,
+                    "*" => solver.mul(int_term(&left_value)?, int_term(&right_value)?)?,
+                    _ => unreachable!(),
+                };
+                parts.push(i64_term_is_in_range(solver, &result)?);
+            }
+            Ok(solver.and(&parts)?)
+        }
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            let mut local = bindings.clone();
+            let condition_defined =
+                definedness(solver, model, condition, state, &local, old_state)?;
+            let condition_value = eval(solver, model, condition, state, &mut local, old_state)?;
+            let then_defined = definedness(solver, model, then_expr, state, &local, old_state)?;
+            let else_defined = definedness(solver, model, else_expr, state, &local, old_state)?;
+            Ok(solver.and(&[
+                condition_defined,
+                solver.ite(bool_term(&condition_value)?, &then_defined, &else_defined)?,
+            ])?)
+        }
+        Expr::Quantified {
+            quantifier,
+            binder,
+            body,
+        } => quantified_definedness(
+            solver, model, quantifier, binder, body, state, bindings, old_state,
+        ),
+        Expr::Aggregate {
+            kind,
+            binder,
+            value,
+        } => aggregate_definedness(
+            solver,
+            model,
+            *kind,
+            binder,
+            value.as_deref(),
+            state,
+            bindings,
+            old_state,
+        ),
+        Expr::BinaryNamed { left, right, .. } => ordered_definedness_refs(
+            solver,
+            model,
+            &[left.as_ref(), right.as_ref()],
+            state,
+            bindings,
+            old_state,
+        ),
+        Expr::TernaryNamed {
+            first,
+            second,
+            third,
+            ..
+        } => ordered_definedness_refs(
+            solver,
+            model,
+            &[first.as_ref(), second.as_ref(), third.as_ref()],
+            state,
+            bindings,
+            old_state,
+        ),
+    }
+}
+
+fn ordered_definedness<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expressions: &[Expr],
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<S::Term, VerifyError> {
+    let expressions = expressions.iter().collect::<Vec<_>>();
+    ordered_definedness_refs(solver, model, &expressions, state, bindings, old_state)
+}
+
+fn ordered_definedness_refs<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expressions: &[&Expr],
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<S::Term, VerifyError> {
+    let mut local = bindings.clone();
+    let mut terms = Vec::new();
+    for expression in expressions {
+        terms.push(definedness(
+            solver, model, expression, state, &local, old_state,
+        )?);
+        let _ = eval(solver, model, expression, state, &mut local, old_state)?;
+    }
+    Ok(solver.and(&terms)?)
+}
+
+pub(crate) fn index_accessible<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    base: &SymbolicValue<S::Term>,
+    index: &SymbolicValue<S::Term>,
+) -> Result<S::Term, VerifyError> {
+    match base {
+        SymbolicValue::Map { ty, entries } => {
+            let TypeRef::Map(key_ty, _) = ty else {
+                unreachable!();
+            };
+            let terms = entries
+                .iter()
+                .map(|(key, _)| {
+                    let key = concrete_value(solver, model, key_ty, key)?;
+                    logical_equal(solver, model, index, &key)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(solver.or(&terms)?)
+        }
+        SymbolicValue::Seq { len, .. } => Ok(solver.and(&[
+            solver.ge(int_term(index)?, &solver.int_value(0))?,
+            solver.lt(int_term(index)?, len)?,
+        ])?),
+        _ => Err(VerifyError::new("indexing requires a map or sequence")),
+    }
+}
+
+fn method_definedness<S: SmtSolver>(
+    solver: &S,
+    name: &str,
+    receiver: &SymbolicValue<S::Term>,
+    arguments: &[SymbolicValue<S::Term>],
+) -> Result<S::Term, VerifyError> {
+    let SymbolicValue::Seq { len, .. } = receiver else {
+        return Ok(solver.bool_value(true));
+    };
+    match (name, arguments) {
+        ("head" | "pop", []) => solver
+            .gt(len, &solver.int_value(0))
+            .map_err(VerifyError::from),
+        ("at", [index]) => Ok(solver.and(&[
+            solver.ge(int_term(index)?, &solver.int_value(0))?,
+            solver.lt(int_term(index)?, len)?,
+        ])?),
+        _ => Ok(solver.bool_value(true)),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn quantified_definedness<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    quantifier: &str,
+    binder: &Binder,
+    body: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<S::Term, VerifyError> {
+    let mut terms = vec![binder_source_definedness(
+        solver, model, binder, state, bindings, old_state,
+    )?];
+    let mut reaches_candidate = solver.bool_value(true);
+    for (name, value, membership) in
+        binder_candidates(solver, model, binder, state, bindings, old_state)?
+    {
+        let mut local = bindings.clone();
+        local.insert(name, value);
+        let membership = membership.unwrap_or_else(|| solver.bool_value(true));
+        let where_defined = binder_where_expression(binder).map_or_else(
+            || Ok(solver.bool_value(true)),
+            |where_expr| definedness(solver, model, where_expr, state, &local, old_state),
+        )?;
+        terms.push(solver.implies(
+            &solver.and(&[reaches_candidate.clone(), membership.clone()])?,
+            &where_defined,
+        )?);
+        let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?
+            .unwrap_or_else(|| solver.bool_value(true));
+        let selected = solver.and(&[membership, where_term])?;
+        let body_defined = definedness(solver, model, body, state, &local, old_state)?;
+        terms.push(solver.implies(
+            &solver.and(&[reaches_candidate.clone(), selected.clone()])?,
+            &body_defined,
+        )?);
+        let body_value = eval(solver, model, body, state, &mut local, old_state)?;
+        let continues = if quantifier == "forall" {
+            solver.or(&[solver.not(&selected)?, bool_term(&body_value)?.clone()])?
+        } else {
+            solver.or(&[solver.not(&selected)?, solver.not(bool_term(&body_value)?)?])?
+        };
+        reaches_candidate = solver.and(&[reaches_candidate, continues])?;
+    }
+    Ok(solver.and(&terms)?)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn aggregate_definedness<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    kind: AggregateKind,
+    binder: &Binder,
+    value: Option<&Expr>,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<S::Term, VerifyError> {
+    let mut terms = vec![binder_source_definedness(
+        solver, model, binder, state, bindings, old_state,
+    )?];
+    let mut sum = solver.int_value(0);
+    for (name, candidate, membership) in
+        binder_candidates(solver, model, binder, state, bindings, old_state)?
+    {
+        let mut local = bindings.clone();
+        local.insert(name, candidate);
+        let membership = membership.unwrap_or_else(|| solver.bool_value(true));
+        let where_defined = binder_where_expression(binder).map_or_else(
+            || Ok(solver.bool_value(true)),
+            |where_expr| definedness(solver, model, where_expr, state, &local, old_state),
+        )?;
+        terms.push(solver.implies(&membership, &where_defined)?);
+        let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?
+            .unwrap_or_else(|| solver.bool_value(true));
+        if let Some(value) = value {
+            let value_defined = definedness(solver, model, value, state, &local, old_state)?;
+            let selected = solver.and(&[membership, where_term])?;
+            terms.push(solver.implies(&selected, &value_defined)?);
+            if kind == AggregateKind::Sum {
+                let value = eval(solver, model, value, state, &mut local, old_state)?;
+                let next_sum = solver.add(&sum, int_term(&value)?)?;
+                terms.push(solver.implies(&selected, &i64_term_is_in_range(solver, &next_sum)?)?);
+                sum = solver.ite(&selected, &next_sum, &sum)?;
+            }
+        }
+    }
+    Ok(solver.and(&terms)?)
+}
+
+fn i64_term_is_in_range<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<S::Term, VerifyError> {
+    Ok(solver.and(&[
+        solver.ge(term, &solver.int_value(i64::MIN))?,
+        solver.le(term, &solver.int_value(i64::MAX))?,
+    ])?)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn binder_source_definedness<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    binder: &Binder,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<S::Term, VerifyError> {
+    match binder {
+        Binder::Typed { .. } => Ok(solver.bool_value(true)),
+        Binder::Range { lo, hi, .. } => ordered_definedness_refs(
+            solver,
+            model,
+            &[lo.as_ref(), hi.as_ref()],
+            state,
+            bindings,
+            old_state,
+        ),
+        Binder::Collection { collection, .. } => {
+            definedness(solver, model, collection, state, bindings, old_state)
+        }
+    }
+}
+
+fn binder_where_expression(binder: &Binder) -> Option<&Expr> {
+    match binder {
+        Binder::Typed { where_expr, .. }
+        | Binder::Range { where_expr, .. }
+        | Binder::Collection { where_expr, .. } => where_expr.as_deref(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn eval_struct_literal<S: SmtSolver>(
     solver: &S,
