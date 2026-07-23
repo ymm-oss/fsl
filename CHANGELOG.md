@@ -13,6 +13,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- Native BMC, explicit/auto, and browser verification now share the single
+  `verification_output` renderer owner, while native engine selection and cache policy remain in
+  `verification` with explicit dependencies and unchanged output and exit contracts. Explicit
+  witnesses are replayed before rendering, and malformed or cross-family cache entries degrade to
+  misses instead of producing a verdict (#396).
 - The pure `conservation_candidate` classifier now belongs to the existing `fsl-tools` analysis
   family, while the CLI retains ai-review orchestration, envelope formatting, mode validation, and
   transport with unchanged findings, ordering, and exit codes (#395).
