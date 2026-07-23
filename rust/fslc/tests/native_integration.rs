@@ -115,6 +115,14 @@ fn native_cli_help_matches_the_embedded_contract_at_every_command_path() {
     assert_eq!(contract["schema"], "fsl-cli-contract.v1");
     let mut nodes = Vec::new();
     walk(&contract["root"], &mut nodes);
+    assert_eq!(
+        nodes
+            .iter()
+            .filter(|node| node["commands"].as_array().is_some_and(Vec::is_empty))
+            .count(),
+        50,
+        "the public contract must enumerate every live native leaf"
+    );
     let mut paths = BTreeSet::new();
 
     for node in nodes {
@@ -155,6 +163,22 @@ fn native_cli_help_matches_the_embedded_contract_at_every_command_path() {
             "help drift at {args:?}"
         );
     }
+
+    for path in [
+        vec!["causal"],
+        vec!["causal", "check"],
+        vec!["causal", "analyze"],
+        vec!["causal", "verify-expectations"],
+        vec!["causal", "observe-expectations"],
+        vec!["causal", "diff"],
+        vec!["causal", "ledger"],
+    ] {
+        assert!(paths.contains(&path), "missing public CLI path: {path:?}");
+    }
+    assert!(
+        !paths.contains(&vec!["causal", "verify"]),
+        "causal review must not acquire a proof-like verify command"
+    );
 
     let invalid_engine = run(&["verify", "specs/cart_v1.fsl", "--engine", "explict"]);
     assert_eq!(invalid_engine.status.code(), Some(2));
