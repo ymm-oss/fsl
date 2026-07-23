@@ -341,10 +341,13 @@ native binary: argument parsing
   TypeScript, and other raw modes remain raw. If emission is later centralized, the maximum needed
   abstraction is a two-variant `Json`/`Raw` output value, not a command framework or generic context
   object.
-- In that candidate, `verification.rs` would retain prepare/solve/cache/finalize staging but replace
-  `use super::*` with explicit imports. Shared native/Worker result policy belongs in
-  `verification_output`; native-only selection and cache policy belongs in `verification`; `main`
-  must not keep forwarding wrappers or duplicate property/output classification.
+- **Resolved C2 slice (#396):** `verification.rs` retains prepare/solve/cache/finalize staging with
+  explicit imports, while `verification_output` is the sole owner of BMC-compatible native,
+  explicit/auto, and Worker result projection. Native-only engine selection and cache policy remain
+  in `verification`; `main` keeps process dispatch and serialization without renderer forwarding or
+  duplicated property/output classification. Explicit evidence crosses the output boundary only
+  after Monitor replay; exact and cross-depth cache reuse validates the entry shape and binds it to
+  its independently computed option family. This does not authorize a full engine module tree.
 - `LiterateState`, atomic migration, verify cache, approval trust, and solver execution remain
   distinct state/failure owners rather than a single application state.
 - **Candidate experiment (not authorization):** if selected through the C2 gate, first make

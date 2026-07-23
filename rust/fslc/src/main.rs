@@ -15024,12 +15024,6 @@ fn apply_vacuity_mode(output: &mut Value, mode: &str) -> Option<i32> {
     Some(2)
 }
 
-fn coverage_hint(depth: usize) -> String {
-    format!(
-        "these requires clauses are unsatisfiable at every step up to depth {depth}; weaken one of them, add an action that establishes them, or increase --depth"
-    )
-}
-
 fn invariant_names(model: &KernelModel) -> Vec<String> {
     invariant_names_selected(model, None)
 }

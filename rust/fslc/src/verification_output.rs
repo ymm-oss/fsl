@@ -727,6 +727,286 @@ pub fn render_bmc_output(
     render_success(envelope, model, result, &options)
 }
 
+/// Render an explicit-state result through the same bounded-verification
+/// projection used by native BMC and the browser Worker, then add the
+/// explicit engine's closure and exploration metadata.
+///
+/// # Errors
+///
+/// Returns a diagnostic when any explicit witness fails Monitor replay.
+pub fn render_explicit_output(
+    envelope: Map<String, Value>,
+    model: &KernelModel,
+    result: &fsl_runtime::ExplicitResult,
+    checked_bounds: Option<&BTreeSet<String>>,
+    deadlock: DeadlockMode,
+    elapsed_s: f64,
+) -> Result<(Value, i32), String> {
+    let compatible = explicit_as_bmc(result);
+    replay_bmc_witnesses(model, &compatible, None)?;
+    let statistics = VerificationStatistics::default();
+
+    if let Some(violation) = &compatible.violation {
+        let options = BmcOutputOptions {
+            depth: result.depth,
+            deadlock,
+            checked_bounds,
+            elapsed_s,
+            statistics: &statistics,
+        };
+        let (mut output, status) = render_violation(envelope, model, violation, &options);
+        add_explicit_metadata(&mut output, result);
+        return Ok((output, status));
+    }
+
+    if deadlock == DeadlockMode::Error
+        && let Some(step) = result.deadlock_step
+    {
+        let options = BmcOutputOptions {
+            depth: result.depth,
+            deadlock,
+            checked_bounds,
+            elapsed_s,
+            statistics: &statistics,
+        };
+        let (mut output, status) =
+            render_deadlock_failure(envelope, model, &compatible, step, &options);
+        add_explicit_metadata(&mut output, result);
+        return Ok((output, status));
+    }
+
+    if result.budget_exceeded {
+        return Ok(render_explicit_budget(
+            envelope,
+            model,
+            result,
+            &compatible,
+            checked_bounds,
+            deadlock,
+            elapsed_s,
+            &statistics,
+        ));
+    }
+
+    let unreached = compatible
+        .reachables
+        .iter()
+        .filter(|(_, witness)| witness.is_none())
+        .filter_map(|(name, _)| {
+            model
+                .reachables
+                .iter()
+                .find(|property| property.name == *name)
+        })
+        .collect::<Vec<_>>();
+    if !unreached.is_empty() {
+        let options = BmcOutputOptions {
+            depth: result.depth_reached,
+            deadlock,
+            checked_bounds,
+            elapsed_s,
+            statistics: &statistics,
+        };
+        let (mut output, status) =
+            render_reachable_failure(envelope, model, &compatible, &unreached, &options);
+        if result.closure {
+            mark_reachables_definitively_unreachable(&mut output);
+        }
+        add_explicit_metadata(&mut output, result);
+        return Ok((output, status));
+    }
+
+    Ok(render_explicit_success(
+        envelope,
+        model,
+        result,
+        &compatible,
+        checked_bounds,
+        deadlock,
+        elapsed_s,
+        &statistics,
+    ))
+}
+
+fn explicit_as_bmc(result: &fsl_runtime::ExplicitResult) -> BmcResult {
+    BmcResult {
+        spec: result.spec.clone(),
+        depth: result.depth,
+        violation: result.violation.as_ref().map(|violation| BmcViolation {
+            kind: violation.violation.kind.clone(),
+            name: violation.violation.name.clone(),
+            step: violation.violation.step,
+            last_action: violation
+                .trace
+                .last()
+                .and_then(|entry| entry.action.as_ref())
+                .map(|action| action.name.clone()),
+            trace: violation.trace.clone(),
+            leads_to: None,
+        }),
+        leadsto_violation: None,
+        reachables: result
+            .reachables
+            .iter()
+            .map(|(name, witness)| {
+                (
+                    name.clone(),
+                    witness
+                        .as_ref()
+                        .map(|witness| fsl_verifier::ReachableWitness {
+                            step: witness.step,
+                            trace: witness.trace.clone(),
+                        }),
+                )
+            })
+            .collect(),
+        deadlock_step: result.deadlock_step,
+        deadlock_trace: result.deadlock_trace.clone(),
+        action_coverage: result.action_coverage.clone(),
+        frontier_progress: !result.closure && !result.budget_exceeded,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_explicit_budget(
+    mut output: Map<String, Value>,
+    model: &KernelModel,
+    result: &fsl_runtime::ExplicitResult,
+    compatible: &BmcResult,
+    checked_bounds: Option<&BTreeSet<String>>,
+    deadlock: DeadlockMode,
+    elapsed_s: f64,
+    statistics: &VerificationStatistics,
+) -> (Value, i32) {
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("result".to_owned(), json!("unknown_budget"));
+    let options = BmcOutputOptions {
+        depth: result.depth_reached,
+        deadlock,
+        checked_bounds,
+        elapsed_s,
+        statistics,
+    };
+    add_common(&mut output, model, compatible, &options);
+    output.insert("depth".to_owned(), json!(result.depth));
+    output.insert("completeness".to_owned(), json!("unknown"));
+    if deadlock == DeadlockMode::Ignore {
+        output.insert("deadlock".to_owned(), json!({"found": false}));
+    }
+    output.insert(
+        "hint".to_owned(),
+        json!(format!(
+            "explicit-state exploration reached its {}-state budget; increase --explicit-budget or use --engine bmc",
+            result.states_explored
+        )),
+    );
+    output.insert(
+        "cost".to_owned(),
+        serde_json::to_value(statistics.with_elapsed(elapsed_s))
+            .expect("verification cost serializes"),
+    );
+    let mut value = Value::Object(output);
+    add_explicit_metadata(&mut value, result);
+    (value, 1)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_explicit_success(
+    mut output: Map<String, Value>,
+    model: &KernelModel,
+    result: &fsl_runtime::ExplicitResult,
+    compatible: &BmcResult,
+    checked_bounds: Option<&BTreeSet<String>>,
+    deadlock: DeadlockMode,
+    elapsed_s: f64,
+    statistics: &VerificationStatistics,
+) -> (Value, i32) {
+    if !result.closure {
+        let options = BmcOutputOptions {
+            depth: result.depth,
+            deadlock,
+            checked_bounds,
+            elapsed_s,
+            statistics,
+        };
+        let (mut output, status) = render_success(output, model, compatible, &options);
+        add_explicit_metadata(&mut output, result);
+        return (output, status);
+    }
+
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("result".to_owned(), json!("proved"));
+    let options = BmcOutputOptions {
+        depth: result.depth_reached,
+        deadlock,
+        checked_bounds,
+        elapsed_s,
+        statistics,
+    };
+    add_common(&mut output, model, compatible, &options);
+    output.insert("depth".to_owned(), json!(result.depth));
+    output.insert("engine".to_owned(), json!("explicit"));
+    output.insert("completeness".to_owned(), json!("unbounded"));
+    if deadlock == DeadlockMode::Ignore {
+        output.insert("deadlock".to_owned(), json!({"found": false}));
+    }
+    output.insert(
+        "warnings".to_owned(),
+        Value::Array(shared_warnings(model, compatible, &options)),
+    );
+    output.insert(
+        "note".to_owned(),
+        json!(
+            "explicit-state exploration reached closure; invariants hold in every reachable state"
+        ),
+    );
+    output.insert(
+        "cost".to_owned(),
+        serde_json::to_value(statistics.with_elapsed(elapsed_s))
+            .expect("verification cost serializes"),
+    );
+    let mut value = Value::Object(output);
+    add_explicit_metadata(&mut value, result);
+    (value, 0)
+}
+
+fn add_explicit_metadata(output: &mut Value, result: &fsl_runtime::ExplicitResult) {
+    let Some(output) = output.as_object_mut() else {
+        return;
+    };
+    output.insert("engine".to_owned(), json!("explicit"));
+    output.insert("closure".to_owned(), json!(result.closure));
+    output.insert("states_explored".to_owned(), json!(result.states_explored));
+    output.insert(
+        "max_frontier_width".to_owned(),
+        json!(result.max_frontier_width),
+    );
+    output.insert("depth_reached".to_owned(), json!(result.depth_reached));
+}
+
+fn mark_reachables_definitively_unreachable(output: &mut Value) {
+    let Some(output) = output.as_object_mut() else {
+        return;
+    };
+    if let Some(unreached) = output.get_mut("unreached").and_then(Value::as_array_mut) {
+        for item in unreached {
+            if let Value::Object(item) = item {
+                item.insert("classification".to_owned(), json!("unreachable"));
+                item.insert(
+                    "hint".to_owned(),
+                    json!(
+                        "not witnessed before explicit state-space closure; the goal is unreachable"
+                    ),
+                );
+            }
+        }
+    }
+    output.insert(
+        "hint".to_owned(),
+        json!("explicit state-space closure proves that the requested reachable goal cannot be reached"),
+    );
+}
+
 #[allow(clippy::too_many_lines)]
 fn render_violation(
     mut output: Map<String, Value>,
@@ -1336,4 +1616,108 @@ fn origin_aware_property_name(
         output.insert("loc".to_owned(), span.python_loc());
     }
     origin_display_name(origin).map_or_else(|| display_name(name), str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn checked_model(source: &str) -> KernelModel {
+        let kernel = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+            .expect("lower source");
+        fsl_core::build_model(kernel).expect("build model")
+    }
+
+    fn test_envelope() -> Map<String, Value> {
+        Map::from_iter([("fsl".to_owned(), json!("1.0"))])
+    }
+
+    #[test]
+    fn explicit_renderer_rejects_a_corrupted_violation_before_rendering() {
+        let model = checked_model(
+            r"spec CorruptEvidence {
+  state { done: Bool }
+  init { done = false }
+  action finish() { requires not done done = true }
+  invariant NeverDone { not done }
+}",
+        );
+        let explicit =
+            fsl_runtime::verify_explicit(model.clone(), 2, 100).expect("run explicit verification");
+        let mut explicit = explicit;
+        let trace = &mut explicit
+            .violation
+            .as_mut()
+            .expect("violation evidence")
+            .trace;
+        trace
+            .last_mut()
+            .expect("violating state")
+            .state
+            .insert("done".to_owned(), FslValue::Bool(false));
+
+        let rendered = render_explicit_output(
+            test_envelope(),
+            &model,
+            &explicit,
+            None,
+            DeadlockMode::Ignore,
+            0.0,
+        );
+        assert!(rendered.is_err());
+    }
+
+    #[test]
+    fn explicit_bounded_success_uses_byte_identical_shared_rendering() {
+        let model = checked_model(
+            r"spec SharedRendering {
+  state { active: Bool }
+  init { active = false }
+  action toggle() { active = not active }
+  invariant BooleanState { active or not active }
+}",
+        );
+        let explicit =
+            fsl_runtime::verify_explicit(model.clone(), 0, 100).expect("run explicit verification");
+        assert!(!explicit.closure);
+        let compatible = explicit_as_bmc(&explicit);
+        let statistics = VerificationStatistics::default();
+        let (bmc, bmc_status) = render_bmc_output(
+            test_envelope(),
+            &model,
+            &compatible,
+            BmcOutputOptions {
+                depth: explicit.depth,
+                deadlock: DeadlockMode::Ignore,
+                checked_bounds: None,
+                elapsed_s: 0.0,
+                statistics: &statistics,
+            },
+        );
+        let (mut explicit_output, explicit_status) = render_explicit_output(
+            test_envelope(),
+            &model,
+            &explicit,
+            None,
+            DeadlockMode::Ignore,
+            0.0,
+        )
+        .expect("explicit evidence replays");
+        let explicit_envelope = explicit_output.as_object_mut().expect("explicit envelope");
+        for key in [
+            "engine",
+            "closure",
+            "states_explored",
+            "max_frontier_width",
+            "depth_reached",
+        ] {
+            explicit_envelope.remove(key);
+        }
+
+        assert_eq!(explicit_status, bmc_status);
+        assert_eq!(
+            serde_json::to_vec_pretty(&explicit_output).expect("serialize explicit output"),
+            serde_json::to_vec_pretty(&bmc).expect("serialize BMC output")
+        );
+    }
 }
