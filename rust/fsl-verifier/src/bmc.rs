@@ -2,20 +2,19 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fsl_core::{
-    FslValue, KernelBinder, KernelModel, LeadsToDef, TraceAction, TraceChange, TraceStep,
-    static_leadsto_bindings,
-};
-use fsl_solver::{ModelValue, SatResult, SmtSolver};
+use fsl_core::{FslValue, KernelModel, LeadsToDef, TraceStep};
+use fsl_solver::{SatResult, SmtSolver};
 
 use crate::VerifyError;
-use crate::eval::{binder_values, eval};
+use crate::eval::eval;
+use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
+use crate::trace::project_trace;
 use crate::transition::{
     ActionInstance, action_guards, action_instances, init_constraints, transition_constraint,
 };
 use crate::value::{
     Bindings, SymbolicState, bool_term, bounds, concrete_value, i64_index, logical_equal,
-    project_state, project_value, symbolic_state,
+    symbolic_state,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -558,135 +557,6 @@ async fn build_witness<S: SmtSolver>(
     let popped = solver.pop(1);
     popped?;
     projected
-}
-
-pub(crate) fn project_trace<S: SmtSolver>(
-    solver: &S,
-    model: &KernelModel,
-    states: &[SymbolicState<S::Term>],
-    choices: &[S::Term],
-    instances: &[ActionInstance<S::Term>],
-    upto: usize,
-) -> Result<Vec<TraceStep>, VerifyError> {
-    let mut trace = Vec::new();
-    for step in 0..=upto {
-        let state = project_state(solver, model, &states[step])?;
-        let action = if step == 0 {
-            None
-        } else {
-            Some(project_action(
-                solver,
-                model,
-                &choices[step - 1],
-                instances,
-            )?)
-        };
-        let changes = trace
-            .last()
-            .map_or_else(BTreeMap::new, |previous: &TraceStep| {
-                state
-                    .iter()
-                    .filter_map(|(name, value)| {
-                        let before = &previous.state[name];
-                        (before != value).then(|| {
-                            (
-                                name.clone(),
-                                TraceChange {
-                                    from: before.clone(),
-                                    to: value.clone(),
-                                },
-                            )
-                        })
-                    })
-                    .collect()
-            });
-        trace.push(TraceStep {
-            step,
-            state,
-            action,
-            changes,
-        });
-    }
-    Ok(trace)
-}
-
-fn project_action<S: SmtSolver>(
-    solver: &S,
-    model: &KernelModel,
-    choice: &S::Term,
-    instances: &[ActionInstance<S::Term>],
-) -> Result<TraceAction, VerifyError> {
-    let index = match solver.model_eval(choice)? {
-        Some(ModelValue::Int(value)) => usize::try_from(value)
-            .map_err(|_| VerifyError::new("negative action choice in model"))?,
-        Some(ModelValue::Bool(_)) => {
-            return Err(VerifyError::new("Boolean action choice in model"));
-        }
-        None => return Err(VerifyError::new("action choice is unavailable in model")),
-    };
-    let instance = instances
-        .get(index)
-        .ok_or_else(|| VerifyError::new("action choice outside instance range"))?;
-    Ok(TraceAction {
-        name: instance.action.clone(),
-        params: instance
-            .params
-            .iter()
-            .map(|(name, value)| Ok((name.clone(), project_value(solver, model, value)?)))
-            .collect::<Result<BTreeMap<String, FslValue>, VerifyError>>()?,
-    })
-}
-
-#[derive(Clone)]
-pub(crate) struct LeadstoBinding<T> {
-    pub concrete: BTreeMap<String, FslValue>,
-    pub symbolic: Bindings<T>,
-}
-
-pub(crate) fn leadsto_bindings<S: SmtSolver>(
-    solver: &S,
-    model: &KernelModel,
-    property: &LeadsToDef,
-) -> Result<Vec<LeadstoBinding<S::Term>>, VerifyError> {
-    let mut expanded = vec![Bindings::new()];
-    for binder in &property.binders {
-        let symbolic = binder_values(solver, model, binder)?;
-        let name = match binder {
-            KernelBinder::Typed { name, .. }
-            | KernelBinder::Range { name, .. }
-            | KernelBinder::Collection { name, .. } => name,
-        };
-        let mut next = Vec::new();
-        for binding in expanded {
-            for (_, term) in &symbolic {
-                let mut candidate = binding.clone();
-                candidate.insert(name.clone(), term.clone());
-                next.push(candidate);
-            }
-        }
-        expanded = next;
-    }
-    let concrete = static_leadsto_bindings(model, property)?;
-    if concrete.len() != expanded.len() {
-        return Err(VerifyError::new("leadsTo binder expansion mismatch"));
-    }
-    Ok(concrete
-        .into_iter()
-        .zip(expanded)
-        .map(|(concrete, symbolic)| LeadstoBinding { concrete, symbolic })
-        .collect())
-}
-
-pub(crate) fn leadsto_condition<S: SmtSolver>(
-    solver: &S,
-    model: &KernelModel,
-    expr: &fsl_core::KernelExpr,
-    state: &SymbolicState<S::Term>,
-    binding: &Bindings<S::Term>,
-) -> Result<S::Term, VerifyError> {
-    let mut binding = binding.clone();
-    let value = eval(solver, model, expr, state, &mut binding, None)?;
-    Ok(bool_term(&value)?.clone())
 }
 
 fn states_equal<S: SmtSolver>(

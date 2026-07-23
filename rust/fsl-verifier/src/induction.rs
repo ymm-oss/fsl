@@ -6,8 +6,9 @@ use fsl_core::{FslValue, KernelModel, TypeDef, TypeRef};
 use fsl_solver::{ModelValue, SatResult, SmtSolver};
 
 use crate::VerifyError;
-use crate::bmc::{leadsto_bindings, leadsto_condition, project_trace};
 use crate::eval::eval;
+use crate::liveness::{leadsto_bindings, leadsto_condition};
+use crate::trace::project_trace;
 use crate::transition::{action_instances, transition_constraint};
 use crate::value::{
     Bindings, SymbolicState, bool_term, bounds, i64_index, int_term, symbolic_state_with_suffix,
