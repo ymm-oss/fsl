@@ -13,6 +13,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- BMC and induction now share neutral private liveness and trace-projection
+  owners, preserving verdicts, evidence, trace output, and solver boundaries
+  (#421).
 - Checked-model type validation now has one private neutral `fsl-core` owner
   shared by model construction, refinement, and Public Kernel export, with
   unchanged Kernel schemas, ordering, diagnostics, and fail-closed controls

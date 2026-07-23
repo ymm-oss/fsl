@@ -94,10 +94,10 @@ fn within_deadline_met_stays_verified_beyond_the_deadlock_step() {
 }
 
 #[test]
-fn bounded_leadsto_where_filters_fail_closed_in_bmc() {
+fn bounded_and_ranked_leadsto_where_filters_fail_closed_through_one_owner() {
     let source = LATE_Q.replace(
         "leadsTo Progress { x == 1 ~> within 1 x == 3 }",
-        "leadsTo Progress { forall i: Count where i > 0 { x == 1 ~> within 1 x == 3 } }",
+        "leadsTo Progress { forall i: Count where i > 0 { x == 1 ~> within 1 x == 3 } decreases 3 - x }",
     );
     let kernel =
         parse_kernel_source(&source, &FsResolver::new(std::env::temp_dir())).expect("parse");
@@ -106,4 +106,9 @@ fn bounded_leadsto_where_filters_fail_closed_in_bmc() {
     let error = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 2))
         .expect_err("where filters must fail closed");
     assert!(error.message.contains("where filters"), "{error}");
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create ranked solver");
+    let ranked_error = block_on(fsl_verifier::prove_ranked_leadstos(&model, &mut solver))
+        .expect_err("ranked where filters must fail closed through the same owner");
+    assert_eq!(ranked_error.message, error.message);
 }
