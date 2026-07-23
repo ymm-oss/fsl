@@ -248,18 +248,20 @@ fn renderer_rejects_a_state_rule_reclassified_as_a_deadline() {
         fsl_core::parse_kernel_source(&fixture.source, &fsl_core::FsResolver::new(&fixture.root))
             .expect("parse model");
     let model = fsl_core::build_model(kernel.clone()).expect("build model");
-    let error = fsl_tools::render_requirements_document(
-        &claims,
-        &kernel,
-        &model,
-        &fixture.source,
-        Locale::En,
-        None,
-        None,
-        None,
-    )
-    .expect_err("mismatched claim kind must fail closed");
-    assert!(error.contains("does not match the paired"));
+    for locale in [Locale::Ja, Locale::En] {
+        let error = fsl_tools::render_requirements_document(
+            &claims,
+            &kernel,
+            &model,
+            &fixture.source,
+            locale,
+            None,
+            None,
+            None,
+        )
+        .expect_err("mismatched claim kind must fail closed independently of presentation locale");
+        assert!(error.contains("does not match the paired"));
+    }
 }
 
 #[test]

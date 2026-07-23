@@ -19,7 +19,7 @@ use fsl_core::{FslValue, KernelModel};
 use serde::Deserialize;
 use serde::de::{Deserializer, MapAccess, Visitor};
 
-use crate::document_render::Locale;
+use crate::document_presentation::Locale;
 
 pub const GLOSSARY_SCHEMA: &str = "fslc.document-glossary.v1";
 

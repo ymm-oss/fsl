@@ -13,6 +13,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- Requirements-document locale parsing and selection now has one private
+  neutral presentation owner shared by rendering, markers, glossary, and
+  document checking, while preserving the `fsl_tools::Locale` facade and
+  generated output bytes (#422).
 - BMC and induction now share neutral private liveness and trace-projection
   owners, preserving verdicts, evidence, trace output, and solver boundaries
   (#421).
