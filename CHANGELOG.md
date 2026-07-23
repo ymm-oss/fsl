@@ -13,6 +13,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- The native causal command parser, I/O preparation, tool calls, and JSON/status projection now
+  have one explicit `causal.rs` module owner, while top-level dispatch, shared process helpers, raw
+  output, serialization, and exit normalization remain in `main.rs` with unchanged CLI contracts
+  (#393).
 - Native BMC, explicit/auto, and browser verification now share the single
   `verification_output` renderer owner, while native engine selection and cache policy remain in
   `verification` with explicit dependencies and unchanged output and exit contracts. Explicit

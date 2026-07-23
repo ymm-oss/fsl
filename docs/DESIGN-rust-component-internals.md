@@ -348,6 +348,19 @@ native binary: argument parsing
   duplicated property/output classification. Explicit evidence crosses the output boundary only
   after Monitor replay; exact and cross-depth cache reuse validates the entry shape and binds it to
   its independently computed option family. This does not authorize a full engine module tree.
+- **Resolved CLI experiment (#393):** the causal parser, I/O preparation, tool calls, and result
+  projection now form the single `causal.rs` family module. `main.rs` retains only top-level
+  dispatch, the causal-source `check` route, shared process helpers, serialization, and exit
+  normalization. The module imports each of its eight lower-crate dependencies and ten shared
+  parent helpers explicitly; it introduces no command framework, context object, fallback, or new
+  output type. Before extraction, the causal family occupied 1,452 contiguous lines and 13
+  functions inside the 15,709-line `main.rs`; afterward `main.rs` is 14,255 lines and the family is
+  a 1,468-line independently revertible module. The existing 38 causal CLI contracts plus explicit
+  argument/stderr, raw-stdout, evidence, location, and exit-status controls preserve the process
+  boundary. The first post-extraction representative change was test-only contract hardening and
+  still touched one focused test file, so it did **not** reduce file count; no production causal
+  follow-up has yet demonstrated lower edit count. This result supports clearer ownership but does
+  not authorize extracting a second family or adopting a typed command framework.
 - `LiterateState`, atomic migration, verify cache, approval trust, and solver execution remain
   distinct state/failure owners rather than a single application state.
 - **Candidate experiment (not authorization):** if selected through the C2 gate, first make
@@ -429,9 +442,10 @@ revertible slices in this order of evidence, not as one pre-authorized migration
    and symlinked inputs.
 4. **Dependency slice:** replace `fslc/src/verification.rs`'s parent glob with explicit imports and
    remove forwarding/duplicate policy only after proving identical callers.
-5. **CLI experiment:** extract the causal command family without changing arguments, JSON envelopes,
-   raw modes, stdout, exit codes, or tool calls. Observe the next representative causal change before
-   extracting another family.
+5. **CLI experiment (completed by #393):** the causal command family is extracted with unchanged
+   arguments, JSON envelopes, raw modes, stdout, exit codes, and tool calls. Its first test-only
+   follow-up did not reduce the one-file edit scope; require a production causal follow-up before
+   claiming change-amplification improvement or extracting another family.
 6. **Touch-driven slices:** when runtime, LSP store, or another command family changes, move only the
    affected logical owner and its focused tests.
 
