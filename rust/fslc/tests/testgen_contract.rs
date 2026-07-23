@@ -91,3 +91,51 @@ fn compose_bridge_preserves_pytest_and_baked_target_goldens() {
         );
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn symlink_source_name_and_canonical_pytest_path_remain_distinct() {
+    use std::os::unix::fs::symlink;
+
+    let root = root();
+    let fixture_root = root.join("rust/target/testgen-contract");
+    let directory = fixture_root.join("path-context");
+    let real_output_parent = fixture_root.join("path-output-real");
+    if directory.exists() {
+        std::fs::remove_dir_all(&directory).expect("clear path-context fixture");
+    }
+    if real_output_parent.exists() {
+        std::fs::remove_dir_all(&real_output_parent).expect("clear real output fixture");
+    }
+    std::fs::create_dir_all(&directory).expect("create path-context fixture");
+    std::fs::create_dir_all(&real_output_parent).expect("create real output directory");
+    let generated = directory.join("generated-link");
+    symlink(&real_output_parent, &generated).expect("create output-parent symlink");
+    let alias = directory.join("cart-alias.fsl");
+    symlink(root.join("specs/cart_v1.fsl"), &alias).expect("create spec symlink");
+    let output_path = generated.join("cart.py");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .arg("testgen")
+        .arg(&alias)
+        .args(["--depth", "3", "--target", "pytest", "-o"])
+        .arg(&output_path)
+        .current_dir(&root)
+        .output()
+        .expect("run symlinked native testgen");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let generated = std::fs::read_to_string(&output_path).expect("read symlink pytest output");
+    assert!(generated.contains("Source: cart-alias.fsl"));
+    assert!(
+        generated.contains(
+            "SPEC_PATH = Path(__file__).resolve().parent / '../../../../specs/cart_v1.fsl'"
+        )
+    );
+
+    std::fs::remove_dir_all(&directory).expect("clear path-context fixture");
+    std::fs::remove_dir_all(&real_output_parent).expect("clear real output fixture");
+}

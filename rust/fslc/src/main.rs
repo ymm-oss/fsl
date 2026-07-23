@@ -10841,11 +10841,14 @@ fn run_testgen(
         Ok(walk) => walk,
         Err(error) => return (semantic_error_output(&error), 2),
     };
+    let path_context = match testgen_path_context(path, output_path) {
+        Ok(context) => context,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
     let input = if source_dialect(&source) == "compose" {
         fsl_tools::compose_testgen_input(
             &model.name,
-            path,
-            output_path,
+            &path_context,
             model.state.iter().map(|(name, _)| name.clone()).collect(),
             model
                 .actions
@@ -10873,7 +10876,7 @@ fn run_testgen(
         )
         .map_err(|error| error.to_string())
         .and_then(|contract| {
-            fsl_tools::public_kernel_testgen_input(&contract, path, output_path, &scenarios, &walk)
+            fsl_tools::public_kernel_testgen_input(&contract, &path_context, &scenarios, &walk)
         })
     };
     let input = match input {
@@ -10916,6 +10919,23 @@ fn run_testgen(
         }
     }
     (result, status)
+}
+
+fn testgen_path_context(
+    spec_path: &Path,
+    output_path: Option<&Path>,
+) -> Result<fsl_tools::TestgenPathContext, String> {
+    let normalized_spec =
+        std::fs::canonicalize(spec_path).unwrap_or_else(|_| spec_path.to_path_buf());
+    match output_path {
+        None => fsl_tools::TestgenPathContext::without_output(spec_path, normalized_spec),
+        Some(output) => {
+            let output_parent = output.parent().map(|parent| {
+                std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf())
+            });
+            fsl_tools::TestgenPathContext::with_output(spec_path, normalized_spec, output_parent)
+        }
+    }
 }
 
 fn run_html_report(
