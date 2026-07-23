@@ -39,7 +39,10 @@ mod typestate;
 mod undecided;
 
 pub use ai::{check_ai, replay_ai};
-pub use analysis::{analyze_model, build_tsg, review_finding, structural_review_findings};
+pub use analysis::{
+    analyze_model, build_tsg, conservation_review_findings, review_finding,
+    structural_review_findings,
+};
 pub use analysis_export::export_analysis_graph;
 pub use causal::{
     Binding, BindingKind, CausalError, CausalModel, CausalWarning, Claim as CausalClaim,
