@@ -20,13 +20,67 @@ struct TestgenAction {
     params: Vec<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum TestgenOutputContext {
+    WithoutOutput,
+    WithOutput { parent: Option<PathBuf> },
+}
+
+/// Explicit, delivery-normalized path input for generated test presentation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TestgenPathContext {
+    source_name: String,
+    spec_path: PathBuf,
+    output: TestgenOutputContext,
+}
+
+impl TestgenPathContext {
+    /// Build context for content returned without an output file.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a raw source path without a UTF-8 file name.
+    pub fn without_output(source_path: &Path, spec_path: PathBuf) -> Result<Self, String> {
+        Ok(Self {
+            source_name: testgen_source_name(source_path)?,
+            spec_path,
+            output: TestgenOutputContext::WithoutOutput,
+        })
+    }
+
+    /// Build context for content written to a caller-selected output file.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a raw source path without a UTF-8 file name.
+    pub fn with_output(
+        source_path: &Path,
+        spec_path: PathBuf,
+        output_parent: Option<PathBuf>,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            source_name: testgen_source_name(source_path)?,
+            spec_path,
+            output: TestgenOutputContext::WithOutput {
+                parent: output_parent,
+            },
+        })
+    }
+}
+
+fn testgen_source_name(source_path: &Path) -> Result<String, String> {
+    source_path
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .map(str::to_owned)
+        .ok_or_else(|| "testgen spec path must have a UTF-8 file name".to_owned())
+}
+
 /// Normalized, target-independent input consumed by every test generator.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TestgenInput {
     spec_name: String,
-    source_name: String,
-    spec_path: PathBuf,
-    output_path: Option<PathBuf>,
+    path: TestgenPathContext,
     state_order: Vec<String>,
     actions: Vec<TestgenAction>,
     scenarios: Vec<Value>,
@@ -341,8 +395,7 @@ fn normalize_step(step: &mut Value, actions: &[TestgenAction]) {
 
 fn build_input(
     spec_name: String,
-    spec_path: &Path,
-    output_path: Option<&Path>,
+    path: &TestgenPathContext,
     state_order: Vec<String>,
     actions: Vec<TestgenAction>,
     scenarios: &Value,
@@ -370,11 +423,6 @@ fn build_input(
         })
         .collect::<BTreeMap<_, _>>();
     validate_walk(walk, &spec_name, &state_names, &action_params)?;
-    let source_name = spec_path
-        .file_name()
-        .and_then(std::ffi::OsStr::to_str)
-        .ok_or_else(|| "testgen spec path must have a UTF-8 file name".to_owned())?
-        .to_owned();
     let scenarios = normalize_scenarios(
         validate_scenarios(scenarios, &spec_name, &state_names, &action_params)?,
         &state_order,
@@ -382,9 +430,7 @@ fn build_input(
     );
     Ok(TestgenInput {
         spec_name,
-        source_name,
-        spec_path: spec_path.to_owned(),
-        output_path: output_path.map(Path::to_owned),
+        path: path.clone(),
         state_order,
         actions,
         scenarios,
@@ -399,8 +445,7 @@ fn build_input(
 /// Rejects incompatible or malformed contracts and mismatched specification names.
 pub fn public_kernel_testgen_input(
     kernel: &Value,
-    spec_path: &Path,
-    output_path: Option<&Path>,
+    path: &TestgenPathContext,
     scenarios: &Value,
     walk: &Value,
 ) -> Result<TestgenInput, String> {
@@ -457,15 +502,7 @@ pub fn public_kernel_testgen_input(
         .collect::<Result<Vec<_>, String>>()?;
     actions.sort_by_key(|(order, _)| *order);
     let actions = actions.into_iter().map(|(_, action)| action).collect();
-    build_input(
-        spec_name,
-        spec_path,
-        output_path,
-        state_order,
-        actions,
-        scenarios,
-        walk,
-    )
+    build_input(spec_name, path, state_order, actions, scenarios, walk)
 }
 
 /// Explicit compose bridge while Public Kernel rejects multi-file provenance.
@@ -479,8 +516,7 @@ pub fn public_kernel_testgen_input(
 #[doc(hidden)]
 pub fn compose_testgen_input(
     spec_name: &str,
-    spec_path: &Path,
-    output_path: Option<&Path>,
+    path: &TestgenPathContext,
     state_order: Vec<String>,
     actions: Vec<(String, Vec<String>)>,
     scenarios: &Value,
@@ -488,8 +524,7 @@ pub fn compose_testgen_input(
 ) -> Result<TestgenInput, String> {
     build_input(
         spec_name.to_owned(),
-        spec_path,
-        output_path,
+        path,
         state_order,
         actions
             .into_iter()
@@ -566,14 +601,15 @@ fn portable_path(path: &Path) -> String {
         .replace(std::path::MAIN_SEPARATOR, "/")
 }
 
-fn relative_spec_path(spec: &Path, output: Option<&Path>) -> String {
-    let absolute = std::fs::canonicalize(spec).unwrap_or_else(|_| spec.to_path_buf());
-    let Some(parent) = output.and_then(Path::parent) else {
-        return portable_path(&absolute);
+fn relative_spec_path(path: &TestgenPathContext) -> String {
+    let TestgenOutputContext::WithOutput {
+        parent: Some(parent),
+    } = &path.output
+    else {
+        return portable_path(&path.spec_path);
     };
-    let base = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
-    let left = base.components().collect::<Vec<_>>();
-    let right = absolute.components().collect::<Vec<_>>();
+    let left = parent.components().collect::<Vec<_>>();
+    let right = path.spec_path.components().collect::<Vec<_>>();
     let common = left
         .iter()
         .zip(&right)
@@ -591,18 +627,14 @@ fn relative_spec_path(spec: &Path, output: Option<&Path>) -> String {
 
 #[allow(clippy::too_many_lines)]
 fn emit_pytest(input: &TestgenInput) -> String {
-    let path_expr = if input.output_path.is_some() {
-        format!(
+    let path_expr = match input.path.output {
+        TestgenOutputContext::WithoutOutput => python_string(&relative_spec_path(&input.path)),
+        TestgenOutputContext::WithOutput { .. } => format!(
             "Path(__file__).resolve().parent / {}",
-            python_string(&relative_spec_path(
-                &input.spec_path,
-                input.output_path.as_deref()
-            ))
-        )
-    } else {
-        python_string(&relative_spec_path(&input.spec_path, None))
+            python_string(&relative_spec_path(&input.path))
+        ),
     };
-    let source_name = &input.source_name;
+    let source_name = &input.path.source_name;
     let mut text = format!(
         r#""""Auto-generated conformance tests for FSL spec.
 Source: {source_name}
@@ -1324,17 +1356,17 @@ fn emit_phpunit(source_name: &str, spec_name: &str, scenarios: &[Value], walk: &
 pub fn generate_testgen(input: &TestgenInput, target: &str) -> Result<String, String> {
     let content = match target {
         "pytest" => emit_pytest(input),
-        "vitest" => emit_vitest(&input.source_name, &input.scenarios, &input.walk),
-        "swift" => emit_swift(&input.source_name, &input.scenarios, &input.walk),
+        "vitest" => emit_vitest(&input.path.source_name, &input.scenarios, &input.walk),
+        "swift" => emit_swift(&input.path.source_name, &input.scenarios, &input.walk),
         "kotlin" => emit_kotlin(
-            &input.source_name,
+            &input.path.source_name,
             &input.spec_name,
             &input.scenarios,
             &input.walk,
         ),
-        "dart" => emit_dart(&input.source_name, &input.scenarios, &input.walk),
+        "dart" => emit_dart(&input.path.source_name, &input.scenarios, &input.walk),
         "phpunit" => emit_phpunit(
-            &input.source_name,
+            &input.path.source_name,
             &input.spec_name,
             &input.scenarios,
             &input.walk,
@@ -1382,16 +1414,19 @@ mod tests {
         (kernel, scenarios, walk)
     }
 
+    fn path_context() -> TestgenPathContext {
+        TestgenPathContext::without_output(Path::new("demo.fsl"), PathBuf::from("demo.fsl"))
+            .expect("build test path context")
+    }
+
     #[test]
     fn public_and_explicit_compose_metadata_normalize_to_one_input() {
         let (kernel, scenarios, walk) = contracts();
-        let public =
-            public_kernel_testgen_input(&kernel, Path::new("demo.fsl"), None, &scenarios, &walk)
-                .expect("adapt public Kernel");
+        let public = public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &walk)
+            .expect("adapt public Kernel");
         let compose = compose_testgen_input(
             "Demo",
-            Path::new("demo.fsl"),
-            None,
+            &path_context(),
             vec!["zeta".to_owned(), "alpha".to_owned()],
             vec![
                 ("begin".to_owned(), vec!["id".to_owned()]),
@@ -1403,6 +1438,96 @@ mod tests {
         .expect("adapt explicit compose metadata");
 
         assert_eq!(public, compose);
+    }
+
+    #[test]
+    fn explicit_path_context_is_the_only_generated_path_input() {
+        let (kernel, scenarios, walk) = contracts();
+        let first_context = TestgenPathContext::with_output(
+            Path::new("demo.fsl"),
+            PathBuf::from("/workspace/first/demo.fsl"),
+            Some(PathBuf::from("/workspace/generated")),
+        )
+        .expect("build first path context");
+        let second_context = TestgenPathContext::with_output(
+            Path::new("demo.fsl"),
+            PathBuf::from("/workspace/second/demo.fsl"),
+            Some(PathBuf::from("/workspace/generated")),
+        )
+        .expect("build second path context");
+        let first = public_kernel_testgen_input(&kernel, &first_context, &scenarios, &walk)
+            .expect("adapt first path context");
+        let second = public_kernel_testgen_input(&kernel, &second_context, &scenarios, &walk)
+            .expect("adapt second path context");
+
+        let first_pytest = generate_testgen(&first, "pytest").expect("emit first pytest");
+        let second_pytest = generate_testgen(&second, "pytest").expect("emit second pytest");
+        assert!(
+            first_pytest
+                .contains("SPEC_PATH = Path(__file__).resolve().parent / '../first/demo.fsl'")
+        );
+        assert!(
+            second_pytest
+                .contains("SPEC_PATH = Path(__file__).resolve().parent / '../second/demo.fsl'")
+        );
+        assert_ne!(first_pytest, second_pytest);
+        for target in ["vitest", "swift", "kotlin", "dart", "phpunit"] {
+            assert_eq!(
+                generate_testgen(&first, target).expect("emit first non-pytest target"),
+                generate_testgen(&second, target).expect("emit second non-pytest target"),
+                "{target} must not observe path-context changes"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_and_parentless_paths_keep_the_explicit_fallback_spelling() {
+        let (kernel, scenarios, walk) = contracts();
+        let missing = TestgenPathContext::without_output(
+            Path::new("missing.fsl"),
+            PathBuf::from("missing/spec.fsl"),
+        )
+        .expect("build missing path context");
+        let input = public_kernel_testgen_input(&kernel, &missing, &scenarios, &walk)
+            .expect("adapt missing path context");
+        let pytest = generate_testgen(&input, "pytest").expect("emit missing-path pytest");
+        assert!(pytest.contains("Source: missing.fsl"));
+        assert!(pytest.contains("SPEC_PATH = 'missing/spec.fsl'"));
+
+        let parentless = TestgenPathContext::with_output(
+            Path::new("demo.fsl"),
+            PathBuf::from("/workspace/demo.fsl"),
+            None,
+        )
+        .expect("build parentless path context");
+        let input = public_kernel_testgen_input(&kernel, &parentless, &scenarios, &walk)
+            .expect("adapt parentless output context");
+        let pytest = generate_testgen(&input, "pytest").expect("emit parentless-path pytest");
+        assert!(
+            pytest.contains("SPEC_PATH = Path(__file__).resolve().parent / '/workspace/demo.fsl'")
+        );
+    }
+
+    #[test]
+    fn generator_source_has_no_filesystem_or_canonicalization_dependency() {
+        let source = include_str!("testgen.rs");
+        let filesystem_api = ["std", "::", "fs"].concat();
+        let canonicalization_api = ["canonical", "ize"].concat();
+        let cwd_api = ["current", "_dir"].concat();
+        assert!(!source.contains(&filesystem_api));
+        assert!(!source.contains(&canonicalization_api));
+        assert!(!source.contains(&cwd_api));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_context_preserves_non_utf8_source_name_rejection() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let source = PathBuf::from(std::ffi::OsString::from_vec(vec![0xff]));
+        let error = TestgenPathContext::without_output(&source, source.clone())
+            .expect_err("reject a non-UTF-8 source name");
+        assert_eq!(error, "testgen spec path must have a UTF-8 file name");
     }
 
     #[test]
@@ -1423,30 +1548,26 @@ mod tests {
     fn public_adapter_fails_closed_on_schema_version_and_spec_mismatch() {
         let (mut kernel, scenarios, walk) = contracts();
         kernel["$schema"] = json!("https://example.com/kernel.schema.json");
-        let error =
-            public_kernel_testgen_input(&kernel, Path::new("demo.fsl"), None, &scenarios, &walk)
-                .expect_err("reject unsupported schema identifier");
+        let error = public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &walk)
+            .expect_err("reject unsupported schema identifier");
         assert!(error.contains("unsupported public Kernel $schema"));
 
         let (mut kernel, scenarios, walk) = contracts();
         kernel["schema_version"] = json!("2.0.0");
-        let error =
-            public_kernel_testgen_input(&kernel, Path::new("demo.fsl"), None, &scenarios, &walk)
-                .expect_err("reject unsupported version");
+        let error = public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &walk)
+            .expect_err("reject unsupported version");
         assert!(error.contains("unsupported public Kernel schema_version"));
 
         let (kernel, scenarios, mut walk) = contracts();
         walk["schema_version"] = json!("2.0.0");
-        let error =
-            public_kernel_testgen_input(&kernel, Path::new("demo.fsl"), None, &scenarios, &walk)
-                .expect_err("reject unsupported trace version");
+        let error = public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &walk)
+            .expect_err("reject unsupported trace version");
         assert!(error.contains("concrete vector.schema_version"));
 
         let (kernel, mut scenarios, walk) = contracts();
         scenarios["spec"] = json!("Other");
-        let error =
-            public_kernel_testgen_input(&kernel, Path::new("demo.fsl"), None, &scenarios, &walk)
-                .expect_err("reject mismatched spec");
+        let error = public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &walk)
+            .expect_err("reject mismatched spec");
         assert!(error.contains("does not match public Kernel spec"));
     }
 
@@ -1454,26 +1575,16 @@ mod tests {
     fn testgen_rejects_malformed_vectors_and_unknown_targets() {
         let (kernel, scenarios, mut malformed_walk) = contracts();
         malformed_walk["steps"] = json!([{"action":"begin"}]);
-        let error = public_kernel_testgen_input(
-            &kernel,
-            Path::new("demo.fsl"),
-            None,
-            &scenarios,
-            &malformed_walk,
-        )
-        .expect_err("reject malformed vector");
+        let error =
+            public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &malformed_walk)
+                .expect_err("reject malformed vector");
         assert!(error.contains("steps[0].params must be an object"));
 
         let (_, _, mut malformed_walk) = contracts();
         malformed_walk["extra"] = json!(true);
-        let error = public_kernel_testgen_input(
-            &kernel,
-            Path::new("demo.fsl"),
-            None,
-            &scenarios,
-            &malformed_walk,
-        )
-        .expect_err("reject unknown trace field");
+        let error =
+            public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &malformed_walk)
+                .expect_err("reject unknown trace field");
         assert!(error.contains("unknown field 'extra'"));
 
         let (_, _, mut malformed_walk) = contracts();
@@ -1483,14 +1594,9 @@ mod tests {
             "expected":{"zeta":0,"alpha":0},
             "extra":true
         }]);
-        let error = public_kernel_testgen_input(
-            &kernel,
-            Path::new("demo.fsl"),
-            None,
-            &scenarios,
-            &malformed_walk,
-        )
-        .expect_err("reject unknown trace step field");
+        let error =
+            public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &malformed_walk)
+                .expect_err("reject unknown trace step field");
         assert!(error.contains("steps[0] has unknown field 'extra'"));
 
         let malformed_scenarios = json!({
@@ -1503,14 +1609,9 @@ mod tests {
             }]
         });
         let (_, _, walk) = contracts();
-        let error = public_kernel_testgen_input(
-            &kernel,
-            Path::new("demo.fsl"),
-            None,
-            &malformed_scenarios,
-            &walk,
-        )
-        .expect_err("reject inconsistent scenario vector");
+        let error =
+            public_kernel_testgen_input(&kernel, &path_context(), &malformed_scenarios, &walk)
+                .expect_err("reject inconsistent scenario vector");
         assert!(error.contains("must have equal lengths"));
 
         let (_, _, mut walk) = contracts();
@@ -1519,9 +1620,8 @@ mod tests {
             "params":{},
             "expected":{"zeta":0,"alpha":0}
         }]);
-        let error =
-            public_kernel_testgen_input(&kernel, Path::new("demo.fsl"), None, &scenarios, &walk)
-                .expect_err("reject unknown vector action");
+        let error = public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &walk)
+            .expect_err("reject unknown vector action");
         assert!(error.contains("unknown action 'missing'"));
 
         let (_, _, mut walk) = contracts();
@@ -1530,15 +1630,13 @@ mod tests {
             "params":{},
             "expected":{"zeta":0,"alpha":0}
         }]);
-        let error =
-            public_kernel_testgen_input(&kernel, Path::new("demo.fsl"), None, &scenarios, &walk)
-                .expect_err("reject mismatched vector parameters");
+        let error = public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &walk)
+            .expect_err("reject mismatched vector parameters");
         assert!(error.contains("must match public Kernel parameters"));
 
         let (_, _, walk) = contracts();
-        let input =
-            public_kernel_testgen_input(&kernel, Path::new("demo.fsl"), None, &scenarios, &walk)
-                .expect("adapt valid input");
+        let input = public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &walk)
+            .expect("adapt valid input");
         assert!(generate_testgen(&input, "unknown").is_err());
     }
 
@@ -1559,9 +1657,8 @@ mod tests {
                 "expected_states":[]
             }
         ]);
-        let input =
-            public_kernel_testgen_input(&kernel, Path::new("demo.fsl"), None, &scenarios, &walk)
-                .expect("adapt valid scenarios");
+        let input = public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &walk)
+            .expect("adapt valid scenarios");
 
         let output = generate_testgen(&input, "pytest").expect("emit pytest");
 

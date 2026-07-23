@@ -81,7 +81,7 @@ inference), and E0 (assumption).
 | E-06 | E2 | Runtime rollback, explicit search, symbolic agreement, Public Kernel, document rendering, CLI, browser parity, and LSP tests contain rejecting cases. | Supplies existing fitness functions. |
 | E-07 | E3 | Focused syntax/core/runtime/solver/native-Z3/verifier tests passed 219 tests, and `cargo check -p fsl-solver-z3js --locked` passed at the baseline. | Confirms the semantic internals used as design evidence are reproducible. |
 | E-08 | E0 | Production load, third-party Rust API use, team ownership, and future feature frequency. | Limits eager restructuring and API-removal claims. |
-| E-09 | E2 | `fmt`, readable explain, and TypeScript modes emit raw output; the accepted port contract requires raw modes to remain raw. `testgen::relative_spec_path` directly canonicalizes paths. | Bounds the CLI output design and records the existing tool-I/O exception. |
+| E-09 | E2 | `fmt`, readable explain, and TypeScript modes emit raw output; the accepted port contract requires raw modes to remain raw. Test generation receives one delivery-normalized path context, and `testgen::relative_spec_path` is a lexical projection. | Bounds the CLI output design and records the resolved testgen I/O boundary. |
 
 Scoped classifications are:
 
@@ -96,9 +96,8 @@ Scoped classifications are:
 - **accidental:** current filenames, flat versus nested modules, private helper placement,
   root-module implementation bodies, and per-call accumulator shapes;
 - **defect:** checked type validation owned by `public_kernel`, shared induction policy owned by
-  `bmc`, document locale owned by its renderer, duplicated domain `snake` transforms, the native
-  verification module's glob dependency on its parent, and test-generation path normalization
-  performed inside the derived transform;
+  `bmc`, document locale owned by its renderer, duplicated domain `snake` transforms, and the native
+  verification module's glob dependency on its parent;
 - **unknown:** external use of the public legacy runtime BFS and compatibility binaries, operational
   importance of those paths, and whether current change clusters will persist.
 
@@ -135,9 +134,9 @@ implementations or state ownership require one.
 Parsers, lowerers, engines, and tool families return their native error/result type. The CLI,
 Worker, or LSP converts that result once at its boundary. Filesystem access is either an explicit
 delivery operation, a named resolver, or a declared path-presentation adapter; writes never occur
-inside semantic or derived-artifact transforms. `testgen::relative_spec_path` is the current bounded
-exception that canonicalizes paths inside a transform. No sibling tool may copy that pattern, and
-its caller must supply normalized path context before test-generation path semantics are changed.
+inside semantic or derived-artifact transforms. `fslc-rust` constructs test generation's explicit
+normalized path context, including independent spec and output-parent canonicalization/fallback;
+`testgen::relative_spec_path` remains a filesystem- and CWD-free lexical projection.
 
 Move-only refactors must retain both a successful oracle and a rejecting oracle. A successful build
 or unchanged positive snapshot alone does not establish semantic preservation.
@@ -302,12 +301,11 @@ builders/contexts are per-call accumulators. No family owns process lifecycle or
   names in both paths.
 - Retain the fail-closed `public_kernel` adapter shared by typestate, test generation, and Domain
   code generation. Do not merge those distinct tools merely because they share input validation.
-- Treat `testgen::relative_spec_path` as a bounded I/O debt. A candidate triggered by its next path
-  behavior change would move canonicalization to the caller and pass normalized path context into
-  the pure generator, preserving generated pytest output and embedded paths byte-for-byte for
-  existing, missing, and symlinked path inputs.
+- **Resolved C2 slice (#423):** `fslc-rust` owns test-generation path canonicalization and passes an
+  explicit normalized path context into the pure generator. Preserve generated pytest output and
+  embedded paths byte-for-byte for existing, missing, and symlinked path inputs.
 - **Candidate inventory (not authorization):** the future structural candidates are the locale
-  owner, duplicated Domain naming helper, and test-generation path input. Decide and verify each
+  owner and duplicated Domain naming helper. Decide and verify each
   independently under its own issue, accepted scope/design, positive and rejecting oracle,
   pre-PR audit, and independently revertible pull request. Do not replace the flat root API or
   create subcrates; family directories are optional presentation after the dependency graph is
@@ -419,8 +417,9 @@ revertible slices in this order of evidence, not as one pre-authorized migration
 1. **Exact duplication:** consolidate the Domain naming transform.
 2. **Neutral-policy slices:** move core checked-type validation, verifier liveness/trace helpers, or
    document locale ownership one at a time. Preserve root re-exports and accepted feature contracts.
-3. **Path-input slice:** move test-generation canonicalization to the delivery caller and preserve
-   generated pytest output and paths byte-for-byte for existing, missing, and symlinked inputs.
+3. **Path-input slice (completed by #423):** test-generation canonicalization is owned by the
+   delivery caller; generated pytest output and paths remain byte-identical for existing, missing,
+   and symlinked inputs.
 4. **Dependency slice:** replace `fslc/src/verification.rs`'s parent glob with explicit imports and
    remove forwarding/duplicate policy only after proving identical callers.
 5. **CLI experiment:** extract the causal command family without changing arguments, JSON envelopes,

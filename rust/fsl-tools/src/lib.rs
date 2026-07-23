@@ -109,7 +109,8 @@ pub use ledger::{render_ledger, render_ledger_with_approvals};
 pub use mutate::{BuiltinMutant, enumerate_builtin_mutants};
 pub use refinement_analysis::analyze_refinement;
 pub use testgen::{
-    TestgenInput, compose_testgen_input, generate_testgen, public_kernel_testgen_input,
+    TestgenInput, TestgenPathContext, compose_testgen_input, generate_testgen,
+    public_kernel_testgen_input,
 };
 pub use typestate::analyze_typestate;
 pub use undecided::{UndecidedRecord, undecided_declarations, undecided_records};

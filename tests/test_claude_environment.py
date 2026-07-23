@@ -104,8 +104,9 @@ def test_rust_architecture_rule_carries_the_accepted_contract() -> None:
         "source-changing C2",
         "negative control",
         "testgen::relative_spec_path",
+        "explicit testgen path context",
         "#423",
-        "implicit filesystem dependency",
+        "filesystem- and CWD-free lexical projection",
     ]
     assert all(contract in normalized_rule for contract in required_contracts)
 

@@ -27,9 +27,9 @@ paths:
 - The accepted logical module tree is an ownership map, not permission for an eager rewrite. Every
   source-changing C2 candidate requires its own issue and scope, an independently revertible change,
   a positive oracle, and a negative control that rejects known contract drift.
-- Semantic and derived transforms receive filesystem data through explicit input or a resolver. The
-  existing `testgen::relative_spec_path` access is bounded debt owned by #423; do not copy it or add
-  another implicit filesystem dependency.
+- Semantic and derived transforms receive filesystem data through explicit input or a resolver.
+  `fslc-rust` owns the explicit testgen path context resolved by #423;
+  `testgen::relative_spec_path` must remain a filesystem- and CWD-free lexical projection.
 - Preserve checked `i64` arithmetic and SMT-LIB Euclidean division/remainder behavior.
 - Run the smallest affected crate tests first, then formatting, Clippy, and wider workspace gates.
 - New Rust source files require `// SPDX-License-Identifier: Apache-2.0`.

@@ -13,6 +13,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- Test generation now receives an explicit delivery-normalized path context,
+  removing filesystem and CWD observation from the pure generator while
+  preserving existing, missing, and symlinked pytest paths and every other
+  target's output bytes (#423).
 - Requirements-document locale parsing and selection now has one private
   neutral presentation owner shared by rendering, markers, glossary, and
   document checking, while preserving the `fsl_tools::Locale` facade and
