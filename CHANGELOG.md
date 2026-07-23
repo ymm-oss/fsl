@@ -6,6 +6,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- The embedded native CLI contract and exact help tree now include all six documented causal
+  command leaves, while the deliberately absent `causal verify` path remains rejected (#442).
 - Verifier transition-outcome agreement now proves actual guard failure and
   representable defined post-update failure phases in native evaluation order,
   rejects malformed, relabelled, partial, or checked-arithmetic evidence, and

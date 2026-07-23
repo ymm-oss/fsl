@@ -36,6 +36,23 @@ native tests instead compare every live help path with the checked-in embedded c
 validate the published result/schema contracts. Existing Python parity utilities remain historical
 or explicitly invoked compatibility evidence only.
 
+The checked-in `rust/fslc/cli-contract.json` is therefore native-authored authority, not a snapshot
+to regenerate from the frozen Python parser. It enumerates all 50 live native leaves, including the
+six Rust-only causal commands, and the native test fixes that leaf count plus the deliberately absent
+`causal verify` path. `tools/export_cli_contract.py` exports only the frozen Python compatibility
+subset and refuses to overwrite the authoritative native file.
+
+The #442 local-optimum audit found that retaining the old Python exporter as an apparent complete
+source was locally convenient when the Rust CLI still matched it, but became a `mixed`
+externalization/time-delayed defect once causal evolved only in Rust: documentation and 39 causal
+tests were green while every causal `--help` path returned a JSON error (usage or I/O, depending on
+which parser branch consumed `--help`) with exit 2. The observed runtime failure, contract omission,
+and false-negative path walker give severity 5/15
+(`E1 A1 F1 K1 T1`) at confidence C3. The selected intervention adds the missing native nodes and a
+50-leaf rejecting oracle while relabeling and guarding the compatibility exporter. Adding product
+behavior to frozen Python or introducing a shared parser framework is rejected; rollback is one
+contract/test/tooling commit with no data migration.
+
 The Claude/Codex environment tests execute Python repository hooks, not the FSL compiler product.
 They remain focused manual tooling checks and are deliberately outside the required native product
 gate; changes to those hooks must invoke the two named tests directly.

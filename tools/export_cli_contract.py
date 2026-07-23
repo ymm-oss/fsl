@@ -1,7 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Export the complete public ``fslc`` argparse surface as canonical JSON."""
+"""Export the frozen Python compatibility CLI surface as canonical JSON.
+
+The authoritative native contract is ``rust/fslc/cli-contract.json`` and contains Rust-only
+commands. This compatibility exporter must never overwrite that native-owned artifact.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +19,7 @@ from fslc.cli_help import canonical_help
 
 
 ROOT = Path(__file__).resolve().parents[1]
+NATIVE_CONTRACT = ROOT / "rust" / "fslc" / "cli-contract.json"
 
 
 def _subparsers(parser: argparse.ArgumentParser) -> argparse._SubParsersAction | None:
@@ -76,7 +81,7 @@ def _parser_contract(parser: argparse.ArgumentParser, path: tuple[str, ...]) -> 
 
 
 def export_contract() -> dict[str, Any]:
-    """Return the deterministic public CLI contract."""
+    """Return the deterministic frozen-Python compatibility contract."""
     return {
         "schema": "fsl-cli-contract.v1",
         "root": _parser_contract(_build_arg_parser(), ()),
@@ -89,6 +94,11 @@ def main() -> None:
     parser = cli_argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-o", "--output", type=Path)
     args = parser.parse_args()
+    if args.output and args.output.resolve() == NATIVE_CONTRACT.resolve():
+        parser.error(
+            "refusing to overwrite the authoritative native CLI contract with the frozen "
+            "Python compatibility subset"
+        )
     rendered = json.dumps(export_contract(), ensure_ascii=False, indent=2) + "\n"
     if args.output:
         args.output.write_text(rendered, encoding="utf-8")
