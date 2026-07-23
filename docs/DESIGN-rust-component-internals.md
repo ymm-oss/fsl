@@ -304,6 +304,10 @@ builders/contexts are per-call accumulators. No family owns process lifecycle or
 - **Resolved C2 slice (#423):** `fslc-rust` owns test-generation path canonicalization and passes an
   explicit normalized path context into the pure generator. Preserve generated pytest output and
   embedded paths byte-for-byte for existing, missing, and symlinked path inputs.
+- **Resolved C2 slice (#395):** `fsl-tools::analysis` owns the pure checked-model classifier for
+  `conservation_candidate` findings. `fslc-rust` retains ai-review family orchestration, aggregate
+  ordering and finding IDs, the `analysis-findings.v0` envelope, mode validation, transport, and
+  exit status. Further analysis families require their own evidence and independently scoped move.
 - **Candidate inventory (not authorization):** the future structural candidates are the locale
   owner and duplicated Domain naming helper. Decide and verify each
   independently under its own issue, accepted scope/design, positive and rejecting oracle,

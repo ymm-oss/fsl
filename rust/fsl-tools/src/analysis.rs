@@ -581,6 +581,229 @@ fn lvalue_root(value: &LValue) -> &str {
     }
 }
 
+fn counter_delta(name: &str, expr: &Expr, model: &KernelModel) -> Option<i64> {
+    fn scalar(expr: &Expr, model: &KernelModel) -> Option<i64> {
+        match expr {
+            Expr::Num(value) => Some(*value),
+            Expr::Var(name) => match model.consts.get(name) {
+                Some(fsl_core::FslValue::Int(value)) => Some(*value),
+                _ => None,
+            },
+            Expr::Neg(value) => scalar(value, model).map(|value| -value),
+            _ => None,
+        }
+    }
+    let Expr::Binary { op, left, right } = expr else {
+        return None;
+    };
+    match op.as_str() {
+        "+" if matches!(left.as_ref(), Expr::Var(value) if value == name) => scalar(right, model),
+        "+" if matches!(right.as_ref(), Expr::Var(value) if value == name) => scalar(left, model),
+        "-" if matches!(left.as_ref(), Expr::Var(value) if value == name) => {
+            scalar(right, model).map(|value| -value)
+        }
+        _ => None,
+    }
+}
+
+fn scan_counter_statements(
+    statements: &[Statement],
+    counters: &BTreeSet<String>,
+    model: &KernelModel,
+    nested: bool,
+    deltas: &mut BTreeMap<String, i64>,
+    excluded: &mut BTreeSet<String>,
+) {
+    for statement in statements {
+        match statement {
+            Statement::Assign { target, value, .. } => {
+                let root = lvalue_root(target);
+                if !counters.contains(root) {
+                    continue;
+                }
+                if nested || !matches!(target, LValue::Var(name) if name == root) {
+                    excluded.insert(root.to_owned());
+                } else if let Some(delta) = counter_delta(root, value, model) {
+                    *deltas.entry(root.to_owned()).or_default() += delta;
+                } else {
+                    excluded.insert(root.to_owned());
+                }
+            }
+            Statement::If {
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                scan_counter_statements(then_statements, counters, model, true, deltas, excluded);
+                scan_counter_statements(else_statements, counters, model, true, deltas, excluded);
+            }
+            Statement::ForAll { statements, .. } => {
+                scan_counter_statements(statements, counters, model, true, deltas, excluded);
+            }
+        }
+    }
+}
+
+fn integer_gcd(mut left: i64, mut right: i64) -> i64 {
+    left = left.abs();
+    right = right.abs();
+    while right != 0 {
+        (left, right) = (right, left % right);
+    }
+    left.max(1)
+}
+
+fn weighted_sum_text(weights: &BTreeMap<String, i64>) -> String {
+    let mut parts = Vec::new();
+    for (name, weight) in weights {
+        if *weight == 0 {
+            continue;
+        }
+        let term = if weight.abs() == 1 {
+            name.clone()
+        } else {
+            format!("{}*{name}", weight.abs())
+        };
+        if parts.is_empty() {
+            parts.push(if *weight > 0 {
+                term
+            } else {
+                format!("-{term}")
+            });
+        } else {
+            parts.push(if *weight > 0 {
+                format!("+ {term}")
+            } else {
+                format!("- {term}")
+            });
+        }
+    }
+    parts.join(" ")
+}
+
+/// Derive deterministic, review-only weighted-sum conservation candidates.
+#[must_use]
+#[allow(clippy::too_many_lines)]
+pub fn conservation_review_findings(model: &KernelModel) -> Vec<Value> {
+    let counters = model
+        .state
+        .iter()
+        .filter(|(_, ty)| matches!(ty, TypeRef::Int))
+        .map(|(name, _)| name.clone())
+        .collect::<BTreeSet<_>>();
+    if counters.len() < 2 {
+        return Vec::new();
+    }
+    let mut excluded = BTreeSet::new();
+    let mut actions = model.actions.iter().collect::<Vec<_>>();
+    actions.sort_by_key(|action| &action.name);
+    let mut rows = Vec::new();
+    for action in actions {
+        let mut deltas = BTreeMap::new();
+        scan_counter_statements(
+            &action.statements,
+            &counters,
+            model,
+            false,
+            &mut deltas,
+            &mut excluded,
+        );
+        rows.push((format!("action:{}", action.name), deltas));
+    }
+    let eligible = counters
+        .iter()
+        .filter(|counter| {
+            !excluded.contains(*counter)
+                && rows
+                    .iter()
+                    .any(|(_, row)| row.get(*counter).copied().unwrap_or_default() != 0)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut findings = Vec::new();
+    for left in 0..eligible.len() {
+        for right in left + 1..eligible.len() {
+            let first = rows.iter().find_map(|(_, row)| {
+                let a = row.get(&eligible[left]).copied().unwrap_or_default();
+                let b = row.get(&eligible[right]).copied().unwrap_or_default();
+                (a != 0 || b != 0).then_some((a, b))
+            });
+            let Some((a, b)) = first else {
+                continue;
+            };
+            let divisor = integer_gcd(a, b);
+            let mut left_weight = b / divisor;
+            let mut right_weight = -a / divisor;
+            if left_weight < 0 || (left_weight == 0 && right_weight < 0) {
+                left_weight = -left_weight;
+                right_weight = -right_weight;
+            }
+            if left_weight == 0
+                || right_weight == 0
+                || rows.iter().any(|(_, row)| {
+                    left_weight * row.get(&eligible[left]).copied().unwrap_or_default()
+                        + right_weight * row.get(&eligible[right]).copied().unwrap_or_default()
+                        != 0
+                })
+            {
+                continue;
+            }
+            let weights = BTreeMap::from([
+                (eligible[left].clone(), left_weight),
+                (eligible[right].clone(), right_weight),
+            ]);
+            let action_effects = rows
+                .iter()
+                .filter_map(|(action, row)| {
+                    let deltas = weights
+                        .keys()
+                        .filter_map(|name| {
+                            let delta = row.get(name).copied().unwrap_or_default();
+                            (delta != 0).then_some((name.clone(), delta))
+                        })
+                        .collect::<BTreeMap<_, _>>();
+                    (!deltas.is_empty()).then_some(json!({
+                        "action":action,
+                        "deltas":deltas,
+                        "weighted_sum_delta":deltas.iter().map(|(name,delta)|weights[name]*delta).sum::<i64>(),
+                    }))
+                })
+                .collect::<Vec<_>>();
+            if action_effects.len() < 2 {
+                continue;
+            }
+            let expression = weighted_sum_text(&weights);
+            let involved = weights
+                .keys()
+                .map(|name| format!("state:{name}"))
+                .chain(
+                    action_effects
+                        .iter()
+                        .filter_map(|item| item["action"].as_str().map(str::to_owned)),
+                )
+                .collect::<BTreeSet<_>>();
+            findings.push(review_finding(
+                "conservation_candidate",
+                0.6,
+                json!(involved),
+                json!({
+                    "kind":"weighted_sum_conservation_candidate",
+                    "expression":expression,
+                    "weights":weights,
+                    "action_net_effects":action_effects,
+                    "excluded_counters":excluded,
+                }),
+                "Counter-like effects structurally preserve this weighted sum, which may indicate an implicit invariant worth declaring and proving.",
+                json!([{"kind":"add_invariant_then_verify","template":format!("Declare `invariant Conservation {{ {expression} == <initial value> }}` and run `fslc verify` plus `--engine induction` to prove it.")}]),
+                json!(["The weighted sum is actually invariant.","The absence of a candidate means no conservation law exists.","This finding is a proof; it is only structural evidence and must be checked by verify."]),
+                None,
+            ));
+        }
+    }
+    findings.truncate(8);
+    findings
+}
+
 fn lvalue_reads(value: &LValue, state: &BTreeSet<String>) -> BTreeSet<String> {
     match value {
         LValue::Index(_, index) => expr_reads(index, state),
@@ -921,6 +1144,12 @@ pub fn analyze_model(
 mod structural_review_tests {
     use super::*;
 
+    fn checked_model(source: &str) -> KernelModel {
+        let kernel = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+            .expect("lower source");
+        fsl_core::build_model(kernel).expect("build model")
+    }
+
     #[test]
     fn checked_model_yields_source_positioned_structural_findings() {
         let source = "spec Review { state { ready: Bool } init { ready = false } invariant stable { ready or not ready } }";
@@ -934,5 +1163,97 @@ mod structural_review_tests {
             .expect("unwritten state finding");
         assert_eq!(finding["formal_status"], "not_a_violation");
         assert_eq!(finding["involved_nodes"][0], "state:ready");
+    }
+
+    #[test]
+    fn conservation_candidates_preserve_exact_weights_action_order_and_wording() {
+        let model = checked_model(
+            r"spec ConservationCandidate {
+  const STEP = 2
+  state { stock: Int, reserved: Int, audit: Int }
+  init { stock = 2 reserved = 0 audit = 0 }
+  action reserve() { stock = stock - STEP reserved = reserved + 1 }
+  action release() { stock = stock + STEP reserved = reserved - 1 }
+  action audit_event() { audit = audit + 1 }
+}",
+        );
+
+        let findings = conservation_review_findings(&model);
+        assert_eq!(findings, conservation_review_findings(&model));
+        assert_eq!(findings.len(), 1);
+        let finding = &findings[0];
+        assert_eq!(finding["finding_type"], "conservation_candidate");
+        assert_eq!(finding["formal_status"], "not_a_violation");
+        assert_eq!(finding["confidence"], 0.6);
+        assert_eq!(
+            finding["involved_nodes"],
+            json!([
+                "action:release",
+                "action:reserve",
+                "state:reserved",
+                "state:stock"
+            ])
+        );
+        assert_eq!(
+            finding["witness"],
+            json!({
+                "kind":"weighted_sum_conservation_candidate",
+                "expression":"2*reserved + stock",
+                "weights":{"reserved":2,"stock":1},
+                "action_net_effects":[
+                    {"action":"action:release","deltas":{"reserved":-1,"stock":2},"weighted_sum_delta":0},
+                    {"action":"action:reserve","deltas":{"reserved":1,"stock":-2},"weighted_sum_delta":0}
+                ],
+                "excluded_counters":[]
+            })
+        );
+        assert!(
+            finding["candidate_repairs"][0]["template"]
+                .as_str()
+                .is_some_and(|text| text.contains("fslc verify"))
+        );
+    }
+
+    #[test]
+    fn conservation_candidates_reject_insufficient_or_nested_evidence() {
+        let one_counter = checked_model(
+            r"spec OneCounter {
+  state { value: Int }
+  init { value = 0 }
+  action increment() { value = value + 1 }
+  action decrement() { value = value - 1 }
+}",
+        );
+        assert!(conservation_review_findings(&one_counter).is_empty());
+
+        let one_action = checked_model(
+            r"spec OneAction {
+  state { left: Int, right: Int }
+  init { left = 1 right = 0 }
+  action move() { left = left - 1 right = right + 1 }
+}",
+        );
+        assert!(conservation_review_findings(&one_action).is_empty());
+
+        let nested = checked_model(
+            r"spec NestedEffects {
+  state { left: Int, right: Int }
+  init { left = 1 right = 0 }
+  action move() { if true { left = left - 1 right = right + 1 } }
+  action undo() { if true { left = left + 1 right = right - 1 } }
+}",
+        );
+        assert!(conservation_review_findings(&nested).is_empty());
+
+        let unsupported_arithmetic = checked_model(
+            r"spec UnsupportedArithmetic {
+  state { left: Int, right: Int }
+  init { left = 1 right = 0 }
+  action move() { left = left - 1 right = right + 1 }
+  action undo() { left = left + 1 right = right - 1 }
+  action scale() { left = left * 2 }
+}",
+        );
+        assert!(conservation_review_findings(&unsupported_arithmetic).is_empty());
     }
 }

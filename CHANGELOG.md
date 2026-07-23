@@ -13,6 +13,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- The pure `conservation_candidate` classifier now belongs to the existing `fsl-tools` analysis
+  family, while the CLI retains ai-review orchestration, envelope formatting, mode validation, and
+  transport with unchanged findings, ordering, and exit codes (#395).
 - Test generation now receives an explicit delivery-normalized path context,
   removing filesystem and CWD observation from the pure generator while
   preserving existing, missing, and symlinked pytest paths and every other
