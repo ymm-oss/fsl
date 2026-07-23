@@ -8,16 +8,20 @@
 //! attaches `proved`/`verified` to a causal claim.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 
 use serde_json::Value;
 
-fn run_cli(arguments: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+fn run_process(arguments: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(arguments)
         .current_dir(repository_root())
         .output()
-        .expect("run native fslc");
+        .expect("run native fslc")
+}
+
+fn run_cli(arguments: &[&str]) -> (Value, i32) {
+    let output = run_process(arguments);
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
             "invalid JSON: {error}; args={arguments:?}; stderr={}",
@@ -38,6 +42,44 @@ fn repository_root() -> PathBuf {
 const RETENTION: &str = "examples/causal/subscription_retention.fsl";
 const INCIDENT: &str = "examples/causal/incident_response.fsl";
 const FUNNEL: &str = "examples/causal/marketing_funnel.fsl";
+
+#[test]
+fn extracted_boundary_preserves_argument_failures_and_raw_sibling_stdout() {
+    for (arguments, message) in [
+        (vec!["causal"], "usage: fslc causal"),
+        (vec!["causal", "check"], "fslc causal check requires a file"),
+        (
+            vec!["causal", "check", RETENTION, "--unknown"],
+            "unknown causal check option '--unknown'",
+        ),
+        (
+            vec!["causal", "analyze", RETENTION, "--projection"],
+            "--projection requires a value",
+        ),
+    ] {
+        let output = run_process(&arguments);
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert!(output.stderr.is_empty(), "{arguments:?}");
+        let value: Value = serde_json::from_slice(&output.stdout).expect("usage JSON stdout");
+        assert_eq!(value["result"], "error", "{arguments:?}");
+        assert_eq!(value["kind"], "usage", "{arguments:?}");
+        assert!(
+            value["message"]
+                .as_str()
+                .is_some_and(|actual| actual.contains(message)),
+            "{arguments:?}: {value}"
+        );
+    }
+
+    let formatted = run_process(&["fmt", "specs/cart_v1.fsl"]);
+    assert_eq!(formatted.status.code(), Some(0));
+    assert!(formatted.stderr.is_empty());
+    assert!(formatted.stdout.starts_with(b"spec ShoppingCart"));
+    assert!(
+        serde_json::from_slice::<Value>(&formatted.stdout).is_err(),
+        "raw formatter output must not cross the JSON serialization branch"
+    );
+}
 
 fn assert_review_only(output: &Value) {
     assert_eq!(output["formal_result"], "not_run");
@@ -106,7 +148,7 @@ fn unknown_reference_fails_closed_with_location() {
     assert_eq!(output["result"], "error");
     assert_eq!(output["kind"], "semantics");
     assert_eq!(output["diagnostic"], "causal_unknown_reference");
-    assert!(output["loc"]["line"].as_u64().expect("line") > 1);
+    assert_eq!(output["loc"], serde_json::json!({"line": 36, "column": 18}));
 }
 
 fn tempfile_dir() -> PathBuf {
