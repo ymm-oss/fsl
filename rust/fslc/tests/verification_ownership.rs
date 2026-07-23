@@ -260,8 +260,10 @@ fn moved_explicit_render_branches_match_the_normalized_raw_golden() {
     if std::env::var_os("FSLC_DUMP_VERIFICATION_GOLDEN").is_some() {
         eprintln!("{actual}");
     }
-    assert_eq!(
-        actual.as_bytes(),
-        include_bytes!("goldens/verification_explicit_rendering.json")
-    );
+    let expected = str::from_utf8(include_bytes!(
+        "goldens/verification_explicit_rendering.json"
+    ))
+    .expect("UTF-8 verification golden")
+    .replace("\r\n", "\n");
+    assert_eq!(actual, expected);
 }
