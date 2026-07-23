@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::document_render::Locale;
+use crate::document_presentation::Locale;
 
 /// Versions the *artifact format* (frontmatter key set + marker grammar) —
 /// distinct from `RCIR_SCHEMA_VERSION`, which versions the claims JSON, not

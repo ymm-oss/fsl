@@ -28,35 +28,9 @@ use serde_json::Value;
 use crate::document::{Claim, ClaimKind, RequirementClaimSet};
 use crate::document_evidence::{AppliedEvidence, requirement_assurance};
 use crate::document_glossary::AppliedGlossary;
+use crate::document_presentation::Locale;
 use crate::document_project::project_renderer_contract;
 use crate::document_render_expr;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Locale {
-    Ja,
-    En,
-}
-
-impl Locale {
-    /// The short code recorded in a generated document's `lang` frontmatter
-    /// key (issue #329) and accepted by `fslc document generate --lang`.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Ja => "ja",
-            Self::En => "en",
-        }
-    }
-
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "ja" => Some(Self::Ja),
-            "en" => Some(Self::En),
-            _ => None,
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct RenderedDocument {

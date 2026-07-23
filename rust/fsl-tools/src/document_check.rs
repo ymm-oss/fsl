@@ -17,7 +17,7 @@ use crate::document_markers::{
     DOCUMENT_RENDERER, DOCUMENT_RENDERER_VERSION, DOCUMENT_SCHEMA, MarkerIssue, NORMATIVE_SCOPE,
     SLOT_NAMES, Segment, parse_body, parse_frontmatter,
 };
-use crate::document_render::Locale;
+use crate::document_presentation::Locale;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct DriftReason {

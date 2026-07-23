@@ -22,6 +22,7 @@ mod document_digest;
 mod document_evidence;
 mod document_glossary;
 mod document_markers;
+mod document_presentation;
 mod document_project;
 mod document_render;
 mod document_render_expr;
@@ -91,12 +92,13 @@ pub use document_markers::{
     NORMATIVE_SCOPE, ParsedDocument, SLOT_NAMES, Segment, parse_frontmatter_only,
     parse_generated_document,
 };
+pub use document_presentation::Locale;
 pub use document_project::{
     DocumentDialect, DocumentInput, DocumentProjectionError, RCIR_SUPPORTED_DIALECTS,
     project_requirement_claims, project_requirement_claims_from_source,
 };
 pub use document_render::{
-    AppliedApproval, AppliedApprovals, Locale, RenderedDocument, render_requirements_document,
+    AppliedApproval, AppliedApprovals, RenderedDocument, render_requirements_document,
 };
 pub use domain::{
     analyze_domain, check_domain, domain_adapter_files, domain_kernel_source, domain_scaffold,
