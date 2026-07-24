@@ -15,6 +15,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- The `fsl-runtime` touch-driven extraction evaluation retains the current public facade and
+  physical eval, Monitor, liveness, refinement, search, and replay owners. Evidence is insufficient
+  to select a move-only slice after the short migration/feature burst, so no implementation child
+  is created; future extraction remains gated by owner change, dependency direction, solver-free
+  production dependencies, and positive/rejecting semantic agreement controls (#398).
 - The `fsl-core` dialect/domain lowering evaluation retains the existing syntax, checked dispatch,
   structural lowering, and generated-source projection owners. Evidence is insufficient to select
   a naming-policy slice or establish a current naming local optimum, so it creates no implementation

@@ -281,13 +281,111 @@ State / Bindings / RuntimeError
 - `explicit.rs` correctly reuses `Monitor`. The legacy `bfs` and product explicit engine may keep
   different result contracts, but any shared successor enumeration must call `Monitor` rather than
   copy transition policy.
-- `lib.rs` currently contains the public facade, evaluator, monitor, liveness, replay, refinement,
-  legacy BFS, and trace helpers. Their distinct state and failure contracts identify a candidate
-  split into `eval`, `monitor`, `liveness`, `replay`, `refinement`, and `search`, while preserving
-  root re-exports.
-- **Candidate slice (not authorization):** if selected through the C2 gate, extract only the
-  responsibility being changed, one move-only slice at a time. Do not perform an eager 2,600-line
-  re-layout, and do not merge the independent symbolic evaluator here.
+- `lib.rs` contains the stable public facade, evaluator, monitor, liveness, replay, refinement,
+  legacy BFS, and trace helpers. These logical owners remain distinct even while physically
+  colocated; `explicit.rs` already owns the product explicit engine behind root re-exports.
+- **Resolved phase selection (#398):** retain the current physical owners and create no extraction
+  child. The short migration/feature history shows legitimate semantic co-change but no upward
+  dependency or post-baseline change under `rust/fsl-runtime`. Monitor retains commit/rollback
+  policy, although refinement has one duplicate guard prefilter recorded below. Re-evaluate when
+  that duplication or another affected owner is next changed, while preserving the root facade and
+  solver-free dependency.
+
+#### Runtime touch-driven extraction evaluation
+
+The measured call graph follows the logical direction above. `eval` is stateless concrete
+expression evaluation. `Monitor` alone validates calls, evaluates guards and updates, commits
+successful state, and records classified disabled, partial-operation, or post-update outcomes
+without mutating committed state. Unknown actions, invalid parameters, stale instances, and
+non-partial evaluation errors instead return `RuntimeError` without a `StepResult`.
+`BoundedLivenessMonitor` owns pending obligations and logical time. Refinement creates implementation
+and abstraction Monitors and uses them for state commits. Its `refinement_action_instance` prefilter
+nevertheless repeats `ActionGuard::Let`/`Requires` interpretation before `Monitor::step` revalidates
+the call. A false prefilter result can become `abs_requires_failed`; this is a real duplicate
+interpretation trigger even though commit/rollback policy remains centralized. Replay re-executes
+each observed step through a Monitor.
+
+Search ownership is broader than two BFS functions. `check_refinement`, `find_boundary_violation`,
+`expression_reachable`, `action_cover_traces`, and `leadsto_response_traces` each own a distinct
+solver-free queue/result contract and reuse Monitor transitions. The public legacy BFS does the
+same. The product explicit engine additionally owns deterministic-initialization and eligibility
+gates plus frontier, parent, closure, coverage, and state budget in `explicit.rs`; these APIs are
+publicly re-exported at the crate root. Normal Cargo dependencies are only `fsl-core` and
+serialization support, so `fsl-runtime` itself has no downward dependency on a solver, Z3, or a
+JavaScript bridge. Higher-level production consumers do combine these siblings: `fslc-rust` uses
+runtime and solver/native-Z3 paths, and `fsl-wasm` uses runtime and solver/Z3JS paths. Verifier
+agreement tests also compare the symbolic and concrete siblings without reversing the runtime edge.
+
+The full available history is a short migration/feature burst rather than a representative
+twelve-month maintenance sample:
+
+| Candidate owner | Observed owner history | Dependency result | #398 result |
+|---|---|---|---|
+| `eval` | Introduced by `81b31eb`; directly changed for conditionals, stage access, and finite binders in `f6707e0`, `d2d3db4`, and `c31b71d` | Language semantics legitimately flow into Monitor and search; no reverse dependency | C0 |
+| `Monitor` | Introduced by `81b31eb`; changed for normalized Kernel evidence, explicit selection, and runtime contract enforcement in `fda5cfb`, `38f9220`, and `3c0287c` | All downstream execution paths reuse the one committed-state owner | C0 |
+| liveness/response | `leadsto_response_traces` is migration-era; `BoundedLivenessMonitor` was added once by `15dc592` | Separate example-generation and pending-obligation contracts; neither introduces an upward dependency | C0 |
+| refinement | Migration plus action-correspondence normalization in `81b31eb` and `04ce5f3` | Commit/rollback depends downward on Monitor, but the abstract-action prefilter duplicates guard interpretation | C0 for module extraction; shared-guard trigger retained |
+| search/BFS/trace | Legacy BFS and auxiliary searches are migration-era; product explicit search was added in `38f9220` and changed with five later semantic/engine features; `action_cover_traces` was corrected by `6fabe14` | Distinct queue/result contracts reuse Monitor commit policy; the higher-change product engine and eligibility gate already live in `explicit.rs` | C0 |
+| replay | Migration plus normalized Kernel evidence in `81b31eb` and `fda5cfb` | Depends downward on Monitor as intended | C0 |
+
+No file under `rust/fsl-runtime/src` or `rust/fsl-runtime/tests` changed after the accepted baseline.
+External agreement evidence did continue to change: `3412330` substantially strengthened symbolic
+transition-outcome agreement and `7159403` updated deadline/liveness controls. Commits such as
+`3c0287c` corrected real guard, parameter, stale-call, and rollback contracts inside the
+authoritative Monitor and added rejecting agreement tests; those are semantic defect evidence, not
+by themselves evidence of a module-boundary inversion. `6fabe14` similarly corrected the separate
+action-cover result contract. Treating every semantic fix or a 2,600-line file as an extraction
+signal would be a false positive, while treating the refinement guard copy as no duplication would
+also be incorrect.
+
+| Choice | Intervention | Benefit | Cost and risk | Decision |
+|---|---|---|---|---|
+| C0: retain current layout | Keep logical owners and the root facade; make the next move touch-driven | No speculative churn; current dependency and state ownership remain explicit | Several owners remain physically colocated | **Selected while representative change evidence is insufficient** |
+| C1: extract `eval` now | Move the most frequently language-touched low-level owner to `eval.rs` and re-export it | Smaller physical change surface for future expression work | Move-only review and visibility churn; every observed caller/dependency already points in the correct direction | Defer until the next eval change demonstrates a net benefit |
+| C2: impose the target tree | Move monitor, liveness, replay, refinement, and search together | Makes every logical owner physically visible | Large migration valley, merge pressure, and elevated semantic-drift risk without an observed dependency defect | Reject |
+
+This is an implementation-local-optima audit of physical placement, not a claim that the runtime
+had no semantic defects:
+
+| Audit variable | Local evaluation | Expanded evaluation |
+|---|---|---|
+| `B` boundary | One function or section in `lib.rs` | Concrete semantics through Monitor, replay, refinement, and all solver-free search/trace owners |
+| `M` metric | Fewer modules and nearby implementation | Single semantic ownership, changed-owner count, agreement, and migration risk |
+| `N` change scope | Move one body to a private module | Preserve all root exports and every production/verification consumer |
+| `T` time | Current migration-era layout | Full available history and the next representative maintenance change |
+
+Observed evidence comprises the call/import graph, Cargo graph, owner-level history, state/failure
+contracts, and current positive/rejecting tests. It is inferred that a move-only `eval` extraction
+would not currently reduce semantic owner count or dependency breadth. Whether the next language
+feature will make physical colocation slower or riskier is unverified. C0 is preferable at function,
+module, and system boundaries; feature/lifecycle comparison remains inconclusive because the
+history is short and feature-heavy, while production operation, external consumers, incidents, and
+maintenance-time evidence are absent. No preference inversion is demonstrated for a specific
+extraction candidate. The result is `insufficient-evidence`, severity 1/15
+(`E0 A0 F0 K0 T1`), confidence C2 from agreeing structure and history. `T1` records that a later
+private move remains cheap and independently reversible, not that the current layout is locked in.
+This score applies to the physical `eval` extraction candidate; the refinement guard copy is a
+separate semantic-consolidation trigger and is not evidence that moving `eval` reduces amplification.
+
+C0 needs no migration or bridge. If a later touch selects C1, move exactly one private owner in one
+revertible commit, preserve root re-exports, and roll back by reverting that commit. Entry and exit
+controls must include the public facade and solver-free Cargo graph; positive Monitor, liveness,
+replay, refinement, auxiliary search, legacy BFS, and explicit-engine paths; and rejecting cases for
+guard failure, stale or out-of-domain calls, post-update rollback, partial operations, unsupported
+deadline shapes, underconstrained initialization, state-budget exhaustion, disabled replay steps,
+altered symbolic successors, and corrupted outcome evidence. A refinement control must make its
+prefilter and `Monitor::step` disagree deliberately and reject the result rather than report
+`abs_requires_failed` as a trustworthy refinement failure.
+
+The legacy `bfs` currently has only its bundled `fsl-bfs` binary consumer and no Rust agreement test.
+Before any runtime move, add a three-way anchor over the same finite deterministic models and depth:
+symbolic verification, direct Monitor enumeration, and legacy BFS must agree on accepted
+successors, bounded invariant/reachability verdicts, earliest deadlock, and action coverage. Its
+negative controls must corrupt or omit a known Monitor successor and independently alter the legacy
+BFS violation, deadlock, reachability, or coverage projection, proving that the comparator rejects
+each mismatch. Product-explicit agreement is useful but cannot substitute for this legacy-BFS
+anchor. Symbolic verification may test agreement with runtime but must not become a production
+dependency.
 
 ### `fsl-solver`
 
