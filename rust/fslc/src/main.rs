@@ -4389,6 +4389,43 @@ fn read_jsonl_records(path: &Path) -> Result<Vec<(usize, Value)>, String> {
         .collect()
 }
 
+pub(crate) fn untyped_replay_enum_conversion_span(
+    mapping: &fsl_syntax::SurfaceRefinement,
+) -> Option<fsl_syntax::Span> {
+    for item in &mapping.items {
+        match item {
+            fsl_syntax::RefinementItem::EnumConversion { span, .. } => return Some(*span),
+            fsl_syntax::RefinementItem::Map { expr, .. } => {
+                if let Some(span) = fsl_core::expression_call_span(expr, "convert") {
+                    return Some(span);
+                }
+            }
+            fsl_syntax::RefinementItem::Action {
+                target: fsl_syntax::ActionTarget::Action(_, args),
+                ..
+            } => {
+                if let Some(span) = args
+                    .iter()
+                    .find_map(|expr| fsl_core::expression_call_span(expr, "convert"))
+                {
+                    return Some(span);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+pub(crate) fn located_error_output(kind: &str, message: &str, span: fsl_syntax::Span) -> Value {
+    let mut output = error_output(kind, message);
+    output.as_object_mut().expect("error envelope").extend([
+        ("loc".to_owned(), span.python_loc()),
+        ("span".to_owned(), json!(span)),
+    ]);
+    output
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, i32) {
     const NOTE: &str = "leadsTo properties are not checked by replay (finite logs only)";
@@ -4405,6 +4442,16 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
         Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
         Err(error) => return (error_output("parse", &error.to_string()), 2),
     };
+    if let Some(span) = untyped_replay_enum_conversion_span(&mapping) {
+        return (
+            located_error_output(
+                "type",
+                "enum conversion requires a typed impl model and is not supported by --from-log mappings",
+                span,
+            ),
+            2,
+        );
+    }
     let records = match read_jsonl_records(log_path) {
         Ok(records) => records,
         Err(error) => return (error_output("io", &error), 2),
@@ -5115,7 +5162,7 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
             output.insert("spec".to_owned(), json!(model.name));
             let implements = match implements_result(path, &model, 8) {
                 Ok(implements) => implements,
-                Err(error) => return (error_output("type", &error), 2),
+                Err(error) => return (implements_error_output(&error), 2),
             };
             let warnings = if implements.is_some() || has_trace_contract {
                 model_warnings(&model)
@@ -7340,7 +7387,10 @@ fn expression_state_roots(
                     collect(value, roots);
                 }
             }
-            KernelExpr::Num(_) | KernelExpr::Bool(_) | KernelExpr::None => {}
+            KernelExpr::Num(_)
+            | KernelExpr::Bool(_)
+            | KernelExpr::None
+            | KernelExpr::EnumMember { .. } => {}
         }
     }
     fn collect_binder(
@@ -7996,6 +8046,9 @@ fn expression_mutant_count(
     match expr {
         KernelExpr::Num(_) => 2,
         KernelExpr::Var(name) => enum_siblings.get(name).copied().unwrap_or_default(),
+        KernelExpr::EnumMember { member, .. } => {
+            enum_siblings.get(member).copied().unwrap_or_default()
+        }
         KernelExpr::Some(value)
         | KernelExpr::Neg(value)
         | KernelExpr::Not(value)
@@ -12897,10 +12950,24 @@ fn implements_result(
     path: &Path,
     model: &KernelModel,
     depth: usize,
-) -> Result<Option<Value>, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+) -> Result<Option<Value>, fslc_rust::verification_output::RequirementsImplementsError> {
+    let source = std::fs::read_to_string(path).map_err(|error| {
+        fslc_rust::verification_output::RequirementsImplementsError {
+            message: error.to_string(),
+            span: None,
+        }
+    })?;
     let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
     fslc_rust::verification_output::requirements_implements_output(&source, &resolver, model, depth)
+}
+
+fn implements_error_output(
+    error: &fslc_rust::verification_output::RequirementsImplementsError,
+) -> Value {
+    error.span.map_or_else(
+        || error_output("type", &error.message),
+        |span| located_error_output("type", &error.message, span),
+    )
 }
 
 fn mismatch_paths(
@@ -12997,7 +13064,15 @@ fn run_refine(
     };
     let mapping = match fsl_core::parse_refinement(&source, &implementation, &abstraction) {
         Ok(mapping) => mapping,
-        Err(error) => return (error_output("type", &error.message), 2),
+        Err(error) => {
+            return (
+                error.span.map_or_else(
+                    || error_output("type", &error.message),
+                    |span| located_error_output("type", &error.message, span),
+                ),
+                2,
+            );
+        }
     };
     let checked =
         match fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, depth) {
@@ -13445,7 +13520,7 @@ fn run_verify(
         }
         implements = match implements_result(path, &model, depth) {
             Ok(implements) => implements,
-            Err(error) => return (error_output("type", &error), 2),
+            Err(error) => return (implements_error_output(&error), 2),
         };
     }
     let deadlock = match DeadlockMode::parse(deadlock_mode) {

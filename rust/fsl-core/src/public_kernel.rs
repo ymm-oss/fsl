@@ -312,6 +312,10 @@ fn expr_json(
             output.insert("kind".to_owned(), json!("var"));
             output.insert("name".to_owned(), json!(name));
         }
+        Expr::EnumMember { member, .. } => {
+            output.insert("kind".to_owned(), json!("var"));
+            output.insert("name".to_owned(), json!(member));
+        }
         Expr::Call { name, .. } => {
             return Err(error(format!(
                 "unlowered predicate call '{name}' in public Kernel"
@@ -829,7 +833,12 @@ fn walk_partial(
             third,
             ..
         } => children.extend([first.as_ref(), second.as_ref(), third.as_ref()]),
-        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::Call { .. } => {}
+        Expr::Num(_)
+        | Expr::Bool(_)
+        | Expr::None
+        | Expr::Var(_)
+        | Expr::EnumMember { .. }
+        | Expr::Call { .. } => {}
     }
     for child in children {
         walk_partial(child, env, model, path, span, path_condition, output)?;

@@ -1258,6 +1258,36 @@ Refinement maps and action arguments use the same expression grammar and type
 rules as ordinary specs, including `if <condition> then <expr> else <expr>`.
 Both branches are name- and type-checked even when the condition is constant.
 
+Distinct nominal enums require an explicit, named conversion. Declare a
+member-wise bijection in the refinement and call it from a state map or action
+argument:
+
+```fsl
+enum conversion use_case_stage UnitOfWorkStage -> CommandStage {
+  Received -> Received
+  Validated -> Validated
+  Executing -> Executing
+  Completed -> Completed
+}
+map command_stage[c: Command] = convert(use_case_stage, stage[c])
+```
+
+Both endpoints must be enum types. Every source and target member must appear
+exactly once; unknown, duplicate, or missing members are `kind: "type"`
+(exit 2) errors at the conversion site. Conversion is never inferred from
+declaration order or equal member spelling, so direct assignment between the
+two enums remains a type error. The target may be a requirements `process`
+stage enum synthesized by lowering; use its checked Kernel name (visible in
+`fslc kernel`), such as `CommandStage`. Existing raw `replay --from-log` and
+causal observation mappings have no typed impl model and reject conversion
+declarations/calls with a located type error; migrate those mappings to a typed
+refinement before using `convert`.
+
+When an abstract generated enum is the binder for a map whose implementation
+uses a design enum as its key, convert the binder in the reverse direction,
+for example `map column_exists[c: Column] =
+design_exists[convert(column_key, c)]` with `column_key Column -> DesignColumn`.
+
 ```bash
 fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
 ```

@@ -1528,7 +1528,9 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
             third,
             ..
         } => vec![first, second, third],
-        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) => Vec::new(),
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {
+            Vec::new()
+        }
     }
 }
 

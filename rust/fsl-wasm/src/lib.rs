@@ -94,6 +94,20 @@ fn error(solver_version: &str, kind: &str, message: impl AsRef<str>) -> Value {
     Value::Object(output)
 }
 
+fn implements_error(
+    solver_version: &str,
+    failure: &fslc_rust::verification_output::RequirementsImplementsError,
+) -> Value {
+    let mut output = error(solver_version, "type", &failure.message);
+    if let Some(span) = failure.span
+        && let Some(object) = output.as_object_mut()
+    {
+        object.insert("loc".to_owned(), span.python_loc());
+        object.insert("span".to_owned(), json!(span));
+    }
+    output
+}
+
 fn build(request: &Request, solver_version: &str) -> Result<KernelModel, Value> {
     let resolver = MemoryResolver {
         files: request.files.clone(),
@@ -292,7 +306,7 @@ fn add_frontend_metadata(
             remove_generic_invariant_warning(&mut output);
         }
         Ok(None) => {}
-        Err(failure) => return error(solver_version, "semantics", failure),
+        Err(failure) => return implements_error(solver_version, &failure),
     }
     let additions = fslc_rust::frontend_output::implicit_initial_value_warnings(
         &request.source,
@@ -560,6 +574,44 @@ mod tests {
             error["message"]
                 .as_str()
                 .is_some_and(|message| message.contains("missing-before.fsl"))
+        );
+    }
+
+    #[test]
+    fn check_keeps_inline_enum_conversion_error_location() {
+        let request = Request {
+            cmd: "check".to_owned(),
+            source: r#"requirements Impl {
+  implements Abs from "abs.fsl" {
+    enum conversion stage ImplStage -> AbsStage { A -> A }
+    map status = convert(stage, stage)
+    action step() -> step()
+  }
+  enum ImplStage { A, B }
+  state { stage: ImplStage }
+  init { stage = A }
+  action step() { stage = B }
+}
+"#
+            .to_owned(),
+            source_file: "impl.fsl".to_owned(),
+            files: BTreeMap::from([(
+                "abs.fsl".to_owned(),
+                "spec Abs { enum AbsStage { A, B } state { status: AbsStage } init { status = A } action step() { status = B } }".to_owned(),
+            )]),
+            options: Options::default(),
+        };
+
+        let failure = block_on(check(&request, TEST_SOLVER_VERSION));
+
+        assert_eq!(failure["result"], "error");
+        assert_eq!(failure["kind"], "type");
+        assert_eq!(failure["loc"], json!({"line": 3, "column": 5}));
+        assert!(failure["span"].is_object());
+        assert!(
+            failure["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("missing source: [B]"))
         );
     }
 

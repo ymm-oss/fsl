@@ -64,6 +64,15 @@ pub(crate) fn eval<S: SmtSolver>(
             eval_struct_literal(solver, model, name, fields, state, bindings, old_state)
         }
         Expr::Var(name) => lookup(solver, model, name, state, bindings),
+        Expr::EnumMember { type_name, member } => concrete_value(
+            solver,
+            model,
+            &TypeRef::Named(type_name.clone()),
+            &FslValue::Enum {
+                type_name: type_name.clone(),
+                member: member.clone(),
+            },
+        ),
         Expr::Call { name, .. } => Err(VerifyError::new(format!(
             "unexpanded predicate call '{name}'"
         ))),
@@ -208,7 +217,9 @@ pub(crate) fn definedness<S: SmtSolver>(
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<S::Term, VerifyError> {
     match expr {
-        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) => Ok(solver.bool_value(true)),
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {
+            Ok(solver.bool_value(true))
+        }
         Expr::UnaryNamed {
             name, expr: inner, ..
         } if name == "old" => definedness(

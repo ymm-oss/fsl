@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- Refinement mappings can now declare an exhaustive, type-safe member-wise
+  conversion between distinct nominal enums and invoke it from state maps or
+  action arguments. This includes requirements `process` stage enums, rejects
+  unknown/duplicate/non-total mappings and implicit ordinal conversion, and
+  fails closed in raw replay modes that lack a typed implementation model
+  (#450).
 - The embedded native CLI contract and exact help tree now include all six documented causal
   command leaves, while the deliberately absent `causal verify` path remains rejected (#442).
 - Verifier transition-outcome agreement now proves actual guard failure and

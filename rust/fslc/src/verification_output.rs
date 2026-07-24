@@ -3,6 +3,7 @@
 //! Backend-neutral JSON rendering for bounded verification results.
 
 use std::collections::BTreeSet;
+use std::fmt;
 use std::future::Future;
 
 use fsl_core::{
@@ -20,6 +21,21 @@ pub enum DeadlockMode {
     Error,
     Ignore,
 }
+
+/// A requirements `implements` failure with its refinement source location.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RequirementsImplementsError {
+    pub message: String,
+    pub span: Option<fsl_syntax::Span>,
+}
+
+impl fmt::Display for RequirementsImplementsError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RequirementsImplementsError {}
 
 impl DeadlockMode {
     /// Parse the public CLI/Worker spelling.
@@ -131,15 +147,23 @@ pub fn requirements_implements_output(
     resolver: &dyn fsl_core::FileResolver,
     model: &KernelModel,
     depth: usize,
-) -> Result<Option<Value>, String> {
-    let Some(contract) = fsl_core::requirements_implements(source, resolver, model)
-        .map_err(|error| error.to_string())?
+) -> Result<Option<Value>, RequirementsImplementsError> {
+    let Some(contract) =
+        fsl_core::requirements_implements(source, resolver, model).map_err(|error| {
+            RequirementsImplementsError {
+                message: error.message,
+                span: error.span,
+            }
+        })?
     else {
         return Ok(None);
     };
     let checked =
         fsl_runtime::check_refinement(model, &contract.abstraction, &contract.refinement, depth)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| RequirementsImplementsError {
+                message: error.to_string(),
+                span: None,
+            })?;
     Ok(Some(if let Some(failure) = checked.failure {
         json!({
             "abs": contract.abstraction.name,

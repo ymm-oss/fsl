@@ -72,3 +72,79 @@ fn explicit_and_auto_correspondences_have_the_same_concrete_verdict() {
         assert_eq!(explicit_result, routed_result);
     }
 }
+
+#[test]
+fn enum_conversion_agrees_across_concrete_refinement_routes_without_ordinal_coercion() {
+    const ABS: &str = "spec Abs { enum AbsStage { A, B, C } state { status: AbsStage } init { status = A } action step() { requires status == A status = B } }";
+    let implementation = build(
+        "spec Impl { enum ImplStage { C, B, A } state { stage: ImplStage } init { stage = A } action step() { requires stage == A stage = B } }",
+    );
+    let abstraction = build(ABS);
+    let mapping = "refinement R { impl Impl abs Abs enum conversion stage ImplStage -> AbsStage { A -> A B -> B C -> C } map status = convert(stage, stage) action step() -> step() }";
+    let refinement =
+        parse_refinement(mapping, &implementation, &abstraction).expect("explicit enum conversion");
+    let result = check_refinement(&implementation, &abstraction, &refinement, 2)
+        .expect("concrete refinement check");
+    assert!(result.failure.is_none(), "{result:?}");
+
+    let wrong = parse_refinement(
+        "refinement R { impl Impl abs Abs enum conversion stage ImplStage -> AbsStage { A -> B B -> A C -> C } map status = convert(stage, stage) action step() -> step() }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("a complete but wrong bijection is statically well typed");
+    let wrong = check_refinement(&implementation, &abstraction, &wrong, 2)
+        .expect("negative control executes");
+    assert!(
+        wrong.failure.is_some(),
+        "wrong member mapping must not refine"
+    );
+
+    let argument_implementation = build(
+        "spec Impl { enum ImplStage { A, B } state { stage: ImplStage } init { stage = A } action send(s: ImplStage) { stage = s } }",
+    );
+    let argument_abstraction = build(
+        "spec Abs { enum AbsStage { A, B } state { status: AbsStage } init { status = A } action send(s: AbsStage) { status = s } }",
+    );
+    let wrong_argument = parse_refinement(
+        "refinement R { impl Impl abs Abs enum conversion state_stage ImplStage -> AbsStage { A -> A B -> B } enum conversion argument_stage ImplStage -> AbsStage { A -> B B -> A } map status = convert(state_stage, stage) action send(s) -> send(convert(argument_stage, s)) }",
+        &argument_implementation,
+        &argument_abstraction,
+    )
+    .expect("wrong action-argument bijection remains statically complete");
+    let wrong_argument = check_refinement(
+        &argument_implementation,
+        &argument_abstraction,
+        &wrong_argument,
+        1,
+    )
+    .expect("action-argument negative control executes");
+    assert!(
+        wrong_argument.failure.is_some(),
+        "member-swapped action argument must not produce a false-green refinement"
+    );
+
+    let inline = r#"requirements Impl {
+  implements Abs from "abs.fsl" {
+    enum conversion stage ImplStage -> AbsStage { A -> A B -> B C -> C }
+    map status = convert(stage, stage)
+    action step() -> step()
+  }
+  enum ImplStage { C, B, A }
+  state { stage: ImplStage }
+  init { stage = A }
+  action step() { requires stage == A stage = B }
+}"#;
+    let inline_implementation = build(inline);
+    let contract = requirements_implements(inline, &Resolver(ABS), &inline_implementation)
+        .expect("inline enum conversion builds")
+        .expect("implements contract");
+    let inline_result = check_refinement(
+        &inline_implementation,
+        &contract.abstraction,
+        &contract.refinement,
+        2,
+    )
+    .expect("inline concrete refinement check");
+    assert!(inline_result.failure.is_none(), "{inline_result:?}");
+}

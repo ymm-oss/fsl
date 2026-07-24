@@ -3280,7 +3280,7 @@ fn bind_expression_tree(
             bind_expression_tree(registry, &child("second"), second, origin);
             bind_expression_tree(registry, &child("third"), third, origin);
         }
-        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) => {}
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {}
     }
 }
 

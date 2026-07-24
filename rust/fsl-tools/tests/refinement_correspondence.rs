@@ -6,7 +6,7 @@ use fsl_tools::analyze_refinement;
 #[test]
 fn refinement_graph_exposes_correspondence_origin_and_shared_progress_identity() {
     let document = parse_surface_document(
-        "refinement R { impl Impl abs Abs action step(v: N) -> run(v) preserve progress { respond Eventually by step } }",
+        "refinement R { impl Impl abs Abs enum conversion status ImplStatus -> AbsStatus { Open -> Ready Closed -> Done } action step(v: N) -> run(v) preserve progress { respond Eventually by step } }",
     )
     .expect("parse refinement");
     let SurfaceDocument::Refinement(refinement) = document else {
@@ -20,6 +20,21 @@ fn refinement_graph_exposes_correspondence_origin_and_shared_progress_identity()
         .find(|node| node["id"] == "action_map:step")
         .expect("action node");
     assert_eq!(action["origin"], "refinement_file");
+    let conversion = graph["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .find(|node| node["id"] == "enum_conversion:status")
+        .expect("enum conversion node");
+    assert_eq!(conversion["source_type"], "ImplStatus");
+    assert_eq!(conversion["target_type"], "AbsStatus");
+    assert_eq!(
+        conversion["members"],
+        serde_json::json!([
+            {"source": "Open", "target": "Ready"},
+            {"source": "Closed", "target": "Done"}
+        ])
+    );
     assert!(
         graph["edges"]
             .as_array()

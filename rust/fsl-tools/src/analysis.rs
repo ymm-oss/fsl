@@ -565,7 +565,7 @@ fn expr_reads_bound(
             reads.extend(expr_reads_bound(second, state, bound));
             reads.extend(expr_reads_bound(third, state, bound));
         }
-        Expr::Num(_) | Expr::Bool(_) | Expr::None => {}
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::EnumMember { .. } => {}
     }
     reads
 }

@@ -98,6 +98,31 @@ pub fn analyze_refinement(refinement: &SurfaceRefinement) -> Value {
                 insert_node(&mut nodes, node(id.clone(), "maps_auto", "maps auto"));
                 insert_edge(&mut edges, edge(&ref_id, "declares", &id));
             }
+            RefinementItem::EnumConversion {
+                name,
+                source,
+                target,
+                members,
+                span,
+            } => {
+                let id = format!("enum_conversion:{name}");
+                let mut value = located_node(id.clone(), "enum_conversion", name, *span);
+                if let Value::Object(object) = &mut value {
+                    object.insert("source_type".to_owned(), json!(source));
+                    object.insert("target_type".to_owned(), json!(target));
+                    object.insert(
+                        "members".to_owned(),
+                        json!(
+                            members
+                                .iter()
+                                .map(|(source, target, _)| json!({"source":source,"target":target}))
+                                .collect::<Vec<_>>()
+                        ),
+                    );
+                }
+                insert_node(&mut nodes, value);
+                insert_edge(&mut edges, edge(&ref_id, "declares", &id));
+            }
             RefinementItem::Map {
                 name,
                 binder,

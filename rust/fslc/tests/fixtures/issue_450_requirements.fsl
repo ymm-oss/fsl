@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+
+requirements ApplicationUseCaseRequirements {
+  process Command {
+    stages Received, Loaded, Decided, Committed, Rejected, Conflict
+    initial Received
+    transition load Received -> Loaded by Application
+  }
+}
+
+verify {
+  instances Command = 1
+}
