@@ -1,17 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use fsl_syntax::{
-    ActionTarget, Binder, CorrespondenceOrigin, Expr, MetaTag, QualifiedName, RefinementItem,
-    RefinementParam, RequirementAction, RequirementActionItem, RequirementBlockItem,
-    RequirementsItem, Span, SurfaceDocument, SurfaceRefinement,
+    ActionTarget, Binder, ConditionalSpans, CorrespondenceOrigin, Expr, MetaTag, QualifiedName,
+    RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
+    RequirementBlockItem, RequirementsItem, Span, SurfaceDocument, SurfaceRefinement,
 };
 
 use crate::{
-    ActionDef, FileResolver, KernelModel, ParamDef, TypeRef, build_model, parse_kernel_source,
+    ActionDef, FileResolver, KernelModel, ParamDef, TypeDef, TypeRef, build_model,
+    parse_kernel_source,
 };
+
+#[derive(Clone, Debug)]
+struct EnumConversion {
+    source: String,
+    target: String,
+    members: Vec<(String, String)>,
+    span: Span,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StateMap {
@@ -109,6 +118,7 @@ fn build_refinement(
     let mut abs_name = None;
     let mut maps_auto = None;
     let mut state_maps = BTreeMap::new();
+    let mut enum_conversion_items = Vec::new();
     let mut action_correspondences = BTreeMap::new();
     let mut action_sources = Vec::new();
     let mut progress = Vec::new();
@@ -118,6 +128,13 @@ fn build_refinement(
             RefinementItem::Impl(name) => impl_name = Some(name),
             RefinementItem::Abs(name) => abs_name = Some(name),
             RefinementItem::MapsAuto(span) => maps_auto = Some(span),
+            RefinementItem::EnumConversion {
+                name,
+                source,
+                target,
+                members,
+                span,
+            } => enum_conversion_items.push((name, source, target, members, span)),
             RefinementItem::Map {
                 name,
                 binder,
@@ -193,6 +210,17 @@ fn build_refinement(
             ),
             None,
         ));
+    }
+    let enum_conversions = build_enum_conversions(enum_conversion_items, &type_context)?;
+    for state_map in state_maps.values_mut() {
+        state_map.expr = elaborate_enum_conversions(state_map.expr.clone(), &enum_conversions)?;
+    }
+    for source in &mut action_sources {
+        if let ActionTarget::Action(_, args) = &mut source.target {
+            for argument in args {
+                *argument = elaborate_enum_conversions(argument.clone(), &enum_conversions)?;
+            }
+        }
     }
     validate_correspondence_duplicates(&action_sources)?;
     for source in action_sources {
@@ -272,6 +300,344 @@ fn build_refinement(
         state_maps,
         action_correspondences,
         progress,
+    })
+}
+
+type SurfaceEnumConversion = (String, String, String, Vec<(String, String, Span)>, Span);
+
+fn build_enum_conversions(
+    items: Vec<SurfaceEnumConversion>,
+    context: &KernelModel,
+) -> Result<BTreeMap<String, EnumConversion>, RefinementError> {
+    let mut conversions = BTreeMap::new();
+    for (name, source, target, rows, span) in items {
+        let source_members = enum_type_members(context, &source, span)?;
+        let target_members = enum_type_members(context, &target, span)?;
+        let mut seen_source = BTreeSet::new();
+        let mut seen_target = BTreeSet::new();
+        let mut members = Vec::new();
+        for (source_member, target_member, row_span) in rows {
+            if !source_members.contains(&source_member) {
+                return Err(refinement_error(
+                    format!("unknown enum member '{source}.{source_member}'"),
+                    Some(row_span),
+                ));
+            }
+            if !target_members.contains(&target_member) {
+                return Err(refinement_error(
+                    format!("unknown enum member '{target}.{target_member}'"),
+                    Some(row_span),
+                ));
+            }
+            if !seen_source.insert(source_member.clone()) {
+                return Err(refinement_error(
+                    format!(
+                        "enum conversion '{name}' maps source member '{source_member}' more than once"
+                    ),
+                    Some(row_span),
+                ));
+            }
+            if !seen_target.insert(target_member.clone()) {
+                return Err(refinement_error(
+                    format!(
+                        "enum conversion '{name}' maps target member '{target_member}' more than once"
+                    ),
+                    Some(row_span),
+                ));
+            }
+            members.push((source_member, target_member));
+        }
+        let missing_source = source_members
+            .iter()
+            .filter(|member| !seen_source.contains(*member))
+            .cloned()
+            .collect::<Vec<_>>();
+        let missing_target = target_members
+            .iter()
+            .filter(|member| !seen_target.contains(*member))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !missing_source.is_empty() || !missing_target.is_empty() {
+            return Err(refinement_error(
+                format!(
+                    "enum conversion '{name}' must cover every source and target member exactly once; missing source: [{}]; missing target: [{}]",
+                    missing_source.join(", "),
+                    missing_target.join(", ")
+                ),
+                Some(span),
+            ));
+        }
+        if conversions
+            .insert(
+                name.clone(),
+                EnumConversion {
+                    source,
+                    target,
+                    members,
+                    span,
+                },
+            )
+            .is_some()
+        {
+            return Err(refinement_error(
+                format!("duplicate enum conversion '{name}'"),
+                Some(span),
+            ));
+        }
+    }
+    Ok(conversions)
+}
+
+fn enum_type_members(
+    context: &KernelModel,
+    type_name: &str,
+    span: Span,
+) -> Result<Vec<String>, RefinementError> {
+    match context.types.get(type_name) {
+        Some(TypeDef::Enum { members, .. }) if members.is_empty() => Err(refinement_error(
+            format!("enum conversion endpoint '{type_name}' has no members"),
+            Some(span),
+        )),
+        Some(TypeDef::Enum { members, .. }) => Ok(members.clone()),
+        Some(_) => Err(refinement_error(
+            format!("enum conversion endpoint '{type_name}' is not an enum"),
+            Some(span),
+        )),
+        None => Err(refinement_error(
+            format!("unknown enum conversion type '{type_name}'"),
+            Some(span),
+        )),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn elaborate_enum_conversions(
+    expr: Expr,
+    conversions: &BTreeMap<String, EnumConversion>,
+) -> Result<Expr, RefinementError> {
+    Ok(match expr {
+        Expr::Call { name, args, span } if name == "convert" => {
+            let [conversion_name, argument] = args.as_slice() else {
+                return Err(refinement_error(
+                    "convert expects exactly two arguments: convert(name, expression)",
+                    Some(span),
+                ));
+            };
+            let Expr::Var(conversion_name) = conversion_name else {
+                return Err(refinement_error(
+                    "convert first argument must be an enum conversion name",
+                    Some(span),
+                ));
+            };
+            let conversion = conversions.get(conversion_name).ok_or_else(|| {
+                refinement_error(
+                    format!("unknown enum conversion '{conversion_name}'"),
+                    Some(span),
+                )
+            })?;
+            let argument = elaborate_enum_conversions(argument.clone(), conversions)?;
+            let (_, fallback_member) = conversion
+                .members
+                .last()
+                .expect("validated enum conversions are non-empty");
+            let mut expanded = Expr::EnumMember {
+                type_name: conversion.target.clone(),
+                member: fallback_member.clone(),
+            };
+            for (source_member, target_member) in conversion.members.iter().rev() {
+                expanded = Expr::Conditional {
+                    condition: Box::new(Expr::Binary {
+                        op: "==".to_owned(),
+                        left: Box::new(argument.clone()),
+                        right: Box::new(Expr::EnumMember {
+                            type_name: conversion.source.clone(),
+                            member: source_member.clone(),
+                        }),
+                    }),
+                    then_expr: Box::new(Expr::EnumMember {
+                        type_name: conversion.target.clone(),
+                        member: target_member.clone(),
+                    }),
+                    else_expr: Box::new(expanded),
+                    spans: Box::new(ConditionalSpans {
+                        condition: span,
+                        then_expr: span,
+                        else_expr: conversion.span,
+                    }),
+                };
+            }
+            expanded
+        }
+        Expr::Call { name, args, span } => Expr::Call {
+            name,
+            args: args
+                .into_iter()
+                .map(|expr| elaborate_enum_conversions(expr, conversions))
+                .collect::<Result<_, _>>()?,
+            span,
+        },
+        Expr::Some(expr) => Expr::Some(Box::new(elaborate_enum_conversions(*expr, conversions)?)),
+        Expr::Set(items) => Expr::Set(
+            items
+                .into_iter()
+                .map(|expr| elaborate_enum_conversions(expr, conversions))
+                .collect::<Result<_, _>>()?,
+        ),
+        Expr::Seq(items) => Expr::Seq(
+            items
+                .into_iter()
+                .map(|expr| elaborate_enum_conversions(expr, conversions))
+                .collect::<Result<_, _>>()?,
+        ),
+        Expr::Struct { name, fields } => Expr::Struct {
+            name,
+            fields: fields
+                .into_iter()
+                .map(|(name, expr)| Ok((name, elaborate_enum_conversions(expr, conversions)?)))
+                .collect::<Result<_, RefinementError>>()?,
+        },
+        Expr::Index(base, index) => Expr::Index(
+            Box::new(elaborate_enum_conversions(*base, conversions)?),
+            Box::new(elaborate_enum_conversions(*index, conversions)?),
+        ),
+        Expr::Field(base, field) => Expr::Field(
+            Box::new(elaborate_enum_conversions(*base, conversions)?),
+            field,
+        ),
+        Expr::Method {
+            receiver,
+            name,
+            args,
+        } => Expr::Method {
+            receiver: Box::new(elaborate_enum_conversions(*receiver, conversions)?),
+            name,
+            args: args
+                .into_iter()
+                .map(|expr| elaborate_enum_conversions(expr, conversions))
+                .collect::<Result<_, _>>()?,
+        },
+        Expr::Binary { op, left, right } => Expr::Binary {
+            op,
+            left: Box::new(elaborate_enum_conversions(*left, conversions)?),
+            right: Box::new(elaborate_enum_conversions(*right, conversions)?),
+        },
+        Expr::Neg(expr) => Expr::Neg(Box::new(elaborate_enum_conversions(*expr, conversions)?)),
+        Expr::Not(expr) => Expr::Not(Box::new(elaborate_enum_conversions(*expr, conversions)?)),
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            spans,
+        } => Expr::Conditional {
+            condition: Box::new(elaborate_enum_conversions(*condition, conversions)?),
+            then_expr: Box::new(elaborate_enum_conversions(*then_expr, conversions)?),
+            else_expr: Box::new(elaborate_enum_conversions(*else_expr, conversions)?),
+            spans,
+        },
+        Expr::Is { expr, pattern } => Expr::Is {
+            expr: Box::new(elaborate_enum_conversions(*expr, conversions)?),
+            pattern,
+        },
+        Expr::Quantified {
+            quantifier,
+            binder,
+            body,
+        } => Expr::Quantified {
+            quantifier,
+            binder: elaborate_conversion_binder(binder, conversions)?,
+            body: Box::new(elaborate_enum_conversions(*body, conversions)?),
+        },
+        Expr::Aggregate {
+            kind,
+            binder,
+            value,
+        } => Expr::Aggregate {
+            kind,
+            binder: elaborate_conversion_binder(binder, conversions)?,
+            value: value
+                .map(|expr| elaborate_enum_conversions(*expr, conversions).map(Box::new))
+                .transpose()?,
+        },
+        Expr::Stage {
+            process,
+            entity,
+            entity_span,
+            span,
+        } => Expr::Stage {
+            process,
+            entity: Box::new(elaborate_enum_conversions(*entity, conversions)?),
+            entity_span,
+            span,
+        },
+        Expr::UnaryNamed { name, expr, span } => Expr::UnaryNamed {
+            name,
+            expr: Box::new(elaborate_enum_conversions(*expr, conversions)?),
+            span,
+        },
+        Expr::BinaryNamed { name, left, right } => Expr::BinaryNamed {
+            name,
+            left: Box::new(elaborate_enum_conversions(*left, conversions)?),
+            right: Box::new(elaborate_enum_conversions(*right, conversions)?),
+        },
+        Expr::TernaryNamed {
+            name,
+            first,
+            second,
+            third,
+        } => Expr::TernaryNamed {
+            name,
+            first: Box::new(elaborate_enum_conversions(*first, conversions)?),
+            second: Box::new(elaborate_enum_conversions(*second, conversions)?),
+            third: Box::new(elaborate_enum_conversions(*third, conversions)?),
+        },
+        expr @ (Expr::Num(_)
+        | Expr::Bool(_)
+        | Expr::None
+        | Expr::Var(_)
+        | Expr::EnumMember { .. }) => expr,
+    })
+}
+
+fn elaborate_conversion_binder(
+    binder: Binder,
+    conversions: &BTreeMap<String, EnumConversion>,
+) -> Result<Binder, RefinementError> {
+    Ok(match binder {
+        Binder::Typed {
+            name,
+            type_name,
+            where_expr,
+        } => Binder::Typed {
+            name,
+            type_name,
+            where_expr: where_expr
+                .map(|expr| elaborate_enum_conversions(*expr, conversions).map(Box::new))
+                .transpose()?,
+        },
+        Binder::Range {
+            name,
+            lo,
+            hi,
+            where_expr,
+        } => Binder::Range {
+            name,
+            lo: Box::new(elaborate_enum_conversions(*lo, conversions)?),
+            hi: Box::new(elaborate_enum_conversions(*hi, conversions)?),
+            where_expr: where_expr
+                .map(|expr| elaborate_enum_conversions(*expr, conversions).map(Box::new))
+                .transpose()?,
+        },
+        Binder::Collection {
+            name,
+            collection,
+            where_expr,
+        } => Binder::Collection {
+            name,
+            collection: Box::new(elaborate_enum_conversions(*collection, conversions)?),
+            where_expr: where_expr
+                .map(|expr| elaborate_enum_conversions(*expr, conversions).map(Box::new))
+                .transpose()?,
+        },
     })
 }
 

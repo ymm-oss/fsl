@@ -1229,6 +1229,33 @@ refinement のマップと action の引数は、`if <condition> then <expr> els
 含め、通常の spec と同じ式文法と型規則を使います。条件が定数であっても、両方の分岐
 が名前と型の検査を受けます。
 
+異なる名前付き enum の間では、明示的に名前を付けた変換が必要です。refinement 内で
+メンバーごとの全単射を宣言し、状態マップまたは action の引数から呼び出します:
+
+```fsl
+enum conversion use_case_stage UnitOfWorkStage -> CommandStage {
+  Received -> Received
+  Validated -> Validated
+  Executing -> Executing
+  Completed -> Completed
+}
+map command_stage[c: Command] = convert(use_case_stage, stage[c])
+```
+
+両端は enum 型でなければなりません。source と target の全メンバーをそれぞれ正確に
+1 回ずつ指定する必要があり、未知・重複・欠落したメンバーは変換宣言の位置を伴う
+`kind: "type"`(exit 2)になります。宣言順や同じメンバー名から変換を推論することは
+なく、2 つの enum の直接代入は引き続き型エラーです。target には requirements の
+`process` lowering が生成した stage enum を指定できます。その場合は `fslc kernel`
+で確認できる checked Kernel 名(例: `CommandStage`)を使います。既存の raw
+`replay --from-log` と causal observation のマッピングには型付き impl model がないため、
+変換宣言/呼び出しを位置付き型エラーとして拒否します。`convert` を使う前に型付き
+refinement へ移行してください。
+
+抽象側の生成 enum が Map の binder で、実装側の Map が design enum をキーにするときは、
+binder を逆方向に変換します。例えば `column_key Column -> DesignColumn` に対して
+`map column_exists[c: Column] = design_exists[convert(column_key, c)]` と書きます。
+
 ```bash
 fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
 ```

@@ -252,6 +252,13 @@ pub enum RefinementItem {
     Impl(String),
     Abs(String),
     MapsAuto(Span),
+    EnumConversion {
+        name: String,
+        source: String,
+        target: String,
+        members: Vec<(String, String, Span)>,
+        span: Span,
+    },
     Map {
         name: String,
         binder: Option<Binder>,
@@ -1045,6 +1052,23 @@ impl RefinementItem {
             Self::Impl(name) => json!(["impl", name]),
             Self::Abs(name) => json!(["abs", name]),
             Self::MapsAuto(span) => json!(["maps_auto", span.python_loc()]),
+            Self::EnumConversion {
+                name,
+                source,
+                target,
+                members,
+                span,
+            } => json!([
+                "enum_conversion",
+                name,
+                source,
+                target,
+                members
+                    .iter()
+                    .map(|(source, target, span)| { json!([source, target, span.python_loc()]) })
+                    .collect::<Vec<_>>(),
+                span.python_loc()
+            ]),
             Self::Map {
                 name,
                 binder,

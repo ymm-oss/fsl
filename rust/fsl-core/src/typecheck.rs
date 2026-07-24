@@ -177,6 +177,16 @@ pub(crate) fn infer_type(
             .get(name)
             .cloned()
             .ok_or_else(|| error(format!("public Kernel cannot type identifier '{name}'"))),
+        Expr::EnumMember { type_name, member } => match model.types.get(type_name) {
+            Some(TypeDef::Enum { members, .. }) if members.contains(member) => {
+                Ok(TypeRef::Named(type_name.clone()))
+            }
+            Some(TypeDef::Enum { .. }) => {
+                Err(error(format!("unknown enum member '{type_name}.{member}'")))
+            }
+            Some(_) => Err(error(format!("'{type_name}' is not an enum"))),
+            None => Err(error(format!("unknown enum type '{type_name}'"))),
+        },
         Expr::Call { name, .. } => Err(error(format!(
             "unlowered predicate call '{name}' in public Kernel"
         ))),
@@ -642,7 +652,7 @@ fn value_expression(value: crate::FslValue) -> Result<Expr, TypecheckError> {
     Ok(match value {
         crate::FslValue::Int(value) => Expr::Num(value),
         crate::FslValue::Bool(value) => Expr::Bool(value),
-        crate::FslValue::Enum { member, .. } => Expr::Var(member),
+        crate::FslValue::Enum { type_name, member } => Expr::EnumMember { type_name, member },
         crate::FslValue::None => Expr::None,
         crate::FslValue::Some(value) => Expr::Some(Box::new(value_expression(*value)?)),
         crate::FslValue::Struct { type_name, fields } => Expr::Struct {
@@ -732,6 +742,7 @@ fn validate_expression(
         | Expr::Bool(_)
         | Expr::None
         | Expr::Var(_)
+        | Expr::EnumMember { .. }
         | Expr::Call { .. }
         | Expr::Stage { .. } => {}
         Expr::Some(item) => {

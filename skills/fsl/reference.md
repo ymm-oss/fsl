@@ -605,9 +605,13 @@ refinement <Name> {
   impl <ImplSpecName>
   abs  <AbsSpecName>
   maps auto                                      // optional identity defaults for same-named compatible state/actions
+  enum conversion <name> <ImplEnum> -> <AbsEnum> {
+    <ImplMember> -> <AbsMember>                  // exhaustive bijection; every member exactly once
+  }
   map <abs_var> = <expr over impl state>          // scalar abstract variable
   map <abs_var>[<x>: <KeyType>] = <expr>          // per-element mapping of a Map
-  // map and action arguments use the same expressions as specs, including if <c> then <a> else <b>
+  // use convert(<name>, <expr>) in a map or action argument
+  // map and action arguments otherwise use the same expressions as specs, including if <c> then <a> else <b>
   action <impl_act>(<formal params>...) -> <abs_act>(<expr>...) | stutter
   // formal params may be bare names or name: Type annotations matching the impl action
   // explicit map/action entries override maps auto; incompatible same-name candidates are type errors
@@ -631,6 +635,18 @@ merged (merging would let an impl-only member get reinterpreted as whichever
 abs member sits at the same ordinal index). Same-named domain types
 (`lo..hi`) with different bounds are fine — an out-of-range value there is
 still caught as `map_out_of_bounds`/`abs_state_mismatch`.
+
+Distinct nominal enums stay incompatible unless an `enum conversion` is
+declared and invoked with `convert(name, expr)`. Both endpoints must be enums;
+unknown, duplicate, or missing source/target members fail as a located type
+error. Conversion is member-wise and never inferred from ordinal position.
+For a requirements `process` stage target, use the checked Kernel enum name
+reported by `fslc kernel` (for example `CommandStage`). Raw production-log and
+causal replay mappings have no typed impl model and therefore reject enum
+conversion declarations/calls; use a typed refinement mapping instead.
+For a generated abstract Map key such as DB `Column`, the conversion direction
+is abstract-to-implementation: convert the abstract binder before indexing the
+implementation Map (for example `Column -> DesignColumn`).
 
 ## 2. Types
 

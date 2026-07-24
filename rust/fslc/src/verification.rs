@@ -9,10 +9,10 @@ use sha2::{Digest, Sha256};
 
 use super::{
     CliVerifyOptions, ScopeBounds, add_strict_tag_warnings, apply_vacuity_mode, block_on_native,
-    display, envelope, error_output, implements_result, invariant_names, load_model,
-    load_model_scoped, load_snapshot_value_object, load_state_snapshot, select_properties,
-    selected_implicit_bounds, semantic_error_output, validate_requirement_traces,
-    validate_specialized_document,
+    display, envelope, error_output, implements_error_output, implements_result, invariant_names,
+    load_model, load_model_scoped, load_snapshot_value_object, load_state_snapshot,
+    select_properties, selected_implicit_bounds, semantic_error_output,
+    validate_requirement_traces, validate_specialized_document,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1918,7 +1918,7 @@ fn execute_cli_verification(
     } else {
         match implements_result(path, model, options.depth) {
             Ok(implements) => implements,
-            Err(error) => return (error_output("type", &error), 2),
+            Err(error) => return (implements_error_output(&error), 2),
         }
     };
     let selection = ModelSelection {

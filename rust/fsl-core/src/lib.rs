@@ -1225,9 +1225,27 @@ pub(crate) fn visit_expr_children(
             visitor(second)?;
             visitor(third)?;
         }
-        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) => {}
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {}
     }
     Ok(())
+}
+
+/// Return the first source span of a named expression call, including nested calls.
+#[must_use]
+pub fn expression_call_span(expr: &Expr, call_name: &str) -> Option<fsl_syntax::Span> {
+    if let Expr::Call { name, span, .. } = expr
+        && name == call_name
+    {
+        return Some(*span);
+    }
+    let mut found = None;
+    let _ = visit_expr_children(expr, &mut |child| {
+        if found.is_none() {
+            found = expression_call_span(child, call_name);
+        }
+        Ok(())
+    });
+    found
 }
 
 fn visit_binder_exprs(

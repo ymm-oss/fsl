@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+
+refinement ApplicationUnitOfWorkRefinesUseCase {
+  impl ApplicationUnitOfWorkDesign
+  abs ApplicationUseCaseRequirements
+  enum conversion use_case_stage UnitOfWorkStage -> CommandStage {
+    Received -> Received
+    Loaded -> Loaded
+    Decided -> Decided
+    Committed -> Committed
+    Rejected -> Rejected
+    Conflict -> Conflict
+  }
+
+  map command_stage[c: Command] = convert(use_case_stage, stage[c])
+  action load(c) -> load(c)
+}

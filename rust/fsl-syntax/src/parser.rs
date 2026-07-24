@@ -1252,6 +1252,32 @@ impl<'a> Parser<'a> {
             || self.peek_symbol("{")
     }
 
+    fn enum_conversion_item(&mut self) -> Result<RefinementItem, ParseError> {
+        let span = self.bump().span;
+        self.expect_ident_value("conversion")?;
+        let name = self.expect_ident()?;
+        let source = self.expect_ident()?;
+        self.expect_symbol("->")?;
+        let target = self.expect_ident()?;
+        self.expect_symbol("{")?;
+        let mut members = Vec::new();
+        while !self.eat_symbol("}") {
+            let member_span = self.peek().span;
+            let source_member = self.expect_ident()?;
+            self.expect_symbol("->")?;
+            let target_member = self.expect_ident()?;
+            members.push((source_member, target_member, member_span));
+            self.eat_symbol(",");
+        }
+        Ok(RefinementItem::EnumConversion {
+            name,
+            source,
+            target,
+            members,
+            span,
+        })
+    }
+
     fn refinement_item(
         &mut self,
         origin: CorrespondenceOrigin,
@@ -1266,6 +1292,9 @@ impl<'a> Parser<'a> {
             let span = self.bump().span;
             self.expect_ident_value("auto")?;
             return Ok(RefinementItem::MapsAuto(span));
+        }
+        if self.peek_ident("enum") {
+            return self.enum_conversion_item();
         }
         if self.peek_ident("map") {
             let span = self.bump().span;

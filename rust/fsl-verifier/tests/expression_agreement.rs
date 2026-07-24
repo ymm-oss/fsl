@@ -5,7 +5,7 @@ use std::future::Future;
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
-use fsl_core::{FsResolver, build_model, parse_kernel_source};
+use fsl_core::{FsResolver, build_model, parse_kernel_source, parse_refinement};
 
 fn block_on<F: Future>(future: F) -> F::Output {
     let mut future = pin!(future);
@@ -93,6 +93,69 @@ spec Agreement {
     let explicit = fsl_runtime::verify_explicit(model, 8, 100).expect("verify explicitly");
     assert!(explicit.violation.is_none(), "{explicit:?}");
     assert!(explicit.closure, "{explicit:?}");
+}
+
+#[test]
+fn elaborated_enum_conversion_agrees_concretely_symbolically_and_in_preserved_progress() {
+    let resolver = FsResolver::new(".");
+    let implementation = build_model(
+        parse_kernel_source(
+            "spec Impl { enum ImplStage { C, B, A } state { stage: ImplStage } init { stage = A } fair action step() { requires stage == A stage = B } }",
+            &resolver,
+        )
+        .expect("parse implementation"),
+    )
+    .expect("build implementation");
+    let abstraction = build_model(
+        parse_kernel_source(
+            "spec Abs { enum AbsStage { A, B, C } state { status: AbsStage } init { status = A } fair action step() { requires status == A status = B } leadsTo Advances { status == A ~> status == B } }",
+            &resolver,
+        )
+        .expect("parse abstraction"),
+    )
+    .expect("build abstraction");
+    let mapping = parse_refinement(
+        "refinement R { impl Impl abs Abs enum conversion stage ImplStage -> AbsStage { A -> A B -> B C -> C } map status = convert(stage, stage) action step() -> step() preserve progress { respond Advances by step } }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("build conversion mapping");
+
+    let expression = &mapping.state_maps["status"].expr;
+    let mut merged = implementation.clone();
+    merged.types.extend(abstraction.types.clone());
+    merged.enum_members.extend(abstraction.enum_members.clone());
+    let mut monitor = fsl_runtime::Monitor::new(implementation.clone()).expect("monitor");
+    let mut states = vec![monitor.state.clone()];
+    let action = monitor.enabled().expect("enabled")[0].clone();
+    monitor.step(&action).expect("step");
+    states.push(monitor.state.clone());
+    for state in states {
+        let expected = fsl_runtime::eval(expression, &state, &mut BTreeMap::new(), &merged, None)
+            .expect("concrete conversion");
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("solver");
+        assert!(
+            block_on(fsl_verifier::expression_matches_value(
+                &merged,
+                &mut solver,
+                expression,
+                &state,
+                &expected,
+            ))
+            .expect("symbolic conversion agreement")
+        );
+    }
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("solver");
+    let progress = block_on(fsl_verifier::check_refinement_progress(
+        &implementation,
+        &abstraction,
+        &mapping,
+        &mut solver,
+        2,
+    ))
+    .expect("preserved progress check");
+    assert!(progress.violation.is_none(), "{progress:?}");
 }
 
 #[test]

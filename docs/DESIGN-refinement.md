@@ -252,6 +252,108 @@ refinement SeatImplRefinesBooking {
   the node and its semantics already existed in both v1 and v2 schemas, this
   change does not alter either schema version.
 
+## 2.6 Exhaustive nominal-enum conversion (issue #450)
+
+Refinement preserves nominal enum identity. Distinct impl/abs enums are never
+assignment-compatible and are never converted by ordinal. A refinement that needs a
+member-wise representation change declares a named conversion and calls it from a state
+map or action argument:
+
+```fsl
+refinement ApplicationUnitOfWorkRefinesUseCase {
+  impl ApplicationUnitOfWorkDesign
+  abs ApplicationUseCaseRequirements
+
+  enum conversion use_case_stage UnitOfWorkStage -> CommandStage {
+    Received  -> Received
+    Loaded    -> Loaded
+    Decided   -> Decided
+    Committed -> Committed
+    Rejected  -> Rejected
+    Conflict  -> Conflict
+  }
+
+  map command_stage[c: Command] = convert(use_case_stage, stage[c])
+  action load(c) -> load(c)
+}
+```
+
+The declaration is a refinement item, so the same syntax is accepted in a standalone
+`refinement` file and an inline requirements `implements { }` block. Its name is local to
+that refinement block. Invocation uses the dedicated
+`convert(<conversion-name>, <expression>)` form and is valid in both state-map expressions
+and abstract action arguments. The first argument is a syntactic conversion name, not a
+value expression; this keeps conversion names out of the namespace of special expression
+calls such as `stage`, `old`, and `abs`.
+
+The source and target names must resolve to enums in the merged impl/abs checked-Kernel
+type inventory. This includes requirements `process` stage enums, DB/domain generated
+enums, and compose-renamed enum types. Conversion rows use the checked-Kernel member
+spellings. Requirements stages retain their source spelling; domain lowering intentionally
+namespaces members (for example `OrderStatus_Pending`), so a mapping at the Kernel
+refinement boundary uses the names published by `fslc kernel`, not the shorter domain-source
+alias. Diagnostics point to the conversion row and list the checked members; they do not
+fabricate a source-level domain span after lowering. The declaration is a checked bijection:
+
+- every declared source member appears exactly once on the left;
+- every declared target member appears exactly once on the right;
+- unknown source/target types or members, duplicate source/target members, a missing
+  member on either side, and a non-enum endpoint are `kind:"type"` errors at the
+  declaration/member location;
+- the call argument must have the declared source nominal type and the call result has
+  the declared target nominal type; and
+- duplicate conversion names, unknown conversion calls, and wrong call arity fail
+  statically.
+
+Requiring both source-totality and target-totality deliberately makes this construct a
+one-to-one representation conversion. A genuine abstraction that collapses several impl
+states into one abs state remains expressible with an ordinary conditional mapping only
+when every referenced member spelling is unambiguous in the merged context; that form does
+not claim exhaustive/bijective assurance. A many-to-one conversion whose source/target
+member spellings collide remains outside this feature. It needs a separately designed
+source-total, non-injective conversion contract rather than weakening this fail-closed
+bijection.
+
+### Checked representation and evaluation
+
+The private checked expression IR gains an enum-member literal carrying both
+`type_name` and `member`; it is not surface `Type.Member` syntax and never consults the
+flat bare-member namespace. Before storing the checked `Refinement`, the frontend
+elaborates each conversion call to the existing nested conditional (`ite`) shape whose
+conditions and results use these typed literals. Repeating the pure argument expression in
+that tree has no observable evaluation-order effect. The last branch is safe as the
+fallback only because source coverage was proved complete.
+
+Concrete Monitor/refinement evaluation maps the selected source member to the declared
+target member. Symbolic evaluation uses the same conditional tree and the enums' own
+member encodings; reversing declaration order therefore cannot change the result.
+Preserved-progress substitution, semantic diff, and inline `implements` consume the
+already-elaborated expression through the shared refinement builder. Production-log and
+causal replay are different: their `impl` is an untyped external JSON schema, so no source
+enum can be resolved. Those raw-surface mapping paths must reject an `enum conversion`
+declaration or `convert(...)` call with a located `kind:"type"` error explaining that a
+typed impl model is required; they must never ignore or partially evaluate it.
+
+Public Kernel model contracts do not contain refinement mappings, and this change does not
+invent a standalone mapping schema. For sidecars that publish an already-checked mapping
+expression, `public_kernel_expression` projects the elaborated form using the existing
+typed `ite` and `var` shape: an internal enum-member literal becomes
+`{"kind":"var","name":<member>,"type":{"kind":"named","name":<type>},...}`.
+The `(type, name)` pair round-trips nominal identity even when impl and abs use identical
+member spelling; projection does not reconstruct it through `base_env`. Public Kernel v1
+and v2 therefore need no new expression kind or schema version. An unelaborated
+`convert(...)` call fails export instead of being omitted or emitted as an untyped call.
+
+### Migration
+
+A pre-3.1 conditional mapping with distinct, unambiguous member spellings remains valid.
+When member spellings collide across nominal enums, or when exhaustive conversion is the
+intended contract, replace the conditional with `enum conversion` plus
+`convert(<name>, <expr>)`.
+Do not rename both layers to one enum type and do not map by declaration order; those
+workarounds erase layer identity or recreate the ordinal false-green that nominal typing
+prevents.
+
 ## 3. CLI / JSON
 
 ```

@@ -102,6 +102,20 @@ pub fn eval(
             .or_else(|| model.enum_members.get(name))
             .cloned()
             .ok_or_else(|| runtime_error(format!("unknown identifier '{name}'"))),
+        Expr::EnumMember { type_name, member } => {
+            let Some(TypeDef::Enum { members, .. }) = model.types.get(type_name) else {
+                return Err(runtime_error(format!("unknown enum type '{type_name}'")));
+            };
+            if !members.contains(member) {
+                return Err(runtime_error(format!(
+                    "unknown enum member '{type_name}.{member}'"
+                )));
+            }
+            Ok(Value::Enum {
+                type_name: type_name.clone(),
+                member: member.clone(),
+            })
+        }
         Expr::Call { name, .. } => {
             Err(runtime_error(format!("unexpanded predicate call '{name}'")))
         }

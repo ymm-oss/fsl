@@ -98,6 +98,10 @@ pub enum Expr {
         fields: Vec<(String, Expr)>,
     },
     Var(String),
+    EnumMember {
+        type_name: String,
+        member: String,
+    },
     Call {
         name: String,
         args: Vec<Expr>,
@@ -235,6 +239,9 @@ impl Expr {
                 json!(["struct_lit", name, object])
             }
             Self::Var(name) => json!(["var", name]),
+            Self::EnumMember { type_name, member } => {
+                json!(["enum_member", type_name, member])
+            }
             Self::Call { name, args, span } => {
                 json!(["call", name, ast_list(args), span.python_loc()])
             }

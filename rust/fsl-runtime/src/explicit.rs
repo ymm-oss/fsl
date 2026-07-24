@@ -736,7 +736,7 @@ fn collect_state_references(
                 output.insert(name.clone());
             }
         }
-        Expr::Num(_) | Expr::Bool(_) | Expr::None => {}
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::EnumMember { .. } => {}
         Expr::Some(value)
         | Expr::Neg(value)
         | Expr::Not(value)
