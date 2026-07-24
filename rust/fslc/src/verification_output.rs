@@ -1036,9 +1036,8 @@ fn render_violation(
     };
     let origin = model.property_origin(property_kind, &violation.name);
     let rendered_name = origin
-        .and_then(|origin| origin.primary.as_ref())
-        .and_then(|site| site.declaration_path.last())
-        .map_or_else(|| display_name(&violation.name), String::clone);
+        .and_then(origin_display_name)
+        .map_or_else(|| display_name(&violation.name), str::to_owned);
     if violation.kind == "trans" {
         output.insert("trans".to_owned(), json!(rendered_name));
     }
@@ -1090,9 +1089,8 @@ fn render_violation(
                 let origin = model.action_origin(&action.name);
                 let mut rendered = json!({
                     "name": origin
-                        .and_then(|origin| origin.primary.as_ref())
-                        .and_then(|site| site.declaration_path.last())
-                        .map_or_else(|| display_name(&action.name), String::clone),
+                        .and_then(origin_display_name)
+                        .map_or_else(|| display_name(&action.name), str::to_owned),
                     "params": action.params.iter().map(|(name, value)| (
                         name.clone(), fsl_value_json(value)
                     )).collect::<Map<_, _>>(),
@@ -1149,9 +1147,8 @@ fn render_reachable_failure(
                     let origin = model.property_origin("reachable", &property.name);
                     let mut item = json!({
                         "name": origin
-                            .and_then(|origin| origin.primary.as_ref())
-                            .and_then(|site| site.declaration_path.last())
-                            .map_or_else(|| display_name(&property.name), String::clone),
+                            .and_then(origin_display_name)
+                            .map_or_else(|| display_name(&property.name), str::to_owned),
                         "loc": property.span.python_loc(),
                         "classification": "insufficient_depth",
                         "hint": format!("not witnessed within depth {}; try a larger --depth", options.depth),

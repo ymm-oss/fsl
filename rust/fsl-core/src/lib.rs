@@ -38,7 +38,6 @@ mod typecheck;
 pub use compose::{
     FileResolver, FsResolver, lower_compose, parse_kernel_source, parse_kernel_source_with_file,
 };
-pub use db::db_kernel_source;
 pub use diagnostics::{
     insert_requirement_metadata, model_warnings, requirement_metadata, version_metadata,
 };

@@ -2251,11 +2251,10 @@ fn lower_catalog_sentinel(name: String, prefix: &str, id: &str) -> Result<Kernel
 ///
 /// # Errors
 ///
-/// Returns [`CoreError`] if the generated kernel catalog is invalid.
+/// Returns [`CoreError`] if the lowered kernel catalog is invalid.
 pub fn lower_db(system: &fsl_syntax::DbSystem) -> Result<KernelSpec, CoreError> {
-    let source = crate::db_kernel_source(system);
-    let spec = fsl_syntax::parse_surface_spec(&source)?;
-    lower_direct_spec(spec)
+    let (surface, origins) = crate::db::lower_db_surface(system);
+    crate::lower_direct_spec_with_origins(surface, origins)
 }
 
 /// Lower a Functional-DDD document to its executable catalog kernel.

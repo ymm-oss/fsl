@@ -243,30 +243,22 @@ rules changed shape instead of gaining a same-named field:
 `DbCheckRule { name, annotations, span }`; `DbCheck::python_ast()`
 reconstructs the original plain `Vec<String>` rule-name list.
 
-`db_kernel_source` (`rust/fsl-core/src/db.rs`) still synthesizes the
-dbsystem's executable kernel as FSL source text re-parsed through the shared
-spec grammar (`fsl_syntax::parse_surface_spec`) — issue #281 did not replace
-that architecture, which would have been a much larger change unrelated to
-annotations. What changed is *what floats through the text*: a migration's
-`decl_annotations` and a matching `DbCheckRule`'s `annotations` are rendered
-back to literal `@requirement(...)`/`@undecided(...)`/`@kind(...)`/custom
-`@ns.path(...)` source lines (`Annotation::render_source()`,
-`rust/fsl-syntax/src/annotation.rs`) immediately before the corresponding
-synthesized `action`/`invariant`, rather than being squeezed through the
-lossy `quote_meta("ID", "text")` single-`MetaTag` string convention the
-system-generated `DB-MIGRATION`/`DB-NOT-NULL`/`DB-COMPAT-READ`/
-`DB-COMPAT-WRITE` labels still use unchanged. Re-parsing then binds them as
-ordinary typed `Annotation`s through the exact same
-`collect_declaration_annotations` path every other dialect uses, so they
-reach `AnnotationRegistry`/`KernelModel`/TSG/the audit ledger with no new
-plumbing. Because the lexer has no string-escape syntax
-(`rust/fsl-syntax/src/lexer.rs::lex_string` stops at the first `"` or
-newline), `Annotation::render_source()` sanitizes backslash, `"`, and
-newline characters out of a `String` argument value before quoting it — the
-same character class `quote_meta` already sanitizes, extended to cover
-newlines too since this is a fresh code path rather than an existing one.
-This sanitization only affects a `String` value containing those characters;
-Integer, Boolean, and Symbol arguments round-trip exactly.
+Issue #410 supersedes the temporary text-transport detail from #281.
+`rust/fsl-core/src/db.rs` now constructs the dbsystem's typed `SurfaceSpec`
+directly. A migration's `decl_annotations` and a matching `DbCheckRule`'s
+`annotations` are cloned onto the generated `SpecItem::Action` or
+`SpecItem::Invariant`; they no longer pass through
+`Annotation::render_source()`, a generated FSL string, or a second parse.
+System-owned `DB-MIGRATION`/`DB-NOT-NULL`/`DB-COMPAT-READ`/
+`DB-COMPAT-WRITE` labels remain separate `MetaTag`s, as before. Typed
+annotations still reach `AnnotationRegistry`/`KernelModel`/TSG/the audit
+ledger through the ordinary direct-lowering collection path, and their values
+are no longer subject to generated-source quoting or sanitization.
+
+The direct builder also supplies an `OriginRegistry`. Annotation relations
+remain distinct from provenance: a rule annotation does not become an origin
+identity, while the generated invariant separately points to the authored rule,
+artifact/environment entry, and column declarations that caused it.
 
 `tools/check_rust_surface_parity.py`'s `SUPPORTED_SPECIALIZED_FRONTENDS`
 already includes `ai-component`/`db`/`domain`; since no new field was
@@ -342,8 +334,6 @@ suppression, and exact declaration matching—remain unchanged.
   dropping the annotation;
 - unifying the four duplicated `pending_annotations` parser state machines
   (`parser.rs`, `domain.rs`, `ai.rs`, `db.rs`) behind one shared trait;
-- replacing `db_kernel_source`'s text-synthesis-and-reparse architecture with
-  direct `KernelSpec`/`SpecItem` construction;
 - formatter or source migrator behavior;
 - macro execution or verifier semantics selected by an annotation;
 - publishing annotations by mutating Public Kernel v1/v2.

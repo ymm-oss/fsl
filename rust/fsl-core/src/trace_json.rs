@@ -51,6 +51,13 @@ pub fn internal_origin_json(origin: &OriginChain) -> Value {
 
 #[must_use]
 pub fn origin_display_name(origin: &OriginChain) -> Option<&str> {
+    // Database lowering now has truthful source origins, but its public action
+    // and property names predate source-backed display-name substitution. Keep
+    // those executable/replay identities stable while still publishing the
+    // origin chain and authored locations.
+    if origin.dialect == "dbsystem" {
+        return None;
+    }
     origin
         .primary
         .as_ref()
