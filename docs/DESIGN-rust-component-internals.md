@@ -75,7 +75,7 @@ inference), and E0 (assumption).
 |---|---|---|---|
 | E-01 | E2 | Module declarations, imports, public re-exports, and state types in all eleven crates expose the current internal dependency and state-owner graph. | Establishes the current structure. |
 | E-02 | E2 | `dispatch::parse_document`, `build_model`, `Monitor`, `SmtSolver`, verification engines, tool-family facades, CLI/Worker entrypoints, and `DocumentIndex` form observable transformation stages. | Establishes the target direction. |
-| E-03 | E2 | `fsl-core::public_kernel` owns checked-model type validation used by `model` and `refinement`; `fsl-verifier::induction` imports liveness/trace helpers from `bmc`; document helpers import `document_render::Locale`; `fslc::verification` uses `super::*`. | Identifies concrete wrong-direction or hidden dependencies. |
+| E-03 | E2 | The baseline found checked-model type validation in `fsl-core::public_kernel`, induction liveness/trace helpers in `bmc`, document locale in `document_render`, duplicated tools Domain naming, and `fslc::verification` using `super::*`. The first four were resolved independently by #420, #421, #422, and #419. | Identifies concrete wrong-direction or hidden dependencies and records which evidence has already been acted on. |
 | E-04 | E2 | `fsl-tools` has independent document, causal, specialized-dialect, and Kernel-derived families behind root re-exports; the document and causal families also have distinct schemas and focused histories. | Justifies family-level internal boundaries without a crate split. |
 | E-05 | E1 | In `295508e9^..c37a81a1418f98c701e22729f3dff4d5e7ddbe5f`, 37 non-merge commits touched `fslc/src/main.rs`, while its command families already have separate integration suites and distinct failure/state contracts. | Justifies a command-family extraction experiment, not a new crate. |
 | E-06 | E2 | Runtime rollback, explicit search, symbolic agreement, Public Kernel, document rendering, CLI, browser parity, and LSP tests contain rejecting cases. | Supplies existing fitness functions. |
@@ -95,9 +95,10 @@ Scoped classifications are:
   retirement decision is made;
 - **accidental:** current filenames, flat versus nested modules, private helper placement,
   root-module implementation bodies, and per-call accumulator shapes;
-- **defect:** checked type validation owned by `public_kernel`, shared induction policy owned by
-  `bmc`, document locale owned by its renderer, duplicated domain `snake` transforms, and the native
-  verification module's glob dependency on its parent;
+- **resolved defect:** checked type validation formerly owned by `public_kernel`, shared induction
+  policy formerly owned by `bmc`, document locale formerly owned by its renderer, and duplicated
+  tools Domain `snake` transforms were corrected by #420, #421, #422, and #419 respectively;
+- **remaining defect:** the native verification module's glob dependency on its parent;
 - **unknown:** external use of the public legacy runtime BFS and compatibility binaries, operational
   importance of those paths, and whether current change clusters will persist.
 
@@ -188,14 +189,78 @@ syntax + lowering vocabulary + origin sidecar
   `ModelBuilder` owns construction-only maps and releases an immutable model.
 - `compose.rs::FileResolver` is the I/O boundary. `FsResolver` is a native convenience adapter, not
   permission for lowerers or validators to read paths directly.
-- **Candidate target (not authorization):** move `validate_expression_type`,
-  `validate_statement_types`, and `validate_model_expression_types` from the outward
-  `public_kernel` projection to a neutral checked-model/typecheck owner used by `model`,
-  `refinement`, and the exporter.
-- Structural Domain lowering and generated-Kernel-source projection remain different outputs, but
-  effect-outcome role normalization must have one low-level owner consumed by both paths.
-- **Candidate trigger (not authorization):** consider those two policy moves when either area next
-  changes; otherwise retain the current file tree and public re-exports.
+- **Resolved neutral-policy slice (#420):** `typecheck` owns
+  `validate_expression_type`, `validate_statement_types`, and
+  `validate_model_expression_types` for `model`, `refinement`, and the Public Kernel exporter.
+  #397 does not reopen or duplicate that completed move.
+- Structural Domain lowering and generated-Kernel-source projection remain different outputs.
+  `fsl-syntax::DomainEffect` owns value-level role conflict detection and the explicit outcome
+  union; `domain_lowering` owns checked event cross-reference validation and status-member mapping
+  consumed by both core projection paths.
+- **Resolved phase selection (#397):** retain the current physical dialect/domain owners. The
+  duplicate private core `lower_name` implementations are a weak static signal, but their distinct
+  structural-lowering and generated-source outputs have no naming drift or naming-policy change
+  after their introduction. Re-evaluate when one path changes, names diverge, or a shared
+  naming-policy defect is demonstrated. Preserve the current file tree and public re-exports
+  meanwhile.
+
+#### Core dialect/domain lowering evaluation
+
+The current value flow remains directed. `fsl-syntax` owns dialect recognition and Domain value
+normalization. `compose::parse_kernel_source` is the `SurfaceDocument` dispatch gate.
+`dialect::lower_domain` coordinates checked Domain lowering, `domain_lowering` owns structural
+Domain-to-Surface lowering plus checked outcome-event validation/status mapping, and `domain` owns
+the separate generated Kernel-source projection while consuming that checked policy. The
+syntax-owned `DomainEffect` methods expose role conflicts, explicitly assigned events, and the
+complete outcome union to both core paths.
+
+The twelve-month horizon includes the full available Rust history, not only the accepted baseline.
+The two core `lower_name` implementations were introduced by the native migration/direct-lowering
+work (`81b31eb` and `a851588`) and have not changed since. In contrast, `d4f5232` and `a0f6f31`
+corrected real drift in effect-outcome handling across these same structural and generated-source
+paths, then placed status mapping and checked validation behind a shared core owner. That is direct
+evidence that a genuinely shared policy can create cross-path amplification and should be
+centralized. It is not evidence that the distinct naming outputs have drifted or that sharing their
+helper now reduces total cost. Since the accepted baseline, only #420 touched the evaluated paths.
+
+| Choice | Intervention | Benefit | Cost and risk | Decision |
+|---|---|---|---|---|
+| C0: retain current owners | No source move; keep the two output paths separate | Preserves independently testable structural and generated-source projections | The two private naming helpers remain visibly duplicated, and a truly shared future policy can require synchronized edits | **Selected while naming-specific evidence is insufficient** |
+| C1: share only core naming | Move `safe`/`lower_name` behind one private owner | Removes duplicate lines and gives future naming changes one edit point | Couples outputs without observed naming drift or change frequency; a later path-specific rule could require another split | Defer pending an independent naming signal |
+| C2: impose a dialect/domain module tree | Move recognition, dispatch, lowering, and projections into a new hierarchy | Makes conceptual stages physically prominent | Broad import and review churn with no measured semantic, operational, or maintenance benefit | Reject |
+
+This is an implementation-local-optima audit, not a file-size judgment:
+
+| Audit variable | Local evaluation | Expanded evaluation |
+|---|---|---|
+| `B` boundary | One private naming helper | Syntax recognition through both checked Domain projections |
+| `M` metric | Minimum duplicate code | Semantic ownership, independent evolution, and contract-preserving change cost |
+| `N` change scope | Share two helper functions | Move one policy owner or restructure the dialect/domain pipeline |
+| `T` time | Current static layout | Full available history within the twelve-month horizon and the next naming/lowering change |
+
+Observed evidence is the import/value-flow graph, distinct output contracts, existing controls,
+unchanged naming helpers, and the earlier effect-outcome drift and correction. It is inferred that
+sharing the naming helper now would add coupling without lowering measured naming-policy change
+amplification. Whether the next naming change will affect both paths identically is an unverified
+hypothesis. C0 is preferable at the function and module boundaries; feature and lifecycle evidence
+is mixed because adjacent effect-outcome policy did require cross-path correction, while the naming
+policy did not. System and operational evidence is absent. There is therefore no demonstrated
+preference inversion for the remaining naming candidate, but an all-boundaries C0 claim would be
+too strong. For the remaining naming candidate, the result is `insufficient-evidence`, severity
+1/15 (`E0 A0 F0 K0 T1`), confidence C2 from source and history. The adjacent effect-outcome history
+limits the broader phase claim but does not establish naming-specific amplification, so `A` remains
+zero. `F0` does not erase the historical outcome defect; it records that the defect was corrected
+and no naming-boundary failure is observed. `T1` records that a future private-helper move remains
+easy to reverse. Current separation is locally rational because the paths produce different
+representations and can fail at different stages.
+
+No migration or compatibility bridge is needed for C0. If a future independent signal selects C1,
+perform it as one revertible private-helper move and roll back by reverting that change. Entry and
+exit controls must cover both positive and rejecting cases: successful structural lowering and
+generated-source projection; invalid expressions; conflicting or duplicate effect-outcome roles;
+name/projection mismatch; unsupported Public Kernel projection; origin and deterministic ordering;
+and symbolic/concrete Domain agreement. Any move must preserve the typed model, Kernel schema and
+ordering, and must not repeat #420's checked-model validation work.
 
 ### `fsl-runtime`
 
@@ -296,9 +361,9 @@ builders/contexts are per-call accumulators. No family owns process lifecycle or
   `ledger::assurance_token`/`assurance_label`, as required by the accepted evidence-overlay design.
   Moving it to a neutral module requires that design to be explicitly superseded and is not part of
   this decision.
-- **Candidate target (not authorization):** consolidate the identical private `domain::snake` and
-  `domain_codegen::snake` transform into one Domain-family helper because it affects generated
-  names in both paths.
+- **Resolved C2 slice (#419):** `domain_naming::snake` is the one tools-family owner used by Domain
+  analysis and code generation. Its simple all-uppercase normalization intentionally remains
+  distinct from core's acronym-aware, identifier-safe `lower_name` policy.
 - Retain the fail-closed `public_kernel` adapter shared by typestate, test generation, and Domain
   code generation. Do not merge those distinct tools merely because they share input validation.
 - **Resolved C2 slice (#423):** `fslc-rust` owns test-generation path canonicalization and passes an
@@ -308,12 +373,11 @@ builders/contexts are per-call accumulators. No family owns process lifecycle or
   `conservation_candidate` findings. `fslc-rust` retains ai-review family orchestration, aggregate
   ordering and finding IDs, the `analysis-findings.v0` envelope, mode validation, transport, and
   exit status. Further analysis families require their own evidence and independently scoped move.
-- **Candidate inventory (not authorization):** the future structural candidates are the locale
-  owner and duplicated Domain naming helper. Decide and verify each
-  independently under its own issue, accepted scope/design, positive and rejecting oracle,
-  pre-PR audit, and independently revertible pull request. Do not replace the flat root API or
-  create subcrates; family directories are optional presentation after the dependency graph is
-  acyclic.
+- **Resolved candidate inventory:** locale ownership and tools Domain naming were completed by
+  #422 and #419. Their completion does not authorize another tools move. Any future candidate needs
+  new evidence, its own issue and accepted scope/design, positive and rejecting oracles, pre-PR
+  audit, and an independently revertible pull request. Do not replace the flat root API or create
+  subcrates; family directories are optional presentation after the dependency graph is acyclic.
 
 ### `fslc-rust`
 
@@ -526,7 +590,7 @@ itself. Selection still requires a dedicated issue and accepted scope/design.
 |---|---|---|---|---|
 | C0 — retain undocumented internals | Apply only the mandatory factual/contract corrections; add no maintained role map or source change. | Almost zero transition work. | Wrong-direction imports, duplicate policy, and overloaded entry modules remain unowned; does not answer the design question. | Rejected. |
 | C1 — publish the internal contract without source moves | Add this role map, hard gates, exceptions, target owners, triggers, and fitness functions. | Gives every future change a target owner while retaining full rollback and avoiding speculative file churn. | Does not itself remove any dependency defect or reduce `main.rs` edit breadth. | **Selected.** |
-| C2 — one minimal local structural correction | In a separate change, move one exact duplicated or wrongly owned rule behind current re-exports; the smallest first candidate is the duplicated Domain naming transform. | Tests whether directional normalization reduces duplicate ownership with a narrow diff and rollback. | Visibility/import churn; no measured maintenance benefit yet. | Not authorized; deferred until an implementation request or the affected code changes. |
+| C2 — one minimal local structural correction | In separate changes, move one exact duplicated or wrongly owned rule behind current re-exports. The baseline Domain naming, typecheck, liveness/trace, locale, path-input, and verification-renderer candidates have now been adjudicated independently. | Tests whether directional normalization reduces duplicate ownership with a narrow diff and rollback. | Visibility/import churn; each additional move still needs fresh evidence rather than inheriting authorization. | Completed slices authorize no further change; #397 selects C0 for core dialect/domain lowering. |
 | C3 — immediately impose the full target module tree | Move all logical roles into physical modules now. | Uniform visible layout and smaller files. | Large review surface, merge pressure, and no demonstrated semantic or operational gain for cohesive adapters. | Rejected for current evidence. |
 
 C1 is the least-regret current intervention under correctness-first, delivery-speed, and
@@ -540,9 +604,10 @@ layout prevents isolation.
 This record is the complete C1 transition. If a later request selects C2, use independently
 revertible slices in this order of evidence, not as one pre-authorized migration:
 
-1. **Exact duplication:** consolidate the Domain naming transform.
-2. **Neutral-policy slices:** move core checked-type validation, verifier liveness/trace helpers, or
-   document locale ownership one at a time. Preserve root re-exports and accepted feature contracts.
+1. **Exact duplication (completed by #419):** consolidate the tools Domain naming transform.
+2. **Neutral-policy slices (completed by #420, #421, and #422):** move core checked-type validation,
+   verifier liveness/trace helpers, and document locale ownership one at a time. Preserve root
+   re-exports and accepted feature contracts.
 3. **Path-input slice (completed by #423):** test-generation canonicalization is owned by the
    delivery caller; generated pytest output and paths remain byte-identical for existing, missing,
    and symlinked inputs.
