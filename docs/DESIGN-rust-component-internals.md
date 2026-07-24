@@ -165,12 +165,51 @@ ast / surface / annotation value types
 - `lexer.rs`, `annotation_parse.rs`, `syntax_expr.rs`, and the shared parts of `parser.rs` own
   reusable recognition mechanics. Per-call token cursors and pending annotations remain local.
 - `ai.rs`, `db.rs`, and `domain.rs` own dialect-specific recognition. `dispatch.rs` is the sole
-  standard-FSL acceptance front door and lexes once.
+  standard-FSL acceptance front door, lexes once, and also owns the intentionally opaque `agent`
+  frontend.
 - `causal.rs` remains an explicit review-only sibling outside standard dispatch. `literate.rs` is
   preprocessing, not a second parser. `lossless.rs` may consume parser results but must not decide
   semantic acceptance.
-- **Current decision:** retain the current physical layout. Add a module only when a new dialect has
-  an independent grammar/value contract; do not split the large shared parser by production count.
+- **Resolved parser evaluation (#399):** retain the current physical layout. Add a module only when
+  a new dialect has an independent grammar/value contract; do not split the shared parser by
+  production count. The parser has one token cursor, annotation hand-off, span/diagnostic policy,
+  and standard grammar owner, and its observed changes follow language features rather than a
+  second dependency direction or independently evolving output contract.
+
+#### Shared parser split evaluation
+
+`parse_expr` and `parse_surface_spec` enter the same private `Parser` cursor.
+`parse_surface_document` delegates to `dispatch::parse_document`; its spec, refinement, compose,
+business, governance, and requirements frontends then enter `parse_shared_tokens` and compose the
+same declaration, type, annotation, expression, and statement recognizers. Dedicated `ai`, `db`,
+`domain`, `agent`, and `causal` paths are already separate where their source value contracts differ
+or remain intentionally opaque. `dispatch` owns dialect selection; the shared parser neither imports
+lowering nor owns semantic validation. The full available history changes `parser.rs` for language
+features such as inline initialization, typed annotations, general conditionals, stage access,
+finite binders, and ID policy. Those changes legitimately cross several productions while retaining
+one location and error policy. No duplicated parser policy, reverse dependency, or independently
+released parser output is observed. The earlier Domain-expression work did move recursive
+expression ownership to `syntax_expr` when a genuinely shared owner emerged; that precedent supports
+a semantic trigger and does not justify a production-count split.
+
+The reproducible code/history cutoff for both #399 evaluations is `f8fe207`. Option labels C0-C2
+below are intervention alternatives from the issue; audit confidence uses the separate C0-C3
+evidence scale.
+
+| Choice | Intervention | Benefit | Cost and risk | Decision |
+|---|---|---|---|---|
+| C0: retain the shared parser | Keep the private cursor and standard grammar together | One source-order, annotation, span, and diagnostic owner | A large file remains and broad grammar features can touch several sections | **Selected** |
+| C1: extract one production family | Move declarations, statements, or types behind a private module | Smaller physical files | Cursor visibility and annotation-state plumbing move across modules without reducing semantic owners or observed changed-owner count | Defer until one family gains an independent contract or repeated isolated change history |
+| C2: impose a parser module tree | Split every production family at once | Makes grammar categories physically prominent | Large migration valley, merge pressure, and high location/diagnostic drift risk without an observed boundary defect | Reject |
+
+The implementation-local-optima audit expands `B` from one production to the standard grammar,
+`M` from file size to semantic-owner and changed-owner count, `N` from a move-only helper to all
+cursor/annotation/diagnostic consumers, and `T` to the full available history and next grammar
+feature. Source, imports, and history agree that the current layout is locally and systemically
+coherent; operational evidence is absent. The result is `insufficient-evidence`, severity 1/15
+(`E0 A0 F0 K0 T1`), confidence C2. A future split must preserve valid and rejecting parse cases,
+exact locations and errors, lossless/formatter idempotence, dispatch, lowering, typed-model checks,
+and the language documentation controls required for a grammar feature.
 
 ### `fsl-core`
 
@@ -261,6 +300,57 @@ generated-source projection; invalid expressions; conflicting or duplicate effec
 name/projection mismatch; unsupported Public Kernel projection; origin and deterministic ordering;
 and symbolic/concrete Domain agreement. Any move must preserve the typed model, Kernel schema and
 ordering, and must not repeat #420's checked-model validation work.
+
+#### Public Kernel projection/export split evaluation
+
+After #420 removed checked-model type validation, `public_kernel.rs` still has one cohesive product
+owner: Kernel v1/v2 version negotiation, typed JSON projection, partial-operation discovery,
+deterministic ordering, and v2 origin/provenance publication. These paths share projection helpers,
+one fail-closed error type, and the same checked model. The observed Kernel changes add expression
+forms, provenance, binders, or replayable normalization across that contract; they do not establish
+separate v1/v2 semantic owners. Splitting the projector by version or JSON collection would copy or
+invert shared policy.
+
+Six trace-product constants are the narrow exception. Test-generation schema constants entered with
+the testgen adapter, while replay schema identifiers and successive accepted versions entered with
+replay and bounded-liveness features. Their production consumers are `fsl-tools::testgen`,
+`fslc-rust` conformance output, and native replay parsing, not Public Kernel projection. They are
+publicly re-exported from the crate root, so their stable API does not require physical ownership by
+`public_kernel.rs`.
+
+| Choice | Intervention | Benefit | Cost and risk | Decision |
+|---|---|---|---|---|
+| C0: retain every item | Leave Kernel and trace schema constants in one file | No move-only diff | Trace schema evolution continues to name the wrong semantic owner | Reject for the six trace constants; retain for the projector |
+| C1: split v1/v2 or projection phases | Create version- or collection-specific projector modules | Smaller physical files | Shared expression, partiality, error, ordering, and provenance rules cross or duplicate the new seams | Reject |
+| C2: move only trace schema constants | Give testgen/replay schema identity one neutral private owner while preserving the crate-root API | Aligns ownership and history with a tiny reversible slice | Import/re-export churn and risk of value or inventory drift | **Selected as child #448** |
+
+For the selected slice, the local convenience is keeping every published JSON constant beside the
+Kernel exporter. Expanding `B` to all schema producers/consumers, `M` to ownership and changed-owner
+count, `N` to the crate-root facade and trace consumers, and `T` to the features that added and
+versioned each trace schema confirms a semantic-owner mismatch but does not demonstrate that moving
+the constants reduces repeated change amplification or shifts an externalized burden. The audit
+result is `insufficient-evidence`, severity 1/15 (`E0 A0 F0 K0 T1`), confidence C2 from source,
+blame, and consumer history. The accepted owner-direction gate independently selects the narrow C2
+correction; there is no runtime boundary failure or lock-in.
+
+Child #448 must preserve all six string values byte-for-byte and keep the existing crate-root symbol
+names/API unchanged while moving their private owner. Its positive controls cover Public Kernel
+v1/v2, testgen/replay goldens, and published schema inventory;
+rejecting controls cover unsupported Kernel versions and a missing or drifted trace schema
+identifier/version. It must not change Kernel schema/order/version, trace JSON, replay semantics,
+or introduce a compatibility facade. All remaining `public_kernel.rs` responsibilities stay C0
+until a separately observed ownership defect exists.
+
+The entry and exit controls for either future slice are fixed as follows; each row pairs a working
+path with a rejecting control so a move cannot pass by dropping behavior:
+
+| Contract | Positive control | Rejecting control |
+|---|---|---|
+| Grammar and source locations | representative shared-dialect parses through `parse_document`, formatter idempotence, and `specialized_frontends_parse_after_leading_trivia` | duplicate/unknown dispatch keywords, annotation-before-close target error, and malformed-expression span tests |
+| Lowering | requirements/business stage agreement, action-correspondence agreement, and Domain/Kernel expression agreement | unknown stage, untyped stage argument, and ambiguous aggregate symbol rejections at authored spans |
+| Typed model | successful `build_model` before Kernel goldens | duplicate writes/parameters and `public_kernel_uses_checked_model_validation_for_unprojected_metadata` |
+| Kernel schema, order, and version | deterministic v1/v2 CLI goldens, guard/pattern order, and v2 origin assurance | unlowered expressions, fabricated compose paths, absolute source paths, and unsupported Kernel/conformance majors |
+| Trace schema child #448 | published schema inventory plus replay/testgen goldens | unsupported replay versions and a removed or drifted trace schema constant |
 
 ### `fsl-runtime`
 

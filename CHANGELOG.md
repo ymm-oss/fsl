@@ -15,6 +15,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- The shared parser evaluation retains one cursor, annotation, location, diagnostic, and standard
+  grammar owner. The Public Kernel evaluation likewise retains its v1/v2 projector, but selects the
+  six independently evolving testgen/replay trace schema constants as one neutral-owner child slice
+  with unchanged crate-root symbols, byte-stable values, and schema drift negative controls (#399;
+  follow-up #448).
 - `dbsystem` executable lifecycle lowering now constructs typed Kernel surface IR
   directly instead of rendering and re-parsing generated FSL. The migration preserves
   types, state, action/property semantics, metadata, annotations, and deterministic
