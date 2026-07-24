@@ -63,15 +63,37 @@ pub(crate) fn base_env(model: &KernelModel) -> TypeEnv {
         };
         env.entry(name.clone()).or_insert(ty);
     }
+    let mut enum_members = BTreeMap::<&str, Option<&str>>::new();
     for (type_name, definition) in &model.types {
         if let TypeDef::Enum { members, .. } = definition {
             for member in members {
-                env.entry(member.clone())
-                    .or_insert_with(|| TypeRef::Named(type_name.clone()));
+                enum_members
+                    .entry(member)
+                    .and_modify(|owner| *owner = None)
+                    .or_insert(Some(type_name));
             }
         }
     }
+    for (member, owner) in enum_members {
+        if let Some(type_name) = owner {
+            env.entry(member.to_owned())
+                .or_insert_with(|| TypeRef::Named(type_name.to_owned()));
+        }
+    }
     env
+}
+
+fn enum_member_owners(model: &KernelModel, member: &str) -> Vec<String> {
+    model
+        .types
+        .iter()
+        .filter_map(|(type_name, definition)| match definition {
+            TypeDef::Enum { members, .. } if members.iter().any(|item| item == member) => {
+                Some(type_name.clone())
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 pub(crate) fn resolve(model: &KernelModel, ty: &TypeRef) -> Result<TypeRef, TypecheckError> {
@@ -173,10 +195,17 @@ pub(crate) fn infer_type(
             ))
         }
         Expr::Struct { name, .. } => Ok(TypeRef::Named(name.clone())),
-        Expr::Var(name) => env
-            .get(name)
-            .cloned()
-            .ok_or_else(|| error(format!("public Kernel cannot type identifier '{name}'"))),
+        Expr::Var(name) => env.get(name).cloned().ok_or_else(|| {
+            let owners = enum_member_owners(model, name);
+            if owners.len() > 1 {
+                error(format!(
+                    "ambiguous enum member '{name}' belongs to [{}]; use a bijective enum conversion when applicable (many-to-one: issue #455)",
+                    owners.join(", ")
+                ))
+            } else {
+                error(format!("public Kernel cannot type identifier '{name}'"))
+            }
+        }),
         Expr::EnumMember { type_name, member } => match model.types.get(type_name) {
             Some(TypeDef::Enum { members, .. }) if members.contains(member) => {
                 Ok(TypeRef::Named(type_name.clone()))

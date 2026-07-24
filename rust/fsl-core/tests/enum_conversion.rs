@@ -172,6 +172,93 @@ fn conversion_calls_are_checked_in_action_arguments() {
 }
 
 #[test]
+fn merged_context_rejects_a_bare_member_shared_by_distinct_nominal_enums() {
+    let implementation = build(
+        "spec Impl { enum AImplStage { Shared, Left } state { stage: AImplStage } init { stage = Shared } }",
+    );
+    let abstraction = build(
+        "spec Abs { enum ZAbsStage { Shared, Zero, One } state { status: ZAbsStage } init { status = Zero } }",
+    );
+    let error = parse_refinement(
+        "refinement R { impl Impl abs Abs map status = if stage == Shared then Zero else One }",
+        &implementation,
+        &abstraction,
+    )
+    .expect_err("a merge must not reinterpret a checked impl member as an abs member");
+
+    assert!(
+        error.message.contains("ambiguous enum member 'Shared'"),
+        "{}",
+        error.message
+    );
+    assert!(error.message.contains("AImplStage"), "{}", error.message);
+    assert!(error.message.contains("ZAbsStage"), "{}", error.message);
+    assert!(error.message.contains("bijective enum conversion"));
+    assert!(error.message.contains("issue #455"));
+    assert!(
+        error.span.is_some(),
+        "diagnostic must retain the map location"
+    );
+}
+
+#[test]
+fn abstraction_constants_cannot_shadow_a_merged_enum_collision() {
+    let implementation = build(
+        "spec Impl { enum AImplStage { Shared, Left } state { stage: AImplStage } init { stage = Shared } }",
+    );
+    let abstraction = build(
+        "spec Abs { const Shared = 0 enum ZAbsStage { Shared, Zero, One } state { status: ZAbsStage } init { status = One } }",
+    );
+    let error = parse_refinement(
+        "refinement R { impl Impl abs Abs map status = if Shared == 0 then Zero else One }",
+        &implementation,
+        &abstraction,
+    )
+    .expect_err("mapping expressions may use implementation constants, not abstraction constants");
+
+    assert!(
+        error.message.contains("ambiguous enum member 'Shared'"),
+        "{}",
+        error.message
+    );
+    assert!(error.message.contains("AImplStage"), "{}", error.message);
+    assert!(error.message.contains("ZAbsStage"), "{}", error.message);
+    assert!(error.span.is_some());
+}
+
+#[test]
+fn ordinary_identifiers_keep_precedence_over_ambiguous_enum_members() {
+    let abstraction = build(
+        "spec Abs { type Key = 0..1 enum ZAbsStage { Shared, Zero } state { ready: Bool, flags: Map<Key, Key> } init { ready = false forall k: Key { flags[k] = 0 } } }",
+    );
+
+    for (implementation, mapping) in [
+        (
+            build(
+                "spec Impl { enum AImplStage { Shared, Left } state { Shared: Bool } init { Shared = true } }",
+            ),
+            "refinement R { impl Impl abs Abs map ready = Shared map flags[b: Key] = b }",
+        ),
+        (
+            build(
+                "spec Impl { const Shared = true enum AImplStage { Shared, Left } state { ready: Bool } init { ready = false } }",
+            ),
+            "refinement R { impl Impl abs Abs map ready = Shared map flags[b: Key] = b }",
+        ),
+        (
+            build(
+                "spec Impl { enum AImplStage { Shared, Left } state { ready: Bool } init { ready = false } }",
+            ),
+            "refinement R { impl Impl abs Abs map ready = ready map flags[Shared: Key] = Shared }",
+        ),
+    ] {
+        parse_refinement(mapping, &implementation, &abstraction).expect(
+            "implementation state/const and local bindings keep precedence over enum members",
+        );
+    }
+}
+
+#[test]
 fn empty_enum_conversion_fails_closed_before_call_elaboration() {
     let implementation = build(
         "spec Impl { enum EmptyImpl {} state { ready: Bool } init { ready = false } action send(s: EmptyImpl) { requires false } }",

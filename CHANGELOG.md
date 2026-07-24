@@ -6,6 +6,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- Refinement typechecking now rejects an unshadowed bare enum member shared by distinct
+  implementation and abstraction enums, preventing checked and evaluation
+  merge order from assigning different nominal identities. Existing identifier
+  shadowing by implementation inputs is preserved, unevaluable abstraction
+  constants are excluded, bijective mappings use the explicit typed conversion,
+  and the separate many-to-one contract remains tracked by #455 (#454).
 - Refinement mappings can now declare an exhaustive, type-safe member-wise
   conversion between distinct nominal enums and invoke it from state maps or
   action arguments. This includes requirements `process` stage enums, rejects

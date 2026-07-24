@@ -654,9 +654,6 @@ fn validate_refinement_expressions(
 
 fn refinement_type_context(implementation: &KernelModel, abstraction: &KernelModel) -> KernelModel {
     let mut context = implementation.clone();
-    for (name, value) in &abstraction.consts {
-        context.consts.entry(name.clone()).or_insert(value.clone());
-    }
     for (name, definition) in &abstraction.types {
         context
             .types
