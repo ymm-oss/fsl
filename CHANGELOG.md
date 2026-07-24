@@ -15,6 +15,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- The native CLI output-boundary evaluation inventories all 50 command leaves and rejects a typed
+  `Command`/`CommandOutcome` framework. A future, separately scoped change may centralize only
+  regular-command JSON/raw process delivery, with exact byte, envelope, stderr, exit-status, and
+  Worker-separation controls (#394; follow-up #441).
 - The native causal command parser, I/O preparation, tool calls, and JSON/status projection now
   have one explicit `causal.rs` module owner, while top-level dispatch, shared process helpers, raw
   output, serialization, and exit normalization remain in `main.rs` with unchanged CLI contracts

@@ -361,6 +361,12 @@ native binary: argument parsing
   still touched one focused test file, so it did **not** reduce file count; no production causal
   follow-up has yet demonstrated lower edit count. This result supports clearer ownership but does
   not authorize extracting a second family or adopting a typed command framework.
+- **Resolved output-boundary evaluation (#394):** retain family parsers and semantic producers as
+  their existing tuple/JSON contracts, reject typed `Command`/`CommandOutcome`, and admit only a
+  future native-process `Json`/`Raw` delivery value. That value is not implemented by this
+  evaluation. Follow-up #441 is the separate, independently revertible implementation issue and may
+  centralize only regular-command stdout and exit delivery; metadata/help, `fmt`, command-family
+  parsing, semantic results, stderr side channels, Worker transport, and LSP remain outside it.
 - `LiterateState`, atomic migration, verify cache, approval trust, and solver execution remain
   distinct state/failure owners rather than a single application state.
 - **Candidate experiment (not authorization):** if selected through the C2 gate, first make
@@ -368,6 +374,106 @@ native binary: argument parsing
   change. The causal family and its focused CLI suite are the first proposed experiment; a
   successful file move is insufficient unless a later representative change touches fewer
   unrelated responsibilities.
+
+#### Native CLI output-boundary evaluation
+
+The authoritative checked-in native CLI contract contains all 50 leaf commands after #442 added
+the six causal leaves (`check`, `analyze`, `verify-expectations`, `observe-expectations`, `diff`, and
+`ledger`). Seven parser dispatchers return `Result<(Value, i32), String>`, while 67 lower producers
+return `(Value, i32)`. These counts distinguish process delivery from semantic and family outcomes;
+a delivery concern is not evidence that all 74 boundaries need one application model.
+
+| Output contract | Leaf inventory | Current process behavior |
+|---|---|---|
+| JSON only | all seven `ai` leaves; `chain`; `check`; `compat check`; `db check/observe`; `diff`; `domain analyze/check/generate/replay`; all three `approval` leaves; `document check`; `mutate`; `refine`; `replay`; `scenarios`; `sweep`; `verify`; `conformance`; `kernel`; `lint`; `migrate`; all six `causal` leaves | Shared pretty JSON stdout and normalized status. `chain` additionally retains its table on stderr. |
+| JSON or raw success | `analyze`; `db import`; `domain expand/testgen`; `explain`; `html`; `ledger`; `document generate/claims`; `testgen`; `typestate` | Nine source sites extract successful content, print exact bytes, and exit. Failures and file-output modes remain JSON. Document generation also projects warnings to stderr. |
+| Dedicated | `fmt`; `version` | `fmt` already uses its own `Source`/`Json` result and preserves check/error status. Version emits one raw line and exits. |
+| Pre-dispatch metadata | `--cli-contract`; every `-h`/`--help` path | Exact embedded bytes bypass normal command dispatch. These are process metadata, not command outcomes. |
+
+The nine raw-success sites represent eleven leaves because `testgen`/`html`/`ledger` share one
+delivery site, reducing those three leaves to one site. `explain` and `typestate` share a parser arm
+but retain separate delivery sites and distinct newline/multi-entity construction. Raw does not
+mean success is always status zero: the existing status remains authoritative. `document claims`
+raw output happens to be JSON text, but it is the RCIR artifact rather than the CLI envelope and
+therefore remains `Raw`.
+
+| Choice | Change surface | Removed duplication | Contract and migration risk | Decision |
+|---|---|---|---|---|
+| C0: tuples plus direct raw branches | No production change | None; nine success paths retain print/exit delivery | Lowest immediate risk, but every new raw mode must reproduce the delivery rules | Retain until the separately scoped C1 slice is ready |
+| C1: minimal `Json`/`Raw` delivery value | Top-level regular-command emission, version, and the nine raw-success sites; existing family dispatchers and 67 producers stay unchanged | One stdout/exit owner for regular commands | Medium and bounded: exact newline, stderr, failure fallback, and exit behavior can drift | Adopt as the one-slice follow-up #441 |
+| C2: typed `Command` and `CommandOutcome` | 50 leaves, seven dispatchers, and up to 67 tuple producers, with pressure to cross Worker/LSP boundaries | Could type parser and semantic variants, but no measured duplicate policy requires it | High coupling, large migration valley, and no production evidence of incremental benefit over C1 | Reject |
+
+This decision is an implementation-local-optima audit of direct raw delivery, not a claim that
+`Value` or local command parsing is inherently defective:
+
+| Audit variable | Local evaluation | Expanded evaluation |
+|---|---|---|
+| `B` boundary | One command arm | The native process contract across all 50 leaves |
+| `M` metric | Minimum local ceremony and exact nearby output | Contract preservation plus repeated delivery-change cost |
+| `N` change scope | One parser/runner branch | Top-level emitter and all raw-success sites in one revertible change |
+| `T` time | Deliver the current feature | Later raw modes and corrections across the CLI lifecycle |
+
+| Evidence status | Record |
+|---|---|
+| Observed | 50 leaves, seven dispatchers, 67 tuple producers, nine raw-success sites, exact process tests, and the migration/DB-Domain/document commit sequence |
+| Inferred | C1 can remove repeated regular-command delivery without moving the family or semantic boundaries; this must still be proved by the #441 diff and controls |
+| Unverified hypothesis | Future raw additions will recur often enough to reduce total maintenance cost; production maintenance time, external callers, incidents, and team coordination are not observed |
+
+| Evaluation boundary | C0 benefit and cost | C1 benefit and cost | Preferred with current evidence |
+|---|---|---|---|
+| Function | Direct writes make exact bytes obvious; no wrapper, but local exit terminates control flow | Adds a delivery variant and return construction | C0 |
+| Module | Each raw arm is self-contained, while `main.rs` repeats delivery in nine places | One regular-command emission owner; stderr remains explicit | C1, narrowly |
+| Feature flow | A feature author can finish locally, but must reproduce failure fallback and status rules | Feature output crosses one extra seam and needs exact controls | C0 for a single isolated feature |
+| Native process | Shared JSON emission coexists with bypasses and direct exits | One regular-command stdout/exit policy without semantic unification | C1 |
+| Operation/organization | No measured operational or multi-team penalty | No measured operational benefit | Insufficient evidence; tie |
+| Lifecycle | Each later raw mode or correction can repeat the process rules | Later raw modes reuse one delivery seam, but must retain byte-specific construction | C1 if recurrence continues |
+
+Direct branches were locally rational during native migration: they made byte-sensitive behavior
+explicit and avoided forcing unrelated semantic results into a framework. The wider structure now
+has nine copies of the same successful-output extraction/print/exit shape. History supplies an
+independent evolution signal: the migration introduced the initial paths, while DB/Domain and
+document features added further paths in separate commits. The later document-warning feature added
+its envelope field and raw-mode stderr projection together because the raw artifact cannot carry the
+envelope; this is a deliberately compensated side channel, not evidence of a prior production
+failure or later correction. CLI maintainers and contract-test owners carry the bounded future cost
+of preserving such compensations. There is no observed runtime, customer, multi-team, incident, or
+production edit-count evidence, and #393's first follow-up did not reduce file count.
+
+At function and family boundaries C0 remains preferable. At the native binary's regular-command
+delivery boundary and lifecycle horizon, C1 becomes narrowly preferable because it centralizes one
+process concern without changing semantic owners. C2 never becomes preferable in the observed
+boundaries. The direct raw-delivery candidate is therefore `time-delayed`, severity 3/15
+(`E1 A1 F0 K0 T1`), confidence C2 from agreeing structure and history. Boundary failure remains
+zero because document warning routing shipped with the warning feature and no incident or
+pre-correction failure is observed.
+
+The counterfactuals are concrete and reversible: C0 retains current behavior; C1 changes one
+delivery seam and rolls back by reverting one commit; C2 requires a coordinated parser/producer
+migration and is rejected. C1's migration valley is one temporarily wider CLI diff with elevated
+exact-byte and exit-risk across all raw branches; focused negative controls are the entry condition,
+and reverting that single change is the rollback. C1 must not absorb stderr payloads into `Raw`,
+copy `FmtCliOutput`, add a generic context, or make native and Worker transports share an artificial
+command type. Intentional separation remains rational for `fmt`, metadata/help, Worker, and each
+family's semantic model, so those are explicitly not local-optimum candidates.
+
+Before a C1 implementation may merge, positive and rejecting controls must prove all of the
+following:
+
+| Contract | Required positive and negative control |
+|---|---|
+| Raw stdout | Exact bytes for every raw-capable leaf, including `print` versus `println`, trailing newlines, multi-entity typestate output, and the raw RCIR artifact |
+| Failure fallback | A failing raw-capable invocation still emits the existing JSON error envelope rather than partial raw output |
+| JSON evidence | Verdict, evidence, location, assurance, and envelope fields remain exact for representative success and failure cases |
+| Exit | Preserve 0/1/2 and normalized internal error 3; raw delivery must use the producer's status rather than assume zero |
+| Stderr | Preserve empty usage stderr where specified, document warnings, and the `chain` table independently of stdout delivery |
+| Dedicated paths | Preserve metadata/help/version bytes and `fmt` source/check/error behavior exactly |
+| Other transports | Native/Worker parity remains unchanged; the Worker continues its check/verify-only JSON contract |
+
+Existing raw parity cases, `formatter_cli`, `document_cli`, typestate goldens, causal boundary tests,
+and native metadata tests are useful anchors, but the implementation issue must add a rejecting
+control for each newly centralized branch rather than treating green positive output as sufficient.
+Re-evaluate the decision if #441 touches family producers, cannot preserve a stream contract without
+a third delivery concern, or a real production follow-up contradicts the expected edit reduction.
 
 ### `fsl-wasm`
 
