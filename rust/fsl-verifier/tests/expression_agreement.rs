@@ -5,7 +5,7 @@ use std::future::Future;
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
-use fsl_core::{FsResolver, build_model, parse_kernel_source, parse_refinement};
+use fsl_core::{FsResolver, FslValue as Value, build_model, parse_kernel_source, parse_refinement};
 
 fn block_on<F: Future>(future: F) -> F::Output {
     let mut future = pin!(future);
@@ -153,6 +153,87 @@ fn elaborated_enum_conversion_agrees_concretely_symbolically_and_in_preserved_pr
         &mapping,
         &mut solver,
         2,
+    ))
+    .expect("preserved progress check");
+    assert!(progress.violation.is_none(), "{progress:?}");
+}
+
+#[test]
+fn enum_abstraction_agrees_symbolically_and_rejects_a_wrong_target() {
+    let resolver = FsResolver::new(".");
+    let implementation = build_model(
+        parse_kernel_source(
+            "spec Impl { enum ImplStage { C, B, A } state { stage: ImplStage } init { stage = A } action hold() { requires stage == A stage = B } fair action advance() { requires stage == B stage = C } }",
+            &resolver,
+        )
+        .expect("parse implementation"),
+    )
+    .expect("build implementation");
+    let abstraction = build_model(
+        parse_kernel_source(
+            "spec Abs { enum AbsStage { Y, X, Unused } state { status: AbsStage } init { status = X } action hold() { requires status == X status = X } fair action advance() { requires status == X status = Y } leadsTo Advances { status == X ~> status == Y } }",
+            &resolver,
+        )
+        .expect("parse abstraction"),
+    )
+    .expect("build abstraction");
+    let mapping = parse_refinement(
+        "refinement R { impl Impl abs Abs enum abstraction stage ImplStage -> AbsStage { A -> X B -> X C -> Y } map status = abstract(stage, stage) action hold() -> hold() action advance() -> advance() preserve progress { respond Advances by advance } }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("build many-to-one mapping");
+
+    let expression = &mapping.state_maps["status"].expr;
+    let mut merged = implementation.clone();
+    merged.types.extend(abstraction.types.clone());
+    merged.enum_members.extend(abstraction.enum_members.clone());
+    let state = BTreeMap::from([(
+        "stage".to_owned(),
+        Value::Enum {
+            type_name: "ImplStage".to_owned(),
+            member: "C".to_owned(),
+        },
+    )]);
+    let correct = Value::Enum {
+        type_name: "AbsStage".to_owned(),
+        member: "Y".to_owned(),
+    };
+    let wrong = Value::Enum {
+        type_name: "AbsStage".to_owned(),
+        member: "X".to_owned(),
+    };
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("solver");
+    assert!(
+        block_on(fsl_verifier::expression_matches_value(
+            &merged,
+            &mut solver,
+            expression,
+            &state,
+            &correct,
+        ))
+        .expect("prove correct many-to-one target")
+    );
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("solver");
+    assert!(
+        !block_on(fsl_verifier::expression_matches_value(
+            &merged,
+            &mut solver,
+            expression,
+            &state,
+            &wrong,
+        ))
+        .expect("reject wrong many-to-one target"),
+        "symbolic anchor must reject the deliberately wrong mapped target"
+    );
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("solver");
+    let progress = block_on(fsl_verifier::check_refinement_progress(
+        &implementation,
+        &abstraction,
+        &mapping,
+        &mut solver,
+        3,
     ))
     .expect("preserved progress check");
     assert!(progress.violation.is_none(), "{progress:?}");

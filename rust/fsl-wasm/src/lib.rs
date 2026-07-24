@@ -616,6 +616,59 @@ mod tests {
     }
 
     #[test]
+    fn check_preserves_enum_abstraction_verdicts_and_locations() {
+        let source = r#"requirements Impl {
+  implements Abs from "abs.fsl" {
+    enum abstraction stage ImplStage -> AbsStage { A -> X B -> X C -> Y }
+    map status = abstract(stage, stage)
+    action hold() -> hold()
+    action advance() -> advance()
+  }
+  enum ImplStage { C, B, A }
+  state { stage: ImplStage }
+  init { stage = A }
+  action hold() { requires stage == A stage = B }
+  action advance() { requires stage == B stage = C }
+}
+"#;
+        let request = |source: String| {
+            Request {
+            cmd: "check".to_owned(),
+            source,
+            source_file: "impl.fsl".to_owned(),
+            files: BTreeMap::from([(
+                "abs.fsl".to_owned(),
+                "spec Abs { enum AbsStage { Y, X, Unused } state { status: AbsStage } init { status = X } action hold() { requires status == X status = X } action advance() { requires status == X status = Y } }".to_owned(),
+            )]),
+            options: Options::default(),
+        }
+        };
+
+        let success = block_on(check(&request(source.to_owned()), TEST_SOLVER_VERSION));
+        assert_eq!(success["result"], "ok", "{success}");
+        assert_eq!(success["implements"]["result"], "refines", "{success}");
+
+        let wrong = block_on(check(
+            &request(source.replace("C -> Y", "C -> X")),
+            TEST_SOLVER_VERSION,
+        ));
+        assert_eq!(wrong["result"], "ok", "{wrong}");
+        assert_eq!(
+            wrong["implements"]["result"], "refinement_failed",
+            "{wrong}"
+        );
+
+        let incomplete = block_on(check(
+            &request(source.replace(" C -> Y", "")),
+            TEST_SOLVER_VERSION,
+        ));
+        assert_eq!(incomplete["result"], "error", "{incomplete}");
+        assert_eq!(incomplete["kind"], "type", "{incomplete}");
+        assert_eq!(incomplete["loc"], json!({"line": 3, "column": 5}));
+        assert!(incomplete["span"].is_object(), "{incomplete}");
+    }
+
+    #[test]
     fn verified_result_contains_shared_warnings() {
         let model = model_from(
             "spec Warnings { state { x: Bool } init { x = false } \

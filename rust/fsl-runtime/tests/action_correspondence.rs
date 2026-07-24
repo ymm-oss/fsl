@@ -148,3 +148,59 @@ fn enum_conversion_agrees_across_concrete_refinement_routes_without_ordinal_coer
     .expect("inline concrete refinement check");
     assert!(inline_result.failure.is_none(), "{inline_result:?}");
 }
+
+#[test]
+fn enum_abstraction_rejects_wrong_many_to_one_state_and_action_mappings() {
+    let implementation = build(
+        "spec Impl { enum ImplStage { C, B, A } state { stage: ImplStage } init { stage = A } action hold() { requires stage == A stage = B } action advance() { requires stage == B stage = C } }",
+    );
+    let abstraction = build(
+        "spec Abs { enum AbsStage { Y, X, Unused } state { status: AbsStage } init { status = X } action hold() { requires status == X status = X } action advance() { requires status == X status = Y } }",
+    );
+    let correct = parse_refinement(
+        "refinement R { impl Impl abs Abs enum abstraction stage ImplStage -> AbsStage { A -> X B -> X C -> Y } map status = abstract(stage, stage) action hold() -> hold() action advance() -> advance() }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("source-total mapping");
+    let result = check_refinement(&implementation, &abstraction, &correct, 3)
+        .expect("concrete many-to-one refinement check");
+    assert!(result.failure.is_none(), "{result:?}");
+
+    let wrong = parse_refinement(
+        "refinement R { impl Impl abs Abs enum abstraction stage ImplStage -> AbsStage { A -> X B -> X C -> X } map status = abstract(stage, stage) action hold() -> hold() action advance() -> advance() }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("wrong mapping remains source-total and well typed");
+    let wrong = check_refinement(&implementation, &abstraction, &wrong, 3)
+        .expect("wrong mapping negative control executes");
+    assert!(
+        wrong.failure.is_some(),
+        "wrong many-to-one state mapping must not refine"
+    );
+
+    let argument_implementation = build(
+        "spec Impl { enum ImplStage { C, B, A } state { stage: ImplStage } init { stage = A } action send(s: ImplStage) { stage = s } }",
+    );
+    let argument_abstraction = build(
+        "spec Abs { enum AbsStage { Y, X, Unused } state { status: AbsStage } init { status = X } action send(s: AbsStage) { status = s } }",
+    );
+    let wrong_argument = parse_refinement(
+        "refinement R { impl Impl abs Abs enum abstraction state_stage ImplStage -> AbsStage { A -> X B -> X C -> Y } enum abstraction argument_stage ImplStage -> AbsStage { A -> X B -> Y C -> Y } map status = abstract(state_stage, stage) action send(s) -> send(abstract(argument_stage, s)) }",
+        &argument_implementation,
+        &argument_abstraction,
+    )
+    .expect("wrong action mapping remains source-total and well typed");
+    let wrong_argument = check_refinement(
+        &argument_implementation,
+        &argument_abstraction,
+        &wrong_argument,
+        1,
+    )
+    .expect("wrong argument negative control executes");
+    assert!(
+        wrong_argument.failure.is_some(),
+        "wrong many-to-one action argument must not refine"
+    );
+}

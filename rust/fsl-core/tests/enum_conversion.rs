@@ -34,6 +34,156 @@ const MAPPING: &str = r"refinement R {
   action load() -> load()
 }";
 
+const ABSTRACTION: &str = r"refinement R {
+  impl Impl
+  abs Abs
+  enum abstraction stage ImplStage -> AbsStage {
+    Received -> Received
+    Loaded -> Loaded
+    Conflict -> Loaded
+  }
+  map status = abstract(stage, stage)
+  action load() -> load()
+}";
+
+#[test]
+fn source_total_abstraction_allows_repeated_and_unused_targets() {
+    let (implementation, abstraction) = models();
+    let mapping = parse_refinement(ABSTRACTION, &implementation, &abstraction)
+        .expect("many-to-one abstraction is source-total");
+    let rendered = fsl_core::expr_text(&mapping.state_maps["status"].expr);
+    assert!(rendered.contains("ImplStage.Conflict"), "{rendered}");
+    assert!(rendered.contains("AbsStage.Loaded"), "{rendered}");
+    let mut context = implementation.clone();
+    context.types.extend(abstraction.types.clone());
+    let position = SourcePos {
+        offset: 0,
+        line: 1,
+        column: 1,
+    };
+    let public = public_kernel_expression(
+        &mapping.state_maps["status"].expr,
+        &context,
+        "mapping.fsl",
+        Span {
+            start: position,
+            end: position,
+        },
+        Some(&TypeRef::Named("AbsStage".to_owned())),
+    )
+    .expect("abstraction uses existing typed Public Kernel expressions")
+    .to_string();
+    assert!(public.contains(r#""name":"ImplStage""#), "{public}");
+    assert!(public.contains(r#""name":"AbsStage""#), "{public}");
+    assert!(!public.contains("enum_abstraction"), "{public}");
+    assert!(!public.contains("abstract"), "{public}");
+
+    let reversed_implementation = build(
+        "spec Impl { enum ImplStage { Received, Loaded, Conflict } state { stage: ImplStage } init { stage = Received } action load() { requires stage == Received stage = Loaded } }",
+    );
+    let reversed_abstraction = build(
+        "spec Abs { enum AbsStage { Conflict, Loaded, Received } state { status: AbsStage } init { status = Received } action load() { requires status == Received status = Loaded } }",
+    );
+    let reversed = parse_refinement(ABSTRACTION, &reversed_implementation, &reversed_abstraction)
+        .expect("declaration order does not affect nominal mapping");
+    assert_eq!(
+        fsl_core::expr_text(&mapping.state_maps["status"].expr),
+        fsl_core::expr_text(&reversed.state_maps["status"].expr)
+    );
+}
+
+#[test]
+fn source_total_abstraction_rejects_incomplete_or_wrong_nominal_sources() {
+    let (implementation, abstraction) = models();
+    for (source, expected) in [
+        (
+            ABSTRACTION.replace("    Conflict -> Loaded\n", ""),
+            "missing source: [Conflict]",
+        ),
+        (
+            ABSTRACTION.replace("Conflict -> Loaded", "Received -> Loaded"),
+            "maps source member 'Received' more than once",
+        ),
+        (
+            ABSTRACTION.replace("Conflict -> Loaded", "Missing -> Loaded"),
+            "unknown enum member 'ImplStage.Missing'",
+        ),
+        (
+            ABSTRACTION.replace("Conflict -> Loaded", "Conflict -> Missing"),
+            "unknown enum member 'AbsStage.Missing'",
+        ),
+    ] {
+        let error = parse_refinement(&source, &implementation, &abstraction)
+            .expect_err("invalid abstraction must fail statically");
+        assert!(error.message.contains(expected), "{}", error.message);
+        assert!(error.span.is_some());
+    }
+
+    let wrong_nominal = build(
+        "spec Impl { enum ImplStage { Conflict, Loaded, Received } enum OtherStage { X, Y, Z } state { stage: ImplStage } init { stage = Received } action load() { requires stage == Received stage = Loaded } }",
+    );
+    let source = r"refinement R {
+      impl Impl
+      abs Abs
+      enum abstraction other OtherStage -> AbsStage {
+        X -> Received
+        Y -> Loaded
+        Z -> Loaded
+      }
+      map status = abstract(other, stage)
+      action load() -> load()
+    }";
+    let error = parse_refinement(source, &wrong_nominal, &abstraction)
+        .expect_err("same-spelled members from another nominal enum remain incompatible");
+    assert!(
+        error.message.contains("is not assignable"),
+        "{}",
+        error.message
+    );
+    assert!(error.span.is_some());
+}
+
+#[test]
+fn abstraction_and_conversion_calls_cannot_be_interchanged() {
+    let (implementation, abstraction) = models();
+    for (source, expected) in [
+        (
+            ABSTRACTION.replace("abstract(stage, stage)", "convert(stage, stage)"),
+            "enum abstraction 'stage' must be invoked with abstract",
+        ),
+        (
+            MAPPING.replace("convert(stage, stage)", "abstract(stage, stage)"),
+            "enum conversion 'stage' must be invoked with convert",
+        ),
+        (
+            ABSTRACTION.replace("abstract(stage, stage)", "abstract(stage)"),
+            "abstract expects exactly two arguments",
+        ),
+        (
+            ABSTRACTION.replace("abstract(stage, stage)", "abstract(missing, stage)"),
+            "unknown enum abstraction 'missing'",
+        ),
+    ] {
+        let error = parse_refinement(&source, &implementation, &abstraction)
+            .expect_err("assurance-specific calls fail closed");
+        assert!(error.message.contains(expected), "{}", error.message);
+        assert!(error.span.is_some());
+    }
+
+    let duplicate = ABSTRACTION.replace(
+        "  enum abstraction stage",
+        "  enum conversion stage ImplStage -> AbsStage { Received -> Received Loaded -> Loaded Conflict -> Conflict }\n  enum abstraction stage",
+    );
+    let error = parse_refinement(&duplicate, &implementation, &abstraction)
+        .expect_err("conversion and abstraction names share one namespace");
+    assert!(
+        error.message.contains("duplicate enum mapping 'stage'"),
+        "{}",
+        error.message
+    );
+    assert!(error.span.is_some());
+}
+
 #[test]
 fn exhaustive_conversion_keeps_nominal_identity_in_checked_and_public_expressions() {
     let (implementation, abstraction) = models();
@@ -193,8 +343,8 @@ fn merged_context_rejects_a_bare_member_shared_by_distinct_nominal_enums() {
     );
     assert!(error.message.contains("AImplStage"), "{}", error.message);
     assert!(error.message.contains("ZAbsStage"), "{}", error.message);
-    assert!(error.message.contains("bijective enum conversion"));
-    assert!(error.message.contains("issue #455"));
+    assert!(error.message.contains("enum conversion/convert"));
+    assert!(error.message.contains("enum abstraction/abstract"));
     assert!(
         error.span.is_some(),
         "diagnostic must retain the map location"
@@ -273,5 +423,26 @@ fn empty_enum_conversion_fails_closed_before_call_elaboration() {
     )
     .expect_err("empty conversions must not reach an infallible elaboration branch");
     assert!(error.message.contains("EmptyImpl' has no members"));
+    assert!(error.span.is_some());
+
+    let error = parse_refinement(
+        "refinement R { impl Impl abs Abs enum abstraction empty EmptyImpl -> EmptyAbs {} action send(s) -> send(abstract(empty, s)) }",
+        &implementation,
+        &abstraction,
+    )
+    .expect_err("empty abstractions must not reach fallback-based elaboration");
+    assert!(error.message.contains("EmptyImpl' has no members"));
+    assert!(error.span.is_some());
+
+    let non_empty_implementation = build(
+        "spec Impl { enum NonEmptyImpl { A } state { ready: Bool } init { ready = false } action send(s: NonEmptyImpl) { ready = true } }",
+    );
+    let error = parse_refinement(
+        "refinement R { impl Impl abs Abs enum abstraction empty NonEmptyImpl -> EmptyAbs {} map ready = ready action send(s) -> send(abstract(empty, s)) }",
+        &non_empty_implementation,
+        &abstraction,
+    )
+    .expect_err("an empty abstraction target has no representable result");
+    assert!(error.message.contains("EmptyAbs' has no members"));
     assert!(error.span.is_some());
 }

@@ -199,7 +199,7 @@ pub(crate) fn infer_type(
             let owners = enum_member_owners(model, name);
             if owners.len() > 1 {
                 error(format!(
-                    "ambiguous enum member '{name}' belongs to [{}]; use a bijective enum conversion when applicable (many-to-one: issue #455)",
+                    "ambiguous enum member '{name}' belongs to [{}]; use enum conversion/convert for a bijection or enum abstraction/abstract for a many-to-one mapping",
                     owners.join(", ")
                 ))
             } else {

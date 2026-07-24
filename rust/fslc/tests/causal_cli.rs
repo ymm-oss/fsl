@@ -958,6 +958,50 @@ fn observe_expectations_rejects_enum_conversion_without_typed_impl_model() {
 }
 
 #[test]
+fn observe_expectations_rejects_enum_abstraction_in_a_binder_without_typed_impl_model() {
+    let scratch = tempfile_dir();
+    let mapping = scratch.join("enum-abstraction-mapping.fsl");
+    std::fs::write(
+        &mapping,
+        r"refinement ExternalRefinesIncident {
+  impl External
+  abs IncidentResponse
+
+  map status[k: ExternalStatus where abstract(missing, k) == k] = k
+}
+",
+    )
+    .expect("write mapping");
+
+    let (output, status) = run_cli(&[
+        "causal",
+        "observe-expectations",
+        INCIDENT,
+        "--from-log",
+        OBS_LOG,
+        "--mapping",
+        mapping.to_str().expect("utf-8 mapping path"),
+        "--scope",
+        OBS_SCOPE,
+        "--period-start",
+        "2026-01-01",
+        "--period-end",
+        "2026-03-31",
+    ]);
+    assert_eq!(status, 2, "{output}");
+    assert_eq!(output["result"], "error");
+    assert_eq!(output["kind"], "type");
+    assert_eq!(output["loc"]["line"], 5, "{output}");
+    assert!(output["loc"]["column"].is_number(), "{output}");
+    assert!(
+        output["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("typed impl model")
+    );
+}
+
+#[test]
 fn observe_expectations_fails_without_period() {
     let (output, status) = run_cli(&[
         "causal",

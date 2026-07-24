@@ -4389,14 +4389,19 @@ fn read_jsonl_records(path: &Path) -> Result<Vec<(usize, Value)>, String> {
         .collect()
 }
 
-pub(crate) fn untyped_replay_enum_conversion_span(
+pub(crate) fn untyped_replay_enum_mapping_span(
     mapping: &fsl_syntax::SurfaceRefinement,
 ) -> Option<fsl_syntax::Span> {
     for item in &mapping.items {
         match item {
-            fsl_syntax::RefinementItem::EnumConversion { span, .. } => return Some(*span),
-            fsl_syntax::RefinementItem::Map { expr, .. } => {
-                if let Some(span) = fsl_core::expression_call_span(expr, "convert") {
+            fsl_syntax::RefinementItem::EnumConversion { span, .. }
+            | fsl_syntax::RefinementItem::EnumAbstraction { span, .. } => return Some(*span),
+            fsl_syntax::RefinementItem::Map { binder, expr, .. } => {
+                if let Some(span) = binder
+                    .as_ref()
+                    .and_then(untyped_replay_binder_enum_mapping_span)
+                    .or_else(|| untyped_replay_expr_enum_mapping_span(expr))
+                {
                     return Some(span);
                 }
             }
@@ -4404,10 +4409,7 @@ pub(crate) fn untyped_replay_enum_conversion_span(
                 target: fsl_syntax::ActionTarget::Action(_, args),
                 ..
             } => {
-                if let Some(span) = args
-                    .iter()
-                    .find_map(|expr| fsl_core::expression_call_span(expr, "convert"))
-                {
+                if let Some(span) = args.iter().find_map(untyped_replay_expr_enum_mapping_span) {
                     return Some(span);
                 }
             }
@@ -4415,6 +4417,40 @@ pub(crate) fn untyped_replay_enum_conversion_span(
         }
     }
     None
+}
+
+fn untyped_replay_expr_enum_mapping_span(expr: &fsl_syntax::Expr) -> Option<fsl_syntax::Span> {
+    ["convert", "abstract"]
+        .into_iter()
+        .find_map(|name| fsl_core::expression_call_span(expr, name))
+}
+
+fn untyped_replay_binder_enum_mapping_span(
+    binder: &fsl_syntax::Binder,
+) -> Option<fsl_syntax::Span> {
+    match binder {
+        fsl_syntax::Binder::Typed { where_expr, .. } => where_expr
+            .as_deref()
+            .and_then(untyped_replay_expr_enum_mapping_span),
+        fsl_syntax::Binder::Range {
+            lo, hi, where_expr, ..
+        } => untyped_replay_expr_enum_mapping_span(lo)
+            .or_else(|| untyped_replay_expr_enum_mapping_span(hi))
+            .or_else(|| {
+                where_expr
+                    .as_deref()
+                    .and_then(untyped_replay_expr_enum_mapping_span)
+            }),
+        fsl_syntax::Binder::Collection {
+            collection,
+            where_expr,
+            ..
+        } => untyped_replay_expr_enum_mapping_span(collection).or_else(|| {
+            where_expr
+                .as_deref()
+                .and_then(untyped_replay_expr_enum_mapping_span)
+        }),
+    }
 }
 
 pub(crate) fn located_error_output(kind: &str, message: &str, span: fsl_syntax::Span) -> Value {
@@ -4442,11 +4478,11 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
         Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
         Err(error) => return (error_output("parse", &error.to_string()), 2),
     };
-    if let Some(span) = untyped_replay_enum_conversion_span(&mapping) {
+    if let Some(span) = untyped_replay_enum_mapping_span(&mapping) {
         return (
             located_error_output(
                 "type",
-                "enum conversion requires a typed impl model and is not supported by --from-log mappings",
+                "enum conversion or abstraction requires a typed impl model and is not supported by --from-log mappings",
                 span,
             ),
             2,

@@ -312,12 +312,8 @@ fabricate a source-level domain span after lowering. The declaration is a checke
 
 Requiring both source-totality and target-totality deliberately makes this construct a
 one-to-one representation conversion. A genuine abstraction that collapses several impl
-states into one abs state remains expressible with an ordinary conditional mapping only
-when every referenced member spelling is unambiguous in the merged context; that form does
-not claim exhaustive/bijective assurance. A many-to-one conversion whose source/target
-member spellings collide remains outside this feature. It needs a separately designed
-source-total, non-injective conversion contract rather than weakening this fail-closed
-bijection.
+states into one abs state uses the separate source-total contract in section 2.7 rather
+than weakening this fail-closed bijection.
 
 ### Checked representation and evaluation
 
@@ -352,12 +348,51 @@ and v2 therefore need no new expression kind or schema version. An unelaborated
 ### Migration
 
 A pre-3.1 conditional mapping with distinct, unambiguous member spellings remains valid.
-When member spellings collide across nominal enums, or when exhaustive conversion is the
-intended contract, replace the conditional with `enum conversion` plus
-`convert(<name>, <expr>)`.
+For a bijection, replace a colliding or exhaustively intended conditional with
+`enum conversion` plus `convert(<name>, <expr>)`. For a source-total many-to-one
+mapping, use the abstraction contract in section 2.7.
 Do not rename both layers to one enum type and do not map by declaration order; those
 workarounds erase layer identity or recreate the ordinal false-green that nominal typing
 prevents.
+
+## 2.7 Source-total nominal-enum abstraction (issue #455)
+
+A many-to-one representation boundary declares a distinct `enum abstraction` and invokes
+it with `abstract(<name>, <expr>)`:
+
+```fsl
+enum abstraction lifecycle ImplStage -> AbsStage {
+  Received  -> Pending
+  Validated -> Pending
+  Completed -> Done
+  Rejected  -> Failed
+}
+map status = abstract(lifecycle, stage)
+```
+
+This declaration is a source-total function, not a bijection. Both endpoint enums must be
+non-empty so the total mapping has a representable result and the checked conditional has
+a fallback. Every source member must appear exactly once. Unknown endpoint types or members, non-enum endpoints, duplicate
+source rows, missing source rows, wrong call arity, unknown names, and a call argument of
+the wrong nominal source type are located type errors. Multiple source rows may select the
+same target. Target members absent from all rows are intentionally unused by this
+abstraction and require no separate declaration. An injective table is accepted, but
+authors should use `enum conversion` when target-totality and target uniqueness are part of
+the intended assurance.
+
+Conversion and abstraction names share one refinement-local namespace, while their call
+forms are not interchangeable. Keeping both declaration and invocation distinct prevents
+a call site from silently claiming bijective assurance for a source-total mapping. Both
+forms lower through the same typed enum-member conditional representation, so concrete
+refinement, symbolic expression agreement, preserved progress, inline `implements`, CLI,
+Worker, and Public Kernel expression projection retain one evaluation path. Reversing
+either enum's declaration order cannot change the result.
+
+Raw production and causal replay lack a typed implementation model and therefore reject
+either an abstraction declaration or `abstract(...)` call with a located type error. They
+must not infer endpoint types from JSON values. Migrate an ambiguous conditional that
+collapses nominal members to `enum abstraction` plus `abstract`; migrate a one-to-one table
+to `enum conversion` plus `convert` so its stronger target guarantees remain executable.
 
 ## 3. CLI / JSON
 

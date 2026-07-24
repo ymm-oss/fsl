@@ -5,13 +5,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- Refinement mappings can declare a source-total `enum abstraction` and invoke
+  it with `abstract(name, expr)` for nominal many-to-one mappings. Repeated and
+  unused targets are allowed, while missing, duplicate, unknown, or
+  wrong-nominal sources fail closed; concrete, symbolic, progress, CLI, Worker,
+  Public Kernel projection, and raw-replay guards share the checked semantics
+  without weakening bijective `enum conversion` (#455).
+
 ### Fixed
 - Refinement typechecking now rejects an unshadowed bare enum member shared by distinct
   implementation and abstraction enums, preventing checked and evaluation
   merge order from assigning different nominal identities. Existing identifier
   shadowing by implementation inputs is preserved, unevaluable abstraction
-  constants are excluded, bijective mappings use the explicit typed conversion,
-  and the separate many-to-one contract remains tracked by #455 (#454).
+  constants are excluded, bijections use explicit typed conversion, and
+  many-to-one mappings use explicit source-total abstraction (#454, #455).
 - Refinement mappings can now declare an exhaustive, type-safe member-wise
   conversion between distinct nominal enums and invoke it from state maps or
   action arguments. This includes requirements `process` stage enums, rejects

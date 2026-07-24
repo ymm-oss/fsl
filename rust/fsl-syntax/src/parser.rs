@@ -1252,9 +1252,14 @@ impl<'a> Parser<'a> {
             || self.peek_symbol("{")
     }
 
-    fn enum_conversion_item(&mut self) -> Result<RefinementItem, ParseError> {
+    fn enum_mapping_item(&mut self) -> Result<RefinementItem, ParseError> {
         let span = self.bump().span;
-        self.expect_ident_value("conversion")?;
+        let is_conversion = if self.eat_ident("conversion") {
+            true
+        } else {
+            self.expect_ident_value("abstraction")?;
+            false
+        };
         let name = self.expect_ident()?;
         let source = self.expect_ident()?;
         self.expect_symbol("->")?;
@@ -1269,13 +1274,23 @@ impl<'a> Parser<'a> {
             members.push((source_member, target_member, member_span));
             self.eat_symbol(",");
         }
-        Ok(RefinementItem::EnumConversion {
-            name,
-            source,
-            target,
-            members,
-            span,
-        })
+        if is_conversion {
+            Ok(RefinementItem::EnumConversion {
+                name,
+                source,
+                target,
+                members,
+                span,
+            })
+        } else {
+            Ok(RefinementItem::EnumAbstraction {
+                name,
+                source,
+                target,
+                members,
+                span,
+            })
+        }
     }
 
     fn refinement_item(
@@ -1294,7 +1309,7 @@ impl<'a> Parser<'a> {
             return Ok(RefinementItem::MapsAuto(span));
         }
         if self.peek_ident("enum") {
-            return self.enum_conversion_item();
+            return self.enum_mapping_item();
         }
         if self.peek_ident("map") {
             let span = self.bump().span;

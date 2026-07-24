@@ -15,11 +15,34 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-struct EnumConversion {
+struct EnumMapping {
     source: String,
     target: String,
     members: Vec<(String, String)>,
     span: Span,
+    assurance: EnumMappingAssurance,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EnumMappingAssurance {
+    Bijection,
+    SourceTotal,
+}
+
+impl EnumMappingAssurance {
+    const fn declaration_name(self) -> &'static str {
+        match self {
+            Self::Bijection => "enum conversion",
+            Self::SourceTotal => "enum abstraction",
+        }
+    }
+
+    const fn call_name(self) -> &'static str {
+        match self {
+            Self::Bijection => "convert",
+            Self::SourceTotal => "abstract",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -118,7 +141,7 @@ fn build_refinement(
     let mut abs_name = None;
     let mut maps_auto = None;
     let mut state_maps = BTreeMap::new();
-    let mut enum_conversion_items = Vec::new();
+    let mut enum_mapping_items = Vec::new();
     let mut action_correspondences = BTreeMap::new();
     let mut action_sources = Vec::new();
     let mut progress = Vec::new();
@@ -134,7 +157,28 @@ fn build_refinement(
                 target,
                 members,
                 span,
-            } => enum_conversion_items.push((name, source, target, members, span)),
+            } => enum_mapping_items.push((
+                EnumMappingAssurance::Bijection,
+                name,
+                source,
+                target,
+                members,
+                span,
+            )),
+            RefinementItem::EnumAbstraction {
+                name,
+                source,
+                target,
+                members,
+                span,
+            } => enum_mapping_items.push((
+                EnumMappingAssurance::SourceTotal,
+                name,
+                source,
+                target,
+                members,
+                span,
+            )),
             RefinementItem::Map {
                 name,
                 binder,
@@ -211,14 +255,14 @@ fn build_refinement(
             None,
         ));
     }
-    let enum_conversions = build_enum_conversions(enum_conversion_items, &type_context)?;
+    let enum_mappings = build_enum_mappings(enum_mapping_items, &type_context)?;
     for state_map in state_maps.values_mut() {
-        state_map.expr = elaborate_enum_conversions(state_map.expr.clone(), &enum_conversions)?;
+        state_map.expr = elaborate_enum_conversions(state_map.expr.clone(), &enum_mappings)?;
     }
     for source in &mut action_sources {
         if let ActionTarget::Action(_, args) = &mut source.target {
             for argument in args {
-                *argument = elaborate_enum_conversions(argument.clone(), &enum_conversions)?;
+                *argument = elaborate_enum_conversions(argument.clone(), &enum_mappings)?;
             }
         }
     }
@@ -303,16 +347,24 @@ fn build_refinement(
     })
 }
 
-type SurfaceEnumConversion = (String, String, String, Vec<(String, String, Span)>, Span);
+type SurfaceEnumMapping = (
+    EnumMappingAssurance,
+    String,
+    String,
+    String,
+    Vec<(String, String, Span)>,
+    Span,
+);
 
-fn build_enum_conversions(
-    items: Vec<SurfaceEnumConversion>,
+fn build_enum_mappings(
+    items: Vec<SurfaceEnumMapping>,
     context: &KernelModel,
-) -> Result<BTreeMap<String, EnumConversion>, RefinementError> {
-    let mut conversions = BTreeMap::new();
-    for (name, source, target, rows, span) in items {
-        let source_members = enum_type_members(context, &source, span)?;
-        let target_members = enum_type_members(context, &target, span)?;
+) -> Result<BTreeMap<String, EnumMapping>, RefinementError> {
+    let mut mappings: BTreeMap<String, EnumMapping> = BTreeMap::new();
+    for (assurance, name, source, target, rows, span) in items {
+        let declaration = assurance.declaration_name();
+        let source_members = enum_type_members(context, declaration, &source, span)?;
+        let target_members = enum_type_members(context, declaration, &target, span)?;
         let mut seen_source = BTreeSet::new();
         let mut seen_target = BTreeSet::new();
         let mut members = Vec::new();
@@ -332,12 +384,13 @@ fn build_enum_conversions(
             if !seen_source.insert(source_member.clone()) {
                 return Err(refinement_error(
                     format!(
-                        "enum conversion '{name}' maps source member '{source_member}' more than once"
+                        "{declaration} '{name}' maps source member '{source_member}' more than once"
                     ),
                     Some(row_span),
                 ));
             }
-            if !seen_target.insert(target_member.clone()) {
+            let first_target_mapping = seen_target.insert(target_member.clone());
+            if assurance == EnumMappingAssurance::Bijection && !first_target_mapping {
                 return Err(refinement_error(
                     format!(
                         "enum conversion '{name}' maps target member '{target_member}' more than once"
@@ -357,54 +410,63 @@ fn build_enum_conversions(
             .filter(|member| !seen_target.contains(*member))
             .cloned()
             .collect::<Vec<_>>();
-        if !missing_source.is_empty() || !missing_target.is_empty() {
-            return Err(refinement_error(
+        if !missing_source.is_empty()
+            || (assurance == EnumMappingAssurance::Bijection && !missing_target.is_empty())
+        {
+            let message = if assurance == EnumMappingAssurance::Bijection {
                 format!(
                     "enum conversion '{name}' must cover every source and target member exactly once; missing source: [{}]; missing target: [{}]",
                     missing_source.join(", "),
                     missing_target.join(", ")
-                ),
-                Some(span),
-            ));
+                )
+            } else {
+                format!(
+                    "enum abstraction '{name}' must cover every source member exactly once; missing source: [{}]",
+                    missing_source.join(", ")
+                )
+            };
+            return Err(refinement_error(message, Some(span)));
         }
-        if conversions
-            .insert(
-                name.clone(),
-                EnumConversion {
-                    source,
-                    target,
-                    members,
-                    span,
-                },
-            )
-            .is_some()
-        {
-            return Err(refinement_error(
-                format!("duplicate enum conversion '{name}'"),
-                Some(span),
-            ));
+        if let Some(existing) = mappings.get(&name) {
+            let message = if existing.assurance == assurance {
+                format!("duplicate {declaration} '{name}'")
+            } else {
+                format!("duplicate enum mapping '{name}'")
+            };
+            return Err(refinement_error(message, Some(span)));
         }
+        mappings.insert(
+            name,
+            EnumMapping {
+                source,
+                target,
+                members,
+                span,
+                assurance,
+            },
+        );
     }
-    Ok(conversions)
+    Ok(mappings)
 }
 
 fn enum_type_members(
     context: &KernelModel,
+    declaration: &str,
     type_name: &str,
     span: Span,
 ) -> Result<Vec<String>, RefinementError> {
     match context.types.get(type_name) {
         Some(TypeDef::Enum { members, .. }) if members.is_empty() => Err(refinement_error(
-            format!("enum conversion endpoint '{type_name}' has no members"),
+            format!("{declaration} endpoint '{type_name}' has no members"),
             Some(span),
         )),
         Some(TypeDef::Enum { members, .. }) => Ok(members.clone()),
         Some(_) => Err(refinement_error(
-            format!("enum conversion endpoint '{type_name}' is not an enum"),
+            format!("{declaration} endpoint '{type_name}' is not an enum"),
             Some(span),
         )),
         None => Err(refinement_error(
-            format!("unknown enum conversion type '{type_name}'"),
+            format!("unknown {declaration} type '{type_name}'"),
             Some(span),
         )),
     }
@@ -413,28 +475,43 @@ fn enum_type_members(
 #[allow(clippy::too_many_lines)]
 fn elaborate_enum_conversions(
     expr: Expr,
-    conversions: &BTreeMap<String, EnumConversion>,
+    conversions: &BTreeMap<String, EnumMapping>,
 ) -> Result<Expr, RefinementError> {
     Ok(match expr {
-        Expr::Call { name, args, span } if name == "convert" => {
+        Expr::Call { name, args, span } if name == "convert" || name == "abstract" => {
+            let declaration = if name == "convert" {
+                "enum conversion"
+            } else {
+                "enum abstraction"
+            };
             let [conversion_name, argument] = args.as_slice() else {
                 return Err(refinement_error(
-                    "convert expects exactly two arguments: convert(name, expression)",
+                    format!("{name} expects exactly two arguments: {name}(name, expression)"),
                     Some(span),
                 ));
             };
             let Expr::Var(conversion_name) = conversion_name else {
                 return Err(refinement_error(
-                    "convert first argument must be an enum conversion name",
+                    format!("{name} first argument must be an {declaration} name"),
                     Some(span),
                 ));
             };
             let conversion = conversions.get(conversion_name).ok_or_else(|| {
                 refinement_error(
-                    format!("unknown enum conversion '{conversion_name}'"),
+                    format!("unknown {declaration} '{conversion_name}'"),
                     Some(span),
                 )
             })?;
+            if conversion.assurance.call_name() != name {
+                return Err(refinement_error(
+                    format!(
+                        "{} '{conversion_name}' must be invoked with {}",
+                        conversion.assurance.declaration_name(),
+                        conversion.assurance.call_name()
+                    ),
+                    Some(span),
+                ));
+            }
             let argument = elaborate_enum_conversions(argument.clone(), conversions)?;
             let (_, fallback_member) = conversion
                 .members
@@ -600,7 +677,7 @@ fn elaborate_enum_conversions(
 
 fn elaborate_conversion_binder(
     binder: Binder,
-    conversions: &BTreeMap<String, EnumConversion>,
+    conversions: &BTreeMap<String, EnumMapping>,
 ) -> Result<Binder, RefinementError> {
     Ok(match binder {
         Binder::Typed {

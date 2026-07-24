@@ -1229,8 +1229,9 @@ refinement のマップと action の引数は、`if <condition> then <expr> els
 含め、通常の spec と同じ式文法と型規則を使います。条件が定数であっても、両方の分岐
 が名前と型の検査を受けます。
 
-異なる名前付き enum の間では、明示的に名前を付けた変換が必要です。refinement 内で
-メンバーごとの全単射を宣言し、状態マップまたは action の引数から呼び出します:
+異なる名前付き enum の間では、明示的に名前を付けた enum mapping が必要です。
+メンバーごとの全単射には、refinement 内で conversion を宣言し、状態マップまたは
+action の引数から呼び出します:
 
 ```fsl
 enum conversion use_case_stage UnitOfWorkStage -> CommandStage {
@@ -1251,6 +1252,28 @@ map command_stage[c: Command] = convert(use_case_stage, stage[c])
 `replay --from-log` と causal observation のマッピングには型付き impl model がないため、
 変換宣言/呼び出しを位置付き型エラーとして拒否します。`convert` を使う前に型付き
 refinement へ移行してください。
+
+多対一の境界では、source-total な abstraction を宣言し、専用の呼び出し形式を
+使います:
+
+```fsl
+enum abstraction lifecycle ImplStage -> AbsStage {
+  Received  -> Pending
+  Validated -> Pending
+  Completed -> Done
+}
+map status = abstract(lifecycle, stage)
+```
+
+両端の enum は空であってはならず、source の全メンバーを正確に 1 回ずつ指定する
+必要があります。source の重複や欠落、
+未知または異なる nominal 型のメンバーは、位置付き型エラーになります。target の
+重複は許可され、どの行にも現れない target メンバーは、この abstraction では意図的に
+未使用です。`enum conversion` は引き続き全単射であり、target の重複や欠落を拒否します。
+conversion と abstraction の名前は refinement ローカルの名前空間を共有し、
+`convert` と `abstract` を取り違えることはできません。どちらも enum の宣言順に依存
+しません。raw production-log と causal のマッピングには型付き impl model がないため、
+abstraction も拒否します。
 
 抽象側の生成 enum が Map の binder で、実装側の Map が design enum をキーにするときは、
 binder を逆方向に変換します。例えば `column_key Column -> DesignColumn` に対して
