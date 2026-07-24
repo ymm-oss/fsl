@@ -7,8 +7,9 @@ use std::fmt;
 use std::future::Future;
 
 use fsl_core::{
-    FslValue, KernelExpr, KernelModel, TypeDef, TypeRef, display_name, fsl_value_json,
-    insert_requirement_metadata, internal_origin_json, origin_display_name, state_json, trace_json,
+    ActionDef, FslValue, KernelExpr, KernelModel, ParamDef, TypeDef, TypeRef, display_name,
+    fsl_value_json, insert_requirement_metadata, internal_origin_json, origin_display_name,
+    state_json, trace_json,
 };
 use fsl_solver::VerificationStatistics;
 use fsl_verifier::{BmcResult, BmcViolation};
@@ -36,6 +37,25 @@ impl fmt::Display for RequirementsImplementsError {
 }
 
 impl std::error::Error for RequirementsImplementsError {}
+
+/// Why a requirements step could not be replayed across semantic-diff models.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RequirementStepRelationError {
+    /// The target action, arity, or argument domain cannot represent the OLD step.
+    Unrelatable(String),
+    /// The target model matched structurally but failed during concrete evaluation.
+    Replay(String),
+}
+
+impl fmt::Display for RequirementStepRelationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unrelatable(message) | Self::Replay(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for RequirementStepRelationError {}
 
 impl DeadlockMode {
     /// Parse the public CLI/Worker spelling.
@@ -308,17 +328,10 @@ pub fn requirement_step_match(
         );
     }
     let enabled = monitor.enabled().map_err(|error| error.to_string())?;
-    let branch_prefix = format!("{}__b", step.name);
-    for action in &monitor.model.actions {
-        if action.name != step.name
-            && !action.name.starts_with(&branch_prefix)
-            && display_name(&action.name) != step.name
-        {
-            continue;
-        }
-        if action.params.len() != arguments.len() {
-            continue;
-        }
+    for action in requirement_actions_by_name(monitor, step)
+        .into_iter()
+        .filter(|action| action.params.len() == arguments.len())
+    {
         let params = action
             .params
             .iter()
@@ -333,6 +346,107 @@ pub fn requirement_step_match(
         }
     }
     Ok((arguments, None))
+}
+
+fn requirement_actions_by_name<'a>(
+    monitor: &'a fsl_runtime::Monitor,
+    step: &fsl_core::RequirementsTraceStep,
+) -> Vec<&'a ActionDef> {
+    let branch_prefix = format!("{}__b", step.name);
+    monitor
+        .model
+        .actions
+        .iter()
+        .filter(|action| {
+            action.name == step.name
+                || action.name.starts_with(&branch_prefix)
+                || display_name(&action.name) == step.name
+        })
+        .collect()
+}
+
+/// Resolve a requirements trace step using arguments evaluated in its source model.
+///
+/// # Errors
+///
+/// Returns a diagnostic when the action, arity, argument domains, or enabled
+/// actions cannot be related to the target Monitor.
+pub fn requirement_step_match_values(
+    monitor: &fsl_runtime::Monitor,
+    step: &fsl_core::RequirementsTraceStep,
+    arguments: &[FslValue],
+) -> Result<Option<fsl_runtime::EnabledAction>, RequirementStepRelationError> {
+    let named_actions = requirement_actions_by_name(monitor, step);
+    if named_actions.is_empty() {
+        return Err(RequirementStepRelationError::Unrelatable(format!(
+            "unknown requirement action '{}'",
+            step.name
+        )));
+    }
+    let matching_actions = named_actions
+        .into_iter()
+        .filter(|action| action.params.len() == arguments.len())
+        .collect::<Vec<_>>();
+    if matching_actions.is_empty() {
+        return Err(RequirementStepRelationError::Unrelatable(format!(
+            "requirement action '{}' has no variant with {} argument(s)",
+            step.name,
+            arguments.len()
+        )));
+    }
+    let matching_actions = matching_actions
+        .into_iter()
+        .filter_map(|action| {
+            let belongs = action.params.iter().zip(arguments.iter()).try_fold(
+                true,
+                |belongs, (parameter, value)| {
+                    let in_domain = match parameter {
+                        ParamDef::Typed { ty, .. } => monitor
+                            .model
+                            .domain_values(ty)
+                            .map_err(|error| {
+                                RequirementStepRelationError::Replay(error.to_string())
+                            })?
+                            .contains(value),
+                        ParamDef::Range { lo, hi, .. } => matches!(
+                            value,
+                            FslValue::Int(value) if lo <= value && value <= hi
+                        ),
+                    };
+                    Ok::<_, RequirementStepRelationError>(belongs && in_domain)
+                },
+            );
+            match belongs {
+                Ok(true) => Some(Ok(action)),
+                Ok(false) => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if matching_actions.is_empty() {
+        return Err(RequirementStepRelationError::Unrelatable(format!(
+            "arguments for requirement action '{}' do not belong to the NEW action domain",
+            step.name
+        )));
+    }
+    let enabled = monitor
+        .enabled()
+        .map_err(|error| RequirementStepRelationError::Replay(error.to_string()))?;
+    for action in matching_actions {
+        let params = action
+            .params
+            .iter()
+            .zip(arguments.iter())
+            .map(|(param, value)| (param.name().to_owned(), value.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        if let Some(instance) = enabled
+            .iter()
+            .find(|instance| instance.action == action.name && instance.params == params)
+        {
+            return Ok(Some(instance.clone()));
+        }
+    }
+    Ok(None)
 }
 
 fn requirement_step_json(step: &fsl_core::RequirementsTraceStep, arguments: &[FslValue]) -> Value {
