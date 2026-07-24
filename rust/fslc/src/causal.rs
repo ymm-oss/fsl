@@ -672,11 +672,11 @@ fn run_causal_observe_expectations(
         Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
         Err(error) => return (error_output("parse", &error.to_string()), 2),
     };
-    if let Some(span) = crate::untyped_replay_enum_conversion_span(&mapping) {
+    if let Some(span) = crate::untyped_replay_enum_mapping_span(&mapping) {
         return (
             crate::located_error_output(
                 "type",
-                "enum conversion requires a typed impl model and is not supported by causal --from-log mappings",
+                "enum conversion or abstraction requires a typed impl model and is not supported by causal --from-log mappings",
                 span,
             ),
             2,

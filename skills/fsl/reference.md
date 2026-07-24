@@ -608,9 +608,13 @@ refinement <Name> {
   enum conversion <name> <ImplEnum> -> <AbsEnum> {
     <ImplMember> -> <AbsMember>                  // exhaustive bijection; every member exactly once
   }
+  enum abstraction <name> <ImplEnum> -> <AbsEnum> {
+    <ImplMember> -> <AbsMember>                  // source-total; repeated/unused targets are allowed
+  }
   map <abs_var> = <expr over impl state>          // scalar abstract variable
   map <abs_var>[<x>: <KeyType>] = <expr>          // per-element mapping of a Map
   // use convert(<name>, <expr>) in a map or action argument
+  // use abstract(<name>, <expr>) for an enum abstraction
   // map and action arguments otherwise use the same expressions as specs, including if <c> then <a> else <b>
   action <impl_act>(<formal params>...) -> <abs_act>(<expr>...) | stutter
   // formal params may be bare names or name: Type annotations matching the impl action
@@ -636,14 +640,21 @@ abs member sits at the same ordinal index). Same-named domain types
 (`lo..hi`) with different bounds are fine — an out-of-range value there is
 still caught as `map_out_of_bounds`/`abs_state_mismatch`.
 
-Distinct nominal enums stay incompatible unless an `enum conversion` is
-declared and invoked with `convert(name, expr)`. Both endpoints must be enums;
+Distinct nominal enums stay incompatible without an explicit named enum
+mapping. Use `enum conversion` plus `convert(name, expr)` for a bijection. Both
+endpoints must be enums;
 unknown, duplicate, or missing source/target members fail as a located type
 error. Conversion is member-wise and never inferred from ordinal position.
 For a requirements `process` stage target, use the checked Kernel enum name
 reported by `fslc kernel` (for example `CommandStage`). Raw production-log and
 causal replay mappings have no typed impl model and therefore reject enum
 conversion declarations/calls; use a typed refinement mapping instead.
+Use `enum abstraction` plus `abstract(name, expr)` for a source-total
+many-to-one boundary. Both endpoint enums are non-empty and every source
+appears exactly once; repeated targets and
+targets unused by all rows are intentional and accepted. It shares the local
+name namespace with conversions, but its call form cannot be interchanged with
+`convert`. Raw replay rejects abstractions for the same missing-type reason.
 For a generated abstract Map key such as DB `Column`, the conversion direction
 is abstract-to-implementation: convert the abstract binder before indexing the
 implementation Map (for example `Column -> DesignColumn`).

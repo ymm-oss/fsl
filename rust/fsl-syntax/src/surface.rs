@@ -259,6 +259,13 @@ pub enum RefinementItem {
         members: Vec<(String, String, Span)>,
         span: Span,
     },
+    EnumAbstraction {
+        name: String,
+        source: String,
+        target: String,
+        members: Vec<(String, String, Span)>,
+        span: Span,
+    },
     Map {
         name: String,
         binder: Option<Binder>,
@@ -1060,6 +1067,23 @@ impl RefinementItem {
                 span,
             } => json!([
                 "enum_conversion",
+                name,
+                source,
+                target,
+                members
+                    .iter()
+                    .map(|(source, target, span)| { json!([source, target, span.python_loc()]) })
+                    .collect::<Vec<_>>(),
+                span.python_loc()
+            ]),
+            Self::EnumAbstraction {
+                name,
+                source,
+                target,
+                members,
+                span,
+            } => json!([
+                "enum_abstraction",
                 name,
                 source,
                 target,

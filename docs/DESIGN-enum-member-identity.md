@@ -11,9 +11,9 @@ frontend rejects its use with a located type error. Existing mapping identifier 
 unchanged: implementation state and constant names plus mapping parameters and binders shadow enum
 members. Abstraction constants are not mapping inputs and are not imported into the checked
 expression environment. A refinement can cross an enum boundary only through a construct that has
-already established the source and target nominal types. The current `enum conversion` and its
-checked `Expr::EnumMember` elaboration cover bijections; the source-total many-to-one case remains
-unsupported until issue #455 is implemented.
+already established the source and target nominal types. `enum conversion` covers bijections, while
+`enum abstraction` covers source-total many-to-one mappings; both elaborate to checked
+`Expr::EnumMember` expressions.
 
 This is a staged **go** for nominal lookup at the checked refinement boundary and a **no-go**
 for replacing `KernelModel.enum_members` with a tuple-keyed public field in the current Kernel
@@ -47,7 +47,7 @@ each consumer and could turn a checked bare member into a different enum value a
 | duplicate-write detection | Evaluate static indices while building one model | Retain the flat one-model index. |
 | Public Kernel v1/v2 projection | Publish checked expressions | No schema change: a typed member remains `kind:"var"` plus its named type. Importers must use the `(type, name)` pair. |
 | document renderer and glossary | Recognize/display members | Continue using the one-model index; glossary targets already carry `Type.Member` and validate the nominal owner. |
-| CLI catalog and raw mapping evaluator | Completion/catalog or untyped external mappings | Continue exposing unambiguous model members. Raw production/causal replay still rejects typed enum conversions because no typed implementation model exists. |
+| CLI catalog and raw mapping evaluator | Completion/catalog or untyped external mappings | Continue exposing unambiguous model members. Raw production/causal replay rejects typed enum conversions and abstractions because no typed implementation model exists. |
 | frozen Python reference | Compatibility reference | No change; this decision concerns the authoritative native Rust checked boundary. |
 
 Bare-member source behavior is unchanged for every model that was valid by itself. The only newly
@@ -72,10 +72,10 @@ abstraction constant from masking the collision during checking when that consta
 to evaluation. Adjacent positive controls preserve implementation state/constant and local-binder
 shadowing.
 
-The adjacent exhaustive-conversion test is the positive path. It checks that same-spelled members
+The adjacent enum-mapping tests are the positive paths. They check that same-spelled members
 are elaborated as both `ImplStage.Shared`-style and `AbsStage.Shared`-style typed literals and that
 the existing Public Kernel expression shape retains both named types. Runtime and verifier
-agreement tests for `enum conversion` remain the execution-level anchors.
+agreement tests for `enum conversion` and `enum abstraction` are the execution-level anchors.
 
 ## Alternatives and migration
 
@@ -88,9 +88,9 @@ refinement boundary because typechecking and evaluation have separate merge impl
 
 This is the selected state. It is a small, reversible compatibility tightening, requires no schema
 version, and centralizes the safety decision in the shared frontend. Authors migrate an ambiguous
-conditional to the checked bijective conversion when it fits, rather than renaming enums or relying
-on declaration order. A colliding many-to-one mapping has an explicit temporary unsupported gap;
-issue #455 owns its separate source-total, non-injective contract.
+conditional to checked `enum conversion` plus `convert` for a bijection, or to source-total
+`enum abstraction` plus `abstract` for a many-to-one mapping, rather than renaming enums or relying
+on declaration order.
 
 ### C. Replace the Kernel field with `(type_name, member)` keys
 

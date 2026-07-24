@@ -1258,9 +1258,9 @@ Refinement maps and action arguments use the same expression grammar and type
 rules as ordinary specs, including `if <condition> then <expr> else <expr>`.
 Both branches are name- and type-checked even when the condition is constant.
 
-Distinct nominal enums require an explicit, named conversion. Declare a
-member-wise bijection in the refinement and call it from a state map or action
-argument:
+Distinct nominal enums require an explicit, named enum mapping. For a
+member-wise bijection, declare a conversion in the refinement and call it from
+a state map or action argument:
 
 ```fsl
 enum conversion use_case_stage UnitOfWorkStage -> CommandStage {
@@ -1282,6 +1282,29 @@ stage enum synthesized by lowering; use its checked Kernel name (visible in
 causal observation mappings have no typed impl model and reject conversion
 declarations/calls with a located type error; migrate those mappings to a typed
 refinement before using `convert`.
+
+For a many-to-one boundary, declare a source-total abstraction and use its
+distinct call form:
+
+```fsl
+enum abstraction lifecycle ImplStage -> AbsStage {
+  Received  -> Pending
+  Validated -> Pending
+  Completed -> Done
+}
+map status = abstract(lifecycle, stage)
+```
+
+Both endpoint enums must be non-empty, and every source member must appear
+exactly once. Duplicate or missing source
+members and unknown or wrong-nominal members are located type errors. Repeated
+targets are allowed; target members omitted from all rows are intentionally
+unused by this abstraction. `enum conversion` remains a bijection and still
+rejects duplicate or missing targets. Conversion and abstraction names share
+one refinement-local namespace, and `convert`/`abstract` cannot be
+interchanged. Both forms are independent of enum declaration order. Raw
+production-log and causal mappings reject abstractions too because they have
+no typed implementation model.
 
 When an abstract generated enum is the binder for a map whose implementation
 uses a design enum as its key, convert the binder in the reverse direction,
