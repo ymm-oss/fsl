@@ -15,6 +15,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- The `fsl-core` dialect/domain lowering evaluation retains the existing syntax, checked dispatch,
+  structural lowering, and generated-source projection owners. Evidence is insufficient to select
+  a naming-policy slice or establish a current naming local optimum, so it creates no implementation
+  slice and records the exact evidence and controls required before sharing the duplicate private
+  core naming policy (#397).
 - The native CLI output-boundary evaluation inventories all 50 command leaves and rejects a typed
   `Command`/`CommandOutcome` framework. A future, separately scoped change may centralize only
   regular-command JSON/raw process delivery, with exact byte, envelope, stderr, exit-status, and
