@@ -254,6 +254,11 @@ refinement SeatImplRefinesBooking {
 
 ## 2.6 Exhaustive nominal-enum conversion (issue #450)
 
+The checked-boundary ownership and flat-index compatibility decision is recorded in
+[DESIGN-enum-member-identity.md](DESIGN-enum-member-identity.md). In particular, a bare
+member shared by the implementation and abstraction inventories is rejected rather than
+resolved by merge order.
+
 Refinement preserves nominal enum identity. Distinct impl/abs enums are never
 assignment-compatible and are never converted by ordinal. A refinement that needs a
 member-wise representation change declares a named conversion and calls it from a state
