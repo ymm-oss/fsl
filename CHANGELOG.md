@@ -15,6 +15,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   symbolic representation (#428).
 
 ### Changed
+- `dbsystem` executable lifecycle lowering now constructs typed Kernel surface IR
+  directly instead of rendering and re-parsing generated FSL. The migration preserves
+  types, state, action/property semantics, metadata, annotations, and deterministic
+  ordering, removes the obsolete public source generator, and binds generated targets
+  to authored DB declarations so diagnostics and Public Kernel v2 provenance no longer
+  cite fabricated generated-source lines (#410).
 - The `fsl-runtime` touch-driven extraction evaluation retains the current public facade and
   physical eval, Monitor, liveness, refinement, search, and replay owners. Evidence is insufficient
   to select a move-only slice after the short migration/feature burst, so no implementation child

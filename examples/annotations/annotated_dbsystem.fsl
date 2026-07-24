@@ -4,10 +4,10 @@
 //
 // Demonstrates `@requirement(id, text?)` attached directly to a
 // `migration` and to a `rule` line inside `check compatibility { ... }`.
-// The typed annotation reaches the checked model through
-// `Annotation::render_source()` rather than the legacy `quote_meta`
-// string convention — see docs/DESIGN-annotations.md's "domain/db/ai
-// nested declaration syntax" section.
+// Direct DB lowering clones the typed annotation onto the generated action or
+// invariant without a generated-source/render/reparse round trip — see
+// docs/DESIGN-annotations.md's "domain/db/ai nested declaration syntax"
+// section.
 //
 // Native-only: the frozen Python reference does not parse `@...` before
 // a dbsystem nested declaration, so this file is excluded from the
