@@ -161,6 +161,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   every non-`statistically_supported` terminal status (`dataset_invalid`,
   `evaluator_untrusted`, `slice_missing`, `insufficient_samples`,
   `inconclusive`) now exits 1 instead of 0 (#510).
+- Native `verify`'s `vacuous_implication` lane now unwraps a
+  `forall`-quantified implication before checking antecedent reachability,
+  not only a bare top-level `Binary{op: "=>"}`. `docs/DESIGN-vacuity.md:22`
+  already documented "a single `=>` directly under `forall*`" as the
+  primary shape, but `verification_warnings` matched only
+  `property.expr` itself being `=>`, so any invariant of the ordinary form
+  `forall x: T { P(x) => Q(x) }` was invisible to the lane: a hollow
+  invariant of this shape verified clean instead of being flagged, and
+  `--vacuity error` had nothing to select. Every leading `forall` is now
+  peeled (nested foralls included, matching the frozen Python reference's
+  `_implication_antecedent_candidate`) and the antecedent is existentially
+  closed over the collected binders (reusing the existing `exists_wrap`
+  helper already used for `leadsTo` triggers) before the reachability
+  check; with zero leading foralls this is a no-op, so the previous
+  top-level-`=>` shape still works unchanged (#486).
 - `analyze`'s TSG no longer leaks the internal db-dialect `QqDbSepqQ`
   separator sentinel into node labels: a db-dialect invariant/action label
   now matches the display name `verify` reports for the same target (both

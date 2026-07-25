@@ -23,22 +23,6 @@ const DEPTH: &str = "4";
 const DIFF_MUTATE_DEPTH: &str = "3";
 const DIFF_MUTATE_MAX: &str = "30";
 
-/// Files where the primary detector is a known, filed, native-only gap.
-/// Native `vacuous_implication` (`rust/fsl-runtime/src/lib.rs`) only matches
-/// an invariant whose *top-level* expression is `Binary{op: "=>"}`; it does
-/// not unwrap a `forall`-quantified implication, which is the shape
-/// `docs/DESIGN-vacuity.md:22-24` documents as the primary case. See issue
-/// #486 (filed while repairing issue #485; distinct from issue #465, which
-/// covers the four vacuity kinds that are entirely unimplemented).
-/// `bank__unreachable_antecedent.fsl` is unaffected: its implication is not
-/// wrapped in `forall`. This pins the *current* gap exactly, so the assertion
-/// fails loudly (forcing an update) once #486 is fixed rather than silently
-/// staying green.
-const KNOWN_NATIVE_VACUITY_FORALL_GAP: &[&str] = &[
-    "order_workflow__unreachable_antecedent.fsl",
-    "return_system__unreachable_antecedent.fsl",
-];
-
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -326,7 +310,6 @@ fn native_injected_corpus_primary_blind_matrix() {
 
     let scratch = scratch_dir();
     let mut failures = Vec::new();
-    let mut known_gap_regressions = Vec::new();
 
     for path in &paths {
         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -335,20 +318,7 @@ fn native_injected_corpus_primary_blind_matrix() {
         let cells = measure(path, &case_headers, &scratch);
 
         let primary = primary_detector(inject);
-        let primary_caught = cells[primary].caught;
-        if KNOWN_NATIVE_VACUITY_FORALL_GAP.contains(&file_name) {
-            // Pin the current, filed-as-#486 gap exactly: this must stay
-            // "not caught" until #486 lands. If it starts catching, this
-            // assertion fails and forces the exclusion to be removed instead
-            // of silently going green.
-            if primary_caught {
-                known_gap_regressions.push(format!(
-                    "{file_name}: primary {primary} now catches (remove from \
-                     KNOWN_NATIVE_VACUITY_FORALL_GAP and close issue #486): {}",
-                    cells[primary].signal
-                ));
-            }
-        } else if !primary_caught {
+        if !cells[primary].caught {
             failures.push(format!(
                 "{file_name}: primary {primary} did not catch {inject}: {}",
                 cells[primary].signal
@@ -364,10 +334,5 @@ fn native_injected_corpus_primary_blind_matrix() {
         }
     }
 
-    assert!(
-        known_gap_regressions.is_empty(),
-        "{}",
-        known_gap_regressions.join("\n")
-    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
