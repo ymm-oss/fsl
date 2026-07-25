@@ -252,3 +252,75 @@ fn check_refinement_finds_a_self_violation_reachable_only_from_a_nondeterministi
         checked.failure
     );
 }
+
+const DIVMAP_ABS: &str = "spec DivMapAbs { state { q: 0..10 } init { q = 0 } \
+     action go(v in 0..10) { q = v } }";
+
+/// Negative control for #512: an action-correspondence *argument* expression
+/// (`go2(a) -> go(a / c)`) that divides by a state variable that can be zero
+/// -- distinct from the impl action's own body, which has no division at all
+/// here -- must be reported as a located `refinement_failed` /
+/// `kind:"map_partial_op"` finding. Before the fix, the divisor's own
+/// `eval()` call inside `check_refinement`'s action-correspondence handling
+/// was not wrapped in `with_total_division` (correctly so: this is action
+/// context per `docs/DESIGN-divmod.md` §2.2, not the read-only "mapping
+/// expression" §2.3 exempts) but its `RuntimeError` was propagated raw via
+/// `?` instead of being classified, so it surfaced as an unclassified
+/// internal error the CLI stamps `kind:"type"` -- neither of the two
+/// documented divide-by-zero treatments.
+#[test]
+fn check_refinement_reports_map_partial_op_for_a_zero_divisor_in_a_correspondence_argument() {
+    let implementation = model(
+        "spec DivMapImpl { state { q: 0..10, c: 0..5 } init { q = 0  c = 1 } \
+         action set_c(v in 0..5) { c = v } \
+         action go2(a in 0..10) { q = a } }",
+    );
+    let abstraction = model(DIVMAP_ABS);
+    let mapping = parse_refinement(
+        "refinement M { impl DivMapImpl abs DivMapAbs map q = q \
+         action set_c(v) -> stutter action go2(a) -> go(a / c) }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("parse mapping");
+
+    let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 3)
+        .expect("check_refinement runs");
+
+    assert!(
+        checked.impl_violation.is_none(),
+        "the impl's own body never divides; this is a mapping-argument defect, not a self-violation: {:?}",
+        checked.impl_violation
+    );
+    let failure = checked
+        .failure
+        .expect("the zero-divisor correspondence argument must be reported, not silently ignored");
+    assert_eq!(failure.kind, "map_partial_op");
+}
+
+/// Regression control: the same action-correspondence argument division,
+/// but guarded so the divisor is never zero on any reachable impl step, must
+/// still `refines` -- the fix must not turn a legitimately total mapping
+/// into a false `map_partial_op`.
+#[test]
+fn check_refinement_still_refines_when_the_correspondence_divisor_is_always_guarded() {
+    let implementation = model(
+        "spec DivMapImplGuarded { state { q: 0..10, c: 0..5 } init { q = 0  c = 1 } \
+         action set_c(v in 0..5) { requires v != 0  c = v } \
+         action go2(a in 0..10) { q = a / c } }",
+    );
+    let abstraction = model(DIVMAP_ABS);
+    let mapping = parse_refinement(
+        "refinement M { impl DivMapImplGuarded abs DivMapAbs map q = q \
+         action set_c(v) -> stutter action go2(a) -> go(a / c) }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("parse mapping");
+
+    let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 3)
+        .expect("check_refinement runs");
+
+    assert!(checked.impl_violation.is_none());
+    assert!(checked.failure.is_none(), "failure: {:?}", checked.failure);
+}

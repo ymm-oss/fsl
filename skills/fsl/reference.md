@@ -1393,6 +1393,15 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   fidelity failure. Never `refines`, never folded into `refinement_failed`.
   `fslc diff` surfaces the same condition as an `impl_violated` finding and
   fails its gate unconditionally (not `--forbid`-gated).
+- **action-correspondence argument partial_op (#512)**: an
+  action-correspondence argument expression (`impl_action(a) -> abs_action(a
+  / c)`) dividing by an impl state variable that can be zero is action
+  context, not the "no check" property context a refinement state map gets —
+  `kind:"map_partial_op"` (`refinement_failed`, exit 1), distinct from
+  `map_out_of_bounds` (a range problem) and from the impl's own body dividing
+  by zero (caught by the impl self-violation precondition above). A
+  correspondence whose divisor is always guarded on every reachable impl
+  step still `refines`.
 - **nondeterministic `init` (#493)**: a state variable `init` never assigns
   on any path (an `init if` reading an unassigned `Bool`) is a genuinely free
   initial value across its type domain, not a silently defaulted one. The
