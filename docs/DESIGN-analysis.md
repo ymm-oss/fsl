@@ -90,7 +90,12 @@ Batch mode accepts files and directories. Directories are expanded recursively
 for `*.fsl`, sorted by normalized path, and emitted as one deterministic JSON
 envelope with `mode: "batch"`. If any file fails, successful entries remain in
 `files[]`, failed entries are also summarized in `errors[]`, and the command
-exits 2.
+exits 2. The `*.fsl` filter applies only to directory expansion — a file
+named explicitly on the command line is always kept, whatever its extension
+(including a `.toml` project manifest, routed the same way single-file mode
+routes one). An explicitly named file that cannot be analyzed is a real
+error in `files[]`/`errors[]`, never a silent omission; a batch that
+analyzed nothing never reports `result: "analyzed"`/exit 0.
 
 ## 2. Typed Semantic Graph (TSG)
 

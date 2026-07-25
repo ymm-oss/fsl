@@ -1083,8 +1083,11 @@ properties, acceptance/forbidden scenarios, and traceability metadata.
 `impact_graph --focus NODE`, `requirement_property_graph`, and
 `property_state_graph` summarize deterministic components/SCCs/cycles, degree,
 and metrics over that graph. It accepts multiple files/directories in batch mode;
-directories expand recursively to sorted `*.fsl` files and partial failures stay
-visible in the batch JSON. Standalone refinement mappings use `--projection
+directories expand recursively to sorted `*.fsl` files (the `*.fsl` filter applies
+only to that expansion — an explicitly named file is always kept, whatever its
+extension) and partial failures stay visible in `files[]`/`errors[]`; a batch
+that analyzed nothing never reports `result:"analyzed"`/exit 0. Standalone
+refinement mappings use `--projection
 refinement_graph`, project manifests use `--projection traceability_graph`, and
 graph projections can export DOT or Mermaid with `--format dot|mermaid`.
 `--projection code_audit --code PATH` is the single-spec, JSON-only bridge from

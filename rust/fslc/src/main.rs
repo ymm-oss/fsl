@@ -12019,8 +12019,17 @@ fn run_analyze_batch(
                 2,
             );
         }
-        if let Err(error) = collect_analysis_files(path, &mut files) {
-            return (error_output("io", &error.to_string()), 2);
+        if path.is_dir() {
+            // `.fsl`-only filtering applies only to directory expansion — an
+            // explicitly named file is always kept, whatever its extension,
+            // so `run_analyze` below can route it (a `.toml` project
+            // manifest) or reject it with a real error (anything else),
+            // instead of it silently vanishing from `files`/`errors`.
+            if let Err(error) = collect_analysis_files(path, &mut files) {
+                return (error_output("io", &error.to_string()), 2);
+            }
+        } else {
+            files.push(path.clone());
         }
     }
     files.sort_by_key(|path| analysis_display_path(path));

@@ -28,6 +28,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   diagnostics").
 
 ### Fixed
+- `analyze` batch mode no longer silently drops an explicitly-named input
+  just because it does not end in `.fsl`. `collect_analysis_files`'s
+  `*.fsl`-only filter applied even to files named directly on the command
+  line (not only to directory expansion, where it belongs), so
+  `analyze a.toml b.txt` returned `files:[]`, `errors:[]`,
+  `result:"analyzed"`, exit 0 — a batch that analyzed nothing reported
+  success. Explicit files are now always kept regardless of extension: a
+  `.toml` project manifest routes through the same handling single-file
+  mode already uses, and anything else that cannot be analyzed is a real
+  error in `files[]`/`errors[]`. Directory expansion is unaffected and
+  still filters to `.fsl` only (#496).
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false
