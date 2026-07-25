@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Every binder value writes the *same* concrete value to a non-indexed
+// target. Unlike explicit_init_contradictory.fsl this is satisfiable (all
+// the simultaneous constraints agree), so it must still verify — a fix for
+// the contradictory-init case must not flag consistent repeated writes.
+spec ExplicitInitForallSameValue {
+  type K = 0..2
+  state { ready: Bool }
+  init {
+    forall k: K { ready = true }
+  }
+  action noop() { }
+  invariant AlwaysReady { ready }
+}

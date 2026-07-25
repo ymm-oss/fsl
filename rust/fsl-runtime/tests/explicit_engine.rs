@@ -173,6 +173,36 @@ fn deterministic_init_tracks_branches_foralls_and_duplicate_locations() {
     assert_eq!(error.message, "nested forall in init is not supported");
 }
 
+/// Negative control for #480: a `forall` binder over more than one value
+/// that writes to a target *not* indexed by the binder demands the same
+/// location equal every binder value simultaneously. When those values
+/// differ, no initial state can satisfy every iteration at once — the same
+/// contradiction the symbolic engine already reports as unsatisfiable init.
+/// Before the fix, `Monitor::new` executed the forall as an imperative
+/// last-write-wins loop and silently produced a (bogus) initial state.
+#[test]
+fn forall_init_writing_conflicting_values_to_the_same_location_is_unsatisfiable() {
+    let contradictory = model(
+        "spec Contradictory { type K = 0..1 state { x: Int } \
+         init { forall k: K { x = k } } action noop() { } }",
+    );
+    let error = fsl_runtime::verify_explicit(contradictory, 4, 100)
+        .expect_err("contradictory forall init rejected");
+    assert_eq!(error.message, "init constraints are unsatisfiable");
+
+    // Regression control: repeating the *same* value on every iteration is
+    // satisfiable and must not be flagged.
+    let consistent = model(
+        "spec Consistent { type K = 0..2 state { ready: Bool } \
+         init { forall k: K { ready = true } } \
+         action noop() { } invariant AlwaysReady { ready } }",
+    );
+    let result =
+        fsl_runtime::verify_explicit(consistent, 4, 100).expect("consistent forall init accepted");
+    assert!(result.closure);
+    assert!(result.violation.is_none());
+}
+
 #[test]
 fn explicit_violation_trace_replays_through_the_monitor() {
     let model = model(

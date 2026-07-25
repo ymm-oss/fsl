@@ -17,12 +17,76 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   wrong-nominal sources fail closed; concrete, symbolic, progress, CLI, Worker,
   Public Kernel projection, and raw-replay guards share the checked semantics
   without weakening bijective `enum conversion` (#455).
+- Native `verify` now reports the `vacuous_leadsto` vacuity lane: a `leadsTo`
+  whose trigger never becomes reachable within `--depth` is a hollow
+  property, the same class BMC already reports for an implication invariant's
+  unreachable antecedent (`vacuous_implication`). Detected via the same
+  solver-free existential-reachability BFS `fsl-runtime::verification_warnings`
+  already uses, so `fsl-runtime` gains no new solver dependency (#465, partial;
+  `always_true_requires`, `tautology_over_frozen`, and `urgency_freeze` remain
+  unimplemented on native — see `docs/DESIGN-rust-port.md` "Shared semantic
+  diagnostics").
 
 ### Fixed
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false
   `no_semantic_change` result (#460, prerequisite for #427).
+- `fslc testgen` (and `domain testgen`) no longer converts a genuine
+  `violated`/`reachable_failed` counterexample from the underlying scenarios
+  machinery into an unrelated exit-2 `kind:"semantics"` spec error. The
+  guard that only short-circuited on `status == 2` let a real `violated`
+  invariant/`leadsTo`, or a `--strict` `reachable_failed`, fall through to
+  `fsl_tools::validate_scenarios`, which found no `scenarios` array in what
+  was actually a `verify`-shaped envelope and reported a generic error —
+  changing the exit code from 1 to 2, replacing `result` with `"error"`,
+  and destroying the trace/blame evidence a repair loop depends on. Both
+  guards (`run_testgen`, `run_domain_testgen`) now propagate any non-zero
+  status verbatim; the success path (`result:"generated"`, exit 0) is
+  unaffected (#472).
+- `fslc refine` now verifies the impl spec's own internal consistency (type
+  bounds, invariants, `trans`, `ensures`) before checking any correspondence
+  against the abstraction. An impl that violates itself within `--depth` —
+  e.g. a dropped `requires` that lets a state variable step outside its
+  declared type bound — is reported `result:"violated"` with a `note`
+  explaining this is a property of the refinement input, never `refines`
+  and never folded into `refinement_failed`. Previously `check_refinement`'s
+  BFS silently discarded (`continue`d past) any violation the impl produced
+  while stepping, so a guard weakening that broke the impl's own bounds
+  could pass as `refines`/exit 0 with no counterexample at all. `fslc diff`
+  gains the same detection as a new `impl_violated` finding kind that fails
+  its gate unconditionally (unlike other finding kinds, not subject to
+  `--forbid`), since a self-violating side makes the comparison untrustworthy;
+  the `implements`-clause mutation oracle and the `implements:` verify
+  metadata (`requirements_implements_output`) are also corrected to stop
+  reporting the impl-violation case as a clean/`"refines"` refinement (#466).
+- `--vacuity {error,ignore}` now selects over the complete documented 5-kind
+  vacuity lane set (`fsl_core::VACUITY_KINDS`) instead of only the two kinds
+  spelled `vacuous_*`. `always_true_requires`, `tautology_over_frozen`, and
+  `urgency_freeze` previously could not be promoted to `--vacuity error` or
+  suppressed by `--vacuity ignore` because none of the three names start
+  with `vacuous_`; native `apply_vacuity_mode` matched by name prefix rather
+  than the closed kind set (#465, the CLI half; the lanes for these three
+  kinds are still unimplemented on native, see above — this fix prevents a
+  *second*, independent bug from compounding the first once they land).
+- `sweep` no longer folds a spec `error` (parse / type / semantics / io /
+  vacuous / a mistyped `--instances`/`--values` name / a missing file) into
+  the positive `sweep_passed`/exit-0 verdict. Any scope in the grid that
+  errors now short-circuits the sweep with that error's envelope and exit
+  code (2, or 3 for `kind:"internal"`) returned verbatim, instead of being
+  discarded as an unrecognized grid-cell result while the top-level verdict
+  fell back to "no counterexample found" — previously a one-character typo
+  in `--instances` could turn a sweep over a genuinely violating spec from
+  exit 1 `sweep_failed` into exit 0 `sweep_passed` (#464).
+- `verify --engine explicit` now agrees with symbolic BMC on a contradictory
+  `init`: a `forall` binder that writes different concrete values to the same
+  non-indexed location across binder values (e.g. `forall k: K { x = k }`
+  with `|K| > 1`) is detected by the concrete Monitor without a solver and
+  reported as `result:"error"`, `kind:"vacuous"`,
+  `message:"init constraints are unsatisfiable"`, exit 2 — matching BMC
+  exactly instead of silently running the forall as a last-write-wins loop
+  and returning `result:"proved"` / exit 0 for a spec with no valid initial
+  state (#480).
 - Refinement typechecking now rejects an unshadowed bare enum member shared by distinct
   implementation and abstraction enums, preventing checked and evaluation
   merge order from assigning different nominal identities. Existing identifier

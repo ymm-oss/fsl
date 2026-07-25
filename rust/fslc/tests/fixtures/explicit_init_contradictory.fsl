@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ExplicitInitContradictory {
+  type K = 0..1
+  state { x: Int }
+  init {
+    forall k: K { x = k }
+  }
+  action noop() { }
+}

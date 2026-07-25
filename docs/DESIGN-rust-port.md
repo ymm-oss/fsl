@@ -251,9 +251,16 @@ solver-independent crates used by both delivery surfaces:
   the same semantic gate.
 - `fsl-core` owns model-only warnings, requirement metadata projection, and
   deterministic state summaries.
-- `fsl-runtime::verification_warnings` owns vacuous-implication reachability,
-  deadlock warnings, and action-coverage warnings. It consumes only the checked
-  model and backend-neutral result facts.
+- `fsl-runtime::verification_warnings` owns vacuous-implication and
+  vacuous-leadsto reachability, deadlock warnings, and action-coverage
+  warnings. It consumes only the checked model and backend-neutral result
+  facts. The remaining three `docs/DESIGN-vacuity.md` §2 lanes
+  (`always_true_requires`, `tautology_over_frozen`, `urgency_freeze`) are
+  solver-dependent and are not yet implemented on the Rust side (#465);
+  `--vacuity` selects over the closed 5-kind set in
+  `fsl-core::VACUITY_KINDS`, not a `"vacuous_"` name-prefix check, so the
+  three unimplemented lanes fail closed by absence rather than by a
+  misclassified warning once they are added.
 - Shared warnings use typed `kind` values for downstream selection. In
   particular, induction removes bounded `kind:"deadlock"` warnings through
   `fsl-runtime::induction_warnings`; frontends never classify a warning by

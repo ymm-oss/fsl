@@ -990,8 +990,13 @@ schema as BMC. Results carry `states_explored`, `max_frontier_width`, and
 properties, nondeterministic `init` (every state variable must be definitely
 assigned), and `init forall` binder domains that reference state variables
 (range bounds and collections must be compile-time constants) — use
-`--engine bmc` for those specs. `--from-state`, `--lemma`, and `--k` do not
-apply to this engine.
+`--engine bmc` for those specs. A definitely-assigned but contradictory
+`init` (an `init forall` that writes different concrete values to the same
+non-indexed location across binder values, e.g. `forall k: K { x = k }` with
+`|K| > 1`) is also rejected, matching BMC exactly: `result:"error"`,
+`kind:"vacuous"`, `message:"init constraints are unsatisfiable"`, exit 2 —
+never `proved`. `--from-state`, `--lemma`, and `--k` do not apply to this
+engine.
 
 `--engine auto` tries explicit first and falls back to bmc transparently
 when explicit can't decide the spec (a fail-closed rejection above, or
@@ -1217,7 +1222,10 @@ first failed layer and later layers are marked `skipped`.
   `result:"sweep_passed"` or `"sweep_failed"`, with every run under
   `sweep.results` and the first failing scope under
   `sweep.minimal_counterexample`. For `--values NAME=LO..HI`, it fixes `LO` and
-  expands `LO..LO`, `LO..LO+1`, ..., `LO..HI`.
+  expands `LO..LO`, `LO..LO+1`, ..., `LO..HI`. A spec `error` from any scope
+  (parse/type/semantics/io/vacuous, a mistyped `--instances`/`--values` name,
+  a missing file) is returned verbatim — exit code and `kind` unchanged —
+  instead of being folded into `sweep_passed`/`sweep_failed`.
 - `explain` is deterministic formatting with no LLM. JSON mode enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest
@@ -1313,6 +1321,14 @@ first failed layer and later layers are marked `skipped`.
   `kind:"progress_lost"`, `violation_kind:"leadsTo"`, `impl_trace`,
   `progress_failure:"lasso_blocks_progress"|"deadlock_or_stall_blocks_progress"`,
   `progress:{leadsTo, actions}`, and `faithfulness_class:"liveness_not_refined"`.
+- **impl self-violation** (checked before any correspondence, `refine`'s own
+  input precondition): if the impl spec violates its own type bounds or
+  invariants within `--depth` — independent of the abstraction and mapping —
+  `refine` reports `result:"violated"` with the impl's own `violation_kind`
+  and a `note` that this is a property of the refinement input, not a
+  fidelity failure. Never `refines`, never folded into `refinement_failed`.
+  `fslc diff` surfaces the same condition as an `impl_violated` finding and
+  fails its gate unconditionally (not `--forbid`-gated).
 - leadsTo ranking failure: `unknown_cti` / `violation_kind:"leadsTo_rank"` with
   `rank_failure` (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
   `pending_not_preserved`; with `helpful`, also `progress_action_not_fair`,
@@ -1440,7 +1456,11 @@ emit the same scenarios:
 If a `reachable` target is not witnessed at the requested depth, `testgen` still
 generates tests for the scenarios it did witness and returns `warnings[]` with a
 message such as `reachable SoldOut not witnessed at depth 3; try --depth >= 4`.
-Use `--strict` to restore all-or-nothing `reachable_failed`.
+Use `--strict` to restore all-or-nothing `reachable_failed`. A genuine
+`violated`/`reachable_failed` result — the spec itself has a bug, not a
+testgen input problem — is returned verbatim (verdict, exit code, and trace
+unchanged), the same envelope `verify`/`scenarios` return for the identical
+spec; it is never re-wrapped as a generic exit-2 spec error.
 
 ## 10. Three-layer dialects (consulting / requirements / design)
 

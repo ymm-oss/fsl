@@ -165,6 +165,17 @@ Two consequences fall out of reusing the same merge, not from new logic:
 
 α(s) := the mapping that defines the impl state → abs state mapping.
 
+0. **impl self-consistency (precondition, issue #466)**: before any of the
+   following steps run, the impl spec's own reachable states up to depth K —
+   including its initial state — are checked concretely for a type-bound,
+   invariant, `trans`, or `ensures` violation, independent of the mapping and
+   the abstraction entirely. This is a property of the refinement *input*
+   (the impl spec is broken on its own), not a refinement fidelity verdict:
+   `result:"violated"` with the impl's own `violation_kind`/trace and an
+   explanatory `note`, never `result:"refines"` and never folded into
+   `refinement_failed` (whose `kind`s below describe a mismatch *between*
+   impl and abs, not a defect in the impl alone). If this precondition finds
+   a violation, steps 1-4 do not run.
 1. **init correspondence**: for the impl's initial state s₀, α(s₀) satisfies the
    abs init constraints. Counterexample: `refinement_failed` / `at: "init"`.
 2. **transition correspondence**: for a reachable impl transition
@@ -493,7 +504,17 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    out-of-range impl value there is already caught downstream as
    `abs_state_mismatch`, so merging is safe. The fix: give impl and abs
    layers distinct type names.
-8. No regression of existing features (refine is a completely independent CLI
+9. **impl self-violation (precondition, issue #466)**: an impl whose own
+   guard/type-bound weakening lets it violate itself within depth K (e.g. a
+   dropped `requires` that lets a state variable step outside its declared
+   type bound) → `result:"violated"` with the impl's own `violation_kind`,
+   never `refines`. `docs/DESIGN-refinement.md` §2 step 0. Rust coverage:
+   `rust/fsl-runtime/tests/refinement.rs` (the `check_refinement` contract
+   directly, plus a regression control distinguishing this from a pure
+   guard-weakening `abs_requires_failed`) and
+   `rust/fslc/tests/issue_466_refine_impl_self_violation.rs` (the `fslc
+   refine` and `fslc diff` CLI contract).
+10. No regression of existing features (refine is a completely independent CLI
    path).
 
 ## 6. Documentation Reflection

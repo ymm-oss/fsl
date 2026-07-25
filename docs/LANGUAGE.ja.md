@@ -821,7 +821,11 @@ Public Kernel v2 はオプトインで、
 したスコープを `sweep.minimal_counterexample` として返します。`--values` に
 ついては、sweep は下限を固定して上限を拡大します(`lo..lo`, `lo..lo+1`, ...,
 `lo..hi`)。sweep の合格は「このグリッドに反例がない」ことを意味し、非有界の証明
-ではありません。
+ではありません。グリッド中のいずれかのスコープが spec `error`(parse / type /
+semantics / io / vacuous / …)を返した場合、それは反例ではありません。`sweep` は
+その基盤のエラー envelope をそのまま返します(`result`、`kind`、`message`、
+`loc`、exit code は変更しません)。`sweep_passed`/`sweep_failed` に畳み込むこと
+はありません。
 
 `diff` は、ソーステキストではなく状態機械の意味を比較します。有界の refinement を
 両方向に実行します: NEW→OLD の失敗は `behavior_added`、OLD→NEW の失敗は
@@ -1288,6 +1292,18 @@ fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth
 `map_out_of_bounds`)、`impl_trace`、マッピング後の `abs_before` /
 `abs_after_*` を伴います。静的なエラー(マップの欠落、未知の action など)は
 `kind: "type"`(exit 2)です。
+
+`refine` はどの対応関係も検査する前に、まず impl spec が `--depth` の範囲内で
+それ自身の型境界や不変条件を破っていないか(内部的に一貫しているか)を検証しま
+す。壊れた impl を refinement mapping で意味のあるものにすることはできないため、
+これは abstraction や mapping とは独立に検査されます: `result: "violated"`
+(exit 1)に `violation_kind` と、これが fidelity の失敗ではなく refinement
+*入力*自体の性質であることを説明する `note` を伴います。`refines` として報告さ
+れることはなく、`refinement_failed`(上記の `kind` 群は impl と abs の**間**の
+不一致を表すものであり、impl 単独の欠陥ではありません)に畳み込まれることもあり
+ません。`fslc diff` は同じ条件を `impl_violated` の finding として表面化させ、
+gate を無条件に(`--forbid` の対象ではなく)失敗させます。自己矛盾した側がある
+比較そのものが信頼できないためです。
 
 状態変数のペアが 1:1 でマップされる場合でも、impl と abs には**別々の enum/struct
 型名**を与えてください。型メタデータは refinement 検査のために名前でマージされ

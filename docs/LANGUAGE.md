@@ -844,6 +844,10 @@ verification result under `sweep.results`, and returns the first failing scope
 under `sweep.minimal_counterexample`. For `--values`, the sweep fixes the lower
 bound and expands the upper bound (`lo..lo`, `lo..lo+1`, ..., `lo..hi`). A
 passing sweep means "no counterexample in this grid", not an unbounded proof.
+A spec `error` (parse / type / semantics / io / vacuous / …) from any scope in
+the grid is not a counterexample: `sweep` returns that underlying error
+envelope verbatim (`result`, `kind`, `message`, `loc`, exit code unchanged)
+instead of folding it into `sweep_passed`/`sweep_failed`.
 
 `diff` compares state-machine meaning instead of source text. It runs bounded
 refinement in both directions: NEW→OLD failure is `behavior_added`, while
@@ -1320,6 +1324,19 @@ with `kind` (`abs_requires_failed` / `abs_state_mismatch` / `stutter_changed_abs
 `map_out_of_bounds`), `impl_trace`, and the post-mapping `abs_before` /
 `abs_after_*`. A static error (a missing map, an unknown action, etc.) is
 `kind: "type"` (exit 2).
+
+Before any correspondence is checked, `refine` first verifies that the impl
+spec is internally consistent on its own — does not violate its own type
+bounds or invariants — within `--depth`. A refinement mapping cannot make a
+broken impl meaningful, so this is checked independently of the abstraction
+and the mapping: `result: "violated"` (exit 1) with `violation_kind` and a
+`note` explaining this is a property of the refinement *input*, not a
+fidelity failure. It is never reported `refines`, and never folded into
+`refinement_failed` (whose `kind`s above describe a mismatch *between* impl
+and abs, not a defect in the impl alone). `fslc diff` surfaces the same
+condition as an `impl_violated` finding and fails its gate unconditionally
+(not subject to `--forbid`), since a self-violating side makes the
+comparison itself untrustworthy.
 
 Give impl and abs **distinct enum/struct type names**, even when a state
 variable pair is mapped 1:1. Type metadata is merged by name for refinement

@@ -201,7 +201,13 @@ pseudorandom walk and `pathlib` for resolving the SPEC path):
    If some `reachable` targets are not witnessed at the requested depth, testgen
    still embeds the witnessed scenarios and returns warning JSON naming each
    missing target with a depth hint. `--strict` restores all-or-nothing
-   `reachable_failed`.
+   `reachable_failed`. A genuine `violated`/`reachable_failed` verdict from the
+   underlying scenarios machinery — the spec itself has a bug, not a testgen
+   input problem — is returned verbatim (`result`, exit code, and trace
+   unchanged), the same envelope `fslc verify`/`fslc scenarios` return for the
+   identical spec; it is never re-wrapped as a generic exit-2 spec error (a
+   native-only regression fixed in issue #472, see `rust/fslc/src/main.rs`
+   `run_testgen`/`run_domain_testgen`).
 3. **Random-walk conformance test**: with the concrete Monitor as the oracle, choose actions
    from `mon.enabled()` by pseudorandom (fixed seed, `random.Random(0)`) for
    N=100 steps, and on every step assert `adapter.step(...)` → `observe() == mon.state`.

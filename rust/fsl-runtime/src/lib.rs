@@ -786,8 +786,9 @@ impl Monitor {
             .map(|(name, ty)| Ok((name.clone(), model.default_value(ty)?)))
             .collect::<Result<State, RuntimeError>>()?;
         let mut bindings = Bindings::new();
+        let mut written = BTreeMap::new();
         for statement in &model.init {
-            execute_init_statement(statement, &mut state, &mut bindings, &model)?;
+            execute_init_statement(statement, &mut state, &mut bindings, &model, &mut written)?;
         }
         Ok(Self {
             model,
@@ -1235,6 +1236,13 @@ pub struct RefinementCheck {
     pub action_map: BTreeMap<String, String>,
     pub abs_has_ensures: bool,
     pub failure: Option<RefinementFailure>,
+    /// Set instead of `failure` when the implementation violates its own
+    /// semantics (a type bound, invariant, `trans`, `ensures`, or
+    /// `partial_op`) within `depth`, independent of the refinement mapping.
+    /// This is a property of the refinement *input* (the impl spec is
+    /// broken on its own), not a refinement fidelity verdict, so it must
+    /// never be reported as `refines` or folded into `refinement_failed`.
+    pub impl_violation: Option<(Violation, Vec<TraceStep>)>,
 }
 
 fn merged_refinement_model(
@@ -1431,6 +1439,24 @@ pub fn check_refinement(
     mapping: &Refinement,
     depth: usize,
 ) -> Result<RefinementCheck, RuntimeError> {
+    // The impl spec must be internally consistent before its transitions are
+    // compared against the abstraction at all: refinement fidelity is
+    // meaningless to evaluate for a spec that already breaks its own type
+    // bounds or invariants. Checking this first — and returning immediately
+    // — means the correspondence walk below never needs to decide what a
+    // mid-walk self-violation means; by construction it cannot encounter
+    // one within the same `depth`.
+    if let Some((violation, trace)) = first_self_violation(implementation.clone(), depth)? {
+        return Ok(RefinementCheck {
+            implementation: implementation.name.clone(),
+            abstraction: abstraction.name.clone(),
+            depth,
+            action_map: BTreeMap::new(),
+            abs_has_ensures: false,
+            failure: None,
+            impl_violation: Some((violation, trace)),
+        });
+    }
     let eval_model = merged_refinement_model(implementation, abstraction)?;
     let impl_initial = Monitor::new(implementation.clone())?;
     let abs_initial = Monitor::new(abstraction.clone())?;
@@ -1462,6 +1488,7 @@ pub fn check_refinement(
             .iter()
             .any(|action| !action.ensures.is_empty()),
         failure: None,
+        impl_violation: None,
     };
     let initial_trace = vec![TraceStep {
         step: 0,
@@ -1550,6 +1577,12 @@ pub fn check_refinement(
             let mut child = monitor.clone();
             let stepped = child.step(&enabled)?;
             if stepped.violation.is_some() {
+                // Unreachable in practice: `first_self_violation` above
+                // already proved the impl has no self-violation within
+                // `depth`, and this walk never explores past `depth`. Kept
+                // as a defensive skip (never a silent `refines`) rather than
+                // an `unreachable!()`, since only silence here — not a
+                // panic — would resurrect the false-green #466 fixes.
                 continue;
             }
             let mut child_trace = trace.clone();
@@ -1778,6 +1811,62 @@ pub fn find_boundary_violation(
     Ok(None)
 }
 
+/// Find the first violation of ANY kind (type bound, user invariant, `trans`,
+/// `ensures`, or `partial_op`) the model has against its own semantics,
+/// concretely, within `depth` — i.e. whether the model is internally
+/// consistent at all, independent of any refinement mapping.
+///
+/// Unlike [`find_boundary_violation`], which is scoped to
+/// `partial_op`/`type_bound` for its own narrower callers, this checks every
+/// violation kind `Monitor::current_violation`/`Monitor::step` can report,
+/// including a violation already present in the initial state (init can
+/// itself violate an invariant or type bound before any action runs).
+///
+/// # Errors
+///
+/// Returns [`RuntimeError`] when concrete evaluation or execution fails.
+fn first_self_violation(
+    model: KernelModel,
+    depth: usize,
+) -> Result<Option<(Violation, Vec<TraceStep>)>, RuntimeError> {
+    let initial = Monitor::new(model)?;
+    let initial_trace = vec![TraceStep {
+        step: 0,
+        state: initial.state.clone(),
+        action: None,
+        changes: BTreeMap::new(),
+    }];
+    if let Some(violation) = initial.current_violation()? {
+        return Ok(Some((violation, initial_trace)));
+    }
+    let mut queue = VecDeque::from([(initial.clone(), initial_trace, 0_usize)]);
+    let mut visited = BTreeSet::from([initial.state.clone()]);
+    while let Some((monitor, trace, step)) = queue.pop_front() {
+        if step >= depth {
+            continue;
+        }
+        for instance in monitor.enabled()? {
+            let mut child = monitor.clone();
+            let before = child.state.clone();
+            let stepped = child.step(&instance)?;
+            let mut child_trace = trace.clone();
+            child_trace.push(trace_step_from_result(
+                step + 1,
+                &before,
+                &instance,
+                &stepped,
+            ));
+            if let Some(violation) = stepped.violation {
+                return Ok(Some((violation, child_trace)));
+            }
+            if visited.insert(child.state.clone()) {
+                queue.push_back((child, child_trace, step + 1));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Return whether a Boolean expression holds in any concrete state up to `depth`.
 ///
 /// # Errors
@@ -1816,6 +1905,21 @@ pub fn expression_reachable(
     Ok(false)
 }
 
+/// Wrap `expr` in a nested `exists` quantifier over `binders`, outermost
+/// binder first — the same existential closure the frozen Python reference
+/// (`bmc._exists_wrap`) uses to check reachability of a leadsTo trigger or
+/// implication antecedent independent of any particular binding.
+fn exists_wrap(binders: &[Binder], expr: Expr) -> Expr {
+    binders
+        .iter()
+        .rev()
+        .fold(expr, |body, binder| Expr::Quantified {
+            quantifier: "exists".to_owned(),
+            binder: binder.clone(),
+            body: Box::new(body),
+        })
+}
+
 /// Build solver-independent verification warnings shared by native and browser frontends.
 #[must_use]
 pub fn verification_warnings(
@@ -1840,6 +1944,29 @@ pub fn verification_warnings(
                 "name": display_name(&property.name),
                 "message": format!("invariant '{}' has an implication antecedent that is unreachable within depth {depth}", display_name(&property.name)),
                 "hint": "the antecedent is not reachable within this depth; check whether an action that should establish it is missing, or whether the antecedent expression is wrong",
+                "loc": property.span.python_loc(),
+                "classification": "insufficient_depth",
+                "blocking": [],
+                "faithfulness_class": "intent_unexercised",
+                "recommended_action": "add a single-shot reachable for the action / raise --depth",
+            });
+            if let JsonValue::Object(warning) = &mut warning {
+                insert_requirement_metadata(warning, &property.annotations, property.meta.as_ref());
+            }
+            warnings.push(warning);
+        }
+    }
+    for property in &model.leadstos {
+        let trigger = exists_wrap(&property.binders, property.before.clone());
+        if matches!(
+            expression_reachable(model.clone(), &trigger, depth),
+            Ok(false)
+        ) {
+            let mut warning = json!({
+                "kind": "vacuous_leadsto",
+                "name": display_name(&property.name),
+                "message": format!("leadsTo '{}' has a trigger that is unreachable within depth {depth}", display_name(&property.name)),
+                "hint": "the trigger is not reachable within this depth; check whether an action that should establish it is missing, or whether the trigger expression is wrong",
                 "loc": property.span.python_loc(),
                 "classification": "insufficient_depth",
                 "blocking": [],
@@ -2394,16 +2521,40 @@ fn evaluate_action_guards(
     Ok(Some(bindings))
 }
 
+/// Execute one `init` statement, threading `written` — the concrete value
+/// already assigned to each resolved lvalue location during this `init`
+/// execution — through every branch and `forall` iteration.
+///
+/// `forall` bulk-initializes by executing its body once per binder value.
+/// When distinct binder values resolve to the *same* concrete location
+/// (typically a target that does not index by the binder), imperative
+/// last-write-wins would silently discard every assignment but the last —
+/// masking exactly the case the symbolic engine reports as unsatisfiable
+/// init (`forall k: K { x = k }` demands `x` equal every member of `K`
+/// simultaneously). Detecting a location written to two different concrete
+/// values keeps the concrete and symbolic engines in agreement without
+/// requiring a solver: unsatisfiability is witnessed directly by the
+/// conflicting concrete values, no search needed.
 fn execute_init_statement(
     statement: &Statement,
     state: &mut State,
     bindings: &mut Bindings,
     model: &KernelModel,
+    written: &mut BTreeMap<String, Value>,
 ) -> Result<(), RuntimeError> {
     match statement {
         Statement::Assign { target, value, .. } => {
             let value = eval(value, state, bindings, model, None)?;
             let read_state = state.clone();
+            let key = lvalue_key(target, &read_state, bindings, model)?;
+            match written.get(&key) {
+                Some(previous) if *previous != value => {
+                    return Err(runtime_error("init constraints are unsatisfiable"));
+                }
+                _ => {
+                    written.insert(key, value.clone());
+                }
+            }
             assign(target, value, &read_state, state, bindings, model)?;
         }
         Statement::If {
@@ -2418,7 +2569,7 @@ fn execute_init_statement(
                 else_statements
             };
             for statement in branch {
-                execute_init_statement(statement, state, bindings, model)?;
+                execute_init_statement(statement, state, bindings, model, written)?;
             }
         }
         Statement::ForAll {
@@ -2431,7 +2582,7 @@ fn execute_init_statement(
                     continue;
                 }
                 for statement in statements {
-                    execute_init_statement(statement, state, &mut local, model)?;
+                    execute_init_statement(statement, state, &mut local, model, written)?;
                 }
             }
         }
