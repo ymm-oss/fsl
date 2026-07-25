@@ -3046,6 +3046,20 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
     }
 }
 
+/// Reject a residual argument the way every other `domain` subcommand's own
+/// `while let Some(option) = args.next() { ... _ => return Err(...) }` loop
+/// already does, for the subcommands (`analyze`, `replay`) that take no
+/// options of their own and so have no such loop to fall through to.
+fn reject_extra_domain_args(
+    args: &mut impl Iterator<Item = String>,
+    subcommand: &str,
+) -> Result<(), String> {
+    match args.next() {
+        Some(option) => Err(format!("unknown domain {subcommand} option '{option}'")),
+        None => Ok(()),
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
     let subcommand = args
@@ -3061,7 +3075,10 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
                 parse_specialized_verify_options(&mut args, true)?;
             Ok(run_domain_check(&path, depth, &deadlock, &engine, &edition))
         }
-        "analyze" => Ok(run_domain_analyze(&path)),
+        "analyze" => {
+            reject_extra_domain_args(&mut args, "analyze")?;
+            Ok(run_domain_analyze(&path))
+        }
         "expand" => {
             let output = parse_optional_output(&mut args)?;
             let result = run_domain_expand(&path, output.as_deref());
@@ -3116,6 +3133,7 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
                 args.next()
                     .ok_or_else(|| "--logs requires a path".to_owned())?,
             );
+            reject_extra_domain_args(&mut args, "replay")?;
             Ok(run_domain_replay(&path, &logs))
         }
         "testgen" => {

@@ -423,6 +423,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `final_state`/`assumptions` are populated from the same Monitor and
   assumption computation `domain analyze` already uses instead of always
   returning `{}`/`[]` (#518).
+- `fslc domain replay` and `fslc domain analyze` now reject an unrecognized
+  trailing argument (`result:"error"`/`kind:"usage"`/exit 2), matching
+  every other `domain` subcommand and the rest of the CLI, instead of
+  silently discarding it and returning a result computed without it (#516).
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false
