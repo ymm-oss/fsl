@@ -867,7 +867,9 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 ```
 fslc check <f>                                  # syntax / names / types only; f = .fsl or .md (literate)
 fslc lint <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
+                                                 # exit 0 no findings, 1 findings exist, 2 I/O or check failure (unconditional per input, refused legacy tokens excepted)
 fslc migrate <path>... --edition next [--write] # dry run by default; atomic validated write set
+                                                 # exit 0 migrated, 2 refused/I/O/check failure (same check-failure contract as lint)
 fslc fmt <f|-> [--edition current|next]         # canonical source on stdout; input is never mutated
 fslc fmt <path>... --check                      # JSON; exit 0 clean, 1 changed, 2 error
 fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)

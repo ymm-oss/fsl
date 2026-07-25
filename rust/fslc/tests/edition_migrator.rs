@@ -201,8 +201,10 @@ fn builtin_id_policy_reports_each_surface_kind_without_rewriting_ids() {
     let path = directory.write(
         "ids.fsl",
         r#"requirements Checkout {
+  state { done: Bool }
+  init { done = false }
   requirement REQ-1 "requirement" { }
-  action reject() { }
+  action reject() { done = true }
   acceptance AC-1 "acceptance" { expect true }
   forbidden NEG-1 "forbidden" { reject() expect rejected }
 }
@@ -341,9 +343,11 @@ acceptance = "TEST-{number}"
     let source = directory.write(
         "custom.fsl",
         r#"requirements Checkout {
+  state { done: Bool }
+  init { done = false }
   requirement PAY-42 "requirement" { }
   acceptance TEST-7 "acceptance" { expect true }
-  action reject() { }
+  action reject() { done = true }
   forbidden FB-CHECKOUT-001 "forbidden" { reject() expect rejected }
 }
 "#,
@@ -627,4 +631,192 @@ fn multi_file_prepare_io_failure_leaves_every_input_unchanged() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(text(&first), first_source);
     assert_eq!(text(&second), second_source);
+}
+
+// #517: `lint`/`migrate` previously only ran checked-model validation on the
+// changed-file path, so an input with no legacy syntax for `plan_migration`
+// to find and fix skipped it entirely — a spec that fails `fslc check`
+// could still report `lint`/`migrate` exit 0. The fix adds an unconditional
+// pre-flight in `load_migration_plan`, shared by both commands, mirroring
+// `run_check`'s own kind/location convention exactly.
+
+/// Positive control required alongside the false-green fix: a genuinely
+/// valid, already-canonical spec with no legacy syntax at all (an
+/// unchanged input, in the issue's own sense — nothing for
+/// `plan_migration` to find or fix) must still pass the new unconditional
+/// pre-flight and report `lint`/`migrate` exit 0, exactly as it did before
+/// this fix. The pre-flight closes a false green; it must not introduce a
+/// false red on well-formed input.
+#[test]
+fn genuinely_valid_unchanged_input_still_passes_lint_and_migrate() {
+    let directory = FixtureDir::new();
+    let source = "spec Sound {\n  state { n: 0..3 }\n  init { n = 0 }\n  action bump() {\n    requires n < 3\n    n = n + 1\n  }\n  invariant Bound { n >= 0 }\n}\n";
+    let path = directory.write("sound.fsl", source);
+    let path = path.to_str().expect("UTF-8 path");
+
+    assert_eq!(run(&["check", path]).status.code(), Some(0));
+
+    let migrated = run(&["migrate", path, "--edition", "next"]);
+    assert_eq!(migrated.status.code(), Some(0));
+    let migrated = json(&migrated);
+    assert_eq!(migrated["result"], "migrated", "{migrated:#}");
+    assert_eq!(migrated["changed"], 0, "{migrated:#}");
+    assert_eq!(migrated["files"][0]["changed"], false, "{migrated:#}");
+    assert_eq!(
+        migrated["files"][0]["findings"].as_array().map(Vec::len),
+        Some(0),
+        "{migrated:#}"
+    );
+
+    let linted = run(&["lint", path, "--edition", "next"]);
+    assert_eq!(linted.status.code(), Some(0));
+    assert_eq!(json(&linted)["finding_count"], 0);
+}
+
+#[test]
+fn check_failing_spec_without_legacy_syntax_still_fails_lint_and_migrate() {
+    let directory = FixtureDir::new();
+    let source = "spec Broken {\n  state { n: 0..3 }\n  init { n = 0 }\n  action bump() {\n    requires n < 3\n    n = true\n  }\n  invariant Bound { n >= 0 }\n}\n";
+    let path = directory.write("type_error_clean.fsl", source);
+    let path = path.to_str().expect("UTF-8 path");
+
+    let checked = json(&run(&["check", path]));
+    assert_eq!(checked["result"], "error", "{checked:#}");
+    assert_eq!(checked["kind"], "semantics", "{checked:#}");
+
+    let migrated = run(&["migrate", path, "--edition", "next"]);
+    assert_eq!(migrated.status.code(), Some(2));
+    let migrated = json(&migrated);
+    assert_eq!(migrated["result"], "error", "{migrated:#}");
+    assert_eq!(migrated["kind"], "semantics", "{migrated:#}");
+    assert_eq!(migrated["message"], checked["message"], "{migrated:#}");
+
+    let linted = run(&["lint", path, "--edition", "next"]);
+    assert_eq!(linted.status.code(), Some(2));
+    let linted = json(&linted);
+    assert_eq!(linted["result"], "error", "{linted:#}");
+    assert_eq!(linted["kind"], "semantics", "{linted:#}");
+    assert_eq!(linted["message"], checked["message"], "{linted:#}");
+}
+
+/// Pins the asymmetry the issue reports: the exact same type error, with and
+/// without one unrelated legacy string-metadata token, must get the exact
+/// same `migrate`/`lint` verdict — not exit 0 only because
+/// `plan_migration` happened to find a legacy token to fix first.
+#[test]
+fn legacy_token_presence_does_not_change_the_check_failure_verdict() {
+    let directory = FixtureDir::new();
+    let clean = directory.write(
+        "type_error_clean.fsl",
+        "spec Broken {\n  state { n: 0..3 }\n  init { n = 0 }\n  action bump() {\n    requires n < 3\n    n = true\n  }\n  invariant Bound { n >= 0 }\n}\n",
+    );
+    let legacy = directory.write(
+        "type_error_legacy.fsl",
+        "spec Broken {\n  state { n: 0..3 }\n  init { n = 0 }\n  action bump() \"REQ-1: bump\" {\n    requires n < 3\n    n = true\n  }\n  invariant Bound { n >= 0 }\n}\n",
+    );
+    let clean = clean.to_str().expect("UTF-8 path");
+    let legacy = legacy.to_str().expect("UTF-8 path");
+
+    let clean_migrate = run(&["migrate", clean, "--edition", "next"]);
+    let legacy_migrate = run(&["migrate", legacy, "--edition", "next"]);
+    assert_eq!(clean_migrate.status.code(), Some(2));
+    assert_eq!(legacy_migrate.status.code(), Some(2));
+    let (clean_migrate, legacy_migrate) = (json(&clean_migrate), json(&legacy_migrate));
+    assert_eq!(
+        clean_migrate["kind"], legacy_migrate["kind"],
+        "{legacy_migrate:#}"
+    );
+    assert_eq!(
+        clean_migrate["message"], legacy_migrate["message"],
+        "{legacy_migrate:#}"
+    );
+
+    let clean_lint = run(&["lint", clean, "--edition", "next"]);
+    let legacy_lint = run(&["lint", legacy, "--edition", "next"]);
+    assert_eq!(clean_lint.status.code(), Some(2));
+    assert_eq!(legacy_lint.status.code(), Some(2));
+}
+
+#[test]
+fn canonical_requirements_spec_with_a_missing_implements_target_still_fails_lint_and_migrate() {
+    let directory = FixtureDir::new();
+    let source = "requirements Broken {\n  implements CartPolicy from \"moved_business.fsl\" {\n  }\n\n  state {\n    n: 0..3\n  }\n\n  init {\n    n = 0\n  }\n\n  action bump() {\n    requires n < 3\n    n = n + 1\n  }\n}\n";
+    let path = directory.write("moved_canon.fsl", source);
+    let path = path.to_str().expect("UTF-8 path");
+
+    let checked = json(&run(&["check", path]));
+    assert_eq!(checked["kind"], "type", "{checked:#}");
+    assert!(checked["loc"]["line"].as_u64().is_some(), "{checked:#}");
+
+    let migrated = run(&["migrate", path, "--edition", "next"]);
+    assert_eq!(migrated.status.code(), Some(2));
+    let migrated = json(&migrated);
+    assert_eq!(migrated["kind"], "type", "{migrated:#}");
+    assert_eq!(migrated["loc"], checked["loc"], "{migrated:#}");
+
+    let linted = run(&["lint", path, "--edition", "next"]);
+    assert_eq!(linted.status.code(), Some(2));
+    let linted = json(&linted);
+    assert_eq!(linted["kind"], "type", "{linted:#}");
+    assert_eq!(linted["loc"], checked["loc"], "{linted:#}");
+
+    // Regression control cited in the issue as an adjacent, intentionally
+    // separate symptom (`validate_fmt_semantics` does not resolve
+    // `requirements_implements`) — `fmt --check` staying exit 0 here is not
+    // this fix's concern and must not change.
+    let formatted = run(&["fmt", path, "--check", "--edition", "next"]);
+    assert_eq!(formatted.status.code(), Some(0));
+}
+
+/// Negative control: a valid spec that also has legacy syntax to migrate
+/// must keep working exactly as before this fix — the pre-flight must not
+/// reject well-formed input.
+#[test]
+fn valid_spec_with_legacy_syntax_still_migrates_and_lints() {
+    let directory = FixtureDir::new();
+    let source = "spec Good {\n  state { n: 0..3 }\n  init { n = 0 }\n  action bump() \"REQ-1: bump\" {\n    requires n < 3\n    n = n + 1\n  }\n  invariant Bound { n >= 0 }\n}\n";
+    let path = directory.write("good_legacy.fsl", source);
+    let path = path.to_str().expect("UTF-8 path");
+
+    assert_eq!(run(&["check", path]).status.code(), Some(0));
+
+    let migrated = run(&["migrate", path, "--edition", "next"]);
+    assert_eq!(migrated.status.code(), Some(0));
+    let migrated = json(&migrated);
+    assert_eq!(migrated["result"], "migrated", "{migrated:#}");
+    assert_eq!(migrated["changed"], 1, "{migrated:#}");
+    assert_eq!(migrated["files"][0]["changed"], true, "{migrated:#}");
+
+    let linted = run(&["lint", path, "--edition", "next"]);
+    assert_eq!(linted.status.code(), Some(1));
+    let linted = json(&linted);
+    assert!(
+        linted["finding_count"].as_u64().unwrap_or(0) > 0,
+        "{linted:#}"
+    );
+}
+
+/// Regression control: a `refinement`-dialect input (no `state` block —
+/// `fslc check` itself fails "spec has no state block" for this dialect,
+/// since a refinement spec is not a standalone check target) must keep
+/// returning exit 0 from `lint`/`migrate`, exactly as before this fix —
+/// the same carve-out `validate_fmt_semantics` already uses.
+#[test]
+fn refinement_dialect_is_still_not_a_standalone_lint_migrate_target() {
+    let directory = FixtureDir::new();
+    let source = "refinement Empty {\n  impl Impl\n  abs Abs\n}\n";
+    let path = directory.write("refinement_only.fsl", source);
+    let path = path.to_str().expect("UTF-8 path");
+
+    let checked = json(&run(&["check", path]));
+    assert_eq!(checked["result"], "error", "{checked:#}");
+
+    assert_eq!(
+        run(&["migrate", path, "--edition", "next"]).status.code(),
+        Some(0)
+    );
+    assert_eq!(
+        run(&["lint", path, "--edition", "next"]).status.code(),
+        Some(0)
+    );
 }

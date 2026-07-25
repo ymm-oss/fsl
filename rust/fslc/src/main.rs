@@ -707,7 +707,64 @@ fn load_migration_plan(
         .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
     let plan = fslc_rust::migration::plan_migration(&source, &path.to_string_lossy(), edition)
         .map_err(|error| migration_plan_error_output(&source, path, &error))?;
+    // A refused plan (`plan.refused()`) means `plan_migration` itself already
+    // found a legacy construct it cannot machine-apply — e.g. `&&`, which is
+    // not tokenizable under the current grammar at all and is recognized via
+    // a dedicated raw-text pre-scan (`unsupported_double_ampersands`) before
+    // any real parsing is attempted. Running the strict checked-model
+    // pre-flight on that same raw source would only fail redundantly (or, for
+    // `&&`, with a confusing generic parse error) on exactly the construct
+    // `migrate`/`lint` already correctly report as `migration_refused`/an
+    // `unsupported_in_edition` finding, so skip it in that case.
+    if !plan.refused() {
+        validate_migration_input_semantics(&source, path)?;
+    }
     Ok((source, plan))
+}
+
+/// Unconditional structural pre-flight shared by `run_lint` and `run_migrate`
+/// through `load_migration_plan` (#517): a spec that would fail `fslc check`
+/// must not silently pass `lint`/`migrate` just because it happens to have
+/// no legacy syntax for `plan_migration` to find and fix — `plan_migration`
+/// only parses far enough to find legacy tokens, never type-checks or
+/// resolves `implements ... from`, so a spec's checked-model well-formedness
+/// was previously only validated on the changed-file path
+/// (`validate_migration_semantics`), never on an unchanged one.
+///
+/// Mirrors `run_check`'s own gate exactly, so the same input gets the same
+/// verdict on both commands: `parse`/`build_model` failures are
+/// `kind:"semantics"` (`load_model`'s convention); an unresolvable
+/// requirements `implements ... from` target is `kind:"type"`
+/// (`implements_error_output`'s convention), located when a span is
+/// available. Reuses the same dialect carve-out as `validate_fmt_semantics`:
+/// `refinement`/`agent` dialects are not a standalone check target
+/// (`fslc check specs/cart_refines.fsl` itself fails "spec has no state
+/// block"; neither `check` nor `fmt --check` nor this pre-flight treats
+/// that as a `lint`/`migrate` defect).
+fn validate_migration_input_semantics(source: &str, path: &Path) -> Result<(), Value> {
+    let dialect = fsl_syntax::dialect_keyword(source)
+        .map_err(|error| semantic_error_output(&error.to_string()))?;
+    if matches!(dialect, "refinement" | "agent") {
+        return Ok(());
+    }
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = fsl_core::parse_kernel_source_with_file(source, &resolver, path.to_string_lossy())
+        .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let model =
+        fsl_core::build_model(kernel).map_err(|error| semantic_error_output(&error.to_string()))?;
+    if matches!(
+        fsl_syntax::parse_surface_document(source),
+        Ok(fsl_syntax::SurfaceDocument::Requirements(_))
+    ) {
+        fsl_core::requirements_implements(source, &resolver, &model).map_err(|error| {
+            error.span.map_or_else(
+                || error_output("type", &error.message),
+                |span| located_error_output("type", &error.message, span),
+            )
+        })?;
+    }
+    Ok(())
 }
 
 fn validate_migration_semantics(before: &str, after: &str, path: &Path) -> Result<(), String> {
