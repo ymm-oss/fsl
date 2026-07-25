@@ -23,18 +23,22 @@ reverted; they are not informational warnings.
 `main`. The ruleset requires only its always-present `merge readiness` aggregator. The aggregator
 fails unless all of these independent lanes succeed:
 
-1. `cargo check --workspace --all-targets --locked` catches compile and feature-integration drift
-   across the complete authoritative Rust workspace.
+1. `cargo check` over the explicit `fsl-syntax`, `fsl-core`, `fsl-runtime`, `fsl-solver`,
+   `fsl-solver-z3js`, `fsl-verifier`, `fsl-tools`, `fsl-wasm`, and `fsl-lsp` package set with
+   `--no-default-features --locked` catches compile and dependency-integration drift across the
+   authoritative native-Z3-free Rust surface without paying the vendored native-Z3 build cost
+   before merge.
 2. Formatting, the `fsl-syntax`, `fsl-core`, `fsl-runtime`, and backend-neutral `fsl-solver` tests,
    plus the runtime/WASM dependency negative controls, protect the solver-independent semantic
    foundation.
 3. The post-merge issue reporter contract tests protect failure creation, duplicate suppression,
    recurrence updates, recovery closure, and workflow-level failure handling.
 
-The lanes run in parallel through `tools/check-merge-readiness.sh`. Clippy, native Z3 verification,
-the complete LSP/corpus suites, the full workspace test/build, JavaScript solver probes, and browser
-Worker validation remain product-gate evidence. A green readiness check must never be rendered or
-documented as a fully verified product.
+The lanes run in parallel through `tools/check-merge-readiness.sh`. Native-CLI/default-feature
+compilation, all-target compilation, Clippy, native Z3 verification, the complete LSP/corpus suites,
+the full workspace test/build, JavaScript solver probes, and browser Worker validation remain
+product-gate evidence. A green readiness check must never be rendered or documented as a fully
+verified product.
 
 Superseded runs for the same pull request are cancelled. Merge-group runs are not cancelled and the
 workflow handles GitHub's `merge_group` event directly, so a merge queue can validate the combined

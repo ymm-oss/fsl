@@ -7,7 +7,19 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
 check_compile() {
-  cargo check --manifest-path rust/Cargo.toml --workspace --all-targets --locked
+  cargo check \
+    --manifest-path rust/Cargo.toml \
+    -p fsl-syntax \
+    -p fsl-core \
+    -p fsl-runtime \
+    -p fsl-solver \
+    -p fsl-solver-z3js \
+    -p fsl-verifier \
+    -p fsl-tools \
+    -p fsl-wasm \
+    -p fsl-lsp \
+    --no-default-features \
+    --locked
 }
 
 check_core_contracts() {

@@ -60,9 +60,9 @@ gate; changes to those hooks must invoke the two named tests directly.
 ## Merge readiness and product evidence
 
 Pull requests into `main` use the bounded `merge readiness` contract from
-[`DESIGN-ci.md`](DESIGN-ci.md). It compiles every Rust target and tests the solver-independent
-semantic foundation, dependency negative controls, and post-merge automation, but it is not the
-required product integration gate defined above.
+[`DESIGN-ci.md`](DESIGN-ci.md). It compiles the native-Z3-free Rust surface and tests the
+solver-independent semantic foundation, dependency negative controls, and post-merge automation,
+but it is not the required product integration gate defined above.
 
 Every merged `main` state still executes the complete Rust/WASM gate plus focused native-Z3 tests on
 macOS and Windows. Pull requests into `production` and tag-driven releases retain full

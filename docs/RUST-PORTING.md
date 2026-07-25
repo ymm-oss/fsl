@@ -128,7 +128,7 @@ Status as of 2026-07-12:
 | browser Worker asset loading / COOP+COEP | isolated Chrome loaded the bundled Worker, separate Emscripten JS/WASM and pthread script with no console errors; `crossOriginIsolated=true`, `sat`, model `x=42` | **proved in browser** |
 | JS term bridge | observed roughly 29k–42k terms/s at 1,000 terms and 60k terms/s at 10,000 terms on the development machine | **start with typed per-term calls** |
 | v1 native scope | issue #195 requests a full replacement, including db/AI/domain and report generators in Phase 3 | **decided: no permanent Python command fallback** |
-| CI and native targets | PR readiness compiles the complete Rust workspace and tests the solver-independent core on Ubuntu; every merged main state runs the complete Rust/WASM gate plus native Z3 tests on Linux, macOS, and Windows | **implemented; see `DESIGN-ci.md`** |
+| CI and native targets | PR readiness compiles the native-Z3-free Rust surface and tests the solver-independent core on Ubuntu; every merged main state runs the complete Rust/WASM gate plus native Z3 tests on Linux, macOS, and Windows | **implemented; see `DESIGN-ci.md`** |
 
 The Phase-0 syntax, dependency, browser, and decision gates are complete. The
 Phase-1 semantic kernel is complete: resolver-backed compose lowering, the typed
