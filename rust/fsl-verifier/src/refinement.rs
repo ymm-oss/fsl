@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use fsl_core::{KernelModel, LeadsToDef, Refinement, substitute_expr};
+use fsl_core::{IndexedReplacements, KernelModel, LeadsToDef, Refinement, substitute_expr_indexed};
 use fsl_solver::SmtSolver;
 
 use crate::{BmcViolation, VerifyError, verify_bounded};
@@ -13,13 +13,19 @@ pub struct ProgressCheck {
     pub checked: BTreeMap<String, Vec<String>>,
 }
 
-/// Pull abstract `leadsTo` properties through scalar refinement maps and check
-/// them over the implementation transition system.
+/// Pull abstract `leadsTo` properties through scalar and indexed refinement
+/// maps and check them over the implementation transition system.
+///
+/// A scalar map (`map a = expr`) substitutes bare reads of `a`. An indexed
+/// map (`map a[i: K] = expr`) substitutes each read `a[e]` with `expr`'s
+/// binder `i` replaced by `e` (DESIGN-refinement.md's "substituted on the
+/// read" rule), regardless of whether the pulled `leadsTo` also reads other,
+/// unrelated indexed maps.
 ///
 /// # Errors
 ///
-/// Returns [`VerifyError`] for indexed progress maps in the current slice,
-/// missing properties, or bounded-verifier failures.
+/// Returns [`VerifyError`] for missing properties or bounded-verifier
+/// failures.
 pub async fn check_refinement_progress<S: SmtSolver>(
     implementation: &KernelModel,
     abstraction: &KernelModel,
@@ -33,18 +39,15 @@ pub async fn check_refinement_progress<S: SmtSolver>(
             checked: BTreeMap::new(),
         });
     }
-    let replacements = mapping
-        .state_maps
-        .iter()
-        .map(|(name, state_map)| {
-            if state_map.binder.is_some() {
-                return Err(VerifyError::new(format!(
-                    "indexed progress map for '{name}' is not implemented"
-                )));
-            }
-            Ok((name.clone(), state_map.expr.clone()))
-        })
-        .collect::<Result<HashMap<_, _>, VerifyError>>()?;
+    let mut replacements = HashMap::new();
+    let mut indexed = IndexedReplacements::new();
+    for (name, state_map) in &mapping.state_maps {
+        if let Some(binder) = &state_map.binder {
+            indexed.insert(name.clone(), (binder.clone(), state_map.expr.clone()));
+        } else {
+            replacements.insert(name.clone(), state_map.expr.clone());
+        }
+    }
     let mut pulled = implementation.clone();
     for (name, definition) in &abstraction.types {
         pulled.types.insert(name.clone(), definition.clone());
@@ -71,14 +74,14 @@ pub async fn check_refinement_progress<S: SmtSolver>(
                 name: property.name.clone(),
                 span: property.span,
                 binders: property.binders.clone(),
-                before: substitute_expr(property.before.clone(), &replacements),
-                after: substitute_expr(property.after.clone(), &replacements),
+                before: substitute_expr_indexed(property.before.clone(), &replacements, &indexed),
+                after: substitute_expr_indexed(property.after.clone(), &replacements, &indexed),
                 meta: property.meta.clone(),
                 annotations: property.annotations.clone(),
                 decreases: property
                     .decreases
                     .clone()
-                    .map(|expr| substitute_expr(expr, &replacements)),
+                    .map(|expr| substitute_expr_indexed(expr, &replacements, &indexed)),
                 within: property.within,
             })
         })

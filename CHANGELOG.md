@@ -105,6 +105,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `rust/fslc/tests/corpus_check_sweep.rs` (an exhaustive `specs/`+`examples/`
   `check` sweep closing the gap left by `rust/fsl-lsp/tests/corpus.rs`, which
   never builds a checked model) (#485).
+- `preserve progress` now works with an indexed (per-element) refinement state
+  map (`map a[i: K] = expr`), not only scalar maps. `fsl-core::substitute_expr_indexed`
+  substitutes each pulled-back read `a[e]` with the map's own expression, its
+  binder replaced by `e` (DESIGN-refinement.md's "substituted on the read"
+  rule), matching capture-avoidance already applied to scalar substitution.
+  `rust/fsl-verifier/src/refinement.rs`'s `check_refinement_progress` no
+  longer rejects the mapping outright the moment *any* indexed map exists
+  (previously `VerifyError("indexed progress map for '<name>' is not
+  implemented")`, `kind:"semantics"`, exit 2) — including when the pulled
+  `leadsTo` does not even read that map. This restores the documented
+  DESIGN-refinement.md:20-40 canonical shape (indexed map + `preserve
+  progress` in the same mapping) and the `examples/agentic_rag` and
+  `examples/multi_agent_system` cross-layer `refine` commands, which
+  previously reported the verifier's own missing feature as a spec error
+  instead of `refines`/`refinement_failed` (#483).
 - Zero-division is now totally defined in property-context expressions
   (`invariant`, `trans`, `reachable`, `leadsTo`, and refinement state mapping),
   matching `DESIGN-divmod.md` §2.1/§2.3: `a / 0` and `a % 0` evaluate to `0`
