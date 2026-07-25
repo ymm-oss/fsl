@@ -2413,15 +2413,23 @@ graph analysis, not kernel proof. `fslc ai replay` accepts JSONL or
 Project-level fsl-ai evidence declarations can combine `ai_component`,
 `dataset`, `evaluator`, `failure_mode`, `statistical_property`,
 `ai_migration`, and `observed_property`. `fslc ai check` parses these files and
-returns `ai_project_analyzed`; `fslc ai eval` checks Bernoulli/proportion
-metrics from precomputed JSONL with Wilson intervals; `fslc ai regress` checks
-aggregate `no_regression` metric drop/increase clauses; `fslc ai compare`
-reports metric deltas without a threshold claim; `fslc ai drift` checks runtime
-telemetry thresholds and drift; and `fslc ai compat` emits a finite
-`dbsystem artifact` capability profile for one `ai_component` or every
+returns `ai_project_analyzed`; `fslc ai eval` checks the selected
+`statistical_property`'s declared `slice`/`min_samples`/`ci_lower`/`ci_upper`
+requirements against precomputed JSONL (`--records`, or the declared
+`dataset`'s `source` file) with Wilson intervals; `fslc ai regress` checks the
+selected `ai_migration`'s declared aggregate `no_regression` metric
+drop/increase clauses; `fslc ai compare` reports metric deltas without a
+threshold claim; `fslc ai drift` checks the selected `observed_property`'s
+declared `observed`/`drift` requirements over runtime telemetry
+(`observed_supported` / `observed_mismatch`); and `fslc ai compat` emits a
+finite `dbsystem artifact` capability profile for one `ai_component` or every
 `ai_component` a project declares, rejecting non-AI input and an AI project
 with no `ai_component` at all (exit 2). All of these use
-`formal_result:"not_run"`.
+`formal_result:"not_run"`. An unknown `--property`/`--migration` selection is
+a check-time error (exit 2); a selected `statistical_property`'s gate status
+(`dataset_invalid`, `evaluator_untrusted`, `slice_missing`,
+`insufficient_samples`, `inconclusive`, or `statistically_unsupported`) exits
+1, matching `statistically_supported`'s exit 0 as the only success case.
 
 Recursive `agent` shape:
 

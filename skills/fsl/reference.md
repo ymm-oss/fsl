@@ -407,15 +407,26 @@ are checked unconditionally regardless of this block. Use `fslc ai check` for
 `verified_under_assumptions` hard-contract findings and `fslc ai replay --logs`
 for JSONL runtime evidence (`replay_conformant` / `replay_nonconformant`,
 `formal_result:"not_run"`). Statistical quality evidence uses the external
-stochastic checker: `fslc ai eval` over precomputed eval JSONL,
-Bernoulli/proportion metrics, Wilson intervals, and
-`formal_result:"not_run"`. `fslc ai regress` checks aggregate
-`ai_migration.no_regression`, `fslc ai compare` reports metric deltas,
-`fslc ai drift` checks runtime telemetry thresholds/drift, and
-`fslc ai compat` emits DB artifact capability profiles for one `ai_component`
-or every `ai_component` a project declares -- rejecting non-AI input and a
-project with no `ai_component` at all (exit 2) rather than an empty profile.
-These results are never formal proof.
+stochastic checker: `fslc ai eval` checks the selected `statistical_property`'s
+declared `slice`/`min_samples`/`ci_lower`/`ci_upper` requirements against
+precomputed eval JSONL (`--records`, or the declared `dataset`'s `source`
+file), Wilson intervals, and `formal_result:"not_run"`. An unknown
+`--property`/`--migration` selection is a check-time error (exit 2); a
+non-`statistically_supported` gate status (`dataset_invalid`,
+`evaluator_untrusted`, `slice_missing`, `insufficient_samples`,
+`inconclusive`, `statistically_unsupported`) exits 1, and the result carries
+the full `schemas/fslc/ai/statistical-result.v0.schema.json` field set
+(`schema_version`/`status`/`slice`/`metric`/`n`/`estimate`/`threshold`/
+`evaluator`/`assumptions` included, not just `result`/`interval`/`checks`).
+`fslc ai regress` checks the selected `ai_migration`'s declared aggregate
+`no_regression` metric clauses, `fslc ai compare` reports metric deltas,
+`fslc ai drift` checks the selected `observed_property`'s declared
+`observed`/`drift` requirements over runtime telemetry
+(`observed_supported` / `observed_mismatch`), and `fslc ai compat` emits DB
+artifact capability profiles for one `ai_component` or every `ai_component` a
+project declares -- rejecting non-AI input and a project with no
+`ai_component` at all (exit 2) rather than an empty profile. These results
+are never formal proof.
 
 Recursive fsl-ai `agent` composition is checked structurally by
 `fslc ai check` and returns `agent_analyzed` on success:
