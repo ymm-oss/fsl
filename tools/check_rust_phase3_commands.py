@@ -165,7 +165,7 @@ def run(binary: Path = RUST) -> dict[str, Any]:
             elif py_out.read_bytes() != rs_out.read_bytes():
                 failures.append({"case": f"testgen:{target}:content", "python": "different bytes", "rust": "different bytes"})
         forbidden_spec = "examples/gallery/valid/small_forbidden_guarded_cancel.fsl"
-        for target in ("vitest", "swift", "kotlin", "dart", "phpunit"):
+        for target in ("pytest", "vitest", "swift", "kotlin", "dart", "phpunit"):
             py_out = Path(directory) / f"py-testgen-forbidden-{target}"
             rs_out = Path(directory) / f"rs-testgen-forbidden-{target}"
             arguments = ["testgen", forbidden_spec, "--depth", "3", "--target", target, "-o"]

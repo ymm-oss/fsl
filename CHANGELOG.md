@@ -87,6 +87,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   exactly instead of silently running the forall as a last-write-wins loop
   and returning `result:"proved"` / exit 0 for a spec with no valid initial
   state (#480).
+- `fslc testgen`'s `pytest` target now emits the `forbidden`-scenario rejection
+  assertion (`result = adapter.step(...)` / `_assert_rejected(...)`) that every
+  other testgen target already emitted, restoring byte-identity with the
+  frozen Python reference and giving the generated conformance harness a real
+  negative control against a guard-weakened implementation (#471).
 - Refinement typechecking now rejects an unshadowed bare enum member shared by distinct
   implementation and abstraction enums, preventing checked and evaluation
   merge order from assigning different nominal identities. Existing identifier
