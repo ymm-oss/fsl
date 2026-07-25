@@ -70,7 +70,11 @@ restrict itself with `when schema lo..hi`.
 `environment schema lo..hi` means exactly the set of schema versions in that
 environment that are reachable in the declared migration order. It does not mean
 every Cartesian product of arbitrary schema and artifact versions; artifact
-coexistence is explicit in the artifact windows.
+coexistence is explicit in the artifact windows. Validation rejects an
+environment schema version that the declared, strictly sequential migration
+plan never reaches, and rejects a `check compatibility` rule name outside the
+closed vocabulary below; both fail `fslc check` / `fslc db check` with exit 2
+instead of silently checking nothing.
 
 Rules checked in snapshot mode:
 
@@ -241,6 +245,19 @@ observation log to a `dbsystem` and emits `observed_mismatch` findings such as:
 Absence from logs is not proof of unused behavior. Observation results include
 `DB-ASSUME-OBSERVABILITY-COVERAGE` and `formal_result: "not_run"` to keep them
 separate from formal compatibility verification.
+
+The observation envelope is validated against
+`schemas/fslc/db/observation.v0.schema.json` before evaluation: a declared
+`schema_version` must equal `fsl-db-observation.v0`, and every event must be an
+object with typed `environment`/`artifact`/`target` strings, an integer
+`schema_version`, a `capability` from the closed vocabulary
+(`reads`/`writes`/`calls`/`requires`/`provides`), and, when present, a `flags`
+object of string values. A malformed envelope or event fails `fslc db observe`
+with exit 2 instead of defaulting missing/mistyped fields into a fabricated
+finding. An event's `flags` snapshot is matched against each artifact entry's
+`when flag ...` conditions the same way `fslc db check` matches them, so an
+artifact observed under the wrong flag variant is `unsupported_artifact_observed`
+rather than silently conformant.
 
 ### 7. Importer Boundary
 

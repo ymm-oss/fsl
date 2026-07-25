@@ -222,7 +222,12 @@ artifact profiles into the same snapshot model; missing providers report
 evidence only (`observed_mismatch`, not formal violation) and `fslc db import`
 for SQL DDL or minimal Prisma schema importers. Production-data preservation and
 DB-engine evidence use JSON schemas under `schemas/fslc/db/` with
-`formal_result: "not_run"`, not `verified`/`proved`.
+`formal_result: "not_run"`, not `verified`/`proved`. An unrecognized `check
+compatibility` rule name and an environment schema window the migration plan
+never reaches both fail validation with exit 2. `fslc db observe` validates its
+event envelope against `schemas/fslc/db/observation.v0.schema.json`
+(exit 2 on a malformed record) and honors each event's `flags` snapshot the same
+way `fslc db check` does.
 
 Functional DDD / async effect dialect (v0; expands to the same kernel and
 reports stable fsl-domain findings):
