@@ -15,6 +15,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `rust/fslc/tests/chain_cli.rs`'s `scratch_dir`) instead of a fixed, reused
   path, so there is nothing left over to collide with on the next run
   regardless of how the previous one ended (#539).
+- `rust/fslc/tests/domain_codegen_contract.rs`'s
+  `all_five_public_kernel_domain_targets_match_pre_migration_goldens` and
+  `every_valid_domain_corpus_entry_generates_all_five_targets` no longer
+  intermittently fail (a golden digest mismatch or a
+  `clear generated directory: No such file or directory`) when cargo runs
+  them in parallel in the same test binary, the default: both used to
+  `exists()`-then-`remove_dir_all()` a directory under a shared
+  `rust/target/domain-codegen-contract/` parent before generating into it,
+  leaving a window one test's cleanup could race against the other's
+  read/write. Each generation call now gets its own uniquely named scratch
+  directory (same idiom as `rust/fslc/tests/chain_cli.rs`'s `scratch_dir`),
+  which needs no `exists()`/`remove_dir_all()` step at all — closing the
+  race window rather than narrowing it (#546).
 - `relation A -> B` state is now usable end to end in the native symbolic
   verifier: `r = Set {}` types and evaluates as the empty relation (both
   `fslc check` and the concrete Monitor previously rejected or mistyped it),
