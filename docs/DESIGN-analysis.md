@@ -121,6 +121,19 @@ Stable node kinds include `spec`, `requirement`, `state`, `phys_state`,
 `reachable`, `acceptance`, and `forbidden`. KPI and control nodes are emitted
 when the validated spec carries that metadata.
 
+`requirement` nodes and their `covers` edges are model-only
+(`KernelModel::requirement_targets`, native `Builder::build`), so every
+dialect reaching `build_tsg` gets them, not only project manifests. A
+requirement attached to nothing the graph represents (e.g. only to `init`,
+which has no node) still gets its own node with zero `covers` edges — this
+is the `disconnected_requirement` review signal, not a dropped node.
+`acceptance`/`forbidden` scenario nodes are requirements-dialect-only (they
+have no Kernel-lowered form, so building them needs source text, not just
+the checked model) and gain a `covers` edge from any `@requirement(...)`
+requirement that names them. KPI nodes project `kpi NAME = count ENTITY in
+STAGE` declarations. Control nodes and the `starts_with`/`precedes` edge
+kinds are not yet implemented on native (#495).
+
 Stable edge kinds include `declares`, `covers`, `has_guard`, `has_effect`,
 `has_ensures`, `reads`, `writes`, `checks`, `starts_with`, and `precedes`.
 

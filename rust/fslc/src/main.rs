@@ -11124,8 +11124,12 @@ fn acknowledge_undecided_findings(model: &KernelModel, findings: &mut [Value]) {
     }
 }
 
-fn ai_review_output(model: &KernelModel, acceptance: &[(String, KernelExpr)]) -> Value {
-    let tsg = fsl_tools::build_tsg(model);
+fn ai_review_output(
+    model: &KernelModel,
+    acceptance: &[(String, KernelExpr)],
+    path: &Path,
+) -> Value {
+    let tsg = enrich_tsg_with_requirements_scenarios(fsl_tools::build_tsg(model), model, path);
     let mut findings = fsl_tools::structural_review_findings(&tsg);
     let unconstrained_states = findings
         .iter()
@@ -11211,6 +11215,78 @@ fn ai_review_output(model: &KernelModel, acceptance: &[(String, KernelExpr)]) ->
     Value::Object(output)
 }
 
+/// Enrich a TSG with requirements-dialect scenario nodes `build_tsg` cannot
+/// see: acceptance/forbidden test cases live only in requirements-dialect
+/// surface syntax (`fsl_core::requirements_trace_contract`), not the lowered
+/// `KernelModel`, so they need source text, not just the checked model.
+/// Adds `acceptance:<id>`/`forbidden:<id>` nodes (declared by the spec) and
+/// a `covers` edge from any `@requirement(...)`-annotated requirement to the
+/// scenario it exercises — creating the `requirement:<id>` node too if it
+/// is not already present (a requirement cited only on a scenario, never on
+/// a Kernel target `build_tsg` itself sees, would otherwise leave a `covers`
+/// edge pointing at a node that does not exist). A no-op for a file that is
+/// not a requirements document, or when the source cannot be re-read.
+fn enrich_tsg_with_requirements_scenarios(
+    mut tsg: Value,
+    model: &KernelModel,
+    path: &Path,
+) -> Value {
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return tsg;
+    };
+    let Ok(Some(contract)) = fsl_core::requirements_trace_contract(&source) else {
+        return tsg;
+    };
+    let mut known_ids = tsg["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|node| node["id"].as_str().map(str::to_owned))
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut node_additions = Vec::new();
+    let mut edge_additions = Vec::new();
+    let spec_id = format!("spec:{}", model.name);
+    for (kind, cases) in [
+        ("acceptance", &contract.acceptance),
+        ("forbidden", &contract.forbidden),
+    ] {
+        for case in cases {
+            let id = format!("{kind}:{}", case.id);
+            node_additions.push(project_analysis_node(&id, kind, &case.id));
+            known_ids.insert(id.clone());
+            edge_additions.push(project_analysis_edge(&spec_id, "declares", &id));
+            for requirement in requirement_metadata(&case.annotations, None) {
+                let Some(requirement_id) = requirement.get("id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let requirement_node_id = format!("requirement:{requirement_id}");
+                if known_ids.insert(requirement_node_id.clone()) {
+                    node_additions.push(project_analysis_node(
+                        &requirement_node_id,
+                        "requirement",
+                        requirement_id,
+                    ));
+                    edge_additions.push(project_analysis_edge(
+                        &spec_id,
+                        "declares",
+                        &requirement_node_id,
+                    ));
+                }
+                edge_additions.push(project_analysis_edge(&requirement_node_id, "covers", &id));
+            }
+        }
+    }
+    if let Some(nodes) = tsg.get_mut("nodes").and_then(Value::as_array_mut) {
+        nodes.extend(node_additions);
+        nodes.sort_by_key(|node| node["id"].as_str().unwrap_or_default().to_owned());
+    }
+    if let Some(edges) = tsg.get_mut("edges").and_then(Value::as_array_mut) {
+        edges.extend(edge_additions);
+        edges.sort_by_key(|edge| edge["id"].as_str().unwrap_or_default().to_owned());
+    }
+    tsg
+}
+
 #[derive(Clone)]
 struct ProjectAnalysisLayer {
     model: KernelModel,
@@ -11280,50 +11356,6 @@ fn prefixed_analysis_edge(layer: &str, edge: &Value) -> Value {
     edge
 }
 
-fn add_requirements_layer_nodes(tsg: &mut Value, model: &KernelModel) {
-    let mut requirements = std::collections::BTreeMap::<String, Vec<String>>::new();
-    let graph_nodes = tsg["nodes"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|node| node["id"].as_str().map(str::to_owned))
-        .collect::<std::collections::BTreeSet<_>>();
-    for (target, links) in model.requirement_targets() {
-        let graph_target = target
-            .strip_prefix("property:")
-            .unwrap_or(&target)
-            .to_owned();
-        for requirement in links {
-            let targets = requirements.entry(requirement.id).or_default();
-            if graph_nodes.contains(&graph_target) {
-                targets.push(graph_target.clone());
-            }
-        }
-    }
-    let mut node_additions = Vec::new();
-    let mut edge_additions = Vec::new();
-    for (requirement, targets) in requirements {
-        let id = format!("requirement:{requirement}");
-        node_additions.push(project_analysis_node(&id, "requirement", &requirement));
-        edge_additions.push(project_analysis_edge(
-            &format!("spec:{}", model.name),
-            "declares",
-            &id,
-        ));
-        for target in targets {
-            edge_additions.push(project_analysis_edge(&id, "covers", &target));
-        }
-    }
-    if let Some(nodes) = tsg.get_mut("nodes").and_then(Value::as_array_mut) {
-        nodes.extend(node_additions);
-        nodes.sort_by_key(|node| node["id"].as_str().unwrap_or_default().to_owned());
-    }
-    if let Some(edges) = tsg.get_mut("edges").and_then(Value::as_array_mut) {
-        edges.extend(edge_additions);
-        edges.sort_by_key(|edge| edge["id"].as_str().unwrap_or_default().to_owned());
-    }
-}
-
 #[allow(clippy::too_many_lines)]
 fn project_traceability_output(path: &Path) -> Result<Value, String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
@@ -11349,10 +11381,10 @@ fn project_traceability_output(path: &Path) -> Result<Value, String> {
         };
         let layer_path = base.join(file);
         let model = load_model(&layer_path)?;
-        let mut tsg = fsl_tools::build_tsg(&model);
-        if layer == "requirements" {
-            add_requirements_layer_nodes(&mut tsg, &model);
-        }
+        // `build_tsg` already projects `requirement`/`kpi` nodes and `covers`
+        // edges (#495) from `model.requirement_targets()`/`model.projections`,
+        // so no separate per-layer enrichment step is needed here anymore.
+        let tsg = fsl_tools::build_tsg(&model);
         let display = analysis_display_path(&layer_path);
         let file_id = format!("file:{layer}:{display}");
         let mut file_node = project_analysis_node(&file_id, "file", &display);
@@ -11872,9 +11904,10 @@ fn run_analyze(
             );
         }
         let acceptance = analysis_acceptance_predicates(path);
-        return (ai_review_output(&model, &acceptance), 0);
+        return (ai_review_output(&model, &acceptance, path), 0);
     }
-    match fsl_tools::analyze_model(&model, projection, focus) {
+    let tsg = enrich_tsg_with_requirements_scenarios(fsl_tools::build_tsg(&model), &model, path);
+    match fsl_tools::analyze_tsg(tsg, projection, focus) {
         Ok(analysis @ Value::Object(_)) => finish_analysis(
             analysis,
             Some(("spec", &model.name)),
@@ -14628,8 +14661,9 @@ spec InitTraceability {
         let kernel = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
             .expect("parse spec");
         let model = fsl_core::build_model(kernel).expect("build model");
-        let mut tsg = fsl_tools::analyze_model(&model, "tsg", None).expect("build tsg");
-        add_requirements_layer_nodes(&mut tsg, &model);
+        // `build_tsg` (via `analyze_model`) now projects `requirement`/`covers`
+        // directly (#495) — no separate enrichment call needed.
+        let tsg = fsl_tools::analyze_model(&model, "tsg", None).expect("build tsg");
 
         let nodes = tsg["nodes"]
             .as_array()

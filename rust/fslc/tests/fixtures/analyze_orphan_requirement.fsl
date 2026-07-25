@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// `@requirement("REQ-INIT-ONLY", ...)` is attached only to `init`, which has
+// no TSG node — the requirement is declared but genuinely connected to
+// nothing analyzable, so `disconnected_requirement` must fire on it.
+spec AnalyzeOrphanRequirement {
+  state { ready: Bool }
+
+  @requirement("REQ-INIT-ONLY", "attached only to init, never to an executable target")
+  init { ready = false }
+
+  action go() {
+    ready = true
+  }
+}

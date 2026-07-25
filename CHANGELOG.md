@@ -6,6 +6,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Native `analyze`'s TSG projection now emits `requirement`/`acceptance`/
+  `forbidden`/`kpi` nodes and `covers` edges for a standalone `.fsl`/
+  requirements spec, not only for a `.toml` project manifest.
+  `requirement`/`covers`/`kpi` are model-only (`build_tsg` itself now
+  projects them from `KernelModel::requirement_targets`/`.projections`, so
+  every dialect gets them); `acceptance`/`forbidden` scenario nodes need
+  requirements-dialect source text (`fsl_core::requirements_trace_contract`)
+  since they have no Kernel-lowered form, and gain a `covers` edge from any
+  `@requirement(...)`-annotated requirement that names them. A requirement
+  connected to nothing the graph represents still gets its own node with no
+  `covers` edges, rather than being silently dropped, so
+  `disconnected_requirement` (`--profile ai-review`) can detect it.
+  `requirement_property_graph` and `--focus requirement:ID` previously had
+  zero edges/always failed for a standalone spec; both now work. `control`
+  nodes and `starts_with`/`precedes` edges remain unimplemented on native
+  (#495, partial — see `docs/DESIGN-analysis.md` §2).
 - Added an evidence-gated `fsl-design-family.v0` sidecar prototype with three
   maintained three-variant dogfood families, native check/verify/refine/diff
   orchestration tests, raw producer and deterministic digest controls, and an

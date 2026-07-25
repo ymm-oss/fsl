@@ -1108,6 +1108,57 @@ impl<'a> Builder<'a> {
             self.add_reads(&id, &reads);
             self.add_checks(&id, &reads);
         }
+        // Requirement traceability: `requirement:<id>` nodes with `covers`
+        // edges to every executable Kernel target the requirement links
+        // (`@requirement`/legacy `covers` on an action, invariant, trans,
+        // reachable, or leadsTo). `requirement_targets()` is model-only
+        // (it scans lowered Kernel targets, not requirements-dialect
+        // surface syntax), so this reaches every dialect `build_tsg` sees,
+        // not only project manifests. `property_target` returns
+        // `property:<kind>:<name>` while the TSG node id is `<kind>:<name>`;
+        // strip that prefix. `init` (`INIT_TARGET`) has no TSG node, so a
+        // requirement attached only to init still gets its own node — with
+        // zero `covers` edges, which is exactly the `disconnected_requirement`
+        // review signal — rather than vanishing from the graph entirely.
+        let mut requirement_targets = BTreeMap::<String, Vec<String>>::new();
+        for (target, links) in self.model.requirement_targets() {
+            let graph_target = target
+                .strip_prefix("property:")
+                .unwrap_or(&target)
+                .to_owned();
+            let has_node = self.nodes.contains_key(&graph_target);
+            for link in links {
+                let targets = requirement_targets.entry(link.id).or_default();
+                if has_node {
+                    targets.push(graph_target.clone());
+                }
+            }
+        }
+        for (requirement_id, targets) in requirement_targets {
+            let id = format!("requirement:{requirement_id}");
+            self.add_node(
+                node(id.clone(), "requirement", Some(requirement_id), None),
+                true,
+            );
+            for target in targets {
+                self.add_edge(edge(&id, "covers", &target));
+            }
+        }
+        // KPI projection nodes (`kpi NAME = count ENTITY in STAGE`, business
+        // and requirements dialects). `ProjectionDef` carries no annotations
+        // of its own, so KPI nodes are declared but not a `covers` target.
+        for projection in &self.model.projections {
+            let id = format!("kpi:{}", projection.name);
+            let mut value = node(
+                id.clone(),
+                "kpi",
+                Some(projection.name.clone()),
+                Some(projection.span.python_loc()),
+            );
+            value.insert("entity".to_owned(), json!(projection.entity));
+            value.insert("stage".to_owned(), json!(projection.stage));
+            self.add_node(value, true);
+        }
         json!({"analysis":"structure","projection":"tsg","schema_version":"tsg.v0","nodes":self.nodes.into_values().collect::<Vec<_>>(),"edges":self.edges.into_values().collect::<Vec<_>>()})
     }
 }
@@ -1116,6 +1167,29 @@ impl<'a> Builder<'a> {
 #[must_use]
 pub fn build_tsg(model: &KernelModel) -> Value {
     Builder::new(model).build()
+}
+
+/// Return the raw TSG or one of its deterministic graph projections, given
+/// an already-built TSG. Exposed separately from [`analyze_model`] so a
+/// caller with source-dependent enrichment `build_tsg` cannot see (e.g.
+/// requirements-dialect acceptance/forbidden scenarios) can build the TSG,
+/// enrich it, and dispatch on the enriched graph — the enrichment must
+/// happen before this so connectivity-sensitive projections
+/// (`requirement_property_graph`, `impact_graph`, review findings) see it.
+///
+/// # Errors
+///
+/// Returns an error for unsupported projections, invalid focus usage, or an
+/// unknown impact-graph focus node.
+pub fn analyze_tsg(tsg: Value, projection: &str, focus: Option<&str>) -> Result<Value, String> {
+    if projection == "tsg" {
+        if focus.is_some() {
+            return Err("--focus is supported only with --projection impact_graph".to_owned());
+        }
+        Ok(tsg)
+    } else {
+        analysis_graph::project(&tsg, projection, focus)
+    }
 }
 
 /// Build either the raw TSG or one of its deterministic graph projections.
@@ -1129,15 +1203,7 @@ pub fn analyze_model(
     projection: &str,
     focus: Option<&str>,
 ) -> Result<Value, String> {
-    let tsg = build_tsg(model);
-    if projection == "tsg" {
-        if focus.is_some() {
-            return Err("--focus is supported only with --projection impact_graph".to_owned());
-        }
-        Ok(tsg)
-    } else {
-        analysis_graph::project(&tsg, projection, focus)
-    }
+    analyze_tsg(build_tsg(model), projection, focus)
 }
 
 #[cfg(test)]
