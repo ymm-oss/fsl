@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::BTreeMap;
+
 use fsl_core::{
     ActionDef, ActionGuard, FslValue, KernelLValue as LValue, KernelModel,
     KernelStatement as Statement, ParamDef, TypeRef,
@@ -20,6 +22,10 @@ pub(crate) struct ActionInstance<T> {
     pub action_index: usize,
     pub action: String,
     pub params: Bindings<T>,
+    /// Concrete parameter values in declaration order, alongside `params`'
+    /// solver terms, so host-side code (leadsTo `helpful` matching) can
+    /// compare instances without a solver round-trip.
+    pub concrete_params: BTreeMap<String, FslValue>,
 }
 
 pub(crate) struct ActionGuardDefinedness<T> {
@@ -34,7 +40,7 @@ pub(crate) fn action_instances<S: SmtSolver>(
 ) -> Result<Vec<ActionInstance<S::Term>>, VerifyError> {
     let mut instances = Vec::new();
     for (action_index, action) in model.actions.iter().enumerate() {
-        let mut bindings = vec![Bindings::new()];
+        let mut bindings = vec![(Bindings::new(), BTreeMap::new())];
         for param in &action.params {
             let values = match param {
                 ParamDef::Typed { ty, .. } => model.domain_values(ty)?,
@@ -45,23 +51,30 @@ pub(crate) fn action_instances<S: SmtSolver>(
                 ParamDef::Range { lo, hi, .. } => TypeRef::Range(*lo, *hi),
             };
             let mut next = Vec::new();
-            for existing in bindings {
+            for (existing_terms, existing_concrete) in bindings {
                 for value in &values {
-                    let mut candidate = existing.clone();
-                    candidate.insert(
+                    let mut terms = existing_terms.clone();
+                    terms.insert(
                         param.name().to_owned(),
                         crate::value::concrete_value(solver, model, &ty, value)?,
                     );
-                    next.push(candidate);
+                    let mut concrete = existing_concrete.clone();
+                    concrete.insert(param.name().to_owned(), value.clone());
+                    next.push((terms, concrete));
                 }
             }
             bindings = next;
         }
-        instances.extend(bindings.into_iter().map(|params| ActionInstance {
-            action_index,
-            action: action.name.clone(),
-            params,
-        }));
+        instances.extend(
+            bindings
+                .into_iter()
+                .map(|(params, concrete_params)| ActionInstance {
+                    action_index,
+                    action: action.name.clone(),
+                    params,
+                    concrete_params,
+                }),
+        );
     }
     Ok(instances)
 }

@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec HelpfulFlickering {
+  type Phase = 0..9
+  type Credit = 0..1
+  state { phase: Phase, done: Bool, credit: Credit }
+  init { phase = 0  done = false  credit = 1 }
+
+  fair action helpEven() {
+    requires phase % 2 == 0
+    requires done == false
+    done = true
+    credit = 0
+  }
+
+  fair action helpOdd() {
+    requires phase % 2 == 1
+    requires done == false
+    done = true
+    credit = 0
+  }
+
+  action rotate() {
+    requires done == false
+    phase = (phase + 1) % 10
+  }
+
+  leadsTo Finishes {
+    done == false ~> done == true
+    helpful helpEven()
+    helpful helpOdd()
+    decreases credit
+  }
+}

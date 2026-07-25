@@ -28,6 +28,11 @@ CASES = (
     ("tests/fixtures/rust_port/ranked_leadsto.fsl", 5, 1),
     ("tests/fixtures/rust_port/ranked_leadsto_non_decreasing.fsl", 5, 1),
     ("tests/fixtures/rust_port/ranked_leadsto_unbounded_below.fsl", 5, 1),
+    ("tests/fixtures/rust_port/ranked_leadsto_helpful.fsl", 1, 1),
+    ("tests/fixtures/rust_port/ranked_leadsto_helpful_nonfair.fsl", 1, 1),
+    ("tests/fixtures/rust_port/ranked_leadsto_helpful_blocked.fsl", 1, 1),
+    ("tests/fixtures/rust_port/ranked_leadsto_helpful_flickering.fsl", 8, 1),
+    ("tests/fixtures/rust_port/ranked_leadsto_helpful_pumped.fsl", 8, 1),
     ("specs/cart_buggy.fsl", 5, 1),
 )
 

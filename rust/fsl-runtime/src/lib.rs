@@ -2892,7 +2892,7 @@ fn assign(
 ) -> Result<(), RuntimeError> {
     match target {
         LValue::Var(name) => {
-            target_state.insert(name.clone(), value);
+            target_state.insert(name.clone(), coerce_relation_literal(name, value, model));
         }
         LValue::Index(name, index_expr) => {
             let index = eval(index_expr, read_state, bindings, model, None)?;
@@ -2965,6 +2965,22 @@ fn assign(
         },
     }
     Ok(())
+}
+
+/// `Set {}` is the only relation literal surface syntax accepts (public
+/// Kernel typing rejects a non-empty one), but `eval`'s `Expr::Set` arm has
+/// no assignment-target type context and always produces `Value::Set`.
+/// Coerce it here, where the target variable's declared type is known --
+/// mirrors the symbolic evaluator's `SymbolicValue::SetLiteral` ->
+/// `SymbolicValue::Relation` coercion (`fsl-verifier/src/value.rs::coerce`).
+fn coerce_relation_literal(name: &str, value: Value, model: &KernelModel) -> Value {
+    if let Value::Set(items) = &value
+        && items.is_empty()
+        && matches!(model.state_type(name), Some(TypeRef::Relation(_, _)))
+    {
+        return Value::Relation(BTreeSet::new());
+    }
+    value
 }
 
 fn lvalue_key(

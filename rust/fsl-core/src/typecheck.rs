@@ -170,10 +170,19 @@ pub(crate) fn infer_type(
             )?)))
         }
         Expr::Set(items) => {
-            if let Some(expected) = expected
-                && matches!(resolve(model, expected)?, TypeRef::Set(_))
-            {
-                return Ok(expected.clone());
+            if let Some(expected) = expected {
+                match resolve(model, expected)? {
+                    TypeRef::Set(_) => return Ok(expected.clone()),
+                    TypeRef::Relation(_, _) => {
+                        if !items.is_empty() {
+                            return Err(error(
+                                "relation literals only support the empty initializer Set {}; use r = r.add(a, b) to add pairs",
+                            ));
+                        }
+                        return Ok(expected.clone());
+                    }
+                    _ => {}
+                }
             }
             let first = items
                 .first()
@@ -414,6 +423,16 @@ pub(crate) fn ensure_assignable(
                 ensure_assignable(item, expected_item, env, model, span)?;
             }
             return Ok(());
+        }
+        (Expr::Set(items), TypeRef::Relation(_, _)) => {
+            return if items.is_empty() {
+                Ok(())
+            } else {
+                Err(error(
+                    "relation literals only support the empty initializer Set {}; use r = r.add(a, b) to add pairs",
+                )
+                .with_span(span))
+            };
         }
         (
             Expr::Conditional {
@@ -780,6 +799,12 @@ fn validate_expression(
             };
             validate_expression(item, env, model, span, Some(&inner))?;
         }
+        Expr::Set(items) if matches!(resolve(model, &ty)?, TypeRef::Relation(_, _)) => {
+            // Relation literals only support the empty initializer `Set {}`;
+            // emptiness is already enforced by `infer_type`/`ensure_assignable`
+            // (there is no per-element type to validate against).
+            debug_assert!(items.is_empty());
+        }
         Expr::Set(items) | Expr::Seq(items) => {
             let item_ty = collection_item_type(&ty, model)?;
             for item in items {
@@ -1116,6 +1141,29 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
         )?;
         if let Some(expr) = &leadsto.decreases {
             validate_expression(expr, &local, model, leadsto.span, Some(&TypeRef::Int))?;
+        }
+        for helper in &leadsto.helpful {
+            let Some(action) = model
+                .actions
+                .iter()
+                .find(|action| action.name == helper.action)
+            else {
+                return Err(error(format!(
+                    "leadsTo '{}' helpful action '{}' is not declared",
+                    leadsto.name, helper.action
+                ))
+                .with_span(helper.span));
+            };
+            if helper.args.len() != action.params.len() {
+                return Err(error(format!(
+                    "leadsTo '{}' helpful action '{}' expects {} argument(s), got {}",
+                    leadsto.name,
+                    helper.action,
+                    action.params.len(),
+                    helper.args.len()
+                ))
+                .with_span(helper.span));
+            }
         }
     }
     if let Some(expr) = &model.terminal {

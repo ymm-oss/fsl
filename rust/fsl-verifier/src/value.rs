@@ -755,6 +755,32 @@ pub(crate) fn coerce<S: SmtSolver>(
                 entries,
             })
         }
+        // `Set {}` is the only relation literal form (public Kernel typing
+        // already rejects a non-empty one); coerce it to the all-absent
+        // finite pair grid, mirroring `TypeRef::Relation`'s default value.
+        (SymbolicValue::SetLiteral(items), TypeRef::Relation(source_ty, target_element_ty)) => {
+            if !items.is_empty() {
+                return Err(VerifyError::new(
+                    "relation literals only support the empty initializer Set {}",
+                ));
+            }
+            let entries = model
+                .domain_values(source_ty)?
+                .into_iter()
+                .flat_map(|source| {
+                    model
+                        .domain_values(target_element_ty)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(move |target| (source.clone(), target))
+                })
+                .map(|pair| Ok((pair, solver.bool_value(false))))
+                .collect::<Result<_, VerifyError>>()?;
+            Ok(SymbolicValue::Relation {
+                ty: target_ty.clone(),
+                entries,
+            })
+        }
         (SymbolicValue::SeqLiteral(items), TypeRef::Seq(element_ty, capacity)) => {
             if items.len() > *capacity {
                 return Err(VerifyError::new("sequence literal exceeds capacity"));

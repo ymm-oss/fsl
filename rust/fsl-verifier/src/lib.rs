@@ -8,6 +8,7 @@ mod eval;
 mod induction;
 mod liveness;
 mod refinement;
+mod symmetry;
 mod trace;
 mod transition;
 mod value;

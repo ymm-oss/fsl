@@ -16,8 +16,9 @@ use serde_json::Value;
 pub use fsl_syntax::{
     AggregateKind as KernelAggregateKind, Annotation, AnnotationError,
     AnnotationRegistry as KernelAnnotationRegistry, AnnotationValue, Annotations,
-    Binder as KernelBinder, CorrespondenceOrigin, Expr as KernelExpr, LValue as KernelLValue,
-    Pattern, QualifiedName, RequirementLink, Statement as KernelStatement, SymbolPath,
+    Binder as KernelBinder, CorrespondenceOrigin, Expr as KernelExpr, HelpfulAction,
+    LValue as KernelLValue, Pattern, QualifiedName, RequirementLink, Statement as KernelStatement,
+    SymbolPath,
 };
 
 mod compose;

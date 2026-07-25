@@ -5,6 +5,39 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Fixed
+- `relation A -> B` state is now usable end to end in the native symbolic
+  verifier: `r = Set {}` types and evaluates as the empty relation (both
+  `fslc check` and the concrete Monitor previously rejected or mistyped it),
+  and `fslc verify`/`fslc mutate` implement all seven relation operations
+  (`.contains(a, b)`, `.add(a, b)`, `.remove(a, b)`, `reachable(r, a, b)`,
+  `acyclic(r)`, `functional(r)`, `injective(r)`, `domain(r)`, `range(r)`),
+  matching the frozen Python reference's semantics (`reachable`/`acyclic`
+  require a self-relation and are rejected otherwise; a memoized bounded-hop
+  closure avoids the unmemoized-blowup class of bug already fixed in the
+  Python reference) (#467).
+- Native `leadsTo` lasso and deadlock-stall search now applies the documented
+  `symmetric type` / `symmetric enum` liveness symmetry reduction: the
+  designated representative state (lasso loop head, or the stalled state) is
+  constrained to the canonical permutation of each symmetric type's
+  per-entity rows, built from `Map<SymmetricType, V>` and
+  `Set<SymmetricType>` state (skipping any `V` that itself mentions a
+  symmetric identity type), matching the frozen Python reference. A genuine
+  per-entity violation (only one identity ever stalls) is still found under
+  both `Map`- and `Set`-shaped symmetric state (#461).
+- `verify --engine induction` now implements `leadsTo ... helpful` per-binding
+  ranking proofs natively, matching the documented idiom for per-entity
+  progress under interleaving. `fslc check` rejects a `helpful` action that
+  names an undeclared action or has the wrong arity; ranking induction
+  additionally proves the four `helpful`-specific obligations (matching
+  action `fair`, an enabled matching instance whenever pending, stable
+  enabledness across two or more `helpful` actions, and non-helpful actions
+  neither dropping the pending obligation nor increasing the measure),
+  reporting `progress_action_not_fair`, `helpful_action_not_enabled`,
+  `helpful_action_enabledness_not_sticky`, `non_decreasing_helpful_action`,
+  `non_helpful_action_increases_measure`, or `pending_not_preserved` on
+  failure and echoing `helpful` on both the proof and CTI (#473).
+
 ### Added
 - Native `analyze`'s TSG projection now emits `requirement`/`acceptance`/
   `forbidden`/`kpi` nodes and `covers` edges for a standalone `.fsl`/

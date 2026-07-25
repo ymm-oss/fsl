@@ -182,6 +182,25 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         );
     };
     if base.get("result").and_then(Value::as_str) != Some("verified") {
+        // A base-case `leadsTo` violation may be a raw BMC stall/lasso trace
+        // that a ranking proof can diagnose more precisely (e.g. a missing
+        // `fair` on the `helpful` action, or a permanently-blocked helpful
+        // instance) -- mirrors the frozen Python reference's `prove()`,
+        // which prefers `_prove_ranked_leadstos`' rank_failure over the raw
+        // BMC counterexample whenever ranking has something more specific to
+        // say.
+        if base.get("result").and_then(Value::as_str) == Some("violated")
+            && base.get("violation_kind").and_then(Value::as_str) == Some("leadsTo")
+            && let Ok(model) = load_induction_model(selection, auxiliary)
+            && let Ok(mut solver) = fsl_solver_z3::Z3Solver::new()
+            && let Ok(ranked) =
+                block_on_native(fsl_verifier::prove_ranked_leadstos(&model, &mut solver))
+            && let Some(failure) = &ranked.failure
+        {
+            let mut statistics = base_solved.statistics.clone();
+            statistics.merge(&fsl_solver::SmtSolver::statistics(&solver));
+            return render_rank_failure(&model, failure, depth, started, &statistics);
+        }
         return (base_value, base_status);
     }
 
@@ -532,6 +551,7 @@ fn render_rank_failure(
         json!(ranking_measure_text(&failure.measure)),
     );
     output.insert("rank_failure".to_owned(), json!(failure.kind));
+    insert_helpful_rank_failure_json(&mut output, model, failure);
     if let Some(value) = failure.measure_value {
         output.insert("measure_value".to_owned(), json!(value));
     }
@@ -653,6 +673,18 @@ fn render_induction_success(
                     "decreases".to_owned(),
                     json!(ranking_measure_text(&proof.measure)),
                 );
+                if !proof.helpful.is_empty() {
+                    entry.insert(
+                        "helpful".to_owned(),
+                        json!(
+                            proof
+                                .helpful
+                                .iter()
+                                .map(helpful_action_label)
+                                .collect::<Vec<_>>()
+                        ),
+                    );
+                }
             }
         }
         output.insert("leads_to".to_owned(), Value::Object(leads_to));
@@ -677,6 +709,54 @@ fn ranking_measure_text(expr: &KernelExpr) -> String {
         format!("({text})")
     } else {
         text
+    }
+}
+
+fn helpful_action_label(helper: &fsl_core::HelpfulAction) -> String {
+    let args = helper
+        .args
+        .iter()
+        .map(::fslc_rust::expr_text)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{}({args})", helper.action)
+}
+
+fn insert_helpful_rank_failure_json(
+    output: &mut Map<String, Value>,
+    model: &KernelModel,
+    failure: &fsl_verifier::RankFailure,
+) {
+    if !failure.helpful.is_empty() {
+        output.insert(
+            "helpful".to_owned(),
+            json!(
+                failure
+                    .helpful
+                    .iter()
+                    .map(helpful_action_label)
+                    .collect::<Vec<_>>()
+            ),
+        );
+    }
+    if !failure.helpful_actions.is_empty() {
+        output.insert(
+            "helpful_actions".to_owned(),
+            Value::Array(
+                failure
+                    .helpful_actions
+                    .iter()
+                    .map(|witness| {
+                        let params = witness
+                            .params
+                            .iter()
+                            .map(|(name, value)| (name.clone(), ::fslc_rust::fsl_value_json(value)))
+                            .collect::<Map<_, _>>();
+                        origin_aware_action_json(model, &witness.action, &params, Value::Null)
+                    })
+                    .collect(),
+            ),
+        );
     }
 }
 

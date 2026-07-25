@@ -8,6 +8,7 @@ use fsl_solver::{SatResult, SmtSolver};
 use crate::VerifyError;
 use crate::eval::eval;
 use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
+use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
 use crate::transition::{
     ActionInstance, action_guards, action_instances, init_constraints, transition_constraint,
@@ -662,12 +663,14 @@ async fn check_leadsto_stagnation<S: SmtSolver>(
     enabled: &[S::Term],
 ) -> Result<Option<BmcViolation>, VerifyError> {
     let deadlock = solver.not(&solver.or(enabled)?)?;
+    let canonical = canonical_constraint(solver, model, &states[step])?;
     for property in &model.leadstos {
         solver.set_query_context("leadsTo", &property.name);
         for binding in leadsto_bindings(solver, model, property)? {
             for pending in 0..=step {
                 let mut terms = vec![
                     deadlock.clone(),
+                    canonical.clone(),
                     leadsto_condition(
                         solver,
                         model,
@@ -806,6 +809,11 @@ async fn check_leadstos<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     depth: usize,
 ) -> Result<Option<BmcViolation>, VerifyError> {
+    let canonical = states
+        .iter()
+        .take(depth + 1)
+        .map(|state| canonical_constraint(solver, model, state))
+        .collect::<Result<Vec<_>, _>>()?;
     for property in &model.leadstos {
         solver.set_query_context("leadsTo", &property.name);
         for binding in leadsto_bindings(solver, model, property)? {
@@ -819,6 +827,7 @@ async fn check_leadstos<S: SmtSolver>(
                     for pending in 0..loop_end {
                         let mut terms = vec![
                             loop_equal.clone(),
+                            canonical[loop_start].clone(),
                             fair.clone(),
                             leadsto_condition(
                                 solver,

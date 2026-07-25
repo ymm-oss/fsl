@@ -18,6 +18,7 @@
 | [`DESIGN-stochastic.md`](DESIGN-stochastic.md) | **fsl-stochastic external evidence layer**. Implemented semantics for precomputed eval JSONL, Bernoulli/proportion metrics, Wilson intervals, result statuses, and the boundary between statistical support and formal proof |
 | [`DESIGN-causal.md`](DESIGN-causal.md) | **`causal` profile (review-only causal hypothesis graphs)**. Typed CausalModel, scope containment, lag/persists time semantics, delayed-feedback classification, evidence/expectation plane boundaries, and JSON contracts — causal claims never receive `proved`/`verified` |
 | [`DESIGN-v1.md`](DESIGN-v1.md) | Language design document (design principles G1-G5, type-system design decisions, the repair protocol, and the roadmap) |
+| [`DESIGN-enum-member-identity.md`](DESIGN-enum-member-identity.md) | Checked-Kernel enum-member identity and lookup: nominal resolution of bare enum-member syntax, shadowing precedence, and the refinement-boundary go/no-go for `KernelModel.enum_members` |
 
 ## Implementation design by architecture and feature (DESIGN-*)
 
@@ -62,6 +63,14 @@
 | [`DESIGN-precedence-policy.md`](DESIGN-precedence-policy.md) | The business-layer no-bypass precedence policy (#75) — why `business` keeps users from writing `state`/`invariant` directly |
 | [`DESIGN-ledger.md`](DESIGN-ledger.md) | `fslc ledger` (turning verifier evidence into a per-requirement-id Markdown audit ledger for PM/audit) |
 | [`DESIGN-assurance-classes.md`](DESIGN-assurance-classes.md) | Assurance-class vocabulary (`proved`/`bounded`/`replay-observed`/`statistical`/`not_run`) shared by `fslc ledger` and `fslc html`, and what each class does/does not guarantee |
+| [`DESIGN-document-requirement-claim-ir.md`](DESIGN-document-requirement-claim-ir.md) | `fslc document` foundation (issue #325): the versioned Requirement Claim IR (RCIR) v1 public contract and the deterministic requirement-claim projector |
+| [`DESIGN-document-controlled-language-renderer.md`](DESIGN-document-controlled-language-renderer.md) | ja/en controlled-language renderer (issue #326): converts an RCIR v1 claim set into `fsl_tools::render_requirements_document` prose |
+| [`DESIGN-document-cli.md`](DESIGN-document-cli.md) | `fslc document generate` / `fslc document claims` (issue #327): wires the RCIR projector and controlled-language renderer into the two CLI entry points |
+| [`DESIGN-document-generated-markers-and-check.md`](DESIGN-document-generated-markers-and-check.md) | Generated block markers and `fslc document check` (issue #329): structural markers/frontmatter on generated artifacts and the purely structural drift checker |
+| [`DESIGN-document-glossary.md`](DESIGN-document-glossary.md) | Glossary sidecar for `fslc document` (issue #330): presentation-only glossary generation and glossary-parity awareness in `fslc document check` |
+| [`DESIGN-document-evidence-overlay.md`](DESIGN-document-evidence-overlay.md) | Evidence/assurance overlay for `fslc document` (issue #332): overlays saved external verification evidence onto a generated requirements document at requirement granularity |
+| [`DESIGN-document-dialect-adapters.md`](DESIGN-document-dialect-adapters.md) | `fslc document`'s dialect boundary (issue #334, v1 slice): explicit rejection of non-kernel dialects rather than adapters, and the scope left open for cross-layer views |
+| [`DESIGN-document-coverage-registry.md`](DESIGN-document-coverage-registry.md) | RCIR coverage registry and no-silent-omission gate (issue #328): classifies every authored semantic target into exactly one of `rendered`/deliberately-excluded/flagged-as-missing |
 | [`DESIGN-mutate.md`](DESIGN-mutate.md) | `fslc mutate` (spec mutation, requirement stress report) |
 | [`DESIGN-explain.md`](DESIGN-explain.md) | `fslc explain --readable` (verification bounds, skeleton enumeration, counterfactuals, witness narration) |
 | [`DESIGN-html-report.md`](DESIGN-html-report.md) | `fslc html` (self-contained visual review report from explain + verify evidence) |
