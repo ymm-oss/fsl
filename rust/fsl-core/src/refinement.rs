@@ -897,29 +897,19 @@ fn apply_auto_action_correspondences(
                 ty: None,
             })
             .collect::<Vec<_>>();
+        let target = match abs_action {
+            None => ActionTarget::Stutter,
+            Some(abs_action) => ActionTarget::Action(
+                abs_action.name.clone(),
+                auto_action_arguments(impl_action, abs_action, span)?,
+            ),
+        };
         insert_action_correspondence(
             action_correspondences,
             ActionCorrespondenceSource {
                 impl_action: impl_action.name.clone(),
                 impl_params: params,
-                target: abs_action.map_or(ActionTarget::Stutter, |abs_action| {
-                    ActionTarget::Action(
-                        abs_action.name.clone(),
-                        abs_action
-                            .params
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(index, parameter)| {
-                                impl_action
-                                    .params
-                                    .iter()
-                                    .find(|candidate| candidate.name() == parameter.name())
-                                    .or_else(|| impl_action.params.get(index))
-                                    .map(|candidate| Expr::Var(candidate.name().to_owned()))
-                            })
-                            .collect(),
-                    )
-                }),
+                target,
                 origin: CorrespondenceOrigin::Auto,
                 span,
             },
@@ -929,6 +919,67 @@ fn apply_auto_action_correspondences(
         )?;
     }
     Ok(())
+}
+
+/// Bind each abstract parameter of a same-named `maps auto` candidate pair
+/// to the impl parameter sharing its name, in the abstract action's
+/// parameter order.
+///
+/// The contract forbids guessing (DESIGN-refinement.md §1): a same-name
+/// candidate whose arity or parameter names do not line up unambiguously is
+/// a located `kind: "type"` error, not a positional/index-based binding. A
+/// mismatched parameter *type* between two identically-named parameters is
+/// left to the same downstream `validate_expression_type` check every other
+/// authoring route already goes through in `lower_action_target`.
+///
+/// # Errors
+///
+/// Returns [`RefinementError`] when the impl and abstract action have a
+/// different number of parameters, or an abstract parameter has no
+/// same-named impl parameter.
+fn auto_action_arguments(
+    impl_action: &ActionDef,
+    abs_action: &ActionDef,
+    span: Span,
+) -> Result<Vec<Expr>, RefinementError> {
+    if impl_action.params.len() != abs_action.params.len() {
+        return Err(refinement_error(
+            format!(
+                "maps auto cannot match '{}' -> '{}': impl has {} parameter(s), abstract has {}; write an explicit `action {}(...) -> {}(...)` correspondence",
+                impl_action.name,
+                abs_action.name,
+                impl_action.params.len(),
+                abs_action.params.len(),
+                impl_action.name,
+                abs_action.name,
+            ),
+            Some(span),
+        ));
+    }
+    abs_action
+        .params
+        .iter()
+        .map(|parameter| {
+            impl_action
+                .params
+                .iter()
+                .find(|candidate| candidate.name() == parameter.name())
+                .map(|candidate| Expr::Var(candidate.name().to_owned()))
+                .ok_or_else(|| {
+                    refinement_error(
+                        format!(
+                            "maps auto cannot match '{}' -> '{}': no impl parameter named '{}'; write an explicit `action {}(...) -> {}(...)` correspondence",
+                            impl_action.name,
+                            abs_action.name,
+                            parameter.name(),
+                            impl_action.name,
+                            abs_action.name,
+                        ),
+                        Some(span),
+                    )
+                })
+        })
+        .collect()
 }
 
 struct ActionCorrespondenceSource {

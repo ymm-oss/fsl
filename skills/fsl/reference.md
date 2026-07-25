@@ -618,7 +618,9 @@ refinement <Name> {
   // map and action arguments otherwise use the same expressions as specs, including if <c> then <a> else <b>
   action <impl_act>(<formal params>...) -> <abs_act>(<expr>...) | stutter
   // formal params may be bare names or name: Type annotations matching the impl action
-  // explicit map/action entries override maps auto; incompatible same-name candidates are type errors
+  // explicit map/action entries override maps auto; auto matches action params BY NAME
+  // only (never position) — a different arity, a surplus/renamed impl param, or an
+  // unmatched abs param is a type error, never a positional guess (#494)
   preserve progress {                            // optional, only when upper leadsTo must be preserved
     respond <AbsLeadsTo> by <impl_act>, ...
   }
@@ -1343,6 +1345,20 @@ first failed layer and later layers are marked `skipped`.
   fidelity failure. Never `refines`, never folded into `refinement_failed`.
   `fslc diff` surfaces the same condition as an `impl_violated` finding and
   fails its gate unconditionally (not `--forbid`-gated).
+- **nondeterministic `init` (#493)**: a state variable `init` never assigns
+  on any path (an `init if` reading an unassigned `Bool`) is a genuinely free
+  initial value across its type domain, not a silently defaulted one. The
+  self-violation precondition and init correspondence both check *every*
+  concrete initial valuation on both impl and abs, not one materialized
+  default — an impl-side valuation must not violate the impl itself, and its
+  mapped state must be a member of the abs's own set of valid initial
+  valuations, for every valuation on both sides. Breaking: a mapping
+  previously `refines` only because one impl initial branch was checked can
+  now be `refinement_failed`; a mapping previously `refinement_failed` only
+  because α(s₀) missed the abs's single materialized default can now be
+  `refines` if it matches a different valid abs branch. A variable init
+  assigns on only some paths (not on any) keeps the prior single-value
+  behavior.
 - leadsTo ranking failure: `unknown_cti` / `violation_kind:"leadsTo_rank"` with
   `rank_failure` (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
   `pending_not_preserved`; with `helpful`, also `progress_action_not_fair`,

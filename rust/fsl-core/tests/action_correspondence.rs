@@ -72,7 +72,91 @@ fn maps_auto_uses_the_common_arity_and_type_checks() {
         &abstraction,
     )
     .expect_err("incompatible same-name actions must fail during auto lowering");
-    assert!(error.message.contains("has 1 arguments, expected 2"));
+    assert!(
+        error
+            .message
+            .contains("impl has 1 parameter(s), abstract has 2")
+    );
+}
+
+/// Issue #494: `maps auto` must never guess a binding for an incompatible
+/// same-name action pair — a surplus impl parameter, a renamed parameter, or
+/// two same-typed parameters neither of which name-matches must all be a
+/// located `kind: "type"` error, never a silently dropped/positionally
+/// guessed correspondence.
+#[test]
+fn maps_auto_rejects_incompatible_parameters_instead_of_guessing() {
+    let go_abstraction = "spec Abs { type K = 0..2 state { seen: K } init { seen = 0 } action go(wanted: K) { seen = wanted } }";
+
+    // Surplus: impl has an extra parameter ('extra') with no counterpart on
+    // the abs side, and the one shared position is also renamed ('a' vs
+    // 'wanted'). The old code silently bound wanted <- a positionally and
+    // dropped 'extra' entirely.
+    let surplus_implementation = build(
+        "spec Impl { type K = 0..2 state { picked: K } init { picked = 0 } action go(a: K, extra: K) { picked = a } }",
+    );
+    let error = parse_refinement(
+        "refinement R { impl Impl abs Abs maps auto }",
+        &surplus_implementation,
+        &build(go_abstraction),
+    )
+    .expect_err("a surplus impl parameter must not be silently dropped");
+    assert!(
+        error
+            .message
+            .contains("impl has 2 parameter(s), abstract has 1")
+    );
+
+    // Renamed: same arity (1 vs 1), but the impl parameter name does not
+    // match the abstract parameter name at all.
+    let renamed_implementation = build(
+        "spec Impl { type K = 0..2 state { picked: K } init { picked = 0 } action go(a: K) { picked = a } }",
+    );
+    let error = parse_refinement(
+        "refinement R { impl Impl abs Abs maps auto }",
+        &renamed_implementation,
+        &build(go_abstraction),
+    )
+    .expect_err("a renamed parameter must not be matched positionally");
+    assert!(error.message.contains("no impl parameter named 'wanted'"));
+
+    // Ambiguous same-typed: same arity (2 vs 2), both impl parameters share
+    // the abstract parameters' type, but neither impl name matches either
+    // abstract name. A type-based positional fallback would have to guess
+    // which same-typed parameter goes where; the contract forbids it.
+    let two_abstraction = "spec Abs { type K = 0..2 state { seen: K } init { seen = 0 } action go(first: K, second: K) { seen = first } }";
+    let ambiguous_implementation = build(
+        "spec Impl { type K = 0..2 state { picked: K } init { picked = 0 } action go(x: K, y: K) { picked = x } }",
+    );
+    let error = parse_refinement(
+        "refinement R { impl Impl abs Abs maps auto }",
+        &ambiguous_implementation,
+        &build(two_abstraction),
+    )
+    .expect_err("two same-typed but differently-named parameters must not be guessed");
+    assert!(error.message.contains("no impl parameter named 'first'"));
+
+    // Positive control: a legitimately auto-mappable pair, including a pure
+    // reorder (impl b,a vs abs a,b — same names, different order), must
+    // still auto-map by name. Losing this would be its own regression.
+    let reordered_implementation = build(
+        "spec Impl { type K = 0..2 state { seen: K } init { seen = 0 } action go(second: K, first: K) { seen = first } }",
+    );
+    let mapping = parse_refinement(
+        "refinement R { impl Impl abs Abs maps auto }",
+        &reordered_implementation,
+        &build(two_abstraction),
+    )
+    .expect("a same-named, reordered parameter pair auto-maps by name");
+    let correspondence = &mapping.action_correspondences["go"];
+    assert!(matches!(
+        &correspondence.target,
+        ActionCorrespondenceTarget::Action { action, args }
+            if action.0 == "go"
+                && args.len() == 2
+                && args[0] == fsl_core::KernelExpr::Var("first".to_owned())
+                && args[1] == fsl_core::KernelExpr::Var("second".to_owned())
+    ));
 }
 
 #[test]
@@ -159,7 +243,11 @@ fn requirements_implicit_auto_returns_an_error_instead_of_indexing_past_params()
     let implementation = build(source);
     let error = requirements_implements(source, &Resolver(abstraction), &implementation)
         .expect_err("arity mismatch must be diagnosed");
-    assert!(error.message.contains("has 1 arguments, expected 2"));
+    assert!(
+        error
+            .message
+            .contains("impl has 1 parameter(s), abstract has 2")
+    );
 }
 
 #[test]

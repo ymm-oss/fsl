@@ -1487,6 +1487,60 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
     Ok(projected)
 }
 
+/// Every concrete initial state consistent with `model`'s init.
+///
+/// A model whose init assigns every state variable on every path returns
+/// exactly the single state [`Monitor::new`] would build — no behavior
+/// change for the common deterministic case. A model with a state variable
+/// init never assigns on any path (nondeterministic init, DESIGN-init-if.md)
+/// is domain-enumerated instead: refinement's step-0 self-consistency
+/// precondition and init correspondence must reason about every reachable
+/// initial valuation, not one arbitrarily materialized default (issue
+/// #493). This does not touch [`Monitor::new`] itself or any other caller —
+/// the general Monitor-construction gate for partial/nondeterministic init
+/// is a different surface (issue #519).
+///
+/// # Errors
+///
+/// Returns [`RuntimeError`] when a free variable's type is not a finite
+/// scalar domain, or a combination cannot be evaluated concretely.
+fn concrete_initial_states(model: &KernelModel) -> Result<Vec<State>, RuntimeError> {
+    let free = explicit::unassigned_init_state_vars(model);
+    if free.is_empty() {
+        return Ok(vec![Monitor::new(model.clone())?.state]);
+    }
+    let mut combinations: Vec<BTreeMap<String, Value>> = vec![BTreeMap::new()];
+    for (name, ty) in &free {
+        let domain = model.domain_values(ty)?;
+        combinations = combinations
+            .into_iter()
+            .flat_map(|combination| {
+                domain.iter().map(move |value| {
+                    let mut next = combination.clone();
+                    next.insert(name.clone(), value.clone());
+                    next
+                })
+            })
+            .collect();
+    }
+    let mut states = BTreeSet::new();
+    for combination in combinations {
+        let mut state = model
+            .state
+            .iter()
+            .map(|(name, ty)| Ok((name.clone(), model.default_value(ty)?)))
+            .collect::<Result<State, RuntimeError>>()?;
+        state.extend(combination);
+        let mut bindings = Bindings::new();
+        let mut written = BTreeMap::new();
+        for statement in &model.init {
+            execute_init_statement(statement, &mut state, &mut bindings, model, &mut written)?;
+        }
+        states.insert(state);
+    }
+    Ok(states.into_iter().collect())
+}
+
 /// Exhaustively check bounded concrete refinement simulation.
 ///
 /// The checker is solver-independent and evaluates every reachable bounded
@@ -1509,8 +1563,15 @@ pub fn check_refinement(
     // bounds or invariants. Checking this first — and returning immediately
     // — means the correspondence walk below never needs to decide what a
     // mid-walk self-violation means; by construction it cannot encounter
-    // one within the same `depth`.
-    if let Some((violation, trace)) = first_self_violation(implementation.clone(), depth)? {
+    // one within the same `depth`. `impl_initial_states` covers every
+    // concrete initial valuation a nondeterministic impl `init` permits
+    // (issue #493), not one arbitrarily materialized default, so this
+    // precondition cannot miss a self-violation reachable only from a
+    // non-default initial branch either.
+    let impl_initial_states = concrete_initial_states(implementation)?;
+    if let Some((violation, trace)) =
+        first_self_violation(implementation, &impl_initial_states, depth)?
+    {
         return Ok(RefinementCheck {
             implementation: implementation.name.clone(),
             abstraction: abstraction.name.clone(),
@@ -1522,15 +1583,12 @@ pub fn check_refinement(
         });
     }
     let eval_model = merged_refinement_model(implementation, abstraction)?;
-    let impl_initial = Monitor::new(implementation.clone())?;
-    let abs_initial = Monitor::new(abstraction.clone())?;
-    let alpha_initial = alpha_state(
-        &impl_initial.state,
-        implementation,
-        abstraction,
-        mapping,
-        &eval_model,
-    )?;
+    // The set of every concrete state abs's own (possibly nondeterministic)
+    // init permits — init correspondence below asks whether α(s₀) is a
+    // *member* of this set, not whether it equals one materialized default
+    // abs initial state.
+    let abs_initial_states: BTreeSet<State> =
+        concrete_initial_states(abstraction)?.into_iter().collect();
     let action_map = mapping
         .action_correspondences
         .iter()
@@ -1554,45 +1612,72 @@ pub fn check_refinement(
         failure: None,
         impl_violation: None,
     };
-    let initial_trace = vec![TraceStep {
-        step: 0,
-        state: impl_initial.state.clone(),
-        action: None,
-        changes: BTreeMap::new(),
-    }];
-    let mut initial_alpha_monitor = Monitor::new(abstraction.clone())?;
-    initial_alpha_monitor.state = alpha_initial.clone();
-    if let Some(violation) = initial_alpha_monitor.current_violation()? {
-        let kind = if violation.kind == "type_bound" {
-            "map_out_of_bounds"
-        } else {
-            "abs_state_mismatch"
-        };
-        check.failure = Some(refinement_failure(
-            kind,
-            Some("init"),
-            0,
-            &initial_trace,
-            None,
-            None,
-            Some(alpha_initial),
+
+    // §2 step 1 (init correspondence): for *every* impl initial valuation
+    // s₀ (plural — nondeterministic impl init has more than one), α(s₀)
+    // must satisfy the abs init constraints. A candidate that fails seeds
+    // no BFS root and is reported immediately (deterministic order: the
+    // states are visited in `impl_initial_states`'s sorted order, so the
+    // failure reported is stable). Every candidate that passes seeds its
+    // own root below, so the walk explores the full reachable set of every
+    // nondeterministic initial branch, not just one.
+    let mut queue = VecDeque::new();
+    for impl_state in impl_initial_states {
+        let alpha_initial = alpha_state(
+            &impl_state,
+            implementation,
+            abstraction,
+            mapping,
+            &eval_model,
+        )?;
+        let initial_trace = vec![TraceStep {
+            step: 0,
+            state: impl_state.clone(),
+            action: None,
+            changes: BTreeMap::new(),
+        }];
+        let mut initial_alpha_monitor = Monitor::new(abstraction.clone())?;
+        initial_alpha_monitor.state = alpha_initial.clone();
+        if let Some(violation) = initial_alpha_monitor.current_violation()? {
+            let kind = if violation.kind == "type_bound" {
+                "map_out_of_bounds"
+            } else {
+                "abs_state_mismatch"
+            };
+            check.failure = Some(refinement_failure(
+                kind,
+                Some("init"),
+                0,
+                &initial_trace,
+                None,
+                None,
+                Some(alpha_initial),
+            ));
+            return Ok(check);
+        }
+        if !abs_initial_states.contains(&alpha_initial) {
+            check.failure = Some(refinement_failure(
+                "abs_state_mismatch",
+                Some("init"),
+                0,
+                &initial_trace,
+                None,
+                abs_initial_states.iter().next().cloned(),
+                Some(alpha_initial),
+            ));
+            return Ok(check);
+        }
+        queue.push_back((
+            Monitor {
+                model: implementation.clone(),
+                state: impl_state,
+                step: 0,
+            },
+            0_usize,
+            initial_trace,
         ));
-        return Ok(check);
-    }
-    if alpha_initial != abs_initial.state {
-        check.failure = Some(refinement_failure(
-            "abs_state_mismatch",
-            Some("init"),
-            0,
-            &initial_trace,
-            None,
-            Some(abs_initial.state),
-            Some(alpha_initial),
-        ));
-        return Ok(check);
     }
 
-    let mut queue = VecDeque::from([(impl_initial, 0_usize, initial_trace)]);
     let mut visited = BTreeSet::new();
     while let Some((_, step, _)) = queue.front() {
         let step = *step;
@@ -1880,6 +1965,14 @@ pub fn find_boundary_violation(
 /// concretely, within `depth` — i.e. whether the model is internally
 /// consistent at all, independent of any refinement mapping.
 ///
+/// `initial_states` is every concrete initial valuation
+/// [`concrete_initial_states`] found for `model` — plural, because a
+/// nondeterministic init has more than one, and a self-violation reachable
+/// only from a non-default initial branch must not be missed (issue #493).
+/// They are checked for an immediate violation in order first (stable,
+/// deterministic reporting), then explored together as one BFS (a state
+/// reachable from more than one root is only visited once).
+///
 /// Unlike [`find_boundary_violation`], which is scoped to
 /// `partial_op`/`type_bound` for its own narrower callers, this checks every
 /// violation kind `Monitor::current_violation`/`Monitor::step` can report,
@@ -1890,21 +1983,31 @@ pub fn find_boundary_violation(
 ///
 /// Returns [`RuntimeError`] when concrete evaluation or execution fails.
 fn first_self_violation(
-    model: KernelModel,
+    model: &KernelModel,
+    initial_states: &[State],
     depth: usize,
 ) -> Result<Option<(Violation, Vec<TraceStep>)>, RuntimeError> {
-    let initial = Monitor::new(model)?;
-    let initial_trace = vec![TraceStep {
-        step: 0,
-        state: initial.state.clone(),
-        action: None,
-        changes: BTreeMap::new(),
-    }];
-    if let Some(violation) = initial.current_violation()? {
-        return Ok(Some((violation, initial_trace)));
+    let mut queue = VecDeque::new();
+    let mut visited = BTreeSet::new();
+    for state in initial_states {
+        let initial = Monitor {
+            model: model.clone(),
+            state: state.clone(),
+            step: 0,
+        };
+        let initial_trace = vec![TraceStep {
+            step: 0,
+            state: initial.state.clone(),
+            action: None,
+            changes: BTreeMap::new(),
+        }];
+        if let Some(violation) = initial.current_violation()? {
+            return Ok(Some((violation, initial_trace)));
+        }
+        if visited.insert(initial.state.clone()) {
+            queue.push_back((initial, initial_trace, 0_usize));
+        }
     }
-    let mut queue = VecDeque::from([(initial.clone(), initial_trace, 0_usize)]);
-    let mut visited = BTreeSet::from([initial.state.clone()]);
     while let Some((monitor, trace, step)) = queue.pop_front() {
         if step >= depth {
             continue;

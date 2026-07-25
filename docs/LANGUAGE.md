@@ -1253,7 +1253,15 @@ refinement CartImplRefinesCart {
   variables with no explicit `map`, it synthesizes `map x = x`; for same-named
   compatible actions with no explicit correspondence, it synthesizes
   `action f(params...) -> f(params...)`. Explicit entries override the defaults.
-  Incompatible same-name candidates are reported as `kind: "type"` errors.
+  Action parameters are matched **by name, never by position**: each abstract
+  parameter binds to the impl parameter sharing its exact name (so a pure
+  reorder still auto-maps), in the abstract action's parameter order. Auto
+  never guesses — a same-name action pair with a different arity, a surplus
+  impl parameter, a renamed parameter, or any abstract parameter with no
+  same-named impl counterpart is a located `kind: "type"` error; write an
+  explicit `action ... -> ...` correspondence for that pair instead.
+  Incompatible same-name state candidates are likewise reported as
+  `kind: "type"` errors.
 - `action <impl>(<formal params>) -> <abs>(<expr>) | stutter` — required for every impl action.
   Formal params may be bare names or `name: Type` annotations matching the impl action declaration.
   `stutter` is an internal step in which the abstract state does not change.
@@ -1344,6 +1352,29 @@ and abs, not a defect in the impl alone). `fslc diff` surfaces the same
 condition as an `impl_violated` finding and fails its gate unconditionally
 (not subject to `--forbid`), since a self-violating side makes the
 comparison itself untrustworthy.
+
+A state variable `init` never assigns on any path (an `init if` reading an
+unassigned `Bool`, for example) is a genuinely free initial value across its
+full type domain, not a value silently defaulted — `refine` checks it that
+way on both the impl and abs side. The self-consistency precondition above
+and the init correspondence it feeds both reason over **every** concrete
+initial valuation `init` permits, not one arbitrarily chosen default: an
+impl-side initial valuation must not violate the impl's own semantics, and
+its mapped state must be a member of the abs's own set of valid initial
+valuations, for every such valuation on both sides. A same-named state
+variable init leaves unassigned on *some* but not all paths (e.g. only
+inside an `if` with no `else`) is not enumerated this way and keeps the
+prior single-valuation behavior.
+
+This closed two opposite defects and is a **breaking change** to `refine`'s
+verdicts for a mapping where either side's `init` leaves a state variable
+fully unassigned: a refinement that previously reported `refines` because
+only the impl's default initial branch was ever checked may now report
+`refinement_failed` (an initial-correspondence violation on another impl
+branch was missed before); a refinement that previously reported
+`refinement_failed` solely because the abs's default initial branch did not
+equal the mapped impl state may now report `refines` (the impl state
+matches a different, still-valid, abs initial branch).
 
 Give impl and abs **distinct enum/struct type names**, even when a state
 variable pair is mapped 1:1. Type metadata is merged by name for refinement

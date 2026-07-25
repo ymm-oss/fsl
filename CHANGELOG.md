@@ -80,6 +80,41 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   mode already uses, and anything else that cannot be analyzed is a real
   error in `files[]`/`errors[]`. Directory expansion is unaffected and
   still filters to `.fsl` only (#496).
+- `fslc refine`! `maps auto` no longer guesses a binding for an incompatible
+  same-name action pair. Auto-matched action parameters are now resolved by
+  name only, never by position: with impl `go(a: K, extra: K)` and abstract
+  `go(wanted: K)` under a bare `maps auto`, native previously bound
+  `wanted <- a` positionally and silently dropped `extra`, returning
+  `refines`/exit 0 for a mapping the frozen Python reference correctly
+  rejects. Now a same-name action pair with a different arity, a surplus
+  impl parameter, a renamed parameter, or an abstract parameter with no
+  same-named impl counterpart is a located `kind:"type"` error, matching the
+  contract `docs/DESIGN-refinement.md` already documented. A legitimately
+  auto-mappable pair — including a pure parameter reorder — still auto-maps.
+  `examples/e2e/2_requirements.fsl`'s `submit` correspondence (a genuine
+  arity-changing map between the business and requirements layers) now
+  declares its correspondence explicitly instead of relying on the removed
+  guess (#494).
+- `fslc refine`! init-state handling now reasons over *every* concrete
+  initial valuation a nondeterministic `init` permits (an `init if` reading
+  a state variable init never assigns, on either the impl or abs side)
+  instead of comparing against the single default state a solver-free
+  `Monitor` happened to materialize. This closed two opposite false
+  verdicts: a nondeterministic impl `init` no longer lets native silently
+  check only the default branch and miss both that branch's own
+  initial-correspondence violation and the reachable set below the other
+  branch (previously `refines`/exit 0 where the frozen reference correctly
+  returns `refinement_failed`/`abs_state_mismatch@init`/exit 1); a
+  nondeterministic abs `init` is now checked as set membership rather than
+  equality against one materialized abs default, so a correct refinement
+  whose impl deterministically starts in a different, still-valid, abs
+  initial branch is no longer wrongly rejected (previously
+  `refinement_failed`/exit 1 where the frozen reference correctly returns
+  `refines`/exit 0). The step-0 impl self-consistency precondition (#466)
+  shares the same enumeration, so a self-violation reachable only from a
+  non-default initial branch is no longer missed either. A state variable
+  assigned on only some init paths (not any) is unaffected and keeps the
+  prior single-valuation behavior (#493).
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false
