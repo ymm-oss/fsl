@@ -18,6 +18,11 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
+# Z3 solver trace file, written by native-z3 test/CLI runs into whichever
+# directory the process's cwd happens to be (rust/, rust/fsl-solver-z3/,
+# rust/fsl-verifier/, rust/fslc/, repo root, ...) — not a repo deliverable
+.z3-trace
+
 # VSCode extension build artifacts
 node_modules/
 editors/vscode/out/
