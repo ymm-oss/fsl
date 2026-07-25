@@ -105,6 +105,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `rust/fslc/tests/corpus_check_sweep.rs` (an exhaustive `specs/`+`examples/`
   `check` sweep closing the gap left by `rust/fsl-lsp/tests/corpus.rs`, which
   never builds a checked model) (#485).
+- Zero-division is now totally defined in property-context expressions
+  (`invariant`, `trans`, `reachable`, `leadsTo`, and refinement state mapping),
+  matching `DESIGN-divmod.md` §2.1/§2.3: `a / 0` and `a % 0` evaluate to `0`
+  instead of raising a concrete `RuntimeError` there, in both the Z3 symbolic
+  encoding (`div`/`modulo` are now pinned with `ite(divisor == 0, 0, ...)`)
+  and the concrete Monitor/BFS evaluator. Previously an unrelated `/0`/`%0`
+  inside an invariant could mask a genuine, independent invariant violation
+  behind a misattributed `violation_kind:"partial_op"` / `_partial_<action>`
+  counterexample under the default (BMC) and `--engine induction` engines,
+  and made `--engine explicit` return a raw `result:"error"` / `kind:"semantics"`
+  instead of the real verdict — breaking the documented symbolic/concrete/BFS
+  agreement invariant. Action-context (`requires`/body/`ensures`) division by
+  a divisor that can reach zero is still reported as `partial_op` (§2.2 is
+  unchanged); Euclidean negative-number division/modulo semantics were
+  already correct and are unaffected (#477).
 - Refinement typechecking now rejects an unshadowed bare enum member shared by distinct
   implementation and abstraction enums, preventing checked and evaluation
   merge order from assigning different nominal identities. Existing identifier

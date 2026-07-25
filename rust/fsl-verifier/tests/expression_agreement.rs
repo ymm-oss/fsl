@@ -325,6 +325,37 @@ spec EmptyActionInitialViolation {
     assert_eq!(violation.step, 0);
 }
 
+/// DESIGN-divmod.md §2.1: the Z3 encoding must pin `/0`/`%0` to the total
+/// value `0`, independent of the CLI's concrete `find_boundary_violation`
+/// pre-check. This calls `verify_bounded` directly so a regression in the
+/// solver-level `div`/`modulo` pin (reverting the `ite(right == 0, 0, ...)`
+/// wrapping in `fsl-solver-z3`) is caught even if the concrete fast path
+/// were ever removed or bypassed. Without the pin, `ZeroDivTotal` masks the
+/// real `GenuineViolation` behind `partial_op`/`_partial_bump` (issue #477).
+#[test]
+fn symbolic_bmc_totalizes_property_context_zero_division() {
+    let source = r"
+spec MaskTest {
+  type Qty = 0..3
+  state { n: Qty }
+  init { n = 0 }
+  action bump() { requires n < 3  n = n + 1 }
+  invariant GenuineViolation { n <= 1 }
+  invariant ZeroDivTotal { 5 / 0 == 0 }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let result = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 4))
+        .expect("bounded verification must not error on /0 in ZeroDivTotal");
+
+    let violation = result.violation.expect("n=2 violates GenuineViolation");
+    assert_eq!(violation.kind, "invariant");
+    assert_eq!(violation.name, "GenuineViolation");
+    assert_eq!(violation.step, 2);
+}
+
 #[test]
 fn binder_aggregates_agree_for_ranges_sets_and_duplicate_sequences() {
     let source = r"

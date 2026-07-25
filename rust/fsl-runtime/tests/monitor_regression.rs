@@ -42,6 +42,61 @@ fn concrete_arithmetic_uses_smt_euclidean_division() {
     assert_eq!(value, FslValue::Bool(true));
 }
 
+/// DESIGN-divmod.md §2.1/§2.3: an invariant's own `/0`/`%0` is totally defined
+/// as `0`, so it must never mask a genuine, independent invariant violation
+/// behind a misattributed `partial_op` on the last-executed action. Reverting
+/// the `TOTAL_DIVISION` scoping in `check_state_selected` makes both bumps
+/// below report `partial_op`/`_partial_bump` (from `ZeroDivTotal`'s `5 / 0`)
+/// instead of ever reaching the real `GenuineViolation` (issue #477).
+#[test]
+fn property_context_zero_division_does_not_mask_a_genuine_invariant_violation() {
+    let model = model(
+        "spec MaskTest { type Qty = 0..3 state { n: Qty } init { n = 0 } ".to_owned()
+            + "action bump() { requires n < 3 n = n + 1 } "
+            + "invariant GenuineViolation { n <= 1 } "
+            + "invariant ZeroDivTotal { 5 / 0 == 0 } }",
+    );
+    let mut monitor = fsl_runtime::Monitor::new(model).expect("initialize monitor");
+    let first = monitor.enabled().expect("enabled actions")[0].clone();
+    let stepped = monitor
+        .step(&first)
+        .expect("first bump must not error on /0");
+    assert!(
+        stepped.violation.is_none(),
+        "ZeroDivTotal must not be checked/violated at n=1, got {:?}",
+        stepped.violation
+    );
+    let second = monitor.enabled().expect("enabled actions")[0].clone();
+    let stepped = monitor
+        .step(&second)
+        .expect("second bump must not error on /0");
+    let violation = stepped.violation.expect("n=2 violates GenuineViolation");
+    assert_eq!(violation.kind, "invariant");
+    assert_eq!(violation.name, "GenuineViolation");
+}
+
+/// DESIGN-divmod.md §2.2: totality of `/0`/`%0` in property contexts must not
+/// weaken the unrelated, pre-existing action-context `partial_op` check. An
+/// action that unconditionally divides by a variable that can be zero is
+/// still `partial_op`, attributed to the action that actually performs it.
+#[test]
+fn action_context_zero_division_is_still_partial_op() {
+    let model = model(
+        "spec ActionDiv0 { state { x: 0..10, d: 0..3 } init { x = 10 d = 0 } ".to_owned()
+            + "action divide() { x = x / d } }",
+    );
+    let mut monitor = fsl_runtime::Monitor::new(model).expect("initialize monitor");
+    let action = monitor.enabled().expect("enabled actions")[0].clone();
+    let stepped = monitor
+        .step(&action)
+        .expect("partial operations are outcomes, not errors");
+    let violation = stepped
+        .violation
+        .expect("unguarded x / d must be partial_op");
+    assert_eq!(violation.kind, "partial_op");
+    assert_eq!(violation.name, "_partial_divide");
+}
+
 #[test]
 fn replay_rejects_a_trace_that_is_not_enabled() {
     let model = model(

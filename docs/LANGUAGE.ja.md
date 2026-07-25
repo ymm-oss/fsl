@@ -527,7 +527,14 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
 
 - 算術: `+ - * / %`、単項 `-`、`min(a, b)` / `max(a, b)` / `abs(a)`
   (`a//b` は `//` 以降がすべてコメントになってしまうので、除算は空白を入れて
-  `a / b` と書きます)
+  `a / b` と書きます)。`/` と `%` は `b != 0` のとき Euclidean(ユークリッド)
+  剰余系に従います(`a == b * (a / b) + (a % b)` かつ `0 <= a % b < |b|`。
+  よって `-7 / 2 == -4`、`-7 % 2 == 1`)。ゼロ除算は**全域的に定義**されており、
+  `a / 0 == 0` と `a % 0 == 0` は常に評価できます — invariant/trans/reachable/
+  leadsTo/mapping 式で `a / 0` を読んでも評価が失敗することはありません。
+  action の `requires`/本体/`ensures` 内では、ゼロになりうる除数への未ガードの
+  `/`/`%` は値自体が定義されていても `partial_op`(§6 参照)として報告されます —
+  `y != 0 => P(x / y)` や `requires y != 0` でガードしてください。
 - 比較: `== != < <= > >=`
 - 論理: `and or not =>`
 - 条件: `if condition then when_true else when_false`。条件は `Bool` で、両方の
@@ -637,7 +644,7 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 | 検査 | 内容 | 違反時 |
 |---|---|---|
 | 型境界 | すべての有界型の状態変数(Map の値、struct のフィールド、Seq の要素を含む)が範囲内にある | `violated` / `type_bound` / `_bounds_<var>` |
-| 部分演算 | `pop()`/`head()`/`at(i)` の時点で列が非空かつインデックスが範囲内であり、`/` `%` の除数が非ゼロ | `violated` / `partial_op` / `_partial_<action>` |
+| 部分演算(action 文脈限定: `requires`/本体/`ensures` のみ、§3 参照) | `pop()`/`head()`/`at(i)` の時点で列が非空かつインデックスが範囲内であり、`/` `%` の除数が非ゼロ | `violated` / `partial_op` / `_partial_<action>` |
 | action カバレッジ | 各 action が深さ K 以内に少なくとも 1 回 enabled になる | `action_coverage` にブロックしている requires の診断 |
 | デッドロック | すべての action が disabled になる状態への到達 | 警告(`--deadlock error` で `violated`) |
 | trans | 2 状態の述語が到達可能なすべての遷移で成立するか | `violated` / `trans` / `trans` + トレース |

@@ -25,6 +25,36 @@ pub use explicit::{
 pub type State = BTreeMap<String, Value>;
 pub type Bindings = BTreeMap<String, Value>;
 
+std::thread_local! {
+    /// DESIGN-divmod.md §2.1/§2.3: while set, `/` and `%` by a zero divisor
+    /// evaluate to the totally-defined value `0` instead of raising the
+    /// §2.2 action-context unguarded-operation error. Property-context
+    /// evaluation entry points (invariant, trans, reachable, leadsTo, and
+    /// refinement state mapping) scope this with [`with_total_division`];
+    /// action guard/statement/ensures evaluation leaves it unset so an
+    /// unguarded `/`/`%` there is still classified `partial_op`.
+    static TOTAL_DIVISION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+struct TotalDivisionScope {
+    previous: bool,
+}
+
+impl Drop for TotalDivisionScope {
+    fn drop(&mut self) {
+        TOTAL_DIVISION.with(|flag| flag.set(self.previous));
+    }
+}
+
+/// Evaluate property-context expressions with `/` and `%` by zero totally
+/// defined as `0` (DESIGN-divmod.md §2.1, §2.3) for the duration of `body`.
+fn with_total_division<T>(body: impl FnOnce() -> T) -> T {
+    let _scope = TotalDivisionScope {
+        previous: TOTAL_DIVISION.with(|flag| flag.replace(true)),
+    };
+    body()
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeError {
     pub message: String,
@@ -349,7 +379,7 @@ pub fn violating_bindings(
         }
     }
 
-    search(expr, state, &Bindings::new(), model)
+    with_total_division(|| search(expr, state, &Bindings::new(), model))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -467,7 +497,11 @@ fn eval_binary(
             let left = as_int(left)?;
             let right = as_int(right)?;
             if right == 0 {
-                Err(runtime_error("division by zero"))
+                if TOTAL_DIVISION.with(std::cell::Cell::get) {
+                    Ok(Value::Int(0))
+                } else {
+                    Err(runtime_error("division by zero"))
+                }
             } else {
                 Ok(Value::Int(left.div_euclid(right)))
             }
@@ -476,7 +510,11 @@ fn eval_binary(
             let left = as_int(left)?;
             let right = as_int(right)?;
             if right == 0 {
-                Err(runtime_error("remainder by zero"))
+                if TOTAL_DIVISION.with(std::cell::Cell::get) {
+                    Ok(Value::Int(0))
+                } else {
+                    Err(runtime_error("remainder by zero"))
+                }
             } else {
                 Ok(Value::Int(left.rem_euclid(right)))
             }
@@ -1094,6 +1132,14 @@ impl BoundedLivenessMonitor {
         state: &State,
         step: usize,
     ) -> Result<Option<BoundedLivenessViolation>, RuntimeError> {
+        with_total_division(|| self.observe_inner(state, step))
+    }
+
+    fn observe_inner(
+        &mut self,
+        state: &State,
+        step: usize,
+    ) -> Result<Option<BoundedLivenessViolation>, RuntimeError> {
         if step != self.next_step {
             return Err(runtime_error(format!(
                 "bounded liveness expected step {}, got {step}",
@@ -1272,6 +1318,24 @@ fn merged_refinement_model(
 }
 
 fn alpha_state(
+    implementation_state: &State,
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    mapping: &Refinement,
+    eval_model: &KernelModel,
+) -> Result<State, RuntimeError> {
+    with_total_division(|| {
+        alpha_state_inner(
+            implementation_state,
+            implementation,
+            abstraction,
+            mapping,
+            eval_model,
+        )
+    })
+}
+
+fn alpha_state_inner(
     implementation_state: &State,
     implementation: &KernelModel,
     abstraction: &KernelModel,
@@ -1882,13 +1946,15 @@ pub fn expression_reachable(
     let mut queue = VecDeque::from([(initial.clone(), 0_usize)]);
     let mut visited = BTreeSet::from([initial.state.clone()]);
     while let Some((monitor, step)) = queue.pop_front() {
-        if as_bool(eval(
-            expression,
-            &monitor.state,
-            &mut Bindings::new(),
-            &monitor.model,
-            None,
-        )?)? {
+        if as_bool(with_total_division(|| {
+            eval(
+                expression,
+                &monitor.state,
+                &mut Bindings::new(),
+                &monitor.model,
+                None,
+            )
+        })?)? {
             return Ok(true);
         }
         if step >= depth {
@@ -2245,6 +2311,14 @@ fn leadsto_bindings(
     state: &State,
     model: &KernelModel,
 ) -> Result<Vec<Bindings>, RuntimeError> {
+    with_total_division(|| leadsto_bindings_inner(property, state, model))
+}
+
+fn leadsto_bindings_inner(
+    property: &fsl_core::LeadsToDef,
+    state: &State,
+    model: &KernelModel,
+) -> Result<Vec<Bindings>, RuntimeError> {
     let mut candidates = vec![Bindings::new()];
     for binder in &property.binders {
         let mut next = Vec::new();
@@ -2262,6 +2336,15 @@ fn leadsto_bindings(
 }
 
 fn response_pending_at(
+    property: &fsl_core::LeadsToDef,
+    binding: &Bindings,
+    trace: &[TraceStep],
+    model: &KernelModel,
+) -> Result<Option<usize>, RuntimeError> {
+    with_total_division(|| response_pending_at_inner(property, binding, trace, model))
+}
+
+fn response_pending_at_inner(
     property: &fsl_core::LeadsToDef,
     binding: &Bindings,
     trace: &[TraceStep],
@@ -2350,24 +2433,26 @@ fn record_reachables(
     step: usize,
     result: &mut BfsResult,
 ) -> Result<(), RuntimeError> {
-    for property in &monitor.model.reachables {
-        if result.reachables[&property.name].is_some() {
-            continue;
+    with_total_division(|| {
+        for property in &monitor.model.reachables {
+            if result.reachables[&property.name].is_some() {
+                continue;
+            }
+            let mut bindings = Bindings::new();
+            if as_bool(eval(
+                &property.expr,
+                &monitor.state,
+                &mut bindings,
+                &monitor.model,
+                None,
+            )?)? {
+                result
+                    .reachables
+                    .insert(property.name.clone(), Some(ReachableWitness { step }));
+            }
         }
-        let mut bindings = Bindings::new();
-        if as_bool(eval(
-            &property.expr,
-            &monitor.state,
-            &mut bindings,
-            &monitor.model,
-            None,
-        )?)? {
-            result
-                .reachables
-                .insert(property.name.clone(), Some(ReachableWitness { step }));
-        }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 fn check_state(
@@ -2380,6 +2465,18 @@ fn check_state(
 }
 
 fn check_state_selected(
+    state: &State,
+    old_state: Option<&State>,
+    model: &KernelModel,
+    step: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<Option<Violation>, RuntimeError> {
+    with_total_division(|| {
+        check_state_selected_inner(state, old_state, model, step, checked_bounds)
+    })
+}
+
+fn check_state_selected_inner(
     state: &State,
     old_state: Option<&State>,
     model: &KernelModel,

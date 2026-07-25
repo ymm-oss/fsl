@@ -24,6 +24,28 @@ fn explicit_bfs_proves_at_state_space_closure() {
     assert_eq!(result.deadlock_step, None);
 }
 
+/// DESIGN-divmod.md §2.1/§2.3: an invariant's own `5 / 0` must not turn
+/// `--engine explicit` verification into a raw `RuntimeError` ("division by
+/// zero"). Reverting the concrete evaluator's zero-divisor totality (or its
+/// `TOTAL_DIVISION` property-context scoping) makes this `Err` instead of
+/// reporting the real `GenuineViolation` (issue #477, symptom 2).
+#[test]
+fn explicit_engine_totalizes_property_context_zero_division() {
+    let model = model(
+        "spec MaskTest { type Qty = 0..3 state { n: Qty } init { n = 0 } \
+         action bump() { requires n < 3 n = n + 1 } \
+         invariant GenuineViolation { n <= 1 } \
+         invariant ZeroDivTotal { 5 / 0 == 0 } }",
+    );
+    let result =
+        fsl_runtime::verify_explicit(model, 4, 100).expect("explicit verification must not error");
+    let violation = result
+        .violation
+        .expect("depth 4 reaches n=2, which violates GenuineViolation");
+    assert_eq!(violation.violation.kind, "invariant");
+    assert_eq!(violation.violation.name, "GenuineViolation");
+}
+
 #[test]
 fn explicit_bfs_fails_closed_at_the_state_budget() {
     let model = model(
