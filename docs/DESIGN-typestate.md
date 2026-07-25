@@ -35,7 +35,11 @@ TypeScript for derivable entities. The output uses the same JSON envelope as the
 
 ## 3. The three corresponding state-machine forms
 
-1. **enum value in a struct field** (`struct Order { status: St }`).
+1. **enum value in a struct field** (`struct Order { status: St }`). This form is scoped by
+   **field name and owning struct type together**: two different structs that both happen to
+   declare a same-named field (e.g. `Order.status` and `Ticket.status`) are two independent
+   entities and machines. A guard/assignment on one struct's field must never be attributed to
+   another struct's same-named field just because the field names match.
 2. **enum value in a state variable** (after business `process`/stages expansion).
 3. **`Option<_>` slot** (none/some ≈ Empty/Filled).
 

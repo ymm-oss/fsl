@@ -2573,7 +2573,9 @@ DESIGN-*.md があります)。
 ## 16. ghost 型への昇格判定(typestate)
 
 `fslc typestate <file.fsl> [--ts]` は、設計 spec の状態機械(enum 値の struct
-フィールド / 状態変数 / `Option<_>` スロット)を、ホスト言語の typestate
+フィールド — フィールド名と所有する struct の型の両方でスコープされ、同名の
+フィールドを持つ別々の struct は独立した機械のまま扱われます / 状態変数 /
+`Option<_>` スロット)を、ホスト言語の typestate
 (ghost 型)へどれだけ健全にマップできるかを判定します。各
 `(entity, action)` を、`derivable`(from の状態がエンティティ自身のローカルな
 ガード — 複合ガードの from 状態は式**全体**が含意するものです。`or` は各選言項

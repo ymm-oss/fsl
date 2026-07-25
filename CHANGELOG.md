@@ -161,6 +161,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `derivable` with `from` covering both; only a mix of a real state
   constraint and an unconstrained disjunct (like `status == A or bypass`)
   stops being derivable. `and` is unchanged (#521).
+- **Breaking:** `fslc typestate` struct-field state machines are now scoped by
+  field name **and** owning struct type, not field name alone. `EnumLocation::Field`
+  previously carried only the field name, so `enum_expr_location`/`enum_lvalue_location`
+  matched any struct field with that name regardless of which struct declared it;
+  two structs that both declare a same-named field backed by the same enum type
+  (e.g. `struct Order { status: St }` and `struct Ticket { status: St }`) had each
+  entity's report and `--ts` output absorb the other's transitions — a method
+  emitted against the wrong host type. The same field-name-only matching also let
+  a whole-struct-literal reassignment (`ticket = Ticket { status: Closed }`, as
+  opposed to `ticket.status = Closed`) leak into an unrelated same-named-field
+  entity's report, up to fabricating a `derivable` transition it never had.
+  Field accesses/writes and struct literals now carry the public Kernel `named`
+  type of their base/own declared type (already present on every public Kernel
+  v1 expression/lvalue/struct-literal node), and a struct-field location matches
+  only when the field name and that owner type both agree. Two entities with the
+  same field name and different owning structs now stay fully independent in the
+  JSON report and in `--ts`; an entity with multiple actions over its own field
+  still aggregates into one machine, unchanged (#520).
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false

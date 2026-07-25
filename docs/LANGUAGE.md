@@ -2619,8 +2619,10 @@ is under [`examples/validation/`](https://github.com/ymm-oss/fsl/tree/main/examp
 ## 16. Promotion judgment to ghost types (typestate)
 
 `fslc typestate <file.fsl> [--ts]` decides how soundly the state machine of a
-design spec (enum-valued struct fields / state variables / `Option<_>` slots)
-can be mapped to the host language's typestate (ghost types). It classifies each
+design spec (enum-valued struct fields, scoped by field name **and** owning
+struct type so two structs with a same-named field remain independent
+machines / state variables / `Option<_>` slots) can be mapped to the host
+language's typestate (ghost types). It classifies each
 `(entity, action)` as `derivable` (the from-state is the entity's own local
 guard — a compound guard's from-state is what the **whole** formula implies:
 `or` is a union of what each disjunct implies, but only when every disjunct
