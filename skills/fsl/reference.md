@@ -1150,8 +1150,15 @@ positive form. Raw JSON is demoted to a collapsed appendix. `--impl-log
 replay **error** (missing file, malformed JSON, wrong-spec trace,
 schema-invalid trace) fails the whole `ledger` command through the standard
 error envelope and exit code, the same as `--evidence`, rather than rendering
-a ledger with the implementation-log row silently missing. See
-`docs/DESIGN-ledger.md`.
+a ledger with the implementation-log row silently missing. A **failing**
+`--evidence` source (a definitive nonconformant/mismatch/unsupported verdict,
+not a verdict-less gate failure) adds a 🔴 要確認 finding for every
+requirement it attaches to — its own root `requirements`/`requirement.id`, or
+a `requirement.id` nested inside a `findings`/`checks` array item — or a
+spec-level（仕様全体）finding when it fails with no attribution at all; it
+never silently renders green while failing evidence sits unread in the
+appendix, and never changes assurance class (that stays orthogonal to
+verdict). See `docs/DESIGN-ledger.md`.
 
 Digest-bound approvals (issue #190) are separate from assurance class and from
 the ledger's empty human-decision checkbox. `approval create` must be run from a

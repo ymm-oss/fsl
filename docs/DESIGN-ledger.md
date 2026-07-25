@@ -31,6 +31,18 @@ reads as "guarantees nothing".
   `--evidence` already fails closed on an unreadable evidence file.
 - The built `spec` — the requirement registry (every `requirement` id + text) and
   `control` governance (owner / severity) when present.
+- `--evidence <result.json>`... (repeatable) — external producer envelopes fold
+  into the assurance-class column (`docs/DESIGN-assurance-classes.md`), but a
+  **failing** source (a definitive `nonconformant`/`replay_nonconformant`/
+  `observed_mismatch`/`evidence_failed`/`statistically_unsupported` verdict,
+  not a verdict-less gate failure like `dataset_invalid`) also adds a 🔴 要確認
+  finding: one per requirement id it attaches to, recursively — its own root
+  `requirements`/`requirement.id`, or a `requirement.id` nested inside a
+  `findings`/`checks` array item — or a spec-level（仕様全体）finding when it
+  fails with no requirement attribution at all (issue #508). A failing source
+  never lowers or removes an independently proven requirement's assurance
+  class; class (method strength) and verdict (pass/fail) stay orthogonal, so
+  the finding is additive only.
 
 ## CLI contract
 
