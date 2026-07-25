@@ -6,6 +6,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- `rust/fslc/tests/testgen_contract.rs`'s
+  `symlink_source_name_and_canonical_pytest_path_remain_distinct` no longer
+  panics with `create output-parent symlink: AlreadyExists` on a repeated
+  local run whose previous invocation was interrupted before its own
+  trailing cleanup ran: the fixture directory and both symlinks it creates
+  now live under a fresh, uniquely named scratch directory (same idiom as
+  `rust/fslc/tests/chain_cli.rs`'s `scratch_dir`) instead of a fixed, reused
+  path, so there is nothing left over to collide with on the next run
+  regardless of how the previous one ended (#539).
 - `relation A -> B` state is now usable end to end in the native symbolic
   verifier: `r = Set {}` types and evaluates as the empty relation (both
   `fslc check` and the concrete Monitor previously rejected or mistyped it),
