@@ -110,8 +110,8 @@ pub use document_render::{
     AppliedApproval, AppliedApprovals, RenderedDocument, render_requirements_document,
 };
 pub use domain::{
-    analyze_domain, check_domain, domain_adapter_files, domain_kernel_source, domain_scaffold,
-    domain_scaffold_metadata,
+    analyze_domain, assumptions as domain_assumptions, check_domain, domain_adapter_files,
+    domain_kernel_source, domain_scaffold, domain_scaffold_metadata,
 };
 pub use html::render_html_report;
 pub use ledger::{render_ledger, render_ledger_with_approvals};

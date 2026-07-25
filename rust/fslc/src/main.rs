@@ -6704,6 +6704,119 @@ fn run_domain_generate(
     wrap_specialized(result)
 }
 
+/// Coerce a runtime-log JSON scalar to the finite integer domain that
+/// `DOMAIN-ASSUME-FINITE-DOMAIN-MODEL` models domain IDs and correlation
+/// values as, mirroring the frozen Python reference's `_coerce_int`
+/// (`src/fslc/domain_replay.py`): best-effort, defaulting to 0 rather than
+/// rejecting the log entry outright.
+#[allow(clippy::cast_possible_truncation)]
+fn domain_replay_coerce_int(value: &Value) -> FslValue {
+    let parsed = match value {
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_f64().map(|value| value as i64)),
+        Value::String(text) => text.trim().parse::<i64>().ok(),
+        Value::Bool(flag) => Some(i64::from(*flag)),
+        _ => None,
+    };
+    FslValue::Int(parsed.unwrap_or(0))
+}
+
+fn domain_replay_params(
+    entry: &Map<String, Value>,
+) -> std::collections::BTreeMap<String, FslValue> {
+    entry
+        .get("params")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .map(|(key, value)| (key.clone(), domain_replay_coerce_int(value)))
+        .collect()
+}
+
+/// `entry.get("correlation_id")`, falling back to `params.correlation_id`,
+/// stringified — mirrors `_correlation_value` in the Python reference.
+fn domain_replay_correlation_value(entry: &Map<String, Value>) -> Option<String> {
+    let value = entry.get("correlation_id").cloned().or_else(|| {
+        entry
+            .get("params")
+            .and_then(Value::as_object)
+            .and_then(|params| params.get("correlation_id"))
+            .cloned()
+    })?;
+    Some(match value {
+        Value::String(text) => text,
+        Value::Number(number) => number.to_string(),
+        Value::Bool(flag) => flag.to_string(),
+        other => other.to_string(),
+    })
+}
+
+/// The event-name field of an effect's `correlation_id Event.field` clause,
+/// i.e. the action parameter that carries the correlation value. Mirrors
+/// `_correlation_field` in the Python reference: it operates on the rendered
+/// `Event.field` source text rather than the parsed expression, so it needs
+/// no access to `fsl-core`'s private domain-lowering resolver.
+fn domain_replay_correlation_field(effect: &fsl_syntax::DomainEffect) -> Option<String> {
+    let rendered = effect.correlation_id.as_ref()?.render_source();
+    Some(match rendered.rsplit_once('.') {
+        Some((_, field)) => field.to_owned(),
+        None => rendered,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn domain_replay_finding(
+    kind: &str,
+    domain: &str,
+    step_index: usize,
+    failed_rule: &str,
+    witness: &Value,
+    repair: &[&str],
+    effect: Option<&str>,
+) -> Value {
+    let mut finding = json!({
+        "schema_version":"fsl-domain-finding.v0",
+        "fsl":"fsl-domain-effect.v0",
+        "result":"violated",
+        "kind":kind,
+        "severity":"error",
+        "domain":domain,
+        "failed_rule":failed_rule,
+        "guarantee_kind":"runtime_observed",
+        "evidence":{"kind":"runtime_replay","formal_proof":false,"step_index":step_index},
+        "witness":witness,
+        "repair_candidates":repair.iter().map(|text| json!({"kind":"implementation_or_model_change","weakens_spec":false,"description":text})).collect::<Vec<_>>(),
+        "assumptions":[],
+    });
+    if let Some(effect) = effect
+        && let Value::Object(object) = &mut finding
+    {
+        object.insert("effect".to_owned(), json!(effect));
+    }
+    finding
+}
+
+/// Step a lowered domain/effect action (`{aggregate}_{command}` or
+/// `{effect}_complete_{outcome}`) against the concrete Monitor. Returns
+/// `Ok(true)` when the model accepted the step, `Ok(false)` when the action
+/// exists but was rejected (unsatisfied guard, partial op, or an unknown
+/// action name — the model has no such transition at all), and never an
+/// `Err`: an evaluation failure is itself evidence the log does not conform,
+/// not an internal error, so it folds into "rejected" rather than aborting
+/// the whole replay (fail-closed, not fail-crash).
+fn domain_replay_step(
+    monitor: &mut fsl_runtime::Monitor,
+    action_name: &str,
+    params: &std::collections::BTreeMap<String, FslValue>,
+) -> bool {
+    match monitor.attempt(action_name, params) {
+        Ok(stepped) => stepped.violation.is_none(),
+        Err(_) => false,
+    }
+}
+
+#[allow(clippy::too_many_lines)]
 fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
     let domain = match parse_domain_document(path) {
         Ok(domain) => domain,
@@ -6713,50 +6826,266 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
         Ok(events) => events,
         Err(error) => return (error_output("parse", &error), 2),
     };
-    let mut pending = std::collections::BTreeSet::new();
-    let mut observed = std::collections::BTreeSet::new();
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let mut monitor = match fsl_runtime::Monitor::new(model.clone()) {
+        Ok(monitor) => monitor,
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+
+    let mut pending: std::collections::BTreeSet<(String, String)> =
+        std::collections::BTreeSet::new();
+    let mut completed: std::collections::BTreeSet<(String, String)> =
+        std::collections::BTreeSet::new();
+    let mut observed: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut findings = Vec::new();
     let mut steps = 0_usize;
+    let name = domain.name.as_str();
+
     for (index, event) in events.iter().enumerate() {
-        match event.get("event").and_then(Value::as_str) {
-            Some("domain_event") => {
-                if let Some(name) = event.get("name").and_then(Value::as_str) {
-                    observed.insert(name.to_owned());
-                }
+        let Some(entry) = event.as_object() else {
+            findings.push(domain_replay_finding(
+                "unknown_runtime_event_kind",
+                name,
+                index,
+                "runtime_log_event_kind_supported",
+                &json!({"log":event}),
+                &["use event kind command, domain_event, effect_request, or effect_completion"],
+                None,
+            ));
+            continue;
+        };
+        let kind = entry
+            .get("event")
+            .and_then(Value::as_str)
+            .or_else(|| entry.get("kind").and_then(Value::as_str));
+        match kind {
+            Some("command") => {
+                let aggregate_name = entry.get("aggregate").and_then(Value::as_str);
+                let command_name = entry.get("command").and_then(Value::as_str);
+                let action_name = aggregate_name.zip(command_name).and_then(|(a, c)| {
+                    let aggregate = domain.aggregates.iter().find(|agg| agg.name == a)?;
+                    aggregate
+                        .commands
+                        .iter()
+                        .any(|command| command.name == c)
+                        .then(|| format!("{}_{}", snake_case(a), snake_case(c)))
+                });
+                let params = domain_replay_params(entry);
+                let ok = action_name
+                    .as_deref()
+                    .is_some_and(|action| domain_replay_step(&mut monitor, action, &params));
                 steps += 1;
+                if !ok {
+                    findings.push(domain_replay_finding(
+                        "command_rejected_by_model",
+                        name,
+                        index,
+                        "runtime_command_must_be_enabled_by_domain_model",
+                        &json!({"log":event}),
+                        &["change the implementation command path or update the FSL decide/evolve model"],
+                        None,
+                    ));
+                }
+            }
+            Some("domain_event") => {
+                let event_name = entry
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .or_else(|| entry.get("domain_event").and_then(Value::as_str));
+                let declared = event_name.is_some_and(|event_name| {
+                    domain
+                        .aggregates
+                        .iter()
+                        .any(|aggregate| aggregate.events.iter().any(|e| e.name == event_name))
+                });
+                if declared {
+                    observed.insert(event_name.unwrap_or_default().to_owned());
+                } else {
+                    findings.push(domain_replay_finding(
+                        "unknown_domain_event",
+                        name,
+                        index,
+                        "runtime_event_declared_in_domain",
+                        &json!({"event":event_name}),
+                        &[&format!(
+                            "declare event {} in an aggregate or fix the runtime log",
+                            event_name.unwrap_or_default()
+                        )],
+                        None,
+                    ));
+                }
             }
             Some("effect_request") => {
-                if let (Some(effect), Some(correlation)) = (
-                    event.get("effect").and_then(Value::as_str),
-                    event.get("correlation_id").and_then(Value::as_str),
-                ) {
-                    pending.insert((effect.to_owned(), correlation.to_owned()));
-                }
+                let effect_name = entry.get("effect").and_then(Value::as_str);
+                let Some(effect) = effect_name
+                    .and_then(|name| domain.effects.iter().find(|effect| effect.name == name))
+                else {
+                    findings.push(domain_replay_finding(
+                        "unknown_effect",
+                        name,
+                        index,
+                        "runtime_effect_declared_in_domain",
+                        &json!({"effect":effect_name}),
+                        &["declare the effect or fix the runtime log"],
+                        None,
+                    ));
+                    continue;
+                };
+                let Some(correlation) = domain_replay_correlation_value(entry) else {
+                    findings.push(domain_replay_finding(
+                        "uncorrelated_async_completion",
+                        name,
+                        index,
+                        "effect_request_has_correlation_id",
+                        &json!({"log":event}),
+                        &[&format!(
+                            "include correlation_id in effect_request for {}",
+                            effect.name
+                        )],
+                        Some(&effect.name),
+                    ));
+                    continue;
+                };
+                pending.insert((effect.name.clone(), correlation));
             }
             Some("effect_completion") => {
-                let effect = event
-                    .get("effect")
+                let effect_name = entry.get("effect").and_then(Value::as_str);
+                let Some(effect) = effect_name
+                    .and_then(|name| domain.effects.iter().find(|effect| effect.name == name))
+                else {
+                    findings.push(domain_replay_finding(
+                        "unknown_effect",
+                        name,
+                        index,
+                        "runtime_effect_declared_in_domain",
+                        &json!({"effect":effect_name}),
+                        &["declare the effect or fix the runtime log"],
+                        None,
+                    ));
+                    continue;
+                };
+                let event_name = entry
+                    .get("name")
                     .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let correlation = event
-                    .get("correlation_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                if let Some(name) = event.get("name").and_then(Value::as_str) {
-                    observed.insert(name.to_owned());
+                    .or_else(|| entry.get("domain_event").and_then(Value::as_str))
+                    .or_else(|| entry.get("outcome").and_then(Value::as_str));
+                if !event_name.is_some_and(|event_name| {
+                    effect
+                        .outcome_events()
+                        .iter()
+                        .any(|outcome| **outcome == event_name)
+                }) {
+                    findings.push(domain_replay_finding(
+                        "effect_completion_event_not_declared",
+                        name,
+                        index,
+                        "effect_completion_uses_declared_outcome",
+                        &json!({"effect":effect.name,"event":event_name}),
+                        &[&format!(
+                            "add {} to effect {} outcomes or fix the runtime log",
+                            event_name.unwrap_or_default(),
+                            effect.name
+                        )],
+                        Some(&effect.name),
+                    ));
+                    continue;
                 }
-                if !pending.remove(&(effect.to_owned(), correlation.to_owned())) {
-                    findings.push(json!({"schema_version":"fsl-domain-finding.v0","fsl":"fsl-domain-effect.v0","result":"violated","kind":"uncorrelated_async_completion","severity":"error","domain":domain.name,"failed_rule":"async_completion_correlated","guarantee_kind":"runtime_observed","witness":{"event_index":index,"effect":effect,"correlation_id":correlation}}));
+                let event_name = event_name.unwrap_or_default();
+                let Some(correlation) = domain_replay_correlation_value(entry) else {
+                    findings.push(domain_replay_finding(
+                        "uncorrelated_async_completion",
+                        name,
+                        index,
+                        "effect_completion_has_correlation_id",
+                        &json!({"log":event}),
+                        &[&format!(
+                            "include correlation_id in effect_completion for {}",
+                            effect.name
+                        )],
+                        Some(&effect.name),
+                    ));
+                    continue;
+                };
+                let key = (effect.name.clone(), correlation.clone());
+                if !pending.contains(&key) {
+                    findings.push(domain_replay_finding(
+                        "uncorrelated_async_completion",
+                        name,
+                        index,
+                        "completion_requires_prior_request",
+                        &json!({"effect":effect.name,"correlation_id":correlation}),
+                        &["record effect_request before completion or fix correlation_id mapping"],
+                        Some(&effect.name),
+                    ));
                 }
+                if effect.irreversible && completed.contains(&key) {
+                    findings.push(domain_replay_finding(
+                        "duplicate_irreversible_effect_commit",
+                        name,
+                        index,
+                        "irreversible_effect_completes_at_most_once_per_correlation",
+                        &json!({"effect":effect.name,"correlation_id":correlation}),
+                        &["deduplicate completion handling by idempotency_key/correlation_id"],
+                        Some(&effect.name),
+                    ));
+                }
+                let action_name = format!(
+                    "{}_complete_{}",
+                    snake_case(&effect.name),
+                    snake_case(event_name)
+                );
+                let mut params = domain_replay_params(entry);
+                if let Some(field) = domain_replay_correlation_field(effect) {
+                    params
+                        .entry(field)
+                        .or_insert_with(|| domain_replay_coerce_int(&json!(correlation)));
+                }
+                let ok = domain_replay_step(&mut monitor, &action_name, &params);
                 steps += 1;
+                if !ok {
+                    findings.push(domain_replay_finding(
+                        "effect_completion_rejected_by_model",
+                        name,
+                        index,
+                        "effect_completion_matches_pending_lifecycle",
+                        &json!({"log":event}),
+                        &["ensure request and completion ordering matches the fsl-effect lifecycle"],
+                        Some(&effect.name),
+                    ));
+                }
+                completed.insert(key.clone());
+                pending.remove(&key);
+                observed.insert(event_name.to_owned());
             }
-            Some("command") => steps += 1,
-            _ => {}
+            _ => {
+                findings.push(domain_replay_finding(
+                    "unknown_runtime_event_kind",
+                    name,
+                    index,
+                    "runtime_log_event_kind_supported",
+                    &json!({"log":event}),
+                    &["use event kind command, domain_event, effect_request, or effect_completion"],
+                    None,
+                ));
+            }
         }
     }
-    wrap_specialized(
-        json!({"result":if findings.is_empty(){"conformance_checked"}else{"nonconformant"},"dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"guarantee_kind":"runtime_observed","steps_checked":steps,"events_observed":observed,"pending_effects":pending.iter().map(|(effect,correlation)|json!({"effect":effect,"correlation_id":correlation})).collect::<Vec<_>>(),"findings":findings,"final_state":{},"assumptions":[]}),
-    )
+    wrap_specialized(json!({
+        "result":if findings.is_empty(){"conformance_checked"}else{"nonconformant"},
+        "dialect":"fsl-domain-effect.v0",
+        "finding_schema_version":"fsl-domain-finding.v0",
+        "domain":domain.name,
+        "guarantee_kind":"runtime_observed",
+        "steps_checked":steps,
+        "events_observed":observed,
+        "pending_effects":pending.iter().map(|(effect,correlation)|json!({"effect":effect,"correlation_id":correlation})).collect::<Vec<_>>(),
+        "findings":findings,
+        "final_state":fslc_rust::state_json(&monitor.state),
+        "assumptions":fsl_tools::domain_assumptions(&domain),
+    }))
 }
 
 #[allow(clippy::too_many_lines)]

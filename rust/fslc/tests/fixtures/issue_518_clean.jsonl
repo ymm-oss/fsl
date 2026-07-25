@@ -1,0 +1,4 @@
+{"event":"command","aggregate":"Msg","command":"SendMsg","params":{"ref_id":"r1"}}
+{"event":"domain_event","aggregate":"Msg","name":"MsgSent","params":{"ref_id":"r1"}}
+{"event":"effect_request","effect":"Deliver","correlation_id":"r1"}
+{"event":"effect_completion","effect":"Deliver","name":"Delivered","correlation_id":"r1","params":{"ref_id":"r1"}}

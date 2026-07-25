@@ -5,7 +5,12 @@ use serde_json::{Value, json};
 
 use crate::domain_naming::snake;
 
-fn assumptions(domain: &DomainSpec) -> Vec<Value> {
+/// The standing `fsl-domain` assumptions for a domain document. Exposed for
+/// `fslc domain replay`'s wiring, which needs the same finite-domain-model /
+/// generated-scaffold / saga-observed-history set that `check`/`analyze`
+/// already compute here, rather than a duplicated copy.
+#[must_use]
+pub fn assumptions(domain: &DomainSpec) -> Vec<Value> {
     let mut values = vec![
         json!({"id":"DOMAIN-ASSUME-FINITE-DOMAIN-MODEL","text":"domain IDs and undeclared scalar input types are modeled as finite 0..1 ranges unless declared explicitly"}),
         json!({"id":"DOMAIN-ASSUME-GENERATED-SCAFFOLD","text":"generated Functional DDD code is an implementation scaffold; runtime conformance still requires an adapter/replay evidence boundary"}),
