@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: Apache-2.0
+
+agent Parent {
+  context [Ticket];
+  tools [Draft, CheckPolicy, RefundPayment];
+  authority {
+    may_execute [Draft, CheckPolicy];
+    requires_human_approval [RefundPayment];
+  }
+
+  agent Draft {
+    grant authority [Draft];
+    grant context [Ticket];
+    tools [Draft];
+    authority { may_execute [Draft]; }
+  }
+
+  agent Policy {
+    grant authority [CheckPolicy];
+    grant context [Ticket];
+    tools [CheckPolicy];
+    authority { may_execute [CheckPolicy]; }
+  }
+
+  agent Payment {
+    grant authority [RefundPayment];
+    grant context [Ticket];
+    tool RefundPayment irreversible {
+      schema RefundPaymentV1;
+    }
+    authority { requires_human_approval [RefundPayment]; }
+  }
+
+  review_gate Policy;
+  orchestration {
+    Draft -> Payment;
+  }
+}

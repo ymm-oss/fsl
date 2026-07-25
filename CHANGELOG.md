@@ -222,6 +222,25 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   a divisor that can reach zero is still reported as `partial_op` (§2.2 is
   unchanged); Euclidean negative-number division/modulo semantics were
   already correct and are unaffected (#477).
+- The recursive `agent` dialect (`docs/LANGUAGE.md` §13.6) now has a real grammar and structural
+  analyzer in native, matching the frozen reference's `src/fslc/ai_parser.py`/`ai_agent.py` exactly
+  (confirmed by byte-identical JSON, including `agent_ir`/`graph_summary`, on
+  `examples/ai/recursive_support_agent.fsl` and every documented finding-kind fixture). Previously
+  `rust/fsl-syntax`'s `parse_agent` only balanced braces and discarded the entire body, so any token
+  soup that lexed cleanly parsed as an empty agent and `fslc ai check` on a recursive `agent` document
+  returned `"expected an ai_component document"` (native rejected the dialect entirely) while `fslc
+  check` unconditionally reported the hardcoded constant `agent_analysis_result: "agent_analyzed"`
+  with no analysis behind it — a confidently green false negative on AI agent authority-delegation
+  safety, and native's own CLI contract (`rust/fslc/cli-contract.json`) already advertised "check an
+  ai_component hard contract or recursive agent structure" as a capability it did not have. A `grant
+  authority`/`grant context` that exceeds the immediate parent's declared boundary is now a check-time
+  `kind:"semantics"` error from `ai check` and `check` alike; the six documented
+  `agent_structural_violation` finding kinds (`child_authority_exceeds_parent_authority`,
+  `child_context_exceeds_parent_context`, `irreversible_operation_without_human_approval_path`,
+  `visibility_leak_across_sibling_agents`, `low_trust_agent_path_to_high_authority_tool`,
+  `policy_review_bypass_in_orchestration`) are all computed by `fslc ai check`. `fslc verify`'s
+  rejection of agent documents and `fslc fmt`'s refusal to reformat a well-formed agent body (no
+  native pretty-printer exists yet) are both unchanged (#468).
 - Native `ai_component` lowering (`fslc check`/`verify`/`ai check`) no longer collapses to a
   one-boolean catalog sentinel with an unsatisfiable no-op action. It now generates the documented
   `Tool` enum, `human_approved`/`tool_executed`/`tool_suggested: Map<Tool, Bool>` and

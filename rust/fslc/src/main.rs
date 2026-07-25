@@ -5171,13 +5171,27 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
                 surface: fsl_syntax::SurfaceDocument::Agent(agent),
                 ..
             }) => {
+                // `check` on an agent document is deliberately lenient: the
+                // top-level `result` stays "ok" even when the structural
+                // analysis finds a violation (matching the frozen
+                // reference); `fslc ai check` is the actual gate (exit 1 on
+                // `agent_analysis_result: "violated"`). A grant-boundary or
+                // other tree-validation failure is still a hard error here.
+                let analysis = match fsl_tools::analyze_ai_agent(&agent) {
+                    Ok(analysis) => analysis,
+                    Err(error) => return (agent_error_output(&error), 2),
+                };
+                let analysis_result = analysis
+                    .get("result")
+                    .cloned()
+                    .unwrap_or_else(|| json!("agent_analyzed"));
                 let mut output = envelope();
                 output.insert("result".to_owned(), json!("ok"));
                 output.insert("spec".to_owned(), json!(agent.name));
                 output.insert("dialect".to_owned(), json!("fsl-ai-agent.v0"));
                 output.insert("warnings".to_owned(), json!([]));
-                output.insert("ai_analysis_result".to_owned(), json!("agent_analyzed"));
-                output.insert("agent_analysis_result".to_owned(), json!("agent_analyzed"));
+                output.insert("ai_analysis_result".to_owned(), analysis_result.clone());
+                output.insert("agent_analysis_result".to_owned(), analysis_result);
                 return (Value::Object(output), 0);
             }
             Ok(_) => {}
@@ -5812,25 +5826,49 @@ fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
     if fslc_rust::frontend_output::is_ai_project(&source) {
         return run_ai_project_check(&source);
     }
-    let component = match parse_surface_document(path) {
-        Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => component,
-        Ok(_) => {
-            return (
-                semantic_error_output("expected an ai_component document"),
-                2,
-            );
+    match parse_surface_document(path) {
+        Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => {
+            let (kernel, status) =
+                run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
+            if status == 2 {
+                return (kernel, status);
+            }
+            // `check_ai` needs the unprojected verify envelope (fields like
+            // `trace` that `stable_kernel_projection` omits) to translate a
+            // kernel invariant violation into a finding; it applies its own
+            // published-kernel projection to the `kernel` field of its own
+            // output.
+            wrap_specialized(fsl_tools::check_ai(&component, &kernel))
         }
-        Err(error) => return (semantic_error_output(&error), 2),
-    };
-    let (kernel, status) = run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
-    if status == 2 {
-        return (kernel, status);
+        Ok(fsl_syntax::SurfaceDocument::Agent(agent)) => {
+            match fsl_tools::analyze_ai_agent(&agent) {
+                Ok(analysis) => wrap_specialized(analysis),
+                Err(error) => (agent_error_output(&error), 2),
+            }
+        }
+        Ok(_) => (
+            semantic_error_output("expected an ai_component or agent document"),
+            2,
+        ),
+        Err(error) => (semantic_error_output(&error), 2),
     }
-    // `check_ai` needs the unprojected verify envelope (fields like `trace`
-    // that `stable_kernel_projection` omits) to translate a kernel invariant
-    // violation into a finding; it applies its own published-kernel
-    // projection to the `kernel` field of its own output.
-    wrap_specialized(fsl_tools::check_ai(&component, &kernel))
+}
+
+fn agent_error_output(error: &fsl_tools::AgentError) -> Value {
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("error"));
+    output.insert("kind".to_owned(), json!("semantics"));
+    output.insert("message".to_owned(), json!(error.message));
+    if let Some(loc) = error.loc {
+        output.insert(
+            "loc".to_owned(),
+            json!({"line": loc.line, "column": loc.column}),
+        );
+    }
+    if let Some(hint) = &error.hint {
+        output.insert("hint".to_owned(), json!(hint));
+    }
+    Value::Object(output)
 }
 
 fn read_json_events(path: &Path) -> Result<Vec<Value>, String> {

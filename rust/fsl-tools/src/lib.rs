@@ -2,6 +2,7 @@
 
 //! Native report generators and specialized FSL dialect engines.
 
+mod agent;
 mod ai;
 mod analysis;
 mod analysis_export;
@@ -38,6 +39,7 @@ mod testgen;
 mod typestate;
 mod undecided;
 
+pub use agent::{AgentError, analyze_ai_agent};
 pub use ai::{check_ai, replay_ai};
 pub use analysis::{
     analyze_model, analyze_tsg, build_tsg, conservation_review_findings, review_finding,

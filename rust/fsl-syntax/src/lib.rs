@@ -24,7 +24,8 @@ mod surface;
 mod syntax_expr;
 
 pub use ai::{
-    AiAuthority, AiAuthorityRule, AiCheckRule, AiComponent, AiFallback, AiHardCheck, AiLoc, AiTool,
+    AiAgentContract, AiAgentGrant, AiAgentOutput, AiAuthority, AiAuthorityRule, AiCheckRule,
+    AiComponent, AiDelegationEdge, AiFailurePolicy, AiFallback, AiHardCheck, AiLoc, AiTool,
     parse_ai_component,
 };
 pub use annotation::{
