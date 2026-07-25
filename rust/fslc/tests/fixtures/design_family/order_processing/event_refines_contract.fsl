@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement EventRefinesOrderContract {
+  impl EventDrivenOrder
+  abs OrderContract
+  map phase = phase
+  action enqueue() -> stutter
+  action finish() -> finish()
+  action cancel() -> cancel()
+}

@@ -41,6 +41,7 @@
 | [`DESIGN-temporal.md`](DESIGN-temporal.md) | leadsTo, weak fairness (lasso counterexamples), and respond scenarios |
 | [`DESIGN-refinement.md`](DESIGN-refinement.md) | Refinement checking (mapping files, conditional expressions, preserve progress) |
 | [`DESIGN-semantic-diff.md`](DESIGN-semantic-diff.md) | `fslc diff` bounded semantic comparison (bidirectional refinement, invariant implication, forbidden replay, scope and gate contract) |
+| [`DESIGN-design-family.md`](DESIGN-design-family.md) | Accepted Phase 0 design-family decision: closed sidecar catalog, independent variant eligibility, directed bounded comparison, provenance/digest gaps, dogfood controls, and no native language/CLI commitment (#427) |
 | [`DESIGN-diff-git.md`](DESIGN-diff-git.md) | Git/CI adapter for revision-consistent full-tree materialization and changed-spec batch semantic diff |
 | [`DESIGN-approval.md`](DESIGN-approval.md) | Digest-bound human approval records, rendering drift checks, and approved-baseline semantic diff |
 | [`DESIGN-compose.md`](DESIGN-compose.md) | Spec composition (namespaces, synchronized actions, internal) |

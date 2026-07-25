@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement EventToSynchronous {
+  impl EventDrivenOrder
+  abs SynchronousOrder
+  map phase = phase
+  map committed = phase == 1
+  action enqueue() -> stutter
+  action finish() -> finish()
+  action cancel() -> cancel()
+}

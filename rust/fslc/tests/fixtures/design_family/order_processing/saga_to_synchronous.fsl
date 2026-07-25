@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement SagaToSynchronous {
+  impl SagaOrder
+  abs SynchronousOrder
+  map phase = phase
+  map committed = phase == 1
+  action reserve() -> stutter
+  action charge() -> stutter
+  action finish() -> finish()
+  action cancel() -> cancel()
+}

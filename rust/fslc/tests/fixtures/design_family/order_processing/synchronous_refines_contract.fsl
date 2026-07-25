@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement SynchronousRefinesOrderContract {
+  impl SynchronousOrder
+  abs OrderContract
+  map phase = phase
+  action finish() -> finish()
+  action cancel() -> cancel()
+}

@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement SnapshotLogToCrud {
+  impl SnapshotLogPersistence
+  abs CrudPersistence
+  map value = value
+  map writes = pending.size()
+  action write(v) -> write(v)
+  action take_snapshot() -> stutter
+}

@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+// MODEL-ORDER-004: Reservation and charging are explicit saga coordination steps.
+spec SagaOrder {
+  type Phase = 0..2
+  state { phase: Phase, reserved: Bool, charged: Bool }
+  init { phase = 0  reserved = false  charged = false }
+
+  action reserve() { requires phase == 0  requires not reserved  reserved = true }
+  action charge() { requires phase == 0  requires reserved  charged = true }
+  action finish() { requires phase == 0  requires charged  phase = 1 }
+  action cancel() { requires phase == 0  phase = 2  reserved = false  charged = false }
+
+  invariant ChargeNeedsReservation { charged => reserved }
+  reachable CanFinish { phase == 1 }
+  reachable CanCancel { phase == 2 }
+}

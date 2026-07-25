@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// MODEL-PERSIST-002: CRUD stores only the latest value and a bounded write count.
+spec CrudPersistence {
+  type Value = 0..2
+  type Count = 0..4
+  state { value: Value, writes: Count }
+  init { value = 0  writes = 0 }
+  action write(v: Value) { requires writes < 4  value = v  writes = writes + 1 }
+  reachable CanChange { value == 2 }
+}

@@ -6,6 +6,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Added an evidence-gated `fsl-design-family.v0` sidecar prototype with three
+  maintained three-variant dogfood families, native check/verify/refine/diff
+  orchestration tests, raw producer and deterministic digest controls, and an
+  accepted agent/workflow-only decision without new language or CLI semantics
+  (#427).
 - Refinement mappings can declare a source-total `enum abstraction` and invoke
   it with `abstract(name, expr)` for nominal many-to-one mappings. Repeated and
   unused targets are allowed, while missing, duplicate, unknown, or

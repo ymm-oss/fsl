@@ -1,0 +1,58 @@
+{
+  "schema_version": "fsl-design-family.v0",
+  "family_id": "concurrent_ownership",
+  "contract": {
+    "source": "contract.fsl",
+    "symbol": "OwnershipContract",
+    "inputs": ["contract.fsl"]
+  },
+  "verification": { "engine": "bmc", "depth": 4 },
+  "variants": [
+    {
+      "id": "shared_lock",
+      "source": "shared_lock.fsl",
+      "symbol": "SharedLockOwnership",
+      "refinement": "shared_lock_refines_contract.fsl",
+      "inputs": ["shared_lock.fsl", "shared_lock_refines_contract.fsl"]
+    },
+    {
+      "id": "actor",
+      "source": "actor.fsl",
+      "symbol": "ActorOwnership",
+      "refinement": "actor_refines_contract.fsl",
+      "inputs": ["actor.fsl", "actor_refines_contract.fsl"]
+    },
+    {
+      "id": "partitioned_queue",
+      "source": "partitioned_queue.fsl",
+      "symbol": "PartitionedQueueOwnership",
+      "refinement": "partitioned_queue_refines_contract.fsl",
+      "inputs": ["partitioned_queue.fsl", "partitioned_queue_refines_contract.fsl"]
+    }
+  ],
+  "comparisons": [
+    {
+      "id": "shared_lock__to__actor",
+      "old": "shared_lock",
+      "new": "actor",
+      "scope_owner": "new",
+      "depth": 4,
+      "mapping": "actor_to_shared_lock.fsl",
+      "mapping_direction": "new_to_old"
+    },
+    {
+      "id": "shared_lock__to__partitioned_queue",
+      "old": "shared_lock",
+      "new": "partitioned_queue",
+      "scope_owner": "new",
+      "depth": 4,
+      "mapping": "partitioned_queue_to_shared_lock.fsl",
+      "mapping_direction": "new_to_old"
+    }
+  ],
+  "bundle_control": {
+    "entry": "bundle_probe.fsl",
+    "dependency": "bundle_dependency.fsl",
+    "inputs": ["bundle_probe.fsl", "bundle_dependency.fsl"]
+  }
+}

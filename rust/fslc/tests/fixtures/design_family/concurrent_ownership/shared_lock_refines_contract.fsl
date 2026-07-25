@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement SharedLockRefinesOwnershipContract {
+  impl SharedLockOwnership
+  abs OwnershipContract
+  map owner = owner
+  action claim(w) -> claim(w)
+  action release(w) -> release(w)
+}

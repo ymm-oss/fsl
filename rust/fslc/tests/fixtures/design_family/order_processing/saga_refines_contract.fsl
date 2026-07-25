@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement SagaRefinesOrderContract {
+  impl SagaOrder
+  abs OrderContract
+  map phase = phase
+  action reserve() -> stutter
+  action charge() -> stutter
+  action finish() -> finish()
+  action cancel() -> cancel()
+}

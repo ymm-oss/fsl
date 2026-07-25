@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement EventLogRefinesPersistenceContract {
+  impl EventLogPersistence
+  abs PersistenceContract
+  map value = value
+  action write(v) -> write(v)
+}

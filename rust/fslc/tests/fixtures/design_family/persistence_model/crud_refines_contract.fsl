@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement CrudRefinesPersistenceContract {
+  impl CrudPersistence
+  abs PersistenceContract
+  map value = value
+  action write(v) -> write(v)
+}

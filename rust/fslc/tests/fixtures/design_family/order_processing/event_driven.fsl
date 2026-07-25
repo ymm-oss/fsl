@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+// MODEL-ORDER-003: Queueing is an independent step before event handling.
+spec EventDrivenOrder {
+  type Phase = 0..2
+  state { phase: Phase, queued: Bool }
+  init { phase = 0  queued = false }
+
+  action enqueue() { requires phase == 0  requires not queued  queued = true }
+  action finish() { requires phase == 0  requires queued  phase = 1  queued = false }
+  action cancel() { requires phase == 0  phase = 2  queued = false }
+
+  invariant QueueOnlyWhilePending { queued => phase == 0 }
+  reachable CanFinish { phase == 1 }
+  reachable CanCancel { phase == 2 }
+}

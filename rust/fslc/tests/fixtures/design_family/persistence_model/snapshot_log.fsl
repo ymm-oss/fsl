@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: Apache-2.0
+// MODEL-PERSIST-004: Snapshotting is an explicit stutter at the logical contract.
+spec SnapshotLogPersistence {
+  const CAP = 4
+  type Value = 0..2
+  state { value: Value, snapshot: Value, pending: Seq<Value, CAP>, dirty: Bool }
+  init { value = 0  snapshot = 0  pending = Seq {}  dirty = false }
+  action write(v: Value) {
+    requires pending.size() < CAP
+    value = v
+    pending = pending.push(v)
+    dirty = true
+  }
+  action take_snapshot() {
+    requires dirty
+    snapshot = value
+    pending = Seq {}
+    dirty = false
+  }
+  invariant CleanSnapshotMatches { not dirty => snapshot == value }
+  reachable CanChange { value == 2 }
+}
