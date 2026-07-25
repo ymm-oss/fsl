@@ -2334,7 +2334,21 @@ pub struct LeadstoResponse {
     pub trace: Vec<TraceStep>,
 }
 
+/// `(found responses, missing (property, binding, triggered) triples)` — see
+/// [`leadsto_response_traces`]. `triggered` is true when the antecedent held
+/// at some visited state (a genuine incomplete response) and false when it
+/// never held within `depth` (nothing was ever pending for that binding);
+/// callers must word the two differently rather than reporting both as "no
+/// response scenario" (issue #526).
+pub type LeadstoResponseTraces = (Vec<LeadstoResponse>, Vec<(String, Bindings, bool)>);
+
 /// Find concrete response examples for each finite `leadsTo` binding.
+///
+/// Also returns every `(property, binding)` with no response witness within
+/// `depth`, tagged with whether its antecedent ever held — scenario
+/// completeness (issue #526) must warn for each such binding individually
+/// rather than collapsing to one warning per property, since a single
+/// witnessed binding would otherwise hide every other binding's gap.
 ///
 /// # Errors
 ///
@@ -2342,9 +2356,9 @@ pub struct LeadstoResponse {
 pub fn leadsto_response_traces(
     model: &KernelModel,
     depth: usize,
-) -> Result<Vec<LeadstoResponse>, RuntimeError> {
+) -> Result<LeadstoResponseTraces, RuntimeError> {
     if model.leadstos.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
     let initial = Monitor::new(model.clone())?;
     let bindings = model
@@ -2365,6 +2379,7 @@ pub fn leadsto_response_traces(
         changes: BTreeMap::new(),
     }];
     let mut responses = BTreeMap::<(String, Bindings), LeadstoResponse>::new();
+    let mut triggered = BTreeSet::<(String, Bindings)>::new();
     let mut queue = VecDeque::from([(initial, initial_trace, 0_usize)]);
     while let Some((monitor, trace, step)) = queue.pop_front() {
         for property in &model.leadstos {
@@ -2375,7 +2390,7 @@ pub fn leadsto_response_traces(
                 }
                 if let Some(pending_at) = response_pending_at(property, binding, &trace, model)? {
                     responses.insert(
-                        key,
+                        key.clone(),
                         LeadstoResponse {
                             property: property.name.clone(),
                             bindings: binding.clone(),
@@ -2384,6 +2399,20 @@ pub fn leadsto_response_traces(
                             trace: trace.clone(),
                         },
                     );
+                    triggered.insert(key);
+                    continue;
+                }
+                if let Some(last) = trace.last() {
+                    let mut probe = binding.clone();
+                    if as_bool(eval(
+                        &property.before,
+                        &last.state,
+                        &mut probe,
+                        model,
+                        None,
+                    )?)? {
+                        triggered.insert(key);
+                    }
                 }
             }
         }
@@ -2406,7 +2435,17 @@ pub fn leadsto_response_traces(
             queue.push_back((child, child_trace, step + 1));
         }
     }
-    Ok(responses.into_values().collect())
+    let missing = bindings
+        .iter()
+        .flat_map(|(name, property_bindings)| {
+            property_bindings.iter().filter_map(|binding| {
+                let key = (name.clone(), binding.clone());
+                (!responses.contains_key(&key))
+                    .then(|| (key.0.clone(), key.1.clone(), triggered.contains(&key)))
+            })
+        })
+        .collect();
+    Ok((responses.into_values().collect(), missing))
 }
 
 fn leadsto_bindings(

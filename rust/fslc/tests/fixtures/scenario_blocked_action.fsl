@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// `bad`'s two `requires` clauses are jointly unsatisfiable, so it is never
+// enabled at any depth (issue #523: `fslc scenarios` must not describe a
+// never-enabled action as "was enabled but no cover trace could be built").
+spec ScenarioBlockedAction {
+  state { x: Int }
+  init { x = 0 }
+
+  action bad() {
+    requires x == 0
+    requires x == 1
+    x = 2
+  }
+
+  action ok() {
+    x = 1
+  }
+
+  invariant Trivial { true }
+}

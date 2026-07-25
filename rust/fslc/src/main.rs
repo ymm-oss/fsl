@@ -4905,6 +4905,7 @@ fn run_scenarios_mode(
     if result.violation.is_some()
         || result.leadsto_violation.is_some()
         || (!allow_unreached && result.reachables.values().any(Option::is_none))
+        || (deadlock_mode == "error" && result.deadlock_step.is_some())
     {
         return run_verify(
             path,
@@ -4938,12 +4939,26 @@ fn run_scenarios_mode(
         .iter()
         .filter(|action| !covers.contains_key(&action.name))
         .map(|action| {
-            json!({
-                "message": format!(
-                    "action '{}' was enabled but no cover trace could be built within depth {depth}",
-                    display(&action.name)
-                ),
-            })
+            if result.action_coverage.get(&action.name) == Some(&false) {
+                // Never enabled (blocked by an unsatisfiable `requires`), not merely
+                // uncovered — say so, matching `fsl_runtime::verification_warnings`'s
+                // wording for the same diagnosis on the verify path.
+                json!({
+                    "message": format!(
+                        "action '{}' is never enabled within depth {depth} — the spec may be vacuous (check its requires clauses)",
+                        display(&action.name)
+                    ),
+                    "hint": fslc_rust::verification_output::coverage_hint(depth),
+                    "blocking_requires": [],
+                })
+            } else {
+                json!({
+                    "message": format!(
+                        "action '{}' was enabled but no cover trace could be built within depth {depth}",
+                        display(&action.name)
+                    ),
+                })
+            }
         }))
         .collect::<Vec<_>>();
     let mut scenarios = Vec::new();
@@ -4970,28 +4985,34 @@ fn run_scenarios_mode(
         }
         scenarios.push(Value::Object(scenario));
     }
-    let responses = match fsl_runtime::leadsto_response_traces(&model, depth) {
-        Ok(responses) => responses,
+    let (responses, missing_responses) = match fsl_runtime::leadsto_response_traces(&model, depth) {
+        Ok(result) => result,
         Err(error) => return (error_output("internal", &error.to_string()), 3),
     };
-    let response_names = responses
-        .iter()
-        .map(|response| response.property.clone())
-        .collect::<std::collections::BTreeSet<_>>();
-    scenario_warnings.extend(
-        model
-            .leadstos
-            .iter()
-            .filter(|property| !response_names.contains(&property.name))
-            .map(|property| {
-                json!({
-                    "message": format!(
-                        "leadsTo {} has no response scenario within depth {depth}",
-                        display(&property.name)
-                    ),
-                })
-            }),
-    );
+    // One warning per (property, binding) with no response witness —
+    // collapsing to one warning per property would hide every binding but
+    // the first with a trace (issue #526). Word the two causes differently:
+    // an antecedent that never held within `depth` is a distinct diagnosis
+    // from one that held but never closed with a response.
+    scenario_warnings.extend(missing_responses.iter().map(|(property, binding, triggered)| {
+        let binding_text = format_bindings(binding);
+        if *triggered {
+            json!({
+                "message": format!(
+                    "leadsTo {} has no response scenario within depth {depth} for binding {{{binding_text}}}",
+                    display(property)
+                ),
+            })
+        } else {
+            json!({
+                "message": format!(
+                    "leadsTo {} binding {{{binding_text}}}: antecedent never holds within depth {depth}",
+                    display(property)
+                ),
+                "hint": "the antecedent is unreachable for this binding within the bound; check the property or increase --depth",
+            })
+        }
+    }));
     for response in responses {
         let mut scenario = scenario_from_trace(&response.trace);
         let mut suffix = String::new();
@@ -5049,6 +5070,10 @@ fn run_scenarios_mode(
         let mut scenario = scenario_from_trace(trace);
         scenario.insert("name".to_owned(), json!("deadlock_terminal"));
         scenario.insert("kind".to_owned(), json!("deadlock"));
+        scenario.insert(
+            "note".to_owned(),
+            json!("after these steps no action is enabled"),
+        );
         scenarios.push(Value::Object(scenario));
     }
     match requirement_trace_scenarios(path, &model) {
@@ -5229,6 +5254,16 @@ fn display_binding(value: &fsl_core::FslValue) -> String {
         fsl_core::FslValue::Enum { member, .. } => member.clone(),
         _ => "value".to_owned(),
     }
+}
+
+/// Renders a quantified-property binding map for a scenario-completeness
+/// warning message (issue #526), e.g. `p=1`.
+fn format_bindings(binding: &fsl_runtime::Bindings) -> String {
+    binding
+        .iter()
+        .map(|(name, value)| format!("{name}={}", display_binding(value)))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// `path` is read for source content (for a literate `.md` input, this is the
