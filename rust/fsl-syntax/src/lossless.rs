@@ -383,7 +383,8 @@ fn refuse_opaque_agent(tree: &LosslessDocument, dialect: &str) -> Result<(), For
         && close > open + 1
     {
         return Err(FormatError::Unsafe {
-            message: "cannot format an opaque agent body without a native semantic grammar"
+            message: "cannot format an agent body: no native pretty-printer exists for the \
+                      recursive agent grammar yet"
                 .to_owned(),
             span: Span {
                 start: tokens[open + 1].span.start,
@@ -999,8 +1000,24 @@ mod tests {
 
     #[test]
     fn nonempty_opaque_agent_body_is_refused() {
+        // Issue #468: `agent` grew a real semantic grammar (previously a
+        // brace-counting stub that accepted any token soup), so a body that
+        // is not valid agent syntax is now rejected at parse time --
+        // matching the frozen reference exactly (both report `kind:"parse"`
+        // at 1:17 for this exact source). `refuse_opaque_agent`'s
+        // `FormatError::Unsafe` heuristic is unreachable for genuinely
+        // invalid syntax; it still refuses well-formed, non-empty agent
+        // bodies, because no native pretty-printer exists for the agent
+        // grammar yet (see the next test).
         let source = "agent Planner { opaque_call() }";
-        let error = format_source(source, FormatEdition::Current).expect_err("opaque body");
+        let error = format_source(source, FormatEdition::Current).expect_err("invalid agent body");
+        assert!(matches!(error, FormatError::Parse(_)));
+    }
+
+    #[test]
+    fn nonempty_well_formed_agent_body_is_still_refused_pending_a_printer() {
+        let source = "agent Planner { model foo; }";
+        let error = format_source(source, FormatEdition::Current).expect_err("no agent printer");
         assert!(matches!(error, FormatError::Unsafe { .. }));
     }
 

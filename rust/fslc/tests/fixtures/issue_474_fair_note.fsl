@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec FairWarningNote {
+  type Id = 0..0
+  state { raised: Bool }
+  init { raised = false }
+  action raise(i: Id) { raised = true }
+  invariant NoteOk { true }
+}

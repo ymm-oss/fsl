@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec FairWarningCore {
+  type Id = 0..0
+  state { done: Bool }
+  init { done = false }
+  fair action decay_fresh(i: Id) { done = true }
+  action plain_decay(i: Id) { done = done }
+  invariant CoreOk { true }
+}

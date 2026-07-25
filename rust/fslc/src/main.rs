@@ -5171,13 +5171,27 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
                 surface: fsl_syntax::SurfaceDocument::Agent(agent),
                 ..
             }) => {
+                // `check` on an agent document is deliberately lenient: the
+                // top-level `result` stays "ok" even when the structural
+                // analysis finds a violation (matching the frozen
+                // reference); `fslc ai check` is the actual gate (exit 1 on
+                // `agent_analysis_result: "violated"`). A grant-boundary or
+                // other tree-validation failure is still a hard error here.
+                let analysis = match fsl_tools::analyze_ai_agent(&agent) {
+                    Ok(analysis) => analysis,
+                    Err(error) => return (agent_error_output(&error), 2),
+                };
+                let analysis_result = analysis
+                    .get("result")
+                    .cloned()
+                    .unwrap_or_else(|| json!("agent_analyzed"));
                 let mut output = envelope();
                 output.insert("result".to_owned(), json!("ok"));
                 output.insert("spec".to_owned(), json!(agent.name));
                 output.insert("dialect".to_owned(), json!("fsl-ai-agent.v0"));
                 output.insert("warnings".to_owned(), json!([]));
-                output.insert("ai_analysis_result".to_owned(), json!("agent_analyzed"));
-                output.insert("agent_analysis_result".to_owned(), json!("agent_analyzed"));
+                output.insert("ai_analysis_result".to_owned(), analysis_result.clone());
+                output.insert("agent_analysis_result".to_owned(), analysis_result);
                 return (Value::Object(output), 0);
             }
             Ok(_) => {}
@@ -5198,8 +5212,8 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
     if let Err(error) = validate_specialized_document(path) {
         return (semantic_error_output(&error), 2);
     }
-    match load_model(path) {
-        Ok(model) => {
+    match load_kernel_model(path) {
+        Ok((_, kernel, model)) => {
             let has_trace_contract = match validate_requirement_traces(path, &model) {
                 Ok((Some(failure), _)) => return (failure, 2),
                 Ok((None, has_contract)) => has_contract,
@@ -5212,7 +5226,7 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
                 Ok(implements) => implements,
                 Err(error) => return (implements_error_output(&error), 2),
             };
-            let warnings = if implements.is_some() || has_trace_contract {
+            let model_level_warnings = if implements.is_some() || has_trace_contract {
                 model_warnings(&model)
                     .into_iter()
                     .filter(|warning| {
@@ -5223,6 +5237,12 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
             } else {
                 model_warnings(&model)
             };
+            let warnings = kernel
+                .diagnostics()
+                .iter()
+                .cloned()
+                .chain(model_level_warnings)
+                .collect::<Vec<_>>();
             output.insert("warnings".to_owned(), Value::Array(warnings));
             if let Some(implements) = implements {
                 output.insert("implements".to_owned(), implements);
@@ -5641,6 +5661,9 @@ fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
             return (kernel, kernel_status);
         }
         if let Value::Object(kernel) = kernel {
+            if kernel.get("result").and_then(Value::as_str) == Some("violated") {
+                result.insert("result".to_owned(), json!("violated"));
+            }
             let projection = [
                 "result",
                 "spec",
@@ -5803,24 +5826,49 @@ fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
     if fslc_rust::frontend_output::is_ai_project(&source) {
         return run_ai_project_check(&source);
     }
-    let component = match parse_surface_document(path) {
-        Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => component,
-        Ok(_) => {
-            return (
-                semantic_error_output("expected an ai_component document"),
-                2,
-            );
+    match parse_surface_document(path) {
+        Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => {
+            let (kernel, status) =
+                run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
+            if status == 2 {
+                return (kernel, status);
+            }
+            // `check_ai` needs the unprojected verify envelope (fields like
+            // `trace` that `stable_kernel_projection` omits) to translate a
+            // kernel invariant violation into a finding; it applies its own
+            // published-kernel projection to the `kernel` field of its own
+            // output.
+            wrap_specialized(fsl_tools::check_ai(&component, &kernel))
         }
-        Err(error) => return (semantic_error_output(&error), 2),
-    };
-    let (kernel, status) = run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
-    if status == 2 {
-        return (kernel, status);
+        Ok(fsl_syntax::SurfaceDocument::Agent(agent)) => {
+            match fsl_tools::analyze_ai_agent(&agent) {
+                Ok(analysis) => wrap_specialized(analysis),
+                Err(error) => (agent_error_output(&error), 2),
+            }
+        }
+        Ok(_) => (
+            semantic_error_output("expected an ai_component or agent document"),
+            2,
+        ),
+        Err(error) => (semantic_error_output(&error), 2),
     }
-    wrap_specialized(fsl_tools::check_ai(
-        &component,
-        stable_kernel_projection(kernel),
-    ))
+}
+
+fn agent_error_output(error: &fsl_tools::AgentError) -> Value {
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("error"));
+    output.insert("kind".to_owned(), json!("semantics"));
+    output.insert("message".to_owned(), json!(error.message));
+    if let Some(loc) = error.loc {
+        output.insert(
+            "loc".to_owned(),
+            json!({"line": loc.line, "column": loc.column}),
+        );
+    }
+    if let Some(hint) = &error.hint {
+        output.insert("hint".to_owned(), json!(hint));
+    }
+    Value::Object(output)
 }
 
 fn read_json_events(path: &Path) -> Result<Vec<Value>, String> {
@@ -13838,7 +13886,8 @@ fn run_verify(
     }
     let mut has_trace_contract = false;
     let mut implements = None;
-    if let Ok(model) = load_model(path) {
+    let mut compose_warnings = Vec::new();
+    if let Ok((_, kernel, model)) = load_kernel_model(path) {
         match validate_requirement_traces(path, &model) {
             Ok((Some(failure), _)) => return (failure, 2),
             Ok((None, has_contract)) => has_trace_contract = has_contract,
@@ -13848,6 +13897,7 @@ fn run_verify(
             Ok(implements) => implements,
             Err(error) => return (implements_error_output(&error), 2),
         };
+        compose_warnings = kernel.diagnostics().to_vec();
     }
     let deadlock = match DeadlockMode::parse(deadlock_mode) {
         Ok(mode) => mode,
@@ -13888,6 +13938,17 @@ fn run_verify(
         }),
         Err(error) => return (error_output("usage", &error), 2),
     };
+    if let Value::Object(envelope) = &mut output
+        && envelope.get("result").and_then(Value::as_str) != Some("error")
+        && !compose_warnings.is_empty()
+        && let Some(Value::Array(warnings)) = envelope.get_mut("warnings")
+    {
+        // Compose-lowering warnings (e.g. `fair_not_inherited`) are computed
+        // while lowering, before the checked KernelModel drops the per-
+        // component information that produced them, so they cannot be
+        // recovered from `model`/`fsl_runtime::verification_warnings` alone.
+        warnings.splice(0..0, compose_warnings);
+    }
     if let Value::Object(envelope) = &mut output
         && envelope.get("result").and_then(Value::as_str) != Some("error")
         && let Some(implements) = implements

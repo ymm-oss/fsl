@@ -4,7 +4,9 @@
 use serde_json::{Map, Value, json};
 
 use crate::{
-    AiComponent, Annotations, Binder, DbSystem, DomainSpec, Expr, QualifiedName, Span, SymbolPath,
+    AiAgentContract, AiAgentGrant, AiAgentOutput, AiAuthority, AiComponent, AiDelegationEdge,
+    AiFailurePolicy, AiLoc, AiTool, Annotations, Binder, DbSystem, DomainSpec, Expr, QualifiedName,
+    Span, SymbolPath,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -652,10 +654,30 @@ pub struct SurfaceCompose {
     pub items: Vec<ComposeItem>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Recursive `agent` dialect body (issue #468). Nested agents are ordinary
+/// `SurfaceAgent` values held in `children` -- lexical nesting only, not a
+/// distinct sub-agent type (`docs/LANGUAGE.md` §13.6).
+#[derive(Clone, Debug, PartialEq)]
 pub struct SurfaceAgent {
     pub name: String,
     pub span: Span,
+    pub model: Option<String>,
+    pub prompt: Option<String>,
+    pub context: Vec<String>,
+    /// Bare names from a `tools [X, Y];` list, kept separate from `tools`
+    /// (full `tool X { ... }` blocks) -- `docs/LANGUAGE.md` §13.6.
+    pub tool_names: Vec<String>,
+    pub tools: Vec<AiTool>,
+    pub authority: AiAuthority,
+    pub grants: Vec<AiAgentGrant>,
+    pub outputs: Vec<AiAgentOutput>,
+    pub orchestration: Vec<AiDelegationEdge>,
+    pub failure_policy: Vec<AiFailurePolicy>,
+    pub contracts: Vec<AiAgentContract>,
+    pub children: Vec<SurfaceAgent>,
+    pub trust: Option<String>,
+    pub review_gates: Vec<String>,
+    pub loc: AiLoc,
 }
 
 #[derive(Clone, Debug, PartialEq)]

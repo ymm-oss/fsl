@@ -108,19 +108,25 @@ fn implements_error(
     output
 }
 
-fn build(request: &Request, solver_version: &str) -> Result<KernelModel, Value> {
+fn build(request: &Request, solver_version: &str) -> Result<(KernelModel, Vec<Value>), Value> {
     let resolver = MemoryResolver {
         files: request.files.clone(),
     };
     let kernel =
         fsl_core::parse_kernel_source_with_file(&request.source, &resolver, &request.source_file)
             .map_err(|failure| error(solver_version, "parse", failure.to_string()))?;
-    fsl_core::build_model(kernel).map_err(|failure| {
+    // Compose-lowering warnings (e.g. `fair_not_inherited`) are computed while
+    // lowering, before `build_model` drops the per-component information that
+    // produced them, so they must be captured here rather than derived from
+    // the checked KernelModel below.
+    let diagnostics = kernel.diagnostics().to_vec();
+    let model = fsl_core::build_model(kernel).map_err(|failure| {
         fslc_rust::verification_output::render_semantic_error(
             envelope(solver_version),
             &failure.to_string(),
         )
-    })
+    })?;
+    Ok((model, diagnostics))
 }
 
 async fn check(request: &Request, solver_version: &str) -> Value {
@@ -137,8 +143,8 @@ async fn check(request: &Request, solver_version: &str) -> Value {
             &failure,
         );
     }
-    let model = match build(request, solver_version) {
-        Ok(model) => model,
+    let (model, compose_warnings) = match build(request, solver_version) {
+        Ok(built) => built,
         Err(error) => return error,
     };
     let has_trace_contract = match fslc_rust::verification_output::validate_requirement_trace_source(
@@ -153,7 +159,11 @@ async fn check(request: &Request, solver_version: &str) -> Value {
     let mut output = envelope(solver_version);
     output.insert("result".to_owned(), json!("ok"));
     output.insert("spec".to_owned(), json!(model.name));
-    output.insert("warnings".to_owned(), Value::Array(model_warnings(&model)));
+    let warnings = compose_warnings
+        .into_iter()
+        .chain(model_warnings(&model))
+        .collect::<Vec<_>>();
+    output.insert("warnings".to_owned(), Value::Array(warnings));
     let mut output = add_frontend_metadata(
         request,
         solver_version,
@@ -330,8 +340,8 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
     if let Err(failure) = fsl_syntax::parse_surface_document(&request.source) {
         return error(solver_version, "parse", failure.to_string());
     }
-    let model = match build(request, solver_version) {
-        Ok(model) => model,
+    let (model, compose_warnings) = match build(request, solver_version) {
+        Ok(built) => built,
         Err(error) => return error,
     };
     let has_trace_contract = match fslc_rust::verification_output::validate_requirement_trace_source(
@@ -391,7 +401,7 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
         return error(solver_version, "internal", failure);
     }
     let statistics = fsl_solver::SmtSolver::statistics(&solver);
-    let (output, _) = fslc_rust::verification_output::render_bmc_output(
+    let (mut output, _) = fslc_rust::verification_output::render_bmc_output(
         envelope(solver_version),
         &model,
         &result,
@@ -403,6 +413,16 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             statistics: &statistics,
         },
     );
+    if !compose_warnings.is_empty()
+        && let Some(object) = output.as_object_mut()
+        && object.get("result").and_then(Value::as_str) != Some("error")
+        && let Some(Value::Array(warnings)) = object.get_mut("warnings")
+    {
+        // See the matching comment in native `run_verify` (rust/fslc/src/main.rs):
+        // compose-lowering warnings must be captured before `build_model` drops
+        // per-component fairness information, so they cannot come from `model`.
+        warnings.splice(0..0, compose_warnings);
+    }
     add_frontend_metadata(
         request,
         solver_version,

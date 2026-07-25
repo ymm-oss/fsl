@@ -96,6 +96,14 @@ pub fn render_semantic_error(mut output: Map<String, Value>, message: &str) -> V
             json!("struct fields must be scalar (domain type, enum, Bool, Int) or Option<scalar>; use a separate Map for Set/Map/Seq/struct fields"),
         );
     }
+    if message.starts_with("unknown ai hard-contract rule '") {
+        output.insert(
+            "hint".to_owned(),
+            json!(
+                "supported rules: forbidden_tool_blocked, human_approval_required, tool_authority, tool_precondition_declared, tool_schema_declared"
+            ),
+        );
+    }
     Value::Object(output)
 }
 

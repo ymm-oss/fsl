@@ -222,6 +222,77 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   a divisor that can reach zero is still reported as `partial_op` (§2.2 is
   unchanged); Euclidean negative-number division/modulo semantics were
   already correct and are unaffected (#477).
+- The recursive `agent` dialect (`docs/LANGUAGE.md` §13.6) now has a real grammar and structural
+  analyzer in native, matching the frozen reference's `src/fslc/ai_parser.py`/`ai_agent.py` exactly
+  (confirmed by byte-identical JSON, including `agent_ir`/`graph_summary`, on
+  `examples/ai/recursive_support_agent.fsl` and every documented finding-kind fixture). Previously
+  `rust/fsl-syntax`'s `parse_agent` only balanced braces and discarded the entire body, so any token
+  soup that lexed cleanly parsed as an empty agent and `fslc ai check` on a recursive `agent` document
+  returned `"expected an ai_component document"` (native rejected the dialect entirely) while `fslc
+  check` unconditionally reported the hardcoded constant `agent_analysis_result: "agent_analyzed"`
+  with no analysis behind it — a confidently green false negative on AI agent authority-delegation
+  safety, and native's own CLI contract (`rust/fslc/cli-contract.json`) already advertised "check an
+  ai_component hard contract or recursive agent structure" as a capability it did not have. A `grant
+  authority`/`grant context` that exceeds the immediate parent's declared boundary is now a check-time
+  `kind:"semantics"` error from `ai check` and `check` alike; the six documented
+  `agent_structural_violation` finding kinds (`child_authority_exceeds_parent_authority`,
+  `child_context_exceeds_parent_context`, `irreversible_operation_without_human_approval_path`,
+  `visibility_leak_across_sibling_agents`, `low_trust_agent_path_to_high_authority_tool`,
+  `policy_review_bypass_in_orchestration`) are all computed by `fslc ai check`. `fslc verify`'s
+  rejection of agent documents and `fslc fmt`'s refusal to reformat a well-formed agent body (no
+  native pretty-printer exists yet) are both unchanged (#468).
+- Native `ai_component` lowering (`fslc check`/`verify`/`ai check`) no longer collapses to a
+  one-boolean catalog sentinel with an unsatisfiable no-op action. It now generates the documented
+  `Tool` enum, `human_approved`/`tool_executed`/`tool_suggested: Map<Tool, Bool>` and
+  `fallback_required: Bool` state, `suggest_*`/`approve_*`/`execute_*`/`fallback_*` actions (no
+  `execute_*` action is ever generated for a forbidden tool; an approval-required tool's `execute_*`
+  action always carries `requires human_approved[tool]`), and the
+  `ai_forbidden_tool_not_executed__<Tool>` / `ai_approval_before_execute__<Tool>` invariants. `check
+  hard { rule <Name>; }` now rejects an unknown rule name as a check-time `kind:"semantics"` error
+  (previously silently accepted) from `ai check`, `check`, and `verify` alike. `fslc ai check` also
+  implements the four previously-unchecked hard rules (`tool_authority`, the two static findings
+  were entirely missing; `tool_schema_declared` was missing; `human_approval_required` used a
+  narrower `irreversible && may_execute && !approved` predicate than the documented
+  `irreversible && !requires_human_approval && !forbidden` rule, so a tool only in `may_suggest`
+  passed silently) and populates `repair_candidates` instead of always emitting `[]`. `fslc ai
+  replay` gains the matching `tool_authority` findings for `suggest`/`execute` calls outside
+  authority and now flags a declared precondition with no `preconditions` evidence object at all
+  (previously only an explicit `false` value was caught, so missing evidence passed silently). This
+  was AGENTS.md's "confidently green false negative" on the AI dialect's tool-authority /
+  human-approval safety claims (#470).
+- Native `fslc db check` now evaluates `rule all_active_writes_exist` the same way it already
+  evaluated `rule all_active_reads_exist`: dropping a column that is still declared as an active
+  artifact's write capability now yields a `column_removed_while_still_written` finding with
+  `witness`, `minimal_conflict_set`, `repair_candidates`, and `artifact_version` populated, and the
+  top-level JSON `result` is reconciled to `"violated"` whenever the attached `kernel` projection
+  reports a violation. Previously the write branch was silently missing (a regressive port relative
+  to the frozen Python reference), so a write-drop incompatibility returned `verified_under_assumptions`
+  with an empty `findings` array — a confidently green false negative, and one that escaped a
+  hardcoded kernel depth-8 default entirely for deep migration histories, since the findings layer
+  is depth-independent once the write branch exists (#469).
+- Native `fslc check`/`verify`/`db check` no longer reject two writes indexed by distinct enum
+  members as a possible alias (`"an action may not assign the same state location more than once"`).
+  The write-aliasing analysis now resolves enum-member indices (both the typed `Expr::EnumMember`
+  literal and a local constant bound to an enum value) to their nominal `(type_name, member)`
+  identity, matching the same-index detection already applied to `Int`/`Bool` constants. This
+  restores `fslc check`/`db check` on the four `examples/db/` `dbsystem` `rename`/`split`/`merge`
+  preservation fixtures, which previously exited 2 against a golden corpus snapshot of `"ok"` (#475).
+- Native `fslc check`/`verify` now emit the documented `fair_not_inherited` `compose` warning: when a
+  non-fair synchronized action references a `fair` component action, `warnings` includes a
+  `kind: "fair_not_inherited"` entry naming the composite action and fair constituent(s), matching the
+  frozen Python reference's message and `loc` exactly. Compose lowering previously discarded
+  constituent `fair` markers with no warning at all (`rust/fsl-core/src/compose.rs` had no warnings
+  channel), so a declared `fair` constituent silently stopped contributing fairness through
+  synchronization with no diagnostic signal — the same failure mode issue #16 fixed in the frozen
+  Python reference, regressed by the native port (#474).
+- The frozen `tests/test_dialect_conformance.py` corpus-conformance harness (`docs/DESIGN-conformance-harness.md`)
+  is green again (0 failing of 212, up from 201 passed / 6 failed). Four intentional-error `governance`
+  gallery fixtures gained the `// expected-result: error` front matter that reclassifies them as
+  `DECLARED_ERROR` instead of `CONFORMANCE`; the no-action `governance_semantic_before.fsl` "before"
+  fragment and the three `examples/causal/*.fsl` files (a dialect the frozen Python reference does not
+  implement at all) are now registered exclusions (`MONITOR_EXCLUSIONS` and a new `causal` entry in
+  `EVIDENCE_CONSTRUCTS`/`is_causal_source`) instead of falling through to `UNKNOWN`. The always-red
+  harness had made a new registration gap indistinguishable from a pre-existing one (#476).
 - Refinement typechecking now rejects an unshadowed bare enum member shared by distinct
   implementation and abstraction enums, preventing checked and evaluation
   merge order from assigning different nominal identities. Existing identifier

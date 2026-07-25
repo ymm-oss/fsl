@@ -43,8 +43,9 @@ pub use diagnostics::{
     requirement_metadata, version_metadata,
 };
 pub use dialect::{
-    GovernanceContract, GovernanceDelegate, GovernancePreservation, RequirementsTraceCase,
-    RequirementsTraceContract, RequirementsTraceExpectation, RequirementsTraceStep,
+    AiToolSets, GovernanceContract, GovernanceDelegate, GovernancePreservation,
+    RequirementsTraceCase, RequirementsTraceContract, RequirementsTraceExpectation,
+    RequirementsTraceStep, ai_approval_invariant_name, ai_forbidden_invariant_name, ai_tool_sets,
     governance_contract, lower_ai_component, lower_business, lower_db, lower_domain,
     lower_governance, lower_requirements, requirements_trace_contract,
 };
@@ -152,6 +153,12 @@ pub struct KernelSpec {
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
     projections: Vec<ProjectionDef>,
+    /// Warnings discovered only while lowering the surface document (e.g.
+    /// compose's `fair_not_inherited`), which the checked [`KernelModel`]
+    /// cannot reconstruct on its own because the information that produced
+    /// them (per-component `fair` markers) does not survive expansion.
+    /// `check`/`verify` merge these with [`model_warnings`].
+    diagnostics: Vec<Value>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -177,6 +184,7 @@ pub fn build_surface_model(spec: SurfaceSpec) -> Result<KernelModel, ModelError>
         origins: OriginRegistry::default(),
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
+        diagnostics: Vec::new(),
     })
 }
 
@@ -214,6 +222,11 @@ impl KernelSpec {
     #[must_use]
     pub fn projections(&self) -> &[ProjectionDef] {
         &self.projections
+    }
+
+    #[must_use]
+    pub fn diagnostics(&self) -> &[Value] {
+        &self.diagnostics
     }
 
     pub(crate) fn set_projections(&mut self, projections: Vec<ProjectionDef>) {
@@ -400,6 +413,7 @@ fn lower_direct_spec_with_origins(
         origins,
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
+        diagnostics: Vec::new(),
     })
 }
 

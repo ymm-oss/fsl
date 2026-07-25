@@ -4,6 +4,7 @@
 use serde_json::{Value, json};
 
 use crate::annotation_parse;
+use crate::surface::SurfaceAgent;
 use crate::{Annotations, ParseError, Span, Token, TokenKind, lex};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -135,6 +136,52 @@ impl AiAuthority {
     }
 }
 
+// --- Recursive `agent` dialect IR (issue #468) -----------------------------
+//
+// These types are structurally distinct from `ai_component`'s IR above:
+// `agent` bodies nest (via `children`), separate a bare `tools [X, Y];` list
+// (`tool_names`) from full `tool X { ... }` blocks (`tools`), and add
+// grant/orchestration/failure-policy/contract/trust/review-gate declarations
+// that `ai_component` does not have.
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiAgentGrant {
+    /// `"authority"` or `"context"`.
+    pub kind: String,
+    pub names: Vec<String>,
+    pub loc: AiLoc,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiAgentOutput {
+    pub name: String,
+    pub visibility: Vec<String>,
+    pub loc: AiLoc,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiDelegationEdge {
+    pub source: String,
+    pub target: String,
+    pub loc: AiLoc,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiFailurePolicy {
+    pub agent: String,
+    pub condition: String,
+    pub action: String,
+    pub target: Option<String>,
+    pub retry_limit: Option<i64>,
+    pub loc: AiLoc,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AiAgentContract {
+    pub hard_rules: Vec<String>,
+    pub loc: AiLoc,
+}
+
 impl AiFallback {
     fn python_ast(&self) -> Value {
         json!({"$type":"AiFallback","reason":self.reason,"target":self.target,"loc":self.loc.python_ast()})
@@ -177,6 +224,37 @@ pub(crate) fn parse_ai_component_tokens(
         return Err(parser.error("unexpected token after ai_component"));
     }
     Ok(component)
+}
+
+/// Parse one recursive `agent { ... }` document (issue #468) into its typed
+/// tree. This only enforces per-block grammar (including "declare at most
+/// once" duplicate checks, mirroring the frozen reference's parse-time
+/// transformer). Cross-node structural checks -- grant boundaries, unknown
+/// orchestration/`review_gate`/`failure_policy` child references, output
+/// visibility targets, and the graph-based finding kinds -- are a separate
+/// pass over the parsed tree (`fsl_tools`' agent analyzer), matching
+/// `docs/DESIGN-ai-hard.md`'s separation of parse/grammar from structural
+/// analysis.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] when lexical or syntactic analysis fails.
+pub(crate) fn parse_agent_tokens(
+    source: &str,
+    tokens: Vec<Token>,
+    cursor: usize,
+) -> Result<SurfaceAgent, ParseError> {
+    let mut parser = AiParser {
+        source,
+        tokens,
+        cursor,
+        pending_annotations: Annotations::default(),
+    };
+    let agent = parser.agent()?;
+    if !matches!(parser.peek().kind, TokenKind::Eof) {
+        return Err(parser.error("unexpected token after agent"));
+    }
+    Ok(agent)
 }
 
 struct AiParser<'a> {
@@ -445,6 +523,246 @@ impl AiParser<'_> {
             annotations,
             loc: Some(loc),
         })
+    }
+
+    /// Parse one `agent { ... }` body, recursing into nested `agent`
+    /// declarations for `children`. `docs/LANGUAGE.md` §13.6: nested agents
+    /// are ordinary agents scoped by their parent, not a distinct
+    /// `sub_agent` type.
+    #[allow(clippy::too_many_lines)]
+    fn agent(&mut self) -> Result<SurfaceAgent, ParseError> {
+        let start = self.peek().span;
+        let loc: AiLoc = start.into();
+        self.expect_ident_value("agent")?;
+        let name = self.expect_ident()?;
+        self.expect_symbol("{")?;
+        let mut agent = SurfaceAgent {
+            name,
+            span: start,
+            model: None,
+            prompt: None,
+            context: Vec::new(),
+            tool_names: Vec::new(),
+            tools: Vec::new(),
+            authority: AiAuthority::default(),
+            grants: Vec::new(),
+            outputs: Vec::new(),
+            orchestration: Vec::new(),
+            failure_policy: Vec::new(),
+            contracts: Vec::new(),
+            children: Vec::new(),
+            trust: None,
+            review_gates: Vec::new(),
+            loc,
+        };
+        let (mut seen_authority, mut seen_context, mut seen_tools) = (false, false, false);
+        let (mut seen_orchestration, mut seen_failure_policy) = (false, false);
+        while !self.peek_symbol("}") {
+            self.take_leading_annotations()?;
+            if self.eat_ident("model") {
+                self.expect_no_pending_annotations()?;
+                if agent.model.is_some() {
+                    return Err(self.error("agent may declare model at most once"));
+                }
+                agent.model = Some(self.atom()?);
+                self.eat_symbol(";");
+            } else if self.eat_ident("prompt") {
+                self.expect_no_pending_annotations()?;
+                if agent.prompt.is_some() {
+                    return Err(self.error("agent may declare prompt at most once"));
+                }
+                agent.prompt = Some(self.atom()?);
+                self.eat_symbol(";");
+            } else if self.eat_ident("context") {
+                self.expect_no_pending_annotations()?;
+                if seen_context {
+                    return Err(self.error("agent may declare context at most once"));
+                }
+                agent.context = self.names()?;
+                seen_context = true;
+                self.eat_symbol(";");
+            } else if self.eat_ident("tools") {
+                self.expect_no_pending_annotations()?;
+                if seen_tools {
+                    return Err(self.error("agent may declare tools at most once"));
+                }
+                agent.tool_names = self.names()?;
+                seen_tools = true;
+                self.eat_symbol(";");
+            } else if self.peek_ident("tool") {
+                agent.tools.push(self.tool()?);
+            } else if self.eat_ident("trust") {
+                self.expect_no_pending_annotations()?;
+                if agent.trust.is_some() {
+                    return Err(self.error("agent may declare trust at most once"));
+                }
+                agent.trust = Some(self.expect_ident()?);
+                self.eat_symbol(";");
+            } else if self.eat_ident("review_gate") {
+                self.expect_no_pending_annotations()?;
+                agent.review_gates.push(self.expect_ident()?);
+                self.eat_symbol(";");
+            } else if self.peek_ident("authority") {
+                let authority = self.authority()?;
+                if seen_authority {
+                    return Err(self.error("agent may declare authority at most once"));
+                }
+                agent.authority = authority;
+                seen_authority = true;
+            } else if self.peek_ident("grant") {
+                self.expect_no_pending_annotations()?;
+                agent.grants.push(self.grant()?);
+            } else if self.peek_ident("output") {
+                agent.outputs.push(self.agent_output()?);
+            } else if self.eat_ident("orchestration") {
+                self.expect_no_pending_annotations()?;
+                if seen_orchestration {
+                    return Err(self.error("agent may declare orchestration at most once"));
+                }
+                agent.orchestration = self.orchestration()?;
+                seen_orchestration = true;
+            } else if self.eat_ident("failure_policy") {
+                self.expect_no_pending_annotations()?;
+                if seen_failure_policy {
+                    return Err(self.error("agent may declare failure_policy at most once"));
+                }
+                agent.failure_policy = self.failure_policy()?;
+                seen_failure_policy = true;
+            } else if self.eat_ident("contract") {
+                self.expect_no_pending_annotations()?;
+                agent.contracts.push(self.agent_contract()?);
+            } else if self.peek_ident("agent") {
+                agent.children.push(self.agent()?);
+            } else {
+                return Err(self.error("expected agent declaration"));
+            }
+        }
+        let end = self.peek().span;
+        self.bump();
+        agent.span = Span {
+            start: start.start,
+            end: end.end,
+        };
+        Ok(agent)
+    }
+
+    fn grant(&mut self) -> Result<AiAgentGrant, ParseError> {
+        let loc = self.loc();
+        self.bump();
+        let kind = if self.eat_ident("authority") {
+            "authority".to_owned()
+        } else if self.eat_ident("context") {
+            "context".to_owned()
+        } else {
+            return Err(self.error("expected 'authority' or 'context' after grant"));
+        };
+        let names = self.names()?;
+        self.eat_symbol(";");
+        Ok(AiAgentGrant { kind, names, loc })
+    }
+
+    fn agent_output(&mut self) -> Result<AiAgentOutput, ParseError> {
+        let loc = self.loc();
+        self.bump();
+        let name = self.expect_ident()?;
+        self.expect_ident_value("visibility")?;
+        let visibility = self.names()?;
+        self.eat_symbol(";");
+        Ok(AiAgentOutput {
+            name,
+            visibility,
+            loc,
+        })
+    }
+
+    fn orchestration(&mut self) -> Result<Vec<AiDelegationEdge>, ParseError> {
+        self.expect_symbol("{")?;
+        let mut edges = Vec::new();
+        while !self.peek_symbol("}") {
+            self.take_leading_annotations()?;
+            self.expect_no_pending_annotations()?;
+            let loc = self.loc();
+            let source = self.expect_ident()?;
+            self.expect_symbol("->")?;
+            let target = self.expect_ident()?;
+            self.eat_symbol(";");
+            edges.push(AiDelegationEdge {
+                source,
+                target,
+                loc,
+            });
+        }
+        self.bump();
+        Ok(edges)
+    }
+
+    fn failure_policy(&mut self) -> Result<Vec<AiFailurePolicy>, ParseError> {
+        self.expect_symbol("{")?;
+        let mut items = Vec::new();
+        while !self.peek_symbol("}") {
+            self.take_leading_annotations()?;
+            self.expect_no_pending_annotations()?;
+            let loc = self.loc();
+            self.expect_ident_value("when")?;
+            let agent_name = self.expect_ident()?;
+            self.expect_symbol(".")?;
+            let condition = self.expect_ident()?;
+            self.expect_symbol("->")?;
+            let (action, retry_limit, target) = if self.eat_ident("retry") {
+                self.expect_ident_value("up_to")?;
+                let limit = self.expect_int()?;
+                ("retry".to_owned(), Some(limit), None)
+            } else {
+                ("target".to_owned(), None, Some(self.expect_ident()?))
+            };
+            self.eat_symbol(";");
+            items.push(AiFailurePolicy {
+                agent: agent_name,
+                condition,
+                action,
+                target,
+                retry_limit,
+                loc,
+            });
+        }
+        self.bump();
+        Ok(items)
+    }
+
+    fn agent_contract(&mut self) -> Result<AiAgentContract, ParseError> {
+        let loc = self.loc();
+        self.expect_symbol("{")?;
+        let mut hard_rules = Vec::new();
+        while !self.peek_symbol("}") {
+            self.take_leading_annotations()?;
+            self.expect_no_pending_annotations()?;
+            if self.eat_ident("hard") {
+                self.expect_symbol("{")?;
+                while !self.peek_symbol("}") {
+                    self.take_leading_annotations()?;
+                    self.expect_no_pending_annotations()?;
+                    self.expect_ident_value("rule")?;
+                    hard_rules.push(self.expect_ident()?);
+                    self.eat_symbol(";");
+                }
+                self.bump();
+            } else if self.eat_ident("rule") {
+                hard_rules.push(self.expect_ident()?);
+                self.eat_symbol(";");
+            } else {
+                return Err(self.error("expected 'hard' or 'rule' inside contract"));
+            }
+        }
+        self.bump();
+        Ok(AiAgentContract { hard_rules, loc })
+    }
+
+    fn expect_int(&mut self) -> Result<i64, ParseError> {
+        let token = self.bump().clone();
+        match token.kind {
+            TokenKind::Int(value) => Ok(value),
+            _ => Err(ParseError::new("expected integer", token.span)),
+        }
     }
 
     fn names(&mut self) -> Result<Vec<String>, ParseError> {

@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: Apache-2.0
+
+agent Parent {
+  context [Ticket];
+  tools [Draft, CheckPolicy];
+  authority { may_execute [Draft, CheckPolicy]; }
+
+  agent Draft {
+    grant authority [Draft];
+    grant context [Ticket];
+    tools [Draft];
+    authority { may_execute [Draft]; }
+    output DraftOut visibility Policy;
+  }
+
+  agent Policy {
+    grant authority [CheckPolicy];
+    grant context [Ticket];
+    tools [CheckPolicy];
+    authority { may_execute [CheckPolicy]; }
+  }
+}

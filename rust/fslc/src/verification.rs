@@ -10,8 +10,8 @@ use sha2::{Digest, Sha256};
 use super::{
     CliVerifyOptions, ScopeBounds, add_strict_tag_warnings, apply_vacuity_mode, block_on_native,
     display, envelope, error_output, implements_error_output, implements_result, invariant_names,
-    load_model, load_model_scoped, load_snapshot_value_object, load_state_snapshot,
-    select_properties, selected_implicit_bounds, semantic_error_output,
+    load_kernel_model, load_model, load_model_scoped, load_snapshot_value_object,
+    load_state_snapshot, select_properties, selected_implicit_bounds, semantic_error_output,
     validate_requirement_traces, validate_specialized_document,
 };
 
@@ -1536,6 +1536,11 @@ struct PreparedCliVerification {
     model: Result<KernelModel, String>,
     initial_state: Option<std::collections::BTreeMap<String, FslValue>>,
     has_trace_contract: bool,
+    /// Compose-lowering warnings (e.g. `fair_not_inherited`), computed while
+    /// lowering the surface document, before `build_model` drops the per-
+    /// component information (like constituent `fair` markers) that produced
+    /// them. `model`/`fsl_runtime::verification_warnings` cannot recover them.
+    compose_warnings: Vec<Value>,
 }
 
 pub(super) fn run_verify_cli(
@@ -1640,6 +1645,17 @@ fn prepare_cli_verification(
             Err(error) => return Err((semantic_error_output(&error), 2)),
         }
     }
+    // `--instances`/`--values` scope overrides go through
+    // `parse_kernel_source_with_bounds` (`load_model_scoped`), a separate
+    // lowering entrypoint that does not apply to compose documents, so
+    // compose-lowering warnings are only collected in the unscoped case.
+    let compose_warnings = if has_scope {
+        Vec::new()
+    } else {
+        load_kernel_model(path)
+            .map(|(_, kernel, _)| kernel.diagnostics().to_vec())
+            .unwrap_or_default()
+    };
     validate_cli_property_selection(path, options, has_scope, snapshot_model.as_ref().ok())?;
     Ok(PreparedCliVerification {
         has_scope,
@@ -1647,6 +1663,7 @@ fn prepare_cli_verification(
         model: snapshot_model,
         initial_state,
         has_trace_contract,
+        compose_warnings,
     })
 }
 
@@ -1957,7 +1974,12 @@ fn execute_cli_verification(
         Err(error) => return (error_output("usage", &error), 2),
     };
     if !filtered {
-        decorate_default_cli_verification(&mut output, implements, prepared.has_trace_contract);
+        decorate_default_cli_verification(
+            &mut output,
+            implements,
+            prepared.has_trace_contract,
+            &prepared.compose_warnings,
+        );
     }
     (output, status)
 }
@@ -1966,6 +1988,7 @@ fn decorate_default_cli_verification(
     output: &mut Value,
     implements: Option<Value>,
     has_trace_contract: bool,
+    compose_warnings: &[Value],
 ) {
     let Value::Object(envelope) = output else {
         return;
@@ -1982,6 +2005,16 @@ fn decorate_default_cli_verification(
             warning.get("message").and_then(Value::as_str)
                 != Some("spec declares no user invariants (only implicit type bounds are checked)")
         });
+    }
+    if !compose_warnings.is_empty()
+        && envelope.get("result").and_then(Value::as_str) != Some("error")
+        && let Some(Value::Array(warnings)) = envelope.get_mut("warnings")
+    {
+        // Compose-lowering warnings (e.g. `fair_not_inherited`) are computed
+        // while lowering, before the checked KernelModel drops the per-
+        // component information that produced them, so they cannot be
+        // recovered from `model`/`fsl_runtime::verification_warnings` alone.
+        warnings.splice(0..0, compose_warnings.iter().cloned());
     }
 }
 

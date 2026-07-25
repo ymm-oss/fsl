@@ -34,8 +34,14 @@ exhaustively; the registry says what may exist there.
 - `EVIDENCE_CONSTRUCTS: dict[str, str]` — construct → reason, for whole file
   kinds that have **no kernel expansion by design**: `ai-project`
   (`is_ai_project_source`; external statistical evidence, `fslc ai
-  eval/regress/drift/compat`, `formal_result:"not_run"`) and `ai-agent`
-  (`is_ai_agent_source`; structural analysis, `agent_analyzed`, not formal proof).
+  eval/regress/drift/compat`, `formal_result:"not_run"`), `ai-agent`
+  (`is_ai_agent_source`; structural analysis, `agent_analyzed`, not formal proof),
+  and `causal` (`is_causal_source`; the causal graph never enters `KernelModel`,
+  `fsl-runtime`, or `fsl-solver` — see [`DESIGN-causal.md`](DESIGN-causal.md) §1 —
+  and native `check` reports `result:"causal_model_checked"` /
+  `formal_result:"not_run"`. The frozen Python reference has no causal
+  implementation at all, so `is_causal_source` is a keyword sniff that lives in
+  `tests/dialect_registry.py` itself rather than `src/fslc`).
 - `MONITOR_EXCLUSIONS: dict[str, str]` — repo-relative path → reason, for
   individual files the frozen Python Monitor legitimately rejects. Each entry
   names its active native or BMC-side coverage, and a stale entry fails the
@@ -45,8 +51,8 @@ exhaustively; the registry says what may exist there.
 
 `classify(path)` reads the source and returns one of:
 
-1. `EXCLUDED` — `is_ai_project_source` / `is_ai_agent_source` match, or path in
-   `MONITOR_EXCLUSIONS`.
+1. `EXCLUDED` — `is_ai_project_source` / `is_ai_agent_source` / `is_causal_source`
+   match, or path in `MONITOR_EXCLUSIONS`.
 2. `REFINEMENT` — top-level keyword `refinement` (mapping files are not state
    machines; refine semantics are covered by `test_refine*.py` and the
    refinement fixtures in `test_oracle_agreement.py`).
@@ -130,6 +136,13 @@ agreement, verdict agreement) — belongs to the frozen Python reference
 implementation and is no longer run by `.github/workflows/ci.yml`. It remains
 available for manual historical/reference checks; active CI coverage is
 provided by the Rust workspace tests and WASM browser validation.
+"Manual/reference" describes who runs it, not whether it may stay red: a
+corpus registration gap here is invisible to CI precisely because nothing
+else runs the full dual-evaluator pipeline over `specs/`/`examples/`, so a
+failing run must still be treated as a reviewable registration diff to land
+(a new dialect/example directory registered in `tests/dialect_registry.py`,
+or a stale exclusion/declared-error front matter removed), not left red
+indefinitely — see issue #476.
 
 Its narrower structural obligation — every `.fsl` under `specs/`/`examples/`
 either `check`s cleanly or is a declared/excluded error, so nothing rots

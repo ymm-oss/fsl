@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: Apache-2.0
+
+dbsystem UnsafeDropColumnWithWriterDeepHistory {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column legacy_name: Text present backfilled nullable;
+      column pad0: Text absent nullable;
+      column pad1: Text absent nullable;
+      column pad2: Text absent nullable;
+      column pad3: Text absent nullable;
+      column pad4: Text absent nullable;
+      column pad5: Text absent nullable;
+      column pad6: Text absent nullable;
+      column pad7: Text absent nullable;
+      column pad8: Text absent nullable;
+      column pad9: Text absent nullable;
+      column pad10: Text absent nullable;
+      column pad11: Text absent nullable;
+    }
+  }
+
+  migration add_pad0 from 0 to 1 {
+    add users.pad0 nullable;
+  }
+
+  migration add_pad1 from 1 to 2 {
+    add users.pad1 nullable;
+  }
+
+  migration add_pad2 from 2 to 3 {
+    add users.pad2 nullable;
+  }
+
+  migration add_pad3 from 3 to 4 {
+    add users.pad3 nullable;
+  }
+
+  migration add_pad4 from 4 to 5 {
+    add users.pad4 nullable;
+  }
+
+  migration add_pad5 from 5 to 6 {
+    add users.pad5 nullable;
+  }
+
+  migration add_pad6 from 6 to 7 {
+    add users.pad6 nullable;
+  }
+
+  migration add_pad7 from 7 to 8 {
+    add users.pad7 nullable;
+  }
+
+  migration add_pad8 from 8 to 9 {
+    add users.pad8 nullable;
+  }
+
+  migration add_pad9 from 9 to 10 {
+    add users.pad9 nullable;
+  }
+
+  migration add_pad10 from 10 to 11 {
+    add users.pad10 nullable;
+  }
+
+  migration add_pad11 from 11 to 12 {
+    add users.pad11 nullable;
+  }
+
+  migration drop_legacy_name from 12 to 13 {
+    drop users.legacy_name;
+  }
+
+  artifact server_v2 {
+    reads users.id;
+  }
+
+  artifact worker_v1 {
+    writes users.legacy_name;
+  }
+
+  environment prod {
+    schema 0..13;
+    active server_v2 when schema 13..13;
+    may_exist worker_v1 when schema 0..13;
+  }
+
+  check compatibility {
+    rule all_active_writes_exist;
+  }
+}
