@@ -57,6 +57,11 @@ The complete required product gate has one Rust-native entrypoint and does not e
 ./tools/check-native-integration.sh
 ```
 
+Pull requests into `main` may use the bounded `merge readiness` gate defined in
+`docs/DESIGN-ci.md`; it is not product verification. Every merged `main` state and every
+production/release promotion must still receive the complete product evidence. Do not hide a
+post-merge product-gate failure or treat its automatically created issue as a waiver.
+
 Python is optional and is used only for changes explicitly scoped to the frozen compatibility
 reference or Python-based repository hooks. Native solver changes should also run
 the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests.

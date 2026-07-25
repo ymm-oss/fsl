@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: merge readiness
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-readiness-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  rust-compile:
+    name: merge readiness / Rust compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      - name: Check every Rust target
+        run: ./tools/check-merge-readiness.sh compile
+
+  core-contracts:
+    name: merge readiness / core contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      - name: Check solver-independent contracts
+        run: ./tools/check-merge-readiness.sh core
+
+  automation-contracts:
+    name: merge readiness / automation contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Test post-merge issue reconciliation
+        run: ./tools/check-merge-readiness.sh automation
+
+  merge-readiness:
+    name: merge readiness
+    if: always()
+    needs:
+      - rust-compile
+      - core-contracts
+      - automation-contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every readiness lane
+        env:
+          RUST_COMPILE: ${{ needs.rust-compile.result }}
+          CORE_CONTRACTS: ${{ needs.core-contracts.result }}
+          AUTOMATION_CONTRACTS: ${{ needs.automation-contracts.result }}
+        shell: bash
+        run: |
+          failures=0
+          for result in "$RUST_COMPILE" "$CORE_CONTRACTS" "$AUTOMATION_CONTRACTS"; do
+            if [ "$result" != "success" ]; then
+              failures=1
+            fi
+          done
+          if [ "$failures" -ne 0 ]; then
+            echo "merge readiness failed: compile=$RUST_COMPILE core=$CORE_CONTRACTS automation=$AUTOMATION_CONTRACTS" >&2
+            exit 1
+          fi

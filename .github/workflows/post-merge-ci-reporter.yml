@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: post-merge CI reporter
+
+on:
+  workflow_run:
+    workflows: ["product gate"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+  pull-requests: read
+
+# Only one reporter mutates the deduplicated issue set at a time. If product
+# gates finish faster than reporting, GitHub coalesces pending reporters toward
+# the newest default-branch health state while the product-gate evidence itself
+# remains attached to every merged commit.
+concurrency:
+  group: post-merge-ci-reporter
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: reconcile post-merge CI issue
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Test reporter contract
+        run: node --test .github/scripts/report-post-merge-ci.test.mjs
+
+      - name: Create, update, or resolve CI issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/report-post-merge-ci.mjs

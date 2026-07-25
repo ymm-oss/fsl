@@ -1,4 +1,4 @@
-name: ci
+name: product gate
 
 env:
   MACOSX_DEPLOYMENT_TARGET: "14.0"
@@ -17,9 +17,22 @@ on:
 permissions:
   contents: read
 
+# During rollout, pull requests into main keep the full product gate until the
+# `merge readiness` context is installed in the main ruleset. Once the ruleset
+# is switched, set the repository variable FSL_OPTIMISTIC_CI=enabled. Product
+# gates for main pushes, schedules, manual runs, and production promotions never
+# honor that opt-out.
+concurrency:
+  group: product-gate-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   rust-workspace:
     name: rust workspace
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.base_ref != 'main' ||
+      vars.FSL_OPTIMISTIC_CI != 'enabled'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -38,6 +51,10 @@ jobs:
 
   wasm:
     name: WASM
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.base_ref != 'main' ||
+      vars.FSL_OPTIMISTIC_CI != 'enabled'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -78,6 +95,10 @@ jobs:
 
   rust-native-z3:
     name: native Z3 4.16 (${{ matrix.os }})
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.base_ref != 'main' ||
+      vars.FSL_OPTIMISTIC_CI != 'enabled'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
@@ -97,3 +118,61 @@ jobs:
       - name: Test pinned native solver and BMC crates
         working-directory: rust
         run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
+
+  production-native-z3-linux:
+    name: native Z3 4.16 (ubuntu-latest)
+    if: github.event_name == 'pull_request' && github.base_ref == 'production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      - name: Test pinned native solver and BMC crates
+        working-directory: rust
+        run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
+
+  product-gate:
+    name: product gate
+    if: >-
+      always() &&
+      (
+        github.event_name != 'pull_request' ||
+        github.base_ref != 'main' ||
+        vars.FSL_OPTIMISTIC_CI != 'enabled'
+      )
+    needs:
+      - rust-workspace
+      - wasm
+      - rust-native-z3
+      - production-native-z3-linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require complete product evidence
+        env:
+          RUST_WORKSPACE: ${{ needs.rust-workspace.result }}
+          WASM: ${{ needs.wasm.result }}
+          NATIVE_Z3: ${{ needs.rust-native-z3.result }}
+          PRODUCTION_NATIVE_Z3_LINUX: ${{ needs.production-native-z3-linux.result }}
+          BASE_REF: ${{ github.base_ref }}
+        shell: bash
+        run: |
+          failures=0
+          for result in "$RUST_WORKSPACE" "$WASM" "$NATIVE_Z3"; do
+            if [ "$result" != "success" ]; then
+              failures=1
+            fi
+          done
+          if [ "$BASE_REF" = "production" ] && [ "$PRODUCTION_NATIVE_Z3_LINUX" != "success" ]; then
+            failures=1
+          fi
+          if [ "$failures" -ne 0 ]; then
+            echo "product gate failed: rust=$RUST_WORKSPACE wasm=$WASM native-z3=$NATIVE_Z3 production-linux=$PRODUCTION_NATIVE_Z3_LINUX" >&2
+            exit 1
+          fi
