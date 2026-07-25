@@ -1663,8 +1663,16 @@ pub fn check_refinement(
             action: None,
             changes: BTreeMap::new(),
         }];
-        let mut initial_alpha_monitor = Monitor::new(abstraction.clone())?;
-        initial_alpha_monitor.state = alpha_initial.clone();
+        // `alpha_initial` is already a complete concrete abs state (the
+        // impl initial state mapped through the refinement correspondence),
+        // so there is nothing for the abstraction's own `init` to compute —
+        // `Monitor::from_state` skips it entirely rather than demanding a
+        // determinism `abstraction.init` may not have (issue #519's gate
+        // interacting with #493's nondeterministic-abs-init support: a
+        // nondeterministic abs init is intentionally never fully
+        // deterministic, so `Monitor::new(abstraction...)` fails closed here
+        // even for a genuinely correct refinement).
+        let initial_alpha_monitor = Monitor::from_state(abstraction.clone(), alpha_initial.clone());
         if let Some(violation) = initial_alpha_monitor.current_violation()? {
             let kind = if violation.kind == "type_bound" {
                 "map_out_of_bounds"
@@ -1839,13 +1847,16 @@ pub fn check_refinement(
                         .zip(values)
                         .map(|(param, value)| (param.name().to_owned(), value))
                         .collect::<BTreeMap<_, _>>();
-                    let mut abs_monitor = Monitor::new(abstraction.clone())?;
-                    abs_monitor.state = abstract_action_state(
+                    // See the step-0 `Monitor::from_state` note above: this
+                    // state is already fully computed, so there is nothing
+                    // for `abstraction.init` to determine here either.
+                    let abs_state = abstract_action_state(
                         &alpha_before,
                         abstraction,
                         abs_action,
                         &expected_params,
                     )?;
+                    let mut abs_monitor = Monitor::from_state(abstraction.clone(), abs_state);
                     let Some(abs_enabled) =
                         refinement_action_instance(&abs_monitor, abs_action, expected_params)?
                     else {
@@ -1876,8 +1887,7 @@ pub fn check_refinement(
                     }
                 }
             }
-            let mut alpha_monitor = Monitor::new(abstraction.clone())?;
-            alpha_monitor.state = alpha_after.clone();
+            let alpha_monitor = Monitor::from_state(abstraction.clone(), alpha_after.clone());
             if let Some(violation) = alpha_monitor.current_violation()? {
                 let kind = if violation.kind == "type_bound" {
                     "map_out_of_bounds"
