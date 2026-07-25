@@ -5900,6 +5900,15 @@ fn stable_kernel_projection(kernel: Value) -> Value {
             "completeness",
             "invariant",
             "violation_kind",
+            // Replayable evidence for a violated/reachable_failed/unknown_cti/
+            // unknown_budget kernel result (AGENTS.md: "Do not allowlist
+            // verdict, location, assurance, or exit-code differences").
+            "loc",
+            "violated_at_step",
+            "violating_bindings",
+            "blame",
+            "last_action",
+            "trace",
         ]
         .into_iter()
         .filter_map(|key| {
@@ -6589,7 +6598,12 @@ fn run_domain_check(
         }
     };
     let (kernel, status) = run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
-    if status == 2 {
+    // Only a definitive kernel verdict (status 0 = verified/proved, status 1 =
+    // violated/reachable_failed/unknown_cti/unknown_budget) has a `result`
+    // that `check_domain` can safely fold into the top-level verdict. Any
+    // other status (2 = spec error, 3 = internal error, ...) must return the
+    // kernel envelope verbatim rather than let it be misread downstream.
+    if status != 0 && status != 1 {
         return apply_domain_edition((kernel, status), path, path, edition);
     }
     let result = match fsl_tools::check_domain(&domain, &stable_kernel_projection(kernel)) {

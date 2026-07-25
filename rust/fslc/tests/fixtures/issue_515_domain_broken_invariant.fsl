@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// #515 negative control: `neverClosed` is violated by a single `CloseDoc`.
+// `domain check` must fold the nested kernel's `violated` result to the
+// top-level verdict instead of reporting `verified_under_assumptions`/exit 0.
+domain BrokenDomain {
+  implementation_profile functional_ddd
+
+  enum Status { Open, Closed }
+
+  aggregate Doc {
+    id DocId
+
+    state {
+      status: Status = Open;
+    }
+
+    command CloseDoc {}
+    event DocClosed {}
+
+    decide CloseDoc {
+      requires status == Open
+      emits DocClosed
+    }
+
+    evolve DocClosed {
+      status = Closed
+    }
+
+    invariant neverClosed { status == Open }
+  }
+}

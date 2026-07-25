@@ -135,8 +135,19 @@ pub fn check_domain(domain: &DomainSpec, kernel: &Value) -> Result<Value, fsl_co
             json!({"result":"violated","dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"formal_result":"not_run","findings":findings,"assumptions":assumptions,"kernel_source":kernel_source}),
         )
     } else {
+        // The nested kernel is the ground truth for the aggregate-invariant
+        // verdict: only "verified"/"proved" may report success. Every other
+        // kernel result (violated, reachable_failed, unknown_cti,
+        // unknown_budget, ...) must fold through to the top-level verdict,
+        // matching the frozen Python reference's `domain_check.py`.
+        let kernel_result = kernel.get("result").cloned().unwrap_or(Value::Null);
+        let result = if matches!(kernel_result.as_str(), Some("verified" | "proved")) {
+            "verified_under_assumptions"
+        } else {
+            "violated"
+        };
         Ok(
-            json!({"result":"verified_under_assumptions","dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"spec":domain.name,"formal_result":"verified","kernel":kernel,"findings":findings,"assumptions":assumptions,"generated_actions":actions(domain)}),
+            json!({"result":result,"dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"spec":domain.name,"formal_result":kernel_result,"kernel":kernel,"findings":findings,"assumptions":assumptions,"generated_actions":actions(domain)}),
         )
     }
 }
