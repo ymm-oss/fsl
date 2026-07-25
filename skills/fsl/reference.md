@@ -1273,10 +1273,15 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `--requirements ids.txt` or a `requirement` block in the requirements dialect but
   never referenced. A declaration with a tag such as `MODEL: ...` / `ASSUME-n: ...`
   does not become a warning.
-- `typestate`: determines how far a state machine (a struct field with enum values /
-  a state variable / an `Option<_>` slot) can be mapped onto the host language's
-  **typestate (ghost types)**. Each action is classified as
-  `derivable` (the from-state is the entity's own local guard) /
+- `typestate`: determines how far a state machine (a struct field with enum values,
+  scoped by field name **and** owning struct type so two structs with a same-named
+  field stay independent machines / a state variable / an `Option<_>` slot) can be
+  mapped onto the host language's **typestate (ghost types)**. Each action is
+  classified as
+  `derivable` (the from-state is the entity's own local guard — for a compound guard,
+  `or` is the union of what each disjunct implies, but only when every disjunct
+  constrains the entity; a disjunct silent about the entity, e.g. an unrelated flag,
+  drops the guard entirely rather than narrowing it) /
   `branching` (data-dependent inside an `if`) /
   `relational` (no local guard, the premise lives in an external structure — cannot
   be expressed in the type and remains a runtime/verification obligation).
