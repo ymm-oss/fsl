@@ -128,6 +128,39 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   malformed `CREATE TABLE` (unbalanced/missing parentheses) now produces an
   `unsupported_sql` warning instead of being silently skipped with no warning
   and no table (#507).
+- `fslc ai compat` no longer line-scans any readable file and reports
+  `compat_profile_generated` with a syntactically empty `dbsystem` fragment
+  (`artifact  { requires ; provides ; }`) for non-AI input or an fsl-ai
+  project that declares no `ai_component` at all — indistinguishable from a
+  genuine clean result. Native now parses either a single `ai_component`
+  document or a full fsl-ai project (`fsl_syntax::parse_ai_project`,
+  `AiComponent.tools[].schema` preferred over the tool name, matching the
+  frozen reference) and rejects wrong-dialect input and a component-less
+  project with exit 2 (#511).
+- `fslc ai eval`/`regress`/`drift` now execute the selected
+  `statistical_property`/`ai_migration`/`observed_property` declaration
+  instead of aggregating records against two hardcoded example
+  metrics/thresholds. `eval` applies every declared slice's
+  `min_samples`/`ci_lower`/`ci_upper` gate and evaluator-trust check
+  (`fsl_tools::evaluate_statistical_property`); `regress`/`drift` read the
+  spec path and the selected `ai_migration`/`observed_property`'s declared
+  metric clauses (`evaluate_migration`/`evaluate_observed_property`) instead
+  of ignoring it; an unknown `--property`/`--migration` selection is now a
+  check-time error (exit 2) instead of a fabricated statistical/observed
+  verdict. `ai eval` also honors the documented `--records`-less invocation
+  by falling back to the declared `dataset`'s `source` file. As part of this,
+  `fslc ai drift`'s success result changes from `observed_conformant` to the
+  documented `observed_supported` (`docs/LANGUAGE.md`,
+  `docs/DESIGN-assurance-classes.md`); `observed_conformant` remains correct
+  and unchanged for `fslc db observe`, which is a different command with its
+  own, still-valid result vocabulary (#509).
+- `fslc ai eval` results now carry every field
+  `schemas/fslc/ai/statistical-result.v0.schema.json` requires
+  (`schema_version`/`status`/`slice`/`metric`/`n`/`estimate`/`threshold`/
+  `evaluator`/`assumptions`, not just `result`/`interval`/`checks`), and
+  every non-`statistically_supported` terminal status (`dataset_invalid`,
+  `evaluator_untrusted`, `slice_missing`, `insufficient_samples`,
+  `inconclusive`) now exits 1 instead of 0 (#510).
 - `analyze`'s TSG no longer leaks the internal db-dialect `QqDbSepqQ`
   separator sentinel into node labels: a db-dialect invariant/action label
   now matches the display name `verify` reports for the same target (both

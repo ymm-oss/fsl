@@ -5923,7 +5923,17 @@ fn wrap_specialized(result: Value) -> (Value, i32) {
             | "replay_nonconformant"
             | "nonconformant"
             | "statistically_unsupported"
-            | "observed_mismatch",
+            | "observed_mismatch"
+            // fsl-ai statistical gate statuses (issue #510): a result that
+            // gates before producing a Wilson interval -- no dataset/schema
+            // evidence, an untrusted evaluator, too few samples, or an
+            // unsupported requirement shape -- is not a passing evaluation
+            // and must not exit 0 alongside `statistically_supported`.
+            | "dataset_invalid"
+            | "evaluator_untrusted"
+            | "slice_missing"
+            | "insufficient_samples"
+            | "inconclusive",
         ) => 1,
         Some("error") => 2,
         _ => 0,
@@ -6228,202 +6238,300 @@ fn run_ai_compare(
         json!({"fsl":"fsl-ai-migration.v0","schema_version":"fsl-ai-comparison-result.v0","result":"compared","formal_result":"not_run","from":from_label.unwrap_or_else(||before.to_str().unwrap_or_default()),"to":to_label.unwrap_or_else(||after.to_str().unwrap_or_default()),"dataset":dataset,"comparisons":comparisons,"assumptions":[],"findings":[]}),
     )
 }
-fn duplicate_records(events: &[Value]) -> bool {
-    let mut seen = std::collections::BTreeSet::new();
-    events
-        .iter()
-        .filter_map(|event| {
-            Some((
-                event.get("case_id")?.as_str()?,
-                event.get("slice").and_then(Value::as_str).unwrap_or("all"),
-                event.get("metric")?.as_str()?,
-            ))
-        })
-        .any(|key| !seen.insert(key))
+/// The `ai_project` name most fsl-ai project commands report -- derived from
+/// the spec's file stem, mirroring the frozen reference's
+/// `parse_ai_project(src, name=Path(path).stem)`.
+fn ai_project_name(path: &Path) -> String {
+    path.file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("AiProject")
+        .to_owned()
 }
+
+fn load_ai_project(path: &Path) -> Result<fsl_syntax::AiProject, (Value, i32)> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|error| (error_output("io", &error.to_string()), 2))?;
+    fsl_syntax::parse_ai_project(&source, &ai_project_name(path))
+        .map_err(|error| (semantic_error_output(&error), 2))
+}
+
+/// `fslc ai eval`: check a selected `statistical_property`'s declared
+/// slice/threshold/evaluator-trust gates against precomputed eval JSONL
+/// (issue #509 -- the declaration previously had no effect; issue #510 --
+/// the result is now schema-conformant with exit codes routed by
+/// `wrap_specialized`).
 fn run_ai_eval(
     path: &Path,
     records: Option<&Path>,
     dataset: Option<&str>,
     property: Option<&str>,
-    _slice: Option<&str>,
+    slice: Option<&str>,
 ) -> (Value, i32) {
-    let Some(records) = records else {
+    let project = match load_ai_project(path) {
+        Ok(project) => project,
+        Err(failure) => return failure,
+    };
+    let selected = match project.select_statistical_property(property, dataset) {
+        Ok(selected) => selected,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let Some(dataset_name) = dataset
+        .map(str::to_owned)
+        .or_else(|| selected.dataset.clone())
+    else {
         return (
-            semantic_error_output("ai eval requires --records for native evaluation"),
+            semantic_error_output("statistical_property requires dataset or --dataset"),
             2,
         );
     };
-    let events = match read_json_events(records) {
+    let records_path = match records {
+        Some(path) => path.to_path_buf(),
+        None => match project.dataset_source(&dataset_name) {
+            Some(source) if source.contains("://") => {
+                return (
+                    semantic_error_output(&format!(
+                        "dataset '{dataset_name}' source '{source}' is external; pass a local --records JSONL file"
+                    )),
+                    2,
+                );
+            }
+            Some(source) => PathBuf::from(source),
+            None => {
+                return (
+                    semantic_error_output(&format!(
+                        "dataset '{dataset_name}' has no source; pass --records"
+                    )),
+                    2,
+                );
+            }
+        },
+    };
+    let events = match read_json_events(&records_path) {
         Ok(events) => events,
         Err(error) => return (error_output("parse", &error), 2),
     };
-    if duplicate_records(&events) {
-        return wrap_specialized(
-            json!({"result":"dataset_invalid","formal_result":"not_run","findings":[{"kind":"statistical_contract_unsupported","violation":"dataset_invalid"}]}),
-        );
+    match fsl_tools::evaluate_statistical_property(selected, &events, &dataset_name, slice) {
+        Ok(result) => wrap_specialized(result),
+        Err(error) => (semantic_error_output(&error), 2),
     }
-    let source = std::fs::read_to_string(path).unwrap_or_default();
-    let selected = property.unwrap_or("");
-    if selected.is_empty() && source.matches("statistical_property ").count() > 1 {
-        return (
-            semantic_error_output(
-                "multiple statistical_property declarations found; pass --property",
-            ),
-            2,
-        );
-    }
-    let stats = metric_summaries(&events, dataset);
-    let accuracy = *stats.get("accuracy").unwrap_or(&(0, 0));
-    let lower = wilson(accuracy.0, accuracy.1)["lower"]
-        .as_f64()
-        .unwrap_or(0.0);
-    let threshold = if selected == "StrictQuality" {
-        0.80
-    } else {
-        0.35
-    };
-    let supported = lower >= threshold;
-    let finding = if supported {
-        vec![]
-    } else {
-        vec![
-            json!({"kind":"statistical_contract_unsupported","minimal_conflict_set":{"property":selected,"dataset":dataset,"slice":"JapaneseRefundTickets","metric":"accuracy"}}),
-        ]
-    };
-    wrap_specialized(
-        json!({"result":if supported{"statistically_supported"}else{"statistically_unsupported"},"formal_result":"not_run","property":selected,"dataset":dataset,"interval":wilson(accuracy.0,accuracy.1),"checks":[{"slice":"all"},{"slice":"JapaneseRefundTickets"}],"findings":finding}),
-    )
 }
-#[allow(clippy::cast_precision_loss)]
+
+/// `fslc ai regress`: check a selected `ai_migration`'s declared
+/// `no_regression` metric clauses (issue #509 -- previously two hardcoded
+/// metric/threshold pairs ran unconditionally and `--migration`/the spec
+/// path were never read).
 fn run_ai_regress(
-    _path: &Path,
+    path: &Path,
     before: &Path,
     after: &Path,
     dataset: Option<&str>,
     migration: Option<&str>,
 ) -> (Value, i32) {
-    let left = match read_json_events(before) {
-        Ok(v) => metric_summaries(&v, dataset),
+    let project = match load_ai_project(path) {
+        Ok(project) => project,
+        Err(failure) => return failure,
+    };
+    let selected = match project.select_migration(migration) {
+        Ok(selected) => selected,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let before_events = match read_json_events(before) {
+        Ok(events) => events,
         Err(error) => return (error_output("parse", &error), 2),
     };
-    let right = match read_json_events(after) {
-        Ok(v) => metric_summaries(&v, dataset),
+    let after_events = match read_json_events(after) {
+        Ok(events) => events,
         Err(error) => return (error_output("parse", &error), 2),
     };
-    let mut findings = Vec::new();
-    for (metric, limit, direction) in [
-        ("accuracy", 0.05, "drop"),
-        ("hallucination_rate", 0.02, "increase"),
-    ] {
-        let a = *left.get(metric).unwrap_or(&(0, 0));
-        let b = *right.get(metric).unwrap_or(&(0, 0));
-        let av = if a.0 == 0 {
-            0.0
-        } else {
-            a.1 as f64 / a.0 as f64
-        };
-        let bv = if b.0 == 0 {
-            0.0
-        } else {
-            b.1 as f64 / b.0 as f64
-        };
-        if (direction == "drop" && av - bv > limit) || (direction == "increase" && bv - av > limit)
-        {
-            findings.push(json!({"kind":"ai_migration_regression","minimal_conflict_set":{"migration":migration,"dataset":dataset,"metric":metric}}));
-        }
+    match fsl_tools::evaluate_migration(selected, &before_events, &after_events, dataset) {
+        Ok(result) => wrap_specialized(result),
+        Err(error) => (semantic_error_output(&error), 2),
     }
-    wrap_specialized(
-        json!({"result":if findings.is_empty(){"statistically_supported"}else{"statistically_unsupported"},"formal_result":"not_run","findings":findings}),
-    )
 }
-#[allow(clippy::cast_precision_loss)]
+
+/// `fslc ai drift`: check a selected `observed_property`'s declared
+/// `observed`/`drift` requirements against runtime telemetry JSONL (issue
+/// #509 -- previously two hardcoded metric/threshold pairs ran
+/// unconditionally and `--property`/the spec path were never read). The
+/// success result is `observed_supported` (not `observed_conformant`,
+/// which stays `fslc db observe`'s vocabulary --
+/// `docs/DESIGN-assurance-classes.md`/`docs/LANGUAGE.md` document
+/// `observed_supported`/`observed_mismatch` for `ai drift` specifically;
+/// only `ai drift`'s result string was wrong, not `db observe`'s).
 fn run_ai_drift(
-    _path: &Path,
+    path: &Path,
     current: &Path,
     baseline: Option<&Path>,
     property: Option<&str>,
     window: Option<&str>,
     baseline_label: Option<&str>,
 ) -> (Value, i32) {
-    let current = match read_json_events(current) {
-        Ok(v) => metric_summaries(&v, None),
+    let project = match load_ai_project(path) {
+        Ok(project) => project,
+        Err(failure) => return failure,
+    };
+    let selected = match project.select_observed_property(property) {
+        Ok(selected) => selected,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let current_events = match read_json_events(current) {
+        Ok(events) => events,
         Err(error) => return (error_output("parse", &error), 2),
     };
-    let baseline_stats = baseline
-        .and_then(|path| read_json_events(path).ok())
-        .map(|v| metric_summaries(&v, None))
-        .unwrap_or_default();
-    let mut findings = Vec::new();
-    for metric in current
-        .keys()
-        .chain(baseline_stats.keys())
-        .collect::<std::collections::BTreeSet<_>>()
-    {
-        let a = *baseline_stats.get(metric).unwrap_or(&(0, 0));
-        let b = *current.get(metric).unwrap_or(&(0, 0));
-        let av = if a.0 == 0 {
-            0.0
-        } else {
-            a.1 as f64 / a.0 as f64
-        };
-        let bv = if b.0 == 0 {
-            0.0
-        } else {
-            b.1 as f64 / b.0 as f64
-        };
-        if (metric == "hallucination_rate" && bv > 0.30)
-            || (metric == "refusal_rate" && (bv - av).abs() > 0.10)
-        {
-            findings.push(json!({"kind":"ai_observed_drift","minimal_conflict_set":{"property":property,"metric":metric,"window":window,"baseline":baseline_label}}));
-        }
-    }
-    wrap_specialized(
-        json!({"result":if findings.is_empty(){"observed_conformant"}else{"observed_mismatch"},"formal_result":"not_run","findings":findings}),
-    )
+    let baseline_events = match baseline {
+        Some(path) => match read_json_events(path) {
+            Ok(events) => events,
+            Err(error) => return (error_output("parse", &error), 2),
+        },
+        None => Vec::new(),
+    };
+    wrap_specialized(fsl_tools::evaluate_observed_property(
+        selected,
+        &current_events,
+        &baseline_events,
+        window,
+        baseline_label,
+    ))
 }
+
+/// `fslc ai compat`: project a `dbsystem artifact` capability profile from
+/// one `ai_component` or every `ai_component` an fsl-ai project declares
+/// (issue #511 -- a non-AI input, or an AI project with no `ai_component` at
+/// all, previously produced a syntactically empty profile that reported
+/// success indistinguishably from a genuine clean result).
 fn run_ai_compat(path: &Path, environment: Option<&str>) -> (Value, i32) {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
-    let summary = ai_project_summary(&source);
-    let mut requires = Vec::new();
-    for (prefix, value) in [
-        ("model", summary.model),
-        ("prompt", summary.prompt),
-        ("retriever", summary.retriever),
-    ] {
-        if let Some(value) = value {
-            requires.push(format!("{prefix}.{value}"));
-        }
+    let components: Vec<fsl_syntax::AiComponent> =
+        if fslc_rust::frontend_output::is_ai_project(&source) {
+            match fsl_syntax::parse_ai_project(&source, &ai_project_name(path)) {
+                Ok(project) => project.components,
+                Err(error) => return (semantic_error_output(&error), 2),
+            }
+        } else {
+            match parse_surface_document(path) {
+                Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => vec![component],
+                Ok(_) => {
+                    return (
+                        semantic_error_output(
+                            "expected an ai_component or fsl-ai project document",
+                        ),
+                        2,
+                    );
+                }
+                Err(error) => return (semantic_error_output(&error), 2),
+            }
+        };
+    if components.is_empty() {
+        return (
+            semantic_error_output(
+                "ai project declares no ai_component to project a compatibility profile from",
+            ),
+            2,
+        );
     }
-    requires.extend(summary.tools.iter().map(|tool| format!("tool.{tool}")));
+    let profiles = components
+        .iter()
+        .map(ai_compat_component_profile)
+        .collect::<Vec<_>>();
+    let fragment = profiles
+        .iter()
+        .map(ai_compat_profile_block)
+        .collect::<String>();
+    wrap_specialized(json!({
+        "fsl": "fsl-ai-compat-profile.v0",
+        "schema_version": "fsl-ai-compat-profile.v0",
+        "result": "compat_profile_generated",
+        "formal_result": "not_run",
+        "environment": environment,
+        "profiles": profiles,
+        "dbsystem_fragment": fragment,
+        "assumptions": [],
+        "findings": [],
+    }))
+}
+
+fn ai_compat_component_profile(component: &fsl_syntax::AiComponent) -> Value {
+    let mut requires = Vec::new();
+    if let Some(model) = &component.model {
+        requires.push(format!("model.{model}"));
+    }
+    if let Some(prompt) = &component.prompt {
+        requires.push(format!("prompt.{prompt}"));
+    }
+    if let Some(retriever) = &component.retriever {
+        requires.push(format!("retriever.{retriever}"));
+    }
+    for tool in &component.tools {
+        requires.push(format!(
+            "tool.{}",
+            tool.schema.as_deref().unwrap_or(&tool.name)
+        ));
+    }
     requires.sort();
-    let provides = summary
-        .output
+    requires.dedup();
+    let provides = component
+        .output_schema
+        .as_ref()
         .map(|value| vec![format!("output.{value}")])
         .unwrap_or_default();
-    let artifact =
-        summary
-            .component
-            .chars()
-            .enumerate()
-            .fold(String::new(), |mut out, (index, c)| {
-                if c.is_ascii_uppercase() && index > 0 {
-                    out.push('_');
-                }
-                out.push(c.to_ascii_lowercase());
-                out
-            });
-    let fragment = format!(
-        "artifact {artifact} {{\n  requires {};\n  provides {};\n}}\n",
-        requires.join(", "),
-        provides.join(", ")
-    );
-    wrap_specialized(
-        json!({"fsl":"fsl-ai-compat-profile.v0","schema_version":"fsl-ai-compat-profile.v0","result":"compat_profile_generated","formal_result":"not_run","environment":environment,"profiles":[{"artifact":artifact,"component":summary.component,"requires":requires,"provides":provides}],"dbsystem_fragment":fragment,"assumptions":[],"findings":[]}),
-    )
+    json!({
+        "artifact": ai_artifact_name(&component.name),
+        "component": component.name,
+        "requires": requires,
+        "provides": provides,
+    })
+}
+
+/// `PascalCase`/`camelCase` component name to `snake_case` artifact name,
+/// mirroring the frozen reference's `_artifact_name`.
+fn ai_artifact_name(name: &str) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    let mut out = String::new();
+    for (index, &c) in chars.iter().enumerate() {
+        if c.is_ascii_uppercase() && index > 0 && !chars[index - 1].is_ascii_uppercase() {
+            out.push('_');
+        }
+        out.push(c.to_ascii_lowercase());
+    }
+    out.trim_matches('_').to_owned()
+}
+
+fn ai_compat_profile_block(profile: &Value) -> String {
+    let artifact = profile["artifact"].as_str().unwrap_or_default();
+    let requires = profile["requires"]
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    let provides = profile["provides"]
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    let requires_line = if requires.is_empty() {
+        String::new()
+    } else {
+        format!("  requires {requires};\n")
+    };
+    let provides_line = if provides.is_empty() {
+        String::new()
+    } else {
+        format!("  provides {provides};\n")
+    };
+    format!("artifact {artifact} {{\n{requires_line}{provides_line}}}\n")
 }
 
 fn parse_domain_document(path: &Path) -> Result<fsl_syntax::DomainSpec, String> {

@@ -2363,13 +2363,24 @@ fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 `dataset`、`evaluator`、`failure_mode`、`statistical_property`、
 `ai_migration`、`observed_property` を組み合わせられます。`fslc ai check` は
 これらのファイルをパースして `ai_project_analyzed` を返します。`fslc ai eval` は
-Wilson 区間つきで、事前計算された JSONL から Bernoulli/比率のメトリクスを検査
-します。`fslc ai regress` は集約の `no_regression` のメトリクス低下/増加の節を
-検査します。`fslc ai compare` は閾値の主張なしにメトリクスの差分を報告します。
-`fslc ai drift` はランタイムのテレメトリの閾値とドリフトを検査します。そして
-`fslc ai compat` は有限の
-`dbsystem artifact` ケイパビリティプロファイルを出力します。これらはすべて
-`formal_result:"not_run"` を使います。
+選択された `statistical_property` が宣言する `slice`/`min_samples`/
+`ci_lower`/`ci_upper` の要件を、事前計算された JSONL（`--records`、または
+宣言された `dataset` の `source` ファイル）に対して Wilson 区間つきで検査
+します。`fslc ai regress` は選択された `ai_migration` が宣言する集約の
+`no_regression` メトリクス低下/増加の節を検査します。`fslc ai compare` は
+閾値の主張なしにメトリクスの差分を報告します。`fslc ai drift` は選択された
+`observed_property` が宣言する `observed`/`drift` の要件をランタイムの
+テレメトリに対して検査します（`observed_supported` / `observed_mismatch`）。
+そして `fslc ai compat` は、1 つの `ai_component`、またはプロジェクトが
+宣言するすべての `ai_component` について有限の `dbsystem artifact`
+ケイパビリティプロファイルを出力し、AI ではない入力や `ai_component` を
+1 つも宣言しない AI プロジェクトは拒否します（exit 2）。これらはすべて
+`formal_result:"not_run"` を使います。未知の `--property`/`--migration` の
+選択はチェック時エラー（exit 2）です。選択された `statistical_property` の
+ゲート状態（`dataset_invalid`、`evaluator_untrusted`、`slice_missing`、
+`insufficient_samples`、`inconclusive`、`statistically_unsupported`）は
+exit 1 となり、唯一の成功ケースである `statistically_supported` の exit 0
+と対比されます。
 
 再帰的な `agent` の形:
 

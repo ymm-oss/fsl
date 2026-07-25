@@ -9,6 +9,7 @@
 //! differential tests without making that legacy representation the Rust AST.
 
 mod ai;
+mod ai_project;
 mod annotation;
 mod annotation_parse;
 mod ast;
@@ -27,6 +28,10 @@ pub use ai::{
     AiAgentContract, AiAgentGrant, AiAgentOutput, AiAuthority, AiAuthorityRule, AiCheckRule,
     AiComponent, AiDelegationEdge, AiFailurePolicy, AiFallback, AiHardCheck, AiLoc, AiTool,
     parse_ai_component,
+};
+pub use ai_project::{
+    AiDataset, AiMetricRequirement, AiMigration, AiObservedProperty, AiObservedRequirement,
+    AiProject, AiRegressionRequirement, AiStatisticalProperty, parse_ai_project,
 };
 pub use annotation::{
     Annotation, AnnotationError, AnnotationRegistry, AnnotationValue, Annotations, RequirementLink,

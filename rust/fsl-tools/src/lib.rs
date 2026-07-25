@@ -4,6 +4,7 @@
 
 mod agent;
 mod ai;
+mod ai_stochastic;
 mod analysis;
 mod analysis_export;
 mod analysis_graph;
@@ -41,6 +42,9 @@ mod undecided;
 
 pub use agent::{AgentError, analyze_ai_agent};
 pub use ai::{check_ai, replay_ai};
+pub use ai_stochastic::{
+    evaluate_migration, evaluate_observed_property, evaluate_statistical_property,
+};
 pub use analysis::{
     analyze_model, analyze_tsg, build_tsg, conservation_review_findings, review_finding,
     structural_review_findings,
