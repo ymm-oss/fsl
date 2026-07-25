@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The self-loop shape: a genuine `(0, 0)` edge exists after `loop_0`. Both
+// a reflexive and a non-reflexive `reachable` agree this makes `0`
+// reachable from `0` -- this shape does not distinguish the two
+// conventions, it is a regression control that the fix does not stop
+// detecting a *real* self-loop.
+spec ReachableSelfLoop {
+  type Node = 0..1
+  state { r: relation Node -> Node }
+  init { r = Set {} }
+
+  action loop_0() {
+    r = r.add(0, 0)
+  }
+
+  invariant NoTrivialSelfReach { not reachable(r, 0, 0) }
+}

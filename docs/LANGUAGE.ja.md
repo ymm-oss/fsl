@@ -577,7 +577,12 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   `reachable(r, a, b)`、`acyclic(r)`、`functional(r)`、`injective(r)`、
   `domain(r)`、`range(r)`。`reachable` と `acyclic` は自己関係
   (`relation T -> T`)を要求します。端点の型/アリティのエラーは修復ヒントを
-  含みます。
+  含みます。`reachable(r, a, a)` は構造上**反射的ではありません**——`a` から
+  `a` に戻る、1本以上の辺からなる本物のパスがある場合にのみ真です(空の関係
+  や非巡回の関係では、すべての `a` について `reachable(r, a, a) == false`)。
+  反射的な読みだと、任意の非空ドメインで `not reachable(r, a, a)` が構造上
+  充足不能になり、述語から意味が失われます。「`r` のどこにも自己ループや
+  サイクルがない」を述べるには `acyclic(r)` を使ってください。
 - ensures / trans の内側のみ: `old(expr)` で遷移前の状態を読む
 - leadsTo ブロックの内側のみ: `P ~> Q`(応答プロパティ。一般式の演算子階層の一部ではありません)。
   Q の前に有界の締め切り `within K` を、応答本体の後に induction のランキング用の

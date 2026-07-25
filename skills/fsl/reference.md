@@ -745,6 +745,9 @@ cannot be assigned both inline and in `init`.
 - Relation: `.contains(a,b) .add(a,b) .remove(a,b)`,
   `reachable(r,a,b) acyclic(r) functional(r) injective(r) domain(r) range(r)`.
   `reachable`/`acyclic` require a self-relation (`relation T -> T`).
+  `reachable(r,a,a)` is **not reflexive**: true only via a real path of ≥1
+  edges back to `a` (empty/acyclic `r` gives `false`, never a free 0-hop
+  `a==a`). Use `acyclic(r)` for "no self-loops or cycles anywhere".
 - conditional expression: `if c then a else b` in any expression position;
   `c` is Bool, both branches have one logical type and are checked statically,
   while only the selected branch is evaluated

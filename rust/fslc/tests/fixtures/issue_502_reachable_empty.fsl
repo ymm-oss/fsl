@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The empty-relation shape: this is the *only* one of the three shapes in
+// this issue's negative control that distinguishes a reflexive from a
+// non-reflexive `reachable(r, a, a)`. With zero edges there is no path of
+// any length from 0 back to 0, so a non-reflexive reading keeps the
+// invariant true at init; only the first `link` action can violate it.
+spec ReachableEmpty {
+  type Node = 0..1
+  state { r: relation Node -> Node }
+  init { r = Set {} }
+
+  action link(a: Node, b: Node) {
+    r = r.add(a, b)
+  }
+
+  invariant NoTrivialSelfReach { not reachable(r, 0, 0) }
+}

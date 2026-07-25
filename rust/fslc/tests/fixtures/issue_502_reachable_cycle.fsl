@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The cycle-through-`a` shape: no direct `(0, 0)` edge, but a 2-hop cycle
+// `0 -> 1 -> 0` exists after both actions have fired. Both a reflexive and
+// a non-reflexive `reachable` agree this makes `0` reachable from `0` via
+// the real path -- this shape does not distinguish the two conventions
+// either, it is a regression control that the fix still finds a multi-hop
+// cycle back to the source (not only a direct self-loop).
+spec ReachableCycle {
+  type Node = 0..1
+  state { r: relation Node -> Node }
+  init { r = Set {} }
+
+  action step1() {
+    r = r.add(0, 1)
+  }
+
+  action step2() {
+    r = r.add(1, 0)
+  }
+
+  invariant NoTrivialSelfReach { not reachable(r, 0, 0) }
+}
