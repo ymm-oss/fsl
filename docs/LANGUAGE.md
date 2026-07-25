@@ -917,7 +917,9 @@ refinement_failed / sweep_failed / observed_mismatch,
 result; `imported`/`imported_with_warnings` is `fslc db import`'s. The same
 `2` mapping is fail-closed for `chain`'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
-`docs/DESIGN-layers.md` §7).
+`docs/DESIGN-layers.md` §7) and for `ledger --impl-log`'s replay input (a
+replay error is not implementation-log evidence and must not be rendered as
+an empty ledger row — `docs/DESIGN-ledger.md`).
 
 ### Kinds of result
 

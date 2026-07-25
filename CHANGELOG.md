@@ -128,6 +128,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   directory) no longer fail the `[impl]` layer with an io error: an empty
   manifest parent directory now normalizes to `.` before resolving files and
   launching the implementation command (#500).
+- `fslc ledger --impl-log` no longer discards a replay error (missing file,
+  malformed JSON, wrong-spec trace, schema-invalid trace): it now fails the
+  whole `ledger` command through the standard error envelope and exit code,
+  the same as `--evidence`, instead of silently rendering a ledger with the
+  implementation-log conformance row missing (#499).
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false

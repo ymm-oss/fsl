@@ -23,7 +23,12 @@ reads as "guarantees nothing".
 - `run_scenarios(file, depth, deadlock)` — passing acceptance / forbidden /
   reachable confirmations per requirement.
 - `--impl-log <trace.json>` (optional) → `run_replay` — implementation-log
-  conformance (`conformant` / `nonconformant`).
+  conformance (`conformant` / `nonconformant`). A replay **error** (missing
+  file, malformed JSON, wrong-spec trace, schema-invalid trace) is not
+  evidence and must not be rendered as an empty/missing implementation-log
+  row: it fails the whole `ledger` command through the same standard error
+  envelope and exit code as any other input error (issue #499), the same way
+  `--evidence` already fails closed on an unreadable evidence file.
 - The built `spec` — the requirement registry (every `requirement` id + text) and
   `control` governance (owner / severity) when present.
 

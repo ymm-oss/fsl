@@ -1145,7 +1145,12 @@ reader can decide approve/reject/risk-accept from. It is a presentation layer
 (no new verification): the `trace_type` discriminator drives a per-finding
 business translation, governance columns (risk/decider) come from `control`
 metadata when present (fill-in otherwise), and the guarantee limit is stated in
-positive form. Raw JSON is demoted to a collapsed appendix. See
+positive form. Raw JSON is demoted to a collapsed appendix. `--impl-log
+<trace.json>` folds a `run_replay` conformance row into the ledger, but a
+replay **error** (missing file, malformed JSON, wrong-spec trace,
+schema-invalid trace) fails the whole `ledger` command through the standard
+error envelope and exit code, the same as `--evidence`, rather than rendering
+a ledger with the implementation-log row silently missing. See
 `docs/DESIGN-ledger.md`.
 
 Digest-bound approvals (issue #190) are separate from assurance class and from

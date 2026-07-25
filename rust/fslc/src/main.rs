@@ -10369,9 +10369,19 @@ fn prepare_ledger_report(request: &LedgerReportRequest<'_>) -> Result<PreparedLe
         DEFAULT_EXPLICIT_BUDGET,
         1,
     );
-    let replay = request
-        .impl_log
-        .map(|trace| run_replay(request.path, trace).0);
+    let replay = match request.impl_log {
+        Some(trace) => {
+            let (detail, status) = run_replay(request.path, trace);
+            // Only `conformant` (0) and `nonconformant` (1) are replay
+            // evidence; io/parse/internal errors (>=2) must fail the ledger
+            // command instead of silently omitting the implementation-log row.
+            if status >= 2 {
+                return Err(detail);
+            }
+            Some(detail)
+        }
+        None => None,
+    };
     let evidence = request
         .evidence_paths
         .iter()
