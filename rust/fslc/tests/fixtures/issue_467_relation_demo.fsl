@@ -1,0 +1,34 @@
+spec RelationDemo {
+  type User = 0..1
+  enum Role { Manager, Staff }
+
+  state {
+    delegates: relation User -> User,
+    roles: relation User -> Role
+  }
+
+  init {
+    delegates = Set {}
+    roles = Set {}
+  }
+
+  action delegate(a: User, b: User) {
+    requires a != b
+    requires not reachable(delegates, b, a)
+    delegates = delegates.add(a, b)
+  }
+
+  action revoke(a: User, b: User) {
+    delegates = delegates.remove(a, b)
+  }
+
+  action grant(u: User, r: Role) {
+    roles = roles.add(u, r)
+  }
+
+  invariant DelegatesAcyclic { acyclic(delegates) }
+  invariant DelegatesFunctional { functional(delegates) }
+  invariant RoleRangeBounded { range(roles).size() <= 2 }
+  invariant DelegateDomainBounded { domain(delegates).size() <= 2 }
+  reachable CanDelegate { delegates.contains(0, 1) }
+}

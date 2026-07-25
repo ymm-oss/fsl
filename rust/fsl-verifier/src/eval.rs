@@ -176,6 +176,88 @@ pub(crate) fn eval<S: SmtSolver>(
                     solver.ite(&nonnegative, term, &solver.neg(term)?)?,
                 ))
             }
+            "rel_functional" | "rel_injective" => {
+                let value = eval(solver, model, expr, state, bindings, old_state)?;
+                let SymbolicValue::Relation { entries, .. } = value else {
+                    return Err(VerifyError::new(format!("{name}() requires a relation")));
+                };
+                let same_key = |left: &(FslValue, FslValue), right: &(FslValue, FslValue)| {
+                    if name == "rel_functional" {
+                        left.0 == right.0
+                    } else {
+                        left.1 == right.1
+                    }
+                };
+                let mut clauses = Vec::new();
+                for (index, (key, present)) in entries.iter().enumerate() {
+                    for (other_key, other_present) in entries.iter().skip(index + 1) {
+                        if same_key(key, other_key) {
+                            clauses
+                                .push(solver.not(
+                                    &solver.and(&[present.clone(), other_present.clone()])?,
+                                )?);
+                        }
+                    }
+                }
+                Ok(bool_value(solver, solver.and(&clauses)?))
+            }
+            "rel_domain" | "rel_range" => {
+                let value = eval(solver, model, expr, state, bindings, old_state)?;
+                let SymbolicValue::Relation { ty, entries } = value else {
+                    return Err(VerifyError::new(format!("{name}() requires a relation")));
+                };
+                let TypeRef::Relation(source_ty, target_ty) = &ty else {
+                    unreachable!();
+                };
+                let (element_ty, values) = if name == "rel_domain" {
+                    (source_ty.as_ref().clone(), model.domain_values(source_ty)?)
+                } else {
+                    (target_ty.as_ref().clone(), model.domain_values(target_ty)?)
+                };
+                let mut element_entries = Vec::with_capacity(values.len());
+                for element in values {
+                    let present_terms = entries
+                        .iter()
+                        .filter(|((source, target), _)| {
+                            if name == "rel_domain" {
+                                source == &element
+                            } else {
+                                target == &element
+                            }
+                        })
+                        .map(|(_, present)| present.clone())
+                        .collect::<Vec<_>>();
+                    element_entries.push((element, solver.or(&present_terms)?));
+                }
+                Ok(SymbolicValue::Set {
+                    ty: TypeRef::Set(Box::new(element_ty)),
+                    entries: element_entries,
+                })
+            }
+            "rel_acyclic" => {
+                let value = eval(solver, model, expr, state, bindings, old_state)?;
+                let SymbolicValue::Relation { ty, entries } = value else {
+                    return Err(VerifyError::new("acyclic() requires a relation"));
+                };
+                let TypeRef::Relation(source_ty, target_ty) = &ty else {
+                    unreachable!();
+                };
+                if source_ty != target_ty {
+                    return Err(VerifyError::new(
+                        "acyclic() requires a self-relation (relation T -> T)",
+                    ));
+                }
+                let reach = relation_reachability_table(solver, model, &entries, source_ty)?;
+                let mut cyclic_terms = Vec::new();
+                for ((source, target), present) in &entries {
+                    let back = reach
+                        .get(&(target.clone(), source.clone()))
+                        .ok_or_else(|| VerifyError::new("relation reachability table gap"))?;
+                    cyclic_terms.push(solver.and(&[present.clone(), back.clone()])?);
+                }
+                let cyclic = solver.or(&cyclic_terms)?;
+                Ok(bool_value(solver, solver.not(&cyclic)?))
+            }
             _ => Err(VerifyError::new(format!(
                 "unsupported unary expression '{name}'"
             ))),
@@ -197,10 +279,85 @@ pub(crate) fn eval<S: SmtSolver>(
                 solver.ite(&condition, int_term(&left)?, int_term(&right)?)?,
             ))
         }
+        Expr::TernaryNamed {
+            name,
+            first,
+            second,
+            third,
+        } if name == "rel_reachable" => {
+            let relation = eval(solver, model, first, state, bindings, old_state)?;
+            let SymbolicValue::Relation { ty, entries } = relation else {
+                return Err(VerifyError::new("reachable() requires a relation"));
+            };
+            let TypeRef::Relation(source_ty, target_ty) = &ty else {
+                unreachable!();
+            };
+            if source_ty != target_ty {
+                return Err(VerifyError::new(
+                    "reachable() requires a self-relation (relation T -> T)",
+                ));
+            }
+            let source = eval(solver, model, second, state, bindings, old_state)?;
+            let target = eval(solver, model, third, state, bindings, old_state)?;
+            let reach = relation_reachability_table(solver, model, &entries, source_ty)?;
+            let mut terms = Vec::with_capacity(reach.len());
+            for ((from, to), reachable) in &reach {
+                let from_term = concrete_value(solver, model, source_ty, from)?;
+                let to_term = concrete_value(solver, model, target_ty, to)?;
+                let same_source = logical_equal(solver, model, &source, &from_term)?;
+                let same_target = logical_equal(solver, model, &target, &to_term)?;
+                terms.push(solver.and(&[same_source, same_target, reachable.clone()])?);
+            }
+            Ok(bool_value(solver, solver.or(&terms)?))
+        }
         Expr::TernaryNamed { name, .. } => Err(VerifyError::new(format!(
             "unsupported ternary expression '{name}'"
         ))),
     }
+}
+
+/// Bounded-hop symbolic reachability closure over a relation's finite
+/// (source, target) domain grid, memoized by iterative relaxation (hop bound
+/// = domain size, sound for both `reachable()` and `acyclic()`'s cycle
+/// check). Ports the frozen Python symbolic reference's
+/// `bmc.py::_relation_reachable_expr` (path of at least one edge -- see the
+/// base-case note below for why this intentionally does not match the
+/// concrete Monitor's own trivial-self-reachability convention).
+fn relation_reachability_table<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    entries: &[((FslValue, FslValue), S::Term)],
+    domain_ty: &TypeRef,
+) -> Result<BTreeMap<(FslValue, FslValue), S::Term>, VerifyError> {
+    let values = model.domain_values(domain_ty)?;
+    let direct: BTreeMap<(FslValue, FslValue), S::Term> = entries.iter().cloned().collect();
+    // Base case: a path of exactly one hop (a direct edge). Unlike the
+    // concrete Monitor's BFS oracle (which treats a node as trivially
+    // "reachable" from itself with zero hops), the frozen Python symbolic
+    // reference (`bmc.py::_relation_reachable_expr`) requires at least one
+    // edge -- `reachable(r, a, a)` is only true when `a` has an actual path
+    // back to itself (e.g. a self-loop or a cycle through it). Matching the
+    // symbolic reference here (not the concrete one) is what this port's
+    // `--engine bmc`/`induction` verdicts are graded against.
+    let mut reach: BTreeMap<(FslValue, FslValue), S::Term> = direct.clone();
+    for _ in 0..values.len() {
+        let mut next = BTreeMap::new();
+        for a in &values {
+            for b in &values {
+                let mut terms = vec![reach[&(a.clone(), b.clone())].clone()];
+                for c in &values {
+                    let via_c = solver.and(&[
+                        reach[&(a.clone(), c.clone())].clone(),
+                        direct[&(c.clone(), b.clone())].clone(),
+                    ])?;
+                    terms.push(via_c);
+                }
+                next.insert((a.clone(), b.clone()), solver.or(&terms)?);
+            }
+        }
+        reach = next;
+    }
+    Ok(reach)
 }
 
 /// Build the condition under which concrete evaluation of `expr` completes
@@ -825,9 +982,47 @@ fn eval_method<S: SmtSolver>(
                 ))),
             }
         }
-        SymbolicValue::Relation { .. } => Err(VerifyError::new(
-            "relation methods are not implemented in the current verifier slice",
-        )),
+        SymbolicValue::Relation { ty, entries } => {
+            let TypeRef::Relation(source_ty, target_ty) = &ty else {
+                unreachable!();
+            };
+            match (name, values.as_slice()) {
+                ("contains", [source, target]) => {
+                    let mut terms = Vec::with_capacity(entries.len());
+                    for ((entry_source, entry_target), present) in &entries {
+                        let source_term = concrete_value(solver, model, source_ty, entry_source)?;
+                        let target_term = concrete_value(solver, model, target_ty, entry_target)?;
+                        let same_source = logical_equal(solver, model, source, &source_term)?;
+                        let same_target = logical_equal(solver, model, target, &target_term)?;
+                        terms.push(solver.and(&[same_source, same_target, present.clone()])?);
+                    }
+                    Ok(bool_value(solver, solver.or(&terms)?))
+                }
+                ("add" | "remove", [source, target]) => {
+                    let added = name == "add";
+                    let entries = entries
+                        .into_iter()
+                        .map(|((entry_source, entry_target), present)| {
+                            let source_term =
+                                concrete_value(solver, model, source_ty, &entry_source)?;
+                            let target_term =
+                                concrete_value(solver, model, target_ty, &entry_target)?;
+                            let same_source = logical_equal(solver, model, source, &source_term)?;
+                            let same_target = logical_equal(solver, model, target, &target_term)?;
+                            let matches = solver.and(&[same_source, same_target])?;
+                            Ok((
+                                (entry_source, entry_target),
+                                solver.ite(&matches, &solver.bool_value(added), &present)?,
+                            ))
+                        })
+                        .collect::<Result<_, VerifyError>>()?;
+                    Ok(SymbolicValue::Relation { ty, entries })
+                }
+                _ => Err(VerifyError::new(format!(
+                    "invalid relation method '{name}'"
+                ))),
+            }
+        }
         _ => Err(VerifyError::new(
             "method receiver has no collection methods",
         )),

@@ -6,6 +6,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- `relation A -> B` state is now usable end to end in the native symbolic
+  verifier: `r = Set {}` types and evaluates as the empty relation (both
+  `fslc check` and the concrete Monitor previously rejected or mistyped it),
+  and `fslc verify`/`fslc mutate` implement all seven relation operations
+  (`.contains(a, b)`, `.add(a, b)`, `.remove(a, b)`, `reachable(r, a, b)`,
+  `acyclic(r)`, `functional(r)`, `injective(r)`, `domain(r)`, `range(r)`),
+  matching the frozen Python reference's semantics (`reachable`/`acyclic`
+  require a self-relation and are rejected otherwise; a memoized bounded-hop
+  closure avoids the unmemoized-blowup class of bug already fixed in the
+  Python reference) (#467).
 - Native `leadsTo` lasso and deadlock-stall search now applies the documented
   `symmetric type` / `symmetric enum` liveness symmetry reduction: the
   designated representative state (lasso loop head, or the stalled state) is

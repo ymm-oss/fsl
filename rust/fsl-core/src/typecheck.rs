@@ -170,10 +170,19 @@ pub(crate) fn infer_type(
             )?)))
         }
         Expr::Set(items) => {
-            if let Some(expected) = expected
-                && matches!(resolve(model, expected)?, TypeRef::Set(_))
-            {
-                return Ok(expected.clone());
+            if let Some(expected) = expected {
+                match resolve(model, expected)? {
+                    TypeRef::Set(_) => return Ok(expected.clone()),
+                    TypeRef::Relation(_, _) => {
+                        if !items.is_empty() {
+                            return Err(error(
+                                "relation literals only support the empty initializer Set {}; use r = r.add(a, b) to add pairs",
+                            ));
+                        }
+                        return Ok(expected.clone());
+                    }
+                    _ => {}
+                }
             }
             let first = items
                 .first()
@@ -414,6 +423,16 @@ pub(crate) fn ensure_assignable(
                 ensure_assignable(item, expected_item, env, model, span)?;
             }
             return Ok(());
+        }
+        (Expr::Set(items), TypeRef::Relation(_, _)) => {
+            return if items.is_empty() {
+                Ok(())
+            } else {
+                Err(error(
+                    "relation literals only support the empty initializer Set {}; use r = r.add(a, b) to add pairs",
+                )
+                .with_span(span))
+            };
         }
         (
             Expr::Conditional {
@@ -779,6 +798,12 @@ fn validate_expression(
                 return Err(error("some expression did not infer Option"));
             };
             validate_expression(item, env, model, span, Some(&inner))?;
+        }
+        Expr::Set(items) if matches!(resolve(model, &ty)?, TypeRef::Relation(_, _)) => {
+            // Relation literals only support the empty initializer `Set {}`;
+            // emptiness is already enforced by `infer_type`/`ensure_assignable`
+            // (there is no per-element type to validate against).
+            debug_assert!(items.is_empty());
         }
         Expr::Set(items) | Expr::Seq(items) => {
             let item_ty = collection_item_type(&ty, model)?;
