@@ -311,9 +311,24 @@ existing `verify` path at that depth; omitting `depth` runs the existing `check`
 path. `refine_against` names another manifest layer and requires an explicit
 `mapping` file because `fslc refine` needs the state/action correspondence. The
 implementation command runs with the manifest directory as its working
-directory. By default the chain short-circuits on the first failed layer and
-marks the remaining planned layers as `skipped`; `--keep-going` records the
-failure and continues through the rest of the manifest.
+directory (a bare filename such as the documented default `fsl-project.toml`
+resolves to `.`, not to an empty `current_dir`). By default the chain
+short-circuits on the first failed layer and marks the remaining planned
+layers as `skipped`; `--keep-going` records the failure and continues through
+the rest of the manifest.
+
+The manifest reader is fail-closed (issue #489): a top-level section name
+other than `[business]`, `[requirements]`, `[design]`, or `[impl]` — including
+a plain typo — is a `kind: "parse"` error at exit 2 rather than a silently
+dropped layer, and a manifest with zero recognized sections (including an
+empty file) is the same error rather than a vacuous `verified` with
+`layers: []`. A `depth` or `refine_depth` value that is present but not a
+plain non-negative integer (for example, one followed by a TOML inline
+comment) is also a `kind: "parse"` error for that layer at exit 2; only an
+*absent* key defaults (to `check` for `depth`, or to 8 for `refine_depth`'s
+cascade through `depth` and the target layer's `depth`). A malformed value is
+never silently substituted with a default, since that would understate a
+depth the manifest author explicitly declared.
 
 ## 8. Phased plan
 

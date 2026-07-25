@@ -1145,8 +1145,20 @@ reader can decide approve/reject/risk-accept from. It is a presentation layer
 (no new verification): the `trace_type` discriminator drives a per-finding
 business translation, governance columns (risk/decider) come from `control`
 metadata when present (fill-in otherwise), and the guarantee limit is stated in
-positive form. Raw JSON is demoted to a collapsed appendix. See
-`docs/DESIGN-ledger.md`.
+positive form. Raw JSON is demoted to a collapsed appendix. `--impl-log
+<trace.json>` folds a `run_replay` conformance row into the ledger, but a
+replay **error** (missing file, malformed JSON, wrong-spec trace,
+schema-invalid trace) fails the whole `ledger` command through the standard
+error envelope and exit code, the same as `--evidence`, rather than rendering
+a ledger with the implementation-log row silently missing. A **failing**
+`--evidence` source (a definitive nonconformant/mismatch/unsupported verdict,
+not a verdict-less gate failure) adds a 🔴 要確認 finding for every
+requirement it attaches to — its own root `requirements`/`requirement.id`, or
+a `requirement.id` nested inside a `findings`/`checks` array item — or a
+spec-level（仕様全体）finding when it fails with no attribution at all; it
+never silently renders green while failing evidence sits unread in the
+appendix, and never changes assurance class (that stays orthogonal to
+verdict). See `docs/DESIGN-ledger.md`.
 
 Digest-bound approvals (issue #190) are separate from assurance class and from
 the ledger's empty human-decision checkbox. `approval create` must be run from a
@@ -1179,7 +1191,12 @@ runs `verify`, while omitting `depth` runs `check`. A layer with
 `refine_against = "requirements"` must also set `mapping = "..."`. `[impl]`
 runs its shell `command` from the manifest directory. JSON is stdout; the
 consolidated table is stderr. Without `--keep-going`, execution stops after the
-first failed layer and later layers are marked `skipped`.
+first failed layer and later layers are marked `skipped`. The manifest reader
+is fail-closed: an unrecognized top-level section name, zero recognized
+sections (including an empty file), or a present-but-unparseable `depth` /
+`refine_depth` value (e.g. one followed by an inline comment) is a `kind:
+"parse"` error at exit 2 rather than a silently dropped layer or a silently
+substituted default — only an *absent* `depth`/`refine_depth` key defaults.
 
 - `mutate` applies a deterministic single mutation to the kernel AST (requires
   deletion/negation, assignment deletion, enum swap, integer/type-bound ±1,
