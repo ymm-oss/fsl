@@ -67,32 +67,46 @@ fn import_sql(text: &str, name: &str) -> DbImport {
         let words = statement.split_whitespace().collect::<Vec<_>>();
         let upper = statement.to_ascii_uppercase();
         if upper.starts_with("CREATE TABLE") {
-            let Some(open) = statement.find('(') else {
-                continue;
-            };
-            let Some(close) = statement.rfind(')') else {
-                continue;
-            };
-            let table = clean(statement["CREATE TABLE".len()..open].trim()).to_owned();
-            for definition in statement[open + 1..close].split(',') {
-                let parts = definition.split_whitespace().collect::<Vec<_>>();
-                if parts.len() < 2
-                    || matches!(
-                        parts[0].to_ascii_uppercase().as_str(),
-                        "PRIMARY" | "FOREIGN" | "UNIQUE" | "CONSTRAINT"
-                    )
-                {
-                    continue;
+            // A malformed statement (missing/unbalanced parentheses) must
+            // still surface as `unsupported_sql`, not be silently dropped
+            // (#507): the caller has no other signal that the table was
+            // never imported.
+            match (statement.find('('), statement.rfind(')')) {
+                (Some(open), Some(close)) if close > open => {
+                    let table = clean(statement["CREATE TABLE".len()..open].trim()).to_owned();
+                    for definition in statement[open + 1..close].split(',') {
+                        let parts = definition.split_whitespace().collect::<Vec<_>>();
+                        if parts.len() < 2
+                            || matches!(
+                                parts[0].to_ascii_uppercase().as_str(),
+                                "PRIMARY" | "FOREIGN" | "UNIQUE" | "CONSTRAINT"
+                            )
+                        {
+                            continue;
+                        }
+                        columns.push(SqlColumn {
+                            table: table.clone(),
+                            name: clean(parts[0]).to_owned(),
+                            kind: parts[1].to_owned(),
+                            present: true,
+                            backfilled: true,
+                            not_null: definition.to_ascii_uppercase().contains("NOT NULL"),
+                        });
+                    }
                 }
-                columns.push(SqlColumn {
-                    table: table.clone(),
-                    name: clean(parts[0]).to_owned(),
-                    kind: parts[1].to_owned(),
-                    present: true,
-                    backfilled: true,
-                    not_null: definition.to_ascii_uppercase().contains("NOT NULL"),
-                });
+                _ => {
+                    warnings.push(json!({"kind":"unsupported_sql","statement":statement,"message":"SQL importer supports CREATE TABLE, ALTER TABLE ADD/DROP/RENAME COLUMN, and UPDATE ... SET for backfill"}));
+                }
             }
+        } else if words.len() >= 6
+            && upper.starts_with("ALTER TABLE")
+            && words[3].eq_ignore_ascii_case("DROP")
+            && words[4].eq_ignore_ascii_case("COLUMN")
+        {
+            let table = clean(words[2]).to_owned();
+            let column = clean(words[5]).to_owned();
+            let index = migrations.len() + 1;
+            migrations.push(format!("\n  migration m{index}_drop_column from {} to {index} {{\n    drop {table}.{column} irreversible;\n  }}\n",index-1));
         } else if words.len() >= 7
             && upper.starts_with("ALTER TABLE")
             && words[3].eq_ignore_ascii_case("ADD")
@@ -216,6 +230,14 @@ fn import_sql(text: &str, name: &str) -> DbImport {
             .and_then(|item| item.split_whitespace().next())
         {
             final_refs.push(add.trim_end_matches(';').to_owned());
+        }
+        if let Some(drop) = migration
+            .split("    drop ")
+            .nth(1)
+            .and_then(|item| item.split_whitespace().next())
+        {
+            let dropped = drop.trim_end_matches(';').to_owned();
+            final_refs.retain(|item| item != &dropped);
         }
     }
     final_refs.sort();

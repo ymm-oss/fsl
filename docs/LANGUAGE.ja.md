@@ -2175,7 +2175,9 @@ dbsystem <Name> {
 ライフサイクル、destructive のアノテーション、preservation-transform の
 アノテーション、API/オフラインの互換性をカバーします。`data_preserved` と
 `rollback_equivalent` はオプトインの有界検査で、`DB-ASSUME-BOUNDED-ROW-MODEL` を
-報告します。
+報告します。上記の閉じた語彙にない `rule` 名や、宣言された厳密に順序付けられた
+マイグレーション計画では到達しない `environment schema lo..hi` は、何も検査せず
+に静かに通るのではなく、検証で exit 2 になります。
 
 フィーチャーフラグは有限の環境次元です。`fslc db check` は、宣言されたバリアント
 を schema のスナップショットとともに列挙し、
@@ -2216,6 +2218,12 @@ migration/schema の要素、最小の競合集合、修復候補を含む `find
 ログからの不在は、未使用の振る舞いの証明ではありません。
 生成されたカーネルの反例を直接調べたいときは、通常の `fslc verify` を使って
 ください。
+
+`fslc db observe` は、観測イベントを評価する前に、観測エンベロープ/イベントを
+`schemas/fslc/db/observation.v0.schema.json` に対して検証します(型付きの必須
+フィールド、閉じた `capability` 語彙、不正なレコードでは exit 2)。各イベントの
+任意の `flags` スナップショットは、`fslc db check` と同じ方法でアーティファクト
+のウィンドウと照合されます。
 
 汎用の `requires` / `provides` ケイパビリティにより、AI モデル/プロンプト/
 リトリーバー/ツールスキーマと出力スキーマのプロファイルが、DB/API/モバイル/

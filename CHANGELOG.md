@@ -77,6 +77,57 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   diagnostics").
 
 ### Fixed
+- `fslc db check` no longer reports a confidently green `verified_under_assumptions`
+  over a genuine compatibility violation. `validate_db` now rejects a `check
+  compatibility` rule name outside the closed vocabulary and an `environment
+  schema lo..hi` the declared migration plan never reaches (exit 2 instead of
+  silently checking nothing). `findings()` is rewritten around a materialized
+  per-migration column-state simulation (mirroring the frozen Python
+  reference's `_static_findings`) instead of syntactic pattern matching, which
+  fixes: `set_not_null` without a prior `backfill` (previously made the
+  violating kernel transition unreachable instead of reported);
+  `rollback_not_equivalent` never firing for a lossy rollbackable
+  split/merge (only `drop` was checked); `data_preservation_loss` never
+  firing for dropping an existing column (only split/merge were checked);
+  reads/writes checked against "a drop op exists somewhere in the source"
+  instead of actual per-snapshot column state (missed an initially absent
+  column with a live reader, and false-fired on a column dropped then
+  re-added); and an offline payload's TTL window never extending its
+  acceptance obligation past the emitting schema snapshot. An `active`
+  artifact's own `calls`/`expects`/`emits_offline`/`requires` declarations
+  are now checked too — previously only artifacts other than `active` were
+  treated as consumers (#490).
+- `fslc db check` no longer false-fires against already-annotated migrations
+  and supported providers. A `supported` (not just `active`) artifact's
+  `accepts`/`responds`/`provides` now counts toward compatibility (`may_exist`
+  still does not); `drop ... destructive` is accepted alongside
+  `irreversible`, and dropping an already-absent column no longer fires
+  `destructive_migration_unannotated`; `split`/`merge ... irreversible` is
+  accepted as a preservation classification alongside `lossless`/`lossy`; and
+  every finding kind is now gated by its documented rule (`rule_enabled`,
+  centralized instead of scattered per-finding conditionals), so an opt-in
+  `data_preserved`/`rollback_equivalent` rule no longer fires when it was not
+  selected (#491).
+- `api_response_field_missing`'s `failed_rule` is now the documented
+  `api_responses_expected` instead of the undocumented
+  `api_response_fields_available` (#492).
+- `fslc db observe` validates its observation envelope and every event
+  against `schemas/fslc/db/observation.v0.schema.json` before evaluating them
+  — a declared `schema_version` must equal `fsl-db-observation.v0`, and each
+  event must be an object with typed required fields and a `capability` from
+  the closed vocabulary — and fails with a located exit-2 error instead of
+  defaulting a missing/mistyped field into a fabricated `unsupported_artifact_observed`
+  witness (#505).
+- `fslc db observe` now matches an event's `flags` snapshot against artifact
+  window conditions the same way `fslc db check` does; an artifact observed
+  under the wrong feature-flag variant is `unsupported_artifact_observed`
+  instead of silently `observed_conformant` (#506).
+- `fslc db import`'s SQL importer now lowers `ALTER TABLE ... DROP COLUMN`
+  into a `drop ... irreversible` migration op as documented (previously
+  unimplemented — the construct fell through to `unsupported_sql`), and a
+  malformed `CREATE TABLE` (unbalanced/missing parentheses) now produces an
+  `unsupported_sql` warning instead of being silently skipped with no warning
+  and no table (#507).
 - `analyze`'s TSG no longer leaks the internal db-dialect `QqDbSepqQ`
   separator sentinel into node labels: a db-dialect invariant/action label
   now matches the display name `verify` reports for the same target (both

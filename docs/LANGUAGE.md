@@ -2226,7 +2226,10 @@ dbsystem <Name> {
 If `check compatibility` is omitted, default rules cover read/write lifecycle,
 destructive annotations, preservation-transform annotations, and API/offline
 compatibility. `data_preserved` and `rollback_equivalent` are opt-in bounded
-checks and report `DB-ASSUME-BOUNDED-ROW-MODEL`.
+checks and report `DB-ASSUME-BOUNDED-ROW-MODEL`. A `rule` name outside the
+closed vocabulary above, or an `environment schema lo..hi` that the declared,
+strictly sequential migration plan never reaches, fails validation with exit 2
+instead of silently checking nothing.
 
 Feature flags are finite environment dimensions. `fslc db check` enumerates the
 declared variants with schema snapshots and reports
@@ -2266,6 +2269,12 @@ candidates. Runtime observation returns `observed_mismatch` with
 `formal_result: "not_run"`; absence from logs is not proof of unused behavior.
 Use ordinary `fslc verify` when you want to inspect the generated kernel
 counterexample directly.
+
+`fslc db observe` validates the observation envelope/events against
+`schemas/fslc/db/observation.v0.schema.json` (typed required fields, a closed
+`capability` vocabulary, exit 2 on a malformed record) before evaluating them,
+and matches each event's optional `flags` snapshot against artifact windows the
+same way `fslc db check` does.
 
 Generic `requires` / `provides` capabilities let AI model/prompt/retriever/tool
 schema and output schema profiles share the same compatibility check as
