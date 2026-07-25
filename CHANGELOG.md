@@ -122,6 +122,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   window conditions the same way `fslc db check` does; an artifact observed
   under the wrong feature-flag variant is `unsupported_artifact_observed`
   instead of silently `observed_conformant` (#506).
+- `fslc db import`'s SQL importer now lowers `ALTER TABLE ... DROP COLUMN`
+  into a `drop ... irreversible` migration op as documented (previously
+  unimplemented — the construct fell through to `unsupported_sql`), and a
+  malformed `CREATE TABLE` (unbalanced/missing parentheses) now produces an
+  `unsupported_sql` warning instead of being silently skipped with no warning
+  and no table (#507).
 - `analyze`'s TSG no longer leaks the internal db-dialect `QqDbSepqQ`
   separator sentinel into node labels: a db-dialect invariant/action label
   now matches the display name `verify` reports for the same target (both

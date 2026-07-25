@@ -271,7 +271,8 @@ typed IR boundary. It supports:
 - `UPDATE ... SET ...` as a backfill signal
 
 Unsupported constructs are reported as `unsupported_sql` warnings and are not
-silently ignored.
+silently ignored; a malformed statement (for example an unbalanced `CREATE
+TABLE`) is reported the same way rather than being dropped without a warning.
 
 The first ORM-specific importer is `prisma-schema-minimal.v0`. It imports
 Prisma `model` scalar fields into the same typed IR and reports relation/list or
