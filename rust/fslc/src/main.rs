@@ -3528,6 +3528,17 @@ fn skipped_chain_entry(
     })
 }
 
+/// Parses a manifest depth value read from `key` in `[layer]`. The manifest
+/// reader treats a present-but-unparseable value as a fail-closed error
+/// rather than silently substituting a default; only an absent key may
+/// default (the caller decides that). Returns the message for a chain-layer
+/// parse-error entry on failure.
+fn parse_manifest_depth(layer: &str, key: &str, raw: &str) -> Result<usize, String> {
+    raw.trim()
+        .parse::<usize>()
+        .map_err(|_| format!("[{layer}] invalid {key} value: {raw:?}"))
+}
+
 #[allow(
     clippy::bool_to_int_with_if,
     clippy::manual_let_else,
@@ -3556,6 +3567,26 @@ fn run_project_chain(path: &Path, keep_going: bool) -> (Value, i32) {
             return (output, 2);
         }
     };
+    let known_sections = ["business", "requirements", "design", "impl"];
+    let mut unknown_sections = sections
+        .keys()
+        .map(String::as_str)
+        .filter(|name| !known_sections.contains(name))
+        .collect::<Vec<_>>();
+    unknown_sections.sort_unstable();
+    if !unknown_sections.is_empty() {
+        let mut output = error_output(
+            "parse",
+            &format!(
+                "unrecognized manifest section(s): [{}] (expected [business], [requirements], [design], and/or [impl])",
+                unknown_sections.join("], [")
+            ),
+        );
+        if let Value::Object(output) = &mut output {
+            output.insert("manifest".to_owned(), json!(path.display().to_string()));
+        }
+        return (output, 2);
+    }
     let mut steps = Vec::<(String, String)>::new();
     for layer in ["business", "requirements", "design"] {
         if let Some(section) = sections.get(layer) {
@@ -3568,7 +3599,20 @@ fn run_project_chain(path: &Path, keep_going: bool) -> (Value, i32) {
     if sections.contains_key("impl") {
         steps.push(("impl".to_owned(), "impl".to_owned()));
     }
-    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    if steps.is_empty() {
+        let mut output = error_output(
+            "parse",
+            "project manifest declares no [business], [requirements], [design], or [impl] section",
+        );
+        if let Value::Object(output) = &mut output {
+            output.insert("manifest".to_owned(), json!(path.display().to_string()));
+        }
+        return (output, 2);
+    }
+    let base = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
     let mut layers = Vec::new();
     for (index, (kind, layer)) in steps.iter().enumerate() {
         let section = &sections[layer];
@@ -3576,20 +3620,29 @@ fn run_project_chain(path: &Path, keep_going: bool) -> (Value, i32) {
             if let Some(file) = section.values.get("file") {
                 let file_path = base.join(file);
                 let (detail, status, check_kind, depth) =
-                    if let Some(depth) = section.values.get("depth") {
-                        let depth = depth.parse::<usize>().unwrap_or(8);
-                        let (detail, status) = run_verify(
-                            &file_path,
-                            depth,
-                            section
-                                .values
-                                .get("deadlock")
-                                .map_or("warn", String::as_str),
-                            "bmc",
-                            DEFAULT_EXPLICIT_BUDGET,
-                            1,
-                        );
-                        (detail, status, "verify", Some(depth))
+                    if let Some(raw_depth) = section.values.get("depth") {
+                        match parse_manifest_depth(layer, "depth", raw_depth) {
+                            Ok(depth) => {
+                                let (detail, status) = run_verify(
+                                    &file_path,
+                                    depth,
+                                    section
+                                        .values
+                                        .get("deadlock")
+                                        .map_or("warn", String::as_str),
+                                    "bmc",
+                                    DEFAULT_EXPLICIT_BUDGET,
+                                    1,
+                                );
+                                (detail, status, "verify", Some(depth))
+                            }
+                            Err(message) => (
+                                json!({"result": "error", "kind": "parse", "message": message}),
+                                2,
+                                "verify",
+                                None,
+                            ),
+                        }
                     } else {
                         let (detail, status) = run_check(&file_path, &file_path);
                         (detail, status, "check", None)
@@ -3663,31 +3716,58 @@ fn run_project_chain(path: &Path, keep_going: bool) -> (Value, i32) {
                 let file_path = base.join(&section.values["file"]);
                 let target_path = base.join(&target_section.expect("checked").values["file"]);
                 let mapping_path = base.join(mapping.expect("checked"));
-                let depth = section
-                    .values
-                    .get("refine_depth")
-                    .or_else(|| section.values.get("depth"))
-                    .or_else(|| target_section.and_then(|target| target.values.get("depth")))
-                    .and_then(|depth| depth.parse().ok())
-                    .unwrap_or(8);
-                let (detail, status) = run_refine(&file_path, &target_path, &mapping_path, depth);
-                let passed = chain_layer_passes(&detail, status);
-                (
-                    json!({
-                        "layer": format!("{layer}->{target}"),
-                        "kind": "refine",
-                        "file": file_path.display().to_string(),
-                        "against": target,
-                        "abs_file": target_path.display().to_string(),
-                        "mapping": mapping_path.display().to_string(),
-                        "depth": depth,
-                        "status": if passed { "passed" } else { "failed" },
-                        "result": detail.get("result").cloned().unwrap_or(Value::Null),
-                        "exit_code": if passed { 0 } else { status.max(1) },
-                        "detail": detail,
-                    }),
-                    !passed,
-                )
+                // Precedence: an explicit `refine_depth` or `depth` on this layer wins
+                // outright, even if malformed (a present-but-invalid key must error, not
+                // silently fall through to the next candidate or the default).
+                let depth_result = if let Some(raw) = section.values.get("refine_depth") {
+                    parse_manifest_depth(layer, "refine_depth", raw)
+                } else if let Some(raw) = section.values.get("depth") {
+                    parse_manifest_depth(layer, "depth", raw)
+                } else if let Some(raw) =
+                    target_section.and_then(|target| target.values.get("depth"))
+                {
+                    parse_manifest_depth(target, "depth", raw)
+                } else {
+                    Ok(8)
+                };
+                match depth_result {
+                    Ok(depth) => {
+                        let (detail, status) =
+                            run_refine(&file_path, &target_path, &mapping_path, depth);
+                        let passed = chain_layer_passes(&detail, status);
+                        (
+                            json!({
+                                "layer": format!("{layer}->{target}"),
+                                "kind": "refine",
+                                "file": file_path.display().to_string(),
+                                "against": target,
+                                "abs_file": target_path.display().to_string(),
+                                "mapping": mapping_path.display().to_string(),
+                                "depth": depth,
+                                "status": if passed { "passed" } else { "failed" },
+                                "result": detail.get("result").cloned().unwrap_or(Value::Null),
+                                "exit_code": if passed { 0 } else { status.max(1) },
+                                "detail": detail,
+                            }),
+                            !passed,
+                        )
+                    }
+                    Err(message) => {
+                        let detail =
+                            json!({"result": "error", "kind": "parse", "message": message});
+                        (
+                            json!({
+                                "layer": format!("{layer}->{target}"),
+                                "kind": "refine",
+                                "status": "failed",
+                                "result": "error",
+                                "exit_code": 2,
+                                "detail": detail,
+                            }),
+                            true,
+                        )
+                    }
+                }
             }
         } else {
             let command = section.values.get("command").cloned().unwrap_or_default();

@@ -914,7 +914,10 @@ imported / imported_with_warnings,
 refinement_failed / sweep_failed / observed_mismatch,
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
-result; `imported`/`imported_with_warnings` is `fslc db import`'s.
+result; `imported`/`imported_with_warnings` is `fslc db import`'s. The same
+`2` mapping is fail-closed for `chain`'s project-manifest reader (unrecognized
+section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
+`docs/DESIGN-layers.md` §7).
 
 ### Kinds of result
 

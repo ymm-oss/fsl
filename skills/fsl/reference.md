@@ -1179,7 +1179,12 @@ runs `verify`, while omitting `depth` runs `check`. A layer with
 `refine_against = "requirements"` must also set `mapping = "..."`. `[impl]`
 runs its shell `command` from the manifest directory. JSON is stdout; the
 consolidated table is stderr. Without `--keep-going`, execution stops after the
-first failed layer and later layers are marked `skipped`.
+first failed layer and later layers are marked `skipped`. The manifest reader
+is fail-closed: an unrecognized top-level section name, zero recognized
+sections (including an empty file), or a present-but-unparseable `depth` /
+`refine_depth` value (e.g. one followed by an inline comment) is a `kind:
+"parse"` error at exit 2 rather than a silently dropped layer or a silently
+substituted default — only an *absent* `depth`/`refine_depth` key defaults.
 
 - `mutate` applies a deterministic single mutation to the kernel AST (requires
   deletion/negation, assignment deletion, enum swap, integer/type-bound ±1,

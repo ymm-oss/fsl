@@ -889,7 +889,10 @@ imported / imported_with_warnings、
 refinement_failed / sweep_failed / observed_mismatch、
 `2` = spec エラー(parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
-`imported`/`imported_with_warnings` は `fslc db import` の結果です。
+`imported`/`imported_with_warnings` は `fslc db import` の結果です。同じ `2` の
+対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
+セクションが0個、パース不能な `depth`/`refine_depth` — `docs/DESIGN-layers.md` §7)
+でもフェイルクローズドに適用されます。
 
 ### 結果の種類
 

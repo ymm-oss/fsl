@@ -115,6 +115,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   non-default initial branch is no longer missed either. A state variable
   assigned on only some init paths (not any) is unaffected and keeps the
   prior single-valuation behavior (#493).
+- `fslc chain`'s project-manifest reader now fails closed instead of silently
+  discarding malformed input: an unrecognized top-level section (including a
+  plain typo), zero recognized `[business]`/`[requirements]`/`[design]`/
+  `[impl]` sections (including an empty manifest), or a present-but-unparseable
+  `depth`/`refine_depth` value (for example one followed by a TOML inline
+  comment) is now a `kind: "parse"` error at exit 2 instead of a silently
+  dropped layer, a vacuous `verified` over zero executed layers, or a silently
+  substituted default depth that understates a declared depth (#489).
+- `fslc chain`'s documented default and bare-filename invocations (e.g.
+  `fslc chain` or `fslc chain fsl-project.toml` from the manifest's own
+  directory) no longer fail the `[impl]` layer with an io error: an empty
+  manifest parent directory now normalizes to `.` before resolving files and
+  launching the implementation command (#500).
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false
