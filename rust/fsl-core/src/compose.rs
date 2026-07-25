@@ -10,7 +10,9 @@ use fsl_syntax::{
     parse_document,
 };
 
-use crate::{CoreError, KernelSpec, PredicateExpander, expand_spec_domains, substitute};
+use crate::{
+    CoreError, IndexedReplacements, KernelSpec, PredicateExpander, expand_spec_domains, substitute,
+};
 
 pub trait FileResolver {
     /// Read one source-relative FSL dependency.
@@ -1242,15 +1244,16 @@ fn resolve_alias_action_item(
 }
 
 fn substitute_action_item(item: ActionItem, replacements: &HashMap<String, Expr>) -> ActionItem {
+    let indexed = IndexedReplacements::new();
     match item {
         ActionItem::Requires(expr, span) => {
-            ActionItem::Requires(substitute(expr, replacements), span)
+            ActionItem::Requires(substitute(expr, replacements, &indexed), span)
         }
         ActionItem::Ensures(expr, span) => {
-            ActionItem::Ensures(substitute(expr, replacements), span)
+            ActionItem::Ensures(substitute(expr, replacements, &indexed), span)
         }
         ActionItem::Let(name, expr, span) => {
-            ActionItem::Let(name, substitute(expr, replacements), span)
+            ActionItem::Let(name, substitute(expr, replacements, &indexed), span)
         }
         ActionItem::Statement(statement) => {
             ActionItem::Statement(substitute_statement(statement, replacements))
@@ -1259,6 +1262,7 @@ fn substitute_action_item(item: ActionItem, replacements: &HashMap<String, Expr>
 }
 
 fn substitute_statement(statement: Statement, replacements: &HashMap<String, Expr>) -> Statement {
+    let indexed = IndexedReplacements::new();
     match statement {
         Statement::Assign {
             target,
@@ -1266,7 +1270,7 @@ fn substitute_statement(statement: Statement, replacements: &HashMap<String, Exp
             span,
         } => Statement::Assign {
             target: substitute_lvalue(target, replacements),
-            value: substitute(value, replacements),
+            value: substitute(value, replacements, &indexed),
             span,
         },
         Statement::If {
@@ -1275,7 +1279,7 @@ fn substitute_statement(statement: Statement, replacements: &HashMap<String, Exp
             else_statements,
             span,
         } => Statement::If {
-            condition: substitute(condition, replacements),
+            condition: substitute(condition, replacements, &indexed),
             then_statements: then_statements
                 .into_iter()
                 .map(|statement| substitute_statement(statement, replacements))
@@ -1303,7 +1307,10 @@ fn substitute_statement(statement: Statement, replacements: &HashMap<String, Exp
 
 fn substitute_lvalue(lvalue: LValue, replacements: &HashMap<String, Expr>) -> LValue {
     match lvalue {
-        LValue::Index(name, expr) => LValue::Index(name, substitute(expr, replacements)),
+        LValue::Index(name, expr) => LValue::Index(
+            name,
+            substitute(expr, replacements, &IndexedReplacements::new()),
+        ),
         LValue::Field(base, field) => {
             LValue::Field(Box::new(substitute_lvalue(*base, replacements)), field)
         }

@@ -11,7 +11,9 @@ use fsl_core::{
     TypeRef,
 };
 
-use super::{Bindings, Monitor, RuntimeError, State, Violation, eval, runtime_error};
+use super::{
+    Bindings, Monitor, RuntimeError, State, Violation, eval, runtime_error, with_total_division,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplicitViolation {
@@ -254,31 +256,33 @@ fn record_reachables(
     parents: &BTreeMap<State, ParentLink>,
     result: &mut ExplicitResult,
 ) -> Result<(), RuntimeError> {
-    for property in &monitor.model.reachables {
-        if result.reachables[&property.name].is_some() {
-            continue;
-        }
-        match eval(
-            &property.expr,
-            &monitor.state,
-            &mut Bindings::new(),
-            &monitor.model,
-            None,
-        )? {
-            Value::Bool(true) => {
-                result.reachables.insert(
-                    property.name.clone(),
-                    Some(ExplicitReachableWitness {
-                        step: level,
-                        trace: reconstruct_trace(initial_state, &monitor.state, parents),
-                    }),
-                );
+    with_total_division(|| {
+        for property in &monitor.model.reachables {
+            if result.reachables[&property.name].is_some() {
+                continue;
             }
-            Value::Bool(false) => {}
-            _ => return Err(runtime_error("reachable expression must be Boolean")),
+            match eval(
+                &property.expr,
+                &monitor.state,
+                &mut Bindings::new(),
+                &monitor.model,
+                None,
+            )? {
+                Value::Bool(true) => {
+                    result.reachables.insert(
+                        property.name.clone(),
+                        Some(ExplicitReachableWitness {
+                            step: level,
+                            trace: reconstruct_trace(initial_state, &monitor.state, parents),
+                        }),
+                    );
+                }
+                Value::Bool(false) => {}
+                _ => return Err(runtime_error("reachable expression must be Boolean")),
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 fn reconstruct_trace(

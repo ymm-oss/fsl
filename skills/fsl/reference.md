@@ -765,9 +765,14 @@ cannot be assigned both inline and in `init`.
    ```
 4. enabled when all requires hold. ensures is checked after the transition.
 5. For Seq `pop/head/at` and a nonzero divisor of `/` `%`, **well-definedness is
-   checked automatically** in action context (partial_op). A requires guard or an if
-   guard both work (path conditions are considered). An out-of-range at() inside an
-   invariant/reachable is an undefined value — always guard with `i < q.size() =>`.
+   checked automatically** in action context (`requires`/body/`ensures`; partial_op).
+   A requires guard or an if guard both work (path conditions are considered). An
+   out-of-range at() inside an invariant/reachable is an undefined value — always
+   guard with `i < q.size() =>`. `/`/`%` are the one exception: division by zero is
+   *totally defined* as `0` (Euclidean for `b != 0`: `-7 / 2 == -4`, `-7 % 2 == 1`),
+   so `a / 0` inside an invariant/trans/reachable/leadsTo/mapping expression always
+   evaluates to `0` rather than being undefined — only the unguarded-in-action-context
+   check is skipped there.
 6. `fair` = weak fairness: an infinite execution in which a fair instance that is
    enabled throughout the loop is never executed is excluded from leadsTo
    counterexamples. Fairness applies to whole action instances; model conditional

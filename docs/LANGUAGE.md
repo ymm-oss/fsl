@@ -542,7 +542,14 @@ variable capture instead of inventing internal binder names. See
 
 - Arithmetic: `+ - * / %`, unary `-`, `min(a, b)` / `max(a, b)` / `abs(a)`
   (since `a//b` would turn everything after `//` into a comment, write division
-  as `a / b` with whitespace)
+  as `a / b` with whitespace). `/` and `%` are Euclidean for `b != 0`
+  (`a == b * (a / b) + (a % b)` and `0 <= a % b < |b|`, so `-7 / 2 == -4` and
+  `-7 % 2 == 1`). Division by zero is **totally defined**: `a / 0 == 0` and
+  `a % 0 == 0` always evaluate, so an invariant/trans/reachable/leadsTo/mapping
+  expression that reads `a / 0` never fails to evaluate. Inside an action's
+  `requires`/body/`ensures`, an unguarded `/`/`%` whose divisor can reach zero
+  is still reported as `partial_op` (see §6) even though the value is defined —
+  guard it with `y != 0 => P(x / y)` or `requires y != 0`.
 - Comparison: `== != < <= > >=`
 - Logical: `and or not =>`
 - Conditional: `if condition then when_true else when_false`. The condition is
@@ -657,7 +664,7 @@ variable.
 | Check | Content | On violation |
 |---|---|---|
 | Type bounds | Every bounded-type state variable (including Map values, struct fields, and Seq elements) is within range | `violated` / `type_bound` / `_bounds_<var>` |
-| Partial operations | At the time of `pop()`/`head()`/`at(i)`, the sequence is non-empty and the index is in range, and the divisor of `/` `%` is non-zero | `violated` / `partial_op` / `_partial_<action>` |
+| Partial operations (action context: `requires`/body/`ensures` only, see §3) | At the time of `pop()`/`head()`/`at(i)`, the sequence is non-empty and the index is in range, and the divisor of `/` `%` is non-zero | `violated` / `partial_op` / `_partial_<action>` |
 | action coverage | Each action is enabled at least once within depth K | diagnosis of the blocking requires in `action_coverage` |
 | Deadlock | Reaching a state where all actions become disabled | warning (`violated` with `--deadlock error`) |
 | trans | Whether the two-state predicate holds across all reachable transitions | `violated` / `trans` / `trans` + trace |

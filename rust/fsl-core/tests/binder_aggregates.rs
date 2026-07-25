@@ -276,6 +276,67 @@ fn substitution_respects_nested_binder_shadowing() {
     assert_ne!(name, "queue");
 }
 
+/// Indexed (per-element) substitution (`substitute_expr_indexed`, issue #483)
+/// must be as capture-avoiding as the existing scalar case above: a `forall`
+/// binder that happens to share a name with a free variable of the indexed
+/// map's own mapping expression must be renamed before the read is expanded,
+/// not left to accidentally capture that variable.
+#[test]
+fn indexed_substitution_avoids_capturing_the_mapping_expressions_free_variable() {
+    // map a[i] = queue[i] — the indexed map's own binder is `i`, and its
+    // mapping expression `queue[i]` has `queue` free.
+    let state_expr = KernelExpr::Index(
+        Box::new(KernelExpr::Var("queue".to_owned())),
+        Box::new(KernelExpr::Var("i".to_owned())),
+    );
+    let state_binder = KernelBinder::Range {
+        name: "i".to_owned(),
+        lo: Box::new(KernelExpr::Num(0)),
+        hi: Box::new(KernelExpr::Num(2)),
+        where_expr: None,
+    };
+    let indexed = HashMap::from([("a".to_owned(), (state_binder, state_expr))]);
+
+    // forall queue: T { a[queue] } — the *outer* binder is also named
+    // `queue`, colliding with the mapping expression's free variable.
+    let target = KernelExpr::Quantified {
+        quantifier: "forall".to_owned(),
+        binder: KernelBinder::Range {
+            name: "queue".to_owned(),
+            lo: Box::new(KernelExpr::Num(0)),
+            hi: Box::new(KernelExpr::Num(2)),
+            where_expr: None,
+        },
+        body: Box::new(KernelExpr::Index(
+            Box::new(KernelExpr::Var("a".to_owned())),
+            Box::new(KernelExpr::Var("queue".to_owned())),
+        )),
+    };
+
+    let substituted =
+        fsl_core::substitute_expr_indexed(target, &HashMap::<String, KernelExpr>::new(), &indexed);
+    let KernelExpr::Quantified {
+        binder: KernelBinder::Range { name: fresh, .. },
+        body,
+        ..
+    } = substituted
+    else {
+        panic!("expected forall");
+    };
+    assert_ne!(
+        fresh, "queue",
+        "the outer binder must be renamed to avoid capture"
+    );
+    // The result must be `queue[<fresh>]`, i.e. the mapping expression's own
+    // `queue` still refers to the free implementation variable, not to the
+    // (renamed) outer binder.
+    let KernelExpr::Index(base, index) = *body else {
+        panic!("expected an index expression after indexed substitution");
+    };
+    assert_eq!(*base, KernelExpr::Var("queue".to_owned()));
+    assert_eq!(*index, KernelExpr::Var(fresh));
+}
+
 #[test]
 fn public_partial_operations_expand_aggregate_binders_without_free_variables() {
     let source = r"
