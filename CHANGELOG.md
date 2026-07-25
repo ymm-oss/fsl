@@ -200,6 +200,23 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   distinctly ("antecedent never holds within depth K") from one whose
   antecedent held but never closed with a response ("has no response
   scenario within depth K") (#526).
+- `fslc explain --readable` no longer prints a branch-lowered action's
+  internal `name.bN` form: a `branches { when P { … } maps Q }` action now
+  resolves back to its authored name (via a new `OriginChain` bound at the
+  branch-splitting site), with a `branch:` line naming each branch's guard
+  and `maps` correspondence, and an `Implements:` section when the source
+  declares a refinement mapping — restoring the branch-lowering and
+  synthesized-refinement-mapping detail `docs/DESIGN-explain.md` §2
+  documents. The JSON skeleton's `actions[].name` for the same branch
+  actions is corrected the same way, with the lowered form preserved as
+  `generated_name` (#528).
+- `fslc explain`'s JSON skeleton restores three fields the native
+  implementation had dropped versus the documented contract: `spec_kind`
+  (was hard-coded `null`), `auto_checks` entries of `kind:"partial_op"` for
+  every syntactic `pop`/`head`/`at`/`/`/`%` site (previously `type_bound`
+  only), and `generated:true` origin provenance on the SLA-synthesized
+  `tick` action and `_deadline_*` invariants (previously indistinguishable
+  from authored declarations) (#530).
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false

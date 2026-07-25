@@ -5,12 +5,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use fsl_syntax::{
-    ActionItem, AggregateKind, Annotation, Annotations, Binder, BusinessGoalBody, BusinessItem,
-    BusinessPolicyBody, Expr, GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem,
-    LValue, MetaTag, Param, PreservationItem, ProcessField, ProcessItem, ProcessTransition,
-    QualifiedName, RequirementAction, RequirementActionItem, RequirementBlockItem,
-    RequirementsItem, SpecItem, StateField, Statement, SurfaceBusiness, SurfaceDocument,
-    SurfaceGovernance, SurfaceRequirements, SurfaceSpec, TimeItem, TypeExpr, VerifyItem,
+    ActionItem, ActionTarget, AggregateKind, Annotation, Annotations, Binder, BusinessGoalBody,
+    BusinessItem, BusinessPolicyBody, Expr, GovernanceArtifactRef, GovernanceDelegateItem,
+    GovernanceItem, LValue, MapsClause, MetaTag, Param, PreservationItem, ProcessField,
+    ProcessItem, ProcessTransition, QualifiedName, RequirementAction, RequirementActionItem,
+    RequirementBlockItem, RequirementsItem, SpecItem, StateField, Statement, SurfaceBusiness,
+    SurfaceDocument, SurfaceGovernance, SurfaceRequirements, SurfaceSpec, TimeItem, TypeExpr,
+    VerifyItem,
 };
 
 use crate::{
@@ -1344,10 +1345,31 @@ fn with_meta(item: SpecItem, metadata: Option<MetaTag>) -> SpecItem {
     }
 }
 
+/// Renders a `branches { when ... } maps <target>` correspondence target for
+/// an origin's `lowering_steps` detail (issue #528).
+fn maps_clause_text(maps: &MapsClause) -> String {
+    match &maps.target {
+        ActionTarget::Stutter => "stutter".to_owned(),
+        ActionTarget::Action(name, args) if args.is_empty() => name.clone(),
+        ActionTarget::Action(name, args) => format!(
+            "{name}({})",
+            args.iter()
+                .map(crate::expr_text)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+/// `lower_requirement_action`'s branch-split actions (`name__bN`) alongside
+/// the origin each one needs so `explain` can recover the authored action
+/// identity and each branch's guard/correspondence instead of leaking the
+/// lowered `name.bN` display form (issue #528). `None` for the single,
+/// unbranched action case — its own name already is the authored identity.
 fn lower_requirement_action(
     action: &RequirementAction,
     metadata: Option<MetaTag>,
-) -> Vec<SpecItem> {
+) -> Vec<(SpecItem, Option<OriginChain>)> {
     let ordinary = action
         .items
         .iter()
@@ -1361,16 +1383,19 @@ fn lower_requirement_action(
         RequirementActionItem::Action(_) => None,
     });
     match branches {
-        None => vec![SpecItem::Action {
-            name: action.name.clone(),
-            params: action.params.clone(),
-            items: ordinary,
-            span: action.span,
-            fair: action.fair,
-            meta: metadata.or_else(|| action.meta.clone()),
-            sync: false,
-            annotations: action.annotations.clone(),
-        }],
+        None => vec![(
+            SpecItem::Action {
+                name: action.name.clone(),
+                params: action.params.clone(),
+                items: ordinary,
+                span: action.span,
+                fair: action.fair,
+                meta: metadata.or_else(|| action.meta.clone()),
+                sync: false,
+                annotations: action.annotations.clone(),
+            },
+            None,
+        )],
         Some(branches) => branches
             .iter()
             .enumerate()
@@ -1378,16 +1403,43 @@ fn lower_requirement_action(
                 let mut items = ordinary.clone();
                 items.push(ActionItem::Requires(branch.condition.clone(), branch.span));
                 items.extend(branch.statements.iter().cloned().map(ActionItem::Statement));
-                SpecItem::Action {
-                    name: format!("{}__b{}", action.name, index + 1),
-                    params: action.params.clone(),
-                    items,
-                    span: action.span,
-                    fair: action.fair,
-                    meta: metadata.clone().or_else(|| action.meta.clone()),
-                    sync: false,
-                    annotations: action.annotations.clone(),
-                }
+                let branch_name = format!("{}__b{}", action.name, index + 1);
+                let origin = OriginChain {
+                    id: OriginId(format!(
+                        "requirements:branch:{}:{}",
+                        branch_name, branch.span.start.offset
+                    )),
+                    dialect: "requirements".to_owned(),
+                    primary: Some(OriginSite {
+                        source_file: None,
+                        span: Some(action.span),
+                        dialect: "requirements".to_owned(),
+                        declaration_path: vec![action.name.clone()],
+                    }),
+                    secondary: Vec::new(),
+                    lowering_steps: vec![LoweringStep {
+                        kind: "branch".to_owned(),
+                        detail: Some(format!(
+                            "when {} maps {}",
+                            crate::expr_text(&branch.condition),
+                            maps_clause_text(&branch.maps)
+                        )),
+                    }],
+                    generated: true,
+                };
+                (
+                    SpecItem::Action {
+                        name: branch_name,
+                        params: action.params.clone(),
+                        items,
+                        span: action.span,
+                        fair: action.fair,
+                        meta: metadata.clone().or_else(|| action.meta.clone()),
+                        sync: false,
+                        annotations: action.annotations.clone(),
+                    },
+                    Some(origin),
+                )
             })
             .collect(),
     }
@@ -1542,6 +1594,11 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
     }
     let mut items = Vec::new();
     let mut extra_annotations = Vec::new();
+    // Generated declarations (SLA `tick`, `_deadline_*`) get no source span of
+    // their own, but explain/analyze still need to tell them apart from
+    // authored declarations (issue #530): bind a `generated_only` origin for
+    // each, applied once `resolve_stage_items` has built the registry below.
+    let mut extra_origins: Vec<(String, OriginChain)> = Vec::new();
     for (name, span) in &entities {
         let count = instance_bounds.get(name).ok_or_else(|| {
             core_error(
@@ -1737,7 +1794,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             match declaration {
                 RequirementBlockItem::Action(action) => {
                     let lowered = lower_requirement_action(action, metadata.clone());
-                    for item in &lowered {
+                    for (item, origin) in &lowered {
                         if let SpecItem::Action { name, span, .. } = item {
                             extra_annotations.push((
                                 crate::action_target(name),
@@ -1761,9 +1818,12 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                                 extra_annotations
                                     .push((crate::action_target(name), annotation.clone()));
                             }
+                            if let Some(origin) = origin {
+                                extra_origins.push((crate::action_target(name), origin.clone()));
+                            }
                         }
                     }
-                    items.extend(lowered);
+                    items.extend(lowered.into_iter().map(|(item, _)| item));
                 }
                 RequirementBlockItem::Property(property) => {
                     let lowered = with_meta(property.clone(), metadata.clone());
@@ -1811,7 +1871,12 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         }
     }
     for action in standalone_actions {
-        items.extend(lower_requirement_action(action, None));
+        for (item, origin) in lower_requirement_action(action, None) {
+            if let (SpecItem::Action { name, .. }, Some(origin)) = (&item, origin) {
+                extra_origins.push((crate::action_target(name), origin));
+            }
+            items.push(item);
+        }
     }
     if !deadlines.is_empty() && time_items.is_none() {
         return Err(core_error(
@@ -2012,6 +2077,10 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             sync: false,
             annotations: Annotations::default(),
         });
+        extra_origins.push((
+            crate::action_target("tick"),
+            OriginChain::generated_only("requirements:sla-tick", "requirements"),
+        ));
         for (
             index,
             (name, bound, span, metadata, requirement_id, requirement_text, requirement_span),
@@ -2057,6 +2126,13 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                     span: *requirement_span,
                 },
             ));
+            extra_origins.push((
+                crate::property_target("invariant", &generated_name),
+                OriginChain::generated_only(
+                    format!("requirements:sla-deadline:{generated_name}"),
+                    "requirements",
+                ),
+            ));
             items.push(SpecItem::Invariant {
                 name: generated_name,
                 expr: Box::new(expression),
@@ -2079,7 +2155,10 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         })
         .map(|item| kpi_projection(item, &stage_processes))
         .collect::<Result<Vec<_>, _>>()?;
-    let origins = resolve_stage_items(&mut items, &stage_processes, "requirements")?;
+    let mut origins = resolve_stage_items(&mut items, &stage_processes, "requirements")?;
+    for (target, origin) in extra_origins {
+        origins.bind(target, origin);
+    }
     let mut kernel = crate::lower_direct_spec_with_origins(
         SurfaceSpec {
             name: requirements.name,

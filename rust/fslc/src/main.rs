@@ -6969,8 +6969,159 @@ fn model_stage_flows(model: &KernelModel) -> Vec<Value> {
     flows
 }
 
+/// Every syntactic partial-operation site (`pop`/`head`/`at`, `/`, `%`)
+/// inside one action's `requires`/`lets`/`statements`/`ensures`, one
+/// `(loc, text)` entry per occurrence — the same structural coverage the
+/// verifier's implicit `partial_op` check applies (issue #530: `explain`'s
+/// skeleton previously enumerated `type_bound` auto-checks only). `text` is
+/// the rendered text of the containing requires/statement/ensures (the same
+/// convention `requires_text`/`ensures_text` already use), so every site
+/// found within one clause shares that clause's rendering. Deliberately
+/// simpler than `fsl_core::public_kernel`'s `walk_partial`/`statement_partial`,
+/// which additionally compute a per-branch failure condition this listing
+/// does not need — a static enumeration has no branches to attribute to.
 #[allow(clippy::too_many_lines)]
-fn model_skeleton(model: &KernelModel) -> Value {
+fn action_partial_op_sites(
+    model: &KernelModel,
+    action: &fsl_core::ActionDef,
+) -> Vec<(fsl_syntax::Span, String)> {
+    fn walk_expr(
+        expr: &KernelExpr,
+        site: &(fsl_syntax::Span, String),
+        sites: &mut Vec<(fsl_syntax::Span, String)>,
+    ) {
+        match expr {
+            KernelExpr::Method {
+                receiver,
+                name,
+                args,
+            } => {
+                if matches!(name.as_str(), "head" | "pop" | "at") {
+                    sites.push(site.clone());
+                }
+                walk_expr(receiver, site, sites);
+                for arg in args {
+                    walk_expr(arg, site, sites);
+                }
+            }
+            KernelExpr::Binary { op, left, right } => {
+                if matches!(op.as_str(), "/" | "%") {
+                    sites.push(site.clone());
+                }
+                walk_expr(left, site, sites);
+                walk_expr(right, site, sites);
+            }
+            KernelExpr::Index(left, right) | KernelExpr::BinaryNamed { left, right, .. } => {
+                walk_expr(left, site, sites);
+                walk_expr(right, site, sites);
+            }
+            KernelExpr::Some(item) | KernelExpr::Neg(item) | KernelExpr::Not(item) => {
+                walk_expr(item, site, sites);
+            }
+            KernelExpr::Set(items) | KernelExpr::Seq(items) => {
+                for item in items {
+                    walk_expr(item, site, sites);
+                }
+            }
+            KernelExpr::Struct { fields, .. } => {
+                for (_, item) in fields {
+                    walk_expr(item, site, sites);
+                }
+            }
+            KernelExpr::Field(value, _)
+            | KernelExpr::Stage { entity: value, .. }
+            | KernelExpr::UnaryNamed { expr: value, .. } => walk_expr(value, site, sites),
+            KernelExpr::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                walk_expr(condition, site, sites);
+                walk_expr(then_expr, site, sites);
+                walk_expr(else_expr, site, sites);
+            }
+            KernelExpr::Is { expr, .. } => walk_expr(expr, site, sites),
+            KernelExpr::Quantified { body, .. } => walk_expr(body, site, sites),
+            KernelExpr::Aggregate { value, .. } => {
+                if let Some(value) = value {
+                    walk_expr(value, site, sites);
+                }
+            }
+            KernelExpr::TernaryNamed {
+                first,
+                second,
+                third,
+                ..
+            } => {
+                walk_expr(first, site, sites);
+                walk_expr(second, site, sites);
+                walk_expr(third, site, sites);
+            }
+            // A `def` call's own body is a separate declaration, checked on
+            // its own terms; its argument expressions are not partial-op
+            // sites of *this* action (matches `walk_partial`'s own choice).
+            KernelExpr::Num(_)
+            | KernelExpr::Bool(_)
+            | KernelExpr::None
+            | KernelExpr::Var(_)
+            | KernelExpr::EnumMember { .. }
+            | KernelExpr::Call { .. } => {}
+        }
+    }
+    fn walk_statement(
+        model: &KernelModel,
+        statement: &KernelStatement,
+        sites: &mut Vec<(fsl_syntax::Span, String)>,
+    ) {
+        match statement {
+            KernelStatement::Assign { value, span, .. } => {
+                let site = (*span, fslc_rust::source_expr_text(model, value));
+                walk_expr(value, &site, sites);
+            }
+            KernelStatement::If {
+                condition,
+                then_statements,
+                else_statements,
+                span,
+            } => {
+                let site = (*span, fslc_rust::source_expr_text(model, condition));
+                walk_expr(condition, &site, sites);
+                for item in then_statements.iter().chain(else_statements) {
+                    walk_statement(model, item, sites);
+                }
+            }
+            KernelStatement::ForAll { statements, .. } => {
+                for item in statements {
+                    walk_statement(model, item, sites);
+                }
+            }
+        }
+    }
+    let mut sites = Vec::new();
+    for (expr, span) in action.requires.iter().zip(&action.require_spans) {
+        let site = (*span, fslc_rust::source_expr_text(model, expr));
+        walk_expr(expr, &site, &mut sites);
+    }
+    // `lets` carries no per-binding span in the checked model; the action's
+    // own declaration span is the closest honest location rather than
+    // fabricating a precise one.
+    for (_, expr) in &action.lets {
+        let site = (action.span, fslc_rust::source_expr_text(model, expr));
+        walk_expr(expr, &site, &mut sites);
+    }
+    for statement in &action.statements {
+        walk_statement(model, statement, &mut sites);
+    }
+    for (expr, span) in action.ensures.iter().zip(&action.ensure_spans) {
+        let site = (*span, fslc_rust::source_expr_text(model, expr));
+        walk_expr(expr, &site, &mut sites);
+    }
+    sites
+}
+
+#[allow(clippy::too_many_lines)]
+fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
     let actions = model
         .actions
         .iter()
@@ -7071,7 +7222,7 @@ fn model_skeleton(model: &KernelModel) -> Value {
             _ => None,
         })
         .collect::<Vec<_>>();
-    let auto_checks = model
+    let mut auto_checks = model
         .state
         .iter()
         .filter(|(_, ty)| !matches!(ty, TypeRef::Int | TypeRef::Bool))
@@ -7080,8 +7231,24 @@ fn model_skeleton(model: &KernelModel) -> Value {
             json!({"kind":"type_bound","name":format!("_bounds_{target}"),"target":target,"requirement":Value::Null})
         })
         .collect::<Vec<_>>();
+    for action in &model.actions {
+        for (span, text) in action_partial_op_sites(model, action) {
+            let mut entry = json!({
+                "kind":"partial_op",
+                "name":fslc_rust::display_name(&format!("_partial_{}", action.name)),
+                "action":fslc_rust::display_name(&action.name),
+                "loc":span.python_loc(),
+                "text":text,
+                "requirement":Value::Null,
+            });
+            if let Value::Object(entry) = &mut entry {
+                insert_requirement_metadata(entry, &action.annotations, action.meta.as_ref());
+            }
+            auto_checks.push(entry);
+        }
+    }
     json!({
-        "spec_kind":Value::Null,
+        "spec_kind":spec_kind,
         "state":model.state.iter().map(|(name,ty)|(fslc_rust::display_name(name),public_type(model,ty))).collect::<Map<_,_>>(),
         "actions":actions,"properties":properties,"auto_checks":auto_checks,
         "domains":domains,
@@ -8095,13 +8262,30 @@ fn invariant_counterfactuals(path: &Path, depth: usize) -> Value {
     )
 }
 
+/// Readable-mode summary of a requirements-layer `implements X from "Y"`
+/// declaration — the "synthesized refinement mapping" `docs/DESIGN-explain.md`
+/// documents for the skeleton (issue #528). `None` when the source declares
+/// no `implements`, or when computing it fails: that failure already
+/// surfaces through `verify`/`check`, and a presentation view must not
+/// itself become a second point of failure for it.
+fn readable_implements_text(path: &Path, model: &KernelModel, depth: usize) -> Option<String> {
+    let implements = implements_result(path, model, depth).ok().flatten()?;
+    let abs = implements.get("abs").and_then(Value::as_str).unwrap_or("?");
+    let result = implements
+        .get("result")
+        .and_then(Value::as_str)
+        .unwrap_or("?");
+    Some(format!("  - {abs}: {result}\n"))
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
-    let model = match load_model(path) {
-        Ok(model) => model,
+    let (source, _kernel, model) = match load_kernel_model(path) {
+        Ok(loaded) => loaded,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let skeleton = model_skeleton(&model);
+    let spec_kind = source_dialect(&source);
+    let skeleton = model_skeleton(&model, spec_kind);
     let (scenarios, _) = run_scenarios(path, depth, "warn");
     let mut output = envelope();
     output.insert("result".to_owned(), json!("explained"));
@@ -8139,7 +8323,7 @@ fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
     }
     if readable {
         let mut text = format!("Spec: {} (depth {depth})\n", model.name);
-        let domains = model_skeleton(&model)
+        let domains = model_skeleton(&model, spec_kind)
             .get("domains")
             .and_then(Value::as_array)
             .cloned()
@@ -8156,8 +8340,20 @@ fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
         for (name, ty) in state {
             let _ = writeln!(text, "  - {}: {}", display(name), type_ref_text(ty));
         }
+        if let Some(implements) = readable_implements_text(path, &model, depth) {
+            text.push_str("\nImplements:\n");
+            text.push_str(&implements);
+        }
         text.push_str("\nActions:\n");
         for action in &model.actions {
+            // Branch-lowered actions (`branches { when ... }`) get one
+            // physical Kernel action per branch; recover the authored
+            // identity from origin metadata rather than printing the
+            // lowered `name.bN` form (issue #528).
+            let origin = model.action_origin(&action.name);
+            let display_name = origin
+                .and_then(fslc_rust::origin_display_name)
+                .map_or_else(|| display(&action.name), str::to_owned);
             let params = action
                 .params
                 .iter()
@@ -8169,10 +8365,19 @@ fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
                 .join(", ");
             let _ = writeln!(
                 text,
-                "  - {}({params}){}",
-                display(&action.name),
+                "  - {display_name}({params}){}",
                 if action.fair { " [fair]" } else { "" },
             );
+            for step in origin
+                .map(|origin| origin.lowering_steps.as_slice())
+                .unwrap_or_default()
+            {
+                if step.kind == "branch"
+                    && let Some(detail) = &step.detail
+                {
+                    let _ = writeln!(text, "    branch: {detail}");
+                }
+            }
             for requirement in action
                 .annotations
                 .requirements()
