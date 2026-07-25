@@ -496,7 +496,7 @@ fn adapt_public_kernel(kernel: &Value) -> Result<PublicKernelView, String> {
 }
 
 fn display_name(name: &str) -> String {
-    name.replacen("__", ".", 1)
+    fsl_core::display_name(name)
 }
 
 fn expr_source(expr: &Expr) -> String {

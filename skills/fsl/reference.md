@@ -1089,7 +1089,13 @@ extension) and partial failures stay visible in `files[]`/`errors[]`; a batch
 that analyzed nothing never reports `result:"analyzed"`/exit 0. Standalone
 refinement mappings use `--projection
 refinement_graph`, project manifests use `--projection traceability_graph`, and
-graph projections can export DOT or Mermaid with `--format dot|mermaid`.
+graph projections can export DOT or Mermaid with `--format dot|mermaid`. A
+node's TSG `label` is its `fsl_core::display_name` (a db-dialect internal
+separator sentinel is converted back to `__`, matching what `verify`
+reports); `--focus` accepts either a node's raw id or its displayed name.
+`action_dependency_graph`'s `enables`/`conflicts_with` edges carry every
+shared read/write state bridge for the action pair in `states` (plural);
+`state` (singular) is only the first one, kept for backward compatibility.
 `--projection code_audit --code PATH` is the single-spec, JSON-only bridge from
 exact executable Kernel requirement targets to `@fsl.trace` implementation
 locations. Treat missing, orphan, and target-mismatch findings as review signals,

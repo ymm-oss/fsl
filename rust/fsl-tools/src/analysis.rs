@@ -349,7 +349,7 @@ pub fn structural_review_findings(tsg: &Value) -> Vec<Value> {
 }
 
 fn display(name: &str) -> String {
-    name.replacen("__", ".", 1)
+    fsl_core::display_name(name)
 }
 
 #[allow(clippy::needless_pass_by_value)]

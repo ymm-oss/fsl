@@ -44,6 +44,31 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   diagnostics").
 
 ### Fixed
+- `analyze`'s TSG no longer leaks the internal db-dialect `QqDbSepqQ`
+  separator sentinel into node labels: a db-dialect invariant/action label
+  now matches the display name `verify` reports for the same target (both
+  now go through the shared `fsl_core::display_name`; two independent local
+  reimplementations in `fsl-tools` — `analysis.rs`'s `display` and
+  `typestate.rs`'s `display_name` — were each missing the sentinel
+  replacement `fsl_core::display_name` already does). Node ids keep their
+  raw, guaranteed-unique internal form, but `--focus` now also accepts a
+  node's displayed name (resolving it to the matching raw id), so a caller
+  no longer needs to know the internal sentinel to reference a target
+  `verify` already named for them.
+- `action_dependency_graph` no longer collapses an action pair connected
+  through more than one shared read/write state bridge down to a single
+  bridge. `enables`/`conflicts_with` edges are deduplicated by
+  `(from, kind, to)`, and the projection previously pushed one edge object
+  per bridge state for the same pair, so the dedup silently kept only
+  whichever state happened to be processed last (alphabetically, since the
+  underlying map iterates that way) — renaming a state variable could flip
+  which bridge a pair reported, and `progressless_cycle`
+  (`--profile ai-review`) attached its leadsTo/terminal check to only that
+  one surviving state, potentially missing progress attached through a
+  different shared bridge. Every bridge state for a pair is now aggregated
+  into `states` (plural) before emitting one edge, and the
+  `progressless_cycle` consumer reads the full `states` array instead of
+  the legacy singular `state` field (#498).
 - `analyze` batch mode no longer silently drops an explicitly-named input
   just because it does not end in `.fsl`. `collect_analysis_files`'s
   `*.fsl`-only filter applied even to files named directly on the command

@@ -10721,11 +10721,20 @@ fn ai_progressless_findings(model: &KernelModel, tsg: &Value) -> Vec<Value> {
                 continue;
             };
             expanded.push(from.to_owned());
-            let state = dependency_edges
+            // An `enables` edge can carry more than one shared read/write
+            // bridge state (`states`, plural) between the same action pair;
+            // consuming only the legacy singular `state` field would miss
+            // whichever bridges are not alphabetically first, and could
+            // therefore miss a leadsTo/terminal attachment that keys off a
+            // different one of them (#498).
+            let states = dependency_edges
                 .iter()
                 .find(|edge| edge["kind"] == "enables" && edge["from"] == from && edge["to"] == to)
-                .and_then(|edge| edge["state"].as_str());
-            if let Some(state) = state {
+                .and_then(|edge| edge["states"].as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str);
+            for state in states {
                 expanded.push(state.to_owned());
                 cycle_states.insert(state.to_owned());
             }

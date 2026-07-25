@@ -83,9 +83,15 @@ Graphviz or Mermaid runtime dependency.
 Single-file success is `result: "analyzed"` and exits 0. Parse, name, type,
 semantics, io, and internal failures reuse the normal fslc error envelope.
 `impact_graph` requires `--focus <node-id>` where the id comes from the TSG
-(`state:x`, `action:checkout`, `requirement:REQ-3`, etc.). Unknown focus ids
-use the normal `kind: "name"` error envelope. `--focus` is single-file only and
-is not accepted with `--profile`.
+(`state:x`, `action:checkout`, `requirement:REQ-3`, etc.). A node's TSG `label`
+is its display name (`fsl_core::display_name`: the internal `__` logical/physical
+marker becomes `.`, and a db-dialect internal separator sentinel is restored to
+`__`) — `--focus` accepts that displayed name too, resolving it to the matching
+node's raw id, so a caller does not need to know the internal sentinel form to
+reference a target `verify` already named for them. Unknown focus ids (neither
+a raw id nor a displayed name that resolves to one) use the normal
+`kind: "name"` error envelope. `--focus` is single-file only and is not
+accepted with `--profile`.
 Batch mode accepts files and directories. Directories are expanded recursively
 for `*.fsl`, sorted by normalized path, and emitted as one deterministic JSON
 envelope with `mode: "batch"`. If any file fails, successful entries remain in
@@ -145,7 +151,12 @@ structural sources:
 - `action_state_graph`: actions connected to state variables they read/write.
 - `action_dependency_graph`: action-to-action structural `enables` edges through
   read/write state bridges, plus write/write `conflicts_with` edges over shared
-  state. These are over-approximations, not scheduling semantics.
+  state. These are over-approximations, not scheduling semantics. An action
+  pair can be bridged through more than one shared state variable; `states`
+  (plural) carries the complete, sorted set, and `state` (singular) is only
+  its first entry kept for backward compatibility — consumers that need every
+  bridge (e.g. attaching a `progressless_cycle` finding to a leadsTo/terminal
+  that only touches one of several shared states) must read `states`.
 - `impact_graph`: the induced TSG slice around `--focus`, with upstream and
   downstream closure annotations (`direction`, `directions`, hop distances) for
   review impact analysis. `direction` is one of `focus`, `upstream`, or

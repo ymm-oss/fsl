@@ -362,35 +362,59 @@ fn action_dependency(tsg: &Value) -> (Vec<Value>, Vec<Value>) {
                 .insert(string(edge, "to"));
         }
     }
-    let mut result = Vec::new();
+    // `select()` deduplicates edges by `(from, kind, to)` id, so pushing one
+    // edge per shared bridge state (as this loop used to) silently dropped
+    // every bridge but the alphabetically-last one for a writer/reader (or
+    // writer/writer) pair connected through more than one state — the same
+    // action pair could flip which state gets attributed depending only on
+    // variable naming. Aggregate every bridge state for a pair first, then
+    // emit exactly one edge per pair carrying the complete, sorted set.
+    let mut enables: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
     for state in writers.keys().filter(|state| readers.contains_key(*state)) {
         for writer in &writers[state] {
             for reader in &readers[state] {
                 if writer != reader {
-                    let mut edge = projection_edge(writer, "enables", reader);
-                    edge.as_object_mut()
-                        .unwrap()
-                        .insert("state".to_owned(), json!(state));
-                    edge.as_object_mut()
-                        .unwrap()
-                        .insert("states".to_owned(), json!([state]));
-                    result.push(edge);
+                    enables
+                        .entry((writer.clone(), reader.clone()))
+                        .or_default()
+                        .insert(state.clone());
                 }
             }
         }
     }
+    let mut result = Vec::new();
+    for ((writer, reader), states) in enables {
+        let mut edge = projection_edge(&writer, "enables", &reader);
+        let object = edge.as_object_mut().unwrap();
+        object.insert(
+            "state".to_owned(),
+            json!(states.iter().next().cloned().unwrap_or_default()),
+        );
+        object.insert("states".to_owned(), json!(states));
+        result.push(edge);
+    }
+    let mut conflicts: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
     for (state, values) in &writers {
         let values = values.iter().collect::<Vec<_>>();
         for left in 0..values.len() {
             for right in left + 1..values.len() {
-                let mut edge = projection_edge(values[left], "conflicts_with", values[right]);
-                let object = edge.as_object_mut().unwrap();
-                object.insert("state".to_owned(), json!(state));
-                object.insert("states".to_owned(), json!([state]));
-                object.insert("symmetric".to_owned(), json!(true));
-                result.push(edge);
+                conflicts
+                    .entry((values[left].clone(), values[right].clone()))
+                    .or_default()
+                    .insert(state.clone());
             }
         }
+    }
+    for ((left, right), states) in conflicts {
+        let mut edge = projection_edge(&left, "conflicts_with", &right);
+        let object = edge.as_object_mut().unwrap();
+        object.insert(
+            "state".to_owned(),
+            json!(states.iter().next().cloned().unwrap_or_default()),
+        );
+        object.insert("states".to_owned(), json!(states));
+        object.insert("symmetric".to_owned(), json!(true));
+        result.push(edge);
     }
     select(tsg, &actions, result)
 }
@@ -490,9 +514,21 @@ fn impact(tsg: &Value, focus: &str) -> Result<(Vec<Value>, Vec<Value>), String> 
         .flatten()
         .filter_map(|n| n["id"].as_str().map(str::to_owned))
         .collect::<Vec<_>>();
-    if !all.iter().any(|id| id == focus) {
-        return Err(format!("unknown analyze focus node: {focus}"));
-    }
+    // Node ids keep their raw, guaranteed-unique internal form (a db-dialect
+    // id embeds the `QqDbSepqQ` separator sentinel), but `--focus` also
+    // accepts the canonical *displayed* form `verify`/`fsl_core::display_name`
+    // report for the same target, so a caller who only has the display name
+    // (e.g. copied from a `verify` violation) does not have to know the
+    // internal sentinel to reference the same node.
+    let focus = if all.iter().any(|id| id == focus) {
+        focus.to_owned()
+    } else {
+        all.iter()
+            .find(|id| fsl_core::display_name(id) == focus)
+            .cloned()
+            .ok_or_else(|| format!("unknown analyze focus node: {focus}"))?
+    };
+    let focus = focus.as_str();
     let all_edges = tsg["edges"].as_array().cloned().unwrap_or_default();
     let down = distances(focus, &adjacency(&all, &all_edges, false, false));
     let up = distances(focus, &adjacency(&all, &all_edges, true, false));
