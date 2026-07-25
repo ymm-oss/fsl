@@ -12271,57 +12271,164 @@ fn compare_diff_invariants(old: &KernelModel, new: &KernelModel) -> Vec<Value> {
     }
 }
 
-fn forbidden_diff_findings(old_path: &Path, new: &KernelModel) -> Vec<Value> {
-    let Ok(source) = std::fs::read_to_string(old_path) else {
-        return Vec::new();
-    };
-    let Ok(Some(contract)) = fsl_core::requirements_trace_contract(&source) else {
-        return Vec::new();
-    };
-    let mut findings = Vec::new();
-    for case in contract.forbidden {
-        let Ok(mut monitor) = fsl_runtime::Monitor::new(new.clone()) else {
-            continue;
+fn old_forbidden_arguments(
+    monitor: &mut fsl_runtime::Monitor,
+    step: &fsl_core::RequirementsTraceStep,
+    is_final: bool,
+) -> Result<Vec<FslValue>, String> {
+    let (arguments, instance) = requirement_step_match(monitor, step)?;
+    let Some(instance) = instance else {
+        return if is_final {
+            Ok(arguments)
+        } else {
+            Err("OLD forbidden setup was not enabled".to_owned())
         };
-        let mut accepted_trace = vec![json!({
-            "step":0,"state":fslc_rust::state_json(&monitor.state),
-        })];
-        let mut accepted_final = false;
-        for (index, step) in case.steps.iter().enumerate() {
-            let Ok((arguments, instance)) = requirement_step_match(&monitor, step) else {
-                break;
-            };
-            let Some(instance) = instance else {
-                break;
-            };
-            let Ok(stepped) = monitor.step(&instance) else {
-                break;
-            };
-            if stepped.violation.is_some() {
-                break;
-            }
-            accepted_trace.push(json!({
-                "step":index+1,"state":fslc_rust::state_json(&monitor.state),
-                "action":{"name":display(&instance.action),
-                    "params":instance.params.iter().map(|(name,value)|(
-                        name.clone(),fslc_rust::fsl_value_json(value)
-                    )).collect::<Map<_,_>>()},
-            }));
-            accepted_final = index + 1 == case.steps.len();
-            let _ = arguments;
+    };
+    let stepped = monitor.step(&instance).map_err(|error| error.to_string())?;
+    match (is_final, stepped.violation.is_some()) {
+        (false, false) | (true, true) => Ok(arguments),
+        (false, true) => Err("OLD forbidden setup was rejected".to_owned()),
+        (true, false) => Err("OLD forbidden final step was accepted".to_owned()),
+    }
+}
+
+fn forbidden_unknown(
+    id: &str,
+    reason: &str,
+    step: Option<(usize, &fsl_core::RequirementsTraceStep)>,
+    detail: &str,
+) -> Value {
+    let mut finding = json!({
+        "kind":"unknown","subject":"forbidden","id":id,
+        "reason":reason,"detail":detail,
+    });
+    if let Some((index, step)) = step {
+        finding["step"] = json!(index);
+        finding["action"] = json!(step.name);
+    }
+    finding
+}
+
+fn forbidden_case_finding(
+    case: &fsl_core::RequirementsTraceCase,
+    old: &KernelModel,
+    new: &KernelModel,
+) -> Option<Value> {
+    let mut old_monitor = match fsl_runtime::Monitor::new(old.clone()) {
+        Ok(monitor) => monitor,
+        Err(error) => {
+            return Some(forbidden_unknown(
+                &case.id,
+                "forbidden_replay_failed",
+                None,
+                &error.to_string(),
+            ));
         }
-        if accepted_final {
-            findings.push(json!({
-                "kind":"forbidden_relaxed","id":case.id,
-                "witness":{
-                    "trace_type":"counterexample","trace":accepted_trace,
-                    "accepted_step":case.steps.last().map(|step|step.name.clone()),
-                    "state":fslc_rust::state_json(&monitor.state),
-                },
-            }));
+    };
+    let mut monitor = match fsl_runtime::Monitor::new(new.clone()) {
+        Ok(monitor) => monitor,
+        Err(error) => {
+            return Some(forbidden_unknown(
+                &case.id,
+                "forbidden_replay_failed",
+                None,
+                &error.to_string(),
+            ));
+        }
+    };
+    let mut accepted_trace = vec![json!({
+        "step":0,"state":fslc_rust::state_json(&monitor.state),
+    })];
+    for (index, step) in case.steps.iter().enumerate() {
+        let is_final = index + 1 == case.steps.len();
+        let arguments = match old_forbidden_arguments(&mut old_monitor, step, is_final) {
+            Ok(arguments) => arguments,
+            Err(error) => {
+                return Some(forbidden_unknown(
+                    &case.id,
+                    "forbidden_replay_failed",
+                    Some((index, step)),
+                    &error,
+                ));
+            }
+        };
+        let instance = match fslc_rust::verification_output::requirement_step_match_values(
+            &monitor, step, &arguments,
+        ) {
+            Ok(instance) => instance,
+            Err(error) => {
+                let reason = match &error {
+                    fslc_rust::verification_output::RequirementStepRelationError::Unrelatable(
+                        _,
+                    ) => "forbidden_step_unrelatable",
+                    fslc_rust::verification_output::RequirementStepRelationError::Replay(_) => {
+                        "forbidden_replay_failed"
+                    }
+                };
+                return Some(forbidden_unknown(
+                    &case.id,
+                    reason,
+                    Some((index, step)),
+                    &error.to_string(),
+                ));
+            }
+        };
+        let instance = instance?;
+        let stepped = match monitor.step(&instance) {
+            Ok(stepped) => stepped,
+            Err(error) => {
+                return Some(forbidden_unknown(
+                    &case.id,
+                    "forbidden_replay_failed",
+                    Some((index, step)),
+                    &error.to_string(),
+                ));
+            }
+        };
+        if stepped.violation.is_some() {
+            return None;
+        }
+        accepted_trace.push(json!({
+            "step":index+1,"state":fslc_rust::state_json(&monitor.state),
+            "action":{"name":display(&instance.action),
+                "params":instance.params.iter().map(|(name,value)|(
+                    name.clone(),fslc_rust::fsl_value_json(value)
+                )).collect::<Map<_,_>>()},
+        }));
+    }
+    Some(json!({
+        "kind":"forbidden_relaxed","id":case.id,
+        "witness":{
+            "trace_type":"counterexample","trace":accepted_trace,
+            "accepted_step":case.steps.last().map(|step|step.name.clone()),
+            "state":fslc_rust::state_json(&monitor.state),
+        },
+    }))
+}
+
+fn forbidden_diff_findings(
+    old_source: &str,
+    old: &KernelModel,
+    new: &KernelModel,
+) -> Result<Vec<Value>, String> {
+    let Some(contract) =
+        fsl_core::requirements_trace_contract(old_source).map_err(|error| error.to_string())?
+    else {
+        return Ok(Vec::new());
+    };
+    for case in &contract.forbidden {
+        if case.steps.is_empty() {
+            return Err(format!(
+                "forbidden '{}' must have at least one step",
+                case.id
+            ));
         }
     }
-    findings
+    Ok(contract
+        .forbidden
+        .iter()
+        .filter_map(|case| forbidden_case_finding(case, old, new))
+        .collect())
 }
 
 fn add_verify_items(scope: &mut ScopeBounds, items: &[fsl_syntax::VerifyItem]) {
@@ -12526,7 +12633,10 @@ fn run_diff(
         }
     }
     findings.extend(compare_diff_invariants(&old_model, &new_model));
-    findings.extend(forbidden_diff_findings(old, &new_model));
+    match forbidden_diff_findings(&old_source, &old_model, &new_model) {
+        Ok(forbidden_findings) => findings.extend(forbidden_findings),
+        Err(error) => return (error_output("type", &error), 2),
+    }
     if scope_changed {
         findings.push(json!({
             "kind":"scope_changed","old":public_scope(&old_scope),

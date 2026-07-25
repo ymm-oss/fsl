@@ -14,6 +14,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   without weakening bijective `enum conversion` (#455).
 
 ### Fixed
+- Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
+  model and reports missing actions, incompatible arity, or incompatible NEW
+  argument domains as explicit `unknown` findings instead of a false
+  `no_semantic_change` result (#460, prerequisite for #427).
 - Refinement typechecking now rejects an unshadowed bare enum member shared by distinct
   implementation and abstraction enums, preventing checked and evaluation
   merge order from assigning different nominal identities. Existing identifier

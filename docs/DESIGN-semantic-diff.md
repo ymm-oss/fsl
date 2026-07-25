@@ -62,6 +62,14 @@ Each OLD `forbidden` scenario is replayed against NEW. If NEW accepts the step
 OLD required to be rejected, the result contains `forbidden_relaxed` and the
 accepted trace. A scenario that cannot be related because its action or
 arguments no longer exist becomes `unknown`, not a false relaxation finding.
+Scenario arguments are evaluated against the OLD typed model and OLD replay
+state before their values are matched to the NEW action parameter domains; NEW
+must not reinterpret a same-spelled nominal enum member as its own type.
+The finding carries `subject:"forbidden"`, the OLD case `id`, a stable
+`reason` (`forbidden_step_unrelatable` or `forbidden_replay_failed`), and the
+zero-based failing `step` plus `action` when available. A matching action that
+is disabled by its guard is a related rejection and therefore preserves the
+forbidden scenario; it is not reported as `unknown`.
 
 ## Scope changes
 
