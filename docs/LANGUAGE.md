@@ -1325,6 +1325,19 @@ with `kind` (`abs_requires_failed` / `abs_state_mismatch` / `stutter_changed_abs
 `abs_after_*`. A static error (a missing map, an unknown action, etc.) is
 `kind: "type"` (exit 2).
 
+Before any correspondence is checked, `refine` first verifies that the impl
+spec is internally consistent on its own — does not violate its own type
+bounds or invariants — within `--depth`. A refinement mapping cannot make a
+broken impl meaningful, so this is checked independently of the abstraction
+and the mapping: `result: "violated"` (exit 1) with `violation_kind` and a
+`note` explaining this is a property of the refinement *input*, not a
+fidelity failure. It is never reported `refines`, and never folded into
+`refinement_failed` (whose `kind`s above describe a mismatch *between* impl
+and abs, not a defect in the impl alone). `fslc diff` surfaces the same
+condition as an `impl_violated` finding and fails its gate unconditionally
+(not subject to `--forbid`), since a self-violating side makes the
+comparison itself untrustworthy.
+
 Give impl and abs **distinct enum/struct type names**, even when a state
 variable pair is mapped 1:1. Type metadata is merged by name for refinement
 checking; a same-named enum (or struct) declared with a different member

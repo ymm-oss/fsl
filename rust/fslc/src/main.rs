@@ -10,7 +10,8 @@ use std::time::Instant;
 
 use fsl_core::{
     Annotations, FslValue, KernelExpr, KernelLValue, KernelModel, KernelSpec, KernelStatement,
-    ParamDef, TypeDef, TypeRef, insert_requirement_metadata, model_warnings, requirement_metadata,
+    ParamDef, TraceStep, TypeDef, TypeRef, insert_requirement_metadata, model_warnings,
+    requirement_metadata,
 };
 use serde_json::{Map, Value, json};
 
@@ -8559,7 +8560,28 @@ fn apply_implements_mutation_oracle(
     let checked =
         fsl_runtime::check_refinement(model, &contract.abstraction, &contract.refinement, depth)
             .map_err(|error| error.to_string())?;
-    if let Some(failure) = checked.failure {
+    if let Some((_, trace)) = &checked.impl_violation {
+        // The mutant violates its own type bounds/invariants — a property of
+        // the mutated impl spec, not a refinement fidelity failure, but a
+        // real, detectable difference (#466): it must not be reported clean.
+        let killer_requirements = trace
+            .last()
+            .and_then(|step| step.action.as_ref())
+            .and_then(|action| {
+                model
+                    .actions
+                    .iter()
+                    .find(|candidate| candidate.name == action.name)
+            })
+            .map_or_else(Vec::new, |action| {
+                annotation_requirement_ids(&action.annotations)
+            });
+        *outcome = MutationOracle {
+            clean: false,
+            killed_by: Some("refinement".to_owned()),
+            killer_requirements,
+        };
+    } else if let Some(failure) = checked.failure {
         let killer_requirements = failure
             .impl_action
             .as_ref()
@@ -12086,7 +12108,7 @@ fn finish_analysis(
     (Value::Object(output), 0)
 }
 
-const DIFF_FINDING_KINDS: [&str; 7] = [
+const DIFF_FINDING_KINDS: [&str; 8] = [
     "behavior_added",
     "behavior_removed",
     "invariant_weakened",
@@ -12094,6 +12116,7 @@ const DIFF_FINDING_KINDS: [&str; 7] = [
     "forbidden_relaxed",
     "scope_changed",
     "unknown",
+    "impl_violated",
 ];
 
 fn diff_shape_mismatch(implementation: &KernelModel, abstraction: &KernelModel) -> Option<Value> {
@@ -12187,6 +12210,24 @@ fn semantic_diff_direction(
         }
         Err(error) => return Err(error.to_string()),
     };
+    if let Some((violation, trace)) = checked.impl_violation {
+        // The implementation side of this direction violates its own type
+        // bounds/invariants (#466) — not a behavior difference to review,
+        // but a broken input. `refines`/`no_semantic_change` would hide a
+        // real regression from a diff gate entirely, so this is surfaced as
+        // its own finding kind and made an unconditional gate failure below
+        // (unlike ordinary findings, never opt-in via `--forbid`).
+        let public = json!({
+            "result":"impl_violated","checked_to_depth":depth,
+            "violation_kind":violation.kind,"invariant":display(&violation.name),
+            "violated_at_step":violation.step,
+        });
+        let raw = json!({
+            "kind":violation.kind,"violated_at_step":violation.step,
+            "impl_trace":fslc_rust::trace_json(implementation,&trace),
+        });
+        return Ok((public, Some(raw)));
+    }
     if let Some(failure) = checked.failure {
         let impl_action = failure.impl_action.as_ref().map(|action| {
             let definition = implementation
@@ -12640,6 +12681,12 @@ fn run_diff(
                 "detail":public.get("mismatch").or_else(||public.get("detail"))
                     .or_else(||public.get("message")).cloned().unwrap_or(Value::Null),
             })),
+            Some("impl_violated") => findings.push(json!({
+                "kind":"impl_violated","direction":direction,
+                "witness":diff_counterexample(raw),
+                "violation_kind":public.get("violation_kind").cloned().unwrap_or(Value::Null),
+                "invariant":public.get("invariant").cloned().unwrap_or(Value::Null),
+            })),
             _ => {}
         }
     }
@@ -12683,11 +12730,21 @@ fn run_diff(
     let mut forbidden = forbid.to_vec();
     forbidden.sort();
     forbidden.dedup();
-    let violations = forbidden
+    let mut violations = forbidden
         .iter()
         .filter(|kind| present.contains(kind.as_str()))
         .cloned()
         .collect::<Vec<_>>();
+    // `impl_violated` is not an ordinary opt-in finding: it means one side
+    // of this diff violates its own type bounds/invariants, so the
+    // comparison itself is not trustworthy. Unlike `--forbid`-gated kinds
+    // (a reviewer's judgment call on whether a *behavior* difference is
+    // acceptable), this always fails the gate, matching how a plain
+    // parse/type error in either input already exits non-zero before
+    // reaching this comparison at all.
+    if present.contains("impl_violated") && !violations.iter().any(|kind| kind == "impl_violated") {
+        violations.push("impl_violated".to_owned());
+    }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("semantic_diff"));
     output.insert(
@@ -13200,6 +13257,44 @@ fn mismatch_paths(
     paths
 }
 
+/// Render `RefinementCheck::impl_violation`: the implementation itself
+/// violates a type bound, invariant, `trans`, or `ensures` within `depth`,
+/// discovered before any refinement correspondence was even attempted. Not
+/// `refines` and not `refinement_failed` (#466) — this is a property of the
+/// refinement *input*, so it is reported with the same shape `fslc verify`
+/// uses for a `violated` result plus an explanatory `note`, matching the
+/// frozen Python reference's `refine()` (`src/fslc/refine.py`, accepted as
+/// [1.2.9] in CHANGELOG.md).
+fn impl_self_violation_output(
+    implementation: &KernelModel,
+    violation: &fsl_runtime::Violation,
+    trace: &[TraceStep],
+    depth: usize,
+) -> Map<String, Value> {
+    let mut output = envelope();
+    output.insert("impl".to_owned(), json!(implementation.name));
+    output.insert("result".to_owned(), json!("violated"));
+    output.insert("violation_kind".to_owned(), json!(violation.kind));
+    if violation.kind == "trans" {
+        output.insert("trans".to_owned(), json!(display(&violation.name)));
+    }
+    output.insert("invariant".to_owned(), json!(display(&violation.name)));
+    output.insert("violated_at_step".to_owned(), json!(violation.step));
+    output.insert("checked_to_depth".to_owned(), json!(depth));
+    output.insert(
+        "impl_trace".to_owned(),
+        fslc_rust::trace_json(implementation, trace),
+    );
+    output.insert(
+        "note".to_owned(),
+        json!(
+            "this result is a property of the impl spec itself (a refinement input), not a refinement failure; verify the impl spec independently before checking refinement"
+        ),
+    );
+    output.insert("trace_type".to_owned(), json!("refinement"));
+    output
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_refine(
     implementation_path: &Path,
@@ -13236,6 +13331,17 @@ fn run_refine(
             Ok(checked) => checked,
             Err(error) => return (error_output("type", &error.to_string()), 2),
         };
+    if let Some((violation, trace)) = checked.impl_violation {
+        return (
+            Value::Object(impl_self_violation_output(
+                &implementation,
+                &violation,
+                &trace,
+                checked.depth,
+            )),
+            1,
+        );
+    }
     let progress = if checked.failure.is_none() && !mapping.progress.is_empty() {
         let mut solver = match fsl_solver_z3::Z3Solver::new() {
             Ok(solver) => solver,

@@ -1321,6 +1321,14 @@ first failed layer and later layers are marked `skipped`.
   `kind:"progress_lost"`, `violation_kind:"leadsTo"`, `impl_trace`,
   `progress_failure:"lasso_blocks_progress"|"deadlock_or_stall_blocks_progress"`,
   `progress:{leadsTo, actions}`, and `faithfulness_class:"liveness_not_refined"`.
+- **impl self-violation** (checked before any correspondence, `refine`'s own
+  input precondition): if the impl spec violates its own type bounds or
+  invariants within `--depth` — independent of the abstraction and mapping —
+  `refine` reports `result:"violated"` with the impl's own `violation_kind`
+  and a `note` that this is a property of the refinement input, not a
+  fidelity failure. Never `refines`, never folded into `refinement_failed`.
+  `fslc diff` surfaces the same condition as an `impl_violated` finding and
+  fails its gate unconditionally (not `--forbid`-gated).
 - leadsTo ranking failure: `unknown_cti` / `violation_kind:"leadsTo_rank"` with
   `rank_failure` (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
   `pending_not_preserved`; with `helpful`, also `progress_action_not_fair`,

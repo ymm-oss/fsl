@@ -32,6 +32,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false
   `no_semantic_change` result (#460, prerequisite for #427).
+- `fslc refine` now verifies the impl spec's own internal consistency (type
+  bounds, invariants, `trans`, `ensures`) before checking any correspondence
+  against the abstraction. An impl that violates itself within `--depth` —
+  e.g. a dropped `requires` that lets a state variable step outside its
+  declared type bound — is reported `result:"violated"` with a `note`
+  explaining this is a property of the refinement input, never `refines`
+  and never folded into `refinement_failed`. Previously `check_refinement`'s
+  BFS silently discarded (`continue`d past) any violation the impl produced
+  while stepping, so a guard weakening that broke the impl's own bounds
+  could pass as `refines`/exit 0 with no counterexample at all. `fslc diff`
+  gains the same detection as a new `impl_violated` finding kind that fails
+  its gate unconditionally (unlike other finding kinds, not subject to
+  `--forbid`), since a self-violating side makes the comparison untrustworthy;
+  the `implements`-clause mutation oracle and the `implements:` verify
+  metadata (`requirements_implements_output`) are also corrected to stop
+  reporting the impl-violation case as a clean/`"refines"` refinement (#466).
 - `--vacuity {error,ignore}` now selects over the complete documented 5-kind
   vacuity lane set (`fsl_core::VACUITY_KINDS`) instead of only the two kinds
   spelled `vacuous_*`. `always_true_requires`, `tautology_over_frozen`, and

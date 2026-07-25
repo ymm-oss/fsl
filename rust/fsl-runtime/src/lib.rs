@@ -1236,6 +1236,13 @@ pub struct RefinementCheck {
     pub action_map: BTreeMap<String, String>,
     pub abs_has_ensures: bool,
     pub failure: Option<RefinementFailure>,
+    /// Set instead of `failure` when the implementation violates its own
+    /// semantics (a type bound, invariant, `trans`, `ensures`, or
+    /// `partial_op`) within `depth`, independent of the refinement mapping.
+    /// This is a property of the refinement *input* (the impl spec is
+    /// broken on its own), not a refinement fidelity verdict, so it must
+    /// never be reported as `refines` or folded into `refinement_failed`.
+    pub impl_violation: Option<(Violation, Vec<TraceStep>)>,
 }
 
 fn merged_refinement_model(
@@ -1432,6 +1439,24 @@ pub fn check_refinement(
     mapping: &Refinement,
     depth: usize,
 ) -> Result<RefinementCheck, RuntimeError> {
+    // The impl spec must be internally consistent before its transitions are
+    // compared against the abstraction at all: refinement fidelity is
+    // meaningless to evaluate for a spec that already breaks its own type
+    // bounds or invariants. Checking this first — and returning immediately
+    // — means the correspondence walk below never needs to decide what a
+    // mid-walk self-violation means; by construction it cannot encounter
+    // one within the same `depth`.
+    if let Some((violation, trace)) = first_self_violation(implementation.clone(), depth)? {
+        return Ok(RefinementCheck {
+            implementation: implementation.name.clone(),
+            abstraction: abstraction.name.clone(),
+            depth,
+            action_map: BTreeMap::new(),
+            abs_has_ensures: false,
+            failure: None,
+            impl_violation: Some((violation, trace)),
+        });
+    }
     let eval_model = merged_refinement_model(implementation, abstraction)?;
     let impl_initial = Monitor::new(implementation.clone())?;
     let abs_initial = Monitor::new(abstraction.clone())?;
@@ -1463,6 +1488,7 @@ pub fn check_refinement(
             .iter()
             .any(|action| !action.ensures.is_empty()),
         failure: None,
+        impl_violation: None,
     };
     let initial_trace = vec![TraceStep {
         step: 0,
@@ -1551,6 +1577,12 @@ pub fn check_refinement(
             let mut child = monitor.clone();
             let stepped = child.step(&enabled)?;
             if stepped.violation.is_some() {
+                // Unreachable in practice: `first_self_violation` above
+                // already proved the impl has no self-violation within
+                // `depth`, and this walk never explores past `depth`. Kept
+                // as a defensive skip (never a silent `refines`) rather than
+                // an `unreachable!()`, since only silence here — not a
+                // panic — would resurrect the false-green #466 fixes.
                 continue;
             }
             let mut child_trace = trace.clone();
@@ -1770,6 +1802,62 @@ pub fn find_boundary_violation(
                     return Ok(Some((violation, child_trace)));
                 }
                 continue;
+            }
+            if visited.insert(child.state.clone()) {
+                queue.push_back((child, child_trace, step + 1));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Find the first violation of ANY kind (type bound, user invariant, `trans`,
+/// `ensures`, or `partial_op`) the model has against its own semantics,
+/// concretely, within `depth` — i.e. whether the model is internally
+/// consistent at all, independent of any refinement mapping.
+///
+/// Unlike [`find_boundary_violation`], which is scoped to
+/// `partial_op`/`type_bound` for its own narrower callers, this checks every
+/// violation kind `Monitor::current_violation`/`Monitor::step` can report,
+/// including a violation already present in the initial state (init can
+/// itself violate an invariant or type bound before any action runs).
+///
+/// # Errors
+///
+/// Returns [`RuntimeError`] when concrete evaluation or execution fails.
+fn first_self_violation(
+    model: KernelModel,
+    depth: usize,
+) -> Result<Option<(Violation, Vec<TraceStep>)>, RuntimeError> {
+    let initial = Monitor::new(model)?;
+    let initial_trace = vec![TraceStep {
+        step: 0,
+        state: initial.state.clone(),
+        action: None,
+        changes: BTreeMap::new(),
+    }];
+    if let Some(violation) = initial.current_violation()? {
+        return Ok(Some((violation, initial_trace)));
+    }
+    let mut queue = VecDeque::from([(initial.clone(), initial_trace, 0_usize)]);
+    let mut visited = BTreeSet::from([initial.state.clone()]);
+    while let Some((monitor, trace, step)) = queue.pop_front() {
+        if step >= depth {
+            continue;
+        }
+        for instance in monitor.enabled()? {
+            let mut child = monitor.clone();
+            let before = child.state.clone();
+            let stepped = child.step(&instance)?;
+            let mut child_trace = trace.clone();
+            child_trace.push(trace_step_from_result(
+                step + 1,
+                &before,
+                &instance,
+                &stepped,
+            ));
+            if let Some(violation) = stepped.violation {
+                return Ok(Some((violation, child_trace)));
             }
             if visited.insert(child.state.clone()) {
                 queue.push_back((child, child_trace, step + 1));

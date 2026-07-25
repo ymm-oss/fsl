@@ -184,7 +184,16 @@ pub fn requirements_implements_output(
                 message: error.to_string(),
                 span: None,
             })?;
-    Ok(Some(if let Some(failure) = checked.failure {
+    Ok(Some(if let Some((violation, _)) = checked.impl_violation {
+        // The impl itself violates its own type bounds/invariants (#466):
+        // a property of the refinement input, not a refinement fidelity
+        // verdict, so it must not be reported `refines`.
+        json!({
+            "abs": contract.abstraction.name,
+            "result": "impl_violated",
+            "violation": {"result": "violated", "kind": violation.kind},
+        })
+    } else if let Some(failure) = checked.failure {
         json!({
             "abs": contract.abstraction.name,
             "result": "refinement_failed",
