@@ -72,7 +72,11 @@ the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests.
   regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/reference.md`, a design
   note, and `CHANGELOG.md`. `docs/LANGUAGE.ja.md` is a second canonical source kept section-aligned
   1:1 with `docs/LANGUAGE.md` (same count/order of `## ` sections) — `tools/build_site_reference.py`
-  fails loudly on drift; see `docs/DESIGN-docs-site.md` D7.
+  fails loudly on drift; see `docs/DESIGN-docs-site.md` D7. A new dialect's top-level construct (and
+  any new `examples/`/`specs/` directory) additionally moves with `tests/dialect_registry.py`
+  (`DIALECTS`, `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS`), or the conformance harness
+  (`docs/DESIGN-conformance-harness.md`) fails loudly with an unregistered-construct error instead
+  of silently excluding the corpus.
 - Do not weaken or hollow out `.fsl` specs to make checks pass. Verify mutation/vacuity evidence.
 - Every formal-to-implementation conformance anchor must include a negative control that rejects a
   known contract-violating trace, transition, or mutation. A green positive path alone does not

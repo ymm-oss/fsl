@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-
+// expected-result: error
 governance Broken {
   preservation MissingBefore {
     after After from "../../self/monitor_action_boundary.fsl"

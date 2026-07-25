@@ -239,6 +239,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   identity, matching the same-index detection already applied to `Int`/`Bool` constants. This
   restores `fslc check`/`db check` on the four `examples/db/` `dbsystem` `rename`/`split`/`merge`
   preservation fixtures, which previously exited 2 against a golden corpus snapshot of `"ok"` (#475).
+- The frozen `tests/test_dialect_conformance.py` corpus-conformance harness (`docs/DESIGN-conformance-harness.md`)
+  is green again (0 failing of 212, up from 201 passed / 6 failed). Four intentional-error `governance`
+  gallery fixtures gained the `// expected-result: error` front matter that reclassifies them as
+  `DECLARED_ERROR` instead of `CONFORMANCE`; the no-action `governance_semantic_before.fsl` "before"
+  fragment and the three `examples/causal/*.fsl` files (a dialect the frozen Python reference does not
+  implement at all) are now registered exclusions (`MONITOR_EXCLUSIONS` and a new `causal` entry in
+  `EVIDENCE_CONSTRUCTS`/`is_causal_source`) instead of falling through to `UNKNOWN`. The always-red
+  harness had made a new registration gap indistinguishable from a pre-existing one (#476).
 - Refinement typechecking now rejects an unshadowed bare enum member shared by distinct
   implementation and abstraction enums, preventing checked and evaluation
   merge order from assigning different nominal identities. Existing identifier

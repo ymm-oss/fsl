@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-
+// expected-result: error
 spec After {
   state { missing: Missing }
   init { }
