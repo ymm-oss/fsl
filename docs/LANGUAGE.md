@@ -2418,7 +2418,9 @@ metrics from precomputed JSONL with Wilson intervals; `fslc ai regress` checks
 aggregate `no_regression` metric drop/increase clauses; `fslc ai compare`
 reports metric deltas without a threshold claim; `fslc ai drift` checks runtime
 telemetry thresholds and drift; and `fslc ai compat` emits a finite
-`dbsystem artifact` capability profile. All of these use
+`dbsystem artifact` capability profile for one `ai_component` or every
+`ai_component` a project declares, rejecting non-AI input and an AI project
+with no `ai_component` at all (exit 2). All of these use
 `formal_result:"not_run"`.
 
 Recursive `agent` shape:

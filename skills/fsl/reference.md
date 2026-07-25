@@ -412,8 +412,10 @@ Bernoulli/proportion metrics, Wilson intervals, and
 `formal_result:"not_run"`. `fslc ai regress` checks aggregate
 `ai_migration.no_regression`, `fslc ai compare` reports metric deltas,
 `fslc ai drift` checks runtime telemetry thresholds/drift, and
-`fslc ai compat` emits DB artifact capability profiles. These results are never
-formal proof.
+`fslc ai compat` emits DB artifact capability profiles for one `ai_component`
+or every `ai_component` a project declares -- rejecting non-AI input and a
+project with no `ai_component` at all (exit 2) rather than an empty profile.
+These results are never formal proof.
 
 Recursive fsl-ai `agent` composition is checked structurally by
 `fslc ai check` and returns `agent_analyzed` on success:

@@ -2367,8 +2367,10 @@ Wilson 区間つきで、事前計算された JSONL から Bernoulli/比率の�
 します。`fslc ai regress` は集約の `no_regression` のメトリクス低下/増加の節を
 検査します。`fslc ai compare` は閾値の主張なしにメトリクスの差分を報告します。
 `fslc ai drift` はランタイムのテレメトリの閾値とドリフトを検査します。そして
-`fslc ai compat` は有限の
-`dbsystem artifact` ケイパビリティプロファイルを出力します。これらはすべて
+`fslc ai compat` は、1 つの `ai_component`、またはプロジェクトが
+宣言するすべての `ai_component` について有限の `dbsystem artifact`
+ケイパビリティプロファイルを出力し、AI ではない入力や `ai_component` を
+1 つも宣言しない AI プロジェクトは拒否します（exit 2）。これらはすべて
 `formal_result:"not_run"` を使います。
 
 再帰的な `agent` の形:

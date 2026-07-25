@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+dataset NoComponentDataset {
+  source "examples/ai/support_eval_v3.jsonl"
+}
+
+statistical_property NoComponentProperty {
+  target MissingComponent
+  dataset NoComponentDataset
+  require ci_lower(metric.accuracy, 0.95) >= 0.5
+}

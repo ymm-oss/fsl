@@ -128,6 +128,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   malformed `CREATE TABLE` (unbalanced/missing parentheses) now produces an
   `unsupported_sql` warning instead of being silently skipped with no warning
   and no table (#507).
+- `fslc ai compat` no longer line-scans any readable file and reports
+  `compat_profile_generated` with a syntactically empty `dbsystem` fragment
+  (`artifact  { requires ; provides ; }`) for non-AI input or an fsl-ai
+  project that declares no `ai_component` at all — indistinguishable from a
+  genuine clean result. Native now parses either a single `ai_component`
+  document or a full fsl-ai project (`fsl_syntax::parse_ai_project`,
+  `AiComponent.tools[].schema` preferred over the tool name, matching the
+  frozen reference) and rejects wrong-dialect input and a component-less
+  project with exit 2 (#511).
 - `analyze`'s TSG no longer leaks the internal db-dialect `QqDbSepqQ`
   separator sentinel into node labels: a db-dialect invariant/action label
   now matches the display name `verify` reports for the same target (both

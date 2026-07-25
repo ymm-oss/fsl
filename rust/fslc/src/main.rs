@@ -6382,48 +6382,154 @@ fn run_ai_drift(
         json!({"result":if findings.is_empty(){"observed_conformant"}else{"observed_mismatch"},"formal_result":"not_run","findings":findings}),
     )
 }
+/// The `ai_project` name most fsl-ai project commands report -- derived from
+/// the spec's file stem, mirroring the frozen reference's
+/// `parse_ai_project(src, name=Path(path).stem)`.
+fn ai_project_name(path: &Path) -> String {
+    path.file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("AiProject")
+        .to_owned()
+}
+
+/// `fslc ai compat`: project a `dbsystem artifact` capability profile from
+/// one `ai_component` or every `ai_component` an fsl-ai project declares
+/// (issue #511 -- a non-AI input, or an AI project with no `ai_component` at
+/// all, previously produced a syntactically empty profile that reported
+/// success indistinguishably from a genuine clean result).
 fn run_ai_compat(path: &Path, environment: Option<&str>) -> (Value, i32) {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
-    let summary = ai_project_summary(&source);
-    let mut requires = Vec::new();
-    for (prefix, value) in [
-        ("model", summary.model),
-        ("prompt", summary.prompt),
-        ("retriever", summary.retriever),
-    ] {
-        if let Some(value) = value {
-            requires.push(format!("{prefix}.{value}"));
-        }
+    let components: Vec<fsl_syntax::AiComponent> =
+        if fslc_rust::frontend_output::is_ai_project(&source) {
+            match fsl_syntax::parse_ai_project(&source, &ai_project_name(path)) {
+                Ok(project) => project.components,
+                Err(error) => return (semantic_error_output(&error), 2),
+            }
+        } else {
+            match parse_surface_document(path) {
+                Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => vec![component],
+                Ok(_) => {
+                    return (
+                        semantic_error_output(
+                            "expected an ai_component or fsl-ai project document",
+                        ),
+                        2,
+                    );
+                }
+                Err(error) => return (semantic_error_output(&error), 2),
+            }
+        };
+    if components.is_empty() {
+        return (
+            semantic_error_output(
+                "ai project declares no ai_component to project a compatibility profile from",
+            ),
+            2,
+        );
     }
-    requires.extend(summary.tools.iter().map(|tool| format!("tool.{tool}")));
+    let profiles = components
+        .iter()
+        .map(ai_compat_component_profile)
+        .collect::<Vec<_>>();
+    let fragment = profiles
+        .iter()
+        .map(ai_compat_profile_block)
+        .collect::<String>();
+    wrap_specialized(json!({
+        "fsl": "fsl-ai-compat-profile.v0",
+        "schema_version": "fsl-ai-compat-profile.v0",
+        "result": "compat_profile_generated",
+        "formal_result": "not_run",
+        "environment": environment,
+        "profiles": profiles,
+        "dbsystem_fragment": fragment,
+        "assumptions": [],
+        "findings": [],
+    }))
+}
+
+fn ai_compat_component_profile(component: &fsl_syntax::AiComponent) -> Value {
+    let mut requires = Vec::new();
+    if let Some(model) = &component.model {
+        requires.push(format!("model.{model}"));
+    }
+    if let Some(prompt) = &component.prompt {
+        requires.push(format!("prompt.{prompt}"));
+    }
+    if let Some(retriever) = &component.retriever {
+        requires.push(format!("retriever.{retriever}"));
+    }
+    for tool in &component.tools {
+        requires.push(format!(
+            "tool.{}",
+            tool.schema.as_deref().unwrap_or(&tool.name)
+        ));
+    }
     requires.sort();
-    let provides = summary
-        .output
+    requires.dedup();
+    let provides = component
+        .output_schema
+        .as_ref()
         .map(|value| vec![format!("output.{value}")])
         .unwrap_or_default();
-    let artifact =
-        summary
-            .component
-            .chars()
-            .enumerate()
-            .fold(String::new(), |mut out, (index, c)| {
-                if c.is_ascii_uppercase() && index > 0 {
-                    out.push('_');
-                }
-                out.push(c.to_ascii_lowercase());
-                out
-            });
-    let fragment = format!(
-        "artifact {artifact} {{\n  requires {};\n  provides {};\n}}\n",
-        requires.join(", "),
-        provides.join(", ")
-    );
-    wrap_specialized(
-        json!({"fsl":"fsl-ai-compat-profile.v0","schema_version":"fsl-ai-compat-profile.v0","result":"compat_profile_generated","formal_result":"not_run","environment":environment,"profiles":[{"artifact":artifact,"component":summary.component,"requires":requires,"provides":provides}],"dbsystem_fragment":fragment,"assumptions":[],"findings":[]}),
-    )
+    json!({
+        "artifact": ai_artifact_name(&component.name),
+        "component": component.name,
+        "requires": requires,
+        "provides": provides,
+    })
+}
+
+/// `PascalCase`/`camelCase` component name to `snake_case` artifact name,
+/// mirroring the frozen reference's `_artifact_name`.
+fn ai_artifact_name(name: &str) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    let mut out = String::new();
+    for (index, &c) in chars.iter().enumerate() {
+        if c.is_ascii_uppercase() && index > 0 && !chars[index - 1].is_ascii_uppercase() {
+            out.push('_');
+        }
+        out.push(c.to_ascii_lowercase());
+    }
+    out.trim_matches('_').to_owned()
+}
+
+fn ai_compat_profile_block(profile: &Value) -> String {
+    let artifact = profile["artifact"].as_str().unwrap_or_default();
+    let requires = profile["requires"]
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    let provides = profile["provides"]
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    let requires_line = if requires.is_empty() {
+        String::new()
+    } else {
+        format!("  requires {requires};\n")
+    };
+    let provides_line = if provides.is_empty() {
+        String::new()
+    } else {
+        format!("  provides {provides};\n")
+    };
+    format!("artifact {artifact} {{\n{requires_line}{provides_line}}}\n")
 }
 
 fn parse_domain_document(path: &Path) -> Result<fsl_syntax::DomainSpec, String> {
