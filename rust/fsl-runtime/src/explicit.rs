@@ -98,7 +98,8 @@ pub fn explicit_unsupported_reason(model: &KernelModel) -> Option<String> {
 /// Returns [`RuntimeError`] when init is nondeterministic, partially assigned, or cannot be
 /// evaluated concretely.
 pub fn deterministic_initial_state(model: &KernelModel) -> Result<State, RuntimeError> {
-    check_deterministic_init(model)?;
+    // `Monitor::new` itself now runs this same deterministic-init gate, so
+    // there is no separate check to run here.
     Ok(Monitor::new(model.clone())?.state)
 }
 
@@ -420,7 +421,7 @@ fn collect_assigned_init_roots(statements: &[Statement], assigned: &mut BTreeSet
     }
 }
 
-fn check_deterministic_init(model: &KernelModel) -> Result<(), RuntimeError> {
+pub(crate) fn check_deterministic_init(model: &KernelModel) -> Result<(), RuntimeError> {
     let (assigned, _) = walk_init(
         &model.init,
         BTreeMap::new(),

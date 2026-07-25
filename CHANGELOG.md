@@ -427,6 +427,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   trailing argument (`result:"error"`/`kind:"usage"`/exit 2), matching
   every other `domain` subcommand and the rest of the CLI, instead of
   silently discarding it and returning a result computed without it (#516).
+- `Monitor::new` (the solver-independent concrete interpreter `replay` and
+  BMC's concrete pre-scan build on) now runs the same deterministic-init gate
+  the explicit engine's own construction check already had, instead of
+  silently default-filling any state component `init` leaves free and
+  treating that one arbitrary value as the specification's initial state.
+  Previously `replay` compared an observed trace's initial state against
+  that default and falsely reported `initial_state_mismatch` on a BMC-valid
+  trace whose free component held a different, equally admissible value. A
+  caller that already has its own complete concrete initial state (an
+  observed replay trace's own step 0, an explicit `--from-state`/
+  `--initial-state` snapshot, or a BMC witness's first state) is unaffected:
+  it now builds through the new `Monitor::from_state`, which has nothing to
+  ask `init` to compute and so is not subject to the gate.
+  `initial_state_mismatch` is still fully checked whenever `init` determines
+  every state variable; when it does not, the whole state is trusted from
+  the caller rather than compared component-wise (#519).
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false

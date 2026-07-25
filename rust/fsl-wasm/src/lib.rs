@@ -358,30 +358,38 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             Ok(deadlock) => deadlock,
             Err(message) => return error(solver_version, "usage", message),
         };
-    match fsl_runtime::find_boundary_violation(model.clone(), request.options.depth) {
-        Ok(Some((violation, trace))) => {
-            let statistics = fsl_solver::VerificationStatistics::default();
-            return fslc_rust::verification_output::render_boundary_output(
-                envelope(solver_version),
-                &model,
-                &violation,
-                &trace,
-                &fslc_rust::verification_output::BmcOutputOptions {
-                    depth: request.options.depth,
-                    deadlock,
-                    checked_bounds: None,
-                    elapsed_s: (performance_now() - started) / 1000.0,
-                    statistics: &statistics,
-                },
-            )
-            .0;
-        }
-        Ok(None) => {}
-        Err(failure) => {
-            return fslc_rust::verification_output::render_semantic_error(
-                envelope(solver_version),
-                &failure.to_string(),
-            );
+    // Mirrors the native CLI's `prepare_bmc` (`fslc/src/verification.rs`):
+    // this pre-scan is an optional shortcut ahead of the full solve below
+    // and needs a deterministic concrete initial state to run at all
+    // (#519). Skip it rather than failing the whole command when a model's
+    // init legitimately leaves some state free — the full solve below
+    // still explores every admissible initial value symbolically.
+    if fsl_runtime::deterministic_initial_state(&model).is_ok() {
+        match fsl_runtime::find_boundary_violation(model.clone(), request.options.depth) {
+            Ok(Some((violation, trace))) => {
+                let statistics = fsl_solver::VerificationStatistics::default();
+                return fslc_rust::verification_output::render_boundary_output(
+                    envelope(solver_version),
+                    &model,
+                    &violation,
+                    &trace,
+                    &fslc_rust::verification_output::BmcOutputOptions {
+                        depth: request.options.depth,
+                        deadlock,
+                        checked_bounds: None,
+                        elapsed_s: (performance_now() - started) / 1000.0,
+                        statistics: &statistics,
+                    },
+                )
+                .0;
+            }
+            Ok(None) => {}
+            Err(failure) => {
+                return fslc_rust::verification_output::render_semantic_error(
+                    envelope(solver_version),
+                    &failure.to_string(),
+                );
+            }
         }
     }
     let mut solver = fsl_solver_z3js::Z3JsSolver::new();

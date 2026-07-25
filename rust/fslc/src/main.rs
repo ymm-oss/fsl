@@ -3974,20 +3974,32 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
                     2,
                 );
             }
-            let initial = match replay_snapshot_json(initial, &model) {
-                Ok(initial) => initial,
+            let initial_state = match load_snapshot_value_object(initial, &model) {
+                Ok(state) => state,
                 Err(error) => return (error_output("io", &error), 2),
             };
+            let initial = fslc_rust::state_json(&initial_state);
             let events = match validate_versioned_replay_events(&model, &trace.events) {
                 Ok(events) => events,
                 Err(error) => return (error_output("io", &error), 2),
             };
-            (Some(initial), events)
+            (Some((initial_state, initial)), events)
         }
     };
+    // `model`'s init may legitimately leave some state free (#519): try the
+    // model's own deterministic init first (so a genuinely wrong observed
+    // initial state is still caught below as `initial_state_mismatch`), and
+    // only fall back to the trace's own observed initial state — already
+    // type-validated above — when init cannot determine one on its own.
+    // With no observed initial state to fall back to (a `Legacy` trace),
+    // there is nothing to build the monitor from, so surface the original
+    // deterministic-init error.
     let mut monitor = match fsl_runtime::Monitor::new(model.clone()) {
         Ok(monitor) => monitor,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        Err(error) => match &observed_initial {
+            Some((state, _)) => fsl_runtime::Monitor::from_state(model.clone(), state.clone()),
+            None => return (semantic_error_output(&error.to_string()), 2),
+        },
     };
     let mut bounded_liveness = if matches!(
         &trace.contract,
@@ -4001,7 +4013,7 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
     } else {
         None
     };
-    if let Some(observed) = observed_initial {
+    if let Some((_, observed)) = observed_initial {
         let expected = fslc_rust::state_json(&monitor.state);
         let mismatches = json_mismatches(&expected, &observed, "");
         if !mismatches.is_empty() {

@@ -964,7 +964,12 @@ complete post-transition `state`. Trace schema 1.1 adds explicit stutter as
 state. Equal-state stutters may be inserted/deleted, while unreported concrete
 intermediates are outside invariant judgment. Optional `timestamp` is opaque
 and ignored. Trace v1 accepts Kernel 1.0.0/2.0.0. Ill-shaped/incomplete input is exit 2; typed
-state divergence is exit 1 with leaf mismatches. Bare arrays/`{events}` are the
+state divergence is exit 1 with leaf mismatches. `initial` is checked against
+`init`'s own computed initial state only when `init` fully determines one; if
+`init` leaves any state variable free (BMC explores every admissible value
+there), `initial` is trusted as the concrete starting point directly instead
+of failing `initial_state_mismatch` against an arbitrary default value for
+that variable. Bare arrays/`{events}` are the
 unversioned action-only compatibility adapter; testgen/verifier traces are not
 replay input. See `docs/DESIGN-replay-trace.md`.
 

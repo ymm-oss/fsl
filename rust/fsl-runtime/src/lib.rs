@@ -811,13 +811,40 @@ impl Monitor {
         }
     }
 
+    /// Build a monitor whose initial state is exactly `state`, without
+    /// running `model`'s init at all.
+    ///
+    /// For a caller that already has a complete concrete initial state —
+    /// an observed replay trace's own step 0, an explicit
+    /// `--initial-state` snapshot, or a BMC witness's first state — there
+    /// is nothing left for init to compute. `init` may legitimately leave
+    /// some state free (a symbolic engine explores every admissible
+    /// value), so building through [`Monitor::new`] here would wrongly
+    /// demand a determinism [`Monitor::new`] does not need to provide
+    /// (#519).
+    #[must_use]
+    pub fn from_state(model: KernelModel, state: State) -> Self {
+        Self {
+            model,
+            state,
+            step: 0,
+        }
+    }
+
     /// Initialize a solver-independent concrete monitor.
     ///
     /// # Errors
     ///
-    /// Returns [`RuntimeError`] when default construction or sequential init
-    /// execution fails.
+    /// Returns [`RuntimeError`] when init does not deterministically assign
+    /// every state variable (component-wise; see
+    /// `docs/DESIGN-bridge.md` "Determinism of init") or sequential init
+    /// execution fails. A model whose init leaves some state free is
+    /// admissible to `verify`/BMC, which explores every admissible value —
+    /// concrete execution has no such freedom to explore, so construction
+    /// fails closed instead of picking one arbitrary default value and
+    /// silently treating it as the specification's initial state.
     pub fn new(model: KernelModel) -> Result<Self, RuntimeError> {
+        explicit::check_deterministic_init(&model)?;
         let mut state = model
             .state
             .iter()
@@ -2270,10 +2297,13 @@ fn replay_trace_with_initial(
     if first.step != 0 || first.action.is_some() {
         return Err(runtime_error("trace must begin with an action-free step 0"));
     }
-    let mut monitor = Monitor::new(model)?;
-    if let Some(initial_state) = initial_state {
-        monitor.state.clone_from(initial_state);
-    }
+    // A caller-provided initial state (the trace's own witnessed step 0, or
+    // an explicit `--initial-state`) makes `Monitor::from_state` the right
+    // constructor here — see its doc comment (#519).
+    let mut monitor = match initial_state {
+        Some(initial_state) => Monitor::from_state(model, initial_state.clone()),
+        None => Monitor::new(model)?,
+    };
     if monitor.state != first.state {
         return Err(runtime_error(
             "trace initial state does not match Monitor init",
