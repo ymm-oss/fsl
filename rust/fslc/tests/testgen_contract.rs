@@ -2,8 +2,11 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use sha2::{Digest, Sha256};
+
+static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -11,6 +14,23 @@ fn root() -> PathBuf {
         .and_then(Path::parent)
         .expect("workspace root")
         .to_owned()
+}
+
+/// A fresh scratch directory per call under `rust/target/`, so parallel test
+/// binaries — and repeated runs in the same worktree — never collide and no
+/// cleanup step is required (gitignored). Same idiom as
+/// `rust/fslc/tests/chain_cli.rs`'s `scratch_dir` (issue #539).
+fn scratch_dir(name: &str) -> PathBuf {
+    let id = NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed);
+    let dir = root().join(format!(
+        "rust/target/testgen-contract-{name}-{}-{id}",
+        std::process::id()
+    ));
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).expect("clean stale scratch dir");
+    }
+    std::fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
 }
 
 fn generated_content(spec: &str, depth: &str, target: &str, stem: &str) -> String {
@@ -137,15 +157,9 @@ fn symlink_source_name_and_canonical_pytest_path_remain_distinct() {
     use std::os::unix::fs::symlink;
 
     let root = root();
-    let fixture_root = root.join("rust/target/testgen-contract");
+    let fixture_root = scratch_dir("symlink");
     let directory = fixture_root.join("path-context");
     let real_output_parent = fixture_root.join("path-output-real");
-    if directory.exists() {
-        std::fs::remove_dir_all(&directory).expect("clear path-context fixture");
-    }
-    if real_output_parent.exists() {
-        std::fs::remove_dir_all(&real_output_parent).expect("clear real output fixture");
-    }
     std::fs::create_dir_all(&directory).expect("create path-context fixture");
     std::fs::create_dir_all(&real_output_parent).expect("create real output directory");
     let generated = directory.join("generated-link");
@@ -174,7 +188,4 @@ fn symlink_source_name_and_canonical_pytest_path_remain_distinct() {
             "SPEC_PATH = Path(__file__).resolve().parent / '../../../../specs/cart_v1.fsl'"
         )
     );
-
-    std::fs::remove_dir_all(&directory).expect("clear path-context fixture");
-    std::fs::remove_dir_all(&real_output_parent).expect("clear real output fixture");
 }

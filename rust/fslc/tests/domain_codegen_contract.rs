@@ -2,8 +2,11 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use sha2::{Digest, Sha256};
+
+static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -11,6 +14,24 @@ fn root() -> PathBuf {
         .and_then(Path::parent)
         .expect("workspace root")
         .to_owned()
+}
+
+/// A fresh scratch directory per call under `rust/target/`, so tests in this
+/// binary — which cargo runs in parallel by default — never race on a
+/// shared generated-output path, and no `exists()`-then-`remove_dir_all`
+/// cleanup step is required (gitignored). Same idiom as
+/// `rust/fslc/tests/chain_cli.rs`'s `scratch_dir` (issue #546).
+fn scratch_dir(name: &str) -> PathBuf {
+    let id = NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed);
+    let dir = root().join(format!(
+        "rust/target/domain-codegen-contract-{name}-{}-{id}",
+        std::process::id()
+    ));
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).expect("clean stale scratch dir");
+    }
+    std::fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
 }
 
 fn collect_files(directory: &Path, current: &Path, files: &mut Vec<PathBuf>) {
@@ -37,10 +58,7 @@ fn portable_relative_path(path: &Path) -> String {
 
 fn generated_digest(target: &str) -> String {
     let root = root();
-    let directory = root.join(format!("rust/target/domain-codegen-contract/{target}"));
-    if directory.exists() {
-        std::fs::remove_dir_all(&directory).expect("clear generated directory");
-    }
+    let directory = scratch_dir(&format!("target-{target}"));
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args([
             "domain",
@@ -79,12 +97,7 @@ fn assert_generation_succeeds(spec: &str, target: &str) {
         .file_stem()
         .expect("fixture stem")
         .to_string_lossy();
-    let directory = root.join(format!(
-        "rust/target/domain-codegen-contract/corpus/{stem}/{target}"
-    ));
-    if directory.exists() {
-        std::fs::remove_dir_all(&directory).expect("clear generated directory");
-    }
+    let directory = scratch_dir(&format!("corpus-{stem}-{target}"));
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(["domain", "generate", spec, "--target", target, "-o"])
         .arg(directory)
