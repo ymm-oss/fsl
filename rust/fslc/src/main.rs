@@ -5641,6 +5641,9 @@ fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
             return (kernel, kernel_status);
         }
         if let Value::Object(kernel) = kernel {
+            if kernel.get("result").and_then(Value::as_str) == Some("violated") {
+                result.insert("result".to_owned(), json!("violated"));
+            }
             let projection = [
                 "result",
                 "spec",

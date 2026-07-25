@@ -222,6 +222,23 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   a divisor that can reach zero is still reported as `partial_op` (§2.2 is
   unchanged); Euclidean negative-number division/modulo semantics were
   already correct and are unaffected (#477).
+- Native `fslc db check` now evaluates `rule all_active_writes_exist` the same way it already
+  evaluated `rule all_active_reads_exist`: dropping a column that is still declared as an active
+  artifact's write capability now yields a `column_removed_while_still_written` finding with
+  `witness`, `minimal_conflict_set`, `repair_candidates`, and `artifact_version` populated, and the
+  top-level JSON `result` is reconciled to `"violated"` whenever the attached `kernel` projection
+  reports a violation. Previously the write branch was silently missing (a regressive port relative
+  to the frozen Python reference), so a write-drop incompatibility returned `verified_under_assumptions`
+  with an empty `findings` array — a confidently green false negative, and one that escaped a
+  hardcoded kernel depth-8 default entirely for deep migration histories, since the findings layer
+  is depth-independent once the write branch exists (#469).
+- Native `fslc check`/`verify`/`db check` no longer reject two writes indexed by distinct enum
+  members as a possible alias (`"an action may not assign the same state location more than once"`).
+  The write-aliasing analysis now resolves enum-member indices (both the typed `Expr::EnumMember`
+  literal and a local constant bound to an enum value) to their nominal `(type_name, member)`
+  identity, matching the same-index detection already applied to `Int`/`Bool` constants. This
+  restores `fslc check`/`db check` on the four `examples/db/` `dbsystem` `rename`/`split`/`merge`
+  preservation fixtures, which previously exited 2 against a golden corpus snapshot of `"ok"` (#475).
 - Refinement typechecking now rejects an unshadowed bare enum member shared by distinct
   implementation and abstraction enums, preventing checked and evaluation
   merge order from assigning different nominal identities. Existing identifier

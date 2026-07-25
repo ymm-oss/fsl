@@ -1337,6 +1337,30 @@ fn write_is_injective_for_binder(target: &LValue, binder: &Binder) -> bool {
     matches!(index, Some(Expr::Var(index)) if index == name)
 }
 
+/// Resolve an index expression to a comparable static identity, if it has one.
+///
+/// This is used only for the write-aliasing check in [`lvalues_may_alias`]. It
+/// recognizes enum-member indices (both the typed `Expr::EnumMember` literal and
+/// a local constant bound to an enum value) in addition to the `Int`/`Bool`
+/// constants that [`eval_const`] already handles, so two writes indexed by
+/// distinct enum members are provably distinct. It must not be used to widen
+/// what counts as a constant expression elsewhere (`eval_const`/`ConstType` are
+/// shared with `const_int`, domain-type bounds, `Seq` capacity, and `within`
+/// deadlines).
+fn static_index_identity(expr: &Expr, constants: &BTreeMap<String, Value>) -> Option<Value> {
+    match expr {
+        Expr::EnumMember { type_name, member } => Some(Value::Enum {
+            type_name: type_name.clone(),
+            member: member.clone(),
+        }),
+        Expr::Var(name) => match constants.get(name) {
+            Some(value @ Value::Enum { .. }) => Some(value.clone()),
+            _ => eval_const(expr, constants).ok(),
+        },
+        _ => eval_const(expr, constants).ok(),
+    }
+}
+
 fn lvalues_may_alias(left: &LValue, right: &LValue, constants: &BTreeMap<String, Value>) -> bool {
     let (left_root, left_index, left_fields) = lvalue_path(left);
     let (right_root, right_index, right_fields) = lvalue_path(right);
@@ -1344,7 +1368,10 @@ fn lvalues_may_alias(left: &LValue, right: &LValue, constants: &BTreeMap<String,
         return false;
     }
     if let (Some(left), Some(right)) = (left_index, right_index)
-        && let (Ok(left), Ok(right)) = (eval_const(left, constants), eval_const(right, constants))
+        && let (Some(left), Some(right)) = (
+            static_index_identity(left, constants),
+            static_index_identity(right, constants),
+        )
         && left != right
     {
         return false;

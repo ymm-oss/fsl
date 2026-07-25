@@ -130,6 +130,23 @@ fn direct_lowering_preserves_catalog_shape_and_source_order() {
     assert!(secondary_names.contains("all_active_reads_exist"));
     assert!(secondary_names.contains("removed_only_after_unused"));
 
+    // #469's coupled kernel-side anchor: `all_active_writes_exist` must be lowered
+    // exactly like `all_active_reads_exist`, so the write branch shares the same
+    // regression coverage as the read branch instead of only the findings layer.
+    let write_origin = kernel
+        .origins()
+        .targets()
+        .find(|(target, _)| target.starts_with("property:invariant:db_writeQqDbSepqQ"))
+        .and_then(|(_, origins)| origins.first())
+        .expect("write compatibility origin");
+    let write_secondary_names = write_origin
+        .secondary
+        .iter()
+        .filter_map(|site| site.declaration_path.last().map(String::as_str))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(write_secondary_names.contains("all_active_writes_exist"));
+    assert!(write_secondary_names.contains("removed_only_after_unused"));
+
     let terminal = syntax.items.last().expect("terminal item");
     assert!(matches!(terminal, SpecItem::Terminal { .. }));
     build_model(kernel).expect("directly lowered catalog builds a checked model");
@@ -212,6 +229,13 @@ fn direct_lowering_preserves_structural_transform_shapes() {
             expected,
             "{path}"
         );
+        // Negative control for #475: this used to be silently skipped, so a
+        // regression in the enum-member alias analysis (spurious duplicate-write
+        // rejection on rename/split/merge's simultaneous field assignments) shipped
+        // undetected. `fslc check` on these exact files must also build cleanly.
+        build_model(kernel).unwrap_or_else(|error| {
+            panic!("directly lowered {expected_name} must build a checked model: {error}")
+        });
     }
 }
 

@@ -197,6 +197,26 @@ fn capability<'a>(artifact: &'a DbArtifact, name: &str) -> &'a [DbColumnRef] {
     artifact.capabilities.get(name).map_or(&[], Vec::as_slice)
 }
 
+fn compat_repairs(capability_name: &str, artifact: &str, column: &str, environment: &str) -> Value {
+    json!([
+        {
+            "kind": "compat_shim",
+            "weakens_spec": false,
+            "description": format!("keep or restore {column} until {artifact} is outside {environment}"),
+        },
+        {
+            "kind": "rollout_window_change",
+            "weakens_spec": false,
+            "description": format!("narrow the {artifact} environment window before dropping {column}"),
+        },
+        {
+            "kind": "declaration_change",
+            "weakens_spec": true,
+            "description": format!("remove the declared {capability_name} capability only if {artifact} truly no longer uses {column}"),
+        }
+    ])
+}
+
 fn window(entry: &DbEnvironmentArtifact, environment: &DbEnvironment) -> (i64, i64) {
     entry.schema_window.unwrap_or(environment.schema_window)
 }
@@ -328,23 +348,43 @@ fn findings(system: &DbSystem, assumptions: &[Value]) -> Vec<Value> {
                             continue;
                         };
                         let range = window(entry, environment);
-                        if range.1 < migration.to_schema
-                            || !capability(artifact, "reads").contains(&operation.column)
-                        {
+                        if range.1 < migration.to_schema {
                             continue;
                         }
-                        let mut finding = common_finding(
-                            "column_removed_while_still_read",
-                            "all_active_reads_exist",
-                            assumptions,
-                        );
-                        finding.insert("environment".to_owned(), json!(environment.name));
-                        finding.insert("migration".to_owned(), json!(migration.name));
-                        finding.insert("schema_element".to_owned(), json!(element));
-                        finding.insert("artifact".to_owned(), json!(artifact.name));
-                        finding.insert("witness".to_owned(), json!({"environment_role": entry.role, "schema_version": migration.to_schema}));
-                        finding.insert("minimal_conflict_set".to_owned(), json!({"environment": environment.name, "artifact": artifact.name, "migration": migration.name, "schema_element": element}));
-                        findings.push(Value::Object(finding));
+                        for (capability_name, kind, rule) in [
+                            (
+                                "reads",
+                                "column_removed_while_still_read",
+                                "all_active_reads_exist",
+                            ),
+                            (
+                                "writes",
+                                "column_removed_while_still_written",
+                                "all_active_writes_exist",
+                            ),
+                        ] {
+                            if !capability(artifact, capability_name).contains(&operation.column) {
+                                continue;
+                            }
+                            let mut finding = common_finding(kind, rule, assumptions);
+                            finding.insert("environment".to_owned(), json!(environment.name));
+                            finding.insert("migration".to_owned(), json!(migration.name));
+                            finding.insert("schema_element".to_owned(), json!(element));
+                            finding.insert("artifact".to_owned(), json!(artifact.name));
+                            finding.insert("artifact_version".to_owned(), json!(artifact.name));
+                            finding.insert("witness".to_owned(), json!({"environment_role": entry.role, "schema_version": migration.to_schema, "declared_capability": capability_name}));
+                            finding.insert("minimal_conflict_set".to_owned(), json!({"environment": environment.name, "artifact": artifact.name, "migration": migration.name, "schema_element": element}));
+                            finding.insert(
+                                "repair_candidates".to_owned(),
+                                compat_repairs(
+                                    capability_name,
+                                    &artifact.name,
+                                    &element,
+                                    &environment.name,
+                                ),
+                            );
+                            findings.push(Value::Object(finding));
+                        }
                     }
                 }
             }
