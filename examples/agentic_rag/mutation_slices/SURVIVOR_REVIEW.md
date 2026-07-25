@@ -1,6 +1,7 @@
 # Agentic RAG mutation survivor review
 
-2026-06-20時点の`mutation_slices/`に対するsurvivor分類。
+2026-06-20時点の`mutation_slices/`に対するsurvivor分類（分類自体は実測値の
+CLI に依存しないため据え置き。実測値の再取得は「反映後の確認」を参照）。
 
 このメモは、`fslc mutate`のsurvivorをそのまま「失敗」と扱わず、本体requirementsへ戻すべき制約だけを選ぶためのレビュー台帳である。
 
@@ -63,14 +64,24 @@ denial reasonを区別したくなったら、`reason` enumを追加する別設
 
 ## 反映後の確認
 
+2026-07-25時点、権威実装（native `fslc`、issue #485）での再実測。以前の版は
+frozen Python実測値で、`backported_constraints_slice.fsl`の3行はnativeでは
+`check`がrequirement注釈のtext衝突でexit 2になり再現不能だった
+（`README.md`参照、修正済み）。
+
 - `fslc check examples/agentic_rag/agentic_rag_requirements.fsl`: `ok`
 - `fslc verify examples/agentic_rag/agentic_rag_requirements.fsl --depth 8 --deadlock ignore --exclude-property RequestEventuallyHandled`: `verified`
 - `fslc verify examples/agentic_rag/agentic_rag_requirements.fsl --depth 8 --deadlock ignore --property RequestEventuallyHandled`: `verified`
-- `fslc refine examples/agentic_rag/agentic_rag_requirements.fsl examples/agentic_rag/agentic_rag_business.fsl examples/agentic_rag/agentic_rag_requirements_refines_business.fsl --depth 7`: `refines`
-- `fslc refine examples/agentic_rag/agentic_rag_design.fsl examples/agentic_rag/agentic_rag_requirements.fsl examples/agentic_rag/agentic_rag_design_refines_requirements.fsl --depth 6`: `refines`
+- `fslc refine examples/agentic_rag/agentic_rag_requirements.fsl examples/agentic_rag/agentic_rag_business.fsl examples/agentic_rag/agentic_rag_requirements_refines_business.fsl --depth 7`: **native では `error`**
+  (`kind:"semantics"`, `"indexed progress map for 'req_stage' is not implemented"`) —
+  既知・別issue #483（indexed map と preserve progress の併用が native未実装）。
+  #485の範囲外、ここでは未着手。
+- `fslc refine examples/agentic_rag/agentic_rag_design.fsl examples/agentic_rag/agentic_rag_requirements.fsl examples/agentic_rag/agentic_rag_design_refines_requirements.fsl --depth 6`: **native では `error`**
+  (`kind:"semantics"`, `"indexed progress map for 'req' is not implemented"`) — 同じく issue #483。
 - `fslc check examples/agentic_rag/mutation_slices/backported_constraints_slice.fsl`: `ok`
 - `fslc verify examples/agentic_rag/mutation_slices/backported_constraints_slice.fsl --depth 7 --deadlock ignore`: `verified`
-- `fslc mutate examples/agentic_rag/mutation_slices/backported_constraints_slice.fsl --depth 7 --by-requirement --max-mutants 180`: `180 total / 160 killed / 20 survived`
+- `fslc mutate examples/agentic_rag/mutation_slices/backported_constraints_slice.fsl --depth 7 --by-requirement --max-mutants 180`: `180 total / 161 killed / 19 survived`
+  (mutation engineの列挙順・演算子集合がPython参照実装と異なるため、絶対数はPython実測値と一致しない)
 
 `backported_constraints_slice.fsl`で直接killした本体反映済み制約:
 
@@ -80,9 +91,9 @@ denial reasonを区別したくなったら、`reason` enumを追加する別設
 | `DraftedHasEvidenceAndCitation` | 8 |
 | `EvidenceBadMeansNoCitation` | 6 |
 | `GuardFailedMeansFailedGuard` | 6 |
-| `ToolApprovalMeansRequested` | 6 |
-| `ToolApprovedMeansApproved` | 6 |
-| `ExecutionComesFromApprovedStage` | 5 |
+| `ToolApprovalMeansRequested` | 5 |
+| `ToolApprovedMeansApproved` | 5 |
+| `ExecutionComesFromApprovedStage` | 4 |
 | `RetryConsumesOneBudget` | 4 |
 
 ## 次に見る候補

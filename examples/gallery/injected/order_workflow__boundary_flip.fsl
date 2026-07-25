@@ -12,7 +12,7 @@ requirements OrderBoundaryFlipInjected {
   init { forall o: OrderId { orders[o] = Order { status: Draft, qty: 0 } } shipped = Set {} revenue = 0 }
 
   requirement OR-PLACE "orders can be placed with quantity at the minimum boundary" {
-    action place(o: OrderId, q: Qty) "OR-PLACE: boundary flipped from q >= 1 to q > 1" {
+    action place(o: OrderId, q: Qty) {
       requires orders[o].status == Draft
       requires q > 1
       orders[o].status = Placed

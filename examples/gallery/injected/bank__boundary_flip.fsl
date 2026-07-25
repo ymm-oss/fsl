@@ -15,7 +15,7 @@ requirements BankBoundaryFlipInjected {
     }
   }
   requirement BANK-WITHDRAW "withdrawals may use the full available balance" {
-    action withdraw(a: Amount) "BANK-WITHDRAW: withdrawing the exact balance is allowed" {
+    action withdraw(a: Amount) {
       requires a > 0
       requires balance > a
       balance = balance - a

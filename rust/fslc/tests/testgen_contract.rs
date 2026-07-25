@@ -13,7 +13,7 @@ fn root() -> PathBuf {
         .to_owned()
 }
 
-fn generated_digest(spec: &str, depth: &str, target: &str, stem: &str) -> String {
+fn generated_content(spec: &str, depth: &str, target: &str, stem: &str) -> String {
     let root = root();
     let directory = root.join("rust/target/testgen-contract");
     std::fs::create_dir_all(&directory).expect("create testgen output directory");
@@ -29,9 +29,13 @@ fn generated_digest(spec: &str, depth: &str, target: &str, stem: &str) -> String
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    std::fs::read_to_string(output_path).expect("read generated scaffold")
+}
+
+fn generated_digest(spec: &str, depth: &str, target: &str, stem: &str) -> String {
     format!(
         "{:x}",
-        Sha256::digest(std::fs::read(output_path).expect("read generated scaffold"))
+        Sha256::digest(generated_content(spec, depth, target, stem).as_bytes())
     )
 }
 
@@ -90,6 +94,41 @@ fn compose_bridge_preserves_pytest_and_baked_target_goldens() {
             "compose {target} output changed"
         );
     }
+}
+
+/// Issue #471: the native `emit_pytest` scenario loop dropped the
+/// `forbidden`-scenario rejection assertion (`_assert_rejected`), so a
+/// generated pytest harness that named itself `test_scenario_forbidden_FB_1`
+/// asserted nothing about the forbidden transition and passed against a
+/// guard-weakened implementation. `specs/cart_v1.fsl` (the golden above) has
+/// no `forbidden` declaration, so that golden alone cannot catch this class
+/// of regression. This is the coupled regression case: a golden digest for a
+/// spec that *does* declare `forbidden`, plus the byte-identical-to-Python
+/// content this golden guards being non-trivial (both lines the emitter had
+/// been silently dropping, mirroring `tests/test_verified_bugs.py`'s
+/// `test_forbidden_testgen_rejection_assertion`, which only exercises the
+/// frozen Python `fslc.cli.run_testgen`).
+#[test]
+fn pytest_target_emits_the_forbidden_rejection_assertion() {
+    let content = generated_content(
+        "examples/gallery/valid/small_forbidden_guarded_cancel.fsl",
+        "3",
+        "pytest",
+        "fbcancel",
+    );
+    assert!(
+        content.contains("result = adapter.step('cancel', {'o': 0})"),
+        "forbidden step call missing from generated pytest:\n{content}"
+    );
+    assert!(
+        content.contains("_assert_rejected(result, 'requires_failed')"),
+        "forbidden rejection assertion missing from generated pytest:\n{content}"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(content.as_bytes())),
+        "da26cf763e96508472a0fcda8c2b4d7c69652d478794c772bd2053389e1b2e51",
+        "small_forbidden_guarded_cancel.fsl pytest output changed"
+    );
 }
 
 #[cfg(unix)]

@@ -741,6 +741,27 @@ def _assert_rejected(result, expected_kind):
                 python_literal(&expected, &state_order)
             );
         }
+        if scenario["kind"].as_str() == Some("forbidden") && scenario["forbidden_step"].is_object()
+        {
+            let step = &scenario["forbidden_step"];
+            let action = step["action"].as_str().unwrap_or_default();
+            let param_order = input
+                .actions
+                .iter()
+                .find(|item| item.name == action)
+                .map_or(&[][..], |item| item.params.as_slice());
+            let _ = writeln!(
+                text,
+                "    result = adapter.step({}, {})",
+                python_string(action),
+                python_literal(&step["params"], param_order)
+            );
+            let _ = writeln!(
+                text,
+                "    _assert_rejected(result, {})",
+                python_literal(&scenario["rejected_by"], &[])
+            );
+        }
     }
     text.push_str(
         r#"

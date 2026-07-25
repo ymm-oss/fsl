@@ -47,14 +47,20 @@ fslc mutate examples/agentic_rag/mutation_slices/backported_constraints_slice.fs
 
 ## Observed Results
 
-2026-06-20時点の手元確認結果。
+2026-07-25時点、権威実装（native `fslc`、`rust/target/debug/fslc`）での実測値
+（issue #485。それ以前の版は frozen Python `python -m fslc` の実測値で、
+`backported_constraints_slice.fsl`はnativeでは`check`が
+requirement注釈のtext衝突でexit 2になり、この表自体が再現不能だった。同不具合は
+`REQ-3`/`REQ-4`/`REQ-5`ブロック内の重複legacy注釈テキストを削除して修正済み）。
+mutation engineの列挙順・演算子集合がPython参照実装とnativeで異なるため、
+killed/survivedの絶対数はPython実測値と一致しない。
 
 | Slice | Verify | Mutate summary |
 |---|---|---|
-| `answer_safety_slice.fsl` | `verified` at depth 6 | `80 total / 58 killed / 22 survived` |
-| `tool_approval_slice.fsl` | `verified` at depth 7 | `100 total / 63 killed / 37 survived` |
-| `retry_liveness_slice.fsl` | `verified` at depth 8 | `88 total / 67 killed / 21 survived` |
-| `backported_constraints_slice.fsl` | `verified` at depth 7 | `180 total / 160 killed / 20 survived` |
+| `answer_safety_slice.fsl` | `verified` at depth 6 | `80 total / 64 killed / 16 survived` |
+| `tool_approval_slice.fsl` | `verified` at depth 7 | `100 total / 67 killed / 33 survived` |
+| `retry_liveness_slice.fsl` | `verified` at depth 8 | `95 total / 73 killed / 22 survived` |
+| `backported_constraints_slice.fsl` | `verified` at depth 7 | `180 total / 161 killed / 19 survived` |
 
 `backported_constraints_slice.fsl`では、以下の本体へ戻した制約が直接killしている。
 
@@ -64,9 +70,9 @@ fslc mutate examples/agentic_rag/mutation_slices/backported_constraints_slice.fs
 | `DraftedHasEvidenceAndCitation` | 8 |
 | `EvidenceBadMeansNoCitation` | 6 |
 | `GuardFailedMeansFailedGuard` | 6 |
-| `ToolApprovalMeansRequested` | 6 |
-| `ToolApprovedMeansApproved` | 6 |
-| `ExecutionComesFromApprovedStage` | 5 |
+| `ToolApprovalMeansRequested` | 5 |
+| `ToolApprovedMeansApproved` | 5 |
+| `ExecutionComesFromApprovedStage` | 4 |
 | `RetryConsumesOneBudget` | 4 |
 
 ## Reading Notes

@@ -12,7 +12,7 @@ requirements OrderGuardWeakeningInjected {
   init { forall o: OrderId { orders[o] = Order { status: Draft, qty: 0 } } shipped = Set {} revenue = 0 }
 
   requirement OR-PLACE "orders can be placed" {
-    action place(o: OrderId, q: Qty) "OR-PLACE: place positive quantity" { requires orders[o].status == Draft requires q >= 1 orders[o].status = Placed orders[o].qty = q }
+    action place(o: OrderId, q: Qty) { requires orders[o].status == Draft requires q >= 1 orders[o].status = Placed orders[o].qty = q }
   }
   requirement OR-PAY "placed orders can be paid" {
     action pay(o: OrderId) "OR-PAY: placed orders can be paid" { requires orders[o].status == Placed orders[o].status = Paid revenue = revenue + orders[o].qty }
@@ -21,7 +21,7 @@ requirements OrderGuardWeakeningInjected {
     action ship(o: OrderId) "OR-SHIP: paid orders can be shipped" { requires orders[o].status == Paid orders[o].status = Shipped shipped = shipped.add(o) }
   }
   requirement OR-CANCEL "only placed or paid orders can be cancelled" {
-    action cancel(o: OrderId) "OR-CANCEL: weakened to allow shipped cancellation" {
+    action cancel(o: OrderId) {
       requires orders[o].status == Placed or orders[o].status == Paid or orders[o].status == Shipped
       if orders[o].status == Paid { revenue = revenue - orders[o].qty }
       orders[o].status = Cancelled
