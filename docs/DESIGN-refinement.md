@@ -50,9 +50,19 @@ refinement CartImplRefinesCart {
   synthesizes `map x = x` for same-named compatible state variables and
   `action f(params...) -> f(params...)` for same-named compatible actions that
   do not already have explicit entries. Explicit `map` and `action ... ->`
-  entries always win. When a same-name candidate exists but its state type,
-  action arity, or action parameter types are incompatible, `build_refinement`
-  raises a `kind: "type"` error instead of guessing.
+  entries always win. An action pair's parameters are matched **by name**,
+  never by position: each abstract parameter is bound to the impl parameter
+  sharing its exact name, in the abstract action's own parameter order, so a
+  purely reordered same-named pair still auto-maps. When a same-name
+  candidate exists but its state type is incompatible, its action arity
+  differs, or an abstract parameter has no same-named impl parameter (a
+  renamed parameter, an impl parameter left over/"surplus" with nothing on
+  the abs side to bind it, or two same-typed parameters that a
+  position-based fallback would otherwise have to guess between —
+  issue #494), `build_refinement` raises a located `kind: "type"` error
+  instead of guessing. A parameter *type* mismatch between two identically
+  named parameters is caught by the same `validate_expression_type` check
+  every other authoring route already goes through, not duplicated here.
 - `action <impl_action>(<formal parameter list>) -> <abs_action>(<expr list>) | stutter`
   The formal parameters are the parameter names of the impl action (matching
   order). They may be written bare (`u`) or with a type annotation matching the
@@ -175,9 +185,16 @@ Two consequences fall out of reusing the same merge, not from new logic:
    explanatory `note`, never `result:"refines"` and never folded into
    `refinement_failed` (whose `kind`s below describe a mismatch *between*
    impl and abs, not a defect in the impl alone). If this precondition finds
-   a violation, steps 1-4 do not run.
-1. **init correspondence**: for the impl's initial state s₀, α(s₀) satisfies the
-   abs init constraints. Counterexample: `refinement_failed` / `at: "init"`.
+   a violation, steps 1-4 do not run. This precondition and step 1 below both
+   reason over the impl's full set of concrete initial valuations (§2.8), not
+   one materialized default, so a self-violation reachable only from a
+   non-default nondeterministic initial branch is not missed either.
+1. **init correspondence**: for *every* concrete initial valuation s₀ the
+   impl's `init` permits, α(s₀) satisfies the abs init constraints — i.e.
+   α(s₀) is a member of the set of concrete initial valuations the abs's own
+   `init` permits, not equal to one arbitrarily materialized default on
+   either side (§2.8, issue #493). Counterexample: `refinement_failed` /
+   `at: "init"`.
 2. **transition correspondence**: for a reachable impl transition
    s →[a, params] s':
    - `a -> stutter` case: **α(s') == α(s)** (logical equality reuses leadsTo's
@@ -404,6 +421,59 @@ either an abstraction declaration or `abstract(...)` call with a located type er
 must not infer endpoint types from JSON values. Migrate an ambiguous conditional that
 collapses nominal members to `enum abstraction` plus `abstract`; migrate a one-to-one table
 to `enum conversion` plus `convert` so its stronger target guarantees remain executable.
+
+## 2.8 Nondeterministic init (v2.x — issue #493)
+
+`init` need not assign every state variable: a state variable an `init if` (or a `forall`
+branch) never assigns on any path is a genuinely free/unconstrained initial value across
+its declared type's domain, the same way `fsl-verifier`'s symbolic BMC init lowering leaves
+an omitted assignment unconstrained (DESIGN-init-if.md). Before this fix, the concrete
+refinement checker instead ran the impl and abs each through one solver-free `Monitor`,
+which fills an unassigned variable with its type's *default* value before executing `init`
+— a single, arbitrarily chosen representative of what may be several valid initial states,
+not the full set §2 step 1 requires. That single-state approximation produced two opposite
+symptoms depending on which side was nondeterministic:
+
+- an impl `init` reading an unassigned variable let the checker silently pick only the
+  default-valued initial state, missing both that state's own initial-correspondence
+  violation on another valuation and the reachable set below it (`refines` reported for a
+  refinement that actually fails);
+- an abs `init` reading an unassigned variable made the checker compare α(s₀) for equality
+  against the single default abs initial state, rejecting a correct refinement whose impl
+  deterministically starts in a different — but still abs-valid — initial valuation
+  (`refinement_failed / abs_state_mismatch@init` reported for a refinement that actually
+  holds).
+
+**Fix**: `check_refinement` enumerates every concrete initial valuation a model's `init`
+permits (`concrete_initial_states` in `rust/fsl-runtime/src/lib.rs`) instead of
+materializing one. A state variable init never assigns on *any* path is domain-enumerated
+(`explicit::unassigned_init_state_vars`); a model with no such variable still produces
+exactly the single state a plain `Monitor` would build, so an ordinary deterministic-init
+spec is unaffected. Step 0's self-consistency precondition and step 1's init correspondence
+both consume this set:
+
+- step 0 checks every impl initial valuation for a self-violation, not just the default;
+- step 1 checks that *every* impl initial valuation's α is a member of the abs's own
+  initial-valuation set, and seeds one BFS root per surviving impl valuation, so the walk
+  covers the full nondeterministic-init reachable set rather than one branch.
+
+**Scope**: only a state variable with *zero* assignment coverage — never an assignment
+target on any init path — is treated as free. A variable assigned on some but not all
+paths (e.g. only inside an `if` with no `else`) is left out of the enumeration and keeps
+the prior default-filled behavior for the branch that skips it; the static analysis cannot
+always prove such a remaining value is genuinely unconstrained rather than an approximation
+artifact (a `where`-filtered `forall`, for instance), so this checker does not guess there
+either. Fully characterizing that partial-coverage case is `Monitor` construction's own
+concern generally, not this refinement-local enumeration (issue #519, a different surface).
+
+**Breaking change**: `fslc refine` verdicts change for a mapping between two specs where
+either side's `init` leaves a state variable fully unassigned on every path. A refinement
+that used to report `refines` because only the impl's default initial branch was checked
+may now report `refinement_failed / abs_state_mismatch@init` (or `map_out_of_bounds`) if
+another impl initial branch is not abs-valid. A refinement that used to report
+`refinement_failed / abs_state_mismatch@init` solely because the abs's default initial
+branch did not equal α(s₀) may now report `refines` if α(s₀) matches a different, still
+valid, abs initial branch.
 
 ## 3. CLI / JSON
 

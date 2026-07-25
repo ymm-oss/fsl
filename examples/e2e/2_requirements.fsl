@@ -18,7 +18,15 @@
 //   `expect Claim <id> in <Stage>` checks the generated process stage map.
 // ════════════════════════════════════════════════════════════════
 requirements ExpenseRequirements {
-  implements ExpenseToBe from "1_business.fsl" { }
+  // submit's business-layer arity (case only) differs from its
+  // requirements-layer arity (case + the amount input this layer
+  // introduces), so `maps auto` cannot infer the correspondence — it can
+  // only bind same-arity, same-named parameters (issue #494). The other
+  // transitions keep the same case-only arity on both layers and still
+  // auto-map.
+  implements ExpenseToBe from "1_business.fsl" {
+    action submit(c, a) -> submit(c)
+  }
 
   number Amount
   const AUTO_LIMIT = 1

@@ -365,6 +365,61 @@ enum Coverage {
     Fields(BTreeMap<String, Coverage>),
 }
 
+/// Names and declared types of state roots that `model`'s init never
+/// assigns on *any* path — fully free / unconstrained by init, per the same
+/// symbolic-free-variable semantics `fsl-verifier`'s BMC init lowering gives
+/// an omitted assignment (DESIGN-init-if.md; issue #493).
+///
+/// This is deliberately simpler than — and not layered on — the
+/// [`check_deterministic_init`]/[`walk_init`] coverage gate: that walk
+/// rejects a condition/index expression reading a not-yet-assigned root as
+/// an error (`init references state variable '...' before it is
+/// assigned`), which is exactly the pattern a nondeterministic `init if`
+/// legitimately uses (the motivating case for #493). This scan instead only
+/// asks whether a root is ever an assignment *target* anywhere in init,
+/// regardless of read order or which branch is taken; it never errors and
+/// never rejects a read.
+///
+/// A root assigned on *some* but not all paths (e.g. only inside an `if`
+/// with no `else`) is left out — treated as "assigned", not free — and
+/// keeps the prior default-filled behavior for the remaining path. Fully
+/// characterizing that partial-coverage case belongs to `Monitor`
+/// construction generally (issue #519), not this refinement-local
+/// enumeration.
+pub(crate) fn unassigned_init_state_vars(model: &KernelModel) -> Vec<(String, TypeRef)> {
+    let mut assigned = BTreeSet::new();
+    collect_assigned_init_roots(&model.init, &mut assigned);
+    model
+        .state
+        .iter()
+        .filter(|(name, _)| !assigned.contains(name.as_str()))
+        .map(|(name, ty)| (name.clone(), ty.clone()))
+        .collect()
+}
+
+fn collect_assigned_init_roots(statements: &[Statement], assigned: &mut BTreeSet<String>) {
+    for statement in statements {
+        match statement {
+            Statement::Assign { target, .. } => {
+                if let Some(name) = logical_var(target) {
+                    assigned.insert(name.to_owned());
+                }
+            }
+            Statement::If {
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                collect_assigned_init_roots(then_statements, assigned);
+                collect_assigned_init_roots(else_statements, assigned);
+            }
+            Statement::ForAll { statements, .. } => {
+                collect_assigned_init_roots(statements, assigned);
+            }
+        }
+    }
+}
+
 fn check_deterministic_init(model: &KernelModel) -> Result<(), RuntimeError> {
     let (assigned, _) = walk_init(
         &model.init,
