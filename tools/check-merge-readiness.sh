@@ -9,15 +9,9 @@ cd "$root"
 check_compile() {
   cargo check \
     --manifest-path rust/Cargo.toml \
-    -p fsl-syntax \
-    -p fsl-core \
-    -p fsl-runtime \
-    -p fsl-solver \
-    -p fsl-solver-z3js \
-    -p fsl-verifier \
-    -p fsl-tools \
-    -p fsl-wasm \
-    -p fsl-lsp \
+    --workspace \
+    --exclude fsl-solver-z3 \
+    --exclude fslc-rust \
     --no-default-features \
     --locked
 }

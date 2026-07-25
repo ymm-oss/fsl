@@ -23,11 +23,11 @@ reverted; they are not informational warnings.
 `main`. The ruleset requires only its always-present `merge readiness` aggregator. The aggregator
 fails unless all of these independent lanes succeed:
 
-1. `cargo check` over the explicit `fsl-syntax`, `fsl-core`, `fsl-runtime`, `fsl-solver`,
-   `fsl-solver-z3js`, `fsl-verifier`, `fsl-tools`, `fsl-wasm`, and `fsl-lsp` package set with
-   `--no-default-features --locked` catches compile and dependency-integration drift across the
+1. `cargo check --workspace --exclude fsl-solver-z3 --exclude fslc-rust
+   --no-default-features --locked` catches compile and dependency-integration drift across the
    authoritative native-Z3-free Rust surface without paying the vendored native-Z3 build cost
-   before merge.
+   before merge. Excluding the native CLI package as a workspace root avoids its Z3-only helper
+   binaries; its library still compiles transitively through the LSP and WASM crates.
 2. Formatting, the `fsl-syntax`, `fsl-core`, `fsl-runtime`, and backend-neutral `fsl-solver` tests,
    plus the runtime/WASM dependency negative controls, protect the solver-independent semantic
    foundation.
