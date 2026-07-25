@@ -597,6 +597,29 @@ fn and_states(base: &StateMap, constraint: &StateMap) -> StateMap {
     result
 }
 
+/// Combines the guard-state maps of the two sides of an `or` node.
+///
+/// `or` is a disjunction, so a state is sound for the whole formula as soon
+/// as *either* disjunct implies it: the from-states are the **union** of the
+/// two sides. But that union is only meaningful when *both* disjuncts
+/// actually constrain the entity — if one says nothing about it (no entry in
+/// its map, e.g. an unrelated flag), that disjunct is satisfiable at *any*
+/// state, so the whole `or` does not pin the entity at all and the entity is
+/// dropped rather than unioned with a vacuous "every state" set. This is why
+/// `status == A or bypass` drops `status` entirely (`bypass` doesn't
+/// constrain it) while `status == A or status == B` — both disjuncts
+/// constrain `status` — keeps the union `{A, B}` (#521).
+fn or_guard_states(left: StateMap, right: &StateMap) -> StateMap {
+    let mut result = StateMap::new();
+    for (entity, mut states) in left {
+        if let Some(right_states) = right.get(&entity) {
+            states.extend(right_states.iter().cloned());
+            result.insert(entity, states);
+        }
+    }
+    result
+}
+
 fn enum_guard_states(
     expr: &Expr,
     location: EnumLocation<'_>,
@@ -604,9 +627,15 @@ fn enum_guard_states(
 ) -> StateMap {
     let mut result = StateMap::new();
     match expr {
-        Expr::Binary { op, left, right } if op == "or" || op == "and" => {
+        Expr::Binary { op, left, right } if op == "and" => {
             merge_states(&mut result, enum_guard_states(left, location, members));
             merge_states(&mut result, enum_guard_states(right, location, members));
+        }
+        Expr::Binary { op, left, right } if op == "or" => {
+            result = or_guard_states(
+                enum_guard_states(left, location, members),
+                &enum_guard_states(right, location, members),
+            );
         }
         Expr::Binary { op, left, right } if op == "==" => {
             for (candidate, value) in [(left.as_ref(), right.as_ref()), (right, left)] {
@@ -735,9 +764,15 @@ fn enum_assignments(
 fn option_guard_states(expr: &Expr, var: &str) -> StateMap {
     let mut result = StateMap::new();
     match expr {
-        Expr::Binary { op, left, right } if op == "or" || op == "and" => {
+        Expr::Binary { op, left, right } if op == "and" => {
             merge_states(&mut result, option_guard_states(left, var));
             merge_states(&mut result, option_guard_states(right, var));
+        }
+        Expr::Binary { op, left, right } if op == "or" => {
+            result = or_guard_states(
+                option_guard_states(left, var),
+                &option_guard_states(right, var),
+            );
         }
         Expr::Binary { op, left, right } if op == "==" || op == "!=" => {
             for (candidate, value) in [(left.as_ref(), right.as_ref()), (right, left)] {

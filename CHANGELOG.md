@@ -144,6 +144,23 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   assurance-class computation itself is unchanged (class and verdict stay
   orthogonal, so a failing source still never lowers an independently
   proven requirement's class) (#508).
+- **Breaking:** `fslc typestate` no longer treats a state comparison in one arm
+  of an `or` as sufficient to pin a transition's from-state when the other arm
+  says nothing about the entity. Previously `enum_guard_states`/
+  `option_guard_states` unioned the states extracted from both arms of `and`
+  **and** `or` alike, so `requires e.status == A or bypass` reported
+  `derivable` with `from: ["A"]` and `--ts` emitted `self: E<"A">` even though
+  the action is also reachable from every other state whenever `bypass` holds
+  — a generated ghost type that excluded behavior the checked model accepts.
+  `or` now unions the states each disjunct implies (as `and` already did),
+  computed per entity, but only when **every** disjunct actually constrains
+  the entity: a disjunct that says nothing about it (e.g. an unrelated flag)
+  drops the guard entirely rather than leaving the other disjunct's state
+  unioned in on its own. `status == A or status == B` — where both disjuncts
+  constrain the entity, just to different states — correctly remains
+  `derivable` with `from` covering both; only a mix of a real state
+  constraint and an unconstrained disjunct (like `status == A or bypass`)
+  stops being derivable. `and` is unchanged (#521).
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false

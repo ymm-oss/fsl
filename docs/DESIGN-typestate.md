@@ -15,7 +15,16 @@ TypeScript for derivable entities. The output uses the same JSON envelope as the
 
 - **`derivable`** — the from-state is a **local guard on the entity's own status field**
   (`requires e.status == S`) and the to-state is a local assignment. The runtime guard compiles
-  soundly into a compile-time type.
+  soundly into a compile-time type. A compound guard's from-states are the states its **whole**
+  formula implies, not the states that appear in any one operand: `and` unions the states each
+  conjunct pins (one conjunct pinning a state is enough, since all conjuncts must hold). `or` is
+  a disjunction, so its from-states are the **union** of what each disjunct implies — but only
+  when **every** disjunct actually constrains the entity: `status == A or status == B` guarantees
+  `status ∈ {A, B}` for every satisfying trace, so it stays `derivable` with `from` covering both.
+  If any disjunct says nothing about the entity (e.g. an unrelated flag), that disjunct is
+  satisfiable at *any* state, so the whole disjunction does not pin the entity at all and the
+  transition cannot be `derivable` through that guard — `status == A or bypass` is not derivable,
+  even though `status == A or status == B` is.
 - **`branching`** — the to-state is assigned only inside an `if` (data-dependent). It is exposed
   in the type, but the implementation bears a proof obligation of exhaustiveness (flagged).
 - **`relational`** — there is **no local guard on the same entity** for the status assignment.

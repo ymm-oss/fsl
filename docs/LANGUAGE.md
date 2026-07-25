@@ -2622,7 +2622,11 @@ is under [`examples/validation/`](https://github.com/ymm-oss/fsl/tree/main/examp
 design spec (enum-valued struct fields / state variables / `Option<_>` slots)
 can be mapped to the host language's typestate (ghost types). It classifies each
 `(entity, action)` as `derivable` (the from-state is the entity's own local
-guard) / `branching` (data-dependent inside an `if`) / `relational` (no local
+guard — a compound guard's from-state is what the **whole** formula implies:
+`or` is a union of what each disjunct implies, but only when every disjunct
+constrains the entity; a disjunct silent about the entity, e.g. an unrelated
+flag, drops the guard entirely rather than narrowing it) /
+`branching` (data-dependent inside an `if`) / `relational` (no local
 guard, and the precondition lives in an external structure — cannot be expressed
 in the type and remains as a runtime/verification obligation). An entity's
 `applicability` is `full` only when all transitions are derivable/branching.
