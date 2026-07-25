@@ -128,7 +128,7 @@ Status as of 2026-07-12:
 | browser Worker asset loading / COOP+COEP | isolated Chrome loaded the bundled Worker, separate Emscripten JS/WASM and pthread script with no console errors; `crossOriginIsolated=true`, `sat`, model `x=42` | **proved in browser** |
 | JS term bridge | observed roughly 29k–42k terms/s at 1,000 terms and 60k terms/s at 10,000 terms on the development machine | **start with typed per-term calls** |
 | v1 native scope | issue #195 requests a full replacement, including db/AI/domain and report generators in Phase 3 | **decided: no permanent Python command fallback** |
-| CI and native targets | PR parity runs Rust stable + Python 3.12 + Node 22 + Chrome on Ubuntu; main/scheduled runs add native Z3 tests on Linux, macOS, and Windows | **implemented for the current kernel slice** |
+| CI and native targets | PR readiness compiles the native-Z3-free Rust surface and tests the solver-independent core on Ubuntu; every merged main state runs the complete Rust/WASM gate plus native Z3 tests on Linux, macOS, and Windows | **implemented; see `DESIGN-ci.md`** |
 
 The Phase-0 syntax, dependency, browser, and decision gates are complete. The
 Phase-1 semantic kernel is complete: resolver-backed compose lowering, the typed
@@ -151,10 +151,14 @@ semantics and pass every cross-backend gate.
 The supported native release matrix is
 `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`,
 `x86_64-apple-darwin`, and `x86_64-pc-windows-msvc`. Pull requests keep one
-fast Ubuntu Rust/parity/browser job. Once `fsl-solver-z3` lands, pushes to main
-and releases add Linux/macOS/Windows native jobs; browser parity remains an
-Ubuntu headless-Chrome job. A target is not advertised until the native Z3
-backend and CLI smoke corpus run on that target in CI.
+stable `merge readiness` context backed by parallel Ubuntu compile,
+solver-independent semantic, dependency-boundary, and automation-contract
+lanes. It is not product verification. Pushes to main and production
+promotions run the complete Rust/WASM product gate plus Linux/macOS/Windows
+native evidence; browser parity remains an Ubuntu headless-Chrome job. A target
+is not advertised until the native Z3 backend and CLI smoke corpus run on that
+target in the product gate. See [`DESIGN-ci.md`](DESIGN-ci.md) for rollout,
+failure reporting, and release-blocking semantics.
 
 ## 5. Commands
 

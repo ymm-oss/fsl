@@ -24,6 +24,10 @@ check_rust() {
   cargo test --manifest-path rust/Cargo.toml --workspace --exclude fsl-lsp --locked
   cargo build --manifest-path rust/Cargo.toml --workspace --locked
 
+  check_boundaries
+}
+
+check_boundaries() {
   assert_dependency_absent fsl-runtime 'fsl-solver|z3' 'fsl-runtime must remain solver-independent'
   assert_dependency_absent fsl-wasm 'fsl-solver-z3 v' 'fsl-wasm must not depend on the native Z3 backend'
 }
@@ -44,12 +48,15 @@ case "${1:-all}" in
   wasm)
     check_wasm
     ;;
+  boundaries)
+    check_boundaries
+    ;;
   all)
     check_rust
     check_wasm
     ;;
   *)
-    echo "usage: $0 [all|rust|wasm]" >&2
+    echo "usage: $0 [all|rust|wasm|boundaries]" >&2
     exit 2
     ;;
 esac

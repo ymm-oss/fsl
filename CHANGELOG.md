@@ -39,6 +39,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   failure and echoing `helpful` on both the proof and CTI (#473).
 
 ### Added
+- Added an optimistic CI lane with one stable, parallelized `merge readiness`
+  context for pull requests and merge queues, while preserving the complete
+  Rust/WASM/macOS/Windows product gate for every merged `main` state and
+  production promotion. Failed post-merge jobs now create or update
+  deduplicated `ci/post-merge` issues and close them only after observed
+  recovery; rollout is fail-safe behind the `FSL_OPTIMISTIC_CI` repository
+  variable. The readiness compile lane deliberately excludes native-Z3 and
+  default-feature builds, which remain mandatory post-merge evidence.
 - Native `analyze`'s TSG projection now emits `requirement`/`acceptance`/
   `forbidden`/`kpi` nodes and `covers` edges for a standalone `.fsl`/
   requirements spec, not only for a `.toml` project manifest.

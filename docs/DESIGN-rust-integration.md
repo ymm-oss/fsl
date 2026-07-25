@@ -57,11 +57,24 @@ The Claude/Codex environment tests execute Python repository hooks, not the FSL 
 They remain focused manual tooling checks and are deliberately outside the required native product
 gate; changes to those hooks must invoke the two named tests directly.
 
-## Timing and portability
+## Merge readiness and product evidence
+
+Pull requests into `main` use the bounded `merge readiness` contract from
+[`DESIGN-ci.md`](DESIGN-ci.md). It compiles the native-Z3-free Rust surface and tests the
+solver-independent semantic foundation, dependency negative controls, and post-merge automation,
+but it is not the required product integration gate defined above.
+
+Every merged `main` state still executes the complete Rust/WASM gate plus focused native-Z3 tests on
+macOS and Windows. Pull requests into `production` and tag-driven releases retain full
+cross-platform evidence. A platform-specific failure may therefore be detected after merge, but it
+must create a tracked issue and prevents promotion rather than being hidden or allowlisted.
+
+## Historical timing and portability
 
 Immediately before this change, the separate Python contract job took 67 seconds on GitHub Actions,
 including 44 seconds in pytest, while the Rust/WASM job took about 10 minutes on a cold runner. The
 single gate removes the Python environment and job rather than hiding it behind another wrapper.
-Native solver tests continue on Linux, macOS ARM, macOS Intel, and Windows for every change; generated
-artifact digests normalize path separators, checked-in FSL source uses LF on every runner, and
-testgen templates normalize line endings so identical text has one cross-platform identity.
+Native solver tests continue on Linux, macOS, and Windows for every merged main state and production
+promotion; generated artifact digests normalize path separators, checked-in FSL source uses LF on
+every runner, and testgen templates normalize line endings so identical text has one cross-platform
+identity.
