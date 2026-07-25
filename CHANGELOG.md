@@ -6,6 +6,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- Native `analyze`'s TSG projection now emits `requirement`/`acceptance`/
+  `forbidden`/`kpi` nodes and `covers` edges for a standalone `.fsl`/
+  requirements spec, not only for a `.toml` project manifest.
+  `requirement`/`covers`/`kpi` are model-only (`build_tsg` itself now
+  projects them from `KernelModel::requirement_targets`/`.projections`, so
+  every dialect gets them); `acceptance`/`forbidden` scenario nodes need
+  requirements-dialect source text (`fsl_core::requirements_trace_contract`)
+  since they have no Kernel-lowered form, and gain a `covers` edge from any
+  `@requirement(...)`-annotated requirement that names them. A requirement
+  connected to nothing the graph represents still gets its own node with no
+  `covers` edges, rather than being silently dropped, so
+  `disconnected_requirement` (`--profile ai-review`) can detect it.
+  `requirement_property_graph` and `--focus requirement:ID` previously had
+  zero edges/always failed for a standalone spec; both now work. `control`
+  nodes and `starts_with`/`precedes` edges remain unimplemented on native
+  (#495, partial — see `docs/DESIGN-analysis.md` §2).
 - Added an evidence-gated `fsl-design-family.v0` sidecar prototype with three
   maintained three-variant dogfood families, native check/verify/refine/diff
   orchestration tests, raw producer and deterministic digest controls, and an
@@ -28,6 +44,42 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   diagnostics").
 
 ### Fixed
+- `analyze`'s TSG no longer leaks the internal db-dialect `QqDbSepqQ`
+  separator sentinel into node labels: a db-dialect invariant/action label
+  now matches the display name `verify` reports for the same target (both
+  now go through the shared `fsl_core::display_name`; two independent local
+  reimplementations in `fsl-tools` — `analysis.rs`'s `display` and
+  `typestate.rs`'s `display_name` — were each missing the sentinel
+  replacement `fsl_core::display_name` already does). Node ids keep their
+  raw, guaranteed-unique internal form, but `--focus` now also accepts a
+  node's displayed name (resolving it to the matching raw id), so a caller
+  no longer needs to know the internal sentinel to reference a target
+  `verify` already named for them.
+- `action_dependency_graph` no longer collapses an action pair connected
+  through more than one shared read/write state bridge down to a single
+  bridge. `enables`/`conflicts_with` edges are deduplicated by
+  `(from, kind, to)`, and the projection previously pushed one edge object
+  per bridge state for the same pair, so the dedup silently kept only
+  whichever state happened to be processed last (alphabetically, since the
+  underlying map iterates that way) — renaming a state variable could flip
+  which bridge a pair reported, and `progressless_cycle`
+  (`--profile ai-review`) attached its leadsTo/terminal check to only that
+  one surviving state, potentially missing progress attached through a
+  different shared bridge. Every bridge state for a pair is now aggregated
+  into `states` (plural) before emitting one edge, and the
+  `progressless_cycle` consumer reads the full `states` array instead of
+  the legacy singular `state` field (#498).
+- `analyze` batch mode no longer silently drops an explicitly-named input
+  just because it does not end in `.fsl`. `collect_analysis_files`'s
+  `*.fsl`-only filter applied even to files named directly on the command
+  line (not only to directory expansion, where it belongs), so
+  `analyze a.toml b.txt` returned `files:[]`, `errors:[]`,
+  `result:"analyzed"`, exit 0 — a batch that analyzed nothing reported
+  success. Explicit files are now always kept regardless of extension: a
+  `.toml` project manifest routes through the same handling single-file
+  mode already uses, and anything else that cannot be analyzed is a real
+  error in `files[]`/`errors[]`. Directory expansion is unaffected and
+  still filters to `.fsl` only (#496).
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false

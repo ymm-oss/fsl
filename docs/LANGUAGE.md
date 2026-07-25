@@ -2529,7 +2529,11 @@ DESIGN-*.md).
   action enables/conflict edges; `--projection impact_graph --focus NODE` emits
   the upstream/downstream slice around a TSG node. It accepts multiple files or
   directories in batch mode;
-  directories are expanded recursively for `*.fsl` and sorted deterministically.
+  directories are expanded recursively for `*.fsl` and sorted deterministically —
+  an explicitly named file is always kept regardless of extension (a `.toml`
+  project manifest routes the same way it does in single-file mode; anything
+  else that cannot be analyzed is a real error in `files[]`/`errors[]`, never
+  a silent drop).
   Standalone refinement mappings can be viewed with `--projection
   refinement_graph`; this is an unresolved structural view because the command
   has no impl/abs model paths. Project manifests can be viewed with `--projection
