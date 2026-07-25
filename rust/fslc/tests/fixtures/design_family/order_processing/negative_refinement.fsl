@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement InvalidSynchronousOrderMapping {
+  impl SynchronousOrder
+  abs OrderContract
+  map phase = 0
+  action finish() -> finish()
+  action cancel() -> cancel()
+}

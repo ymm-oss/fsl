@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// MODEL-OWNER-003: A mailbox enqueue is separate from actor-owned mutation.
+spec ActorOwnership {
+  type Worker = 0..1
+  state { owner: Option<Worker>, mailbox: Option<Worker> }
+  init { owner = none  mailbox = none }
+
+  action enqueue(w: Worker) { requires mailbox == none  mailbox = some(w) }
+  action claim(w: Worker) { requires owner == none  requires mailbox == some(w)  owner = some(w)  mailbox = none }
+  action release(w: Worker) { requires owner == some(w)  owner = none }
+
+  reachable CanOwn { owner != none }
+}

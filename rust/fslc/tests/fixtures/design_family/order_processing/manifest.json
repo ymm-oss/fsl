@@ -1,0 +1,58 @@
+{
+  "schema_version": "fsl-design-family.v0",
+  "family_id": "order_processing",
+  "contract": {
+    "source": "contract.fsl",
+    "symbol": "OrderContract",
+    "inputs": ["contract.fsl"]
+  },
+  "verification": { "engine": "bmc", "depth": 4 },
+  "variants": [
+    {
+      "id": "synchronous",
+      "source": "synchronous.fsl",
+      "symbol": "SynchronousOrder",
+      "refinement": "synchronous_refines_contract.fsl",
+      "inputs": ["synchronous.fsl", "synchronous_refines_contract.fsl"]
+    },
+    {
+      "id": "event_driven",
+      "source": "event_driven.fsl",
+      "symbol": "EventDrivenOrder",
+      "refinement": "event_refines_contract.fsl",
+      "inputs": ["event_driven.fsl", "event_refines_contract.fsl"]
+    },
+    {
+      "id": "saga",
+      "source": "saga.fsl",
+      "symbol": "SagaOrder",
+      "refinement": "saga_refines_contract.fsl",
+      "inputs": ["saga.fsl", "saga_refines_contract.fsl"]
+    }
+  ],
+  "comparisons": [
+    {
+      "id": "synchronous__to__event_driven",
+      "old": "synchronous",
+      "new": "event_driven",
+      "scope_owner": "new",
+      "depth": 4,
+      "mapping": "event_to_synchronous.fsl",
+      "mapping_direction": "new_to_old"
+    },
+    {
+      "id": "synchronous__to__saga",
+      "old": "synchronous",
+      "new": "saga",
+      "scope_owner": "new",
+      "depth": 4,
+      "mapping": "saga_to_synchronous.fsl",
+      "mapping_direction": "new_to_old"
+    }
+  ],
+  "bundle_control": {
+    "entry": "bundle_probe.fsl",
+    "dependency": "bundle_dependency.fsl",
+    "inputs": ["bundle_probe.fsl", "bundle_dependency.fsl"]
+  }
+}

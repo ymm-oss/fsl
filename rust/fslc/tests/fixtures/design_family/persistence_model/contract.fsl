@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+// MODEL-PERSIST-001: Artificial logical-value contract, not a durability claim.
+spec PersistenceContract {
+  type Value = 0..2
+  state { value: Value }
+  init { value = 0 }
+  action write(v: Value) { value = v }
+  reachable CanChange { value == 2 }
+}

@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// MODEL-OWNER-002: The owner and lock bit change atomically.
+spec SharedLockOwnership {
+  type Worker = 0..1
+  state { owner: Option<Worker>, locked: Bool }
+  init { owner = none  locked = false }
+
+  action claim(w: Worker) { requires owner == none  requires not locked  owner = some(w)  locked = true }
+  action release(w: Worker) { requires owner == some(w)  requires locked  owner = none  locked = false }
+
+  invariant LockMatchesOwner { locked == (owner != none) }
+  reachable CanOwn { owner != none }
+}

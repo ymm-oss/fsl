@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+spec OwnershipBundleDependency {
+  state { observed: Bool }
+  init { observed = false }
+  action observe() { observed = true }
+}
