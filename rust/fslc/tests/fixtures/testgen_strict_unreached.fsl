@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// `Two` is not reachable within depth 1: at depth 1, `--strict` must abort
+// as `reachable_failed` instead of the default partial-generation mode.
+spec TestgenStrictUnreached {
+  type Small = 0..2
+  state { x: Small }
+  init { x = 0 }
+
+  action inc() {
+    requires x < 2
+    x = x + 1
+  }
+
+  reachable One { x == 1 }
+  reachable Two { x == 2 }
+}

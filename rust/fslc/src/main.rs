@@ -6488,7 +6488,10 @@ fn run_domain_testgen(
         Err(error) => return (semantic_error_output(&error), 2),
     };
     let (generic, generic_status) = run_testgen(path, depth, target, deadlock_mode, strict, None);
-    if generic_status == 2 {
+    if generic_status != 0 {
+        // Same reasoning as run_testgen above: `domain testgen` must not
+        // re-wrap a genuine violated/reachable_failed/internal result from
+        // the generic testgen path as a domain-specific error.
         return (generic, generic_status);
     }
     let mut content = generic
@@ -9500,7 +9503,16 @@ fn run_testgen(
         Err(error) => return (semantic_error_output(&error), 2),
     };
     let (scenarios, status) = run_scenarios_mode(path, depth, deadlock_mode, !strict);
-    if status == 2 {
+    if status != 0 {
+        // A genuine `violated`/`reachable_failed` counterexample (status 1)
+        // is not a spec error: propagate it verbatim (verdict, exit code,
+        // and trace) instead of falling through to
+        // `fsl_tools::validate_scenarios`, which only understands a real
+        // `scenarios` envelope and turns the missing `scenarios` array into
+        // an unrelated exit-2 `kind:"semantics"` error — silently
+        // reclassifying "your spec has a bug" as "fix your input" and
+        // destroying the trace. Status 3 (internal) is propagated the same
+        // way for the same reason.
         return (scenarios, status);
     }
     let walk = match fslc_rust::testgen_trace_vectors(&model) {

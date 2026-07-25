@@ -1456,7 +1456,11 @@ emit the same scenarios:
 If a `reachable` target is not witnessed at the requested depth, `testgen` still
 generates tests for the scenarios it did witness and returns `warnings[]` with a
 message such as `reachable SoldOut not witnessed at depth 3; try --depth >= 4`.
-Use `--strict` to restore all-or-nothing `reachable_failed`.
+Use `--strict` to restore all-or-nothing `reachable_failed`. A genuine
+`violated`/`reachable_failed` result — the spec itself has a bug, not a
+testgen input problem — is returned verbatim (verdict, exit code, and trace
+unchanged), the same envelope `verify`/`scenarios` return for the identical
+spec; it is never re-wrapped as a generic exit-2 spec error.
 
 ## 10. Three-layer dialects (consulting / requirements / design)
 

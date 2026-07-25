@@ -32,6 +32,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false
   `no_semantic_change` result (#460, prerequisite for #427).
+- `fslc testgen` (and `domain testgen`) no longer converts a genuine
+  `violated`/`reachable_failed` counterexample from the underlying scenarios
+  machinery into an unrelated exit-2 `kind:"semantics"` spec error. The
+  guard that only short-circuited on `status == 2` let a real `violated`
+  invariant/`leadsTo`, or a `--strict` `reachable_failed`, fall through to
+  `fsl_tools::validate_scenarios`, which found no `scenarios` array in what
+  was actually a `verify`-shaped envelope and reported a generic error —
+  changing the exit code from 1 to 2, replacing `result` with `"error"`,
+  and destroying the trace/blame evidence a repair loop depends on. Both
+  guards (`run_testgen`, `run_domain_testgen`) now propagate any non-zero
+  status verbatim; the success path (`result:"generated"`, exit 0) is
+  unaffected (#472).
 - `fslc refine` now verifies the impl spec's own internal consistency (type
   bounds, invariants, `trans`, `ensures`) before checking any correspondence
   against the abstraction. An impl that violates itself within `--depth` —
