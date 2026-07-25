@@ -150,6 +150,7 @@
       <tr><td>Transition correspondence</td><td>Every design step maps to a requirement action that is <i>enabled</i>, and the update lines up.</td><td><code>abs_requires_failed</code> — the design bypassed an upper guard.</td></tr>
       <tr><td>Stutter</td><td>An action mapped to <code>stutter</code> truly leaves the abstract view unchanged.</td><td><code>stutter_changed_abs</code> — a false "internal-only" claim.</td></tr>
       <tr><td>Mapping range</td><td>Mapped values stay inside the abstract type.</td><td><code>map_out_of_bounds</code> — the projection escaped the abstract domain.</td></tr>
+      <tr><td>Correspondence argument</td><td>An action-correspondence argument expression evaluates without hitting an undefined operation (e.g. a zero divisor).</td><td><code>map_partial_op</code> — the mapping itself is undefined for this reachable value.</td></tr>
     </table>
 
     <div class="vs reveal" style="margin-top:24px">

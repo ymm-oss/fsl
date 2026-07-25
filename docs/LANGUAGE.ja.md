@@ -531,10 +531,14 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   剰余系に従います(`a == b * (a / b) + (a % b)` かつ `0 <= a % b < |b|`。
   よって `-7 / 2 == -4`、`-7 % 2 == 1`)。ゼロ除算は**全域的に定義**されており、
   `a / 0 == 0` と `a % 0 == 0` は常に評価できます — invariant/trans/reachable/
-  leadsTo/mapping 式で `a / 0` を読んでも評価が失敗することはありません。
-  action の `requires`/本体/`ensures` 内では、ゼロになりうる除数への未ガードの
-  `/`/`%` は値自体が定義されていても `partial_op`(§6 参照)として報告されます —
-  `y != 0 => P(x / y)` や `requires y != 0` でガードしてください。
+  leadsTo/refinement の state map 式で `a / 0` を読んでも評価が失敗することは
+  ありません。action の `requires`/本体/`ensures` 内では、ゼロになりうる除数への
+  未ガードの `/`/`%` は値自体が定義されていても `partial_op`(§6 参照)として
+  報告されます — `y != 0 => P(x / y)` や `requires y != 0` でガードしてください。
+  refinement の action 対応の**引数**式(§10、`impl_action(a) -> abs_action(a / c)`)
+  は、抽象 action 呼び出しを構成するものなので property 文脈の mapping 式ではなく
+  action 文脈であり、同じ `partial_op` 扱いを受けて `kind: "map_partial_op"` として
+  報告されます。
 - 比較: `== != < <= > >=`
 - 論理: `and or not =>`
 - 条件: `if condition then when_true else when_false`。条件は `Bool` で、両方の
@@ -1313,9 +1317,12 @@ fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth
 
 成功: `result: "refines"`(exit 0)。違反: `refinement_failed`(exit 1)で、
 `kind`(`abs_requires_failed` / `abs_state_mismatch` / `stutter_changed_abs` /
-`map_out_of_bounds`)、`impl_trace`、マッピング後の `abs_before` /
-`abs_after_*` を伴います。静的なエラー(マップの欠落、未知の action など)は
-`kind: "type"`(exit 2)です。
+`map_out_of_bounds` / `map_partial_op`)、`impl_trace`、マッピング後の
+`abs_before` / `abs_after_*` を伴います。静的なエラー(マップの欠落、未知の
+action など)は `kind: "type"`(exit 2)です。`map_partial_op` は、action 対応の
+引数式(`impl_action(a) -> abs_action(a / c)`)がゼロになりうる impl の state
+変数で除算しているケースです — action 文脈であり、refinement の state map が
+受ける「チェックなし」の property 文脈ではありません(§3 のゼロ除算規則)。
 
 `refine` はどの対応関係も検査する前に、まず impl spec が `--depth` の範囲内で
 それ自身の型境界や不変条件を破っていないか(内部的に一貫しているか)を検証しま

@@ -498,7 +498,7 @@ Violation:
   "violated_at_step": 3,
   "impl_action": { "name": "rebalance", "params": {...}, "loc": ... },
   "kind": "abs_requires_failed" | "abs_state_mismatch" | "stutter_changed_abs"
-        | "map_out_of_bounds",
+        | "map_out_of_bounds" | "map_partial_op",
   "impl_trace": [ ...existing trace format... ],
   "abs_before": { ...logical state of α(s)... },
   "abs_after_expected": { ...after applying b... } | null,
@@ -586,6 +586,20 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    refine` and `fslc diff` CLI contract).
 10. No regression of existing features (refine is a completely independent CLI
    path).
+11. **action-correspondence argument partial_op (issue #512)**: an
+   action-correspondence argument expression (`impl_action(a) -> abs_action(a / c)`)
+   that divides by an impl state variable which can be zero — distinct from
+   `map_out_of_bounds` (a range problem) and from the impl's own body dividing by
+   zero (`abs_requires_failed`'s precondition, issue #466's `impl_violation`, since
+   here the impl's own body has no division at all) → `map_partial_op`, not an
+   unclassified `kind:"type"` error. `docs/DESIGN-divmod.md` §2.2/§2.3: this is
+   action context, not the read-only "mapping expression" §2.3 exempts, so it gets
+   the same partial_op treatment a division inside the abstract action's own body
+   would. A guarded correspondence (the divisor is never zero on any reachable impl
+   step) still `refines`. Rust coverage: `rust/fsl-runtime/tests/refinement.rs` (the
+   `check_refinement` contract directly) and
+   `rust/fslc/tests/issue_512_refine_map_partial_op.rs` (the `fslc refine` CLI
+   contract).
 
 ## 6. Documentation Reflection
 

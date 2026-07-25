@@ -545,11 +545,15 @@ variable capture instead of inventing internal binder names. See
   as `a / b` with whitespace). `/` and `%` are Euclidean for `b != 0`
   (`a == b * (a / b) + (a % b)` and `0 <= a % b < |b|`, so `-7 / 2 == -4` and
   `-7 % 2 == 1`). Division by zero is **totally defined**: `a / 0 == 0` and
-  `a % 0 == 0` always evaluate, so an invariant/trans/reachable/leadsTo/mapping
-  expression that reads `a / 0` never fails to evaluate. Inside an action's
-  `requires`/body/`ensures`, an unguarded `/`/`%` whose divisor can reach zero
-  is still reported as `partial_op` (see §6) even though the value is defined —
-  guard it with `y != 0 => P(x / y)` or `requires y != 0`.
+  `a % 0 == 0` always evaluate, so an invariant/trans/reachable/leadsTo/refinement
+  state-map expression that reads `a / 0` never fails to evaluate. Inside an
+  action's `requires`/body/`ensures`, an unguarded `/`/`%` whose divisor can
+  reach zero is still reported as `partial_op` (see §6) even though the value
+  is defined — guard it with `y != 0 => P(x / y)` or `requires y != 0`. A
+  refinement action-correspondence *argument* expression (§10,
+  `impl_action(a) -> abs_action(a / c)`) is action context, not a property-context
+  mapping expression, since it constructs an abstract action call: it gets the
+  same `partial_op` treatment, surfaced as `kind: "map_partial_op"`.
 - Comparison: `== != < <= > >=`
 - Logical: `and or not =>`
 - Conditional: `if condition then when_true else when_false`. The condition is
@@ -1346,9 +1350,12 @@ fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth
 
 Success: `result: "refines"` (exit 0). Violation: `refinement_failed` (exit 1)
 with `kind` (`abs_requires_failed` / `abs_state_mismatch` / `stutter_changed_abs` /
-`map_out_of_bounds`), `impl_trace`, and the post-mapping `abs_before` /
-`abs_after_*`. A static error (a missing map, an unknown action, etc.) is
-`kind: "type"` (exit 2).
+`map_out_of_bounds` / `map_partial_op`), `impl_trace`, and the post-mapping
+`abs_before` / `abs_after_*`. A static error (a missing map, an unknown action,
+etc.) is `kind: "type"` (exit 2). `map_partial_op` is an action-correspondence
+argument expression (`impl_action(a) -> abs_action(a / c)`) dividing by an impl
+state variable that can be zero — action context (§3/§6's `partial_op` rule),
+not the "no check" property context a refinement *state* map gets.
 
 Before any correspondence is checked, `refine` first verifies that the impl
 spec is internally consistent on its own — does not violate its own type
