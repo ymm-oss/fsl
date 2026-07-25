@@ -786,8 +786,9 @@ impl Monitor {
             .map(|(name, ty)| Ok((name.clone(), model.default_value(ty)?)))
             .collect::<Result<State, RuntimeError>>()?;
         let mut bindings = Bindings::new();
+        let mut written = BTreeMap::new();
         for statement in &model.init {
-            execute_init_statement(statement, &mut state, &mut bindings, &model)?;
+            execute_init_statement(statement, &mut state, &mut bindings, &model, &mut written)?;
         }
         Ok(Self {
             model,
@@ -2394,16 +2395,40 @@ fn evaluate_action_guards(
     Ok(Some(bindings))
 }
 
+/// Execute one `init` statement, threading `written` — the concrete value
+/// already assigned to each resolved lvalue location during this `init`
+/// execution — through every branch and `forall` iteration.
+///
+/// `forall` bulk-initializes by executing its body once per binder value.
+/// When distinct binder values resolve to the *same* concrete location
+/// (typically a target that does not index by the binder), imperative
+/// last-write-wins would silently discard every assignment but the last —
+/// masking exactly the case the symbolic engine reports as unsatisfiable
+/// init (`forall k: K { x = k }` demands `x` equal every member of `K`
+/// simultaneously). Detecting a location written to two different concrete
+/// values keeps the concrete and symbolic engines in agreement without
+/// requiring a solver: unsatisfiability is witnessed directly by the
+/// conflicting concrete values, no search needed.
 fn execute_init_statement(
     statement: &Statement,
     state: &mut State,
     bindings: &mut Bindings,
     model: &KernelModel,
+    written: &mut BTreeMap<String, Value>,
 ) -> Result<(), RuntimeError> {
     match statement {
         Statement::Assign { target, value, .. } => {
             let value = eval(value, state, bindings, model, None)?;
             let read_state = state.clone();
+            let key = lvalue_key(target, &read_state, bindings, model)?;
+            match written.get(&key) {
+                Some(previous) if *previous != value => {
+                    return Err(runtime_error("init constraints are unsatisfiable"));
+                }
+                _ => {
+                    written.insert(key, value.clone());
+                }
+            }
             assign(target, value, &read_state, state, bindings, model)?;
         }
         Statement::If {
@@ -2418,7 +2443,7 @@ fn execute_init_statement(
                 else_statements
             };
             for statement in branch {
-                execute_init_statement(statement, state, bindings, model)?;
+                execute_init_statement(statement, state, bindings, model, written)?;
             }
         }
         Statement::ForAll {
@@ -2431,7 +2456,7 @@ fn execute_init_statement(
                     continue;
                 }
                 for statement in statements {
-                    execute_init_statement(statement, state, &mut local, model)?;
+                    execute_init_statement(statement, state, &mut local, model, written)?;
                 }
             }
         }

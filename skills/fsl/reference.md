@@ -990,8 +990,13 @@ schema as BMC. Results carry `states_explored`, `max_frontier_width`, and
 properties, nondeterministic `init` (every state variable must be definitely
 assigned), and `init forall` binder domains that reference state variables
 (range bounds and collections must be compile-time constants) — use
-`--engine bmc` for those specs. `--from-state`, `--lemma`, and `--k` do not
-apply to this engine.
+`--engine bmc` for those specs. A definitely-assigned but contradictory
+`init` (an `init forall` that writes different concrete values to the same
+non-indexed location across binder values, e.g. `forall k: K { x = k }` with
+`|K| > 1`) is also rejected, matching BMC exactly: `result:"error"`,
+`kind:"vacuous"`, `message:"init constraints are unsatisfiable"`, exit 2 —
+never `proved`. `--from-state`, `--lemma`, and `--k` do not apply to this
+engine.
 
 `--engine auto` tries explicit first and falls back to bmc transparently
 when explicit can't decide the spec (a fail-closed rejection above, or

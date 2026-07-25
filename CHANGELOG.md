@@ -23,6 +23,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false
   `no_semantic_change` result (#460, prerequisite for #427).
+- `verify --engine explicit` now agrees with symbolic BMC on a contradictory
+  `init`: a `forall` binder that writes different concrete values to the same
+  non-indexed location across binder values (e.g. `forall k: K { x = k }`
+  with `|K| > 1`) is detected by the concrete Monitor without a solver and
+  reported as `result:"error"`, `kind:"vacuous"`,
+  `message:"init constraints are unsatisfiable"`, exit 2 — matching BMC
+  exactly instead of silently running the forall as a last-write-wins loop
+  and returning `result:"proved"` / exit 0 for a spec with no valid initial
+  state (#480).
 - Refinement typechecking now rejects an unshadowed bare enum member shared by distinct
   implementation and abstraction enums, preventing checked and evaluation
   merge order from assigning different nominal identities. Existing identifier

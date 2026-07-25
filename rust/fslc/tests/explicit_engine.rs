@@ -228,6 +228,49 @@ fn explicit_init_forall_domains_match_bmc_semantics_errors() {
     assert_eq!(bmc["result"], "verified");
 }
 
+/// Negative control for #480: `forall k: K { x = k }` over a multi-valued
+/// `K` demands `x` equal every member of `K` simultaneously, which BMC
+/// already reports as unsatisfiable init (`kind:"vacuous"`, exit 2). Before
+/// the fix, the explicit engine silently ran the forall as a last-write-wins
+/// imperative loop and returned `result:"proved"` / exit 0 — a confidently
+/// green false negative over a spec with no valid initial state. If this
+/// regresses, `explicit` will diverge from `bmc` again on this fixture.
+#[test]
+fn explicit_rejects_contradictory_forall_init_and_agrees_with_bmc() {
+    let path = fixture_path("explicit_init_contradictory.fsl");
+
+    let (explicit, explicit_status) = verify(&path, "explicit", 4, &[]);
+    assert_eq!(explicit_status, 2, "explicit accepted a contradictory init");
+    assert_eq!(explicit["result"], "error");
+    assert_eq!(explicit["kind"], "vacuous");
+    assert_eq!(explicit["message"], "init constraints are unsatisfiable");
+
+    let (bmc, bmc_status) = verify(&path, "bmc", 4, &[]);
+    assert_eq!(bmc_status, explicit_status, "exit code must match BMC");
+    assert_eq!(bmc["result"], explicit["result"]);
+    assert_eq!(bmc["kind"], explicit["kind"]);
+    assert_eq!(bmc["message"], explicit["message"]);
+}
+
+/// Regression control: a `forall` that writes the *same* concrete value to a
+/// non-indexed target on every iteration is satisfiable (the simultaneous
+/// constraints agree) and must keep verifying. This guards the #480 fix
+/// against over-triggering on the ordinary "repeat this literal for every
+/// binder value" idiom.
+#[test]
+fn explicit_accepts_forall_init_writing_the_same_value_every_iteration() {
+    let path = fixture_path("explicit_init_forall_same_value.fsl");
+
+    let (explicit, explicit_status) = verify(&path, "explicit", 4, &[]);
+    assert_eq!(explicit_status, 0, "explicit: {explicit:#}");
+    assert_eq!(explicit["result"], "proved");
+    assert_eq!(explicit["closure"], true);
+
+    let (bmc, bmc_status) = verify(&path, "bmc", 4, &[]);
+    assert_eq!(bmc_status, 0, "bmc: {bmc:#}");
+    assert_eq!(bmc["result"], "verified");
+}
+
 #[test]
 fn explicit_closure_proves_true_noninductive_invariant() {
     let fixture =

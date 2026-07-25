@@ -81,6 +81,23 @@ Key points:
   so the explicit engine must never silently explore only the default-seeded
   state: any spec it accepts has exactly one initial state, and everything
   else is an explicit error. The Rust port must enforce the same gate.
+- **Unsatisfiable init (fail closed, kind `vacuous`).** Definite assignment
+  alone does not guarantee a consistent initial state: `init forall` executes
+  once per binder value, and when two binder values write different concrete
+  values to the same non-binder-indexed location (e.g. `forall k: K { x = k }`
+  with `|K| > 1`), the assignment cannot hold simultaneously for every binder
+  value. Symbolic BMC encodes each `init forall` iteration as a constraint
+  conjunct and reports the resulting UNSAT as `result:"error"`,
+  `kind:"vacuous"`, `message:"init constraints are unsatisfiable"` (exit 2,
+  §3 of `docs/DESIGN-vacuity.md`). The Rust `fsl-runtime` Monitor (used by
+  every concrete-initial-state caller, not only this engine) detects the same
+  contradiction without a solver: it tracks the concrete value written to
+  each resolved lvalue location across the whole `init` block and fails with
+  the identical message the instant a later write disagrees with an earlier
+  one at the same location. A later write that repeats the *same* value is
+  not a conflict and is accepted, so the ordinary "assign this literal for
+  every binder value" idiom (`forall k: K { m[k] = 0 }`, and even a
+  non-indexed `forall k: K { ready = true }`) is unaffected.
 
 ## 3. Verdict and JSON contract
 
@@ -95,6 +112,7 @@ unchanged:
 | Closure reached, no violation | `proved` | 0 | Unbounded claim; `closure: true` |
 | State budget exceeded | `unknown_budget` | 1 | Explicit truncation; never reported as verified |
 | Unsupported spec feature | `error` (kind `semantics`) | 2 | Fail closed, see §5 |
+| Init unsatisfiable | `error` (kind `vacuous`) | 2 | Same verdict, kind, message, and exit code as BMC, see §2 |
 
 Every result carries exploration stats alongside the standard `cost` object:
 states explored, maximum frontier width, and whether closure was reached.
