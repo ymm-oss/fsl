@@ -6,6 +6,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- Native `leadsTo` lasso and deadlock-stall search now applies the documented
+  `symmetric type` / `symmetric enum` liveness symmetry reduction: the
+  designated representative state (lasso loop head, or the stalled state) is
+  constrained to the canonical permutation of each symmetric type's
+  per-entity rows, built from `Map<SymmetricType, V>` and
+  `Set<SymmetricType>` state (skipping any `V` that itself mentions a
+  symmetric identity type), matching the frozen Python reference. A genuine
+  per-entity violation (only one identity ever stalls) is still found under
+  both `Map`- and `Set`-shaped symmetric state (#461).
 - `verify --engine induction` now implements `leadsTo ... helpful` per-binding
   ranking proofs natively, matching the documented idiom for per-entity
   progress under interleaving. `fslc check` rejects a `helpful` action that
