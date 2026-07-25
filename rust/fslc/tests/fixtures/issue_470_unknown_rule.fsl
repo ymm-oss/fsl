@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+
+ai_component UnknownRule {
+  model m1;
+  prompt p1;
+  input InV1;
+  output OutV1;
+  tool SearchOrder {
+    schema SearchOrderV1;
+    precondition order_exists;
+  }
+  authority {
+    may_execute SearchOrder;
+  }
+  check hard {
+    rule totally_bogus_rule_name;
+  }
+}

@@ -43,8 +43,9 @@ pub use diagnostics::{
     requirement_metadata, version_metadata,
 };
 pub use dialect::{
-    GovernanceContract, GovernanceDelegate, GovernancePreservation, RequirementsTraceCase,
-    RequirementsTraceContract, RequirementsTraceExpectation, RequirementsTraceStep,
+    AiToolSets, GovernanceContract, GovernanceDelegate, GovernancePreservation,
+    RequirementsTraceCase, RequirementsTraceContract, RequirementsTraceExpectation,
+    RequirementsTraceStep, ai_approval_invariant_name, ai_forbidden_invariant_name, ai_tool_sets,
     governance_contract, lower_ai_component, lower_business, lower_db, lower_domain,
     lower_governance, lower_requirements, requirements_trace_contract,
 };

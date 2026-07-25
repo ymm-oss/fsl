@@ -222,6 +222,25 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   a divisor that can reach zero is still reported as `partial_op` (§2.2 is
   unchanged); Euclidean negative-number division/modulo semantics were
   already correct and are unaffected (#477).
+- Native `ai_component` lowering (`fslc check`/`verify`/`ai check`) no longer collapses to a
+  one-boolean catalog sentinel with an unsatisfiable no-op action. It now generates the documented
+  `Tool` enum, `human_approved`/`tool_executed`/`tool_suggested: Map<Tool, Bool>` and
+  `fallback_required: Bool` state, `suggest_*`/`approve_*`/`execute_*`/`fallback_*` actions (no
+  `execute_*` action is ever generated for a forbidden tool; an approval-required tool's `execute_*`
+  action always carries `requires human_approved[tool]`), and the
+  `ai_forbidden_tool_not_executed__<Tool>` / `ai_approval_before_execute__<Tool>` invariants. `check
+  hard { rule <Name>; }` now rejects an unknown rule name as a check-time `kind:"semantics"` error
+  (previously silently accepted) from `ai check`, `check`, and `verify` alike. `fslc ai check` also
+  implements the four previously-unchecked hard rules (`tool_authority`, the two static findings
+  were entirely missing; `tool_schema_declared` was missing; `human_approval_required` used a
+  narrower `irreversible && may_execute && !approved` predicate than the documented
+  `irreversible && !requires_human_approval && !forbidden` rule, so a tool only in `may_suggest`
+  passed silently) and populates `repair_candidates` instead of always emitting `[]`. `fslc ai
+  replay` gains the matching `tool_authority` findings for `suggest`/`execute` calls outside
+  authority and now flags a declared precondition with no `preconditions` evidence object at all
+  (previously only an explicit `false` value was caught, so missing evidence passed silently). This
+  was AGENTS.md's "confidently green false negative" on the AI dialect's tool-authority /
+  human-approval safety claims (#470).
 - Native `fslc db check` now evaluates `rule all_active_writes_exist` the same way it already
   evaluated `rule all_active_reads_exist`: dropping a column that is still declared as an active
   artifact's write capability now yields a `column_removed_while_still_written` finding with

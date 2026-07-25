@@ -5826,10 +5826,11 @@ fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
     if status == 2 {
         return (kernel, status);
     }
-    wrap_specialized(fsl_tools::check_ai(
-        &component,
-        stable_kernel_projection(kernel),
-    ))
+    // `check_ai` needs the unprojected verify envelope (fields like `trace`
+    // that `stable_kernel_projection` omits) to translate a kernel invariant
+    // violation into a finding; it applies its own published-kernel
+    // projection to the `kernel` field of its own output.
+    wrap_specialized(fsl_tools::check_ai(&component, &kernel))
 }
 
 fn read_json_events(path: &Path) -> Result<Vec<Value>, String> {
