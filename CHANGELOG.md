@@ -23,6 +23,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false
   `no_semantic_change` result (#460, prerequisite for #427).
+- `sweep` no longer folds a spec `error` (parse / type / semantics / io /
+  vacuous / a mistyped `--instances`/`--values` name / a missing file) into
+  the positive `sweep_passed`/exit-0 verdict. Any scope in the grid that
+  errors now short-circuits the sweep with that error's envelope and exit
+  code (2, or 3 for `kind:"internal"`) returned verbatim, instead of being
+  discarded as an unrecognized grid-cell result while the top-level verdict
+  fell back to "no counterexample found" — previously a one-character typo
+  in `--instances` could turn a sweep over a genuinely violating spec from
+  exit 1 `sweep_failed` into exit 0 `sweep_passed` (#464).
 - `verify --engine explicit` now agrees with symbolic BMC on a contradictory
   `init`: a `forall` binder that writes different concrete values to the same
   non-indexed location across binder values (e.g. `forall k: K { x = k }`

@@ -1222,7 +1222,10 @@ first failed layer and later layers are marked `skipped`.
   `result:"sweep_passed"` or `"sweep_failed"`, with every run under
   `sweep.results` and the first failing scope under
   `sweep.minimal_counterexample`. For `--values NAME=LO..HI`, it fixes `LO` and
-  expands `LO..LO`, `LO..LO+1`, ..., `LO..HI`.
+  expands `LO..LO`, `LO..LO+1`, ..., `LO..HI`. A spec `error` from any scope
+  (parse/type/semantics/io/vacuous, a mistyped `--instances`/`--values` name,
+  a missing file) is returned verbatim — exit code and `kind` unchanged —
+  instead of being folded into `sweep_passed`/`sweep_failed`.
 - `explain` is deterministic formatting with no LLM. JSON mode enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest

@@ -821,7 +821,11 @@ Public Kernel v2 はオプトインで、
 したスコープを `sweep.minimal_counterexample` として返します。`--values` に
 ついては、sweep は下限を固定して上限を拡大します(`lo..lo`, `lo..lo+1`, ...,
 `lo..hi`)。sweep の合格は「このグリッドに反例がない」ことを意味し、非有界の証明
-ではありません。
+ではありません。グリッド中のいずれかのスコープが spec `error`(parse / type /
+semantics / io / vacuous / …)を返した場合、それは反例ではありません。`sweep` は
+その基盤のエラー envelope をそのまま返します(`result`、`kind`、`message`、
+`loc`、exit code は変更しません)。`sweep_passed`/`sweep_failed` に畳み込むこと
+はありません。
 
 `diff` は、ソーステキストではなく状態機械の意味を比較します。有界の refinement を
 両方向に実行します: NEW→OLD の失敗は `behavior_added`、OLD→NEW の失敗は

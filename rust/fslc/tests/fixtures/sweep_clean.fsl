@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec SweepClean {
+  type Amount = 0..3
+  state { balance: Int }
+  init { balance = 0 }
+  action deposit(a: Amount) {
+    requires a > 0 and balance + a <= 3
+    balance = balance + a
+  }
+  invariant WithinBounds { balance <= 3 }
+}

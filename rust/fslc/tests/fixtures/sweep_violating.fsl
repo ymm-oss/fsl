@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec SweepViolating {
+  type Amount = 0..3
+  state { balance: Int }
+  init { balance = 0 }
+  action deposit(a: Amount) {
+    requires a > 0
+    balance = balance + a
+  }
+  invariant TooSmall { balance <= 1 }
+}

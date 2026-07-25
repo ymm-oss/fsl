@@ -844,6 +844,10 @@ verification result under `sweep.results`, and returns the first failing scope
 under `sweep.minimal_counterexample`. For `--values`, the sweep fixes the lower
 bound and expands the upper bound (`lo..lo`, `lo..lo+1`, ..., `lo..hi`). A
 passing sweep means "no counterexample in this grid", not an unbounded proof.
+A spec `error` (parse / type / semantics / io / vacuous / …) from any scope in
+the grid is not a counterexample: `sweep` returns that underlying error
+envelope verbatim (`result`, `kind`, `message`, `loc`, exit code unchanged)
+instead of folding it into `sweep_passed`/`sweep_failed`.
 
 `diff` compares state-machine meaning instead of source text. It runs bounded
 refinement in both directions: NEW→OLD failure is `behavior_added`, while

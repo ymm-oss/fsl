@@ -3317,7 +3317,18 @@ fn run_sweep(
                     from_state: None,
                     edition: "current".to_owned(),
                 };
-                let (mut verification, _) = run_verify_cli(path, path, &options);
+                let (mut verification, status) = run_verify_cli(path, path, &options);
+                if verification.get("result").and_then(Value::as_str) == Some("error") {
+                    // A spec error (parse/type/semantics/io/vacuous/…) is not a
+                    // counterexample: folding it into the sweep grid let a single
+                    // mistyped `--instances` name, missing file, or unparseable
+                    // spec collapse into `sweep_passed`/exit 0 even when the same
+                    // spec has a real counterexample under the correct scope.
+                    // Return the underlying error verbatim (kind, message, loc,
+                    // and exit code — 2, or 3 for `kind:"internal"` — preserved)
+                    // instead of absorbing it as a passing grid cell.
+                    return (verification, status);
+                }
                 if let Value::Object(envelope) = &mut verification {
                     let trace_type = envelope.remove("trace_type");
                     envelope.insert(
