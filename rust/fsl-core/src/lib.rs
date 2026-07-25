@@ -39,7 +39,8 @@ pub use compose::{
     FileResolver, FsResolver, lower_compose, parse_kernel_source, parse_kernel_source_with_file,
 };
 pub use diagnostics::{
-    insert_requirement_metadata, model_warnings, requirement_metadata, version_metadata,
+    VACUITY_KINDS, insert_requirement_metadata, is_vacuity_kind, model_warnings,
+    requirement_metadata, version_metadata,
 };
 pub use dialect::{
     GovernanceContract, GovernanceDelegate, GovernancePreservation, RequirementsTraceCase,

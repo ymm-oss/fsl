@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The trigger `pending` is never reachable within a small depth because no
+// action ever sets it — `finish`'s own guard requires it, so `finish` is
+// itself never enabled. The leadsTo is hollow: it checks nothing.
+spec VacuousLeadstoFixture {
+  state { pending: Bool, done: Bool }
+  init { pending = false  done = false }
+
+  action finish() {
+    requires pending
+    pending = false
+    done = true
+  }
+
+  leadsTo Served { pending ~> done }
+}

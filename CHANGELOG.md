@@ -17,12 +17,30 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   wrong-nominal sources fail closed; concrete, symbolic, progress, CLI, Worker,
   Public Kernel projection, and raw-replay guards share the checked semantics
   without weakening bijective `enum conversion` (#455).
+- Native `verify` now reports the `vacuous_leadsto` vacuity lane: a `leadsTo`
+  whose trigger never becomes reachable within `--depth` is a hollow
+  property, the same class BMC already reports for an implication invariant's
+  unreachable antecedent (`vacuous_implication`). Detected via the same
+  solver-free existential-reachability BFS `fsl-runtime::verification_warnings`
+  already uses, so `fsl-runtime` gains no new solver dependency (#465, partial;
+  `always_true_requires`, `tautology_over_frozen`, and `urgency_freeze` remain
+  unimplemented on native — see `docs/DESIGN-rust-port.md` "Shared semantic
+  diagnostics").
 
 ### Fixed
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false
   `no_semantic_change` result (#460, prerequisite for #427).
+- `--vacuity {error,ignore}` now selects over the complete documented 5-kind
+  vacuity lane set (`fsl_core::VACUITY_KINDS`) instead of only the two kinds
+  spelled `vacuous_*`. `always_true_requires`, `tautology_over_frozen`, and
+  `urgency_freeze` previously could not be promoted to `--vacuity error` or
+  suppressed by `--vacuity ignore` because none of the three names start
+  with `vacuous_`; native `apply_vacuity_mode` matched by name prefix rather
+  than the closed kind set (#465, the CLI half; the lanes for these three
+  kinds are still unimplemented on native, see above — this fix prevents a
+  *second*, independent bug from compounding the first once they land).
 - `sweep` no longer folds a spec `error` (parse / type / semantics / io /
   vacuous / a mistyped `--instances`/`--values` name / a missing file) into
   the positive `sweep_passed`/exit-0 verdict. Any scope in the grid that

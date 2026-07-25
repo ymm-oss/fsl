@@ -1817,6 +1817,21 @@ pub fn expression_reachable(
     Ok(false)
 }
 
+/// Wrap `expr` in a nested `exists` quantifier over `binders`, outermost
+/// binder first — the same existential closure the frozen Python reference
+/// (`bmc._exists_wrap`) uses to check reachability of a leadsTo trigger or
+/// implication antecedent independent of any particular binding.
+fn exists_wrap(binders: &[Binder], expr: Expr) -> Expr {
+    binders
+        .iter()
+        .rev()
+        .fold(expr, |body, binder| Expr::Quantified {
+            quantifier: "exists".to_owned(),
+            binder: binder.clone(),
+            body: Box::new(body),
+        })
+}
+
 /// Build solver-independent verification warnings shared by native and browser frontends.
 #[must_use]
 pub fn verification_warnings(
@@ -1841,6 +1856,29 @@ pub fn verification_warnings(
                 "name": display_name(&property.name),
                 "message": format!("invariant '{}' has an implication antecedent that is unreachable within depth {depth}", display_name(&property.name)),
                 "hint": "the antecedent is not reachable within this depth; check whether an action that should establish it is missing, or whether the antecedent expression is wrong",
+                "loc": property.span.python_loc(),
+                "classification": "insufficient_depth",
+                "blocking": [],
+                "faithfulness_class": "intent_unexercised",
+                "recommended_action": "add a single-shot reachable for the action / raise --depth",
+            });
+            if let JsonValue::Object(warning) = &mut warning {
+                insert_requirement_metadata(warning, &property.annotations, property.meta.as_ref());
+            }
+            warnings.push(warning);
+        }
+    }
+    for property in &model.leadstos {
+        let trigger = exists_wrap(&property.binders, property.before.clone());
+        if matches!(
+            expression_reachable(model.clone(), &trigger, depth),
+            Ok(false)
+        ) {
+            let mut warning = json!({
+                "kind": "vacuous_leadsto",
+                "name": display_name(&property.name),
+                "message": format!("leadsTo '{}' has a trigger that is unreachable within depth {depth}", display_name(&property.name)),
+                "hint": "the trigger is not reachable within this depth; check whether an action that should establish it is missing, or whether the trigger expression is wrong",
                 "loc": property.span.python_loc(),
                 "classification": "insufficient_depth",
                 "blocking": [],

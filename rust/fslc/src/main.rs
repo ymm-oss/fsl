@@ -13756,7 +13756,7 @@ fn apply_vacuity_mode(output: &mut Value, mode: &str) -> Option<i32> {
                     warning
                         .get("kind")
                         .and_then(Value::as_str)
-                        .is_some_and(|kind| kind.starts_with("vacuous_"))
+                        .is_some_and(fsl_core::is_vacuity_kind)
                 })
                 .cloned()
                 .collect::<Vec<_>>()
@@ -13768,7 +13768,7 @@ fn apply_vacuity_mode(output: &mut Value, mode: &str) -> Option<i32> {
                 !warning
                     .get("kind")
                     .and_then(Value::as_str)
-                    .is_some_and(|kind| kind.starts_with("vacuous_"))
+                    .is_some_and(fsl_core::is_vacuity_kind)
             });
         }
         return None;
@@ -14433,6 +14433,40 @@ fn block_on_native<F: Future>(future: F) -> F::Output {
 #[cfg(test)]
 mod exit_status_tests {
     use super::*;
+
+    /// Negative control for #465: before the fix, `apply_vacuity_mode`
+    /// selected findings with `kind.starts_with("vacuous_")`, which matches
+    /// only 2 of the 5 documented vacuity kinds
+    /// (`docs/LANGUAGE.md` §15, `fsl_core::VACUITY_KINDS`).
+    /// `always_true_requires`, `tautology_over_frozen`, and `urgency_freeze`
+    /// do not share that prefix, so `--vacuity error` silently let a hollow
+    /// spec carrying only one of those three pass, and `--vacuity ignore`
+    /// silently left it in `warnings`. If this regresses to a prefix check,
+    /// these assertions fail.
+    #[test]
+    fn apply_vacuity_mode_covers_every_vacuity_kind_not_only_the_vacuous_prefix() {
+        for kind in fsl_core::VACUITY_KINDS {
+            let mut error_output = json!({
+                "result": "verified",
+                "warnings": [{"kind": kind, "message": "hollow"}],
+            });
+            let status = apply_vacuity_mode(&mut error_output, "error");
+            assert_eq!(status, Some(2), "kind={kind}: {error_output:#}");
+            assert_eq!(error_output["result"], "error");
+            assert_eq!(error_output["kind"], kind);
+
+            let mut ignore_output = json!({
+                "result": "verified",
+                "warnings": [{"kind": kind, "message": "hollow"}],
+            });
+            assert_eq!(apply_vacuity_mode(&mut ignore_output, "ignore"), None);
+            assert_eq!(
+                ignore_output["warnings"].as_array().map(Vec::len),
+                Some(0),
+                "kind={kind} was not ignored: {ignore_output:#}"
+            );
+        }
+    }
 
     #[test]
     fn internal_error_envelopes_always_exit_three() {
