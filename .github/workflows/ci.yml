@@ -29,6 +29,10 @@ jobs:
         with:
           components: clippy,rustfmt
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
       - name: Check Rust workspace
         run: ./tools/check-native-integration.sh rust
 
@@ -42,6 +46,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
 
       - uses: actions/setup-node@v4
         with:
@@ -75,13 +83,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15, windows-latest]
+        # ubuntu-latest is covered by the full rust-workspace test gate above.
+        os: [macos-15, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
         with:
-          components: clippy,rustfmt
+          workspaces: rust -> target
 
       - name: Test pinned native solver and BMC crates
         working-directory: rust
