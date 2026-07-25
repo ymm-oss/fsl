@@ -92,6 +92,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   other testgen target already emitted, restoring byte-identity with the
   frozen Python reference and giving the generated conformance harness a real
   negative control against a guard-weakened implementation (#471).
+- The `examples/gallery/injected/` negative-control detector matrix and its
+  primary/blind calibration are now measured on the authoritative native CLI,
+  not only the frozen Python reference: 17 injected specs and the
+  `agentic_rag` `backported_constraints_slice.fsl` mutation slice carried a
+  `requirement` annotation text conflict between their outer block and an
+  inner legacy tag (checked-model error since #237) that the corpus never
+  followed; the redundant inner tag is removed and the outer block's already-
+  correct requirement text is the sole source of truth. Adds
+  `rust/fslc/tests/injection_detector_matrix.rs` (the native primary/blind
+  matrix, run by `tools/check-native-integration.sh`) and
+  `rust/fslc/tests/corpus_check_sweep.rs` (an exhaustive `specs/`+`examples/`
+  `check` sweep closing the gap left by `rust/fsl-lsp/tests/corpus.rs`, which
+  never builds a checked model) (#485).
 - Refinement typechecking now rejects an unshadowed bare enum member shared by distinct
   implementation and abstraction enums, preventing checked and evaluation
   merge order from assigning different nominal identities. Existing identifier

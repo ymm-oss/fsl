@@ -12,10 +12,10 @@ requirements OrderOverStrengthenedGuardInjected {
   init { forall o: OrderId { orders[o] = Order { status: Draft, qty: 0 } } shipped = Set {} revenue = 0 }
 
   requirement OR-PLACE "orders can be placed" {
-    action place(o: OrderId, q: Qty) "OR-PLACE: place positive quantity" { requires orders[o].status == Draft requires q >= 1 orders[o].status = Placed orders[o].qty = q }
+    action place(o: OrderId, q: Qty) { requires orders[o].status == Draft requires q >= 1 orders[o].status = Placed orders[o].qty = q }
   }
   requirement OR-PAY "placed orders can be paid" {
-    action pay(o: OrderId) "OR-PAY: impossible over-strengthened guard" {
+    action pay(o: OrderId) {
       requires orders[o].status == Shipped
       orders[o].status = Paid
       revenue = revenue + orders[o].qty

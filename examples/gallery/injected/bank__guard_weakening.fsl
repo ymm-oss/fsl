@@ -15,7 +15,7 @@ requirements BankGuardWeakeningInjected {
     }
   }
   requirement BANK-WITHDRAW "withdrawals require available balance" {
-    action withdraw(a: Amount) "BANK-WITHDRAW: overdraft guard is weakened" {
+    action withdraw(a: Amount) {
       requires a > 0
       requires balance >= a - 1
       balance = balance - a

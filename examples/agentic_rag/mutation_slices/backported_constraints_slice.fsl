@@ -115,7 +115,7 @@ requirements AgenticRagBackportedConstraintsSlice {
       req[r].st = HumanReview
     }
 
-    invariant EvidenceReadyHasEvidenceAndCitation "REQ-3: EvidenceReadyは十分な証拠と許可済み引用を表す" {
+    invariant EvidenceReadyHasEvidenceAndCitation {
       forall r: Req {
         req[r].st == EvidenceReady => (
           req[r].evidence == Adequate and req[r].citation_ok
@@ -123,7 +123,7 @@ requirements AgenticRagBackportedConstraintsSlice {
       }
     }
 
-    invariant DraftedHasEvidenceAndCitation "REQ-3: Draftedは回答可能な証拠と引用を保持している" {
+    invariant DraftedHasEvidenceAndCitation {
       forall r: Req {
         req[r].st == Drafted => (
           req[r].evidence == Adequate and req[r].citation_ok
@@ -131,7 +131,7 @@ requirements AgenticRagBackportedConstraintsSlice {
       }
     }
 
-    invariant EvidenceBadMeansNoCitation "REQ-3: EvidenceBadは不十分な証拠と引用不可を表す" {
+    invariant EvidenceBadMeansNoCitation {
       forall r: Req {
         req[r].st == EvidenceBad => (
           req[r].evidence == Inadequate and not req[r].citation_ok
@@ -139,7 +139,7 @@ requirements AgenticRagBackportedConstraintsSlice {
       }
     }
 
-    trans RetryConsumesOneBudget "REQ-3: retry時はbudgetを1だけ消費する" {
+    trans RetryConsumesOneBudget {
       forall r: Req {
         (old(req[r].st) == EvidenceBad and req[r].st == Retrieving) => (
           req[r].retry == old(req[r].retry) - 1
@@ -164,7 +164,7 @@ requirements AgenticRagBackportedConstraintsSlice {
       req[r].guard = Failed
     }
 
-    invariant GuardFailedMeansFailedGuard "REQ-4: GuardFailedは出力ガードレール失敗を表す" {
+    invariant GuardFailedMeansFailedGuard {
       forall r: Req {
         req[r].st == GuardFailed => req[r].guard == Failed
       }
@@ -196,19 +196,19 @@ requirements AgenticRagBackportedConstraintsSlice {
       req[r].st = ActionExecuted
     }
 
-    invariant ToolApprovalMeansRequested "REQ-5: ToolApprovalはRequested承認状態を表す" {
+    invariant ToolApprovalMeansRequested {
       forall r: Req {
         req[r].st == ToolApproval => req[r].approval == Requested
       }
     }
 
-    invariant ToolApprovedMeansApproved "REQ-5: ToolApprovedはApproved承認状態を表す" {
+    invariant ToolApprovedMeansApproved {
       forall r: Req {
         req[r].st == ToolApproved => req[r].approval == Approved
       }
     }
 
-    trans ExecutionComesFromApprovedStage "REQ-5: ActionExecutedはToolApprovedからだけ入る" {
+    trans ExecutionComesFromApprovedStage {
       forall r: Req {
         req[r].st == ActionExecuted => (
           old(req[r].st) == ToolApproved or old(req[r].st) == ActionExecuted

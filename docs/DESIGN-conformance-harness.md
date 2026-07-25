@@ -66,6 +66,18 @@ mutation is meaningful as a delta from an accepted baseline, and
 acceptance/forbidden traces provide the independent channel for boundary or guard
 drift. No single green detector establishes intent fidelity.
 
+This calibration is measured on the authoritative native surface, not only the
+frozen Python reference (issue #485): `rust/fslc/tests/injection_detector_matrix.rs`
+runs the same primary/blind matrix against the native `fslc` binary and is part
+of the Rust CI-equivalent gate (`tools/check-native-integration.sh`, which does
+not execute Python — AGENTS.md). `tests/test_injection_bench.py` measures the
+same native binary by default too (`FSLC_BENCH_CLI=python` switches back to the
+frozen reference); it regenerates the committed `examples/gallery/injected/MATRIX.json`
+evidence artifact. A detector gap that is native-only and already filed (the
+`unreachable-antecedent` lane's `vacuity` primary detector against a
+`forall`-quantified implication, issue #486) is an explicit, documented
+exclusion in both — never a silent pass.
+
 ## Pipeline stages and failure semantics — `tests/test_dialect_conformance.py`
 
 One parametrized test per class; every obligation is an `assert`, never a skip.
@@ -113,10 +125,26 @@ with pinning and the covered files the whole harness projects to ≈ 3 min
 single-threaded. Bounds are explicit constants (`depth` per dialect,
 `EXPR_STATES`) — raising coverage is a registry diff, not a hidden loop change.
 
-This harness belongs to the frozen Python reference implementation and is no
-longer run by `.github/workflows/ci.yml`. It remains available for manual
-historical/reference checks; active CI coverage is provided by the Rust
-workspace tests and WASM browser validation.
+This harness — the full dual-evaluator pipeline (Monitor load, BFS/expression
+agreement, verdict agreement) — belongs to the frozen Python reference
+implementation and is no longer run by `.github/workflows/ci.yml`. It remains
+available for manual historical/reference checks; active CI coverage is
+provided by the Rust workspace tests and WASM browser validation.
+
+Its narrower structural obligation — every `.fsl` under `specs/`/`examples/`
+either `check`s cleanly or is a declared/excluded error, so nothing rots
+silently the way issue #485's 18 files did — has a native equivalent that
+*is* active CI: `rust/fslc/tests/corpus_check_sweep.rs`. Unlike
+`rust/fsl-lsp/tests/corpus.rs` (parse + index only, never builds a checked
+model), this sweep runs `fslc check` on every file and requires each one to
+either succeed, declare `// expected-result: error` for a `check`-targeted
+invocation, be a `refinement`-dialect file (structurally out of scope: a
+mapping file has no `state` block, so `fslc check` always reports "spec has
+no state block" regardless of whether the mapping is sound — whether it is
+actually exercised by `fslc refine` is a separate claim tracked by #483, not
+asserted here), or the injected detector corpus (its own matrix, above), or
+carry a reasoned exclusion naming the test or issue that actually owns its
+expected behavior.
 
 The external-compiler conformance surface introduced by issue #208 is separate
 from this historical corpus gate. Native `fslc conformance` emits versioned,
