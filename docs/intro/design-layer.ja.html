@@ -154,6 +154,7 @@
       <tr><td>遷移の対応</td><td>すべての設計ステップが、<i>有効な</i>要件操作に対応し、更新も一致する。</td><td><code>abs_requires_failed</code> — 設計が上位の条件を迂回した。</td></tr>
       <tr><td>stutter</td><td><code>stutter</code> にした操作が、本当に抽象側を変えない。</td><td><code>stutter_changed_abs</code> — 「内部だけ」という主張が嘘。</td></tr>
       <tr><td>対応値の範囲</td><td>対応づけた値が、抽象の型の範囲に収まる。</td><td><code>map_out_of_bounds</code> — 射影が抽象の範囲を超えた。</td></tr>
+      <tr><td>対応の引数</td><td>action 対応の引数式が、未定義の演算(ゼロ除算など)に当たらずに評価できる。</td><td><code>map_partial_op</code> — この到達可能な値に対して、対応づけ自体が未定義。</td></tr>
     </table>
 
     <div class="vs reveal" style="margin-top:24px">

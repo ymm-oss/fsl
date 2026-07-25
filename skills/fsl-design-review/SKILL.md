@@ -95,6 +95,7 @@ the abstract contract, mapping, or detail guards to obtain a green result.
 | `abs_requires_failed` | The detail layer bypasses an abstract-layer guard (a control shortcut, effectively strengthening a precondition) | LSP violation = not substitutable. `impl_trace` is the forbidden procedure |
 | `abs_state_mismatch` | Observable behavior diverges from the contract | LSP violation (a postcondition-equivalent deviation). Also suspect a misreading of the mapping |
 | `stutter_changed_abs` | An operation claimed to be "internal detail" causes an externally visible change | A break of encapsulation. The stutter declaration is a lie |
+| `map_partial_op` | An action-correspondence argument expression is undefined for a reachable instance (e.g. a divisor that can be zero) | Not a substitutability failure — the mapping itself is broken for this instance. Fix the correspondence expression, not the implementation's behavior |
 | coverage `false` | An action that can never fire = a dead extension point / dead procedure | Equivalent to YAGNI / dead code. Read `blocking_requires` |
 | `unknown_cti` | The contract is true but requires an implicit premise | Discovery of an implicit design premise. If it is a domain truth, make it explicit as an auxiliary invariant |
 

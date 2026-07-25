@@ -1774,10 +1774,38 @@ pub fn check_refinement(
                             runtime_error(format!("unknown abstract action '{name}'"))
                         })?;
                     let mut bindings = enabled.params.clone();
-                    let values = args
+                    let values = match args
                         .iter()
                         .map(|expr| eval(expr, &monitor.state, &mut bindings, &eval_model, None))
-                        .collect::<Result<Vec<_>, _>>()?;
+                        .collect::<Result<Vec<_>, _>>()
+                    {
+                        Ok(values) => values,
+                        // An action-correspondence argument expression (not
+                        // the impl action's own body -- that self-violation
+                        // is already excluded above) hit an undefined
+                        // operation for this reachable impl instance, e.g. a
+                        // `/`/`%` divisor that is zero only through the
+                        // mapping's argument expression. `docs/DESIGN-divmod.md`
+                        // §2.2's action-context partial_op check applies here
+                        // by the same G5 rationale (constructing an abstract
+                        // action call is action context, not the read-only
+                        // "mapping expression" §2.3 exempts): this must be a
+                        // located refinement finding, not an unclassified
+                        // internal error that the CLI defaults to `kind:"type"`.
+                        Err(error) if is_partial_operation_error(&error.message) => {
+                            check.failure = Some(refinement_failure(
+                                "map_partial_op",
+                                Some("step"),
+                                step + 1,
+                                &child_trace,
+                                Some(alpha_before.clone()),
+                                Some(alpha_after.clone()),
+                                Some(alpha_after),
+                            ));
+                            return Ok(check);
+                        }
+                        Err(error) => return Err(error),
+                    };
                     let expected_params = abs_action
                         .params
                         .iter()

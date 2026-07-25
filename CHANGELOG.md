@@ -176,6 +176,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   helper already used for `leadsTo` triggers) before the reachability
   check; with zero leading foralls this is a no-op, so the previous
   top-level-`=>` shape still works unchanged (#486).
+- `fslc refine` now classifies a zero divisor in a refinement
+  action-correspondence *argument* expression (`impl_action(a) ->
+  abs_action(a / c)`, where `c` is an impl state variable that can be zero)
+  as a located `refinement_failed`/`kind:"map_partial_op"` finding, joining
+  the existing closed kind set (`abs_requires_failed` / `abs_state_mismatch`
+  / `stutter_changed_abs` / `map_out_of_bounds`). Constructing an abstract
+  action call is action context (`docs/DESIGN-divmod.md` §2.2), not the
+  read-only "mapping expression" §2.3 exempts (a refinement *state* map,
+  distinct from an action-correspondence argument), so it gets the same
+  `partial_op` treatment a division inside the abstract action's own body
+  would. Before this fix `check_refinement` propagated the divisor's raw
+  `RuntimeError` unclassified, surfacing as `result:"error"`,
+  `kind:"type"`, `message:"division by zero"` — neither of the two
+  documented `/0` treatments, and not a member of the refinement contract's
+  kind set. A correspondence whose divisor is always guarded on every
+  reachable impl step is unaffected and still `refines` (#512).
 - `analyze`'s TSG no longer leaks the internal db-dialect `QqDbSepqQ`
   separator sentinel into node labels: a db-dialect invariant/action label
   now matches the display name `verify` reports for the same target (both
