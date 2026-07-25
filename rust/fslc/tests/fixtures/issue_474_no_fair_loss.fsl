@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+
+compose NoFairLoss {
+  use FairWarningCore as core from "issue_474_fair_core.fsl"
+  use FairWarningNote as ntf from "issue_474_fair_note.fsl"
+  action plain_and_note(i: core.Id) = core.plain_decay(i) || ntf.raise(i) { }
+}

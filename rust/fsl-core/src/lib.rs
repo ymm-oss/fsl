@@ -152,6 +152,12 @@ pub struct KernelSpec {
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
     projections: Vec<ProjectionDef>,
+    /// Warnings discovered only while lowering the surface document (e.g.
+    /// compose's `fair_not_inherited`), which the checked [`KernelModel`]
+    /// cannot reconstruct on its own because the information that produced
+    /// them (per-component `fair` markers) does not survive expansion.
+    /// `check`/`verify` merge these with [`model_warnings`].
+    diagnostics: Vec<Value>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -177,6 +183,7 @@ pub fn build_surface_model(spec: SurfaceSpec) -> Result<KernelModel, ModelError>
         origins: OriginRegistry::default(),
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
+        diagnostics: Vec::new(),
     })
 }
 
@@ -214,6 +221,11 @@ impl KernelSpec {
     #[must_use]
     pub fn projections(&self) -> &[ProjectionDef] {
         &self.projections
+    }
+
+    #[must_use]
+    pub fn diagnostics(&self) -> &[Value] {
+        &self.diagnostics
     }
 
     pub(crate) fn set_projections(&mut self, projections: Vec<ProjectionDef>) {
@@ -400,6 +412,7 @@ fn lower_direct_spec_with_origins(
         origins,
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
+        diagnostics: Vec::new(),
     })
 }
 

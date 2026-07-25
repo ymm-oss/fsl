@@ -5198,8 +5198,8 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
     if let Err(error) = validate_specialized_document(path) {
         return (semantic_error_output(&error), 2);
     }
-    match load_model(path) {
-        Ok(model) => {
+    match load_kernel_model(path) {
+        Ok((_, kernel, model)) => {
             let has_trace_contract = match validate_requirement_traces(path, &model) {
                 Ok((Some(failure), _)) => return (failure, 2),
                 Ok((None, has_contract)) => has_contract,
@@ -5212,7 +5212,7 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
                 Ok(implements) => implements,
                 Err(error) => return (implements_error_output(&error), 2),
             };
-            let warnings = if implements.is_some() || has_trace_contract {
+            let model_level_warnings = if implements.is_some() || has_trace_contract {
                 model_warnings(&model)
                     .into_iter()
                     .filter(|warning| {
@@ -5223,6 +5223,12 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
             } else {
                 model_warnings(&model)
             };
+            let warnings = kernel
+                .diagnostics()
+                .iter()
+                .cloned()
+                .chain(model_level_warnings)
+                .collect::<Vec<_>>();
             output.insert("warnings".to_owned(), Value::Array(warnings));
             if let Some(implements) = implements {
                 output.insert("implements".to_owned(), implements);
@@ -13841,7 +13847,8 @@ fn run_verify(
     }
     let mut has_trace_contract = false;
     let mut implements = None;
-    if let Ok(model) = load_model(path) {
+    let mut compose_warnings = Vec::new();
+    if let Ok((_, kernel, model)) = load_kernel_model(path) {
         match validate_requirement_traces(path, &model) {
             Ok((Some(failure), _)) => return (failure, 2),
             Ok((None, has_contract)) => has_trace_contract = has_contract,
@@ -13851,6 +13858,7 @@ fn run_verify(
             Ok(implements) => implements,
             Err(error) => return (implements_error_output(&error), 2),
         };
+        compose_warnings = kernel.diagnostics().to_vec();
     }
     let deadlock = match DeadlockMode::parse(deadlock_mode) {
         Ok(mode) => mode,
@@ -13891,6 +13899,17 @@ fn run_verify(
         }),
         Err(error) => return (error_output("usage", &error), 2),
     };
+    if let Value::Object(envelope) = &mut output
+        && envelope.get("result").and_then(Value::as_str) != Some("error")
+        && !compose_warnings.is_empty()
+        && let Some(Value::Array(warnings)) = envelope.get_mut("warnings")
+    {
+        // Compose-lowering warnings (e.g. `fair_not_inherited`) are computed
+        // while lowering, before the checked KernelModel drops the per-
+        // component information that produced them, so they cannot be
+        // recovered from `model`/`fsl_runtime::verification_warnings` alone.
+        warnings.splice(0..0, compose_warnings);
+    }
     if let Value::Object(envelope) = &mut output
         && envelope.get("result").and_then(Value::as_str) != Some("error")
         && let Some(implements) = implements

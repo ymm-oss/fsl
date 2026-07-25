@@ -483,6 +483,7 @@ impl ModelBuilder {
             origins,
             annotations,
             projections,
+            diagnostics: _,
         } = kernel;
         Self {
             spec,

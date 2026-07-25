@@ -9,6 +9,7 @@ use fsl_syntax::{
     SpecItem, Statement, SurfaceCompose, SurfaceDocument, SurfaceSpec, SyncAction, TypeExpr,
     parse_document,
 };
+use serde_json::{Value, json};
 
 use crate::{
     CoreError, IndexedReplacements, KernelSpec, PredicateExpander, expand_spec_domains, substitute,
@@ -161,7 +162,12 @@ fn parse_component(
     Ok((expand_spec_domains(spec)?, parsed.annotations))
 }
 
-fn composed_kernel(name: String, items: Vec<SpecItem>, annotations: Annotations) -> KernelSpec {
+fn composed_kernel(
+    name: String,
+    items: Vec<SpecItem>,
+    annotations: Annotations,
+    diagnostics: Vec<Value>,
+) -> KernelSpec {
     let mut kernel = KernelSpec {
         spec: SurfaceSpec {
             name,
@@ -171,6 +177,7 @@ fn composed_kernel(name: String, items: Vec<SpecItem>, annotations: Annotations)
         origins: crate::OriginRegistry::default(),
         annotations: fsl_syntax::AnnotationRegistry::default(),
         projections: Vec::new(),
+        diagnostics,
     };
     kernel.annotations.extend(crate::SPEC_TARGET, annotations);
     kernel
@@ -225,6 +232,7 @@ pub fn lower_compose(
         })
         .collect::<HashSet<_>>();
 
+    let mut warnings = Vec::new();
     let mut static_items = Vec::new();
     let mut init = Vec::new();
     let mut init_meta = None;
@@ -279,7 +287,7 @@ pub fn lower_compose(
                 static_items.push(rewrite_compose_item(item.clone(), &components)?);
             }
             ComposeItem::SyncAction(action) => {
-                actions.push(sync_action(action, &components)?);
+                actions.push(sync_action(action, &components, &mut warnings)?);
             }
             ComposeItem::Use { .. } | ComposeItem::Internal { .. } => {}
         }
@@ -294,6 +302,7 @@ pub fn lower_compose(
         compose.name,
         static_items,
         component_annotations,
+        warnings,
     ))
 }
 
@@ -931,6 +940,7 @@ fn resolve_alias_statement(
 fn sync_action(
     action: &SyncAction,
     components: &BTreeMap<String, Component>,
+    warnings: &mut Vec<Value>,
 ) -> Result<SpecItem, CoreError> {
     let params = action
         .params
@@ -939,6 +949,7 @@ fn sync_action(
         .map(|param| resolve_alias_param(param, components))
         .collect::<Result<Vec<_>, _>>()?;
     let mut items = Vec::new();
+    let mut fair_constituents = Vec::new();
     for reference in &action.refs {
         let component = components.get(&reference.alias).ok_or_else(|| CoreError {
             message: format!("unknown alias '{}'", reference.alias),
@@ -958,6 +969,14 @@ fn sync_action(
                 column: action.span.start.column,
                 origin: None,
             })?;
+        // Fairness is not inherited through synchronization (docs/LANGUAGE.md
+        // "Compose"): capture the constituent's own `fair` marker here, before
+        // `rewrite_component_item` and the composite's single `fair: action.fair`
+        // below discard it, so a non-fair composite that references a fair
+        // constituent can be reported.
+        if matches!(&source, SpecItem::Action { fair: true, .. }) {
+            fair_constituents.push(format!("{}.{}", reference.alias, reference.action));
+        }
         let SpecItem::Action {
             params: source_params,
             items: source_items,
@@ -1002,6 +1021,17 @@ fn sync_action(
             .map(|item| resolve_alias_action_item(item, components))
             .collect::<Result<Vec<_>, _>>()?,
     );
+    if !action.fair && !fair_constituents.is_empty() {
+        let refs = fair_constituents.join(", ");
+        warnings.push(json!({
+            "kind": "fair_not_inherited",
+            "message": format!(
+                "synchronized action '{}' is not fair; fair constituent action(s) {refs} will not contribute fairness unless the composite action is declared fair",
+                action.name,
+            ),
+            "loc": action.span.python_loc(),
+        }));
+    }
     Ok(SpecItem::Action {
         name: action.name.clone(),
         params,

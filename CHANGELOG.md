@@ -239,6 +239,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   identity, matching the same-index detection already applied to `Int`/`Bool` constants. This
   restores `fslc check`/`db check` on the four `examples/db/` `dbsystem` `rename`/`split`/`merge`
   preservation fixtures, which previously exited 2 against a golden corpus snapshot of `"ok"` (#475).
+- Native `fslc check`/`verify` now emit the documented `fair_not_inherited` `compose` warning: when a
+  non-fair synchronized action references a `fair` component action, `warnings` includes a
+  `kind: "fair_not_inherited"` entry naming the composite action and fair constituent(s), matching the
+  frozen Python reference's message and `loc` exactly. Compose lowering previously discarded
+  constituent `fair` markers with no warning at all (`rust/fsl-core/src/compose.rs` had no warnings
+  channel), so a declared `fair` constituent silently stopped contributing fairness through
+  synchronization with no diagnostic signal — the same failure mode issue #16 fixed in the frozen
+  Python reference, regressed by the native port (#474).
 - The frozen `tests/test_dialect_conformance.py` corpus-conformance harness (`docs/DESIGN-conformance-harness.md`)
   is green again (0 failing of 212, up from 201 passed / 6 failed). Four intentional-error `governance`
   gallery fixtures gained the `// expected-result: error` front matter that reclassifies them as
