@@ -74,3 +74,42 @@ emitted. JSON-serializable. tests/test_explain.py: cart_v1
 skeleton / the `ShippedWasPaid` counterfactual appears via **assignment removal** /
 NonNegativeRevenue yields "no counterfactual" / the dialect cancel_flow carries the original
 requirement text / compose does not crash / exit 0. Roadmap #1.
+
+## 6. Native skeleton restoration (issues #528, #530)
+
+The native Rust `model_skeleton`/`--readable` projection independently walks
+`KernelModel` rather than reusing Python's raw `source_lines[line-1].strip()`
+slicing (§3), and had drifted from the documented contract on three fronts,
+fixed together because they share the same root cause — a synthesized
+declaration with no registered `OriginChain`:
+
+- **`spec_kind`** was hard-coded `null`. It is now `source_dialect(source)`
+  (`"kernel"`/`"requirements"`/`"business"`/`"domain"`/`"db"`/… — the same
+  classification `fslc lint`/`fslc chain` already use), threaded through
+  `run_explain` from the raw source text alongside the built model.
+- **`auto_checks`** enumerated `type_bound` only. It now also enumerates one
+  `partial_op` entry per syntactic `pop`/`head`/`at`/`/`/`%` site in each
+  action's `requires`/`lets`/`statements`/`ensures` — the same structural
+  walk `fsl_core::public_kernel`'s `walk_partial`/`statement_partial` use for
+  the Public Kernel's `partial_operations`, deliberately without that walk's
+  per-branch failure-condition computation, which a static enumeration does
+  not need.
+- **Branch lowering and generated declarations carried no provenance.**
+  `branches { when P { … } maps Q }` in a `requirements` action lowers to one
+  physical Kernel action per branch, named `name__bN` (issue #528); the SLA
+  `time { deadline … }` block synthesizes a `tick` action and one
+  `_deadline_*` invariant per deadline with no authored name at all (issue
+  #530). Neither ever bound an `OriginChain`, so `model_skeleton`'s existing
+  `origin_display_name` fallback had nothing to recover the authored
+  identity from and printed the lowered internal name instead. Both
+  synthesis sites in `dialect.rs::lower_requirements` now bind one: a branch
+  gets `generated: true` with a real `primary` span (the authored action's
+  own declaration) and a `lowering_steps` entry of `kind: "branch"` naming
+  its guard and `maps` correspondence; `tick`/`_deadline_*` use
+  `OriginChain::generated_only` (no authored span exists for them at all).
+  `--readable` recovers the authored action name from this origin the same
+  way `model_skeleton`'s JSON path already did, prints each branch's guard
+  under a `branch:` line, and — the "synthesized refinement mapping" bullet
+  in §2 — an `Implements:` section from the existing
+  `requirements_implements_output` when the source declares
+  `implements X from "Y"`.

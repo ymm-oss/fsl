@@ -1263,9 +1263,17 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest
   counterfactual trace that breaks it under requires/assignment/fair removal.
+  `skeleton.spec_kind` names the source dialect (`kernel`/`requirements`/…);
+  `skeleton.auto_checks` lists both `type_bound` and one `partial_op` entry
+  per syntactic `pop`/`head`/`at`/`/`/`%` site. A `branches { when P { … }
+  maps Q }` action and a generated SLA `tick`/`_deadline_*` declaration each
+  carry an `origin` (`generated:true`, plus a `branch` lowering step naming
+  the guard/correspondence for the former) so `name` still resolves to the
+  authored identity rather than the lowered `name.bN`/synthetic form.
   `--readable` emits a text view that surfaces verification bounds, fairness,
-  KPI projections, branch lowering, and synthesized refinement mappings.
-  Invariants for which none is found are explicitly marked
+  KPI projections, branch lowering (one `branch:` line per split action),
+  and a synthesized `Implements:` refinement mapping when the source
+  declares one. Invariants for which none is found are explicitly marked
   `no counterfactual within depth K`.
 - `--strict-tags` on `check` / `verify` adds traceability warnings only to
   ok/verified/proved success results. The targets are untagged

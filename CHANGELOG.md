@@ -179,6 +179,44 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   same field name and different owning structs now stay fully independent in the
   JSON report and in `--ts`; an entity with multiple actions over its own field
   still aggregates into one machine, unchanged (#520).
+- `fslc scenarios --deadlock error` now preserves the same `violated` /
+  `deadlock` / exit 1 verdict `fslc verify --deadlock error` already reports
+  for the same spec, instead of silently discarding the promoted failure and
+  returning `result:"scenarios"` / exit 0. `--deadlock warn` still generates
+  a `deadlock_terminal` scenario, now carrying the required explanatory
+  `note: "after these steps no action is enabled"` (#522).
+- `fslc scenarios` no longer describes a never-enabled action (a genuinely
+  unsatisfiable `requires` conjunction, per verify's own `action_coverage`
+  verdict) as "was enabled but no cover trace could be built": it now says
+  the action is never enabled, with the same hint and `blocking_requires`
+  verify already computes for it. The original wording is reserved for an
+  action verify found enabled whose cover trace scenario generation still
+  failed to build (#523).
+- `fslc scenarios` now warns for every quantified `leadsTo` binding without a
+  response witness individually, instead of collapsing completeness to one
+  warning per property name: a witnessed binding for one binding value no
+  longer hides the missing-response warning for every other binding. A
+  binding whose antecedent never held within `--depth` is now worded
+  distinctly ("antecedent never holds within depth K") from one whose
+  antecedent held but never closed with a response ("has no response
+  scenario within depth K") (#526).
+- `fslc explain --readable` no longer prints a branch-lowered action's
+  internal `name.bN` form: a `branches { when P { … } maps Q }` action now
+  resolves back to its authored name (via a new `OriginChain` bound at the
+  branch-splitting site), with a `branch:` line naming each branch's guard
+  and `maps` correspondence, and an `Implements:` section when the source
+  declares a refinement mapping — restoring the branch-lowering and
+  synthesized-refinement-mapping detail `docs/DESIGN-explain.md` §2
+  documents. The JSON skeleton's `actions[].name` for the same branch
+  actions is corrected the same way, with the lowered form preserved as
+  `generated_name` (#528).
+- `fslc explain`'s JSON skeleton restores three fields the native
+  implementation had dropped versus the documented contract: `spec_kind`
+  (was hard-coded `null`), `auto_checks` entries of `kind:"partial_op"` for
+  every syntactic `pop`/`head`/`at`/`/`/`%` site (previously `type_bound`
+  only), and `generated:true` origin provenance on the SLA-synthesized
+  `tick` action and `_deadline_*` invariants (previously indistinguishable
+  from authored declarations) (#530).
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false

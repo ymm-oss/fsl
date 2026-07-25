@@ -92,12 +92,30 @@ fslc scenarios <file.fsl> [--depth K]
   3. **the deadlock trace** (when found. "a state where nothing more can be done" becomes a
      terminal-state test in the implementation)
 - If the spec is violated, return the same violated JSON as verify and exit 1 (do not make
-  scenarios from a broken spec).
+  scenarios from a broken spec). This includes a promoted deadlock under
+  `--deadlock error`: it is a violation, not a warning, so it takes the same
+  `violated` / exit 1 path before any scenario is built (issue #522). Under
+  `--deadlock warn`, the deadlock scenario carries the same explanatory
+  `"note": "after these steps no action is enabled"` shown in §2.3.
 - If any `reachable` is not witnessed, return `reachable_failed` like verify. Each
   `unreached[]` entry carries a `classification`: `insufficient_depth` when the
   target is satisfiable as a state predicate but was not witnessed by depth K, or
   `over_constrained` when the target is unsatisfiable under type bounds/invariants
   (with `blocking_requires` naming the blocking unsat core).
+- An action with no cover trace is diagnosed against the same `action_coverage`
+  verdict verify computes for it (§1), not merely the absence of a trace: an
+  action verify proved is never enabled within depth K (an unsatisfiable
+  `requires` conjunction) is reported as never enabled, with the same hint and
+  `blocking_requires`; only an action verify found enabled but scenario
+  generation still failed to build a cover trace for is reported as "was
+  enabled but no cover trace could be built" (issue #523).
+- Scenario completeness for a quantified `leadsTo` is tracked per `(property,
+  binding)`, not per property name: a witnessed binding never suppresses the
+  warning for a sibling binding with no response (issue #526). A binding whose
+  antecedent never held within depth K is worded distinctly ("antecedent
+  never holds within depth K") from one whose antecedent held but never
+  closed with a response ("has no response scenario within depth K"), since
+  the two point the reader at different fixes.
 - `fslc testgen` consumes the same scenario machinery in partial mode: witnessed
   `reachable` targets still become pytest scenarios, while unwitnessed targets are
   returned as warnings such as

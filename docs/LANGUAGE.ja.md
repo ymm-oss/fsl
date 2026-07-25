@@ -797,8 +797,12 @@ Public Kernel v2 はオプトインで、
 ついて `respond_<Name>[_<binding>]` シナリオを出力します。各シナリオは
 `kind: "leadsTo"`、`pending_at`、`satisfied_at`、`bindings`、`steps`、
 `initial_state`、`expected_states` を持ち、P の成立から深さ K 以内での Q の成立
-までの最短トレースを表します。P が決して成立しないバインディングはシナリオに
-ならず、`warnings` に現れます。
+までの最短トレースを表します。数量化された性質は性質名単位ではなくバインディ
+ング単位で追跡されます: あるバインディングの応答シナリオが見つかっても、応答
+のない別のバインディングの完全性警告を隠しません。P が深さ K 以内で一度も成立
+しないバインディングは「antecedent never holds within depth K」という専用の
+警告になり、P は成立したが応答が一度も閉じなかったバインディングは
+「has no response scenario within depth K」になります。両者は混同されません。
 
 `verify --property Name` は invariant、`trans`、`leadsTo`、`reachable` の宣言を
 横断して解決し、指名されたプロパティ種別だけを単独で検査します。

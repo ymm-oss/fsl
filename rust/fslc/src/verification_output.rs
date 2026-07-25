@@ -1650,7 +1650,10 @@ fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
     }
 }
 
-fn coverage_hint(depth: usize) -> String {
+/// Shared with `main.rs::run_scenarios_mode`, which faces the same
+/// covered:false diagnosis for actions with no cover trace (issue #523).
+#[must_use]
+pub fn coverage_hint(depth: usize) -> String {
     format!(
         "these requires clauses are unsatisfiable at every step up to depth {depth}; weaken one of them, add an action that establishes them, or increase --depth"
     )

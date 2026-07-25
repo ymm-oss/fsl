@@ -818,8 +818,13 @@ In addition to `reachable` and action coverage, `scenarios` outputs, for each
 `leadsTo P ~> Q`, a `respond_<Name>[_<binding>]` scenario. Each scenario has
 `kind: "leadsTo"`, `pending_at`, `satisfied_at`, `bindings`, `steps`,
 `initial_state`, and `expected_states`, representing the shortest trace from P
-holding to Q holding within depth K. Bindings for which P never holds are not
-turned into scenarios and appear in `warnings`.
+holding to Q holding within depth K. A quantified property is tracked
+per binding, not per property name: one binding's response scenario never
+suppresses the completeness warning for a sibling binding with none. A
+binding for which P never holds within depth K gets its own warning worded
+"antecedent never holds within depth K"; a binding for which P held but no
+response ever closed gets "has no response scenario within depth K" — the
+two are never conflated.
 
 `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
 `reachable` declarations and checks only the named property kind in isolation.
