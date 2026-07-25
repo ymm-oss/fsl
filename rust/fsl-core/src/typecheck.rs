@@ -1117,6 +1117,29 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
         if let Some(expr) = &leadsto.decreases {
             validate_expression(expr, &local, model, leadsto.span, Some(&TypeRef::Int))?;
         }
+        for helper in &leadsto.helpful {
+            let Some(action) = model
+                .actions
+                .iter()
+                .find(|action| action.name == helper.action)
+            else {
+                return Err(error(format!(
+                    "leadsTo '{}' helpful action '{}' is not declared",
+                    leadsto.name, helper.action
+                ))
+                .with_span(helper.span));
+            };
+            if helper.args.len() != action.params.len() {
+                return Err(error(format!(
+                    "leadsTo '{}' helpful action '{}' expects {} argument(s), got {}",
+                    leadsto.name,
+                    helper.action,
+                    action.params.len(),
+                    helper.args.len()
+                ))
+                .with_span(helper.span));
+            }
+        }
     }
     if let Some(expr) = &model.terminal {
         validate_expression(expr, &env, model, unknown_span(), Some(&TypeRef::Bool))?;

@@ -5,6 +5,20 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Fixed
+- `verify --engine induction` now implements `leadsTo ... helpful` per-binding
+  ranking proofs natively, matching the documented idiom for per-entity
+  progress under interleaving. `fslc check` rejects a `helpful` action that
+  names an undeclared action or has the wrong arity; ranking induction
+  additionally proves the four `helpful`-specific obligations (matching
+  action `fair`, an enabled matching instance whenever pending, stable
+  enabledness across two or more `helpful` actions, and non-helpful actions
+  neither dropping the pending obligation nor increasing the measure),
+  reporting `progress_action_not_fair`, `helpful_action_not_enabled`,
+  `helpful_action_enabledness_not_sticky`, `non_decreasing_helpful_action`,
+  `non_helpful_action_increases_measure`, or `pending_not_preserved` on
+  failure and echoing `helpful` on both the proof and CTI (#473).
+
 ### Added
 - Native `analyze`'s TSG projection now emits `requirement`/`acceptance`/
   `forbidden`/`kpi` nodes and `covers` edges for a standalone `.fsl`/

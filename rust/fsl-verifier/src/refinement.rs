@@ -83,6 +83,7 @@ pub async fn check_refinement_progress<S: SmtSolver>(
                     .clone()
                     .map(|expr| substitute_expr_indexed(expr, &replacements, &indexed)),
                 within: property.within,
+                helpful: Vec::new(),
             })
         })
         .collect::<Result<Vec<_>, VerifyError>>()?;

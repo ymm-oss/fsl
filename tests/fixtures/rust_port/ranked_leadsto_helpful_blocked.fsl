@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec BlockedHelpful {
+  type Case = 0..1
+  type Level = 0..2
+  state {
+    level: Map<Case, Level>,
+    gate: Map<Case, Bool>
+  }
+  init {
+    forall c: Case {
+      level[c] = 2
+      gate[c] = false
+    }
+  }
+
+  fair action step(c: Case) {
+    requires gate[c]
+    requires level[c] > 0
+    level[c] = level[c] - 1
+  }
+
+  invariant NonNeg { forall c: Case { level[c] >= 0 } }
+
+  leadsTo Responds {
+    forall c: Case { level[c] > 0 ~> level[c] == 0 }
+    helpful step(c)
+    decreases level[c]
+  }
+}

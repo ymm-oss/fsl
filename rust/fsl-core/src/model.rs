@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use fsl_syntax::{
-    ActionItem, Annotation, AnnotationRegistry, Annotations, Binder, Expr, LValue, MetaTag, Param,
-    RequirementLink, SourcePos, Span, SpecItem, Statement, SurfaceSpec, TypeExpr,
+    ActionItem, Annotation, AnnotationRegistry, Annotations, Binder, Expr, HelpfulAction, LValue,
+    MetaTag, Param, RequirementLink, SourcePos, Span, SpecItem, Statement, SurfaceSpec, TypeExpr,
 };
 
 use crate::{
@@ -122,6 +122,7 @@ pub struct LeadsToDef {
     pub annotations: Annotations,
     pub decreases: Option<Expr>,
     pub within: Option<i64>,
+    pub helpful: Vec<HelpfulAction>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -758,6 +759,7 @@ impl ModelBuilder {
                             .clone(),
                         decreases: None,
                         within: None,
+                        helpful: Vec::new(),
                     });
                 }
                 SpecItem::LeadsTo {
@@ -769,6 +771,7 @@ impl ModelBuilder {
                     meta,
                     decreases,
                     within,
+                    helpful,
                     ..
                 } => {
                     let origin = self
@@ -791,6 +794,7 @@ impl ModelBuilder {
                             .map(|expr| self.const_int(expr))
                             .transpose()
                             .map_err(|error| error.with_origin(origin))?,
+                        helpful: helpful.clone(),
                     });
                 }
                 _ => {}
