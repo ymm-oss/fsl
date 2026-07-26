@@ -6,6 +6,32 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- Every spec-reading native command now classifies a syntax error the way
+  `check` does: `kind: "parse"` with `diagnostic_code: "FSL-PARSE"` and a
+  `loc`. `rust/fslc/src/main.rs`'s `load_kernel_model` flattened the frontend's
+  structured failure into a `String`, so `kernel`, `conformance`, `scenarios`,
+  `explain`, `analyze`, `typestate`, `ledger`, `testgen`, `document generate`,
+  `diff`, `replay`, and `html` re-classified an unparseable file as
+  `kind: "semantics"` with `loc: null`, and `verify`/`sweep` reported
+  `kind: "parse"` with the `loc` dropped — breaking the schema guarantee in
+  `docs/DESIGN-v1.md` §7.2 that `parse` always carries a location, and sending
+  the §8 repair protocol into the wrong branch. The loader now returns a typed
+  `SpecLoadError` (`Io`/`Parse`/`Semantic`) and every consumer renders it
+  through the same `frontend_output::render_surface_parse_error` `check` uses.
+  Exit codes and `result: "error"` were already correct and are unchanged.
+  The browser Worker's `verify` moved with the CLI so the native/Worker parity
+  contract still holds (#484, #497).
+- A missing or unreadable specification is now `kind: "io"` for every command
+  instead of falling through the message-string classifier to
+  `kind: "semantics"`. `fslc analyze` disagreed with itself: one missing input
+  reported `semantics` and the same missing input alongside a second file
+  reported `io`. `check` and `verify` also no longer silently continue when the
+  spec cannot be read (#497).
+- `fslc mutate` on a specification that fails to load now exits 2 instead of 0.
+  A non-`verified` baseline still scores 0, but a spec error keeps its own exit
+  code, as `docs/LANGUAGE.md`'s exit-code table requires with no per-command
+  exemption; exit 0 on an unparseable spec was a green gate over a
+  specification that was never analysed (#484).
 - `rust/fslc/tests/testgen_contract.rs`'s
   `symlink_source_name_and_canonical_pytest_path_remain_distinct` no longer
   panics with `create output-parent symlink: AlreadyExists` on a repeated

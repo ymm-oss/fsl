@@ -8,10 +8,11 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use super::{
-    CliVerifyOptions, ScopeBounds, add_strict_tag_warnings, apply_vacuity_mode, block_on_native,
-    display, envelope, error_output, implements_error_output, implements_result, invariant_names,
-    load_kernel_model, load_model, load_model_scoped, load_snapshot_value_object,
-    load_state_snapshot, select_properties, selected_implicit_bounds, semantic_error_output,
+    CliVerifyOptions, ScopeBounds, SpecLoadError, add_strict_tag_warnings, apply_vacuity_mode,
+    block_on_native, display, envelope, error_output, implements_error_output, implements_result,
+    invariant_names, load_kernel_model, load_model, load_model_scoped, load_snapshot_value_object,
+    load_state_snapshot, read_spec_source, select_properties, selected_implicit_bounds,
+    semantic_error_output, spec_load_error_output, surface_parse_error_output,
     validate_requirement_traces, validate_specialized_document,
 };
 
@@ -132,7 +133,7 @@ fn verification_cost(started: Instant, statistics: &fsl_solver::VerificationStat
         .expect("verification cost serializes")
 }
 
-fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, String> {
+fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, SpecLoadError> {
     let mut model = match selection.model {
         Some(model) => model.clone(),
         None => selection.scope.map_or_else(
@@ -140,7 +141,8 @@ fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, Str
             |scope| load_model_scoped(selection.path, scope),
         )?,
     };
-    select_properties(&mut model, selection.property, selection.excluded)?;
+    select_properties(&mut model, selection.property, selection.excluded)
+        .map_err(SpecLoadError::Semantic)?;
     Ok(model)
 }
 
@@ -248,7 +250,7 @@ fn load_induction_model(
     auxiliary: &[(String, KernelExpr)],
 ) -> Result<KernelModel, CommandResult> {
     let mut model =
-        load_selected_model(selection).map_err(|error| (semantic_error_output(&error), 2))?;
+        load_selected_model(selection).map_err(|error| (spec_load_error_output(&error), 2))?;
     model
         .invariants
         .extend(auxiliary.iter().map(|(name, expr)| fsl_core::PropertyDef {
@@ -764,7 +766,7 @@ pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32
     let started = Instant::now();
     let model = match load_selected_model(request.selection) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     if model.actions.is_empty() {
         return (semantic_error_output("spec has no actions"), 2);
@@ -812,7 +814,7 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
     let started = Instant::now();
     let model = match load_selected_model(request.selection) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     if model.actions.is_empty() {
         return (semantic_error_output("spec has no actions"), 2);
@@ -930,7 +932,7 @@ fn execute_bmc(
 
 fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc, CommandResult> {
     let model = load_selected_model(request.selection)
-        .map_err(|error| (semantic_error_output(&error), 2))?;
+        .map_err(|error| (spec_load_error_output(&error), 2))?;
     let checked_bounds = selected_implicit_bounds(
         &model,
         request.selection.property,
@@ -1263,7 +1265,7 @@ fn load_lemma_model(
     path: &Path,
     options: &CliVerifyOptions,
 ) -> Result<(KernelModel, std::collections::BTreeSet<String>), CommandResult> {
-    let mut model = load_model(path).map_err(|error| (semantic_error_output(&error), 2))?;
+    let mut model = load_model(path).map_err(|error| (spec_load_error_output(&error), 2))?;
     let occupied_names = model
         .invariants
         .iter()
@@ -1623,7 +1625,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
 struct PreparedCliVerification {
     has_scope: bool,
     is_agent_document: bool,
-    model: Result<KernelModel, String>,
+    model: Result<KernelModel, SpecLoadError>,
     initial_state: Option<std::collections::BTreeMap<String, FslValue>>,
     has_trace_contract: bool,
     /// Compose-lowering warnings (e.g. `fair_not_inherited`), computed while
@@ -1698,14 +1700,11 @@ fn prepare_cli_verification(
     path: &Path,
     options: &CliVerifyOptions,
 ) -> Result<PreparedCliVerification, CommandResult> {
-    let is_agent_document = if let Ok(source) = std::fs::read_to_string(path) {
-        match fsl_syntax::parse_surface_document(&source) {
-            Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,
-            Ok(_) => false,
-            Err(error) => return Err((error_output("parse", &error.to_string()), 2)),
-        }
-    } else {
-        false
+    let source = read_spec_source(path).map_err(|error| (spec_load_error_output(&error), 2))?;
+    let is_agent_document = match fsl_syntax::parse_surface_document(&source) {
+        Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,
+        Ok(_) => false,
+        Err(error) => return Err((surface_parse_error_output(&error), 2)),
     };
     let has_scope = !options.scope.instances.is_empty() || !options.scope.values.is_empty();
     if let Err(error) = validate_specialized_document(path) {
@@ -1719,7 +1718,7 @@ fn prepare_cli_verification(
     let initial_state = if let Some(snapshot_path) = options.from_state.as_deref() {
         let model = snapshot_model
             .as_ref()
-            .map_err(|error| (semantic_error_output(error), 2))?;
+            .map_err(|error| (spec_load_error_output(error), 2))?;
         match load_state_snapshot(snapshot_path, model) {
             Ok(state) => Some(state),
             Err((kind, error)) => return Err((error_output(&kind, &error), 2)),
@@ -1771,7 +1770,7 @@ fn validate_cli_property_selection(
         None if has_scope => load_model_scoped(path, &options.scope),
         None => load_model(path),
     }
-    .map_err(|error| (semantic_error_output(&error), 2))?;
+    .map_err(|error| (spec_load_error_output(&error), 2))?;
     if options.engine == "induction"
         && let Some(name) = options.property.as_deref()
         && let Some(kind) = model
@@ -2018,7 +2017,7 @@ fn execute_cli_verification(
     };
     let model = match &prepared.model {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(error), 2),
+        Err(error) => return (spec_load_error_output(error), 2),
     };
     let implements = if filtered {
         None
@@ -2203,7 +2202,7 @@ fn add_cli_strict_tag_warnings(
     } else {
         load_model(path)
     }
-    .map_err(|error| (semantic_error_output(&error), 2))?;
+    .map_err(|error| (spec_load_error_output(&error), 2))?;
     add_strict_tag_warnings(output, &model, path, true, options.requirements.as_deref())
         .map_err(|error| (error_output("io", &error), 2))
 }

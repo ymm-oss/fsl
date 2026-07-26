@@ -167,7 +167,13 @@ fn ledger_reports_spec_errors_before_approval_errors() {
         ],
     );
 
-    assert_eq!(output["kind"], "semantics");
+    // The fixture is an unparseable file, so the spec error that has to win
+    // over the missing-approval error is a *syntax* error. This asserted
+    // `kind == "semantics"` only because `load_kernel_model` flattened the
+    // frontend diagnostic to a message string (#484); `ledger` now reports the
+    // classification `check` reports for the same file, with its location.
+    assert_eq!(output["kind"], "parse");
+    assert!(!output["loc"].is_null(), "{output}");
     std::fs::remove_dir_all(root).expect("remove temporary repository");
 }
 
