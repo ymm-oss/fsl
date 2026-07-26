@@ -42,6 +42,17 @@ const PROJECT_BLOCKS: &[&str] = &[
 /// `no_regression`).
 const NESTED_BLOCKS: &[&str] = &["slice", "preserve", "no_regression"];
 
+/// Top-level kinds recognized only as block *boundaries*: the parser never
+/// descends into their body, so their contents carry no checked meaning and
+/// are echoed as bare `{kind, name}` entries (`skills/fsl/reference.md`).
+const RAW_BLOCKS: &[&str] = &[
+    "ai_action",
+    "ai_contract",
+    "authority",
+    "retriever",
+    "trust_boundary",
+];
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct AiMetricRequirement {
     /// `"min_samples"` | `"ci_lower"` | `"ci_upper"` | `"point_estimate"` |
@@ -109,6 +120,33 @@ pub struct AiDataset {
     pub source: Option<String>,
 }
 
+/// A declaration recognized only as a block boundary (`RAW_BLOCKS`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AiRawBlock {
+    pub kind: String,
+    pub name: String,
+}
+
+/// A `require` clause whose text matched no known evidence-clause grammar.
+///
+/// `parse_metric_requirement`/`parse_observed_requirement` are deliberately
+/// lenient and keep such a clause as `kind: "inconclusive"` so the evidence
+/// commands can report it as a gate status instead of crashing. The check
+/// stage has the opposite obligation: it must not report
+/// `ai_project_analyzed` over a declaration no downstream command can
+/// execute (issue #542).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AiUnparsedClause {
+    /// `"statistical_property"` or `"observed_property"`.
+    pub declaration_kind: &'static str,
+    pub declaration: String,
+    /// `"all"` for a clause declared directly in the block body, else the
+    /// enclosing `slice` name.
+    pub slice: String,
+    /// The clause exactly as written, without its `require ` keyword.
+    pub source: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AiProject {
     pub name: String,
@@ -117,9 +155,43 @@ pub struct AiProject {
     pub statistical_properties: Vec<AiStatisticalProperty>,
     pub observed_properties: Vec<AiObservedProperty>,
     pub migrations: Vec<AiMigration>,
+    pub raw_blocks: Vec<AiRawBlock>,
 }
 
 impl AiProject {
+    /// Every `require` clause this parser could not classify, in declaration
+    /// order. A non-empty result means the project is not executable by
+    /// `fslc ai eval`/`drift`, so `check` must reject it rather than report
+    /// `ai_project_analyzed` (issue #542).
+    #[must_use]
+    pub fn unparsed_clauses(&self) -> Vec<AiUnparsedClause> {
+        let statistical = self.statistical_properties.iter().flat_map(|property| {
+            property
+                .requirements
+                .iter()
+                .filter(|requirement| requirement.kind == "inconclusive")
+                .map(|requirement| AiUnparsedClause {
+                    declaration_kind: "statistical_property",
+                    declaration: property.name.clone(),
+                    slice: requirement.slice.clone(),
+                    source: requirement.source.clone(),
+                })
+        });
+        let observed = self.observed_properties.iter().flat_map(|property| {
+            property
+                .requirements
+                .iter()
+                .filter(|requirement| requirement.kind == "inconclusive")
+                .map(|requirement| AiUnparsedClause {
+                    declaration_kind: "observed_property",
+                    declaration: property.name.clone(),
+                    slice: requirement.slice.clone(),
+                    source: requirement.source.clone(),
+                })
+        });
+        statistical.chain(observed).collect()
+    }
+
     /// Resolve the source JSONL path declared by `dataset <name> { source
     /// "..."; }`, matching `_records_path`'s dataset-source fallback used
     /// when `fslc ai eval` is invoked without `--records` (`docs/LANGUAGE.md`
@@ -250,6 +322,10 @@ pub fn parse_ai_project(source: &str, name: &str) -> Result<AiProject, String> {
                 .observed_properties
                 .push(parse_observed_property(block)?),
             "ai_migration" => project.migrations.push(parse_migration(block)?),
+            kind if RAW_BLOCKS.contains(&kind) => project.raw_blocks.push(AiRawBlock {
+                kind: block.kind.clone(),
+                name: block.name.clone(),
+            }),
             _ => {}
         }
     }

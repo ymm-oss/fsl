@@ -6,6 +6,27 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- **Breaking (output).** `fslc ai check` and the `fslc check` dispatch for
+  fsl-ai project files no longer accept a declaration whose `require` clauses
+  are unparseable. Both ran `ai_project_summary`, a line scanner that
+  collected declaration *names* by string prefix and never read a clause body,
+  so a project whose clauses match no known evidence grammar returned
+  `ai_project_analyzed` / `findings: []` / exit 0 from `check` and was then
+  rejected by `eval`/`regress`/`drift`/`compat` -- the confidently green false
+  negative `AGENTS.md` calls more dangerous than a crash. The check stage now
+  reports from `fsl_syntax::parse_ai_project`, the parser those commands
+  already execute, and an unexecutable `require` clause is a spec error
+  (`result:"error"`, `kind:"parse"`, exit 2) naming the declaration, slice, and
+  clause text, matching `docs/LANGUAGE.md`'s exit-code table and the exit 2 the
+  same dialect already returns for non-AI `ai compat` input and an unknown
+  `--property`/`--migration` selection. Reporting from the parser also corrects
+  two `ai check` output fields: `components` is now the declared `ai_component`
+  names (`[]` when none, previously the scanner's placeholder `[""]`), and
+  `raw_blocks` entries carry `{kind, name}` per block as
+  `skills/fsl/reference.md` specifies (previously `{kind}` only, deduplicated
+  by kind). Raw blocks stay unvalidated: garbage inside `ai_action`,
+  `ai_contract`, `authority`, `retriever`, or `trust_boundary` still passes
+  `check`, because those are contractually block boundaries only (#542).
 - Every spec-reading native command now classifies a syntax error the way
   `check` does: `kind: "parse"` with `diagnostic_code: "FSL-PARSE"` and a
   `loc`. `rust/fslc/src/main.rs`'s `load_kernel_model` flattened the frontend's

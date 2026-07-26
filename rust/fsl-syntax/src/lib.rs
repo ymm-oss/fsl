@@ -31,7 +31,8 @@ pub use ai::{
 };
 pub use ai_project::{
     AiDataset, AiMetricRequirement, AiMigration, AiObservedProperty, AiObservedRequirement,
-    AiProject, AiRegressionRequirement, AiStatisticalProperty, parse_ai_project,
+    AiProject, AiRawBlock, AiRegressionRequirement, AiStatisticalProperty, AiUnparsedClause,
+    parse_ai_project,
 };
 pub use annotation::{
     Annotation, AnnotationError, AnnotationRegistry, AnnotationValue, Annotations, RequirementLink,

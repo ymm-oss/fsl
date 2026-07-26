@@ -130,7 +130,7 @@ fn build(request: &Request, solver_version: &str) -> Result<(KernelModel, Vec<Va
 }
 
 async fn check(request: &Request, solver_version: &str) -> Value {
-    if let Some(output) = fslc_rust::frontend_output::ai_project_check_output(
+    if let Some((output, _)) = fslc_rust::frontend_output::ai_project_check_output(
         &request.source,
         &request.source_file,
         envelope(solver_version),

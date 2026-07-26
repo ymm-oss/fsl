@@ -553,7 +553,11 @@ observed_property <Name> {
 ```
 
 `require` clauses here are threshold labels for external evidence jobs, not
-kernel formulas — they add no probability semantics to `fslc verify`.
+kernel formulas — they add no probability semantics to `fslc verify`. They are
+still parsed at `check` time: a `require` clause matching none of the known
+grammars (`min_samples`, `ci_lower`, `ci_upper`, a point estimate, `observed`,
+`drift`) is a spec error (exit 2) from both `fslc check` and `fslc ai check`,
+because `check` must not accept a project `eval`/`drift` cannot execute.
 `failure_mode <Name> { condition ...; severity ...; }` is parsed and listed by
 name under `ai_project_analyzed`'s `failure_modes`, but no command yet checks
 its content against evidence — it is tracked metadata, not a verified claim.
