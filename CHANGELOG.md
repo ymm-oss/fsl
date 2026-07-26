@@ -5,6 +5,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Fixed
+- A CDP timeout in the browser parity gate now reports the call ordinal, the
+  socket's `readyState`, how many other requests were outstanding, and Chrome's
+  own stderr, instead of only the method and the elapsed budget. The stall it
+  catches is intermittent — one failure in five full local runs, none in CI —
+  and is not reproducible on demand, so the single message an occurrence prints
+  is all the evidence there will ever be, and the previous message could not
+  separate "Chrome never became usable" from "the page stopped answering
+  mid-poll". Call id 1 is `Runtime.enable`, so an id-1 timeout indicts startup
+  while a later id indicts the page; an `OPEN` socket means nobody answered
+  while `CLOSING`/`CLOSED` means the transport went away and the close handler
+  lost the race. No retry was added: retrying an unexplained stall would
+  suppress the event this exists to capture, and a genuine hang would return as
+  a slow pass rather than a failure (#587).
+
 ## [4.0.0] - 2026-07-27
 
 ### Changed
