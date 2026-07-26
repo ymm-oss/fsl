@@ -54,6 +54,29 @@ async function command(executable, args, timeoutMs = 300_000) {
   });
 }
 
+const nativeBinary = fileURLToPath(new URL("../target/debug/fslc", import.meta.url));
+async function nativeEnvelope(testCase) {
+  const args = testCase.cmd === "check"
+    ? ["check", testCase.path]
+    : [
+      "verify", testCase.path,
+      "--depth", String(testCase.options.depth),
+      "--deadlock", testCase.options.deadlock,
+      "--no-cache",
+    ];
+  const result = await command(nativeBinary, args, nativeCommandTimeoutMs);
+  if (testCase.expected_status !== undefined && result.status !== testCase.expected_status) {
+    throw new Error(
+      `native CLI exit mismatch for ${testCase.path}: expected ${testCase.expected_status}, got ${result.status}`,
+    );
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`native CLI JSON failure: ${error}\n${result.stderr}`);
+  }
+}
+
 async function collectFslFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(entries.map((entry) => {
@@ -83,7 +106,11 @@ const candidates = [
 // exclusion has become unnecessary (#568). This is a *capability* exclusion,
 // never a tolerated-difference allowlist: the native<->Worker envelopes are
 // still not compared for these documents, and no verdict, location, or
-// exit-code difference is allowlisted anywhere.
+// exit-code difference is allowlisted anywhere. A new entry must also keep
+// native answering non-error for that document (#577, enforced below): once
+// native errors too, the Worker-only probe can no longer tell agreement from
+// a coincidence, which is what let the 28 retired refinement entries go
+// stale silently.
 const unsupportedReasons = {
   agent:
     "native `check` runs the lenient fsl-ai agent analysis (result \"ok\", dialect fsl-ai-agent.v0); "
@@ -123,10 +150,11 @@ for (const path of candidates) {
       throw new Error(`unreviewed unsupported ${documentType} document: ${repositoryPath}`);
     }
     observedUnsupported.add(repositoryPath);
-    // Not compared against native -- probed on the Worker alone, so that the
-    // day the Worker grows a verb for this document type the recorded premise
-    // stops matching and the exclusion fails instead of silently persisting.
-    exclusionProbes.push({
+    // Not compared against native -- probed on the Worker alone below, so
+    // that the day the Worker grows a verb for this document type the
+    // recorded premise stops matching and the exclusion fails instead of
+    // silently persisting (#568).
+    const probe = {
       id: `exclusion-${exclusionProbes.length}`,
       cmd: "check",
       path: repositoryPath,
@@ -135,7 +163,26 @@ for (const path of candidates) {
       files: {},
       options: {},
       documentType,
-    });
+    };
+    exclusionProbes.push(probe);
+    // That Worker-only probe is sound only because native also answers
+    // non-error for this document: agreement then forces the Worker
+    // non-error too, which the probe below already catches -- no envelope
+    // comparison needed. If native answered "error" instead, a Worker error
+    // would be indistinguishable from real agreement, which is exactly the
+    // blindness that let the 28 refinement entries retired in #577 go stale
+    // silently (both sides erroring looked the same whether or not the two
+    // errors actually matched). Checked here, before the ~6-minute Worker
+    // run, because it depends on nothing but native.
+    const probeNativeEnvelope = await nativeEnvelope(probe);
+    if (probeNativeEnvelope.result === "error") {
+      throw new Error(
+        `${repositoryPath}: native's own result is "error" for this ${documentType} document, so `
+        + `a Worker-only probe cannot distinguish real native<->Worker agreement from two unrelated `
+        + `errors that both happen to be "error". Compare the pair explicitly (native vs Worker `
+        + `envelope) or retire the entry, the way the 28 refinement entries were retired in #577.`,
+      );
+    }
     continue;
   }
   if (unsupportedDocuments.has(repositoryPath)) {
@@ -318,28 +365,6 @@ if (details.ok !== "true") {
 }
 const browser = JSON.parse(details.text);
 if (!browser.cancelled) throw new Error("Worker cancellation did not complete");
-const nativeBinary = fileURLToPath(new URL("../target/debug/fslc", import.meta.url));
-async function nativeEnvelope(testCase) {
-  const args = testCase.cmd === "check"
-    ? ["check", testCase.path]
-    : [
-      "verify", testCase.path,
-      "--depth", String(testCase.options.depth),
-      "--deadlock", testCase.options.deadlock,
-      "--no-cache",
-    ];
-  const result = await command(nativeBinary, args, nativeCommandTimeoutMs);
-  if (testCase.expected_status !== undefined && result.status !== testCase.expected_status) {
-    throw new Error(
-      `native CLI exit mismatch for ${testCase.path}: expected ${testCase.expected_status}, got ${result.status}`,
-    );
-  }
-  try {
-    return JSON.parse(result.stdout);
-  } catch (error) {
-    throw new Error(`native CLI JSON failure: ${error}\n${result.stderr}`);
-  }
-}
 const native = [];
 for (const testCase of parityCases) {
   native.push(await nativeEnvelope(testCase));
@@ -373,6 +398,14 @@ for (let index = 0; index < parityCases.length; index += 1) {
 // parse (causal) -- either way it never produces an analysis. The day the
 // Worker gains the verb, `result` stops being `"error"` and this fails,
 // naming the entry to remove.
+//
+// This Worker-only check is sound only because native also answers
+// non-error for every excluded document, which is asserted separately in the
+// candidate-collection loop above, before the Worker even runs (#577): when
+// native is non-error, Worker/native agreement forces the Worker non-error
+// too, so this check alone already catches staleness -- no envelope
+// comparison needed. See the comment on that earlier assertion for why it
+// would be unsound to skip.
 const staleExclusions = [];
 for (let index = 0; index < exclusionProbes.length; index += 1) {
   const probe = exclusionProbes[index];
