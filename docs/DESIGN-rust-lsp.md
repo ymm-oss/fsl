@@ -79,6 +79,15 @@ The index may classify tokens only after authoritative parsing succeeds. Context
 is an index projection, not a second parser: it cannot accept a document, lower syntax, or invent
 semantic validity.
 
+Every accepted declaration and binder form in `rust/fsl-syntax` needs a matching entry in this
+contextual walk (`declaration_keyword`, the quantifier/aggregate/pattern binder checks, and
+`INDEX_KEYWORDS` in `rust/fsl-lsp/src/index.rs`), or it silently loses navigation
+(`textDocument/definition`, `references`, `rename`, `documentSymbol`) without a parse failure to
+surface the gap. A language feature's coupled change (grammar/lowering, typed model, semantics,
+docs) therefore also covers `rust/fsl-lsp/src/index.rs`. `rust/fsl-lsp/tests/corpus.rs` only
+asserts that every identifier has some symbol-or-reference entry, not that its role or scope is
+correct, so a new declaration or binder form needs its own targeted unit test (issue #504).
+
 Open buffers take precedence over files on disk. Imports and workspace references load through a
 document resolver that first consults the store and then the filesystem relative to the owning
 document. Closing a buffer discards its overlay and republishes diagnostics from disk only after a

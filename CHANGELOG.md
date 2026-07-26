@@ -128,6 +128,20 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   diagnostics").
 
 ### Fixed
+- The native LSP's document index now recognizes `def` declarations and their
+  parameters, aggregate/quantifier binders written with a `name: Type` form
+  (`count(c: Id where ...)`, `sum(...)`, `unique(...)`, `exactlyOne(...)`,
+  `forall`/`exists`), `is some(v)` pattern binders, named `preservation NAME {
+  ... }` governance blocks, and every name in a comma-separated `actor A, B`
+  list — each previously indexed as an ordinary reference with no matching
+  declaration, so `textDocument/definition`/`references`/`rename` returned
+  nothing and `documentSymbol` omitted them. Also fixed a `reachable`/`domain`
+  collision: both name a top-level declaration keyword (`reachable NAME {
+  expr }`, `domain SpecName { ... }`) and a relation builtin call
+  (`reachable(r, a, b)`, `domain(r)`); an unconditional keyword match
+  previously consumed the identifier immediately following either builtin
+  call as a brand-new self-defining declaration, corrupting the referenced
+  state variable's definition/reference set (#504).
 - `fslc db check` no longer reports a confidently green `verified_under_assumptions`
   over a genuine compatibility violation. `validate_db` now rejects a `check
   compatibility` rule name outside the closed vocabulary and an `environment
