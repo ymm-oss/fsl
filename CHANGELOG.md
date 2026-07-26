@@ -18,6 +18,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   (`docs/DESIGN-ci.md`).
 
 ### Fixed
+- `fslc ai check` now rejects duplicate `dataset` and `evaluator` declaration
+  names, which the frozen reference has always rejected
+  (`src/fslc/ai_project.py:237-241`). Native validated only three of the five
+  declaration kinds, so a project declaring `dataset Shared` twice exited 0 and
+  reported `datasets: ['Shared', 'Shared']`. Because a `dataset X` reference
+  resolves by name, two declarations sharing one made resolution depend on
+  declaration order — the false green was silently picking a winner, not merely
+  echoing a name twice (#571).
 - Native now emits `kind:"name"` for name-resolution failures instead of
   collapsing them into `semantics`, making every member of the
   `docs/DESIGN-v1.md` §7.2 closed set reachable. `duplicate state variable`,
