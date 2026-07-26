@@ -6298,7 +6298,15 @@ fn run_ai_project_check(source: &str, path: &Path) -> (Value, i32) {
         &ai_project_name(path),
     ) {
         Ok(project) => project,
-        Err(message) => return (error_output("parse", &message), 2),
+        Err(error) => {
+            let mut output = error_output("parse", &error.message);
+            if let Some((line, column)) = error.position
+                && let Some(object) = output.as_object_mut()
+            {
+                object.insert("loc".to_owned(), json!({"line": line, "column": column}));
+            }
+            return (output, 2);
+        }
     };
     wrap_specialized(
         json!({"result":"ai_project_analyzed","formal_result":"not_run","components":project.components.iter().map(|component|&component.name).collect::<Vec<_>>(),"statistical_properties":project.statistical_properties.iter().map(|property|&property.name).collect::<Vec<_>>(),"observed_properties":project.observed_properties.iter().map(|property|&property.name).collect::<Vec<_>>(),"migrations":project.migrations.iter().map(|migration|&migration.name).collect::<Vec<_>>(),"raw_blocks":project.raw_blocks.iter().map(|block|json!({"kind":block.kind,"name":block.name})).collect::<Vec<_>>(),"findings":[]}),

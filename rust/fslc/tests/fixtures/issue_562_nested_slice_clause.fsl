@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// The offending clause sits inside a nested `slice` block, below a comment
+// header and a sibling declaration, so a `loc` derived from the enclosing
+// block's position rather than the clause's own line would be visibly wrong.
+
+ai_component Target {
+  model m
+  prompt p
+}
+
+statistical_property Nested {
+  target Target
+  confidence 0.95
+
+  slice JapaneseTickets {
+    require min_samples >= 5
+    require this clause is not executable by ai eval
+  }
+}
