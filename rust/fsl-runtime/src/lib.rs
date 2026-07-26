@@ -321,7 +321,7 @@ pub fn eval(
             third,
         } if name == "rel_reachable" => relation_reachable(
             eval(first, state, bindings, model, old_state)?,
-            eval(second, state, bindings, model, old_state)?,
+            &eval(second, state, bindings, model, old_state)?,
             &eval(third, state, bindings, model, old_state)?,
         ),
         Expr::TernaryNamed { name, .. } => Err(runtime_error(format!(
@@ -586,14 +586,29 @@ fn binder_where_holds(
 
 fn relation_reachable(
     relation: Value,
-    source: Value,
+    source: &Value,
     target: &Value,
 ) -> Result<Value, RuntimeError> {
     let Value::Relation(edges) = relation else {
         return Err(runtime_error("reachable() requires a relation"));
     };
-    let mut seen = BTreeSet::from([source.clone()]);
-    let mut frontier = vec![source];
+    // Non-reflexive: `reachable(r, a, a)` is true only via a real path of
+    // one or more edges back to `a`, never a free zero-hop `a == a` step
+    // (`docs/LANGUAGE.md`'s relation section; matches the frozen Python
+    // reference's `_relation_reachable` in `src/fslc/runtime.py`, and this
+    // crate's own symbolic evaluator). The frontier starts at `source`'s
+    // *direct successors*, not `source` itself, so an empty or acyclic
+    // relation never reports self-reachability by construction. `source`
+    // itself is deliberately left out of `seen` here, so a cycle that
+    // leads back to `source` still re-enqueues it -- needed to detect
+    // `reachable(r, a, a)` via a multi-hop cycle through `a`.
+    let mut seen = BTreeSet::new();
+    let mut frontier = Vec::new();
+    for (_, next) in edges.iter().filter(|(from, _)| from == source) {
+        if seen.insert(next.clone()) {
+            frontier.push(next.clone());
+        }
+    }
     while let Some(current) = frontier.pop() {
         if &current == target {
             return Ok(Value::Bool(true));
@@ -645,7 +660,7 @@ fn eval_relation_unary(
                 for (_, next) in edges.iter().filter(|(source, _)| source == &node) {
                     if as_bool(relation_reachable(
                         Value::Relation(edges.clone()),
-                        next.clone(),
+                        next,
                         &node,
                     )?)? {
                         return Ok(Value::Bool(false));

@@ -594,6 +594,12 @@ variable capture instead of inventing internal binder names. See
   `reachable(r, a, b)`, `acyclic(r)`, `functional(r)`, `injective(r)`,
   `domain(r)`, `range(r)`. `reachable` and `acyclic` require a self-relation
   (`relation T -> T`); endpoint type/arity errors include repair hints.
+  `reachable(r, a, a)` is **not** reflexive by construction: it is true only
+  if a real path of one or more edges leads from `a` back to `a` (so an empty
+  or acyclic relation gives `reachable(r, a, a) == false` for every `a`). A
+  reflexive reading would make `not reachable(r, a, a)` unsatisfiable by
+  construction for any inhabited domain, draining the predicate of meaning;
+  use `acyclic(r)` to state "no self-loops or cycles anywhere in `r`".
 - Inside ensures / trans only: read the pre-transition state with `old(expr)`
 - Inside a leadsTo block only: `P ~> Q` (response property. not part of the operator hierarchy of general expressions);
   optional `within K` before Q for a bounded deadline, and optional

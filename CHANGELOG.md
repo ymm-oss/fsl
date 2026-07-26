@@ -28,6 +28,27 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   directory (same idiom as `rust/fslc/tests/chain_cli.rs`'s `scratch_dir`),
   which needs no `exists()`/`remove_dir_all()` step at all — closing the
   race window rather than narrowing it (#546).
+- Native `reachable(r, a, a)` is now non-reflexive on every engine: true
+  only via a real path of one or more edges back to `a`, never a free
+  zero-hop `a == a` step. `rust/fsl-runtime/src/lib.rs`'s concrete
+  `relation_reachable` (used by the `--engine explicit` BFS oracle, and by
+  the default engine's own trace-replay consistency check) started its BFS
+  frontier at `[source]` and checked `current == target` before traversing
+  any edge, so it reported self-reachability as trivially true for *any*
+  relation, including an empty one -- a free zero-hop step the symbolic
+  evaluator's convention never took. Neither `docs/LANGUAGE.md` nor
+  `docs/LANGUAGE.ja.md` previously stated whether `reachable` was
+  reflexive; both now document the non-reflexive contract explicitly.
+  Matches the frozen Python reference's `_relation_reachable`
+  (`src/fslc/runtime.py`) and native BMC exactly -- confirmed by direct
+  code reading and by running the frozen `verify`/`scenarios` commands
+  against the same repro spec, both `violated_at_step:1`, not the reflexive
+  `0` the pre-fix native concrete engine reported. Before the fix an empty
+  relation disagreed between engines (`violated_at_step` 0 vs. 1) and a
+  multi-hop-cycle spec made the default engine's own trace-replay
+  consistency check fail outright (`kind:"internal"`,
+  `"trace state mismatch"`, exit 3), since BMC's concrete replay of its own
+  symbolic counterexample used the same disagreeing evaluator (#502).
 - `relation A -> B` state is now usable end to end in the native symbolic
   verifier: `r = Set {}` types and evaluates as the empty relation (both
   `fslc check` and the concrete Monitor previously rejected or mistyped it),
