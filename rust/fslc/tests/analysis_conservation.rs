@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Value, json};
 
@@ -12,6 +13,27 @@ fn root() -> PathBuf {
         .expect("workspace root")
         .to_owned()
 }
+
+/// A fresh scratch directory per test under `rust/target/`, following the
+/// `scratch_dir` idiom `rust/fslc/tests/chain_cli.rs` already establishes.
+///
+/// The previous fixed path — `rust/target/analysis-conservation-contract` —
+/// was created and `remove_dir_all`ed by a test that runs concurrently with
+/// every other test binary in the workspace, so a repeat or parallel run could
+/// clear the directory another run was reading. A unique path does not narrow
+/// that window, it closes it, and it removes the need to delete anything
+/// (`rust/target/` is gitignored). Issue 572.
+fn scratch_dir(name: &str) -> PathBuf {
+    let id = NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed);
+    let dir = root().join("rust/target").join(format!(
+        "analysis-conservation-{name}-{}-{id}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
+}
+
+static NEXT_SCRATCH: AtomicUsize = AtomicUsize::new(0);
 
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_fslc"))
@@ -111,8 +133,7 @@ fn ai_review_invalid_input_and_unsupported_modes_still_exit_two() {
     assert_eq!(unsupported["result"], "error");
     assert_eq!(unsupported["kind"], "semantics");
 
-    let directory = root().join("rust/target/analysis-conservation-contract");
-    std::fs::create_dir_all(&directory).expect("create invalid fixture directory");
+    let directory = scratch_dir("invalid-input");
     let invalid = directory.join("invalid.fsl");
     std::fs::write(&invalid, "spec Broken { state { value: } }")
         .expect("write invalid analysis fixture");
@@ -124,7 +145,10 @@ fn ai_review_invalid_input_and_unsupported_modes_still_exit_two() {
     ]);
     assert_eq!(invalid.status.code(), Some(2));
     assert_eq!(output_json(&invalid)["result"], "error");
-    std::fs::remove_dir_all(&directory).expect("clear invalid fixture directory");
+    // Safe to remove now, and only now: the path is unique to this test in this
+    // process, so nothing else can be reading it. Deleting a *shared* path is
+    // what produced the race this fixes.
+    std::fs::remove_dir_all(&directory).expect("clear scratch dir");
 }
 
 #[test]
