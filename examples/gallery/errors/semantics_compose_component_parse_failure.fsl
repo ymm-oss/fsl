@@ -1,0 +1,20 @@
+// expected-command: check
+// expected-result: error
+// expected-kind: semantics
+//
+// The native<->Worker parity control for issue #556. This document's own top
+// level parses, so the failure surfaces while resolving and lowering the
+// component -- `fsl_core::parse_kernel_source_with_file`, the kernel stage.
+// Both surfaces must classify that stage through the same
+// `spec_load::kernel_load_error`: the component's parse failure is not this
+// document's own syntax error, so it stays `semantics`. The Worker used to
+// hard-code the whole stage to `kind:"parse"`, and no corpus case reached it.
+compose GallerySemanticsComposeComponentParseFailure {
+  use GallerySemanticsComposeBrokenComponent as broken
+      from "semantics_compose_broken_component.fsl"
+
+  state { seen: Int }
+  init  { seen = 0 }
+
+  invariant SeenNonNegative { seen >= 0 }
+}

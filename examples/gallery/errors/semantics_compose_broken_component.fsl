@@ -1,0 +1,8 @@
+// expected-helper: used by semantics_compose_component_parse_failure.fsl
+// expected-command: check
+// expected-result: error
+// expected-kind: parse
+spec GallerySemanticsComposeBrokenComponent {
+  state { count: Int }
+  init { count = }
+}

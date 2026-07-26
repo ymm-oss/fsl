@@ -166,6 +166,16 @@ const governanceErrorCase = "examples/gallery/errors/governance_missing_before.f
 if (!parityCases.some((testCase) => testCase.path === governanceErrorCase)) {
   throw new Error(`${governanceErrorCase} must remain in the parity corpus`);
 }
+// The only corpus input that fails at the kernel stage
+// (`fsl_core::parse_kernel_source_with_file`) while its own top level parses.
+// Every other kernel-stage failure under specs/+examples/ is a refinement,
+// agent, or causal document this harness excludes as unsupported, so without
+// this case the Worker could classify that whole stage differently from native
+// and no parity run would notice (issue #556).
+const kernelStageCase = "examples/gallery/errors/semantics_compose_component_parse_failure.fsl";
+if (!parityCases.some((testCase) => testCase.path === kernelStageCase)) {
+  throw new Error(`${kernelStageCase} must remain in the parity corpus`);
+}
 const missingGovernanceDependency = "rust/fslc/tests/fixtures/governance_missing_dependency.fsl";
 const missingGovernanceSource = await readFile(join(repository, missingGovernanceDependency), "utf8");
 parityCases.push({

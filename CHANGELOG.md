@@ -119,6 +119,28 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `loc` rather than emitting a `{line: 0, column: 0}` placeholder;
   `docs/DESIGN-v1.md` now states that exception explicitly instead of leaving
   the clause overstating the implementation (#555).
+- The browser Worker no longer classifies a kernel-stage load failure
+  differently from the native CLI. `rust/fsl-wasm`'s `build()` hard-coded every
+  `fsl_core::parse_kernel_source_with_file` failure to `kind: "parse"`, while
+  native carried the same `CoreError` through `kernel_load_error` and reported
+  `semantics`/`type`/`name` — the same input classified two ways depending on
+  which surface ran it, which `AGENTS.md` forbids allowlisting and which makes
+  `docs/DESIGN-v1.md`'s closed `kind` set meaningless. The classifier and its
+  render dispatch moved out of the `fslc` binary into `fslc_rust::spec_load`
+  (`SpecLoadError`, `kernel_load_error`, `surface_parse_failure`,
+  `render_spec_load_error`) so both surfaces run the same one; the Worker gained
+  no classifier of its own, since a parallel classifier is what diverged.
+  Native's classification is unchanged.
+  Detection power was zero: `examples/gallery/errors/` had no input that fails
+  at the kernel stage while its own top level parses — every such file in
+  `specs/`+`examples/` is a refinement, agent, or causal document the parity
+  harness excludes as unsupported — so the divergence was invisible to
+  `./tools/check-native-integration.sh`.
+  `examples/gallery/errors/semantics_compose_component_parse_failure.fsl` and
+  its `semantics_compose_broken_component.fsl` helper close that hole, taking
+  the native↔Worker parity corpus from 351 to 355 cases, and
+  `rust/fsl-wasm/test-browser.mjs` now fails loudly if the case ever leaves the
+  corpus (#556).
 - Every spec-reading native command now classifies a syntax error the way
   `check` does: `kind: "parse"` with `diagnostic_code: "FSL-PARSE"` and a
   `loc`. `rust/fslc/src/main.rs`'s `load_kernel_model` flattened the frontend's

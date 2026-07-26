@@ -24,6 +24,19 @@ of JSON output actually confirmed with `fslc`.
 ```
 
 ```json
+// semantics_compose_component_parse_failure.fsl
+{"result":"error","kind":"semantics","message":"expected expression at examples/gallery/errors/semantics_compose_component_parse_failure.fsl:7:18"}
+```
+
+`semantics_compose_component_parse_failure.fsl`, with its
+`semantics_compose_broken_component.fsl` helper, is the native↔Worker parity
+control for the kernel stage (issue #556). Its own top level parses, so the
+failure comes from resolving and lowering the component; the component's syntax
+error is not this document's own syntax error, so it stays `semantics` on both
+surfaces rather than becoming `parse`. No corpus case reached that stage
+before, which is why the Worker could classify all of it as `parse` undetected.
+
+```json
 // vacuous_contradictory_init.fsl
 {"result":"error","kind":"vacuous","message":"init constraints are unsatisfiable — the spec has no initial state"}
 ```

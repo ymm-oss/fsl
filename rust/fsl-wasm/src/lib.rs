@@ -122,9 +122,19 @@ fn build(request: &Request, solver_version: &str) -> Result<(KernelModel, Vec<Va
     let resolver = MemoryResolver {
         files: request.files.clone(),
     };
+    // Classified by the same `kernel_load_error` the native CLI runs and
+    // rendered by the same dispatch. This stage used to be hard-coded to
+    // `kind:"parse"` here while native reported `semantics`/`type` for the very
+    // same input (issue #556); a second classifier on this side is what
+    // produced that divergence, so there must not be one.
     let kernel =
         fsl_core::parse_kernel_source_with_file(&request.source, &resolver, &request.source_file)
-            .map_err(|failure| error(solver_version, "parse", failure.to_string()))?;
+            .map_err(|failure| {
+            fslc_rust::spec_load::render_spec_load_error(
+                envelope(solver_version),
+                &fslc_rust::spec_load::kernel_load_error(&request.source, &failure),
+            )
+        })?;
     // Compose-lowering warnings (e.g. `fair_not_inherited`) are computed while
     // lowering, before `build_model` drops the per-component information that
     // produced them, so they must be captured here rather than derived from
