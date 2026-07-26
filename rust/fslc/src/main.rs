@@ -10084,29 +10084,28 @@ fn run_mutate(
 ) -> (Value, i32) {
     let (baseline, status) = run_verify(path, depth, "warn", "bmc", DEFAULT_EXPLICIT_BUDGET, 1);
     if status != 0 || baseline.get("result").and_then(Value::as_str) != Some("verified") {
-        // A non-`verified` baseline still scores 0 (an unverified spec has no
-        // mutation score, not a failure), but a *spec error* keeps its own exit
-        // code: `docs/LANGUAGE.md` maps parse/type/semantics/io to 2 with no
-        // per-command exemption, and exit 0 on an unparseable spec is a green
-        // gate over a spec that was never analysed.
-        let baseline_status = baseline_error_status(&baseline, status);
+        // The baseline envelope is re-emitted verbatim, so its own `result`
+        // decides the exit code through `docs/LANGUAGE.md`'s table: `violated`
+        // and the other row-1 verdicts exit 1, and a *spec error* keeps the
+        // code the baseline already classified.
+        let baseline_status = mutate_exit_status(&baseline, status);
         return (baseline, baseline_status);
     }
     let model = match load_model(path) {
         Ok(model) => model,
-        Err(error) => return (spec_load_error_output(&error), 2),
+        Err(error) => return mutate_error(spec_load_error_output(&error)),
     };
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 0),
+        Err(error) => return mutate_error(error_output("io", &error.to_string())),
     };
     let trace_contract = match fsl_core::requirements_trace_contract(&source) {
         Ok(contract) => contract,
-        Err(error) => return (semantic_error_output(&error.to_string()), 0),
+        Err(error) => return mutate_error(semantic_error_output(&error.to_string())),
     };
     let document = match parse_surface_document(path) {
         Ok(document) => document,
-        Err(error) => return (semantic_error_output(&error), 0),
+        Err(error) => return mutate_error(semantic_error_output(&error)),
     };
     let action_labels = mutation_action_labels(&document);
     let spec = match document {
@@ -10118,14 +10117,14 @@ fn run_mutate(
                 fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
             match fsl_core::parse_kernel_source(&source, &resolver) {
                 Ok(kernel) => kernel.into_syntax(),
-                Err(error) => return (semantic_error_output(&error.to_string()), 0),
+                Err(error) => return mutate_error(semantic_error_output(&error.to_string())),
             }
         }
         _ => {
-            return (
-                error_output("semantics", "mutate expects a spec-like FSL file"),
-                0,
-            );
+            return mutate_error(error_output(
+                "semantics",
+                "mutate expects a spec-like FSL file",
+            ));
         }
     };
     let all_mutants = fsl_tools::enumerate_builtin_mutants(&spec);
@@ -10258,7 +10257,7 @@ fn run_mutate(
     if let Some(external_path) = external_mutants {
         let candidates = match load_external_mutations(external_path, &source) {
             Ok(candidates) => candidates,
-            Err(error) => return (error_output("io", &error), 0),
+            Err(error) => return mutate_error(error_output("io", &error)),
         };
         for candidate in candidates {
             if let Some(invalid) = candidate.invalid.clone() {
@@ -15705,14 +15704,42 @@ fn model_error_output(error: &fsl_core::ModelError) -> Value {
     )
 }
 
-/// Keep a spec-error envelope's own exit code when a command would otherwise
-/// downgrade a non-success baseline to 0.
-fn baseline_error_status(baseline: &Value, status: i32) -> i32 {
-    if baseline.get("result").and_then(Value::as_str) == Some("error") {
-        status
-    } else {
-        0
+/// `docs/LANGUAGE.md`'s exit-code table applied to an envelope `mutate`
+/// returns, as a *total* match over the result vocabulary a mutation run can
+/// carry.
+///
+/// `mutate` re-emits its baseline `verify` envelope verbatim when the baseline
+/// does not verify, so the baseline's `result` -- not merely the fact that it
+/// is "not verified" -- decides the exit code. Deriving the status from
+/// `result == "error"` alone let every other non-success value fall through to
+/// 0, so `violated` exited 0 (issue #554): a mutation score is meaningless
+/// over a spec that already fails, and a gate reading only the exit code saw a
+/// pass. `scenarios` and `testgen` re-emit the same baseline envelope and
+/// already exit 1.
+///
+/// `error_status` is the classified spec-error code the caller already holds
+/// (2 for parse/type/semantics/io, or whatever the baseline reported), so an
+/// error envelope is never re-classified here.
+fn mutate_exit_status(output: &Value, error_status: i32) -> i32 {
+    match output.get("result").and_then(Value::as_str) {
+        // Exit-code table row 0.
+        Some("mutated" | "verified" | "proved") => 0,
+        // Row 1. A baseline `verify` cannot produce that row's remaining
+        // members (`nonconformant`, `refinement_failed`, `sweep_failed`,
+        // `observed_mismatch`); those belong to other commands.
+        Some("violated" | "reachable_failed" | "unknown_cti" | "unknown_budget") => 1,
+        Some("error") => error_status,
+        // An unmapped result is an internal inconsistency, never a silent
+        // success -- falling through to 0 is exactly how #554 arose.
+        _ => 3,
     }
+}
+
+/// Pair a `mutate` error envelope with the exit code the table gives it, so no
+/// early return can re-introduce a hard-coded status.
+fn mutate_error(output: Value) -> (Value, i32) {
+    let status = mutate_exit_status(&output, 2);
+    (output, status)
 }
 
 /// Render a spec-loading failure through the class the loader preserved, so

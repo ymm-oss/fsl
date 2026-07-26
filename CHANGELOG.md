@@ -49,6 +49,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   Verdicts and exit codes are unaffected, and no review finding changes — the
   manifest path accepts only `--projection traceability_graph`, so no structural
   detector runs there at all (#558).
+- **Breaking (exit code).** `fslc mutate` on a spec whose baseline already
+  fails now exits 1 instead of 0. `mutate` re-emits the baseline `verify`
+  envelope verbatim when the baseline does not verify, but derived its exit
+  code from `result == "error"` alone, so every other non-success verdict fell
+  through to 0 and `result:"violated"` returned a green exit — a mutation score
+  is meaningless over a spec that already fails, and a gate reading only the
+  exit code saw a pass. `docs/LANGUAGE.md`'s exit-code table maps `violated`
+  to 1 with no per-command exemption, and `scenarios`/`testgen` re-emit the
+  same envelope and already exited 1. The status is now a total match over the
+  results a mutation run can carry (`mutate_exit_status`): `mutated`/
+  `verified`/`proved` → 0, `violated`/`reachable_failed`/`unknown_cti`/
+  `unknown_budget` → 1, `error` → the code the envelope was already classified
+  with, and anything unmapped → 3 rather than silently 0. Mapping the whole
+  vocabulary also closed a second reachable false green in the same command:
+  `--from <unreadable file>` returned `result:"error"`, `kind:"io"` with exit 0
+  and now exits 2 (#554).
 - Native `fslc mutate` now defaults to 200 built-in mutants instead of 100,
   matching the `max_mutants` default its own published CLI contract
   (`rust/fslc/cli-contract.json`) advertises and the 200 fixed by
