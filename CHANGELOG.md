@@ -5,6 +5,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Added
+- `rust/fslc/tests/corpus_check_sweep.rs::check_result_and_exit_status_never_contradict`:
+  an oracle-free Verdict Conservation Law check (issue #537 C2) over every
+  `.fsl` file under `specs/` + `examples/`. It holds no per-file expectation;
+  it only requires that a success-class `fslc check` result exit 0, that
+  every other (including any future, unlisted) result exit non-zero, and
+  that the stdout envelope is a JSON object carrying a string `result`
+  field. `corpus_check_sweep.rs`'s existing sweep only ever inspected the
+  JSON body, never the process exit status, so a `result:"error"` envelope
+  that exited 0 would previously pass unnoticed.
+
 ### Fixed
 - A CDP timeout in the browser parity gate now reports the call ordinal, the
   socket's `readyState`, how many other requests were outstanding, and Chrome's

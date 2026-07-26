@@ -22,6 +22,15 @@
 //! `examples/gallery/injected/` (its own primary/blind detector matrix in
 //! `injection_detector_matrix.rs`) is a genuine verified-elsewhere category,
 //! not a silent skip.
+//!
+//! `check_result_and_exit_status_never_contradict` below is a second,
+//! independent property over the same corpus sweep (issue #537 C2, Verdict
+//! Conservation Law). It holds no per-file oracle and needs none of the
+//! exclusions above: unlike "does this file check clean", "does the exit
+//! status agree with the result class" is a closed law that every corpus
+//! file -- including deliberately-failing fixtures and the
+//! `refinement`/`examples/gallery/injected/` categories excluded above --
+//! must satisfy.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -113,19 +122,31 @@ fn headers(source: &str) -> std::collections::BTreeMap<String, String> {
     out
 }
 
-fn run_check(path: &Path) -> Value {
+/// Runs `fslc check` on `path` and returns the parsed stdout envelope
+/// together with the process exit status, so a single sweep of the corpus
+/// can serve both the per-file oracle below and the oracle-free
+/// `result`/exit conservation law in
+/// `check_result_and_exit_status_never_contradict`.
+fn run_check(path: &Path) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(["check", path.to_str().expect("utf8 path")])
         .current_dir(root())
         .output()
         .expect("run native CLI");
-    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+    let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
             "invalid JSON for `fslc check {}`: {error}; stderr={}",
             path.display(),
             String::from_utf8_lossy(&output.stderr)
         )
-    })
+    });
+    let status = output.status.code().unwrap_or_else(|| {
+        panic!(
+            "`fslc check {}` terminated by signal, no exit code",
+            path.display()
+        )
+    });
+    (value, status)
 }
 
 #[test]
@@ -164,7 +185,7 @@ fn every_corpus_spec_checks_ok_or_declares_its_error() {
             continue;
         }
 
-        let result = run_check(path);
+        let (result, _exit) = run_check(path);
 
         let file_headers = headers(&source);
         // `expected-command`/`expected-result` may target a *stricter* verb
@@ -198,4 +219,88 @@ fn every_corpus_spec_checks_ok_or_declares_its_error() {
     }
 
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// `result` values `fslc check` emits that belong to the success class
+/// (exit status must be 0).
+///
+/// `check`'s own family arms (`run_check_with_tags`, `agent_check_output`,
+/// `run_causal_check` in `rust/fslc/src/main.rs`/`causal.rs`) each set their
+/// exit code directly at the return site rather than deriving it from
+/// `result` through one shared function -- unlike, say, `mutate_exit_status`
+/// in `main.rs`, there is no existing single production-code enumeration of
+/// `check`'s result vocabulary this test could defer to instead. This is
+/// therefore deliberately an allowlist, not a denylist: issue #537 C2
+/// requires that aggregation "never default an unknown variant to
+/// success", so a `check` result value that is not (yet) listed here falls
+/// through to the failure class below and the test fails loudly instead of
+/// silently accepting a new false-green shape.
+const CHECK_SUCCESS_RESULTS: &[&str] = &[
+    "ok",                   // rust/fslc/src/main.rs: run_check_with_tags, agent_check_output
+    "causal_model_checked", // rust/fsl-tools/src/causal_analysis.rs
+];
+
+/// Verdict Conservation Law for `fslc check` (issue #537 C2), checked
+/// without any per-file oracle: a success-class `result` must exit 0, and
+/// every other `result` -- including a value not yet in
+/// `CHECK_SUCCESS_RESULTS` -- must exit non-zero. The envelope itself must
+/// also be a JSON object carrying a string `result` field.
+#[test]
+fn check_result_and_exit_status_never_contradict() {
+    let root = root();
+    let mut files = Vec::new();
+    collect_fsl_files(&root.join("specs"), &mut files);
+    collect_fsl_files(&root.join("examples"), &mut files);
+    files.sort();
+    assert!(
+        files.len() > 150,
+        "corpus scan floor: found only {} .fsl files under specs/+examples/, expected 150+ \
+         (the directory walk may be broken)",
+        files.len()
+    );
+
+    let mut failures = Vec::new();
+    let mut observed_results = BTreeSet::new();
+
+    for path in &files {
+        let rel = repo_relative(&root, path);
+        let (envelope, exit) = run_check(path);
+
+        let Some(object) = envelope.as_object() else {
+            failures.push(format!(
+                "{rel}: `fslc check` stdout is not a JSON object: {envelope}"
+            ));
+            continue;
+        };
+        let Some(result) = object.get("result").and_then(Value::as_str) else {
+            failures.push(format!(
+                "{rel}: `fslc check` envelope has no string `result` field: {envelope}"
+            ));
+            continue;
+        };
+
+        observed_results.insert(result.to_owned());
+        let is_success = CHECK_SUCCESS_RESULTS.contains(&result);
+        if is_success && exit != 0 {
+            failures.push(format!(
+                "{rel}: result={result:?} is success-class but exit={exit} (false red)"
+            ));
+        } else if !is_success && exit == 0 {
+            failures.push(format!(
+                "{rel}: result={result:?} is not a registered success-class result but \
+                 exit=0 (false green)"
+            ));
+        }
+    }
+
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    // Not a conservation check: a corpus that happened to contain zero
+    // check-failing files would make the `!is_success && exit == 0` arm
+    // above vacuously true for every file, so this law's negative side
+    // would never actually fire. Confirm the corpus still exercises it.
+    assert!(
+        observed_results.contains("error"),
+        "expected at least one corpus file to produce result=\"error\"; \
+         got {observed_results:?} -- the failure-class arm of this law is untested"
+    );
 }
