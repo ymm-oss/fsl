@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Detector fixture for the `unanchored_property` scenario-anchor clause
+// (`rust/fsl-tools/src/analysis.rs`: `scenario_actions && kind == "reachable"`).
+// Not a corpus specification — it is shaped to isolate one branch.
+//
+// `AllClosed` deliberately reads no state, so the earlier
+// `!reads.is_empty() && !reads.is_disjoint(&related)` disjunct cannot suppress
+// it and the scenario-anchor clause is the only thing that can. That clause
+// needs a scenario -> action edge, which on native only exists once acceptance
+// step ordering is projected (#495). `AC-1` supplies exactly one such step.
+requirements ScenarioAnchoredReachable {
+  number Amount
+
+  process Ticket with amount: Amount {
+    stages Open, Closed
+    initial Open
+
+    transition close Open -> Closed by Agent
+      with a: Amount
+      when a > 0
+      set amount = a
+      covers REQ-1 "An agent closes a ticket"
+  }
+
+  reachable AllClosed { true }
+
+  acceptance AC-1 "close one ticket" {
+    close(0, 1)
+    expect Ticket 0 in Closed
+  }
+}
+verify {
+  instances Ticket = 2
+  values Amount = 0..2
+}

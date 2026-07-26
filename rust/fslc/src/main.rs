@@ -12075,7 +12075,7 @@ fn ai_review_output(
     acceptance: &[(String, KernelExpr)],
     path: &Path,
 ) -> Value {
-    let tsg = enrich_tsg_with_requirements_scenarios(fsl_tools::build_tsg(model), model, path);
+    let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(model), model, path);
     let mut findings = fsl_tools::structural_review_findings(&tsg);
     let unconstrained_states = findings
         .iter()
@@ -12161,26 +12161,23 @@ fn ai_review_output(
     Value::Object(output)
 }
 
-/// Enrich a TSG with requirements-dialect scenario nodes `build_tsg` cannot
-/// see: acceptance/forbidden test cases live only in requirements-dialect
-/// surface syntax (`fsl_core::requirements_trace_contract`), not the lowered
-/// `KernelModel`, so they need source text, not just the checked model.
-/// Adds `acceptance:<id>`/`forbidden:<id>` nodes (declared by the spec) and
-/// a `covers` edge from any `@requirement(...)`-annotated requirement to the
-/// scenario it exercises — creating the `requirement:<id>` node too if it
-/// is not already present (a requirement cited only on a scenario, never on
-/// a Kernel target `build_tsg` itself sees, would otherwise leave a `covers`
-/// edge pointing at a node that does not exist). A no-op for a file that is
-/// not a requirements document, or when the source cannot be re-read.
-fn enrich_tsg_with_requirements_scenarios(
-    mut tsg: Value,
-    model: &KernelModel,
-    path: &Path,
-) -> Value {
+/// Add the TSG node and edge kinds that survive only in the source text.
+///
+/// Acceptance/forbidden cases (`fsl_core::requirements_trace_contract`) and
+/// governance/business `control` catalog entries have no Kernel-lowered form,
+/// so they cannot be reconstructed from [`KernelModel`] the way
+/// `requirement`/`kpi` nodes are — they need the source, not just the checked
+/// model. A requirement cited only on a scenario, never on a Kernel target
+/// `build_tsg` itself sees, gets its `requirement:<id>` node created here so
+/// its `covers` edge never dangles. A no-op when the source cannot be re-read,
+/// or for a document that declares neither cases nor controls.
+///
+/// Both single-file entry points (`analyze` and `analyze --profile ai-review`)
+/// call this once. The `.toml` project-manifest path builds its own prefixed
+/// multi-layer graph from `build_tsg` alone and so has none of these
+/// source-only kinds; that predates this function.
+fn enrich_tsg_from_source(mut tsg: Value, model: &KernelModel, path: &Path) -> Value {
     let Ok(source) = std::fs::read_to_string(path) else {
-        return tsg;
-    };
-    let Ok(Some(contract)) = fsl_core::requirements_trace_contract(&source) else {
         return tsg;
     };
     let mut known_ids = tsg["nodes"]
@@ -12192,6 +12189,43 @@ fn enrich_tsg_with_requirements_scenarios(
     let mut node_additions = Vec::new();
     let mut edge_additions = Vec::new();
     let spec_id = format!("spec:{}", model.name);
+    add_scenario_items(
+        &source,
+        &spec_id,
+        &mut known_ids,
+        &mut node_additions,
+        &mut edge_additions,
+    );
+    add_control_items(
+        &source,
+        &spec_id,
+        &mut known_ids,
+        &mut node_additions,
+        &mut edge_additions,
+    );
+    if let Some(nodes) = tsg.get_mut("nodes").and_then(Value::as_array_mut) {
+        nodes.extend(node_additions);
+        nodes.sort_by_key(|node| node["id"].as_str().unwrap_or_default().to_owned());
+    }
+    if let Some(edges) = tsg.get_mut("edges").and_then(Value::as_array_mut) {
+        edges.extend(edge_additions);
+        edges.sort_by_key(|edge| edge["id"].as_str().unwrap_or_default().to_owned());
+    }
+    tsg
+}
+
+/// Project `acceptance`/`forbidden` cases, the requirements that cover them,
+/// and their step ordering.
+fn add_scenario_items(
+    source: &str,
+    spec_id: &str,
+    known_ids: &mut std::collections::BTreeSet<String>,
+    node_additions: &mut Vec<Value>,
+    edge_additions: &mut Vec<Value>,
+) {
+    let Ok(Some(contract)) = fsl_core::requirements_trace_contract(source) else {
+        return;
+    };
     for (kind, cases) in [
         ("acceptance", &contract.acceptance),
         ("forbidden", &contract.forbidden),
@@ -12200,7 +12234,7 @@ fn enrich_tsg_with_requirements_scenarios(
             let id = format!("{kind}:{}", case.id);
             node_additions.push(project_analysis_node(&id, kind, &case.id));
             known_ids.insert(id.clone());
-            edge_additions.push(project_analysis_edge(&spec_id, "declares", &id));
+            edge_additions.push(project_analysis_edge(spec_id, "declares", &id));
             for requirement in requirement_metadata(&case.annotations, None) {
                 let Some(requirement_id) = requirement.get("id").and_then(Value::as_str) else {
                     continue;
@@ -12213,24 +12247,87 @@ fn enrich_tsg_with_requirements_scenarios(
                         requirement_id,
                     ));
                     edge_additions.push(project_analysis_edge(
-                        &spec_id,
+                        spec_id,
                         "declares",
                         &requirement_node_id,
                     ));
                 }
                 edge_additions.push(project_analysis_edge(&requirement_node_id, "covers", &id));
             }
+            // Step ordering. The frozen reference
+            // (`src/fslc/analysis/tsg.py` `_add_scenario_steps`) fixes both the
+            // direction and the split: the edge runs scenario -> action, the
+            // first step is `starts_with`, every later step is `precedes`, and
+            // the id carries the step index so a scenario that calls the same
+            // action twice does not collapse into one edge.
+            for (index, step) in case.steps.iter().enumerate() {
+                let action_id = format!("action:{}", step.name);
+                // A validated case can only name a declared action, so this
+                // holds in practice; skipping rather than fabricating an
+                // `action` node keeps the graph free of invented declarations
+                // and of dangling edges either way.
+                if !known_ids.contains(&action_id) {
+                    continue;
+                }
+                let kind = if index == 0 {
+                    "starts_with"
+                } else {
+                    "precedes"
+                };
+                edge_additions.push(json!({
+                    "id": format!("edge:{id}:step:{index}:{action_id}"),
+                    "kind": kind,
+                    "from": id,
+                    "to": action_id,
+                    "step": index,
+                }));
+            }
         }
     }
-    if let Some(nodes) = tsg.get_mut("nodes").and_then(Value::as_array_mut) {
-        nodes.extend(node_additions);
-        nodes.sort_by_key(|node| node["id"].as_str().unwrap_or_default().to_owned());
+}
+
+/// Project governance/business `control` catalog entries.
+///
+/// `docs/LANGUAGE.md` §"control" states a control "does not generate a property
+/// by itself; it is a catalog entry", so lowering leaves nothing behind for
+/// `build_tsg` to find.
+fn add_control_items(
+    source: &str,
+    spec_id: &str,
+    known_ids: &mut std::collections::BTreeSet<String>,
+    node_additions: &mut Vec<Value>,
+    edge_additions: &mut Vec<Value>,
+) {
+    let Ok(document) = fsl_syntax::parse_surface_document(source) else {
+        return;
+    };
+    let controls: Vec<&String> = match &document {
+        fsl_syntax::SurfaceDocument::Governance(governance) => governance
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                fsl_syntax::GovernanceItem::Control { id, .. } => Some(id),
+                _ => None,
+            })
+            .collect(),
+        fsl_syntax::SurfaceDocument::Business(business) => business
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                fsl_syntax::BusinessItem::Control { id, .. } => Some(id),
+                _ => None,
+            })
+            .collect(),
+        _ => return,
+    };
+    for control in controls {
+        let id = format!("control:{control}");
+        if !known_ids.insert(id.clone()) {
+            continue;
+        }
+        node_additions.push(project_analysis_node(&id, "control", control));
+        edge_additions.push(project_analysis_edge(spec_id, "declares", &id));
     }
-    if let Some(edges) = tsg.get_mut("edges").and_then(Value::as_array_mut) {
-        edges.extend(edge_additions);
-        edges.sort_by_key(|edge| edge["id"].as_str().unwrap_or_default().to_owned());
-    }
-    tsg
 }
 
 #[derive(Clone)]
@@ -12853,7 +12950,7 @@ fn run_analyze(
         let acceptance = analysis_acceptance_predicates(path);
         return (ai_review_output(&model, &acceptance, path), 0);
     }
-    let tsg = enrich_tsg_with_requirements_scenarios(fsl_tools::build_tsg(&model), &model, path);
+    let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(&model), &model, path);
     match fsl_tools::analyze_tsg(tsg, projection, focus) {
         Ok(analysis @ Value::Object(_)) => finish_analysis(
             analysis,
