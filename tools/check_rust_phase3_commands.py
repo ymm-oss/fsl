@@ -83,7 +83,11 @@ def project(name: str, value: dict[str, Any]) -> Any:
     if name == "ai-check":
         return {key: value.get(key) for key in ("result", "dialect", "ai_component", "formal_result")} | {"findings": findings}
     if name == "ai-project-check":
-        return {key: value.get(key) for key in ("result", "formal_result", "components", "statistical_properties", "observed_properties", "migrations")}
+        # Every key `analyze_ai_project` emits. This projection used to cover
+        # only six of them, which is why native could omit `ai_project`,
+        # `assumptions`, `datasets`, `dialect`, `evaluators`, and
+        # `failure_modes` without the comparison noticing (issue #563).
+        return {key: value.get(key) for key in ("result", "dialect", "formal_result", "ai_project", "components", "datasets", "evaluators", "failure_modes", "statistical_properties", "observed_properties", "migrations", "raw_blocks", "assumptions")}
     if name == "ai-replay":
         return {"result": value.get("result"), "events_checked": value.get("events_checked"), "violations": [item.get("violation") for item in value.get("findings", [])]}
     if name in {"ai-eval", "ai-regress", "ai-drift"}:

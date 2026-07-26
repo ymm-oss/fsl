@@ -6311,8 +6311,14 @@ fn run_ai_project_check(source: &str, path: &Path) -> (Value, i32) {
             return (output, 2);
         }
     };
+    // Field set and order mirror the frozen reference's `analyze_ai_project`
+    // (`src/fslc/ai_project.py`). Native previously omitted `dialect`,
+    // `ai_project`, `datasets`, `evaluators`, `failure_modes`, and
+    // `assumptions`; `skills/fsl/reference.md` documents `failure_modes` as
+    // output, so agents were told to expect a field native never produced
+    // (issue #563).
     wrap_specialized(
-        json!({"result":"ai_project_analyzed","formal_result":"not_run","components":project.components.iter().map(|component|&component.name).collect::<Vec<_>>(),"statistical_properties":project.statistical_properties.iter().map(|property|&property.name).collect::<Vec<_>>(),"observed_properties":project.observed_properties.iter().map(|property|&property.name).collect::<Vec<_>>(),"migrations":project.migrations.iter().map(|migration|&migration.name).collect::<Vec<_>>(),"raw_blocks":project.raw_blocks.iter().map(|block|json!({"kind":block.kind,"name":block.name})).collect::<Vec<_>>(),"findings":[]}),
+        json!({"result":"ai_project_analyzed","dialect":"fsl-ai-project.v0","formal_result":"not_run","ai_project":project.name,"components":project.components.iter().map(|component|&component.name).collect::<Vec<_>>(),"datasets":project.datasets.iter().map(|dataset|&dataset.name).collect::<Vec<_>>(),"evaluators":project.evaluators,"failure_modes":project.failure_modes,"statistical_properties":project.statistical_properties.iter().map(|property|&property.name).collect::<Vec<_>>(),"observed_properties":project.observed_properties.iter().map(|property|&property.name).collect::<Vec<_>>(),"migrations":project.migrations.iter().map(|migration|&migration.name).collect::<Vec<_>>(),"raw_blocks":project.raw_blocks.iter().map(|block|json!({"kind":block.kind,"name":block.name})).collect::<Vec<_>>(),"assumptions":[{"id":"AI-ASSUME-EXTERNAL-EVIDENCE-JOBS","text":"statistical, migration, and observed AI declarations are external evidence jobs and do not add probability semantics to fslc verify"}],"findings":[]}),
     )
 }
 
