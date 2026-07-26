@@ -111,6 +111,7 @@ impl DocumentIndex {
         let mut contexts: Vec<(Context, Option<String>)> = Vec::new();
         let mut expected: Option<(SymbolRole, Option<Context>)> = None;
         let mut awaiting_block: Option<(Context, Option<String>)> = None;
+        let mut list_role: Option<(SymbolRole, Option<Context>)> = None;
         let mut declaration_offsets = BTreeSet::new();
 
         for (index, token) in tokens.iter().enumerate() {
@@ -126,8 +127,18 @@ impl DocumentIndex {
                         });
                         continue;
                     }
-                    if let Some((role, context)) = declaration_keyword(name) {
+                    // `reachable` and `domain` each name both a top-level
+                    // declaration keyword (`reachable NAME { expr }`, `domain
+                    // SpecName { ... }`) and a relation builtin call
+                    // (`reachable(r, a, b)`, `domain(r)`). Only the
+                    // declaration form starts a new declaration; a following
+                    // `(` is always the builtin call, which is a keyword like
+                    // every other builtin and owns no local name.
+                    let builtin_call = matches!(name.as_str(), "reachable" | "domain")
+                        && token_symbol(tokens.get(index + 1)) == Some("(");
+                    if !builtin_call && let Some((role, context)) = declaration_keyword(name) {
                         expected = role.map(|role| (role, context));
+                        list_role = (name == "actor").then_some(expected).flatten();
                         if role.is_none() {
                             awaiting_block = context.map(|context| (context, None));
                         }
@@ -152,23 +163,47 @@ impl DocumentIndex {
                             == Some("{")
                             || token_symbol(index.checked_sub(1).and_then(|i| tokens.get(i)))
                                 == Some(","));
-                    let role = if next_is_colon {
+                    // A binder introduced by `forall`/`exists`, or the first
+                    // parameter of an aggregate call (`count(c: T where ...)`,
+                    // `sum(...)`, `unique(...)`, `exactlyOne(...)`), declares a
+                    // local name regardless of the enclosing declaration
+                    // context and regardless of whether it uses the `name: T`
+                    // or `name in ...` binder form.
+                    let binder_after_aggregate_paren =
+                        token_symbol(index.checked_sub(1).and_then(|i| tokens.get(i))) == Some("(")
+                            && matches!(
+                                token_ident(index.checked_sub(2).and_then(|i| tokens.get(i))),
+                                Some("count" | "sum" | "unique" | "exactlyOne")
+                            );
+                    let quantifier_binder = matches!(previous, Some("forall" | "exists"))
+                        || binder_after_aggregate_paren;
+                    // `x is some(v)` binds `v` for the rest of the guarded
+                    // expression, the same as a `let`.
+                    let pattern_binder =
+                        token_symbol(index.checked_sub(1).and_then(|i| tokens.get(i))) == Some("(")
+                            && token_ident(index.checked_sub(2).and_then(|i| tokens.get(i)))
+                                == Some("some")
+                            && token_ident(index.checked_sub(3).and_then(|i| tokens.get(i)))
+                                == Some("is");
+                    let role = if quantifier_binder || pattern_binder {
+                        Some(SymbolRole::Variable)
+                    } else if next_is_colon {
                         match context {
                             Some(Context::Action) => Some(SymbolRole::Parameter),
                             Some(Context::State) => Some(SymbolRole::Variable),
                             Some(Context::Struct) => Some(SymbolRole::Property),
                             _ => None,
                         }
-                    } else if enum_member
-                        || matches!(previous, Some("as" | "let" | "forall" | "exists"))
-                    {
+                    } else if enum_member || matches!(previous, Some("as" | "let")) {
                         Some(SymbolRole::Variable)
                     } else {
                         None
                     };
                     if let Some(role) = role {
                         let scoped = matches!(role, SymbolRole::Parameter)
-                            || matches!(previous, Some("as" | "let" | "forall" | "exists"));
+                            || quantifier_binder
+                            || pattern_binder
+                            || matches!(previous, Some("as" | "let"));
                         add_symbol(
                             source,
                             token,
@@ -188,20 +223,34 @@ impl DocumentIndex {
                         });
                     }
                 }
+                TokenKind::Symbol(symbol) if symbol == "," => {
+                    // `actor A, B` continues one declaration list, but the
+                    // parser also ends the list on a trailing comma followed
+                    // by the next item keyword (`actor A, entity Case`), so
+                    // only a non-keyword name re-arms the pending role.
+                    let continues_list =
+                        token_ident(tokens.get(index + 1)).is_some_and(|next| !is_keyword(next));
+                    if continues_list && let Some(pending) = list_role {
+                        expected = Some(pending);
+                    }
+                }
                 TokenKind::Symbol(symbol) if symbol == "{" => {
                     let inherited = contexts.last().and_then(|(_, owner)| owner.clone());
                     contexts.push(awaiting_block.take().unwrap_or((Context::Other, inherited)));
+                    list_role = None;
                 }
                 TokenKind::Symbol(symbol) if symbol == "}" => {
                     contexts.pop();
                     awaiting_block = None;
                     expected = None;
+                    list_role = None;
                 }
                 TokenKind::Symbol(symbol)
                     if symbol == ";"
                         && !matches!(awaiting_block, Some((Context::Action | Context::Top, _))) =>
                 {
                     awaiting_block = None;
+                    list_role = None;
                 }
                 _ => {}
             }
@@ -612,7 +661,7 @@ fn declaration_keyword(value: &str) -> Option<(Option<SymbolRole>, Option<Contex
         "enum" => (Some(SymbolRole::Type), Some(Context::Enum)),
         "struct" | "table" => (Some(SymbolRole::Type), Some(Context::Struct)),
         "action" | "transition" | "tool" | "command" | "effect" | "migration" | "decide"
-        | "evolve" => (Some(SymbolRole::Function), Some(Context::Action)),
+        | "evolve" | "def" => (Some(SymbolRole::Function), Some(Context::Action)),
         "invariant" | "trans" | "reachable" | "until" | "unless" | "leadsTo" | "property"
         | "requirement" | "acceptance" | "forbidden" | "control" | "policy" | "goal" | "claim"
         | "expectation" => (Some(SymbolRole::Property), Some(Context::Other)),
@@ -620,6 +669,7 @@ fn declaration_keyword(value: &str) -> Option<(Option<SymbolRole>, Option<Contex
         | "environment" | "artifact" | "column" | "variable" => {
             (Some(SymbolRole::Variable), Some(Context::Other))
         }
+        "preservation" => (Some(SymbolRole::Namespace), Some(Context::Other)),
         "state" => (None, Some(Context::State)),
         "init" | "verify" => (None, Some(Context::Other)),
         _ => return None,
@@ -643,6 +693,7 @@ const INDEX_KEYWORDS: &[&str] = &[
     "forall",
     "exists",
     "in",
+    "where",
     "terminal",
     "decreases",
     "within",
@@ -696,7 +747,6 @@ const INDEX_KEYWORDS: &[&str] = &[
     "delegates",
     "require",
     "satisfied_by",
-    "preservation",
     "before",
     "after",
     "checked_by",
@@ -902,5 +952,214 @@ mod tests {
                 .iter()
                 .all(|range| range.start.line == 4)
         );
+    }
+
+    /// Issue #504 evidence: the minimal accepted `spec` probing `def`, an
+    /// aggregate binder, an `is some(v)` pattern binder, and the
+    /// `reachable`/`domain` relation builtins.
+    const ISSUE_504_PROBE: &str = r"spec Probe {
+  type Id = 0..1
+  def eligible(x: Id) = x == 0
+  state { maybe: Option<Id>, edge: relation Id -> Id }
+  invariant UsesDef { eligible(0) }
+  invariant Agg { count(c: Id where c == 0) >= 0 }
+  invariant Pattern { maybe is some(v) and v == 0 }
+  invariant Relation { reachable(edge, 0, 1) and domain(edge).contains(0) }
+}";
+
+    /// `def eligible(x: Id) = x == 0` must declare `eligible` as a navigable
+    /// `Function` symbol and `x` as a `Parameter` scoped to it, and the call
+    /// `eligible(0)` and the body's `x == 0` must resolve back to them.
+    /// Before this fix, `def` was entirely absent from `declaration_keyword`,
+    /// so `eligible`/`x` were indexed as ordinary references with no
+    /// declaration to resolve to (`definition_at` returned `None`).
+    #[test]
+    fn def_declares_a_function_symbol_with_a_scoped_parameter() {
+        let index = DocumentIndex::build(ISSUE_504_PROBE, Some("probe.fsl")).expect("valid index");
+        let call_site = Position::new(4, 22); // `eligible(0)` inside UsesDef
+        let definition = index
+            .definition_at(call_site)
+            .expect("eligible(0) must resolve");
+        assert_eq!(definition.name, "eligible");
+        assert_eq!(definition.role, SymbolRole::Function);
+
+        let param_use = Position::new(2, 24); // the `x` inside `x == 0`
+        let param_definition = index
+            .definition_at(param_use)
+            .expect("the parameter use of x must resolve");
+        assert_eq!(param_definition.role, SymbolRole::Parameter);
+        assert_eq!(param_definition.owner.as_deref(), Some("eligible"));
+        let param_references = index.references_at(Position::new(2, 15), true);
+        assert_eq!(param_references.len(), 2, "{param_references:?}");
+    }
+
+    /// `count(c: Id where c == 0)` must declare `c` as a `Variable` binder
+    /// scoped to the enclosing invariant, resolvable from both `where c ==
+    /// 0`. Before this fix, a `name: Type` binder only got a role inside
+    /// `Context::Action`/`Context::State`/`Context::Struct`; inside an
+    /// invariant's `Context::Other` it fell through to `None` and was
+    /// indexed as a plain reference with no declaration.
+    #[test]
+    fn aggregate_binder_declares_a_scoped_variable() {
+        let index = DocumentIndex::build(ISSUE_504_PROBE, Some("probe.fsl")).expect("valid index");
+        let binder_use = Position::new(5, 36); // `c` inside `where c == 0`
+        let definition = index
+            .definition_at(binder_use)
+            .expect("the aggregate binder use of c must resolve");
+        assert_eq!(definition.name, "c");
+        assert_eq!(definition.role, SymbolRole::Variable);
+        assert_eq!(definition.owner.as_deref(), Some("Agg"));
+    }
+
+    /// A `forall`/`exists` binder must declare its name as a `Variable`
+    /// scoped to the enclosing declaration in the `name: Type` form too, not
+    /// only the `name in ...` form. Before this fix the typed form was
+    /// matched first by `next_is_colon`, which outside
+    /// `Context::Action`/`State`/`Struct` yields no role at all, so an
+    /// invariant's quantifier binder was indexed as a plain reference.
+    #[test]
+    fn forall_and_exists_typed_binders_declare_scoped_variables() {
+        let source = r"spec Quant {
+  type Id = 0..1
+  state { seen: Set<Id> }
+  invariant Every { forall i: Id { seen.contains(i) } }
+  invariant Any { exists j: Id { seen.contains(j) } }
+}";
+        let index = DocumentIndex::build(source, None).expect("valid index");
+        for (name, owner) in [("i", "Every"), ("j", "Any")] {
+            let binder = index
+                .symbols
+                .iter()
+                .find(|symbol| symbol.name == name)
+                .unwrap_or_else(|| panic!("{name} must be declared, got {:?}", index.symbols));
+            assert_eq!(binder.role, SymbolRole::Variable);
+            assert_eq!(binder.owner.as_deref(), Some(owner));
+            let use_site = index
+                .references
+                .iter()
+                .find(|reference| reference.name == name)
+                .unwrap_or_else(|| panic!("{name} must be used in the body"));
+            let definition = index
+                .definition_at(use_site.range.start)
+                .expect("the binder use must resolve");
+            assert_eq!(definition.selection_range, binder.selection_range);
+        }
+    }
+
+    /// `maybe is some(v) and v == 0` must declare `v` as a `Variable`
+    /// pattern binder scoped to the enclosing invariant, resolvable from the
+    /// guarded use `v == 0`. Before this fix, `is some(name)` was not
+    /// recognized as a binder position at all.
+    #[test]
+    fn is_some_pattern_binder_declares_a_scoped_variable() {
+        let index = DocumentIndex::build(ISSUE_504_PROBE, Some("probe.fsl")).expect("valid index");
+        let binder_use = Position::new(6, 43); // `v` inside `v == 0`
+        let definition = index
+            .definition_at(binder_use)
+            .expect("the pattern binder use of v must resolve");
+        assert_eq!(definition.name, "v");
+        assert_eq!(definition.role, SymbolRole::Variable);
+        assert_eq!(definition.owner.as_deref(), Some("Pattern"));
+    }
+
+    /// `reachable` and `domain` each name both a top-level declaration
+    /// keyword (`reachable NAME { expr }`, `domain SpecName { ... }`) and a
+    /// relation builtin call. `reachable(edge, 0, 1) and
+    /// domain(edge).contains(0)` must not spuriously declare a second `edge`
+    /// symbol from either builtin call; the state declaration must stay the
+    /// only `edge` symbol, and every use of `edge` must resolve to it.
+    /// Before this fix, the unconditional `declaration_keyword` match
+    /// consumed the identifier immediately following `reachable`/`domain` as
+    /// a brand-new declaration, corrupting `edge`'s definition/reference set
+    /// with a self-defining duplicate. The builtin call names themselves stay
+    /// keywords and own no index entry, like every other builtin.
+    #[test]
+    fn reachable_and_domain_builtin_calls_do_not_shadow_the_relation_declaration() {
+        let index = DocumentIndex::build(ISSUE_504_PROBE, Some("probe.fsl")).expect("valid index");
+        let edge_symbols = index
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.name == "edge")
+            .count();
+        assert_eq!(edge_symbols, 1, "{:?}", index.symbols);
+        assert!(
+            !index
+                .references
+                .iter()
+                .any(|reference| matches!(reference.name.as_str(), "reachable" | "domain")),
+            "{:?}",
+            index.references
+        );
+
+        let state_declaration = Position::new(3, 29);
+        for use_position in [
+            Position::new(7, 33), // reachable(edge, ...)
+            Position::new(7, 56), // domain(edge)
+        ] {
+            let definition = index
+                .definition_at(use_position)
+                .expect("edge use must resolve");
+            assert_eq!(definition.selection_range.start, state_declaration);
+        }
+    }
+
+    /// A named `preservation NAME { ... }` governance block must declare
+    /// `NAME` as a navigable symbol. Before this fix, `preservation` was
+    /// absent from `declaration_keyword`, so the block name was indexed as
+    /// an ordinary reference with no declaration.
+    #[test]
+    fn named_preservation_block_declares_a_symbol() {
+        let source = r#"governance Controls { control CTRL "control" preservation Reform { preserve CTRL } }"#;
+        let index = DocumentIndex::build(source, None).expect("valid governance");
+        let reform = index
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "Reform")
+            .expect("preservation block name must be declared");
+        assert_eq!(reform.role, SymbolRole::Namespace);
+    }
+
+    /// `actor Customer, Manager` must declare every comma-separated name,
+    /// not only the first. Before this fix, `expected` (the pending
+    /// declaration role/context) was consumed by the first identifier and
+    /// never re-armed at the following `,`, so `Manager` fell through to an
+    /// ordinary reference with no declaration.
+    #[test]
+    fn comma_separated_actor_list_declares_every_name() {
+        let source = "business Actors { actor Customer, Manager entity Case }\n\
+             verify { instances Case = 1 }";
+        let index = DocumentIndex::build(source, None).expect("valid business");
+        for name in ["Customer", "Manager"] {
+            let symbol = index
+                .symbols
+                .iter()
+                .find(|symbol| symbol.name == name)
+                .unwrap_or_else(|| panic!("{name} must be declared"));
+            assert_eq!(symbol.role, SymbolRole::Variable);
+        }
+    }
+
+    /// `rust/fsl-syntax/src/parser.rs`'s `open_ident_list` also ends an
+    /// `actor` list on a trailing comma followed by the next item keyword, so
+    /// `actor Customer, entity Case` declares one actor and one entity. The
+    /// pending-role re-arm must not consume that keyword: a naive re-arm at
+    /// every `,` declared a symbol literally named `entity` and left `Case`
+    /// an unresolved reference.
+    #[test]
+    fn actor_list_terminated_by_a_trailing_comma_does_not_consume_the_next_keyword() {
+        let source = "business Actors { actor Customer, entity Case }\n\
+             verify { instances Case = 1 }";
+        let index = DocumentIndex::build(source, None).expect("valid business");
+        assert!(
+            !index.symbols.iter().any(|symbol| symbol.name == "entity"),
+            "{:?}",
+            index.symbols
+        );
+        let case = index
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "Case")
+            .expect("Case must be declared by `entity Case`");
+        assert_eq!(case.role, SymbolRole::Type);
     }
 }
