@@ -59,6 +59,7 @@ pub struct ImportBinding {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DocumentIndex {
     source: String,
+    refinement: bool,
     pub symbols: Vec<Symbol>,
     pub references: Vec<Reference>,
     pub imports: Vec<ImportBinding>,
@@ -112,37 +113,50 @@ impl DocumentIndex {
         let mut expected: Option<(SymbolRole, Option<Context>)> = None;
         let mut awaiting_block: Option<(Context, Option<String>)> = None;
         let mut list_role: Option<(SymbolRole, Option<Context>)> = None;
+        let mut in_annotation = false;
         let mut declaration_offsets = BTreeSet::new();
 
         for (index, token) in tokens.iter().enumerate() {
             match &token.kind {
                 TokenKind::Ident(name) => {
-                    if let Some((role, context)) = expected.take() {
-                        add_symbol(source, token, name, role, None, &mut symbols);
-                        declaration_offsets.insert(token.span.start.offset);
-                        awaiting_block = context.map(|context| {
-                            let owner = matches!(context, Context::Action | Context::Other)
-                                .then(|| name.clone());
-                            (context, owner)
-                        });
-                        continue;
-                    }
-                    // `reachable` and `domain` each name both a top-level
-                    // declaration keyword (`reachable NAME { expr }`, `domain
-                    // SpecName { ... }`) and a relation builtin call
-                    // (`reachable(r, a, b)`, `domain(r)`). Only the
-                    // declaration form starts a new declaration; a following
-                    // `(` is always the builtin call, which is a keyword like
-                    // every other builtin and owns no local name.
-                    let builtin_call = matches!(name.as_str(), "reachable" | "domain")
-                        && token_symbol(tokens.get(index + 1)) == Some("(");
-                    if !builtin_call && let Some((role, context)) = declaration_keyword(name) {
-                        expected = role.map(|role| (role, context));
-                        list_role = (name == "actor").then_some(expected).flatten();
-                        if role.is_none() {
-                            awaiting_block = context.map(|context| (context, None));
+                    // `@name(args)` is an annotation, never a declaration. Its
+                    // name path collides head-on with `declaration_keyword`
+                    // (`@requirement("R", "t")` against the real
+                    // `requirement NAME { ... }` form), and its symbol-path
+                    // arguments sit exactly where the binder and enum-member
+                    // heuristics fire, so no identifier from `@` through the
+                    // closing `)` may start a declaration or consume a pending
+                    // one. Names that are not keywords stay references, which
+                    // is what `unindexed_identifiers` requires of them.
+                    if !in_annotation {
+                        if let Some((role, context)) = expected.take() {
+                            add_symbol(source, token, name, role, None, &mut symbols);
+                            declaration_offsets.insert(token.span.start.offset);
+                            awaiting_block = context.map(|context| {
+                                let owner = matches!(context, Context::Action | Context::Other)
+                                    .then(|| name.clone());
+                                (context, owner)
+                            });
+                            continue;
                         }
-                        continue;
+                        // `reachable` and `domain` each name both a top-level
+                        // declaration keyword (`reachable NAME { expr }`,
+                        // `domain SpecName { ... }`) and a relation builtin
+                        // call (`reachable(r, a, b)`, `domain(r)`). Only the
+                        // declaration form starts a new declaration; a
+                        // following `(` is always the builtin call, which is a
+                        // keyword like every other builtin and owns no local
+                        // name.
+                        let builtin_call = matches!(name.as_str(), "reachable" | "domain")
+                            && token_symbol(tokens.get(index + 1)) == Some("(");
+                        if !builtin_call && let Some((role, context)) = declaration_keyword(name) {
+                            expected = role.map(|role| (role, context));
+                            list_role = (name == "actor").then_some(expected).flatten();
+                            if role.is_none() {
+                                awaiting_block = context.map(|context| (context, None));
+                            }
+                            continue;
+                        }
                     }
                     if is_keyword(name) {
                         continue;
@@ -185,7 +199,9 @@ impl DocumentIndex {
                                 == Some("some")
                             && token_ident(index.checked_sub(3).and_then(|i| tokens.get(i)))
                                 == Some("is");
-                    let role = if quantifier_binder || pattern_binder {
+                    let role = if in_annotation {
+                        None
+                    } else if quantifier_binder || pattern_binder {
                         Some(SymbolRole::Variable)
                     } else if next_is_colon {
                         match context {
@@ -223,13 +239,27 @@ impl DocumentIndex {
                         });
                     }
                 }
+                // `@` opens an annotation and its closing `)` ends it.
+                // `annotation_parse::annotation` is the one grammar every
+                // dialect uses (`parser.rs`, `domain.rs`, `db.rs`, `ai.rs`):
+                // `@` path `(` args `)`, where `(` is mandatory and an
+                // argument is a string, integer, Boolean, or dotted symbol
+                // path — never a parenthesized expression. With no nesting
+                // possible the first `)` always closes the annotation.
+                TokenKind::Symbol(symbol) if symbol == "@" => {
+                    in_annotation = true;
+                }
+                TokenKind::Symbol(symbol) if symbol == ")" => {
+                    in_annotation = false;
+                }
                 TokenKind::Symbol(symbol) if symbol == "," => {
                     // `actor A, B` continues one declaration list, but the
                     // parser also ends the list on a trailing comma followed
                     // by the next item keyword (`actor A, entity Case`), so
-                    // only a non-keyword name re-arms the pending role.
-                    let continues_list =
-                        token_ident(tokens.get(index + 1)).is_some_and(|next| !is_keyword(next));
+                    // only a non-keyword name re-arms the pending role. A
+                    // comma between annotation arguments separates no list.
+                    let continues_list = !in_annotation
+                        && token_ident(tokens.get(index + 1)).is_some_and(|next| !is_keyword(next));
                     if continues_list && let Some(pending) = list_role {
                         expected = Some(pending);
                     }
@@ -265,6 +295,7 @@ impl DocumentIndex {
         let imports = import_bindings(source, &tokens);
         Ok(Self {
             source: source.to_owned(),
+            refinement,
             symbols,
             references,
             imports,
@@ -339,6 +370,67 @@ impl DocumentIndex {
     #[must_use]
     pub fn import_for_alias(&self, alias: &str) -> Option<&ImportBinding> {
         self.imports.iter().find(|binding| binding.alias == alias)
+    }
+
+    /// Return declaration-name positions the index failed to declare.
+    ///
+    /// A declaration keyword that owns a name (`action`, `invariant`, `entity`,
+    /// `command`, ...) is followed in the grammar by that name, so whenever the
+    /// very next token is an identifier the index must have declared a symbol
+    /// there. `unindexed_identifiers` cannot see this: a swallowed name is
+    /// still indexed, just as a reference to nothing, and a keyword registered
+    /// as a symbol in its place is still an entry. Positions where the next
+    /// token is not an identifier are skipped, because the keyword is then not
+    /// introducing a name — `reachable(r, a, b)` and `domain(r)` are relation
+    /// builtin calls, `@requirement("R", "t")` is an annotation, and
+    /// `until`/`leadsTo` open a block.
+    ///
+    /// `action` is skipped in a `refinement` document for the same reason:
+    /// there `action impl_name(args) -> abs_name` maps an implementation
+    /// action onto an abstract one, so the name is a cross-spec reference and
+    /// `apply_refinement_hints` demotes it on purpose.
+    #[must_use]
+    pub fn misprojected_declarations(&self) -> Vec<String> {
+        let declared = self
+            .symbols
+            .iter()
+            .map(|symbol| {
+                (
+                    symbol.selection_range.start.line,
+                    symbol.selection_range.start.character,
+                )
+            })
+            .collect::<HashSet<_>>();
+        fsl_syntax::lex(&self.source).map_or_else(
+            |_| Vec::new(),
+            |tokens| {
+                tokens
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, token)| {
+                        let TokenKind::Ident(keyword) = &token.kind else {
+                            return None;
+                        };
+                        if self.refinement && keyword == "action" {
+                            return None;
+                        }
+                        declaration_keyword(keyword)?.0?;
+                        let name = tokens.get(index + 1)?;
+                        let TokenKind::Ident(name_text) = &name.kind else {
+                            return None;
+                        };
+                        let position = span_range(&self.source, name.span).start;
+                        (!declared.contains(&(position.line, position.character))).then(|| {
+                            format!(
+                                "{}:{}: `{keyword} {name_text}` declares nothing",
+                                position.line + 1,
+                                position.character + 1
+                            )
+                        })
+                    })
+                    .collect()
+            },
+        )
     }
 
     /// Return non-keyword identifiers that have neither declaration nor reference coverage.
@@ -1161,5 +1253,135 @@ mod tests {
             .find(|symbol| symbol.name == "Case")
             .expect("Case must be declared by `entity Case`");
         assert_eq!(case.role, SymbolRole::Type);
+    }
+
+    /// Issue #551 evidence, reduced from `examples/annotations/annotated_domain.fsl`.
+    const ISSUE_551_PROBE: &str = r#"domain AnnotatedOrders {
+  implementation_profile functional_ddd
+
+  aggregate Order {
+    id OrderId
+
+    state {
+      placed: Bool = false;
+    }
+
+    @requirement("REQ-COMMAND", "placing an order is traceable")
+    command Place {
+      input order_id: OrderId
+    }
+
+    event Placed { order_id: OrderId }
+
+    decide Place {
+      emits Placed
+    }
+
+    evolve Placed {
+      placed = true
+    }
+  }
+}"#;
+
+    /// `@requirement(...)` is an annotation; `requirement NAME { ... }` is a
+    /// declaration. Before this fix the shared name made the annotation arm a
+    /// pending `(Property, Other)` declaration that nothing between there and
+    /// the next identifier disarmed, so the *next line's* construct keyword —
+    /// `command` — was consumed as the declaration name and the real name
+    /// `Place` was left with no declaration at all.
+    #[test]
+    fn annotation_named_like_a_declaration_keyword_does_not_swallow_the_declaration() {
+        let index = DocumentIndex::build(ISSUE_551_PROBE, None).expect("valid domain");
+        assert!(
+            !index.symbols.iter().any(|symbol| symbol.name == "command"),
+            "{:?}",
+            index.symbols
+        );
+        let place = index
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "Place")
+            .expect("`command Place` must declare Place");
+        assert_eq!(place.role, SymbolRole::Function);
+        assert!(index.misprojected_declarations().is_empty());
+    }
+
+    /// The positive control for the fix above: resolving the collision by
+    /// dropping `requirement` from `declaration_keyword` would also pass that
+    /// negative control, and would break this — `requirement NAME "text"
+    /// { ... }` is a real declaration form.
+    #[test]
+    fn a_real_requirement_declaration_still_declares_its_name() {
+        let source = r#"requirements Support {
+  type CaseId = 0..1
+  state { done: Bool }
+  init { done = false }
+  requirement REQ-1 "a case can finish" {
+    action finish() {
+      done = true
+    }
+  }
+}"#;
+        let index = DocumentIndex::build(source, None).expect("valid requirements");
+        let requirement = index
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "REQ")
+            .expect("`requirement REQ-1` must declare its ID");
+        assert_eq!(requirement.role, SymbolRole::Property);
+        assert!(index.misprojected_declarations().is_empty());
+    }
+
+    /// `annotation_parse::annotation` makes `(` mandatory and accepts a dotted
+    /// path with an empty argument list, so `@doc.control()` — not a bare
+    /// `@undecided` — is the no-argument form. Every segment of the path is a
+    /// name position, so a trailing segment that collides with
+    /// `declaration_keyword` (`control`) swallows the next declaration exactly
+    /// like a single-segment `@requirement` does, and an empty argument list
+    /// leaves no token between the name and the declaration to recover on.
+    #[test]
+    fn empty_argument_and_dotted_annotations_do_not_swallow_the_declaration() {
+        let source = ISSUE_551_PROBE.replace(
+            r#"@requirement("REQ-COMMAND", "placing an order is traceable")"#,
+            "@doc.control()",
+        );
+        let index = DocumentIndex::build(&source, None).expect("valid domain");
+        let place = index
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "Place")
+            .expect("`command Place` must declare Place");
+        assert_eq!(place.role, SymbolRole::Function);
+        assert!(index.misprojected_declarations().is_empty());
+    }
+
+    /// An annotation's symbol-path arguments sit exactly where the aggregate
+    /// binder heuristic fires (`count(c: T ...)`), so `@count(binder)` would
+    /// otherwise declare its arguments as scoped Variables. Nothing between
+    /// `@` and the closing `)` may declare anything, and non-keyword argument
+    /// names stay references, which `unindexed_identifiers` requires.
+    #[test]
+    fn annotation_arguments_declare_nothing_and_stay_references() {
+        let source = ISSUE_551_PROBE.replace(
+            r#"@requirement("REQ-COMMAND", "placing an order is traceable")"#,
+            "@count(swallowed, alsoSwallowed)",
+        );
+        let index = DocumentIndex::build(&source, None).expect("valid domain");
+        for argument in ["swallowed", "alsoSwallowed"] {
+            assert!(
+                !index.symbols.iter().any(|symbol| symbol.name == argument),
+                "{argument} must not be declared: {:?}",
+                index.symbols
+            );
+            assert!(
+                index
+                    .references
+                    .iter()
+                    .any(|reference| reference.name == argument),
+                "{argument} must stay a reference: {:?}",
+                index.references
+            );
+        }
+        assert!(index.misprojected_declarations().is_empty());
     }
 }

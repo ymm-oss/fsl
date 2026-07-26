@@ -42,6 +42,10 @@ fn valid_corpus_is_parsed_and_every_identifier_is_indexed() {
                         missing.join(", ")
                     ));
                 }
+                let misprojected = index.misprojected_declarations();
+                if !misprojected.is_empty() {
+                    failures.push(format!("{}: {}", path.display(), misprojected.join(", ")));
+                }
             }
             Err(error) => failures.push(format!("{}: {error}", path.display())),
         }

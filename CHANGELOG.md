@@ -154,6 +154,29 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   diagnostics").
 
 ### Fixed
+- The native LSP's document index no longer lets an `@` annotation swallow the
+  declaration that follows it. `@requirement("REQ-COMMAND", "…")` shares its
+  name with the `requirement NAME { … }` declaration keyword, and the index
+  handled no `@` at all, so the annotation armed a pending declaration that
+  nothing between there and the next identifier disarmed — the *next line's*
+  construct keyword was consumed as the declaration name. In
+  `examples/annotations/annotated_domain.fsl` that registered a Property symbol
+  literally named `command` and left `command Place { … }`'s real name `Place`
+  with no declaration at all, so definition/references/rename returned nothing
+  and `documentSymbol` listed a construct keyword. 13 sites across the four
+  `examples/annotations/*.fsl` files were affected, every one of them from
+  `@requirement`. Nothing from `@` through the annotation's closing `)` may now
+  declare anything or consume a pending declaration, in any dialect; non-keyword
+  names inside an annotation stay references. Resolved by position, not by
+  removing `requirement` from the declaration keywords, which would have broken
+  the real declaration form (#551).
+- `rust/fsl-lsp/tests/corpus.rs` now also asserts, over every corpus file, that
+  a declaration keyword owning a name has actually declared that name
+  (`DocumentIndex::misprojected_declarations`). The previous whole-corpus check
+  only required every identifier to have *some* entry, which a swallowed name
+  satisfies as a reference to nothing, so it passed while roles and scopes were
+  wrong. This is the drift detector the `#504`/`#551` class of index bug had
+  been missing (#551).
 - The native LSP's document index now recognizes `def` declarations and their
   parameters, aggregate/quantifier binders written with a `name: Type` form
   (`count(c: Id where ...)`, `sum(...)`, `unique(...)`, `exactlyOne(...)`,
