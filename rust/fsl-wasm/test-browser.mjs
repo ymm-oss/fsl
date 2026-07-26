@@ -99,7 +99,7 @@ const candidates = [
 // Documents the Worker has no verb for, and therefore cannot be compared
 // against the native CLI. Each entry records the document type and the
 // *measured* reason the exclusion holds, so the next reader does not re-derive
-// it. `workerSignature` below turns each entry into a self-retiring one: the
+// it. `exclusionProbes` below turns each entry into a self-retiring one: the
 // harness probes the Worker for every excluded document and fails loudly when
 // the Worker's behaviour no longer matches the recorded premise, i.e. when the
 // exclusion has become unnecessary (#568). This is a *capability* exclusion,
