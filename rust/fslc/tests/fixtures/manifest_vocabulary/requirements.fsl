@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Manifest-vocabulary fixture, requirements layer. Carries the source-only
+// constructs the manifest path used to drop: `acceptance`/`forbidden` cases,
+// their `starts_with`/`precedes` step edges, and the `covers` edge from a
+// case-level `@requirement(...)`. It declares `REQ-SHARED` too, so the
+// manifest graph has to keep the two layers' nodes apart.
+requirements ManifestVocabularyRequirements {
+  type Item = 0..0
+  enum RSt { RDraft, RDone }
+
+  state {
+    req: Map<Item, RSt>
+  }
+  init {
+    forall i: Item { req[i] = RDraft }
+  }
+
+  requirement REQ-SHARED "an item can finish" {
+    action finish(i: Item) maps finish(i) {
+      requires req[i] == RDraft
+      req[i] = RDone
+    }
+  }
+
+  @requirement("REQ-CASE", "the finish path is exercised end to end")
+  acceptance AC-1 "finish moves the item to done" {
+    finish(0)
+    expect req[0] == RDone
+  }
+
+  forbidden FB-1 "an item cannot finish twice" {
+    finish(0)
+    finish(0)
+    expect rejected
+  }
+}
