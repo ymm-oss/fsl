@@ -653,7 +653,13 @@ pub(crate) fn assurance_label(token: &str, depth: Option<u64>) -> String {
     }
 }
 
-fn formal_assurance(group: &str, name: &str, verification: &Value) -> &'static str {
+/// Classify one spec element (an invariant/leadsTo/reachable/transition by
+/// group and name) against a `verify`/`prove` result. `pub(crate)` so
+/// `html.rs`'s property rows (issue #525) reuse this exact rule rather than
+/// re-deriving it -- re-deriving it locally is how the html report came to
+/// stamp one report-wide class on every row and call a bounded reachability
+/// witness `proved(induction)`.
+pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) -> &'static str {
     if verification.get("result").and_then(Value::as_str) == Some("proved") {
         if matches!(group, "invariants" | "transitions") {
             return "proved";

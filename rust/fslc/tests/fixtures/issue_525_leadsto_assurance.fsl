@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// The issue #525 leadsTo control: a report that proves under
+// `--engine induction` (`result:"proved"`, `completeness:"unbounded"`) yet
+// carries an ordinary unranked `leadsTo`, whose row must stay
+// `bounded(BMC depth k)` -- only a ranked response with an explicit unbounded
+// proof may render `proved(induction)`.
+
+business RequestFlow {
+  actor Customer, System
+
+  entity Req
+
+  process Req {
+    stages Open, Answered
+    initial Open
+
+    transition answer Open -> Answered by System
+  }
+
+  policy POL-ANSWER "An open request must always be answered"
+    every Req in Open must eventually be Answered
+
+  goal CanAnswer "Some request reaches the answered stage"
+    some Req can reach Answered
+}
+
+verify {
+  instances Req = 1
+}

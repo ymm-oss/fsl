@@ -569,21 +569,50 @@ fn actions_section(actions: &[Value], coverage: &Value) -> String {
     )
 }
 
+/// The depth an assurance label reports, `checked_to_depth` first.
+fn checked_depth(verification: &Value) -> Option<u64> {
+    verification
+        .get("checked_to_depth")
+        .or_else(|| verification.get("depth"))
+        .and_then(Value::as_u64)
+}
+
+/// The report-wide assurance of one verification envelope, for the status
+/// panel. This is a whole-report summary and must never be reused as a
+/// per-property class: see `property_assurance`.
 fn assurance(verification: &Value) -> String {
-    if verification["completeness"] == "unbounded" {
-        "proved(induction)".to_owned()
-    } else if verification["completeness"] == "bounded" {
-        format!(
-            "bounded(BMC depth {})",
-            text(
-                verification
-                    .get("checked_to_depth")
-                    .unwrap_or(&verification["depth"])
-            )
-        )
-    } else {
-        "not_run".to_owned()
+    crate::ledger::assurance_label(
+        crate::ledger::assurance_token(verification),
+        checked_depth(verification),
+    )
+}
+
+/// The html property `kind` to the ledger's element group
+/// (`docs/DESIGN-assurance-classes.md`: "Assurance column per property row
+/// via `classify_element` (kind->group: invariant->invariants,
+/// leadsTo->leadstos, reachable->reachables, trans->transitions)").
+fn property_group(kind: &str) -> Option<&'static str> {
+    match kind {
+        "invariant" => Some("invariants"),
+        "trans" => Some("transitions"),
+        "leadsTo" => Some("leadstos"),
+        "reachable" => Some("reachables"),
+        _ => None,
     }
+}
+
+/// One property row's own assurance class, from the ledger's per-element
+/// rule (issue #525). A reachability witness and action coverage stay
+/// `bounded` even inside an `--engine induction` report, because
+/// k-induction ranks only invariants and leadsTo; labelling them
+/// `proved(induction)` overstates the evidence in an audit artifact.
+fn property_assurance(property: &Value, verification: &Value) -> String {
+    property_group(&text(&property["kind"])).map_or_else(String::new, |group| {
+        crate::ledger::assurance_label(
+            crate::ledger::formal_assurance(group, &text(&property["name"]), verification),
+            checked_depth(verification),
+        )
+    })
 }
 
 fn properties_section(properties: &[Value], checks: &[Value], verification: &Value) -> String {
@@ -591,10 +620,11 @@ fn properties_section(properties: &[Value], checks: &[Value], verification: &Val
     for property in properties {
         let _ = write!(
             rows,
-            "<tr><td>{}</td><td><code>{}</code></td><td>{}</td><td>{}</td></tr>",
+            "<tr><td>{}</td><td><code>{}</code>{}</td><td>{}</td><td>{}</td></tr>",
             escape(&text(&property["kind"])),
             escape(&text(&property["name"])),
-            escape(&assurance(verification)),
+            requirement_caption(&property["requirement"]),
+            escape(&property_assurance(property, verification)),
             escape(&text(&property["body_text"]))
         );
     }

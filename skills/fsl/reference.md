@@ -1210,7 +1210,11 @@ carries an **assurance class** (issue #171): `proved(induction)` (k-induction,
 all depths) / `bounded(BMC depth k)` (BMC, depth k) / `replay-observed`
 (concrete log/trace checked, not a universal claim) / `statistical(Wilson c%)`
 (precomputed eval JSONL, aggregate not per-case) / `not_run` (no formal
-evidence — structural analysis, profiles, comparisons). `--engine induction`
+evidence — structural analysis, profiles, comparisons). The class is
+**per element, not per report**: in an `--engine induction` report only
+invariants and transitions reach `proved(induction)`, while `reachable` rows,
+action coverage, and an unranked `leadsTo` stay `bounded(BMC depth k)` because
+k-induction ranks neither. `--engine induction`
 is required for a requirement to ever show `proved`; `--evidence
 <result.json>` folds a saved fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"`
 producer's output (tagged via a top-level `requirements: [...]` list) into the

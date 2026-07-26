@@ -6,6 +6,26 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- **Breaking (output).** `fslc html` no longer labels every property row with
+  one report-wide assurance class. `html.rs::assurance` derived a single class
+  from root completeness and `properties_section` reused it for every row, so
+  under `--engine induction` a `reachable` and an ordinary unranked `leadsTo`
+  both rendered `proved(induction)` even though k-induction ranks only
+  invariants and transitions -- a reachability witness comes from the bounded
+  base BMC. In an audit artifact "proved" claims all-depth universal evidence,
+  so this was an assurance misstatement. Property rows now classify per element
+  through the ledger's existing `formal_assurance` rule
+  (`docs/DESIGN-assurance-classes.md`) instead of a second local
+  classification, and the report-wide status row now shares the ledger's
+  `assurance_token`/`assurance_label` pair as well. For
+  `examples/pm/cancel_flow.fsl --engine induction`, `CanRetain`, `CanChurn`,
+  `POL-1`, and `POL-2` change from `proved(induction)` to
+  `bounded(BMC depth 8)`. The same renderer also never called
+  `requirement_caption` for property rows, so invariant/reachable/leadsTo rows
+  dropped the requirement text actions and counterfactuals keep; each row now
+  renders its own caption under the declaration name, escaped, and omits it
+  entirely when the property carries no requirement tag
+  (`docs/DESIGN-html-report.md`) (#525).
 - **Breaking (output).** `fslc ai check` and the `fslc check` dispatch for
   fsl-ai project files no longer accept a declaration whose `require` clauses
   are unparseable. Both ran `ai_project_summary`, a line scanner that
