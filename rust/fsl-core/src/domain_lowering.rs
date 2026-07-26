@@ -67,6 +67,7 @@ fn error_at(message: impl Into<String>, span: Span) -> CoreError {
             }],
             generated: false,
         })),
+        name_resolution: false,
     }
 }
 
@@ -1858,7 +1859,8 @@ impl<'a> Resolver<'a> {
                     return Err(error_at(
                         format!("duplicate enum member '{member}' in '{}'", ty.name),
                         ty.member_spans.get(index).copied().unwrap_or(ty.span),
-                    ));
+                    )
+                    .into_name_resolution());
                 }
             }
         }

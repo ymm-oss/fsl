@@ -1197,6 +1197,7 @@ fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
         line: span.start.line,
         column: span.start.column,
         origin: None,
+        name_resolution: false,
     }
 }
 

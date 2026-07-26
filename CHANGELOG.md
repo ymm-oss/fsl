@@ -6,6 +6,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- Native now emits `kind:"name"` for name-resolution failures instead of
+  collapsing them into `semantics`, making every member of the
+  `docs/DESIGN-v1.md` §7.2 closed set reachable. `duplicate state variable`,
+  `duplicate enum member`, `duplicate def`, `duplicate parameter in def`,
+  `def ... parameter is shadowed by binder`, and `undefined predicate` were all
+  reported as `semantics`, sending an agent following the §8 repair protocol
+  down the wrong branch. `CoreError` and `ModelError` now carry the
+  classification the frontend already determined, and it survives through
+  `SpecLoadError` to the one renderer — the same direction as #484, rather than
+  adding patterns to the message-string classifier, which has no text these
+  diagnostics share and would silently reclassify them on any wording change.
+  Messages are byte-identical and no other `kind` moves.
+  `examples/gallery/errors/name_duplicate_state_variable.fsl` is the corpus
+  golden the classification never had; its absence is why this survived #484 and
+  #555. Its `loc` now names the redeclaration rather than the first binding:
+  the diagnostic carried no span of its own, so it fell back to the
+  message-derived heuristic, which finds the *earlier* `x` and pointed a repair
+  agent at the innocent declaration (#565).
 - The fsl-ai project check's unexecutable-`require` spec error (#542) now
   carries a `loc` pointing at the offending clause's own line and column.
   `rust/fsl-syntax/src/ai_project.rs` tracked no positions at all, so the error

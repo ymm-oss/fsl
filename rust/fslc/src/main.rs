@@ -5453,14 +5453,15 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
     .find(|diagnostic| diagnostic.kind != "migration")
     {
         // `check` returns here before it reaches `load_kernel_model`, so the
-        // location has to travel through this branch too, or `check` alone
-        // reports `loc: null` for a diagnostic every other command locates
-        // (issue 555).
+        // location and classification have to travel through this branch too,
+        // or `check` alone reports `loc: null` and `semantics` for a diagnostic
+        // every other command locates and classifies (issues 555, 565).
         return (
             fslc_rust::verification_output::render_semantic_error(
                 envelope(),
                 &diagnostic.message,
                 diagnostic.located.then(|| diagnostic.span.python_loc()),
+                diagnostic.kind == "name",
             ),
             2,
         );
@@ -15701,19 +15702,22 @@ fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
 }
 
 fn semantic_error_output(message: &str) -> Value {
-    fslc_rust::verification_output::render_semantic_error(envelope(), message, None)
+    fslc_rust::verification_output::render_semantic_error(envelope(), message, None, false)
 }
 
 /// Render a typed-model failure with the location the model recorded for the
-/// construct that failed.
+/// construct that failed and the classification the frontend determined, so a
+/// name-resolution failure reports `kind:"name"` rather than collapsing into
+/// `semantics`.
 ///
 /// The message is unchanged from what every command already rendered; only
-/// `loc` is added (issue 555).
+/// `loc` and `kind` move (issues 555, 565).
 fn model_error_output(error: &fsl_core::ModelError) -> Value {
     fslc_rust::verification_output::render_semantic_error(
         envelope(),
         &error.to_string(),
         fslc_rust::verification_output::model_error_loc(error),
+        error.name_resolution,
     )
 }
 

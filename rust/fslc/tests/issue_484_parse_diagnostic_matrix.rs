@@ -282,9 +282,8 @@ fn a_missing_input_is_io_for_every_spec_reading_command() {
 /// The corpus `type`/`semantics` goldens, with the construct each diagnostic
 /// must point at.
 ///
-/// `examples/gallery/errors/` has no `name`-kind fixture, so that third
-/// classification in the `docs/DESIGN-v1.md` §7.2 clause has no corpus case to
-/// pin here.
+/// The `name` member of that clause is pinned separately, by
+/// `NAME_FIXTURE` below (issue 565).
 const LOCATED_SEMANTIC_FIXTURES: &[(&str, &str, u64, u64)] = &[
     // `state { owner: UserId }` — the state declaration naming the unknown type.
     (
@@ -352,6 +351,111 @@ fn every_spec_reading_command_locates_a_type_or_semantic_error() {
             );
         }
     }
+
+    std::fs::remove_dir_all(&directory).expect("remove fixture directory");
+}
+
+/// The corpus `name` golden, with the construct its diagnostic must point at.
+///
+/// `docs/DESIGN-v1.md` §7.2 fixes `kind` as a closed set including `name`.
+/// Native reached every member except that one: name-resolution failures were
+/// collapsed into `semantics`, because the only classifier was
+/// `semantic_error_kind`, which matches message text and has no `name` pattern
+/// to match (issue 565).
+const NAME_FIXTURE: &str = "examples/gallery/errors/name_duplicate_state_variable.fsl";
+/// `state { x: Bool, x: Bool }` — the *second* `x`, the redeclaration, not the
+/// first binding and not the enclosing `state` block.
+const NAME_FIXTURE_LINE: u64 = 5;
+const NAME_FIXTURE_COLUMN: u64 = 20;
+
+/// Every native name-resolution diagnostic, with the message each must keep
+/// **byte for byte**.
+///
+/// The classifier still falls back to message matching for `type`, and that
+/// matching is prefix/suffix-based, so any edit to one of these strings can
+/// move a `kind` without touching a classification rule. Pinning the exact text
+/// is what makes that impossible to do silently.
+const NAME_DIAGNOSTICS: &[(&str, &str)] = &[
+    (
+        "spec DupVar {\n  state { x: Bool, x: Bool }\n  init { x = true }\n  action flip() { x = not x }\n}\n",
+        "duplicate state variable 'x'",
+    ),
+    (
+        "spec DupEnum {\n  enum E { A, B }\n  enum F { B, C }\n  state { e: E }\n  init { e = A }\n  action stay() { e = e }\n}\n",
+        "duplicate enum member 'B'",
+    ),
+];
+
+#[test]
+fn every_spec_reading_command_classifies_a_name_resolution_failure_as_name() {
+    let directory = fixture_directory("name-kind-matrix");
+    let trace = write_fixture(
+        &directory,
+        "trace.json",
+        r#"{"schema_version":1,"spec":"Valid","initial":{"value":0},"events":[]}"#,
+    );
+    let other = write_fixture(&directory, "other.fsl", VALID_SOURCE);
+
+    for (name, arguments) in spec_reading_commands(NAME_FIXTURE, &trace, &other) {
+        // `fmt` never lowers to the kernel, so no typed-model diagnostic exists
+        // for it to classify.
+        if name == "fmt" {
+            continue;
+        }
+        let (output, status) = run_cli(&arguments);
+        assert_eq!(output["result"], "error", "{name}: {output}");
+        assert_eq!(output["kind"], "name", "{name}: {output}");
+        assert_eq!(status, 2, "{name}: {output}");
+        assert_eq!(
+            output["message"], "duplicate state variable 'x'",
+            "{name}: {output}"
+        );
+        // Issue 555 gave this half of the clause its `loc`; assert the exact
+        // position for the same reason as the fixtures above, and because a
+        // `name` diagnostic pointing at the first `x` would name the innocent
+        // declaration.
+        assert_eq!(
+            output["loc"]["line"].as_u64(),
+            Some(NAME_FIXTURE_LINE),
+            "{name}: {output}"
+        );
+        assert_eq!(
+            output["loc"]["column"].as_u64(),
+            Some(NAME_FIXTURE_COLUMN),
+            "{name}: {output}"
+        );
+    }
+
+    std::fs::remove_dir_all(&directory).expect("remove fixture directory");
+}
+
+/// The classification travels on the diagnostic, so it must not depend on the
+/// message text — and the messages themselves must not drift, because the
+/// surviving `type` rules still match on prefixes and suffixes.
+#[test]
+fn name_resolution_messages_are_unchanged_and_classify_without_message_matching() {
+    let directory = fixture_directory("name-kind-messages");
+
+    for (index, (source, message)) in NAME_DIAGNOSTICS.iter().enumerate() {
+        let spec = write_fixture(&directory, &format!("name_{index}.fsl"), source);
+        let (output, status) = run_cli(&["check", &spec]);
+        assert_eq!(status, 2, "{message}: {output}");
+        assert_eq!(output["kind"], "name", "{message}: {output}");
+        assert_eq!(output["message"], *message, "{message}: {output}");
+    }
+
+    // The positive control for the same edge: `semantic_error_kind`'s surviving
+    // message rules must still produce `type`, not be swept into `name`.
+    let bad_type = write_fixture(&directory, "bad_type.fsl", TYPE_SOURCE);
+    let (output, status) = run_cli(&["check", &bad_type]);
+    assert_eq!(status, 2, "{output}");
+    assert_eq!(output["kind"], "type", "{output}");
+    assert_eq!(output["message"], "unknown type 'Missing'", "{output}");
+
+    let no_state = write_fixture(&directory, "no_state.fsl", SEMANTIC_SOURCE);
+    let (output, status) = run_cli(&["check", &no_state]);
+    assert_eq!(status, 2, "{output}");
+    assert_eq!(output["kind"], "semantics", "{output}");
 
     std::fs::remove_dir_all(&directory).expect("remove fixture directory");
 }

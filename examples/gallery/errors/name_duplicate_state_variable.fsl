@@ -1,0 +1,9 @@
+// expected-command: check
+// expected-result: error
+// expected-kind: name
+spec GalleryNameDuplicateStateVariable {
+  state { x: Bool, x: Bool }
+  init { x = true }
+  action flip() { x = not x }
+  invariant Ok { true or not x }
+}

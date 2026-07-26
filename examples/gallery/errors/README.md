@@ -19,6 +19,11 @@ of JSON output actually confirmed with `fslc`.
 ```
 
 ```json
+// name_duplicate_state_variable.fsl
+{"result":"error","kind":"name","message":"duplicate state variable 'x'"}
+```
+
+```json
 // semantics_duplicate_assignment.fsl
 {"result":"error","kind":"semantics","message":"double assignment to 'x' on the same execution path"}
 ```

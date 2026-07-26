@@ -47,6 +47,9 @@ pub enum SpecLoadError {
 pub struct SemanticDiagnostic {
     pub message: String,
     pub loc: Option<Value>,
+    /// Whether the failure was resolving a name, which `docs/DESIGN-v1.md`
+    /// §7.2 classifies `kind:"name"` (issue 565).
+    pub name_resolution: bool,
 }
 
 impl SemanticDiagnostic {
@@ -57,6 +60,7 @@ impl SemanticDiagnostic {
         Self {
             message: message.into(),
             loc: None,
+            name_resolution: false,
         }
     }
 
@@ -68,16 +72,19 @@ impl SemanticDiagnostic {
         Self {
             message: message.into(),
             loc: crate::verification_output::origin_loc(origin),
+            name_resolution: false,
         }
     }
 
     /// A typed-model failure, located by the span it recorded for itself or by
-    /// its enclosing construct's lowering origin.
+    /// its enclosing construct's lowering origin, and classified by whether it
+    /// was resolving a name.
     #[must_use]
     pub fn from_model_error(error: &fsl_core::ModelError) -> Self {
         Self {
             message: error.to_string(),
             loc: crate::verification_output::model_error_loc(error),
+            name_resolution: error.name_resolution,
         }
     }
 }
@@ -150,6 +157,7 @@ pub fn render_spec_load_error(mut output: Map<String, Value>, error: &SpecLoadEr
             output,
             &diagnostic.message,
             diagnostic.loc.clone(),
+            diagnostic.name_resolution,
         ),
     }
 }

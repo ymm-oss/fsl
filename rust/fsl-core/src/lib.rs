@@ -86,9 +86,24 @@ pub struct CoreError {
     pub line: u32,
     pub column: u32,
     pub origin: Option<Box<OriginChain>>,
+    /// Whether this is a name-resolution failure — a declaration that is
+    /// duplicated, missing, or shadowed.
+    ///
+    /// `docs/DESIGN-v1.md` §7.2 fixes `kind` as a closed set whose `name`
+    /// member covers exactly these. Carrying the classification on the error
+    /// keeps it out of message-string matching, which cannot survive a message
+    /// edit (issue 565, the direction issue 484 established).
+    pub name_resolution: bool,
 }
 
 impl CoreError {
+    /// Classify this diagnostic as a name-resolution failure.
+    #[must_use]
+    pub fn into_name_resolution(mut self) -> Self {
+        self.name_resolution = true;
+        self
+    }
+
     #[must_use]
     pub fn with_source_file(mut self, source_file: impl AsRef<str>) -> Self {
         if let Some(origin) = &mut self.origin {
@@ -145,6 +160,7 @@ impl From<ParseError> for CoreError {
                 lowering_steps: Vec::new(),
                 generated: false,
             })),
+            name_resolution: false,
         }
     }
 }
@@ -260,6 +276,7 @@ pub fn parse_direct_kernel_spec(source: &str) -> Result<KernelSpec, CoreError> {
             line: 1,
             column: 1,
             origin: None,
+            name_resolution: false,
         });
     };
     let mut kernel = lower_direct_spec(spec)?;
@@ -293,6 +310,7 @@ fn validate_direct_scope_overrides(
         line: 1,
         column: 1,
         origin: None,
+        name_resolution: false,
     };
     if (!instances.is_empty() || !values.is_empty()) && entities.is_empty() && numbers.is_empty() {
         return Err(error(
@@ -389,6 +407,7 @@ pub fn parse_kernel_source_with_bounds(
             line: 1,
             column: 1,
             origin: None,
+            name_resolution: false,
         }),
     }?;
     kernel.annotations.extend(SPEC_TARGET, parsed.annotations);
@@ -552,7 +571,9 @@ impl PredicateExpander {
                 continue;
             };
             if definitions.contains_key(name) {
-                return Err(core_error(format!("duplicate def '{name}'"), *span));
+                return Err(
+                    core_error(format!("duplicate def '{name}'"), *span).into_name_resolution()
+                );
             }
             // `def` items are inlined and dropped before `build_model` runs, so
             // this is the only point at which the definition's own name is
@@ -576,17 +597,18 @@ impl PredicateExpander {
                 .map(|(name, _)| name.clone())
                 .collect::<Vec<_>>();
             if names.iter().collect::<HashSet<_>>().len() != names.len() {
-                return Err(core_error(
-                    format!("duplicate parameter in def '{name}'"),
-                    *span,
-                ));
+                return Err(
+                    core_error(format!("duplicate parameter in def '{name}'"), *span)
+                        .into_name_resolution(),
+                );
             }
             let bound = bound_vars(value);
             if let Some(shadowed) = names.iter().filter(|name| bound.contains(*name)).min() {
                 return Err(core_error(
                     format!("def '{name}' parameter is shadowed by binder '{shadowed}'"),
                     *span,
-                ));
+                )
+                .into_name_resolution());
             }
             definitions.insert(
                 name.clone(),
@@ -618,6 +640,7 @@ impl PredicateExpander {
                 line: definition.line,
                 column: definition.column,
                 origin: None,
+                name_resolution: false,
             });
         }
         stack.push(name.to_owned());
@@ -632,7 +655,8 @@ impl PredicateExpander {
         } = expr
         {
             let Some(definition) = self.definitions.get(name) else {
-                return Err(core_error(format!("undefined predicate '{name}'"), *span));
+                return Err(core_error(format!("undefined predicate '{name}'"), *span)
+                    .into_name_resolution());
             };
             if args.len() != definition.params.len() {
                 return Err(core_error(
@@ -1028,7 +1052,8 @@ impl PredicateExpander {
     fn expand_expr(&self, expr: Expr, stack: &mut Vec<String>) -> Result<Expr, CoreError> {
         if let Expr::Call { name, args, span } = expr {
             let Some(definition) = self.definitions.get(&name) else {
-                return Err(core_error(format!("undefined predicate '{name}'"), span));
+                return Err(core_error(format!("undefined predicate '{name}'"), span)
+                    .into_name_resolution());
             };
             if stack.contains(&name) {
                 let mut cycle = stack.clone();
@@ -1188,6 +1213,7 @@ fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
         line: span.start.line,
         column: span.start.column,
         origin: None,
+        name_resolution: false,
     }
 }
 
