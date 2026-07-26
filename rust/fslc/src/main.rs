@@ -11173,11 +11173,20 @@ struct LedgerReportRequest<'a> {
 struct PreparedLedgerReport {
     model: KernelModel,
     verification: Value,
+    verification_status: i32,
     replay: Option<Value>,
     evidence: Vec<(String, Value)>,
     scenarios: Value,
 }
 
+/// The direct `fslc ledger` entry point. Unlike
+/// `generate_unapproved_ledger_report` (which `approval_artifact` also calls
+/// to reproduce a target's canonical rendering purely for a digest
+/// comparison -- a verdict mismatch there is legitimate drift evidence for
+/// `approval check`/`create`, not a hard error), this is the command a user
+/// or CI gate actually runs and reads the exit code of, so it must not hide
+/// a violated/unknown verification baseline behind the unconditional exit 0
+/// `generated_content_result` gives every generated artifact (issue #592).
 fn run_ledger_report(
     request: &LedgerReportRequest<'_>,
     approval_paths: &[PathBuf],
@@ -11195,7 +11204,20 @@ fn run_ledger_report(
             Err(error) => return (error, 2),
         }
     };
-    render_ledger_report(request, &prepared, approvals.as_ref())
+    let (result, status) = render_ledger_report(request, &prepared, approvals.as_ref());
+    if status != 0 {
+        // An `io` failure writing `-o` (the only non-zero
+        // `generated_content_result` can itself report) outranks the
+        // verification verdict.
+        return (result, status);
+    }
+    // `docs/LANGUAGE.md`'s exit-code table applied to the same `verify`
+    // baseline `mutate` already shares through `mutate_exit_status`:
+    // `prepared.verification` carries the identical `result` vocabulary
+    // (`verified`/`proved`/`violated`/`unknown_cti`/`unknown_budget`/`error`)
+    // because both call the same `run_verify`. Reusing the mapping here
+    // instead of writing a second one is the fix issue #592 asked for.
+    (result, mutate_exit_status(&prepared.verification, prepared.verification_status))
 }
 
 fn generate_unapproved_ledger_report(request: &LedgerReportRequest<'_>) -> (Value, i32) {
@@ -11211,7 +11233,7 @@ fn prepare_ledger_report(request: &LedgerReportRequest<'_>) -> Result<PreparedLe
         Ok(model) => model,
         Err(error) => return Err(spec_load_error_output(&error)),
     };
-    let (verification, _) = run_verify(
+    let (verification, verification_status) = run_verify(
         request.path,
         request.depth,
         request.deadlock_mode,
@@ -11257,6 +11279,7 @@ fn prepare_ledger_report(request: &LedgerReportRequest<'_>) -> Result<PreparedLe
     Ok(PreparedLedgerReport {
         model,
         verification,
+        verification_status,
         replay,
         evidence,
         scenarios,

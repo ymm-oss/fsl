@@ -310,3 +310,76 @@ fn check_result_and_exit_status_never_contradict() {
          got {observed_results:?} -- the failure-class arm of this law is untested"
     );
 }
+
+/// Runs `fslc` with `args` and returns only its exit status -- `ledger`
+/// prints rendered Markdown (not JSON) to stdout when `-o` is omitted, so
+/// unlike `run_check` there is no envelope here to parse.
+fn run_exit_status(args: &[&str]) -> i32 {
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(args)
+        .current_dir(root())
+        .output()
+        .expect("run native CLI");
+    output.status.code().unwrap_or_else(|| {
+        panic!("`fslc {args:?}` terminated by signal, no exit code")
+    })
+}
+
+/// Verdict Conservation Law for `fslc ledger` (issue #592), checked without
+/// any per-file oracle -- structurally different from
+/// `check_result_and_exit_status_never_contradict` above because it cannot
+/// be: `ledger`'s JSON envelope reports `result:"generated"` unconditionally,
+/// whether the verification baseline it embeds is clean or violated, so
+/// there is no top-level `result` string whose vocabulary a
+/// `CHECK_SUCCESS_RESULTS`-style allowlist could key off. `ledger` renders
+/// that baseline by calling `run_verify` with the same
+/// `--depth`/`--deadlock ignore`/`--engine bmc` `ledger` itself defaults to
+/// (`prepare_ledger_report` in `rust/fslc/src/main.rs`), so this law instead
+/// runs `fslc verify` at matching arguments as an independent process and
+/// requires the two commands' exit-code *class* (0 success vs non-zero
+/// failure) to agree for every corpus file: a `ledger` that exits 0 over a
+/// spec its own `verify` pass found violated is hiding that verdict.
+#[test]
+fn ledger_exit_status_agrees_with_its_verify_baseline() {
+    let root = root();
+    let mut files = Vec::new();
+    collect_fsl_files(&root.join("specs"), &mut files);
+    collect_fsl_files(&root.join("examples"), &mut files);
+    files.sort();
+    assert!(
+        files.len() > 150,
+        "corpus scan floor: found only {} .fsl files under specs/+examples/, expected 150+ \
+         (the directory walk may be broken)",
+        files.len()
+    );
+
+    let mut failures = Vec::new();
+    let mut saw_failure_class = false;
+
+    for path in &files {
+        let rel = repo_relative(&root, path);
+        let path_str = path.to_str().expect("utf8 path");
+        let verify_exit = run_exit_status(&[
+            "verify", path_str, "--depth", "2", "--deadlock", "ignore", "--engine", "bmc",
+        ]);
+        let ledger_exit = run_exit_status(&["ledger", path_str, "--depth", "2"]);
+
+        if verify_exit != 0 {
+            saw_failure_class = true;
+        }
+        if (verify_exit == 0) != (ledger_exit == 0) {
+            failures.push(format!(
+                "{rel}: verify exit={verify_exit} but ledger exit={ledger_exit} at the same \
+                 depth/deadlock/engine -- ledger must not hide a verify verdict (issue #592)"
+            ));
+        }
+    }
+
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    // Not a conservation check: see the identical rationale above.
+    assert!(
+        saw_failure_class,
+        "expected at least one corpus file to fail `fslc verify` at depth 2; \
+         the failure-class arm of this law is untested"
+    );
+}

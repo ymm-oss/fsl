@@ -452,6 +452,12 @@ fn approval_record_reports_approved_then_drifted_and_drives_semantic_diff() {
         .replace(" \"REQ-190: an approved review remains approved\"", "");
     std::fs::write(root.join("spec.fsl"), without_requirement_ids)
         .expect("remove requirement IDs from current spec");
+    // `.replace("approved = true", "approved = false")` above also matched
+    // the substring inside `ever_approved = true`, so `approve()` no longer
+    // sets either flag: `ever_approved` never becomes true and
+    // `ApprovalPersists` holds vacuously (`verify` still reports
+    // `"verified"`, with a `vacuous_implication` warning). This `ledger` run
+    // is therefore unaffected by issue #592's fix and stays exit 0.
     successful(
         &root,
         &[
@@ -649,6 +655,9 @@ fn signed_v2_records_require_a_matching_trust_anchor_and_fail_closed() {
         original.replace("approved = true", "approved = false"),
     )
     .expect("write semantic change");
+    // Same substring-overlap quirk as `removed-requirement.md` above
+    // (`ApprovalPersists` still holds vacuously), so this `ledger` run is
+    // unaffected by issue #592's fix and stays exit 0.
     successful(
         &root,
         &[

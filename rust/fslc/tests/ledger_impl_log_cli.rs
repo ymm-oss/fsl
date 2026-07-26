@@ -11,6 +11,15 @@
 //! `*_still_generates` tests guard that legitimate replay evidence
 //! (conformant and nonconformant, as opposed to a replay error) is not
 //! collaterally broken by making the command fail-closed.
+//!
+//! `replay_trace.fsl`'s `partial(i: Id)` action is deliberately left
+//! unguarded at `i == 0` -- `replay_trace_contract.rs` replays it there on
+//! purpose to exercise the concrete Monitor's `partial_op` violation kind.
+//! The same unguarded division makes `fslc verify` legitimately classify
+//! this spec `result:"error"`/exit 2 (`kind:"semantics"`, "division by
+//! zero"), which issue #592 now correctly propagates to `fslc ledger`'s own
+//! exit code even though the ledger content still renders in full. That is
+//! why the `*_still_generates` tests below assert exit 2, not exit 0.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -161,8 +170,12 @@ fn ledger_impl_log_conformant_trace_still_generates() {
     let out = dir.join("ledger.md");
     let output = ledger_with_impl_log(&fixture("replay_trace.valid.v1.json"), &out);
 
-    assert!(
-        output.status.success(),
+    // Exit 2, not 0: `replay_trace.fsl` itself carries a genuine `verify`
+    // error (see the module doc), and issue #592 makes `ledger` report that
+    // rather than hide it -- but the ledger content still generates in full.
+    assert_eq!(
+        output.status.code(),
+        Some(2),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -179,8 +192,12 @@ fn ledger_impl_log_nonconformant_trace_still_generates() {
     let out = dir.join("ledger.md");
     let output = ledger_with_impl_log(&fixture("replay_trace.state-mismatch.v1.json"), &out);
 
-    assert!(
-        output.status.success(),
+    // Same exit 2 as the conformant case above, for the same reason (the
+    // spec's own `verify` baseline errors, independent of the impl-log
+    // trace's conformance) -- the nonconformant row still renders.
+    assert_eq!(
+        output.status.code(),
+        Some(2),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
