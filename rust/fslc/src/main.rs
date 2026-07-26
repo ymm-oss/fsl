@@ -12199,10 +12199,17 @@ fn ai_review_output(
 /// its `covers` edge never dangles. A no-op when the source cannot be re-read,
 /// or for a document that declares neither cases nor controls.
 ///
-/// Both single-file entry points (`analyze` and `analyze --profile ai-review`)
-/// call this once. The `.toml` project-manifest path builds its own prefixed
-/// multi-layer graph from `build_tsg` alone and so has none of these
-/// source-only kinds; that predates this function.
+/// Every entry path runs this: the standalone file, `analyze --profile
+/// ai-review`, and the `.toml` project manifest once per layer, on that
+/// layer's own source and its unprefixed graph, so the layer prefix applies to
+/// what is added here like anything else (#558). `Builder::build` drops a
+/// `covers` edge whose target has no node yet and runs first, but that cannot
+/// reach anything added here: the edges it computes come from
+/// `KernelModel::requirement_targets`, which enumerates only `init`,
+/// `action:*`, and `property:*` targets, so it can never name a scenario or a
+/// control. Every edge added here has both of its endpoints created here,
+/// which is why no deferred resolution or ordering change is needed on any
+/// path.
 fn enrich_tsg_from_source(mut tsg: Value, model: &KernelModel, path: &Path) -> Value {
     let Ok(source) = std::fs::read_to_string(path) else {
         return tsg;
@@ -12454,10 +12461,13 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
         };
         let layer_path = base.join(file);
         let model = load_model(&layer_path)?;
-        // `build_tsg` already projects `requirement`/`kpi` nodes and `covers`
-        // edges (#495) from `model.requirement_targets()`/`model.projections`,
-        // so no separate per-layer enrichment step is needed here anymore.
-        let tsg = fsl_tools::build_tsg(&model);
+        // `build_tsg` projects `requirement`/`kpi` nodes and `covers` edges
+        // (#495) from `model.requirement_targets()`/`model.projections`, but it
+        // only ever sees the lowered `KernelModel`. The source-only kinds run
+        // through the same enrichment the standalone path uses, per layer and
+        // on the unprefixed graph, so both input forms yield the same
+        // vocabulary and the layer prefix below still applies uniformly (#558).
+        let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(&model), &model, &layer_path);
         let display = analysis_display_path(&layer_path);
         let file_id = format!("file:{layer}:{display}");
         let mut file_node = project_analysis_node(&file_id, "file", &display);

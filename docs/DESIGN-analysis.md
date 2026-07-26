@@ -149,6 +149,16 @@ property, and the edge vocabulary has no `satisfies` kind, so a control node
 carries only its `declares` edge and no review finding reads control nodes
 today.
 
+The vocabulary does not depend on input form. A `.toml` project manifest runs
+the same source-level enrichment a standalone file runs, once per layer and on
+that layer's own unprefixed graph, so a manifest layer slice carries the node
+and edge kinds that layer's file carries standalone; the `<layer>:` prefix is
+then applied to enrichment-added nodes like any other, so two layers declaring
+the same id stay two nodes. A manifest additionally carries
+`file`/`refinement`/`*_map` nodes and cross-layer edges with no standalone
+equivalent, and renames a layer's `spec` node by role — those are manifest-only
+structure, not a vocabulary difference (#558).
+
 Stable edge kinds include `declares`, `covers`, `has_guard`, `has_effect`,
 `has_ensures`, `reads`, `writes`, `checks`, `starts_with`, and `precedes`.
 

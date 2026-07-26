@@ -6,6 +6,25 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- `fslc analyze` on a `.toml` project manifest now emits the same TSG
+  vocabulary a standalone file emits for the same source. The manifest loop
+  built each layer with `fsl_tools::build_tsg` alone, which only sees the
+  lowered `KernelModel`, so none of the source-only kinds ever appeared on that
+  path — `acceptance`/`forbidden` scenario nodes with their `covers` and
+  `starts_with`/`precedes` edges, and `control` catalog nodes — and the graph
+  vocabulary silently depended on which input form named the spec. Each layer
+  now runs the same source-level enrichment, on its own file
+  and its unprefixed graph, so `<layer>:` prefixing still applies to
+  enrichment-added nodes and two layers declaring the same id stay two nodes.
+  No ordering change was needed: `Builder::build` drops a `covers` edge whose
+  target has no node yet and runs first, but the edges it computes come from
+  `KernelModel::requirement_targets`, which enumerates only `init`, `action:*`,
+  and `property:*` targets and can never name a scenario or a control, and
+  every enrichment-added edge has both endpoints created by the enrichment
+  itself.
+  Verdicts and exit codes are unaffected, and no review finding changes — the
+  manifest path accepts only `--projection traceability_graph`, so no structural
+  detector runs there at all (#558).
 - Native `fslc mutate` now defaults to 200 built-in mutants instead of 100,
   matching the `max_mutants` default its own published CLI contract
   (`rust/fslc/cli-contract.json`) advertises and the 200 fixed by
