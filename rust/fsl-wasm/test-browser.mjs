@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawn } from "node:child_process";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import "./build.mjs";
-import { cases } from "./web/cases.mjs";
 import { assertNormalizerContract, differences, normalizeEnvelope } from "./parity.mjs";
 import { workerMessageError } from "./web/worker-protocol.mjs";
 
@@ -54,6 +53,29 @@ async function command(executable, args, timeoutMs = 300_000) {
   });
 }
 
+const nativeBinary = fileURLToPath(new URL("../target/debug/fslc", import.meta.url));
+async function nativeEnvelope(testCase) {
+  const args = testCase.cmd === "check"
+    ? ["check", testCase.path]
+    : [
+      "verify", testCase.path,
+      "--depth", String(testCase.options.depth),
+      "--deadlock", testCase.options.deadlock,
+      "--no-cache",
+    ];
+  const result = await command(nativeBinary, args, nativeCommandTimeoutMs);
+  if (testCase.expected_status !== undefined && result.status !== testCase.expected_status) {
+    throw new Error(
+      `native CLI exit mismatch for ${testCase.path}: expected ${testCase.expected_status}, got ${result.status}`,
+    );
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`native CLI JSON failure: ${error}\n${result.stderr}`);
+  }
+}
+
 async function collectFslFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(entries.map((entry) => {
@@ -77,20 +99,18 @@ const candidates = [
 // Documents the Worker has no verb for, and therefore cannot be compared
 // against the native CLI. Each entry records the document type and the
 // *measured* reason the exclusion holds, so the next reader does not re-derive
-// it. `workerSignature` below turns each entry into a self-retiring one: the
+// it. `exclusionProbes` below turns each entry into a self-retiring one: the
 // harness probes the Worker for every excluded document and fails loudly when
 // the Worker's behaviour no longer matches the recorded premise, i.e. when the
 // exclusion has become unnecessary (#568). This is a *capability* exclusion,
 // never a tolerated-difference allowlist: the native<->Worker envelopes are
 // still not compared for these documents, and no verdict, location, or
-// exit-code difference is allowlisted anywhere.
+// exit-code difference is allowlisted anywhere. A new entry must also keep
+// native answering non-error for that document (#577, enforced below): once
+// native errors too, the Worker-only probe can no longer tell agreement from
+// a coincidence, which is what let the 28 retired refinement entries go
+// stale silently.
 const unsupportedReasons = {
-  refinement:
-    "the Worker exposes only check/verify over Kernel specs and has no `refine` verb. NOTE (measured "
-    + "on the post-#574 tree): native and Worker check/verify envelopes now AGREE for every refinement "
-    + "document in the corpus, so this exclusion no longer suppresses any divergence and is retirable. "
-    + "Retiring it adds 54 compared cases and is a corpus-scope decision tracked separately -- the probe "
-    + "below only detects the Worker gaining a verb, not this agreement-staleness (#568)",
   agent:
     "native `check` runs the lenient fsl-ai agent analysis (result \"ok\", dialect fsl-ai-agent.v0); "
     + "the Worker has no agent path at all and stops at the kernel lowering gate",
@@ -100,35 +120,7 @@ const unsupportedReasons = {
     + "cannot validate, so there is no comparable pair to build",
 };
 const unsupportedDocuments = new Map(Object.entries({
-  "examples/agentic_rag/agentic_rag_design_refines_requirements.fsl": "refinement",
-  "examples/agentic_rag/agentic_rag_requirements_refines_business.fsl": "refinement",
-  "examples/agentic_rag/negative/guard_bypass_refines_requirements.fsl": "refinement",
-  "examples/agentic_rag/negative/liveness_drop_refines_requirements.fsl": "refinement",
-  "examples/agentic_rag/negative/tool_approval_bypass_refines_requirements.fsl": "refinement",
   "examples/ai/recursive_support_agent.fsl": "agent",
-  "examples/consulting/tobe_refines_asis.fsl": "refinement",
-  "examples/e2e/3_refines_2.fsl": "refinement",
-  "examples/gallery/adversarial/refine_mapping_boundary_map.fsl": "refinement",
-  "examples/gallery/adversarial/governance_semantic_mapping.fsl": "refinement",
-  "examples/gallery/errors/refinement_failed_map.fsl": "refinement",
-  "examples/layers/return_impl_refines.fsl": "refinement",
-  "examples/multi_agent_system/multi_agent_design_refines_requirements.fsl": "refinement",
-  "examples/multi_agent_system/multi_agent_requirements_refines_business.fsl": "refinement",
-  "examples/nfr/sla_worker_refines.fsl": "refinement",
-  "examples/refinement_chain/bot_refines_mid.fsl": "refinement",
-  "examples/refinement_chain/mid_refines_top.fsl": "refinement",
-  "examples/refinement_liveness/design_bypasses_control_refines.fsl": "refinement",
-  "examples/refinement_liveness/design_drops_liveness_progress_refines.fsl": "refinement",
-  "examples/refinement_liveness/design_drops_liveness_refines.fsl": "refinement",
-  "examples/refinement_liveness/design_keeps_liveness_progress_refines.fsl": "refinement",
-  "examples/refinement_liveness/design_keeps_liveness_refines.fsl": "refinement",
-  "examples/ui_spike/ui_refines_req.fsl": "refinement",
-  "examples/validation/order_refund_instant_refines.fsl": "refinement",
-  "examples/validation/order_refund_windowed_refines.fsl": "refinement",
-  "specs/bank_refines.fsl": "refinement",
-  "specs/cart_refines.fsl": "refinement",
-  "specs/seat_refines.fsl": "refinement",
-  "examples/causal/evidence/incident-log-mapping.fsl": "refinement",
   "examples/causal/incident_response.fsl": "causal",
   "examples/causal/marketing_funnel.fsl": "causal",
   "examples/causal/subscription_retention.fsl": "causal",
@@ -152,15 +144,16 @@ for (const path of candidates) {
       .find((line) => line.length > 0);
     if (stripped !== undefined && /^causal\s/.test(stripped)) documentType = "causal";
   }
-  if (["agent", "refinement", "causal"].includes(documentType)) {
+  if (["agent", "causal"].includes(documentType)) {
     if (unsupportedDocuments.get(repositoryPath) !== documentType) {
       throw new Error(`unreviewed unsupported ${documentType} document: ${repositoryPath}`);
     }
     observedUnsupported.add(repositoryPath);
-    // Not compared against native -- probed on the Worker alone, so that the
-    // day the Worker grows a verb for this document type the recorded premise
-    // stops matching and the exclusion fails instead of silently persisting.
-    exclusionProbes.push({
+    // Not compared against native -- probed on the Worker alone below, so
+    // that the day the Worker grows a verb for this document type the
+    // recorded premise stops matching and the exclusion fails instead of
+    // silently persisting (#568).
+    const probe = {
       id: `exclusion-${exclusionProbes.length}`,
       cmd: "check",
       path: repositoryPath,
@@ -169,7 +162,26 @@ for (const path of candidates) {
       files: {},
       options: {},
       documentType,
-    });
+    };
+    exclusionProbes.push(probe);
+    // That Worker-only probe is sound only because native also answers
+    // non-error for this document: agreement then forces the Worker
+    // non-error too, which the probe below already catches -- no envelope
+    // comparison needed. If native answered "error" instead, a Worker error
+    // would be indistinguishable from real agreement, which is exactly the
+    // blindness that let the 28 refinement entries retired in #577 go stale
+    // silently (both sides erroring looked the same whether or not the two
+    // errors actually matched). Checked here, before the ~6-minute Worker
+    // run, because it depends on nothing but native.
+    const probeNativeEnvelope = await nativeEnvelope(probe);
+    if (probeNativeEnvelope.result === "error") {
+      throw new Error(
+        `${repositoryPath}: native's own result is "error" for this ${documentType} document, so `
+        + `a Worker-only probe cannot distinguish real native<->Worker agreement from two unrelated `
+        + `errors that both happen to be "error". Compare the pair explicitly (native vs Worker `
+        + `envelope) or retire the entry, the way the 28 refinement entries were retired in #577.`,
+      );
+    }
     continue;
   }
   if (unsupportedDocuments.has(repositoryPath)) {
@@ -205,12 +217,25 @@ const governanceErrorCase = "examples/gallery/errors/governance_missing_before.f
 if (!parityCases.some((testCase) => testCase.path === governanceErrorCase)) {
   throw new Error(`${governanceErrorCase} must remain in the parity corpus`);
 }
-// The only corpus input that fails at the kernel stage
-// (`fsl_core::parse_kernel_source_with_file`) while its own top level parses.
-// Every other kernel-stage failure under specs/+examples/ is a refinement,
-// agent, or causal document this harness excludes as unsupported, so without
-// this case the Worker could classify that whole stage differently from native
-// and no parity run would notice (issue #556).
+// #577: anchors the retirement of the 28 stale refinement exclusions. Native
+// and Worker check/verify envelopes now agree for every refinement document
+// in the corpus (the exclusion premise measured in #568 no longer holds), so
+// this document must be a compared parity case, not a Worker-only exclusion
+// probe. If a future change silently re-excludes refinement documents, this
+// fails instead of only showing up as a quiet drop in `parityCases.length`.
+const retiredRefinementCase = "specs/cart_refines.fsl";
+if (!parityCases.some((testCase) => testCase.path === retiredRefinementCase)) {
+  throw new Error(`${retiredRefinementCase} must remain in the parity corpus`);
+}
+// The only corpus input whose kernel-stage failure
+// (`fsl_core::parse_kernel_source_with_file`) keeps its own located message
+// instead of the generic substituted "spec has no state block" that
+// refinement documents get (`kernel_load_error` in spec_load.rs) -- while its
+// own top level parses. Every other located kernel-stage failure under
+// specs/+examples/ is an agent or causal document this harness still excludes
+// as unsupported (refinement is now compared directly, #577), so without this
+// case the Worker could classify a located kernel-stage message differently
+// from native and no parity run would notice (issue #556).
 const kernelStageCase = "examples/gallery/errors/semantics_compose_component_parse_failure.fsl";
 if (!parityCases.some((testCase) => testCase.path === kernelStageCase)) {
   throw new Error(`${kernelStageCase} must remain in the parity corpus`);
@@ -254,9 +279,45 @@ const server = createServer((request, response) => {
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const { port } = server.address();
 
+// Playwright installs each downloaded browser under its own version-numbered
+// directory, and the platform subdirectory inside it is itself
+// version-dependent, not just architecture-dependent: measured on this box,
+// chromium_headless_shell-1208 nests
+// chrome-headless-shell-mac-arm64/chrome-headless-shell, while the older
+// chromium_headless_shell-1187 nests chrome-mac/headless_shell -- a
+// different directory name *and* a different executable basename, not a
+// mac-arm64/mac-x64 suffix swap. Neither the version number nor the platform
+// directory name is worth hardcoding (an Intel Mac's
+// chrome-headless-shell-mac-x64 would silently never match a hardcoded
+// mac-arm64 path), so every version directory's actual subdirectories are
+// enumerated and both observed executable basenames are tried in each,
+// rather than guessing at layouts nobody has measured.
+function playwrightHeadlessShellCandidates() {
+  const versionsRoot = join(homedir(), "Library/Caches/ms-playwright");
+  if (!existsSync(versionsRoot)) return [];
+  const versions = readdirSync(versionsRoot)
+    .filter((name) => name.startsWith("chromium_headless_shell-"))
+    .sort()
+    .reverse();
+  return versions.flatMap((version) => {
+    const versionRoot = join(versionsRoot, version);
+    let platforms;
+    try {
+      platforms = readdirSync(versionRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    } catch {
+      return [];
+    }
+    return platforms.flatMap((platform) => [
+      join(versionRoot, platform, "chrome-headless-shell"),
+      join(versionRoot, platform, "headless_shell"),
+    ]);
+  });
+}
 const chrome = [
   process.env.CHROME_BIN,
-  "/Users/rizumita/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+  ...playwrightHeadlessShellCandidates(),
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/usr/bin/google-chrome",
   "/usr/bin/google-chrome-stable",
@@ -289,11 +350,37 @@ async function devtoolsPort() {
 }
 let nextId = 1;
 const pending = new Map();
+const cdpTimeoutMs = 30_000;
+// Unlike command(), which has always had a timeout, a dropped or half-open
+// CDP connection used to leave the returned promise unsettled forever: the
+// message listener is the only thing that ever resolved or rejected a
+// pending entry, so a response that never arrives hung node indefinitely,
+// and the `for (attempt < 360)` probe loop below is not actually a bound
+// once a single `await cdp(...)` inside it never returns (#584). Both the
+// per-call timeout here and rejectPending's socket close/error handlers
+// below turn that hang into a loud, named failure, which lets the
+// surrounding `finally` still run and clean up the child process and
+// profile directory.
 function cdp(socket, method, params = {}) {
   const id = nextId;
   nextId += 1;
   socket.send(JSON.stringify({ id, method, params }));
-  return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`CDP method "${method}" timed out after ${cdpTimeoutMs}ms`));
+    }, cdpTimeoutMs);
+    pending.set(id, {
+      resolve: (value) => { clearTimeout(timeout); resolve(value); },
+      reject: (error) => { clearTimeout(timeout); reject(error); },
+    });
+  });
+}
+function rejectPending(error) {
+  for (const [id, waiter] of pending) {
+    pending.delete(id);
+    waiter.reject(error);
+  }
 }
 let details;
 try {
@@ -302,6 +389,8 @@ try {
   const page = targets.find((target) => target.type === "page");
   if (!page) throw new Error("Chrome did not expose a page target");
   const socket = new WebSocket(page.webSocketDebuggerUrl);
+  socket.addEventListener("close", () => rejectPending(new Error("CDP socket closed with requests outstanding")));
+  socket.addEventListener("error", () => rejectPending(new Error("CDP socket error with requests outstanding")));
   socket.addEventListener("message", ({ data }) => {
     const message = JSON.parse(data);
     if (!message.id || !pending.has(message.id)) return;
@@ -339,28 +428,6 @@ if (details.ok !== "true") {
 }
 const browser = JSON.parse(details.text);
 if (!browser.cancelled) throw new Error("Worker cancellation did not complete");
-const nativeBinary = fileURLToPath(new URL("../target/debug/fslc", import.meta.url));
-async function nativeEnvelope(testCase) {
-  const args = testCase.cmd === "check"
-    ? ["check", testCase.path]
-    : [
-      "verify", testCase.path,
-      "--depth", String(testCase.options.depth),
-      "--deadlock", testCase.options.deadlock,
-      "--no-cache",
-    ];
-  const result = await command(nativeBinary, args, nativeCommandTimeoutMs);
-  if (testCase.expected_status !== undefined && result.status !== testCase.expected_status) {
-    throw new Error(
-      `native CLI exit mismatch for ${testCase.path}: expected ${testCase.expected_status}, got ${result.status}`,
-    );
-  }
-  try {
-    return JSON.parse(result.stdout);
-  } catch (error) {
-    throw new Error(`native CLI JSON failure: ${error}\n${result.stderr}`);
-  }
-}
 const native = [];
 for (const testCase of parityCases) {
   native.push(await nativeEnvelope(testCase));
@@ -394,6 +461,14 @@ for (let index = 0; index < parityCases.length; index += 1) {
 // parse (causal) -- either way it never produces an analysis. The day the
 // Worker gains the verb, `result` stops being `"error"` and this fails,
 // naming the entry to remove.
+//
+// This Worker-only check is sound only because native also answers
+// non-error for every excluded document, which is asserted separately in the
+// candidate-collection loop above, before the Worker even runs (#577): when
+// native is non-error, Worker/native agreement forces the Worker non-error
+// too, so this check alone already catches staleness -- no envelope
+// comparison needed. See the comment on that earlier assertion for why it
+// would be unsound to skip.
 const staleExclusions = [];
 for (let index = 0; index < exclusionProbes.length; index += 1) {
   const probe = exclusionProbes[index];

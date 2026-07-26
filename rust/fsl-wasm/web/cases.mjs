@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Browser smoke cases shared between the Worker client probe (client.mjs)
-// and the native parity gate (test-browser.mjs). Each case carries the exact
-// verify options both probes must use so the parity comparison stays honest.
+// Worker smoke cases for client.mjs, the only consumer: each case is checked
+// in the browser against its own `expected` verdict (and `expect` shape),
+// not against native. A native comparison loop keyed on these cases existed
+// once (`nativeVerdict`, removed in d30f456 / issue 287) but test-browser.mjs
+// no longer imports this module -- the corpus parity run it does instead
+// (415 real specs/examples documents, each through native and the Worker) is
+// strictly stronger than these 9 inline sources, so that comparison is not
+// worth restoring (issue 585). Do not reintroduce an import of `cases` there
+// on the assumption these are meant to be parity-checked; they are not.
 export const cases = [
   {
     id: "verified",

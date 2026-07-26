@@ -71,6 +71,68 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   tolerated-difference allowlist: the envelopes are still not compared for
   these documents and no verdict, location, or exit-code difference is
   allowlisted (#568).
+- The 28 `refinement`-typed entries in `rust/fsl-wasm/test-browser.mjs`'s
+  `unsupportedDocuments` exclusion map are retired; the compared native<->Worker
+  parity corpus grows from 359 to 415 cases and `exclusionProbes` drops from 32
+  to 4 (agent + 3 causal only). The exclusion premise was measured stale: #574
+  gave native and the Worker one shared classifier (`kernel_load_error`) for a
+  document whose top level parses but is not Kernel-shaped, so `check`/`verify`
+  on every refinement document in the corpus now produce byte-identical
+  `semantics`/"spec has no state block" envelopes on both surfaces -- the
+  exclusion was suppressing zero divergence. `specs/cart_refines.fsl` is now
+  asserted by name to remain a compared parity case, the same way
+  `duplicateWriteCase`/`governanceErrorCase` are, so a future silent
+  re-exclusion fails loudly instead of only showing up as a quiet drop in
+  `parityCases.length` (#577).
+- Every parity-corpus exclusion is now checked to have native answer
+  non-`error`, before the Worker launches. This closes the blindness that let
+  the 28 retired entries go stale: #568's probe tests only the *Worker* side
+  (`result !== "error"`), which detects agreement only when native answers
+  non-`error` — agreement then forces the Worker non-`error` too. Native
+  answered `error` for all 28 refinement documents, so two sides erroring
+  looked identical whether or not the errors matched, and the probe stayed
+  green for weeks. Native answers non-`error` for all 4 surviving exclusions
+  (`ok` for agent, `causal_model_checked` for the 3 causal), so the cheap
+  Worker-only probe is sound for them — and the day an exclusion is added
+  whose native side errors, this assertion names it instead of silently
+  reverting the corpus to that blind state. Full envelope comparison was
+  evaluated and rejected: the causal envelope carries no `versions` block, so
+  `validateEnvelope` throws before any comparison, which is a normalizer
+  rejection rather than a verdict. The assertion runs in the candidate loop
+  rather than beside the Worker probe because it depends on nothing but
+  native, turning a ~6-minute failure into a sub-second one (#577).
+- The browser parity harness no longer embeds a developer's absolute path.
+  `rust/fsl-wasm/test-browser.mjs` hardcoded one machine's
+  `/Users/<name>/Library/Caches/ms-playwright/chromium_headless_shell-1208/...`
+  Chrome, the only committed line in the repository containing an absolute home
+  path, which `AGENTS.md` forbids. Playwright installs each build under its own
+  version directory and has changed the internal layout between them — both
+  `chrome-mac/headless_shell` and
+  `chrome-headless-shell-<platform>/chrome-headless-shell` exist on a machine
+  with two builds installed — so the version, the platform directory, and the
+  binary name are all discovered rather than spelled out, newest build first
+  (#583).
+- A dropped or half-open Chrome DevTools Protocol connection no longer hangs
+  the browser gate forever. `cdp()` returned a promise that only the message
+  listener could ever settle, with no timeout and no socket `close`/`error`
+  handler, so a response that never arrived hung Node indefinitely; the
+  surrounding `for (attempt < 360)` loop is not a bound when a single `await`
+  inside it never returns. Because the hang left the process to be killed
+  externally, the `finally` that terminates Chrome and removes the profile
+  directory never ran: an orphaned `chrome-headless-shell` (parent gone,
+  4h13m old) and seven leaked profile directories were measured on one machine,
+  and an orphan over two hours old blocked a later gate. `cdp()` now times out
+  naming the method, and both socket `close` and `error` reject every
+  outstanding request, so the failure is loud and the cleanup runs (#584).
+- `rust/fsl-wasm/web/cases.mjs` no longer claims its smoke cases are compared
+  against native. The native comparison keyed on them (`nativeVerdict`) was
+  removed in `d30f456` when the corpus-wide parity run replaced it, but the
+  now-unused `import { cases }` in `test-browser.mjs` and the header comment
+  promising "the parity comparison stays honest" both survived, so the file
+  documented a check that no longer existed. The import is removed and the
+  comment states what is true: these 9 inline sources are Worker smoke cases
+  checked in the browser against their own `expected`, and the 415-case corpus
+  comparison supersedes the removed one (#585).
 - A kernel-stage failure inside a `use ... from` component now reports the
   parent's `use` declaration as its `loc`, and names the component's own path
   and position in the message. The two used to be mixed: the path came from the
