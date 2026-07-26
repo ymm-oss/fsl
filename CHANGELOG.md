@@ -6,6 +6,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `rust/fslc/tests/refine_corpus_parity.rs`: a native port of
+  `tools/check_rust_refinement_parity.py`'s 6 corpus refinement-mapping
+  regressions (`specs/cart_refines.fsl`, `specs/seat_refines.fsl`,
+  `examples/gallery/errors/refinement_failed_map.fsl`,
+  `examples/gallery/adversarial/refine_mapping_boundary_map.fsl`, and 2
+  `examples/refinement_liveness/*_progress_refines.fsl` files). The Python
+  script checked both the `fslc refine` stdout envelope and the process
+  exit code, but was never called from any CI workflow or
+  `tools/check-native-integration.sh`, so the native `refine` path's corpus
+  coverage ran nowhere — a structural gap that let #466, #483, #493, #494,
+  and #512 escape as false greens on this path (issue #593). The new test
+  is picked up automatically by `cargo test --workspace`, which both
+  `tools/check-native-integration.sh` and CI already run.
 - `rust/fslc/tests/corpus_check_sweep.rs::check_result_and_exit_status_never_contradict`:
   an oracle-free Verdict Conservation Law check (issue #537 C2) over every
   `.fsl` file under `specs/` + `examples/`. It holds no per-file expectation;
@@ -17,6 +30,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   that exited 0 would previously pass unnoticed.
 
 ### Fixed
+- `rust/fslc/tests/corpus_check_sweep.rs`'s module doc claimed (per issue
+  #483) that "the gallery fixtures and `examples/refinement_liveness/*`"
+  are refined by a test; only 6 of the 28 `refinement`-dialect corpus files
+  are, and that exercise was never wired into CI. Reworded to name the 6
+  covered files and their owning test, `refine_corpus_parity.rs` (issue
+  #593; same "comment claims a contract the implementation does not back"
+  shape as #585).
 - A CDP timeout in the browser parity gate now reports the call ordinal, the
   socket's `readyState`, how many other requests were outstanding, and Chrome's
   own stderr, instead of only the method and the elapsed budget. The stall it
