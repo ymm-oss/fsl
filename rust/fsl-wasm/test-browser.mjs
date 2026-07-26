@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawn } from "node:child_process";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -280,9 +280,45 @@ const server = createServer((request, response) => {
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const { port } = server.address();
 
+// Playwright installs each downloaded browser under its own version-numbered
+// directory, and the platform subdirectory inside it is itself
+// version-dependent, not just architecture-dependent: measured on this box,
+// chromium_headless_shell-1208 nests
+// chrome-headless-shell-mac-arm64/chrome-headless-shell, while the older
+// chromium_headless_shell-1187 nests chrome-mac/headless_shell -- a
+// different directory name *and* a different executable basename, not a
+// mac-arm64/mac-x64 suffix swap. Neither the version number nor the platform
+// directory name is worth hardcoding (an Intel Mac's
+// chrome-headless-shell-mac-x64 would silently never match a hardcoded
+// mac-arm64 path), so every version directory's actual subdirectories are
+// enumerated and both observed executable basenames are tried in each,
+// rather than guessing at layouts nobody has measured.
+function playwrightHeadlessShellCandidates() {
+  const versionsRoot = join(homedir(), "Library/Caches/ms-playwright");
+  if (!existsSync(versionsRoot)) return [];
+  const versions = readdirSync(versionsRoot)
+    .filter((name) => name.startsWith("chromium_headless_shell-"))
+    .sort()
+    .reverse();
+  return versions.flatMap((version) => {
+    const versionRoot = join(versionsRoot, version);
+    let platforms;
+    try {
+      platforms = readdirSync(versionRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    } catch {
+      return [];
+    }
+    return platforms.flatMap((platform) => [
+      join(versionRoot, platform, "chrome-headless-shell"),
+      join(versionRoot, platform, "headless_shell"),
+    ]);
+  });
+}
 const chrome = [
   process.env.CHROME_BIN,
-  "/Users/rizumita/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+  ...playwrightHeadlessShellCandidates(),
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/usr/bin/google-chrome",
   "/usr/bin/google-chrome-stable",
