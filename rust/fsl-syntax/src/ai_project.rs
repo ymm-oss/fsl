@@ -65,6 +65,10 @@ pub struct AiMetricRequirement {
     pub slice: String,
     pub min_samples: Option<u64>,
     pub source: String,
+    /// 1-based position of the clause's first character in the project
+    /// source, so an unexecutable clause reports a `loc` (#562).
+    pub line: u32,
+    pub column: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -103,6 +107,10 @@ pub struct AiObservedRequirement {
     pub compared_to: Option<String>,
     pub slice: String,
     pub source: String,
+    /// 1-based position of the clause's first character in the project
+    /// source, so an unexecutable clause reports a `loc` (#562).
+    pub line: u32,
+    pub column: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -145,6 +153,9 @@ pub struct AiUnparsedClause {
     pub slice: String,
     /// The clause exactly as written, without its `require ` keyword.
     pub source: String,
+    /// 1-based position of the clause in the project source.
+    pub line: u32,
+    pub column: u32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -175,6 +186,8 @@ impl AiProject {
                     declaration: property.name.clone(),
                     slice: requirement.slice.clone(),
                     source: requirement.source.clone(),
+                    line: requirement.line,
+                    column: requirement.column,
                 })
         });
         let observed = self.observed_properties.iter().flat_map(|property| {
@@ -187,6 +200,8 @@ impl AiProject {
                     declaration: property.name.clone(),
                     slice: requirement.slice.clone(),
                     source: requirement.source.clone(),
+                    line: requirement.line,
+                    column: requirement.column,
                 })
         });
         statistical.chain(observed).collect()
@@ -299,7 +314,7 @@ impl AiProject {
 /// unterminated, or a `statistical_property`/`observed_property`/
 /// `ai_migration` name is declared more than once.
 pub fn parse_ai_project(source: &str, name: &str) -> Result<AiProject, String> {
-    let blocks = top_blocks(source)?;
+    let blocks = top_blocks(source, 0)?;
     if blocks.is_empty() {
         return Err("expected fsl-ai project declarations".to_owned());
     }
@@ -317,10 +332,10 @@ pub fn parse_ai_project(source: &str, name: &str) -> Result<AiProject, String> {
             "dataset" => project.datasets.push(parse_dataset(block)),
             "statistical_property" => project
                 .statistical_properties
-                .push(parse_statistical_property(block)?),
+                .push(parse_statistical_property(block, source)?),
             "observed_property" => project
                 .observed_properties
-                .push(parse_observed_property(block)?),
+                .push(parse_observed_property(block, source)?),
             "ai_migration" => project.migrations.push(parse_migration(block)?),
             kind if RAW_BLOCKS.contains(&kind) => project.raw_blocks.push(AiRawBlock {
                 kind: block.kind.clone(),
@@ -362,6 +377,9 @@ fn reject_duplicates<'a>(names: impl Iterator<Item = &'a str>, label: &str) -> R
 struct RawBlock {
     kind: String,
     name: String,
+    /// Char offset of `body`'s first character within the whole project
+    /// source, so a clause inside it can report its own `loc` (#562).
+    body_offset: usize,
     /// The exact original text of the block, header included (`"kind name {
     /// ... }"`), used to hand `ai_component` blocks to the strict token
     /// parser unmodified.
@@ -500,7 +518,7 @@ fn brace_depth(chars: &[char]) -> i32 {
     depth
 }
 
-fn top_blocks(source: &str) -> Result<Vec<RawBlock>, String> {
+fn top_blocks(source: &str, base: usize) -> Result<Vec<RawBlock>, String> {
     let chars: Vec<char> = source.chars().collect();
     let mut blocks = Vec::new();
     let mut i = 0usize;
@@ -525,6 +543,7 @@ fn top_blocks(source: &str) -> Result<Vec<RawBlock>, String> {
             blocks.push(RawBlock {
                 text: chars[header.start..=end].iter().collect(),
                 body: chars[header.brace + 1..end].iter().collect(),
+                body_offset: base + header.brace + 1,
                 kind: header.kind,
                 name: header.name,
             });
@@ -571,21 +590,54 @@ fn strip_semi(line: &str) -> String {
 /// stripped and nested-block lines (including the block's own header line)
 /// skipped, mirroring `_top_lines`.
 #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-fn top_lines(body: &str) -> Vec<String> {
+fn top_lines(body: &str, base: usize) -> Vec<SourceLine> {
     let mut lines = Vec::new();
     let mut depth = 0i32;
-    for raw in body.lines() {
-        let line = strip_comment(raw).trim();
+    let mut line_start = base;
+    for raw in body.split('\n') {
+        let consumed = raw.chars().count() + 1;
+        let stripped = strip_comment(raw);
+        let line = stripped.trim();
         if line.is_empty() {
+            line_start += consumed;
             continue;
         }
         let before = depth;
         depth += line.matches('{').count() as i32 - line.matches('}').count() as i32;
         if before == 0 && !line.contains('{') && !line.contains('}') {
-            lines.push(strip_semi(line));
+            let indent = stripped.chars().count() - stripped.trim_start().chars().count();
+            lines.push(SourceLine {
+                text: strip_semi(line),
+                offset: line_start + indent,
+            });
         }
+        line_start += consumed;
     }
     lines
+}
+
+/// One `top_lines` statement with the char offset of its first non-space
+/// character in the whole project source.
+struct SourceLine {
+    text: String,
+    offset: usize,
+}
+
+/// Resolve a char offset in `source` to the 1-based `loc` line and column
+/// `docs/DESIGN-v1.md` §7.2 guarantees every `parse` error carries (#562).
+#[allow(clippy::cast_possible_truncation)]
+fn line_column(source: &str, offset: usize) -> (u32, u32) {
+    let mut line = 1u32;
+    let mut column = 1u32;
+    for ch in source.chars().take(offset) {
+        if ch == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    (line, column)
 }
 
 fn atom(text: &str) -> String {
@@ -641,7 +693,8 @@ fn is_dotted_ident(s: &str) -> bool {
 
 fn parse_dataset(block: &RawBlock) -> AiDataset {
     let mut source = None;
-    for line in top_lines(&block.body) {
+    for entry in top_lines(&block.body, block.body_offset) {
+        let line = entry.text.as_str();
         if let Some(rest) = line.strip_prefix("source ") {
             source = Some(atom(rest));
         }
@@ -653,7 +706,11 @@ fn parse_dataset(block: &RawBlock) -> AiDataset {
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn parse_metric_requirement(line: &str, slice_name: &str) -> AiMetricRequirement {
+fn parse_metric_requirement(
+    line: &str,
+    slice_name: &str,
+    position: (u32, u32),
+) -> AiMetricRequirement {
     let source = line.to_owned();
     let expr = line.trim();
     if let Some((idx, op)) = find_comparator(expr) {
@@ -669,6 +726,8 @@ fn parse_metric_requirement(line: &str, slice_name: &str) -> AiMetricRequirement
                 comparator: Some(op.to_owned()),
                 threshold: Some(value),
                 slice: slice_name.to_owned(),
+                line: position.0,
+                column: position.1,
                 min_samples: Some(value as u64),
                 source,
             };
@@ -686,6 +745,8 @@ fn parse_metric_requirement(line: &str, slice_name: &str) -> AiMetricRequirement
                     comparator: Some(op.to_owned()),
                     threshold: Some(threshold),
                     slice: slice_name.to_owned(),
+                    line: position.0,
+                    column: position.1,
                     min_samples: None,
                     source,
                 };
@@ -701,6 +762,8 @@ fn parse_metric_requirement(line: &str, slice_name: &str) -> AiMetricRequirement
                 comparator: Some(op.to_owned()),
                 threshold: Some(threshold),
                 slice: slice_name.to_owned(),
+                line: position.0,
+                column: position.1,
                 min_samples: None,
                 source,
             };
@@ -713,18 +776,24 @@ fn parse_metric_requirement(line: &str, slice_name: &str) -> AiMetricRequirement
         comparator: None,
         threshold: None,
         slice: slice_name.to_owned(),
+        line: position.0,
+        column: position.1,
         min_samples: None,
         source,
     }
 }
 
-fn parse_statistical_property(block: &RawBlock) -> Result<AiStatisticalProperty, String> {
+fn parse_statistical_property(
+    block: &RawBlock,
+    source: &str,
+) -> Result<AiStatisticalProperty, String> {
     let mut target = None;
     let mut dataset = None;
     let mut evaluator = None;
     let mut confidence = 0.95;
     let mut requirements = Vec::new();
-    for line in top_lines(&block.body) {
+    for entry in top_lines(&block.body, block.body_offset) {
+        let line = entry.text.as_str();
         if let Some(rest) = line.strip_prefix("target ") {
             target = Some(atom(rest));
         } else if let Some(rest) = line.strip_prefix("dataset ") {
@@ -739,16 +808,25 @@ fn parse_statistical_property(block: &RawBlock) -> Result<AiStatisticalProperty,
                 )
             })?;
         } else if let Some(rest) = line.strip_prefix("require ") {
-            requirements.push(parse_metric_requirement(rest, "all"));
+            requirements.push(parse_metric_requirement(
+                rest,
+                "all",
+                line_column(source, entry.offset),
+            ));
         }
     }
-    for child in top_blocks(&block.body)? {
+    for child in top_blocks(&block.body, block.body_offset)? {
         if child.kind != "slice" {
             continue;
         }
-        for line in top_lines(&child.body) {
+        for entry in top_lines(&child.body, child.body_offset) {
+            let line = entry.text.as_str();
             if let Some(rest) = line.strip_prefix("require ") {
-                requirements.push(parse_metric_requirement(rest, &child.name));
+                requirements.push(parse_metric_requirement(
+                    rest,
+                    &child.name,
+                    line_column(source, entry.offset),
+                ));
             }
         }
     }
@@ -762,7 +840,11 @@ fn parse_statistical_property(block: &RawBlock) -> Result<AiStatisticalProperty,
     })
 }
 
-fn parse_observed_requirement(line: &str, slice_name: &str) -> AiObservedRequirement {
+fn parse_observed_requirement(
+    line: &str,
+    slice_name: &str,
+    position: (u32, u32),
+) -> AiObservedRequirement {
     let expr = line.trim();
     if let Some((idx, op)) = find_comparator(expr) {
         let left = expr[..idx].trim();
@@ -779,6 +861,8 @@ fn parse_observed_requirement(line: &str, slice_name: &str) -> AiObservedRequire
                 threshold,
                 compared_to: None,
                 slice: slice_name.to_owned(),
+                line: position.0,
+                column: position.1,
                 source: line.to_owned(),
             };
         }
@@ -798,6 +882,8 @@ fn parse_observed_requirement(line: &str, slice_name: &str) -> AiObservedRequire
                     threshold,
                     compared_to: Some(compared_to.to_owned()),
                     slice: slice_name.to_owned(),
+                    line: position.0,
+                    column: position.1,
                     source: line.to_owned(),
                 };
             }
@@ -810,16 +896,22 @@ fn parse_observed_requirement(line: &str, slice_name: &str) -> AiObservedRequire
         threshold: 0.0,
         compared_to: None,
         slice: slice_name.to_owned(),
+        line: position.0,
+        column: position.1,
         source: line.to_owned(),
     }
 }
 
-fn parse_observed_property(block: &RawBlock) -> Result<AiObservedProperty, String> {
+fn parse_observed_property(
+    block: &RawBlock,
+    project_source: &str,
+) -> Result<AiObservedProperty, String> {
     let mut target = None;
     let mut source = None;
     let mut window = None;
     let mut requirements = Vec::new();
-    for line in top_lines(&block.body) {
+    for entry in top_lines(&block.body, block.body_offset) {
+        let line = entry.text.as_str();
         if let Some(rest) = line.strip_prefix("target ") {
             target = Some(atom(rest));
         } else if let Some(rest) = line.strip_prefix("source ") {
@@ -827,16 +919,25 @@ fn parse_observed_property(block: &RawBlock) -> Result<AiObservedProperty, Strin
         } else if let Some(rest) = line.strip_prefix("window ") {
             window = Some(atom(rest));
         } else if let Some(rest) = line.strip_prefix("require ") {
-            requirements.push(parse_observed_requirement(rest, "all"));
+            requirements.push(parse_observed_requirement(
+                rest,
+                "all",
+                line_column(project_source, entry.offset),
+            ));
         }
     }
-    for child in top_blocks(&block.body)? {
+    for child in top_blocks(&block.body, block.body_offset)? {
         if child.kind != "slice" {
             continue;
         }
-        for line in top_lines(&child.body) {
+        for entry in top_lines(&child.body, child.body_offset) {
+            let line = entry.text.as_str();
             if let Some(rest) = line.strip_prefix("require ") {
-                requirements.push(parse_observed_requirement(rest, &child.name));
+                requirements.push(parse_observed_requirement(
+                    rest,
+                    &child.name,
+                    line_column(project_source, entry.offset),
+                ));
             }
         }
     }
@@ -878,21 +979,22 @@ fn parse_regression_requirement(
 
 fn parse_migration(block: &RawBlock) -> Result<AiMigration, String> {
     let mut regression_requirements = Vec::new();
-    for child in top_blocks(&block.body)? {
+    for child in top_blocks(&block.body, block.body_offset)? {
         if child.kind != "preserve" {
             continue;
         }
-        for grandchild in top_blocks(&child.body)? {
+        for grandchild in top_blocks(&child.body, child.body_offset)? {
             if grandchild.kind != "no_regression" {
                 continue;
             }
             let mut dataset = None;
-            for line in top_lines(&grandchild.body) {
+            for entry in top_lines(&grandchild.body, grandchild.body_offset) {
+                let line = entry.text.as_str();
                 if let Some(rest) = line.strip_prefix("dataset ") {
                     dataset = Some(atom(rest));
                 } else if line.starts_with("metric ") {
                     regression_requirements
-                        .push(parse_regression_requirement(&line, dataset.clone())?);
+                        .push(parse_regression_requirement(line, dataset.clone())?);
                 }
             }
         }

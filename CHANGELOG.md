@@ -6,6 +6,30 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- The fsl-ai project check's unexecutable-`require` spec error (#542) now
+  carries a `loc` pointing at the offending clause's own line and column.
+  `rust/fsl-syntax/src/ai_project.rs` tracked no positions at all, so the error
+  named the declaration and slice but no position, breaking
+  `docs/DESIGN-v1.md` §7.2's guarantee that every `parse` error has one. Block
+  bodies and their statement lines now carry their char offset through
+  `top_blocks`/`top_lines`, each metric/observed requirement records the
+  position of the clause that produced it, and both `fslc ai check` and the
+  `fslc check` dispatch emit it. A clause nested in a `slice` reports its own
+  line, not the enclosing block's. Which projects are accepted is unchanged
+  (#562, partial -- see below).
+- **Not fixed, recorded:** an unknown *non-*`require` line inside a declaration
+  body is still silently ignored, so acceptance still turns on the line's first
+  word. Closing that requires deciding a closed body grammar, and no current
+  source specifies one: the frozen `src/fslc/ai_project.py` ignores unrecognized
+  lines by construction (an `if`/`elif` chain with no `else`) and downgrades an
+  unparseable `require` to `kind="inconclusive"` rather than erroring;
+  `docs/LANGUAGE.md` and `skills/fsl/reference.md` state only the `require` rule
+  #542 added; and `skills/fsl/reference.md` documents unvalidated block bodies
+  as intended for `ai_action`/`retriever`/`trust_boundary`/`authority`. The one
+  corpus project file additionally uses free-form predicate lines
+  (`language in ["ja", "en"]`, `condition output.claims not_supported_by
+  retrieved.sources`) that both implementations store verbatim and never parse
+  (#562).
 - `fslc analyze` on a `.toml` project manifest now emits the same TSG
   vocabulary a standalone file emits for the same source. The manifest loop
   built each layer with `fsl_tools::build_tsg` alone, which only sees the

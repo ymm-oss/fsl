@@ -47,9 +47,17 @@ pub fn ai_project_name(source_file: &str) -> &str {
 ///
 /// # Errors
 ///
-/// Returns the parse or unexecutable-clause message, for `kind: "parse"`.
-pub fn parse_checked_ai_project(source: &str, name: &str) -> Result<fsl_syntax::AiProject, String> {
-    let project = fsl_syntax::parse_ai_project(source, name)?;
+/// Returns the parse or unexecutable-clause message, carrying the position of
+/// the first offending clause when there is one, for `kind: "parse"`.
+pub fn parse_checked_ai_project(
+    source: &str,
+    name: &str,
+) -> Result<fsl_syntax::AiProject, AiProjectParseError> {
+    let project =
+        fsl_syntax::parse_ai_project(source, name).map_err(|message| AiProjectParseError {
+            message,
+            position: None,
+        })?;
     let unparsed = project.unparsed_clauses();
     if unparsed.is_empty() {
         return Ok(project);
@@ -64,10 +72,24 @@ pub fn parse_checked_ai_project(source: &str, name: &str) -> Result<fsl_syntax::
         })
         .collect::<Vec<_>>()
         .join("; ");
-    Err(format!(
-        "require clause matches no known fsl-ai evidence clause grammar \
-         (min_samples, ci_lower, ci_upper, a point estimate, observed, or drift): {detail}"
-    ))
+    // `unparsed_clauses` walks declarations in source order, so the first entry
+    // is the first offending clause; report its own line, not its block's.
+    let first = &unparsed[0];
+    Err(AiProjectParseError {
+        message: format!(
+            "require clause matches no known fsl-ai evidence clause grammar \
+             (min_samples, ci_lower, ci_upper, a point estimate, observed, or drift): {detail}"
+        ),
+        position: Some((first.line, first.column)),
+    })
+}
+
+/// An fsl-ai project check failure, carrying the offending clause's position
+/// when the parser resolved one. `docs/DESIGN-v1.md` §7.2 guarantees every
+/// `parse` error carries a `loc` (#562).
+pub struct AiProjectParseError {
+    pub message: String,
+    pub position: Option<(u32, u32)>,
 }
 
 /// Render the multi-declaration AI project check result when applicable,
@@ -82,10 +104,13 @@ pub fn ai_project_check_output(
         return None;
     }
     let spec = ai_project_name(source_file);
-    if let Err(message) = parse_checked_ai_project(source, spec) {
+    if let Err(error) = parse_checked_ai_project(source, spec) {
         output.insert("result".to_owned(), json!("error"));
         output.insert("kind".to_owned(), json!("parse"));
-        output.insert("message".to_owned(), json!(message));
+        output.insert("message".to_owned(), json!(error.message));
+        if let Some((line, column)) = error.position {
+            output.insert("loc".to_owned(), json!({"line": line, "column": column}));
+        }
         return Some((Value::Object(output), 2));
     }
     output.insert("result".to_owned(), json!("ok"));
