@@ -427,6 +427,38 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   trailing argument (`result:"error"`/`kind:"usage"`/exit 2), matching
   every other `domain` subcommand and the rest of the CLI, instead of
   silently discarding it and returning a result computed without it (#516).
+- `fslc lint`/`fslc migrate` now checked-model-validate every input,
+  unconditionally, instead of only validating a file `plan_migration` found
+  legacy syntax to rewrite. Previously an input with no legacy tokens for
+  `plan_migration` to fix was never checked at all — a spec with a genuine
+  type error, or a canonical requirements spec whose `implements ... from`
+  target had moved, could still report `lint`/`migrate` exit 0 purely
+  because it happened to have nothing to migrate, while the identical defect
+  with one unrelated legacy token present correctly failed. The new
+  pre-flight (shared by both commands through `load_migration_plan`) mirrors
+  `fslc check`'s own kind/location convention exactly, so the same input
+  gets the same verdict from both commands. `refinement`/`agent` dialects
+  are excluded (same carve-out `fmt --check` already uses: a mapping file
+  has no `state` block by design), and a refused plan (a legacy construct
+  `plan_migration` recognizes but cannot machine-apply, e.g. `&&`) is also
+  excluded, since no pre-migration checked model exists to compare for such
+  input in the first place (#517).
+- `Monitor::new` (the solver-independent concrete interpreter `replay` and
+  BMC's concrete pre-scan build on) now runs the same deterministic-init gate
+  the explicit engine's own construction check already had, instead of
+  silently default-filling any state component `init` leaves free and
+  treating that one arbitrary value as the specification's initial state.
+  Previously `replay` compared an observed trace's initial state against
+  that default and falsely reported `initial_state_mismatch` on a BMC-valid
+  trace whose free component held a different, equally admissible value. A
+  caller that already has its own complete concrete initial state (an
+  observed replay trace's own step 0, an explicit `--from-state`/
+  `--initial-state` snapshot, or a BMC witness's first state) is unaffected:
+  it now builds through the new `Monitor::from_state`, which has nothing to
+  ask `init` to compute and so is not subject to the gate.
+  `initial_state_mismatch` is still fully checked whenever `init` determines
+  every state variable; when it does not, the whole state is trusted from
+  the caller rather than compared component-wise (#519).
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false

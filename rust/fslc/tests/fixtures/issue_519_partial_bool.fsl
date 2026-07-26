@@ -1,0 +1,20 @@
+spec PartialBool {
+  type Key = 0..1
+
+  state {
+    m: Map<Key, Bool>
+  }
+
+  init {
+    m[0] = false
+  }
+
+  action set_zero() {
+    requires not m[0]
+    m[0] = true
+  }
+
+  invariant KeyZeroSane {
+    m[0] == false or m[0] == true
+  }
+}

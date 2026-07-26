@@ -811,13 +811,40 @@ impl Monitor {
         }
     }
 
+    /// Build a monitor whose initial state is exactly `state`, without
+    /// running `model`'s init at all.
+    ///
+    /// For a caller that already has a complete concrete initial state —
+    /// an observed replay trace's own step 0, an explicit
+    /// `--initial-state` snapshot, or a BMC witness's first state — there
+    /// is nothing left for init to compute. `init` may legitimately leave
+    /// some state free (a symbolic engine explores every admissible
+    /// value), so building through [`Monitor::new`] here would wrongly
+    /// demand a determinism [`Monitor::new`] does not need to provide
+    /// (#519).
+    #[must_use]
+    pub fn from_state(model: KernelModel, state: State) -> Self {
+        Self {
+            model,
+            state,
+            step: 0,
+        }
+    }
+
     /// Initialize a solver-independent concrete monitor.
     ///
     /// # Errors
     ///
-    /// Returns [`RuntimeError`] when default construction or sequential init
-    /// execution fails.
+    /// Returns [`RuntimeError`] when init does not deterministically assign
+    /// every state variable (component-wise; see
+    /// `docs/DESIGN-bridge.md` "Determinism of init") or sequential init
+    /// execution fails. A model whose init leaves some state free is
+    /// admissible to `verify`/BMC, which explores every admissible value —
+    /// concrete execution has no such freedom to explore, so construction
+    /// fails closed instead of picking one arbitrary default value and
+    /// silently treating it as the specification's initial state.
     pub fn new(model: KernelModel) -> Result<Self, RuntimeError> {
+        explicit::check_deterministic_init(&model)?;
         let mut state = model
             .state
             .iter()
@@ -1636,8 +1663,16 @@ pub fn check_refinement(
             action: None,
             changes: BTreeMap::new(),
         }];
-        let mut initial_alpha_monitor = Monitor::new(abstraction.clone())?;
-        initial_alpha_monitor.state = alpha_initial.clone();
+        // `alpha_initial` is already a complete concrete abs state (the
+        // impl initial state mapped through the refinement correspondence),
+        // so there is nothing for the abstraction's own `init` to compute —
+        // `Monitor::from_state` skips it entirely rather than demanding a
+        // determinism `abstraction.init` may not have (issue #519's gate
+        // interacting with #493's nondeterministic-abs-init support: a
+        // nondeterministic abs init is intentionally never fully
+        // deterministic, so `Monitor::new(abstraction...)` fails closed here
+        // even for a genuinely correct refinement).
+        let initial_alpha_monitor = Monitor::from_state(abstraction.clone(), alpha_initial.clone());
         if let Some(violation) = initial_alpha_monitor.current_violation()? {
             let kind = if violation.kind == "type_bound" {
                 "map_out_of_bounds"
@@ -1812,13 +1847,16 @@ pub fn check_refinement(
                         .zip(values)
                         .map(|(param, value)| (param.name().to_owned(), value))
                         .collect::<BTreeMap<_, _>>();
-                    let mut abs_monitor = Monitor::new(abstraction.clone())?;
-                    abs_monitor.state = abstract_action_state(
+                    // See the step-0 `Monitor::from_state` note above: this
+                    // state is already fully computed, so there is nothing
+                    // for `abstraction.init` to determine here either.
+                    let abs_state = abstract_action_state(
                         &alpha_before,
                         abstraction,
                         abs_action,
                         &expected_params,
                     )?;
+                    let mut abs_monitor = Monitor::from_state(abstraction.clone(), abs_state);
                     let Some(abs_enabled) =
                         refinement_action_instance(&abs_monitor, abs_action, expected_params)?
                     else {
@@ -1849,8 +1887,7 @@ pub fn check_refinement(
                     }
                 }
             }
-            let mut alpha_monitor = Monitor::new(abstraction.clone())?;
-            alpha_monitor.state = alpha_after.clone();
+            let alpha_monitor = Monitor::from_state(abstraction.clone(), alpha_after.clone());
             if let Some(violation) = alpha_monitor.current_violation()? {
                 let kind = if violation.kind == "type_bound" {
                     "map_out_of_bounds"
@@ -2270,10 +2307,13 @@ fn replay_trace_with_initial(
     if first.step != 0 || first.action.is_some() {
         return Err(runtime_error("trace must begin with an action-free step 0"));
     }
-    let mut monitor = Monitor::new(model)?;
-    if let Some(initial_state) = initial_state {
-        monitor.state.clone_from(initial_state);
-    }
+    // A caller-provided initial state (the trace's own witnessed step 0, or
+    // an explicit `--initial-state`) makes `Monitor::from_state` the right
+    // constructor here — see its doc comment (#519).
+    let mut monitor = match initial_state {
+        Some(initial_state) => Monitor::from_state(model, initial_state.clone()),
+        None => Monitor::new(model)?,
+    };
     if monitor.state != first.state {
         return Err(runtime_error(
             "trace initial state does not match Monitor init",

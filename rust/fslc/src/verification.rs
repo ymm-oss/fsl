@@ -936,7 +936,17 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
         request.selection.property,
         request.selection.excluded,
     );
-    if checked_bounds.is_none() && request.initial_state.is_none() {
+    // `find_boundary_violation` is a concrete pre-scan: an optional
+    // shortcut ahead of the full Z3-backed solve below, not the source of
+    // verify's soundness. It needs a deterministic concrete initial state
+    // to run at all (#519); a model whose init leaves some state free is
+    // still fully supported by `solve_bmc`, which explores every
+    // admissible initial value symbolically, so skip the shortcut rather
+    // than failing the whole command when it does not apply.
+    if checked_bounds.is_none()
+        && request.initial_state.is_none()
+        && fsl_runtime::deterministic_initial_state(&model).is_ok()
+    {
         match fsl_runtime::find_boundary_violation(model.clone(), request.depth) {
             Ok(Some((violation, trace))) => {
                 let statistics = fsl_solver::VerificationStatistics::default();

@@ -867,7 +867,9 @@ urgency freezes time (`urgency_freeze`). `--vacuity error` gives
 ```
 fslc check <f>                                  # syntax / names / types only; f = .fsl or .md (literate)
 fslc lint <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
+                                                 # exit 0 no findings, 1 findings exist, 2 I/O or check failure (unconditional per input, refused legacy tokens excepted)
 fslc migrate <path>... --edition next [--write] # dry run by default; atomic validated write set
+                                                 # exit 0 migrated, 2 refused/I/O/check failure (same check-failure contract as lint)
 fslc fmt <f|-> [--edition current|next]         # canonical source on stdout; input is never mutated
 fslc fmt <path>... --check                      # JSON; exit 0 clean, 1 changed, 2 error
 fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)
@@ -964,7 +966,12 @@ complete post-transition `state`. Trace schema 1.1 adds explicit stutter as
 state. Equal-state stutters may be inserted/deleted, while unreported concrete
 intermediates are outside invariant judgment. Optional `timestamp` is opaque
 and ignored. Trace v1 accepts Kernel 1.0.0/2.0.0. Ill-shaped/incomplete input is exit 2; typed
-state divergence is exit 1 with leaf mismatches. Bare arrays/`{events}` are the
+state divergence is exit 1 with leaf mismatches. `initial` is checked against
+`init`'s own computed initial state only when `init` fully determines one; if
+`init` leaves any state variable free (BMC explores every admissible value
+there), `initial` is trusted as the concrete starting point directly instead
+of failing `initial_state_mismatch` against an arbitrary default value for
+that variable. Bare arrays/`{events}` are the
 unversioned action-only compatibility adapter; testgen/verifier traces are not
 replay input. See `docs/DESIGN-replay-trace.md`.
 

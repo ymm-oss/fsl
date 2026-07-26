@@ -13,6 +13,20 @@ taxonomies `deprecated`, `non_canonical`, `ambiguous_intent`, or
 `unsupported_in_edition`, severity, exact span, edition, canonical replacement,
 and whether its edits are machine-applicable.
 
+The "check failure" half of exit 2 is unconditional per input, shared by
+`lint` and `migrate` (#517): every input is checked-model-validated
+regardless of whether it happens to contain any legacy syntax for
+`plan_migration` to find and rewrite — a spec that fails `fslc check` gets
+`kind:"semantics"`/`kind:"type"` and exit 2 from `lint`/`migrate` exactly as
+it would from `check`, not a silent exit 0 just because there was nothing to
+migrate. As with `fmt --check`, `refinement`/`agent` dialects are not a
+standalone check target and are excluded from this validation (a mapping
+file has no `state` block by design). A refused plan (a legacy construct
+`plan_migration` recognizes but cannot machine-apply, e.g. `&&`) is also
+excluded: per the `&&` note below, no pre-migration checked model exists to
+compare for such input in the first place, so the check applies only to
+input `plan_migration` itself did not already refuse.
+
 Each lint operand may be a file or directory. Directory operands expand
 recursively to regular `*.fsl` files; symlink entries and other extensions are
 skipped while walking them, and the combined file set is deduplicated and sorted

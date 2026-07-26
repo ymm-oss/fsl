@@ -96,6 +96,18 @@ Concrete execution requires a deterministic initial state. Static check at
   + hint "runtime monitor requires a deterministic init".
 - All existing specs satisfy this (a spec that does not satisfy it passes verify
   but errors in Monitor — prompting a fix on the spec side).
+- This gate lives in `Monitor::new` itself (#519), not only in the explicit
+  engine's own construction check (`explicit::check_deterministic_init`, which
+  `Monitor::new` now reuses) — every caller that asks `Monitor::new` to compute
+  the concrete initial state from `init` gets it, including `replay`'s witness
+  reconstruction and BMC's concrete pre-scan (`find_boundary_violation`).
+  A caller that already has its own complete concrete initial state — an
+  observed replay trace's own step 0, an explicit `--from-state`/
+  `--initial-state` snapshot, or a BMC witness's first state — is not asking
+  `init` to compute anything, so it builds through `Monitor::from_state`
+  instead and is unaffected by this gate: `init` may leave a component free
+  (BMC explores every admissible value there), and a concrete run pinned to
+  one already-admissible value has nothing left for the gate to check.
 
 ### 1.4 Expression evaluation
 
@@ -146,6 +158,15 @@ Output:
 ```
 
 exit code: conformant = 0, nonconformant = 1, input/spec error = 2.
+
+A versioned trace's declared `initial` state is compared against `init`'s own
+computed initial state only when `init` fully determines one (every state
+variable, not component-wise); when it does not, the trace's own `initial` is
+used as the concrete starting point directly instead (see §1.3's
+`Monitor::from_state` note, #519), and `initial_state_mismatch` is not
+checked for that run at all — there is currently no per-component fallback
+that still cross-checks a state variable init *does* fully determine while
+skipping only the ones a free component shares a root with.
 
 ## 3. `fslc testgen` — generation of a conformance-test skeleton
 

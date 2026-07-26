@@ -1,0 +1,10 @@
+{
+  "$schema": "https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json",
+  "schema_version": "1.1.0",
+  "kernel_schema_version": "1.0.0",
+  "spec": "FullBool",
+  "initial": {"m": {"0": true, "1": false}},
+  "events": [
+    {"tick": 1, "action": null, "params": {}, "state": {"m": {"0": true, "1": false}}}
+  ]
+}
