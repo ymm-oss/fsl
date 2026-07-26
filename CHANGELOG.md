@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-07-27
+
 ### Changed
 - Pull requests into `main` now run the complete Linux product evidence — `rust workspace`
   and `WASM` — instead of deferring it to after the merge. Only the cross-platform
@@ -3701,7 +3703,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/ymm-oss/fsl/compare/v3.1.0...v4.0.0
 [3.1.0]: https://github.com/ymm-oss/fsl/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/ymm-oss/fsl/compare/v2.7.0...v3.0.0
 [2.7.0]: https://github.com/ymm-oss/fsl/compare/v2.6.3...v2.7.0
