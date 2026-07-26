@@ -63,6 +63,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   tolerated-difference allowlist: the envelopes are still not compared for
   these documents and no verdict, location, or exit-code difference is
   allowlisted (#568).
+- A kernel-stage failure inside a `use ... from` component now reports the
+  parent's `use` declaration as its `loc`, and names the component's own path
+  and position in the message. The two used to be mixed: the path came from the
+  parent (`source_file`) while the line and column came from the component's
+  parser, so `check` on
+  `examples/gallery/errors/semantics_compose_component_parse_failure.fsl`
+  reported `…:7:18` — and line 7 of that file is a comment. A location in the
+  wrong file is worse than none, and `docs/DESIGN-v1.md` G2 requires the output
+  JSON alone to say where the problem is. `loc` is `{line, column}` with no
+  `file` in all five of its `docs/DESIGN-v1.md` examples, so it can only mean a
+  position in the file the envelope is about; the `use` declaration is that
+  position, and it is also the line to look at first. The message now reads
+  `component "<component>" failed to parse (<inner> at <component>:<l>:<c>) at
+  <parent>:<use line>:<use column>`, naming both files explicitly. An
+  unreadable component is re-anchored the same way, instead of reporting `1:1`.
+  Native and the browser Worker share the loader, so both return the identical
+  string; the file is a parity corpus case, so
+  `./tools/check-native-integration.sh` checks that on every run (#567).
 - The fsl-ai project check's unexecutable-`require` spec error (#542) now
   carries a `loc` pointing at the offending clause's own line and column.
   `rust/fsl-syntax/src/ai_project.rs` tracked no positions at all, so the error

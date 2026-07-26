@@ -152,16 +152,77 @@ impl ComponentNames {
     }
 }
 
+/// Re-anchor a failure that happened *inside* a component onto the parent's
+/// `use ... from` declaration (issue #567).
+///
+/// `loc` is `{line, column}` with no `file` (`docs/DESIGN-v1.md`), so it can
+/// only ever mean "a position in the file the envelope names". A component's
+/// line and column reported against the parent's path therefore points at
+/// whatever happens to sit there — for the compose error gallery fixture, a
+/// comment. The position now belongs to the `use` declaration, which really is
+/// in the parent and really is the line to look at, and the component's own
+/// path and position move into the message so nothing is lost.
+fn component_error(
+    path: &str,
+    use_span: fsl_syntax::Span,
+    error: &CoreError,
+    verb: &str,
+) -> CoreError {
+    CoreError {
+        message: format!(
+            "component \"{path}\" {verb} ({} at {path}:{}:{})",
+            error.message, error.line, error.column
+        ),
+        line: use_span.start.line,
+        column: use_span.start.column,
+        // Not propagated from `error`. What this value reports is a compose-level
+        // failure to load a component, anchored at the parent's `use`
+        // declaration — it is not itself a name-resolution failure, and
+        // `docs/DESIGN-v1.md` §8's repair branch for `name` ("add a declaration
+        // or change a type") would be wrong advice at that location. The
+        // component's own classification survives inside the message, together
+        // with its path and position (issue 565's flag, issue 567's anchoring).
+        name_resolution: false,
+        // The origin's span is the `use` declaration, which really is in the
+        // parent, so `with_source_file` stamps the parent path onto a position
+        // that exists there. Carrying the component's span here is what let the
+        // rendered message pair the parent's path with the component's line.
+        origin: Some(Box::new(crate::OriginChain {
+            id: crate::OriginId(format!(
+                "compose:use:{}:{}",
+                use_span.start.offset, use_span.end.offset
+            )),
+            dialect: "compose".to_owned(),
+            primary: Some(crate::OriginSite {
+                source_file: None,
+                span: Some(use_span),
+                dialect: "compose".to_owned(),
+                declaration_path: vec!["use".to_owned(), path.to_owned()],
+            }),
+            secondary: Vec::new(),
+            lowering_steps: Vec::new(),
+            generated: false,
+        })),
+    }
+}
+
 fn parse_component(
     source: &str,
+    path: &str,
     use_span: fsl_syntax::Span,
 ) -> Result<(SurfaceSpec, Annotations), CoreError> {
-    let parsed = parse_document(SourceFile::new(source))?;
+    let parsed = parse_document(SourceFile::new(source)).map_err(|error| {
+        component_error(path, use_span, &CoreError::from(error), "failed to parse")
+    })?;
     let SurfaceDocument::Spec(spec) = parsed.surface else {
         return Err(error_at("compose use must reference a spec", use_span));
     };
-    let spec = PredicateExpander::new(&spec)?.expand(spec)?;
-    Ok((expand_spec_domains(spec)?, parsed.annotations))
+    let spec = PredicateExpander::new(&spec)
+        .and_then(|expander| expander.expand(spec))
+        .map_err(|error| component_error(path, use_span, &error, "failed to lower"))?;
+    let spec = expand_spec_domains(spec)
+        .map_err(|error| component_error(path, use_span, &error, "failed to lower"))?;
+    Ok((spec, parsed.annotations))
 }
 
 fn composed_kernel(
@@ -212,8 +273,10 @@ pub fn lower_compose(
         if components.contains_key(alias) {
             return Err(error_at(format!("duplicate alias '{alias}'"), *span));
         }
-        let source = resolver.read(path)?;
-        let (spec, annotations) = parse_component(&source, *span)?;
+        let source = resolver
+            .read(path)
+            .map_err(|error| component_error(path, *span, &error, "could not be read"))?;
+        let (spec, annotations) = parse_component(&source, path, *span)?;
         component_annotations.extend(annotations.source_order().iter().cloned());
         order.push(alias.clone());
         components.insert(
