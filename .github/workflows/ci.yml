@@ -17,11 +17,21 @@ on:
 permissions:
   contents: read
 
-# During rollout, pull requests into main keep the full product gate until the
-# `merge readiness` context is installed in the main ruleset. Once the ruleset
-# is switched, set the repository variable FSL_OPTIMISTIC_CI=enabled. Product
-# gates for main pushes, schedules, manual runs, and production promotions never
-# honor that opt-out.
+# The Linux evidence — `rust workspace` and `WASM` — runs on every pull request.
+# It is where the tests live: 103 of the repository's 124 integration test files
+# sit in `fslc`, `fsl-tools`, `fsl-verifier` and `fsl-lsp`, none of which the
+# bounded `merge readiness` gate compiles or runs, and its `cargo check` carries
+# no `--all-targets`, so a type error or a failing assertion in any of them used
+# to reach main and surface only after the merge.
+#
+# Only the cross-platform matrix — `native Z3 4.16` on macOS and Windows — stays
+# post-merge under FSL_OPTIMISTIC_CI, reported by the post-merge CI reporter.
+# That is where platform failures have actually occurred (Windows PATH and
+# `core.autocrlf` line endings), and Windows is the slowest job in the gate, so
+# deferring it is what buys the merge-throughput this split is for.
+#
+# Product gates for main pushes, schedules, manual runs, and production
+# promotions never honor that opt-out.
 concurrency:
   group: product-gate-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -29,10 +39,6 @@ concurrency:
 jobs:
   rust-workspace:
     name: rust workspace
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.base_ref != 'main' ||
-      vars.FSL_OPTIMISTIC_CI != 'enabled'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -51,10 +57,6 @@ jobs:
 
   wasm:
     name: WASM
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.base_ref != 'main' ||
-      vars.FSL_OPTIMISTIC_CI != 'enabled'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

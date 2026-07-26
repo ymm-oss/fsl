@@ -7,11 +7,16 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
 check_compile() {
+  # `--all-targets` is load-bearing. Without it `cargo check` builds library and
+  # binary targets only, so a type error in a test file passes this lane
+  # entirely — only `cargo fmt --check` below would see such a file, and only
+  # when the breakage is syntactic.
   cargo check \
     --manifest-path rust/Cargo.toml \
     --workspace \
     --exclude fsl-solver-z3 \
     --exclude fslc-rust \
+    --all-targets \
     --no-default-features \
     --locked
 }
