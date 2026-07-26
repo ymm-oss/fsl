@@ -42,8 +42,16 @@ fn undecided_declarations_surface_in_reports_and_acknowledge_without_suppression
     let spec = spec.to_str().expect("UTF-8 fixture path");
 
     let ledger = run(&["ledger", spec]);
-    assert!(
-        ledger.status.success(),
+    // This fixture's own verification baseline is `violated` (`fslc verify`
+    // exits 1 on it), so `ledger` exits 1 too since issue 592: the report is
+    // still rendered in full -- every content assertion below still holds --
+    // but the exit code no longer claims the audit found nothing. `verify`,
+    // `testgen`, and `scenarios` all exit 1 on this same fixture; `ledger`
+    // exiting 0 was the odd one out. Pinned rather than dropped so the
+    // conservation property stays asserted here, not just its absence.
+    assert_eq!(
+        ledger.status.code(),
+        Some(1),
         "{}",
         String::from_utf8_lossy(&ledger.stderr)
     );
