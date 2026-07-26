@@ -7,16 +7,16 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
 check_compile() {
-  # `--all-targets` is load-bearing. Without it `cargo check` builds library and
-  # binary targets only, so a type error in a test file passes this lane
-  # entirely — only `cargo fmt --check` below would see such a file, and only
-  # when the breakage is syntactic.
+  # Deliberately no `--all-targets`. It was tried and measured at 12m42s in CI,
+  # which destroys this lane's reason to exist — it is the sub-minute fail-fast
+  # signal, not the gate. Test targets are compiled and run by `rust workspace`,
+  # which now runs on every pull request, so `--all-targets` here buys nothing
+  # and costs the fast feedback.
   cargo check \
     --manifest-path rust/Cargo.toml \
     --workspace \
     --exclude fsl-solver-z3 \
     --exclude fslc-rust \
-    --all-targets \
     --no-default-features \
     --locked
 }

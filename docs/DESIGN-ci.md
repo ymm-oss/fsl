@@ -24,34 +24,43 @@ Measured on the batch that motivated this revision:
 
 - **The tests live in the crates the bounded lane excludes.** 103 of 124 integration test files sit
   in `fslc` (77), `fsl-tools` (16), `fsl-verifier` (8) and `fsl-lsp` (2). `merge readiness` runs 21.
-- **Its compile lane did not build test targets at all** — `cargo check` without `--all-targets` —
+- **Its compile lane does not build test targets at all** — `cargo check` without `--all-targets` —
   so a type error or a failing assertion in any of those 103 files reached `main` and surfaced only
-  post-merge. Only `cargo fmt --check` covered them, and only for syntactic breakage. That lane now
-  passes `--all-targets`; it still does not *run* those tests, which is why `rust workspace` moved.
+  post-merge. Only `cargo fmt --check` covered them, and only for syntactic breakage. Adding
+  `--all-targets` there was tried and **reverted**: measured at 12m42s in CI, it destroys the lane's
+  reason to exist, and it is redundant once `rust workspace` compiles and runs those targets
+  pre-merge.
 - **Platform failures have been Windows-specific**: a `python` executable absent from `PATH`, and
   `core.autocrlf` turning `depth = 2` into `depth = 2\r`. No macOS-specific failure has occurred.
-- **Windows is the slowest job in the gate** (≈17 min against ≈12 min for the Linux workspace), so
-  deferring the matrix is what buys the merge throughput this design is for.
+- **Windows is the slowest job in the gate** (≈17 min, against ≈12 min for the Linux workspace on a
+  warm cache and ≈18 min cold), so deferring the matrix is what buys the merge throughput this
+  design is for.
 
-The cost is stated plainly: a pull request into `main` now waits roughly twelve minutes rather than
-forty seconds, and because a branch that falls behind `main` must re-run its checks, a serial chain
-of rebases pays that repeatedly.
+The cost is stated plainly: a pull request into `main` now waits for `rust workspace`, measured at
+18m17s on a cold cache and around twelve minutes warm, rather than forty seconds. Because a branch
+that falls behind `main` must re-run its checks, a serial chain of rebases pays that repeatedly. Two
+mitigations already exist and are worth using before the cost is treated as inherent: independent
+changes can share one pull request with one commit per topic, and `merge-readiness.yml` already
+handles `merge_group`, so a merge queue can validate several candidates as one batch once `ci.yml`
+gains the same trigger.
 
 ## Merge readiness contract
 
 `.github/workflows/merge-readiness.yml` runs for `pull_request` and `merge_group` events targeting
-`main`. It is now the **fail-fast lane**: it returns in well under a minute, so obvious breakage is
-reported in seconds rather than after the twelve-minute Linux workspace job. It is no longer the
-only pre-merge evidence, and it was never sufficient on its own. The aggregator fails unless all of
-these independent lanes succeed:
+`main`. It is now the **fail-fast lane**: its slowest measured contract lane is 33s and the aggregator
+4s, so obvious breakage is reported in well under a minute rather than after the Linux workspace job.
+Keeping it that fast is the reason `--all-targets` was reverted below. It is no longer the only
+pre-merge evidence, and it was never sufficient on its own. The aggregator fails unless all of these
+independent lanes succeed:
 
-1. `cargo check --workspace --exclude fsl-solver-z3 --exclude fslc-rust --all-targets
-   --no-default-features --locked` catches compile and dependency-integration drift across the
-   authoritative native-Z3-free Rust surface without paying the vendored native-Z3 build cost
-   before merge. Excluding the native CLI package as a workspace root avoids its Z3-only helper
-   binaries; its library still compiles transitively through the LSP and WASM crates.
-   `--all-targets` is load-bearing: without it, test and bench targets are never compiled, and a
-   type error in a test file passes this lane entirely.
+1. `cargo check --workspace --exclude fsl-solver-z3 --exclude fslc-rust --no-default-features
+   --locked` catches compile and dependency-integration drift across the authoritative
+   native-Z3-free Rust surface without paying the vendored native-Z3 build cost before merge.
+   Excluding the native CLI package as a workspace root avoids its Z3-only helper binaries; its
+   library still compiles transitively through the LSP and WASM crates. **`--all-targets` is
+   deliberately absent**: it was added, measured at 12m42s, and reverted, because this lane's whole
+   value is sub-minute feedback and `rust workspace` already compiles and runs those targets on the
+   same pull request.
 2. Formatting, the `fsl-syntax`, `fsl-core`, `fsl-runtime`, and backend-neutral `fsl-solver` tests,
    plus the runtime/WASM dependency negative controls, protect the solver-independent semantic
    foundation.
