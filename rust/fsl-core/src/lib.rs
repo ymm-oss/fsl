@@ -32,6 +32,7 @@ mod model;
 mod origin;
 mod public_kernel;
 mod refinement;
+mod reserved;
 mod trace;
 mod trace_json;
 mod typecheck;
@@ -552,6 +553,23 @@ impl PredicateExpander {
             };
             if definitions.contains_key(name) {
                 return Err(core_error(format!("duplicate def '{name}'"), *span));
+            }
+            // `def` items are inlined and dropped before `build_model` runs, so
+            // this is the only point at which the definition's own name is
+            // still visible to the reserved-word check (issue #570).
+            if crate::reserved::is_reserved(name) {
+                return Err(core_error(
+                    crate::reserved::reserved_message(name, "def"),
+                    *span,
+                ));
+            }
+            for (param, _) in params {
+                if crate::reserved::is_reserved(param) {
+                    return Err(core_error(
+                        crate::reserved::reserved_message(param, "def parameter"),
+                        *span,
+                    ));
+                }
             }
             let names = params
                 .iter()

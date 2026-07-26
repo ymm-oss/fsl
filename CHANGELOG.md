@@ -30,6 +30,31 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   (`language in ["ja", "en"]`, `condition output.claims not_supported_by
   retrieved.sources`) that both implementations store verbatim and never parse
   (#562).
+- **Breaking (input).** `true`, `false`, and `none` are now rejected as
+  declaration names; a specification that used one will stop checking. They
+  always resolve to the literal in an expression, so a declaration with one of
+  those names was unreadable from every expression — and the misreading was
+  silent, not an error. `state { true: Bool }` with
+  `invariant AlwaysHolds { true }` returned `ok` from `check`, `verified` from
+  `verify`, and **`proved`** from `verify --engine explicit`, while
+  `init { true = false }` assigned a variable nothing could read: the author
+  read "the variable holds" and the verifier proved the literal. All three
+  engines agreed, so symbolic/concrete/BFS agreement did not catch it.
+  `none` appeared to be rejected already, but only incidentally — the error came
+  from Option-type inference failing on a bare `none`, so
+  `state { none: Bool, slot: Option<Bool> }` with `slot = none` checked `ok` and
+  silently assigned the literal. The check now covers the specification name,
+  `const`, `def` and its parameters, `type`, `enum` and its members, `struct`
+  and its fields, state variables, actions and their parameters, properties
+  (including `leadsTo`), quantifier and aggregate binders, and `is some(x)`
+  pattern bindings. The reserved set is derived from the native expression
+  parser rather than copied from the frozen reference: only those three
+  identifiers are matched unconditionally as literals, so `count`, `sum`,
+  `stage`, `in`, `is`, `where`, `old`, `abs`, `and`, and `or` remain valid names
+  and every `.fsl` under `specs/` and `examples/` still checks unchanged.
+  The diagnostic is `kind: "semantics"` with a `loc`; `docs/DESIGN-v1.md` §7.2
+  puts it in the `name` class, which native does not yet emit anywhere (#565)
+  (#570).
 - `fslc analyze` on a `.toml` project manifest now emits the same TSG
   vocabulary a standalone file emits for the same source. The manifest loop
   built each layer with `fsl_tools::build_tsg` alone, which only sees the

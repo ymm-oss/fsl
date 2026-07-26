@@ -722,6 +722,16 @@ cannot be assigned both inline and in `init`.
 
 ## 3. Expression catalog
 
+**`true`, `false`, and `none` are reserved and cannot name anything** —
+specification, const, `def` or its parameters, type, enum or its members, struct
+or its fields, state variable, action or its parameters, property, quantifier or
+aggregate binder, or an `is some(x)` pattern binding. They always resolve to the
+literal, so such a declaration is unreadable from every expression and the
+misreading is silent: `state { true: Bool }` with `invariant AlwaysHolds { true }`
+used to return `proved` while `init { true = false }` wrote a variable nothing
+could read (#570). No other word is reserved — `count`, `sum`, `stage`, `in`,
+`is`, `where`, `old`, `abs`, `and`, `or` are contextual and stay valid names.
+
 - Arithmetic: `+ - * / %`, unary `-`, `min(a,b)` `max(a,b)` `abs(a)`
   (in `a//b` everything after `//` becomes a comment, so write division with a
   space: `a / b`)

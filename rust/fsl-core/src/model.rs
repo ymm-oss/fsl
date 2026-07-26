@@ -517,6 +517,10 @@ impl ModelBuilder {
 
     #[allow(clippy::too_many_lines)]
     fn build(mut self) -> Result<KernelModel, ModelError> {
+        // Before anything reads a name: a declaration named `true`/`false`/
+        // `none` is unreadable from every expression, and the misreading is
+        // silent rather than an error (issue #570).
+        crate::reserved::check_reserved_names(&self.spec)?;
         self.collect_consts()?;
         self.collect_types()?;
         self.collect_declaration_annotations();
