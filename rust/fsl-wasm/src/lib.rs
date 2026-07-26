@@ -338,7 +338,13 @@ fn add_frontend_metadata(
 async fn verify(request: &Request, solver_version: &str) -> Value {
     let started = performance_now();
     if let Err(failure) = fsl_syntax::parse_surface_document(&request.source) {
-        return error(solver_version, "parse", failure.to_string());
+        // Same envelope `check` renders, and the one the native CLI now
+        // renders for every spec-reading command: `kind:"parse"` with
+        // `diagnostic_code` and `loc` (#484).
+        return fslc_rust::frontend_output::render_surface_parse_error(
+            envelope(solver_version),
+            &failure,
+        );
     }
     let (model, compose_warnings) = match build(request, solver_version) {
         Ok(built) => built,

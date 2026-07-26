@@ -2111,12 +2111,18 @@ fn load_document_claims_with_label(
     path: &Path,
     label: &str,
 ) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
-    let source =
-        std::fs::read_to_string(path).map_err(|error| error_output("io", &error.to_string()))?;
+    let source = read_spec_source(path).map_err(|error| spec_load_error_output(&error))?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    fsl_tools::project_requirement_claims_from_source(&source, Some(label), base)
-        .map(|claims| (source, claims))
-        .map_err(|error| document_projection_error_output(&error))
+    match fsl_tools::project_requirement_claims_from_source(&source, Some(label), base) {
+        Ok(claims) => Ok((source, claims)),
+        // The projector reports a surface-parse failure as a plain message, so
+        // recover the span and emit the same `kind:"parse"` envelope `check`
+        // emits instead of a location-free `semantics` error.
+        Err(error) => Err(surface_parse_failure(&source).map_or_else(
+            || document_projection_error_output(&error),
+            |error| surface_parse_error_output(&error),
+        )),
+    }
 }
 
 fn document_diagnostics_error(
@@ -3998,7 +4004,7 @@ fn format_chain_table(result: &Value) -> String {
 fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
     let model = match load_model(path) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let raw = match std::fs::read_to_string(trace_path) {
         Ok(raw) => raw,
@@ -4646,7 +4652,7 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
     const NOTE: &str = "leadsTo properties are not checked by replay (finite logs only)";
     let model = match load_model(path) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let mapping_source = match std::fs::read_to_string(mapping_path) {
         Ok(source) => source,
@@ -4974,7 +4980,7 @@ fn run_scenarios_mode(
 ) -> (Value, i32) {
     let model = match load_model(path) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     match validate_requirement_traces(path, &model) {
         Ok((Some(failure), _)) => return (failure, 2),
@@ -5353,6 +5359,30 @@ fn format_bindings(binding: &fsl_runtime::Bindings) -> String {
         .join(", ")
 }
 
+/// `check` on an agent document is deliberately lenient: the top-level
+/// `result` stays "ok" even when the structural analysis finds a violation
+/// (matching the frozen reference); `fslc ai check` is the actual gate (exit 1
+/// on `agent_analysis_result: "violated"`). A grant-boundary or other
+/// tree-validation failure is still a hard error here.
+fn agent_check_output(agent: &fsl_syntax::SurfaceAgent) -> (Value, i32) {
+    let analysis = match fsl_tools::analyze_ai_agent(agent) {
+        Ok(analysis) => analysis,
+        Err(error) => return (agent_error_output(&error), 2),
+    };
+    let analysis_result = analysis
+        .get("result")
+        .cloned()
+        .unwrap_or_else(|| json!("agent_analyzed"));
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("ok"));
+    output.insert("spec".to_owned(), json!(agent.name));
+    output.insert("dialect".to_owned(), json!("fsl-ai-agent.v0"));
+    output.insert("warnings".to_owned(), json!([]));
+    output.insert("ai_analysis_result".to_owned(), analysis_result.clone());
+    output.insert("agent_analysis_result".to_owned(), analysis_result);
+    (Value::Object(output), 0)
+}
+
 /// `path` is read for source content (for a literate `.md` input, this is the
 /// materialized, blanked `.literate.fsl` sibling — its line positions match
 /// the original document). `display_path` is stamped into every user-visible
@@ -5360,56 +5390,35 @@ fn format_bindings(binding: &fsl_runtime::Bindings) -> String {
 /// readable output always names the document the caller actually passed in,
 /// never the transient materialization.
 fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
-    if let Ok(source) = std::fs::read_to_string(path) {
-        if let Some(output) = fslc_rust::frontend_output::ai_project_check_output(
-            &source,
-            &display_path.to_string_lossy(),
-            envelope(),
-        ) {
-            return (output, 0);
-        }
-        match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source)) {
-            Ok(fsl_syntax::ParsedDocument {
-                surface: fsl_syntax::SurfaceDocument::Agent(agent),
-                ..
-            }) => {
-                // `check` on an agent document is deliberately lenient: the
-                // top-level `result` stays "ok" even when the structural
-                // analysis finds a violation (matching the frozen
-                // reference); `fslc ai check` is the actual gate (exit 1 on
-                // `agent_analysis_result: "violated"`). A grant-boundary or
-                // other tree-validation failure is still a hard error here.
-                let analysis = match fsl_tools::analyze_ai_agent(&agent) {
-                    Ok(analysis) => analysis,
-                    Err(error) => return (agent_error_output(&error), 2),
-                };
-                let analysis_result = analysis
-                    .get("result")
-                    .cloned()
-                    .unwrap_or_else(|| json!("agent_analyzed"));
-                let mut output = envelope();
-                output.insert("result".to_owned(), json!("ok"));
-                output.insert("spec".to_owned(), json!(agent.name));
-                output.insert("dialect".to_owned(), json!("fsl-ai-agent.v0"));
-                output.insert("warnings".to_owned(), json!([]));
-                output.insert("ai_analysis_result".to_owned(), analysis_result.clone());
-                output.insert("agent_analysis_result".to_owned(), analysis_result);
-                return (Value::Object(output), 0);
-            }
-            Ok(_) => {}
-            Err(error) => return (surface_parse_error_output(&error), 2),
-        }
-        let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-        if let Some(diagnostic) = fslc_rust::source_diagnostic::diagnostics(
-            &source,
-            &display_path.to_string_lossy(),
-            &resolver,
-        )
-        .into_iter()
-        .find(|diagnostic| diagnostic.kind != "migration")
-        {
-            return (semantic_error_output(&diagnostic.message), 2);
-        }
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    if let Some(output) = fslc_rust::frontend_output::ai_project_check_output(
+        &source,
+        &display_path.to_string_lossy(),
+        envelope(),
+    ) {
+        return (output, 0);
+    }
+    match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source)) {
+        Ok(fsl_syntax::ParsedDocument {
+            surface: fsl_syntax::SurfaceDocument::Agent(agent),
+            ..
+        }) => return agent_check_output(&agent),
+        Ok(_) => {}
+        Err(error) => return (surface_parse_error_output(&error), 2),
+    }
+    let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+    if let Some(diagnostic) = fslc_rust::source_diagnostic::diagnostics(
+        &source,
+        &display_path.to_string_lossy(),
+        &resolver,
+    )
+    .into_iter()
+    .find(|diagnostic| diagnostic.kind != "migration")
+    {
+        return (semantic_error_output(&diagnostic.message), 2);
     }
     if let Err(error) = validate_specialized_document(path) {
         return (semantic_error_output(&error), 2);
@@ -5463,7 +5472,7 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
             }
             (Value::Object(output), 0)
         }
-        Err(error) => (semantic_error_output(&error), 2),
+        Err(error) => (spec_load_error_output(&error), 2),
     }
 }
 
@@ -5486,9 +5495,9 @@ fn portable_cli_source_path(path: &Path) -> Result<String, String> {
 }
 
 fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (Value, i32) {
-    let source = match std::fs::read_to_string(path) {
+    let source = match read_spec_source(path) {
         Ok(source) => source,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
@@ -5507,13 +5516,10 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
     let kernel = match parsed {
         Ok(kernel) => kernel,
         Err(error) => {
-            let message =
-                if error.message == "top-level document has not reached the kernel lowering gate" {
-                    "spec has no state block".to_owned()
-                } else {
-                    error.to_string()
-                };
-            return (semantic_error_output(&message), 2);
+            return (
+                spec_load_error_output(&kernel_load_error(&source, &error)),
+                2,
+            );
         }
     };
     let model = match fsl_core::build_model(kernel.clone()) {
@@ -5543,9 +5549,11 @@ fn run_conformance(
     depth: usize,
     version: fsl_core::PublicKernelVersion,
 ) -> (Value, i32) {
-    match load_model(path)
-        .and_then(|model| fslc_rust::conformance_vectors_for_version(&model, depth, version))
-    {
+    let model = match load_model(path) {
+        Ok(model) => model,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    match fslc_rust::conformance_vectors_for_version(&model, depth, version) {
         Ok(mut vectors) => {
             vectors
                 .as_object_mut()
@@ -5713,7 +5721,7 @@ fn run_check_with_tags(
     if status == 0 && strict_tags {
         let model = match load_model(path) {
             Ok(model) => model,
-            Err(error) => return (semantic_error_output(&error), 2),
+            Err(error) => return (spec_load_error_output(&error), 2),
         };
         if let Err(error) = add_strict_tag_warnings(&mut output, &model, path, true, requirements) {
             return (error_output("io", &error), 2);
@@ -6641,7 +6649,9 @@ fn domain_scaffold_inputs(
     path: &Path,
     domain: &fsl_syntax::DomainSpec,
 ) -> Result<(Value, Value), String> {
-    let (source, kernel, model) = load_kernel_model(path)?;
+    // Reached only once the caller has parsed `path` into a `DomainSpec`, so
+    // the load cannot fail with a surface-parse error here.
+    let (source, kernel, model) = load_kernel_model(path).map_err(|error| error.to_string())?;
     let contract = fsl_core::public_kernel_contract(
         &kernel,
         &model,
@@ -6915,7 +6925,7 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
     };
     let model = match load_model(path) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let mut monitor = match fsl_runtime::Monitor::new(model.clone()) {
         Ok(monitor) => monitor,
@@ -8820,7 +8830,7 @@ fn readable_implements_text(path: &Path, model: &KernelModel, depth: usize) -> O
 fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
     let (source, _kernel, model) = match load_kernel_model(path) {
         Ok(loaded) => loaded,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let spec_kind = source_dialect(&source);
     let skeleton = model_skeleton(&model, spec_kind);
@@ -9178,7 +9188,7 @@ fn run_mutate_legacy(
     }
     let model = match load_model(path) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 0),
+        Err(error) => return (spec_load_error_output(&error), 0),
     };
     let mut mutants = Vec::new();
     let mut discovered = None;
@@ -10036,11 +10046,17 @@ fn run_mutate(
 ) -> (Value, i32) {
     let (baseline, status) = run_verify(path, depth, "warn", "bmc", DEFAULT_EXPLICIT_BUDGET, 1);
     if status != 0 || baseline.get("result").and_then(Value::as_str) != Some("verified") {
-        return (baseline, 0);
+        // A non-`verified` baseline still scores 0 (an unverified spec has no
+        // mutation score, not a failure), but a *spec error* keeps its own exit
+        // code: `docs/LANGUAGE.md` maps parse/type/semantics/io to 2 with no
+        // per-command exemption, and exit 0 on an unparseable spec is a green
+        // gate over a spec that was never analysed.
+        let baseline_status = baseline_error_status(&baseline, status);
+        return (baseline, baseline_status);
     }
     let model = match load_model(path) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 0),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
@@ -10335,15 +10351,20 @@ fn run_mutate(
 }
 
 fn run_typestate(path: &Path) -> (Value, i32) {
-    let source = match std::fs::read_to_string(path) {
+    let source = match read_spec_source(path) {
         Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
     let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
         Ok(kernel) => kernel,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        Err(error) => {
+            return (
+                spec_load_error_output(&kernel_load_error(&source, &error)),
+                2,
+            );
+        }
     };
     let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
@@ -10406,7 +10427,7 @@ fn run_testgen(
 ) -> (Value, i32) {
     let (source, kernel, model) = match load_kernel_model(path) {
         Ok(parts) => parts,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let (scenarios, status) = run_scenarios_mode(path, depth, deadlock_mode, !strict);
     if status != 0 {
@@ -10531,7 +10552,7 @@ fn run_html_report(
 ) -> (Value, i32) {
     let model = match load_model(path) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
@@ -10772,7 +10793,7 @@ fn run_approval_create(
     }
     let model = match load_model(path) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let (_repo, relative_path, git_commit) = match approval::git_binding(path) {
         Ok(binding) => binding,
@@ -11137,7 +11158,7 @@ fn generate_unapproved_ledger_report(request: &LedgerReportRequest<'_>) -> (Valu
 fn prepare_ledger_report(request: &LedgerReportRequest<'_>) -> Result<PreparedLedgerReport, Value> {
     let model = match load_model(request.path) {
         Ok(model) => model,
-        Err(error) => return Err(semantic_error_output(&error)),
+        Err(error) => return Err(spec_load_error_output(&error)),
     };
     let (verification, _) = run_verify(
         request.path,
@@ -12282,9 +12303,9 @@ fn prefixed_analysis_edge(layer: &str, edge: &Value) -> Value {
 }
 
 #[allow(clippy::too_many_lines)]
-fn project_traceability_output(path: &Path) -> Result<Value, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let sections = parse_project_manifest(&source)?;
+fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
+    let source = read_spec_source(path)?;
+    let sections = parse_project_manifest(&source).map_err(SpecLoadError::Semantic)?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let manifest = analysis_display_path(path);
     let mut nodes = std::collections::BTreeMap::new();
@@ -12376,15 +12397,16 @@ fn project_traceability_output(path: &Path) -> Result<Value, String> {
             continue;
         };
         let mapping_path = base.join(mapping);
-        let document = parse_surface_document(&mapping_path)?;
+        let document = parse_surface_document(&mapping_path).map_err(SpecLoadError::Semantic)?;
         let fsl_syntax::SurfaceDocument::Refinement(refinement) = document else {
-            return Err("expected refinement mapping".to_owned());
+            return Err(SpecLoadError::Semantic(
+                "expected refinement mapping".to_owned(),
+            ));
         };
-        let mapping_source = std::fs::read_to_string(&mapping_path)
-            .map_err(|error| format!("failed to read {}: {error}", mapping_path.display()))?;
+        let mapping_source = read_spec_source(&mapping_path)?;
         let checked_refinement =
             fsl_core::parse_refinement(&mapping_source, &implementation.model, &abstraction.model)
-                .map_err(|error| error.message)?;
+                .map_err(|error| SpecLoadError::Semantic(error.message))?;
         let display = analysis_display_path(&mapping_path);
         let refinement_id = format!("refinement:{layer}->{target}:{}", refinement.name);
         let file_id = format!("file:{layer}->{target}:{display}");
@@ -12743,7 +12765,7 @@ fn run_analyze(
         }
         let analysis = match project_traceability_output(path) {
             Ok(analysis) => analysis,
-            Err(error) => return (error_output("semantics", &error), 2),
+            Err(error) => return (spec_load_error_output(&error), 2),
         };
         return finish_analysis(analysis, None, projection, output_format);
     }
@@ -12768,7 +12790,7 @@ fn run_analyze(
         }
         let model = match load_model(path) {
             Ok(model) => model,
-            Err(error) => return (semantic_error_output(&error), 2),
+            Err(error) => return (spec_load_error_output(&error), 2),
         };
         return (tag_review_output(&model), 0);
     }
@@ -12802,7 +12824,7 @@ fn run_analyze(
     }
     let model = match load_model(path) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     if projection == "code_audit" {
         let analysis = match code_audit::analyze(&model, code_path.expect("checked above")) {
@@ -13569,11 +13591,11 @@ fn run_diff(
         load_model(old)
     } {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let new_model = match load_model(new) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let mapping_source = match mapping.map(std::fs::read_to_string).transpose() {
         Ok(source) => source,
@@ -14283,11 +14305,11 @@ fn run_refine(
 ) -> (Value, i32) {
     let implementation = match load_model(implementation_path) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let abstraction = match load_model(abstraction_path) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let source = match std::fs::read_to_string(mapping_path) {
         Ok(source) => source,
@@ -14731,23 +14753,25 @@ fn run_verify(
     explicit_budget: usize,
     k_ind: usize,
 ) -> (Value, i32) {
-    if let Ok(source) = std::fs::read_to_string(path) {
-        match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source)) {
-            Err(error) => return (surface_parse_error_output(&error), 2),
-            Ok(fsl_syntax::ParsedDocument {
-                surface: fsl_syntax::SurfaceDocument::Agent(_),
-                ..
-            }) => {
-                return (
-                    error_output(
-                        "parse",
-                        "agent documents cannot be verified as Kernel specs",
-                    ),
-                    2,
-                );
-            }
-            Ok(_) => {}
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source)) {
+        Err(error) => return (surface_parse_error_output(&error), 2),
+        Ok(fsl_syntax::ParsedDocument {
+            surface: fsl_syntax::SurfaceDocument::Agent(_),
+            ..
+        }) => {
+            return (
+                error_output(
+                    "parse",
+                    "agent documents cannot be verified as Kernel specs",
+                ),
+                2,
+            );
         }
+        Ok(_) => {}
     }
     if let Err(error) = validate_specialized_document(path) {
         return (semantic_error_output(&error), 2);
@@ -15184,25 +15208,82 @@ fn parse_param_value(
     }
 }
 
-fn load_model(path: &Path) -> Result<KernelModel, String> {
+/// A spec-loading failure that keeps the diagnostic class the frontend
+/// determined instead of flattening it to a message string.
+///
+/// `docs/DESIGN-v1.md` §7.2 fixes the error classification as a closed set and
+/// guarantees `loc` for `parse`. Flattening a surface-parse failure into a
+/// `String` erased that class, so every command loading a spec through
+/// [`load_kernel_model`] re-classified a syntax error as `semantics` with no
+/// `loc`, while `check` — which runs the surface parser directly — reported
+/// `parse` with a span.
+#[derive(Debug)]
+enum SpecLoadError {
+    Io(String),
+    Parse(Box<fsl_syntax::ParseError>),
+    Semantic(String),
+}
+
+impl std::fmt::Display for SpecLoadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(message) | Self::Semantic(message) => formatter.write_str(message),
+            Self::Parse(error) => write!(formatter, "{error}"),
+        }
+    }
+}
+
+fn load_model(path: &Path) -> Result<KernelModel, SpecLoadError> {
     load_kernel_model(path).map(|(_, _, model)| model)
 }
 
-fn load_kernel_model(path: &Path) -> Result<(String, KernelSpec, KernelModel), String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+fn load_kernel_model(path: &Path) -> Result<(String, KernelSpec, KernelModel), SpecLoadError> {
+    let source = read_spec_source(path)?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
     let kernel =
-        fsl_core::parse_kernel_source_with_file(&source, &resolver, path.to_string_lossy())
-            .map_err(|error| {
-                if error.message == "top-level document has not reached the kernel lowering gate" {
-                    "spec has no state block".to_owned()
-                } else {
-                    error.to_string()
-                }
-            })?;
-    let model = fsl_core::build_model(kernel.clone()).map_err(|error| error.to_string())?;
+        match fsl_core::parse_kernel_source_with_file(&source, &resolver, path.to_string_lossy()) {
+            Ok(kernel) => kernel,
+            Err(error) => return Err(kernel_load_error(&source, &error)),
+        };
+    let model = fsl_core::build_model(kernel.clone())
+        .map_err(|error| SpecLoadError::Semantic(error.to_string()))?;
     Ok((source, kernel, model))
+}
+
+/// Read a spec file, classifying a read failure as `io` rather than letting the
+/// message-string classifier fall through to `semantics` (issue 497: a missing
+/// single analyze input reported `semantics` while the same missing file in a
+/// batch reported `io`).
+fn read_spec_source(path: &Path) -> Result<String, SpecLoadError> {
+    std::fs::read_to_string(path)
+        .map_err(|error| SpecLoadError::Io(format!("{}: {error}", path.display())))
+}
+
+/// Recover the typed surface-parse diagnostic behind a lowering or projection
+/// failure that only reports a message.
+///
+/// The kernel and document entrypoints run the surface parser themselves and
+/// report the result as a `CoreError`/projection message, so the class is
+/// recovered by re-running the same parser on the failure path only. A compose
+/// document whose *component* fails to parse still lowers its own top level
+/// successfully and therefore stays `semantics`, exactly as `check` reports it.
+fn surface_parse_failure(source: &str) -> Option<fsl_syntax::ParseError> {
+    fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)).err()
+}
+
+/// Classify a kernel lowering failure, preserving a surface-parse span.
+fn kernel_load_error(source: &str, error: &fsl_core::CoreError) -> SpecLoadError {
+    if let Some(parse_error) = surface_parse_failure(source) {
+        return SpecLoadError::Parse(Box::new(parse_error));
+    }
+    SpecLoadError::Semantic(
+        if error.message == "top-level document has not reached the kernel lowering gate" {
+            "spec has no state block".to_owned()
+        } else {
+            error.to_string()
+        },
+    )
 }
 
 #[allow(clippy::too_many_lines)]
@@ -15429,18 +15510,17 @@ fn load_snapshot_value_object(
         .collect()
 }
 
-fn load_model_scoped(path: &Path, scope: &ScopeBounds) -> Result<KernelModel, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+fn load_model_scoped(path: &Path, scope: &ScopeBounds) -> Result<KernelModel, SpecLoadError> {
+    let source = read_spec_source(path)?;
     let kernel =
-        fsl_core::parse_kernel_source_with_bounds(&source, &scope.instances, &scope.values)
-            .map_err(|error| {
-                if error.message.starts_with("--instances/--values") {
-                    error.message
-                } else {
-                    error.to_string()
-                }
-            })?;
-    fsl_core::build_model(kernel).map_err(|error| error.to_string())
+        match fsl_core::parse_kernel_source_with_bounds(&source, &scope.instances, &scope.values) {
+            Ok(kernel) => kernel,
+            Err(error) if error.message.starts_with("--instances/--values") => {
+                return Err(SpecLoadError::Semantic(error.message));
+            }
+            Err(error) => return Err(kernel_load_error(&source, &error)),
+        };
+    fsl_core::build_model(kernel).map_err(|error| SpecLoadError::Semantic(error.to_string()))
 }
 
 fn envelope() -> Map<String, Value> {
@@ -15503,6 +15583,27 @@ fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
 
 fn semantic_error_output(message: &str) -> Value {
     fslc_rust::verification_output::render_semantic_error(envelope(), message)
+}
+
+/// Keep a spec-error envelope's own exit code when a command would otherwise
+/// downgrade a non-success baseline to 0.
+fn baseline_error_status(baseline: &Value, status: i32) -> i32 {
+    if baseline.get("result").and_then(Value::as_str) == Some("error") {
+        status
+    } else {
+        0
+    }
+}
+
+/// Render a spec-loading failure through the class the loader preserved, so
+/// every spec-reading command emits the envelope `check` emits for the same
+/// file (`kind:"parse"` + `diagnostic_code` + `loc` for a syntax error).
+fn spec_load_error_output(error: &SpecLoadError) -> Value {
+    match error {
+        SpecLoadError::Io(message) => error_output("io", message),
+        SpecLoadError::Parse(error) => surface_parse_error_output(error),
+        SpecLoadError::Semantic(message) => semantic_error_output(message),
+    }
 }
 
 fn finish(output: &mut Map<String, Value>, checked: usize, started: Instant) {
