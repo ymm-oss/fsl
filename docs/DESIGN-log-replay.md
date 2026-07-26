@@ -112,8 +112,9 @@ diagnostics; sharing a generic mapper must not erase domain evidence.
 
 ## 6. Coupled-change and tests
 
-The implementation is in `src/fslc/log_replay.py`; CLI dispatch remains in
-`src/fslc/cli.py`. `tests/test_log_replay.py` covers conformant replay, first
-action/state divergence, incomplete observation, parser/AST identity with
-refinement, indexed Map + enum conversion, object-field access, malformed
-JSONL line reporting, and the public CLI.
+The native implementation and CLI dispatch are in
+`rust/fslc/src/main.rs::run_log_replay`. `tests/test_rust_cli_semantics.py`
+provides focused native-CLI behavior checks, and `tests/test_log_replay.py`
+retains broader frozen-reference cases. Neither Python-driven suite is part of
+the required Rust-native product gate. Add equivalent Rust regression cases
+before changing mapped-log semantics; current native coverage is incomplete.

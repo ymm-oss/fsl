@@ -25,6 +25,40 @@ unchanged and avoids unsupported state shapes such as
 `Map<ArtifactVersion, Set<Column>>`. Static artifact capabilities are represented
 by generated invariants and metadata, not by nested runtime state.
 
+### Direct lowering and provenance
+
+The executable lifecycle is constructed directly as typed `SurfaceSpec` IR in
+`fsl-core`; a `dbsystem` is never rendered as generated FSL text and re-parsed.
+The direct builder preserves the legacy semantic mapping and deterministic order:
+
+- `SchemaVersion` spans the minimum and maximum schema values declared by the
+  database, migrations, environments, and artifact windows;
+- `Column` members and initial column-map assignments use sorted `(table, column)`
+  order, while migration actions and their operations retain source order;
+- each migration guard precedes its operation guards and updates, and the schema
+  update remains the final statement;
+- read/write compatibility properties follow environment, artifact-entry,
+  capability, and column order; the terminal predicate uses the last migration's
+  target schema or the database's initial schema.
+
+The old generated-source line numbers and empty origin registry were not a
+compatibility contract. Generated Kernel targets now carry `dbsystem` origin
+chains whose primary site is the authored database, column, migration,
+migration operation, environment-artifact entry, or compatibility rule. A
+property may additionally cite the contributing artifact and column as secondary
+sites. This is an intentional diagnostic correction: counterexamples point to
+the source DB declaration instead of a fabricated generated-Kernel line.
+Public Kernel v1 and v2 schemas and versions are unchanged; v2 reports these
+lowered targets as `generated_from_source`. Source-backed DB origins do not
+replace the established generated action/property display names, which remain
+the executable and replay identities. DB-only compatibility validation continues
+to belong to `fsl-tools` and is not moved into the shared kernel.
+
+The conformance anchors are `rust/fslc/tests/db_direct_lowering.rs`: a positive
+catalog-order/model control, a Public Kernel v2 source-origin control, and a
+negative `DB-NOT-NULL` migration that must still fail at the authored rule and
+migration locations.
+
 ## Semantic Modes
 
 ### 1. Compatibility Snapshot
@@ -36,7 +70,11 @@ restrict itself with `when schema lo..hi`.
 `environment schema lo..hi` means exactly the set of schema versions in that
 environment that are reachable in the declared migration order. It does not mean
 every Cartesian product of arbitrary schema and artifact versions; artifact
-coexistence is explicit in the artifact windows.
+coexistence is explicit in the artifact windows. Validation rejects an
+environment schema version that the declared, strictly sequential migration
+plan never reaches, and rejects a `check compatibility` rule name outside the
+closed vocabulary below; both fail `fslc check` / `fslc db check` with exit 2
+instead of silently checking nothing.
 
 Rules checked in snapshot mode:
 
@@ -208,6 +246,19 @@ Absence from logs is not proof of unused behavior. Observation results include
 `DB-ASSUME-OBSERVABILITY-COVERAGE` and `formal_result: "not_run"` to keep them
 separate from formal compatibility verification.
 
+The observation envelope is validated against
+`schemas/fslc/db/observation.v0.schema.json` before evaluation: a declared
+`schema_version` must equal `fsl-db-observation.v0`, and every event must be an
+object with typed `environment`/`artifact`/`target` strings, an integer
+`schema_version`, a `capability` from the closed vocabulary
+(`reads`/`writes`/`calls`/`requires`/`provides`), and, when present, a `flags`
+object of string values. A malformed envelope or event fails `fslc db observe`
+with exit 2 instead of defaulting missing/mistyped fields into a fabricated
+finding. An event's `flags` snapshot is matched against each artifact entry's
+`when flag ...` conditions the same way `fslc db check` matches them, so an
+artifact observed under the wrong flag variant is `unsupported_artifact_observed`
+rather than silently conformant.
+
 ### 7. Importer Boundary
 
 `fslc db import` provides a deliberately small SQL DDL importer to establish the
@@ -220,7 +271,8 @@ typed IR boundary. It supports:
 - `UPDATE ... SET ...` as a backfill signal
 
 Unsupported constructs are reported as `unsupported_sql` warnings and are not
-silently ignored.
+silently ignored; a malformed statement (for example an unbalanced `CREATE
+TABLE`) is reported the same way rather than being dropped without a warning.
 
 The first ORM-specific importer is `prisma-schema-minimal.v0`. It imports
 Prisma `model` scalar fields into the same typed IR and reports relation/list or

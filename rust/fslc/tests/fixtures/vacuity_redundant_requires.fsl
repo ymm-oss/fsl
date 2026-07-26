@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// `st != Cancelled` cannot be false once `st == Paid` holds, for any value the
+// enum allows — a dead ornament rather than a guard.
+spec ConditionedRequires {
+  enum St { Paid, Cancelled }
+  state { st: St }
+  init { st = Paid }
+  action cancel() { st = Cancelled }
+  action pay() "REQ-A: paid action" {
+    requires st == Paid
+    requires st != Cancelled
+    st = Paid
+  }
+  invariant TypeOk { st == Paid or st == Cancelled }
+}

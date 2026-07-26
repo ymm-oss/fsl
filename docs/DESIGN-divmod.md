@@ -29,7 +29,18 @@ with `+ - * / %`.
    silently relies on 0 is reported as violated** (G5).
 3. **No check in property contexts (invariant/reachable/leadsTo/mapping expressions)**:
    /0 evaluates to 0 (total, so not an indeterminate value). Document the guard idiom
-   `y != 0 => P(x / y)` as a recommendation.
+   `y != 0 => P(x / y)` as a recommendation. "Mapping expressions" here means a
+   refinement **state** map (`map name = expr` / `map name[i: K] = expr`): a read-only
+   view recomputed whenever the mapped state is read, with no state or action of its
+   own — the same shape as an invariant reading a computed value. It does **not**
+   include a refinement **action-correspondence argument** expression
+   (`impl_action(params) -> abs_action(arg_expr, ...)`, `docs/DESIGN-refinement.md`
+   §3): that expression constructs the parameter values for an abstract action
+   *invocation*, the same role a division inside the abstract action's own body would
+   play, so it is action context (rule 2) and gets the same partial_op treatment —
+   surfaced as a refinement-shaped finding, `kind:"map_partial_op"`
+   (`docs/DESIGN-refinement.md` §3), rather than an invariant-shaped one, since there
+   is no invariant to name (issue #512).
 4. **Negative numbers follow SMT-LIB (Euclidean)**: when `b != 0`,
    `a = b * (a / b) + (a % b)` and `0 <= a % b < |b|`.
    - Z3's Int div/mod use this definition (used as-is).

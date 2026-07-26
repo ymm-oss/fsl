@@ -3,14 +3,16 @@
 //! Backend-neutral JSON rendering for bounded verification results.
 
 use std::collections::BTreeSet;
+use std::fmt;
 use std::future::Future;
 
 use fsl_core::{
-    FslValue, KernelExpr, KernelModel, TypeDef, TypeRef, display_name, fsl_value_json,
-    insert_requirement_metadata, internal_origin_json, origin_display_name, state_json, trace_json,
+    ActionDef, FslValue, KernelExpr, KernelModel, ParamDef, TypeDef, TypeRef, display_name,
+    fsl_value_json, insert_requirement_metadata, internal_origin_json, origin_display_name,
+    state_json, trace_json,
 };
 use fsl_solver::VerificationStatistics;
-use fsl_verifier::{BmcResult, BmcViolation};
+use fsl_verifier::{BmcResult, BmcViolation, VacuityFinding};
 use serde_json::{Map, Value, json};
 
 /// Deadlock reporting policy shared by native and browser verification.
@@ -20,6 +22,40 @@ pub enum DeadlockMode {
     Error,
     Ignore,
 }
+
+/// A requirements `implements` failure with its refinement source location.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RequirementsImplementsError {
+    pub message: String,
+    pub span: Option<fsl_syntax::Span>,
+}
+
+impl fmt::Display for RequirementsImplementsError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RequirementsImplementsError {}
+
+/// Why a requirements step could not be replayed across semantic-diff models.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RequirementStepRelationError {
+    /// The target action, arity, or argument domain cannot represent the OLD step.
+    Unrelatable(String),
+    /// The target model matched structurally but failed during concrete evaluation.
+    Replay(String),
+}
+
+impl fmt::Display for RequirementStepRelationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unrelatable(message) | Self::Replay(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for RequirementStepRelationError {}
 
 impl DeadlockMode {
     /// Parse the public CLI/Worker spelling.
@@ -47,17 +83,68 @@ pub struct BmcOutputOptions<'a> {
     pub statistics: &'a VerificationStatistics,
 }
 
-/// Render a model-construction error using the public semantic classification.
+/// The source location a typed-model diagnostic carries, if the model bound one
+/// to the offending construct.
+///
+/// The span is read back from the origin the model already recorded; it is
+/// never re-derived or synthesised. A construct with no recorded span yields
+/// `None`, and the caller must leave `loc` absent rather than emit the
+/// `line: 0` sentinel, which would point a repair agent at a location that does
+/// not exist (issue 555).
 #[must_use]
-pub fn render_semantic_error(mut output: Map<String, Value>, message: &str) -> Value {
-    let kind = semantic_error_kind(message);
+pub fn origin_loc(origin: Option<&fsl_core::OriginChain>) -> Option<Value> {
+    origin
+        .and_then(|origin| origin.primary.as_ref())
+        .and_then(|site| site.span)
+        .map(fsl_syntax::Span::python_loc)
+}
+
+/// The source location of a typed-model failure.
+///
+/// Prefers the span the diagnostic recorded for itself over the enclosing
+/// construct's lowering origin, so the report names the assignment or field
+/// that failed rather than the declaration containing it.
+#[must_use]
+pub fn model_error_loc(error: &fsl_core::ModelError) -> Option<Value> {
+    error.span.map_or_else(
+        || origin_loc(error.origin.as_deref()),
+        |span| Some(span.python_loc()),
+    )
+}
+
+/// Render a model-construction error using the public semantic classification.
+///
+/// `docs/DESIGN-v1.md` §7.2 guarantees `loc` for `parse`/`name`/`type`/
+/// `semantics` and fixes `kind` as a closed set including `name`. This is the
+/// single dispatch point for that whole half of the set, so both the location
+/// (issue 555) and the classification (issue 565) travel with the diagnostic
+/// instead of being reconstructed per command.
+#[must_use]
+pub fn render_semantic_error(
+    mut output: Map<String, Value>,
+    message: &str,
+    loc: Option<Value>,
+    name_resolution: bool,
+) -> Value {
+    let kind = diagnostic_kind(message, name_resolution);
     output.insert("result".to_owned(), json!("error"));
     output.insert("kind".to_owned(), json!(kind));
     output.insert("message".to_owned(), json!(message));
+    if let Some(loc) = loc {
+        output.insert("loc".to_owned(), loc);
+    }
     if message.starts_with("struct field '") && message.ends_with(" has non-scalar type") {
         output.insert(
             "hint".to_owned(),
             json!("struct fields must be scalar (domain type, enum, Bool, Int) or Option<scalar>; use a separate Map for Set/Map/Seq/struct fields"),
+        );
+    }
+    if message.starts_with("unknown ai hard-contract rule '") {
+        output.insert(
+            "hint".to_owned(),
+            json!(
+                "supported rules: forbidden_tool_blocked, human_approval_required, tool_authority, tool_precondition_declared, tool_schema_declared"
+            ),
         );
     }
     Value::Object(output)
@@ -105,6 +192,24 @@ pub fn render_governance_error(
     Value::Object(output)
 }
 
+/// The classification for a typed diagnostic, preferring the class the frontend
+/// determined over matching on the message text.
+///
+/// `docs/DESIGN-v1.md` §7.2's closed set includes `name`, which no message
+/// pattern can identify: `duplicate state variable 'x'`,
+/// `duplicate enum member 'B'` and `undefined predicate 'p'` share no prefix or
+/// suffix, and a classifier keyed on message text silently reclassifies a
+/// diagnostic whenever its wording changes. The frontend already knows, so it
+/// says so (issue 565).
+#[must_use]
+pub fn diagnostic_kind(message: &str, name_resolution: bool) -> &'static str {
+    if name_resolution {
+        "name"
+    } else {
+        semantic_error_kind(message)
+    }
+}
+
 /// Classify a typed-model diagnostic identically on every Rust delivery surface.
 #[must_use]
 pub fn semantic_error_kind(message: &str) -> &'static str {
@@ -131,16 +236,33 @@ pub fn requirements_implements_output(
     resolver: &dyn fsl_core::FileResolver,
     model: &KernelModel,
     depth: usize,
-) -> Result<Option<Value>, String> {
-    let Some(contract) = fsl_core::requirements_implements(source, resolver, model)
-        .map_err(|error| error.to_string())?
+) -> Result<Option<Value>, RequirementsImplementsError> {
+    let Some(contract) =
+        fsl_core::requirements_implements(source, resolver, model).map_err(|error| {
+            RequirementsImplementsError {
+                message: error.message,
+                span: error.span,
+            }
+        })?
     else {
         return Ok(None);
     };
     let checked =
         fsl_runtime::check_refinement(model, &contract.abstraction, &contract.refinement, depth)
-            .map_err(|error| error.to_string())?;
-    Ok(Some(if let Some(failure) = checked.failure {
+            .map_err(|error| RequirementsImplementsError {
+                message: error.to_string(),
+                span: None,
+            })?;
+    Ok(Some(if let Some((violation, _)) = checked.impl_violation {
+        // The impl itself violates its own type bounds/invariants (#466):
+        // a property of the refinement input, not a refinement fidelity
+        // verdict, so it must not be reported `refines`.
+        json!({
+            "abs": contract.abstraction.name,
+            "result": "impl_violated",
+            "violation": {"result": "violated", "kind": violation.kind},
+        })
+    } else if let Some(failure) = checked.failure {
         json!({
             "abs": contract.abstraction.name,
             "result": "refinement_failed",
@@ -284,17 +406,10 @@ pub fn requirement_step_match(
         );
     }
     let enabled = monitor.enabled().map_err(|error| error.to_string())?;
-    let branch_prefix = format!("{}__b", step.name);
-    for action in &monitor.model.actions {
-        if action.name != step.name
-            && !action.name.starts_with(&branch_prefix)
-            && display_name(&action.name) != step.name
-        {
-            continue;
-        }
-        if action.params.len() != arguments.len() {
-            continue;
-        }
+    for action in requirement_actions_by_name(monitor, step)
+        .into_iter()
+        .filter(|action| action.params.len() == arguments.len())
+    {
         let params = action
             .params
             .iter()
@@ -309,6 +424,107 @@ pub fn requirement_step_match(
         }
     }
     Ok((arguments, None))
+}
+
+fn requirement_actions_by_name<'a>(
+    monitor: &'a fsl_runtime::Monitor,
+    step: &fsl_core::RequirementsTraceStep,
+) -> Vec<&'a ActionDef> {
+    let branch_prefix = format!("{}__b", step.name);
+    monitor
+        .model
+        .actions
+        .iter()
+        .filter(|action| {
+            action.name == step.name
+                || action.name.starts_with(&branch_prefix)
+                || display_name(&action.name) == step.name
+        })
+        .collect()
+}
+
+/// Resolve a requirements trace step using arguments evaluated in its source model.
+///
+/// # Errors
+///
+/// Returns a diagnostic when the action, arity, argument domains, or enabled
+/// actions cannot be related to the target Monitor.
+pub fn requirement_step_match_values(
+    monitor: &fsl_runtime::Monitor,
+    step: &fsl_core::RequirementsTraceStep,
+    arguments: &[FslValue],
+) -> Result<Option<fsl_runtime::EnabledAction>, RequirementStepRelationError> {
+    let named_actions = requirement_actions_by_name(monitor, step);
+    if named_actions.is_empty() {
+        return Err(RequirementStepRelationError::Unrelatable(format!(
+            "unknown requirement action '{}'",
+            step.name
+        )));
+    }
+    let matching_actions = named_actions
+        .into_iter()
+        .filter(|action| action.params.len() == arguments.len())
+        .collect::<Vec<_>>();
+    if matching_actions.is_empty() {
+        return Err(RequirementStepRelationError::Unrelatable(format!(
+            "requirement action '{}' has no variant with {} argument(s)",
+            step.name,
+            arguments.len()
+        )));
+    }
+    let matching_actions = matching_actions
+        .into_iter()
+        .filter_map(|action| {
+            let belongs = action.params.iter().zip(arguments.iter()).try_fold(
+                true,
+                |belongs, (parameter, value)| {
+                    let in_domain = match parameter {
+                        ParamDef::Typed { ty, .. } => monitor
+                            .model
+                            .domain_values(ty)
+                            .map_err(|error| {
+                                RequirementStepRelationError::Replay(error.to_string())
+                            })?
+                            .contains(value),
+                        ParamDef::Range { lo, hi, .. } => matches!(
+                            value,
+                            FslValue::Int(value) if lo <= value && value <= hi
+                        ),
+                    };
+                    Ok::<_, RequirementStepRelationError>(belongs && in_domain)
+                },
+            );
+            match belongs {
+                Ok(true) => Some(Ok(action)),
+                Ok(false) => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if matching_actions.is_empty() {
+        return Err(RequirementStepRelationError::Unrelatable(format!(
+            "arguments for requirement action '{}' do not belong to the NEW action domain",
+            step.name
+        )));
+    }
+    let enabled = monitor
+        .enabled()
+        .map_err(|error| RequirementStepRelationError::Replay(error.to_string()))?;
+    for action in matching_actions {
+        let params = action
+            .params
+            .iter()
+            .zip(arguments.iter())
+            .map(|(param, value)| (param.name().to_owned(), value.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        if let Some(instance) = enabled
+            .iter()
+            .find(|instance| instance.action == action.name && instance.params == params)
+        {
+            return Ok(Some(instance.clone()));
+        }
+    }
+    Ok(None)
 }
 
 fn requirement_step_json(step: &fsl_core::RequirementsTraceStep, arguments: &[FslValue]) -> Value {
@@ -727,6 +943,292 @@ pub fn render_bmc_output(
     render_success(envelope, model, result, &options)
 }
 
+/// Render an explicit-state result through the same bounded-verification
+/// projection used by native BMC and the browser Worker, then add the
+/// explicit engine's closure and exploration metadata.
+///
+/// # Errors
+///
+/// Returns a diagnostic when any explicit witness fails Monitor replay.
+pub fn render_explicit_output(
+    envelope: Map<String, Value>,
+    model: &KernelModel,
+    result: &fsl_runtime::ExplicitResult,
+    checked_bounds: Option<&BTreeSet<String>>,
+    deadlock: DeadlockMode,
+    elapsed_s: f64,
+    vacuity: &[VacuityFinding],
+) -> Result<(Value, i32), String> {
+    let compatible = explicit_as_bmc(result, vacuity);
+    replay_bmc_witnesses(model, &compatible, None)?;
+    let statistics = VerificationStatistics::default();
+
+    if let Some(violation) = &compatible.violation {
+        let options = BmcOutputOptions {
+            depth: result.depth,
+            deadlock,
+            checked_bounds,
+            elapsed_s,
+            statistics: &statistics,
+        };
+        let (mut output, status) = render_violation(envelope, model, violation, &options);
+        add_explicit_metadata(&mut output, result);
+        return Ok((output, status));
+    }
+
+    if deadlock == DeadlockMode::Error
+        && let Some(step) = result.deadlock_step
+    {
+        let options = BmcOutputOptions {
+            depth: result.depth,
+            deadlock,
+            checked_bounds,
+            elapsed_s,
+            statistics: &statistics,
+        };
+        let (mut output, status) =
+            render_deadlock_failure(envelope, model, &compatible, step, &options);
+        add_explicit_metadata(&mut output, result);
+        return Ok((output, status));
+    }
+
+    if result.budget_exceeded {
+        return Ok(render_explicit_budget(
+            envelope,
+            model,
+            result,
+            &compatible,
+            checked_bounds,
+            deadlock,
+            elapsed_s,
+            &statistics,
+        ));
+    }
+
+    let unreached = compatible
+        .reachables
+        .iter()
+        .filter(|(_, witness)| witness.is_none())
+        .filter_map(|(name, _)| {
+            model
+                .reachables
+                .iter()
+                .find(|property| property.name == *name)
+        })
+        .collect::<Vec<_>>();
+    if !unreached.is_empty() {
+        let options = BmcOutputOptions {
+            depth: result.depth_reached,
+            deadlock,
+            checked_bounds,
+            elapsed_s,
+            statistics: &statistics,
+        };
+        let (mut output, status) =
+            render_reachable_failure(envelope, model, &compatible, &unreached, &options);
+        if result.closure {
+            mark_reachables_definitively_unreachable(&mut output);
+        }
+        add_explicit_metadata(&mut output, result);
+        return Ok((output, status));
+    }
+
+    Ok(render_explicit_success(
+        envelope,
+        model,
+        result,
+        &compatible,
+        checked_bounds,
+        deadlock,
+        elapsed_s,
+        &statistics,
+    ))
+}
+
+/// Project a solver-free explicit-state result onto the bounded-verification
+/// shape. `vacuity` carries the solver-decided lanes proved separately by the
+/// caller: the explicit engine has no solver, but the lanes are properties of
+/// the model rather than of the exploration, so the same findings apply.
+fn explicit_as_bmc(result: &fsl_runtime::ExplicitResult, vacuity: &[VacuityFinding]) -> BmcResult {
+    BmcResult {
+        spec: result.spec.clone(),
+        depth: result.depth,
+        violation: result.violation.as_ref().map(|violation| BmcViolation {
+            kind: violation.violation.kind.clone(),
+            name: violation.violation.name.clone(),
+            step: violation.violation.step,
+            last_action: violation
+                .trace
+                .last()
+                .and_then(|entry| entry.action.as_ref())
+                .map(|action| action.name.clone()),
+            trace: violation.trace.clone(),
+            leads_to: None,
+        }),
+        leadsto_violation: None,
+        reachables: result
+            .reachables
+            .iter()
+            .map(|(name, witness)| {
+                (
+                    name.clone(),
+                    witness
+                        .as_ref()
+                        .map(|witness| fsl_verifier::ReachableWitness {
+                            step: witness.step,
+                            trace: witness.trace.clone(),
+                        }),
+                )
+            })
+            .collect(),
+        deadlock_step: result.deadlock_step,
+        deadlock_trace: result.deadlock_trace.clone(),
+        action_coverage: result.action_coverage.clone(),
+        frontier_progress: !result.closure && !result.budget_exceeded,
+        vacuity: vacuity.to_vec(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_explicit_budget(
+    mut output: Map<String, Value>,
+    model: &KernelModel,
+    result: &fsl_runtime::ExplicitResult,
+    compatible: &BmcResult,
+    checked_bounds: Option<&BTreeSet<String>>,
+    deadlock: DeadlockMode,
+    elapsed_s: f64,
+    statistics: &VerificationStatistics,
+) -> (Value, i32) {
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("result".to_owned(), json!("unknown_budget"));
+    let options = BmcOutputOptions {
+        depth: result.depth_reached,
+        deadlock,
+        checked_bounds,
+        elapsed_s,
+        statistics,
+    };
+    add_common(&mut output, model, compatible, &options);
+    output.insert("depth".to_owned(), json!(result.depth));
+    output.insert("completeness".to_owned(), json!("unknown"));
+    if deadlock == DeadlockMode::Ignore {
+        output.insert("deadlock".to_owned(), json!({"found": false}));
+    }
+    output.insert(
+        "hint".to_owned(),
+        json!(format!(
+            "explicit-state exploration reached its {}-state budget; increase --explicit-budget or use --engine bmc",
+            result.states_explored
+        )),
+    );
+    output.insert(
+        "cost".to_owned(),
+        serde_json::to_value(statistics.with_elapsed(elapsed_s))
+            .expect("verification cost serializes"),
+    );
+    let mut value = Value::Object(output);
+    add_explicit_metadata(&mut value, result);
+    (value, 1)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_explicit_success(
+    mut output: Map<String, Value>,
+    model: &KernelModel,
+    result: &fsl_runtime::ExplicitResult,
+    compatible: &BmcResult,
+    checked_bounds: Option<&BTreeSet<String>>,
+    deadlock: DeadlockMode,
+    elapsed_s: f64,
+    statistics: &VerificationStatistics,
+) -> (Value, i32) {
+    if !result.closure {
+        let options = BmcOutputOptions {
+            depth: result.depth,
+            deadlock,
+            checked_bounds,
+            elapsed_s,
+            statistics,
+        };
+        let (mut output, status) = render_success(output, model, compatible, &options);
+        add_explicit_metadata(&mut output, result);
+        return (output, status);
+    }
+
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("result".to_owned(), json!("proved"));
+    let options = BmcOutputOptions {
+        depth: result.depth_reached,
+        deadlock,
+        checked_bounds,
+        elapsed_s,
+        statistics,
+    };
+    add_common(&mut output, model, compatible, &options);
+    output.insert("depth".to_owned(), json!(result.depth));
+    output.insert("engine".to_owned(), json!("explicit"));
+    output.insert("completeness".to_owned(), json!("unbounded"));
+    if deadlock == DeadlockMode::Ignore {
+        output.insert("deadlock".to_owned(), json!({"found": false}));
+    }
+    output.insert(
+        "warnings".to_owned(),
+        Value::Array(shared_warnings(model, compatible, &options)),
+    );
+    output.insert(
+        "note".to_owned(),
+        json!(
+            "explicit-state exploration reached closure; invariants hold in every reachable state"
+        ),
+    );
+    output.insert(
+        "cost".to_owned(),
+        serde_json::to_value(statistics.with_elapsed(elapsed_s))
+            .expect("verification cost serializes"),
+    );
+    let mut value = Value::Object(output);
+    add_explicit_metadata(&mut value, result);
+    (value, 0)
+}
+
+fn add_explicit_metadata(output: &mut Value, result: &fsl_runtime::ExplicitResult) {
+    let Some(output) = output.as_object_mut() else {
+        return;
+    };
+    output.insert("engine".to_owned(), json!("explicit"));
+    output.insert("closure".to_owned(), json!(result.closure));
+    output.insert("states_explored".to_owned(), json!(result.states_explored));
+    output.insert(
+        "max_frontier_width".to_owned(),
+        json!(result.max_frontier_width),
+    );
+    output.insert("depth_reached".to_owned(), json!(result.depth_reached));
+}
+
+fn mark_reachables_definitively_unreachable(output: &mut Value) {
+    let Some(output) = output.as_object_mut() else {
+        return;
+    };
+    if let Some(unreached) = output.get_mut("unreached").and_then(Value::as_array_mut) {
+        for item in unreached {
+            if let Value::Object(item) = item {
+                item.insert("classification".to_owned(), json!("unreachable"));
+                item.insert(
+                    "hint".to_owned(),
+                    json!(
+                        "not witnessed before explicit state-space closure; the goal is unreachable"
+                    ),
+                );
+            }
+        }
+    }
+    output.insert(
+        "hint".to_owned(),
+        json!("explicit state-space closure proves that the requested reachable goal cannot be reached"),
+    );
+}
+
 #[allow(clippy::too_many_lines)]
 fn render_violation(
     mut output: Map<String, Value>,
@@ -756,9 +1258,8 @@ fn render_violation(
     };
     let origin = model.property_origin(property_kind, &violation.name);
     let rendered_name = origin
-        .and_then(|origin| origin.primary.as_ref())
-        .and_then(|site| site.declaration_path.last())
-        .map_or_else(|| display_name(&violation.name), String::clone);
+        .and_then(origin_display_name)
+        .map_or_else(|| display_name(&violation.name), str::to_owned);
     if violation.kind == "trans" {
         output.insert("trans".to_owned(), json!(rendered_name));
     }
@@ -810,9 +1311,8 @@ fn render_violation(
                 let origin = model.action_origin(&action.name);
                 let mut rendered = json!({
                     "name": origin
-                        .and_then(|origin| origin.primary.as_ref())
-                        .and_then(|site| site.declaration_path.last())
-                        .map_or_else(|| display_name(&action.name), String::clone),
+                        .and_then(origin_display_name)
+                        .map_or_else(|| display_name(&action.name), str::to_owned),
                     "params": action.params.iter().map(|(name, value)| (
                         name.clone(), fsl_value_json(value)
                     )).collect::<Map<_, _>>(),
@@ -869,9 +1369,8 @@ fn render_reachable_failure(
                     let origin = model.property_origin("reachable", &property.name);
                     let mut item = json!({
                         "name": origin
-                            .and_then(|origin| origin.primary.as_ref())
-                            .and_then(|site| site.declaration_path.last())
-                            .map_or_else(|| display_name(&property.name), String::clone),
+                            .and_then(origin_display_name)
+                            .map_or_else(|| display_name(&property.name), str::to_owned),
                         "loc": property.span.python_loc(),
                         "classification": "insufficient_depth",
                         "hint": format!("not witnessed within depth {}; try a larger --depth", options.depth),
@@ -1180,7 +1679,139 @@ fn shared_warnings(
             .and_then(|trace| trace.last())
             .map(|entry| &entry.state),
         &result.action_coverage,
+        &solver_vacuity_warnings(model, result),
     )
+}
+
+/// Render the solver-decided vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes
+/// 3–5) that `fsl-verifier` proved for this model.
+///
+/// None of the messages mention `--depth`: unlike the two reachability lanes,
+/// these judgments quantify over the declared type space and therefore hold at
+/// every bound (issue #465).
+fn solver_vacuity_warnings(model: &KernelModel, result: &BmcResult) -> Vec<Value> {
+    result
+        .vacuity
+        .iter()
+        .map(|finding| vacuity_warning(model, finding))
+        .collect()
+}
+
+fn vacuity_warning(model: &KernelModel, finding: &VacuityFinding) -> Value {
+    let label = display_name(finding.name());
+    let (message, hint) = match finding {
+        VacuityFinding::TautologyOverFrozen { frozen_vars, .. } => {
+            let names = frozen_vars
+                .iter()
+                .map(|name| display_name(name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            (
+                format!(
+                    "invariant '{label}' is a tautology over frozen state ({names}): it holds for all dynamics because every state variable it depends on is never modified by any action"
+                ),
+                "make such variables 'const', or add the action that should modify them".to_owned(),
+            )
+        }
+        VacuityFinding::UrgencyFreeze { deadlines, .. } => {
+            let urgent = urgent_action_labels(model);
+            let urgent_text = if urgent.is_empty() {
+                "the generated urgent condition".to_owned()
+            } else {
+                urgent
+                    .iter()
+                    .map(|name| format!("'{name}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let deadline_text = deadlines
+                .iter()
+                .map(|name| format!("'{}'", display_name(name)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            (
+                format!(
+                    "urgent condition for action(s) {urgent_text} holds initially and is preserved by every action, so generated action 'tick' is never enabled; time is frozen and deadline invariant(s) {deadline_text} are vacuously satisfied"
+                ),
+                "use the deadline-urgency pattern: make only the action guarded by deadline arrival (for example, requires age >= K) urgent".to_owned(),
+            )
+        }
+        VacuityFinding::AlwaysTrueRequires { .. } => (
+            format!(
+                "action '{label}' has a requires clause that is always true when the preceding clauses hold — no value the declared types allow can falsify it"
+            ),
+            "this requires clause is not acting as a constraint; decide whether the model is missing state where it matters, or the clause is redundant".to_owned(),
+        ),
+    };
+    let mut warning = json!({
+        "kind": finding.kind(),
+        "name": label,
+        "message": message,
+        "hint": hint,
+    });
+    if let Value::Object(entry) = &mut warning {
+        entry.insert("loc".to_owned(), finding.span().python_loc());
+        if matches!(finding, VacuityFinding::TautologyOverFrozen { .. }) {
+            entry.insert(
+                "faithfulness_class".to_owned(),
+                json!("frozen_only_invariant"),
+            );
+            entry.insert(
+                "recommended_action".to_owned(),
+                json!("run mutate to check kill-rate"),
+            );
+        }
+        insert_vacuity_requirement(entry, model, finding);
+    }
+    warning
+}
+
+/// Attach the requirement metadata of the declaration the finding blames: the
+/// invariant, the action, or — for `urgency_freeze`, whose blamed `tick` is
+/// generated — the first deadline invariant it renders vacuous.
+fn insert_vacuity_requirement(
+    entry: &mut Map<String, Value>,
+    model: &KernelModel,
+    finding: &VacuityFinding,
+) {
+    match finding {
+        VacuityFinding::TautologyOverFrozen {
+            invariant: name, ..
+        } => {
+            if let Some(property) = model.invariants.iter().find(|entry| entry.name == *name) {
+                insert_requirement_metadata(entry, &property.annotations, property.meta.as_ref());
+            }
+        }
+        VacuityFinding::UrgencyFreeze { deadlines, .. } => {
+            if let Some(property) = deadlines
+                .first()
+                .and_then(|name| model.invariants.iter().find(|entry| entry.name == *name))
+            {
+                insert_requirement_metadata(entry, &property.annotations, property.meta.as_ref());
+            }
+        }
+        VacuityFinding::AlwaysTrueRequires { action: name, .. } => {
+            if let Some(action) = model.actions.iter().find(|entry| entry.name == *name) {
+                insert_requirement_metadata(entry, &action.annotations, action.meta.as_ref());
+            }
+        }
+    }
+}
+
+/// The `urgent` action names the requirements lowering consumed into the
+/// generated `tick` guard, recorded on `tick`'s origin because the Kernel
+/// keeps only the expanded `requires not(<enabled ...>)`.
+fn urgent_action_labels(model: &KernelModel) -> Vec<String> {
+    model
+        .action_origin("tick")
+        .into_iter()
+        .flat_map(|origin| origin.lowering_steps.iter())
+        .filter(|step| step.kind == fsl_core::URGENT_ACTIONS_STEP)
+        .filter_map(|step| step.detail.as_ref())
+        .flat_map(|detail| detail.split(','))
+        .filter(|name| !name.is_empty())
+        .map(display_name)
+        .collect()
 }
 
 fn invariant_names_selected(
@@ -1218,7 +1849,10 @@ fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
     }
 }
 
-fn coverage_hint(depth: usize) -> String {
+/// Shared with `main.rs::run_scenarios_mode`, which faces the same
+/// covered:false diagnosis for actions with no cover trace (issue #523).
+#[must_use]
+pub fn coverage_hint(depth: usize) -> String {
     format!(
         "these requires clauses are unsatisfiable at every step up to depth {depth}; weaken one of them, add an action that establishes them, or increase --depth"
     )
@@ -1336,4 +1970,110 @@ fn origin_aware_property_name(
         output.insert("loc".to_owned(), span.python_loc());
     }
     origin_display_name(origin).map_or_else(|| display_name(name), str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn checked_model(source: &str) -> KernelModel {
+        let kernel = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+            .expect("lower source");
+        fsl_core::build_model(kernel).expect("build model")
+    }
+
+    fn test_envelope() -> Map<String, Value> {
+        Map::from_iter([("fsl".to_owned(), json!("1.0"))])
+    }
+
+    #[test]
+    fn explicit_renderer_rejects_a_corrupted_violation_before_rendering() {
+        let model = checked_model(
+            r"spec CorruptEvidence {
+  state { done: Bool }
+  init { done = false }
+  action finish() { requires not done done = true }
+  invariant NeverDone { not done }
+}",
+        );
+        let explicit =
+            fsl_runtime::verify_explicit(model.clone(), 2, 100).expect("run explicit verification");
+        let mut explicit = explicit;
+        let trace = &mut explicit
+            .violation
+            .as_mut()
+            .expect("violation evidence")
+            .trace;
+        trace
+            .last_mut()
+            .expect("violating state")
+            .state
+            .insert("done".to_owned(), FslValue::Bool(false));
+
+        let rendered = render_explicit_output(
+            test_envelope(),
+            &model,
+            &explicit,
+            None,
+            DeadlockMode::Ignore,
+            0.0,
+            &[],
+        );
+        assert!(rendered.is_err());
+    }
+
+    #[test]
+    fn explicit_bounded_success_uses_byte_identical_shared_rendering() {
+        let model = checked_model(
+            r"spec SharedRendering {
+  state { active: Bool }
+  init { active = false }
+  action toggle() { active = not active }
+  invariant BooleanState { active or not active }
+}",
+        );
+        let explicit =
+            fsl_runtime::verify_explicit(model.clone(), 0, 100).expect("run explicit verification");
+        assert!(!explicit.closure);
+        let compatible = explicit_as_bmc(&explicit, &[]);
+        let statistics = VerificationStatistics::default();
+        let (bmc, bmc_status) = render_bmc_output(
+            test_envelope(),
+            &model,
+            &compatible,
+            BmcOutputOptions {
+                depth: explicit.depth,
+                deadlock: DeadlockMode::Ignore,
+                checked_bounds: None,
+                elapsed_s: 0.0,
+                statistics: &statistics,
+            },
+        );
+        let (mut explicit_output, explicit_status) = render_explicit_output(
+            test_envelope(),
+            &model,
+            &explicit,
+            None,
+            DeadlockMode::Ignore,
+            0.0,
+            &[],
+        )
+        .expect("explicit evidence replays");
+        let explicit_envelope = explicit_output.as_object_mut().expect("explicit envelope");
+        for key in [
+            "engine",
+            "closure",
+            "states_explored",
+            "max_frontier_width",
+            "depth_reached",
+        ] {
+            explicit_envelope.remove(key);
+        }
+
+        assert_eq!(explicit_status, bmc_status);
+        assert_eq!(
+            serde_json::to_vec_pretty(&explicit_output).expect("serialize explicit output"),
+            serde_json::to_vec_pretty(&bmc).expect("serialize BMC output")
+        );
+    }
 }

@@ -3,7 +3,7 @@
   "root": {
     "path": [],
     "prog": "fslc",
-    "help": "usage: fslc [-h] [-V] {version,check,lint,migrate,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,document,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n\npositional arguments:\n  {version,check,lint,migrate,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,document,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain}\n    version             show the version\n    lint                report edition migration diagnostics\n    migrate             plan or atomically apply edition migrations\n    fmt                 format one FSL source or check multiple paths\n    kernel              emit the normalized public Kernel JSON contract\n    conformance         emit language-neutral concrete conformance vectors\n    sweep               run bounded verification across a scope grid\n    html                generate a self-contained HTML review report\n    ledger              generate a business audit ledger (markdown) by\n                        requirement id\n    document            generate a requirements document (ja/en) or emit its\n                        RCIR claim set as JSON\n    approval            create and check digest-bound approval records\n    diff                compare OLD and NEW specification semantics\n    chain               run a project manifest across business, requirements,\n                        design, and impl\n    typestate           decide whether typestate (ghost types) applies to a\n                        design spec and emit a TS template\n    analyze             emit structural analysis JSON for a spec\n    db                  database compatibility dialect commands\n    compat              shared compatibility commands\n    ai                  AI dialect commands\n    domain              Functional DDD / async effect dialect commands\n\noptions:\n  -h, --help            show this help message and exit\n  -V, --version         show program's version number and exit\n",
+    "help": "usage: fslc [-h] [-V] {version,check,lint,migrate,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,document,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain,causal}\n\npositional arguments:\n  {version,check,lint,migrate,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,document,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain,causal}\n    version             show the version\n    lint                report edition migration diagnostics\n    migrate             plan or atomically apply edition migrations\n    fmt                 format one FSL source or check multiple paths\n    kernel              emit the normalized public Kernel JSON contract\n    conformance         emit language-neutral concrete conformance vectors\n    sweep               run bounded verification across a scope grid\n    html                generate a self-contained HTML review report\n    ledger              generate a business audit ledger (markdown) by\n                        requirement id\n    document            generate a requirements document (ja/en) or emit its\n                        RCIR claim set as JSON\n    approval            create and check digest-bound approval records\n    diff                compare OLD and NEW specification semantics\n    chain               run a project manifest across business, requirements,\n                        design, and impl\n    typestate           decide whether typestate (ghost types) applies to a\n                        design spec and emit a TS template\n    analyze             emit structural analysis JSON for a spec\n    db                  database compatibility dialect commands\n    compat              shared compatibility commands\n    ai                  AI dialect commands\n    domain              Functional DDD / async effect dialect commands\n    causal              causal review, expectation, observation, and ledger commands\n\noptions:\n  -h, --help            show this help message and exit\n  -V, --version         show program's version number and exit\n",
     "actions": [
       {
         "dest": "help",
@@ -533,6 +533,103 @@
           }
         ],
         "commands": []
+      },
+      {
+        "path": ["causal"],
+        "prog": "fslc causal",
+        "help": "usage: fslc causal [-h] {check,analyze,verify-expectations,observe-expectations,diff,ledger}\n\npositional arguments:\n  {check,analyze,verify-expectations,observe-expectations,diff,ledger}\n    check               check a causal review model\n    analyze             project or review a causal model\n    verify-expectations\n                        bounded-check declared causal expectations\n    observe-expectations\n                        replay observations into causal expectation evidence\n    diff                compare causal models by stable claim identity\n    ledger              project claims, plans, and evidence into a causal ledger\n\noptions:\n  -h, --help            show this help message and exit\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": ["-h", "--help"],
+            "nargs": 0,
+            "action": "store"
+          }
+        ],
+        "commands": [
+          {
+            "path": ["causal", "analyze"],
+            "prog": "fslc causal analyze",
+            "help": "usage: fslc causal analyze [-h] (--projection {causal_graph,causal_timeline,causal_traceability_graph,causal_evidence_graph} | --profile {causal-review}) [--format {json,dot,mermaid}] [--evidence EVIDENCE] [--lifecycle LIFECYCLE] [--as-of AS_OF] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --projection {causal_graph,causal_timeline,causal_traceability_graph,causal_evidence_graph}\n  --profile {causal-review}\n  --format {json,dot,mermaid}\n  --evidence EVIDENCE\n  --lifecycle LIFECYCLE\n  --as-of AS_OF\n",
+            "actions": [
+              {"dest": "help", "required": false, "flags": ["-h", "--help"], "nargs": 0, "action": "store"},
+              {"dest": "file", "required": true, "positional": true, "action": "store"},
+              {"dest": "projection", "required": false, "flags": ["--projection"], "choices": ["causal_graph", "causal_timeline", "causal_traceability_graph", "causal_evidence_graph"], "action": "store"},
+              {"dest": "profile", "required": false, "flags": ["--profile"], "choices": ["causal-review"], "action": "store"},
+              {"dest": "format", "required": false, "flags": ["--format"], "choices": ["json", "dot", "mermaid"], "default": "json", "action": "store"},
+              {"dest": "evidence", "required": false, "flags": ["--evidence"], "repeatable": true, "action": "store"},
+              {"dest": "lifecycle", "required": false, "flags": ["--lifecycle"], "repeatable": true, "action": "store"},
+              {"dest": "as_of", "required": false, "flags": ["--as-of"], "action": "store"}
+            ],
+            "commands": []
+          },
+          {
+            "path": ["causal", "check"],
+            "prog": "fslc causal check",
+            "help": "usage: fslc causal check [-h] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help  show this help message and exit\n",
+            "actions": [
+              {"dest": "help", "required": false, "flags": ["-h", "--help"], "nargs": 0, "action": "store"},
+              {"dest": "file", "required": true, "positional": true, "action": "store"}
+            ],
+            "commands": []
+          },
+          {
+            "path": ["causal", "diff"],
+            "prog": "fslc causal diff",
+            "help": "usage: fslc causal diff [-h] [--format {json}] before after\n\npositional arguments:\n  before\n  after\n\noptions:\n  -h, --help       show this help message and exit\n  --format {json}\n",
+            "actions": [
+              {"dest": "help", "required": false, "flags": ["-h", "--help"], "nargs": 0, "action": "store"},
+              {"dest": "before", "required": true, "positional": true, "action": "store"},
+              {"dest": "after", "required": true, "positional": true, "action": "store"},
+              {"dest": "format", "required": false, "flags": ["--format"], "choices": ["json"], "default": "json", "action": "store"}
+            ],
+            "commands": []
+          },
+          {
+            "path": ["causal", "ledger"],
+            "prog": "fslc causal ledger",
+            "help": "usage: fslc causal ledger [-h] [--plans PLANS] [--evidence EVIDENCE] [--lifecycle LIFECYCLE] [--as-of AS_OF] [--format {json}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --plans PLANS\n  --evidence EVIDENCE\n  --lifecycle LIFECYCLE\n  --as-of AS_OF\n  --format {json}\n",
+            "actions": [
+              {"dest": "help", "required": false, "flags": ["-h", "--help"], "nargs": 0, "action": "store"},
+              {"dest": "file", "required": true, "positional": true, "action": "store"},
+              {"dest": "plans", "required": false, "flags": ["--plans"], "repeatable": true, "action": "store"},
+              {"dest": "evidence", "required": false, "flags": ["--evidence"], "repeatable": true, "action": "store"},
+              {"dest": "lifecycle", "required": false, "flags": ["--lifecycle"], "repeatable": true, "action": "store"},
+              {"dest": "as_of", "required": false, "flags": ["--as-of"], "action": "store"},
+              {"dest": "format", "required": false, "flags": ["--format"], "choices": ["json"], "default": "json", "action": "store"}
+            ],
+            "commands": []
+          },
+          {
+            "path": ["causal", "observe-expectations"],
+            "prog": "fslc causal observe-expectations",
+            "help": "usage: fslc causal observe-expectations [-h] --from-log FROM_LOG --mapping MAPPING --scope SCOPE --period-start PERIOD_START --period-end PERIOD_END [--out OUT] [--lifecycle-out LIFECYCLE_OUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --from-log FROM_LOG\n  --mapping MAPPING\n  --scope SCOPE\n  --period-start PERIOD_START\n  --period-end PERIOD_END\n  --out OUT\n  --lifecycle-out LIFECYCLE_OUT\n",
+            "actions": [
+              {"dest": "help", "required": false, "flags": ["-h", "--help"], "nargs": 0, "action": "store"},
+              {"dest": "file", "required": true, "positional": true, "action": "store"},
+              {"dest": "from_log", "required": true, "flags": ["--from-log"], "action": "store"},
+              {"dest": "mapping", "required": true, "flags": ["--mapping"], "action": "store"},
+              {"dest": "scope", "required": true, "flags": ["--scope"], "action": "store"},
+              {"dest": "period_start", "required": true, "flags": ["--period-start"], "action": "store"},
+              {"dest": "period_end", "required": true, "flags": ["--period-end"], "action": "store"},
+              {"dest": "out", "required": false, "flags": ["--out"], "action": "store"},
+              {"dest": "lifecycle_out", "required": false, "flags": ["--lifecycle-out"], "action": "store"}
+            ],
+            "commands": []
+          },
+          {
+            "path": ["causal", "verify-expectations"],
+            "prog": "fslc causal verify-expectations",
+            "help": "usage: fslc causal verify-expectations [-h] [--depth DEPTH] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help     show this help message and exit\n  --depth DEPTH\n",
+            "actions": [
+              {"dest": "help", "required": false, "flags": ["-h", "--help"], "nargs": 0, "action": "store"},
+              {"dest": "file", "required": true, "positional": true, "action": "store"},
+              {"dest": "depth", "required": false, "flags": ["--depth"], "default": 8, "action": "store"}
+            ],
+            "commands": []
+          }
+        ]
       },
       {
         "path": [

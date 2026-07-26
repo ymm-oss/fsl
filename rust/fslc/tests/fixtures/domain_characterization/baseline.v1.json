@@ -7857,11 +7857,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8013,11 +8013,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8038,11 +8038,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8094,11 +8094,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8119,11 +8119,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8158,11 +8158,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8189,11 +8189,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8210,14 +8210,19 @@
           "result": "error",
           "kind": "parse",
           "message": "unexpected character '&' at 6:47",
+          "diagnostic_code": "FSL-PARSE",
+          "loc": {
+            "line": 6,
+            "column": 47
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8236,14 +8241,18 @@
           "result": "error",
           "kind": "semantics",
           "message": "unknown domain symbol 'missing_status' at rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl:10:29",
+          "loc": {
+            "line": 10,
+            "column": 29
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8260,14 +8269,18 @@
           "result": "error",
           "kind": "semantics",
           "message": "unknown domain symbol 'missing_status' at rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl:10:29",
+          "loc": {
+            "line": 10,
+            "column": 29
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8286,14 +8299,18 @@
           "result": "error",
           "kind": "semantics",
           "message": "unknown domain symbol 'Cancelled' at rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_member.fsl:10:41",
+          "loc": {
+            "line": 10,
+            "column": 41
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8310,14 +8327,18 @@
           "result": "error",
           "kind": "semantics",
           "message": "unknown domain symbol 'Cancelled' at rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_member.fsl:10:41",
+          "loc": {
+            "line": 10,
+            "column": 41
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8336,14 +8357,18 @@
           "result": "error",
           "kind": "semantics",
           "message": "comparison operand type mismatch at rust/fslc/tests/fixtures/domain_characterization/invalid_type_mismatch.fsl:10:37",
+          "loc": {
+            "line": 10,
+            "column": 37
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8360,14 +8385,18 @@
           "result": "error",
           "kind": "semantics",
           "message": "comparison operand type mismatch at rust/fslc/tests/fixtures/domain_characterization/invalid_type_mismatch.fsl:10:37",
+          "loc": {
+            "line": 10,
+            "column": 37
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8394,11 +8423,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8415,14 +8444,19 @@
           "result": "error",
           "kind": "parse",
           "message": "expected expression at 6:42",
+          "diagnostic_code": "FSL-PARSE",
+          "loc": {
+            "line": 6,
+            "column": 42
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8449,11 +8483,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8470,14 +8504,19 @@
           "result": "error",
           "kind": "parse",
           "message": "expected expression at 6:44",
+          "diagnostic_code": "FSL-PARSE",
+          "loc": {
+            "line": 6,
+            "column": 44
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8496,14 +8535,18 @@
           "result": "error",
           "kind": "semantics",
           "message": "unknown domain symbol 'Status_Draft' at rust/fslc/tests/fixtures/domain_characterization/ai_internal_name_misuse.fsl:10:41",
+          "loc": {
+            "line": 10,
+            "column": 41
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",
@@ -8520,14 +8563,18 @@
           "result": "error",
           "kind": "semantics",
           "message": "unknown domain symbol 'Status_Draft' at rust/fslc/tests/fixtures/domain_characterization/ai_internal_name_misuse.fsl:10:41",
+          "loc": {
+            "line": 10,
+            "column": 41
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "3.1.0"
+              "version": "4.0.0"
             },
             "solver": {
               "name": "z3",

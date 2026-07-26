@@ -17,6 +17,27 @@ from dataclasses import dataclass
 SCAN_ROOTS = ("specs", "examples")
 
 
+def is_causal_source(source: str) -> bool:
+    """Sniff the top-level ``causal`` keyword.
+
+    Native intentionally excludes "causal" from its dialect-dispatch
+    ``frontends!`` list (``docs/DESIGN-causal.md`` §1: the causal graph never
+    enters ``KernelModel``, ``fsl-runtime``, or ``fsl-solver``), and the frozen
+    Python reference has no causal implementation at all, so
+    ``src/fslc/dialect_registry.py``'s ``DIALECT_KEYWORDS`` deliberately
+    excludes it too. This predicate therefore lives in test infrastructure,
+    not ``src/fslc`` — adding it there would misrepresent the frozen
+    reference as understanding a dialect it does not implement.
+    """
+    for line in source.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("//"):
+            continue
+        tokens = stripped.split()
+        return bool(tokens) and tokens[0] == "causal"
+    return False
+
+
 @dataclass(frozen=True)
 class Dialect:
     construct: str  # the file's top-level keyword
@@ -49,6 +70,13 @@ EVIDENCE_CONSTRUCTS: dict[str, str] = {
         "fsl-ai recursive agent file (is_ai_agent_source): structural analysis "
         "only (agent_analyzed), formal_result not_run, never expands to a "
         "kernel spec"
+    ),
+    "causal": (
+        "causal profile file (is_causal_source, docs/DESIGN-causal.md §1): the "
+        "causal graph never enters KernelModel/fsl-runtime/fsl-solver, and "
+        "check reports result=causal_model_checked / formal_result=not_run. "
+        "Native coverage lives in rust/fslc/tests/causal_cli.rs; the frozen "
+        "Python reference has no causal implementation at all"
     ),
 }
 
@@ -89,5 +117,13 @@ MONITOR_EXCLUSIONS: dict[str, str] = {
         "Python reference intentionally retains the pre-Rust compatibility "
         "surface. Native Monitor, symbolic, CLI, origin, and parser coverage "
         "lives in the Rust workspace tests"
+    ),
+    "examples/gallery/adversarial/governance_semantic_before.fsl": (
+        "governance preservation 'before' fragment with no actions. Monitor "
+        "requires >=1 action (same shape as examples/self/no_actions.fsl "
+        "above), but native `fslc check` accepts it (ok, warnings only) -- it "
+        "is not a DECLARED_ERROR fixture. Native coverage lives in "
+        "rust/fslc/tests/cli_regression.rs::"
+        "native_check_locates_a_semantic_dependency_error_at_the_preservation"
     ),
 }

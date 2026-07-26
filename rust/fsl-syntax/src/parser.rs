@@ -1252,6 +1252,47 @@ impl<'a> Parser<'a> {
             || self.peek_symbol("{")
     }
 
+    fn enum_mapping_item(&mut self) -> Result<RefinementItem, ParseError> {
+        let span = self.bump().span;
+        let is_conversion = if self.eat_ident("conversion") {
+            true
+        } else {
+            self.expect_ident_value("abstraction")?;
+            false
+        };
+        let name = self.expect_ident()?;
+        let source = self.expect_ident()?;
+        self.expect_symbol("->")?;
+        let target = self.expect_ident()?;
+        self.expect_symbol("{")?;
+        let mut members = Vec::new();
+        while !self.eat_symbol("}") {
+            let member_span = self.peek().span;
+            let source_member = self.expect_ident()?;
+            self.expect_symbol("->")?;
+            let target_member = self.expect_ident()?;
+            members.push((source_member, target_member, member_span));
+            self.eat_symbol(",");
+        }
+        if is_conversion {
+            Ok(RefinementItem::EnumConversion {
+                name,
+                source,
+                target,
+                members,
+                span,
+            })
+        } else {
+            Ok(RefinementItem::EnumAbstraction {
+                name,
+                source,
+                target,
+                members,
+                span,
+            })
+        }
+    }
+
     fn refinement_item(
         &mut self,
         origin: CorrespondenceOrigin,
@@ -1266,6 +1307,9 @@ impl<'a> Parser<'a> {
             let span = self.bump().span;
             self.expect_ident_value("auto")?;
             return Ok(RefinementItem::MapsAuto(span));
+        }
+        if self.peek_ident("enum") {
+            return self.enum_mapping_item();
         }
         if self.peek_ident("map") {
             let span = self.bump().span;
@@ -1386,10 +1430,11 @@ impl<'a> Parser<'a> {
             self.bump();
             let name = self.expect_ident()?;
             self.expect_symbol("{")?;
-            let members = self.ident_list("}")?;
+            let (members, member_spans) = self.ident_list_with_spans("}")?;
             return Ok(SpecItem::Enum {
                 name,
                 members,
+                member_spans,
                 symmetric,
             });
         }
@@ -1397,11 +1442,11 @@ impl<'a> Parser<'a> {
             return Err(self.error("symmetric must precede type or enum"));
         }
         if self.peek_ident("struct") {
-            self.bump();
+            let span = self.bump().span;
             let name = self.expect_ident()?;
             self.expect_symbol("{")?;
             let fields = self.field_list()?;
-            return Ok(SpecItem::Struct { name, fields });
+            return Ok(SpecItem::Struct { name, fields, span });
         }
         if self.peek_ident("entity") || self.peek_ident("number") {
             let token = self.bump().clone();
@@ -1905,19 +1950,28 @@ impl<'a> Parser<'a> {
         Some(MetaTag::parse(&value, token.span))
     }
 
-    fn ident_list(&mut self, close: &str) -> Result<Vec<String>, ParseError> {
+    /// A comma-separated name list, with each name's span, so a diagnostic can
+    /// name the offending occurrence rather than the first one that matches
+    /// (issue 576).
+    fn ident_list_with_spans(
+        &mut self,
+        close: &str,
+    ) -> Result<(Vec<String>, Vec<Span>), ParseError> {
         let mut values = Vec::new();
+        let mut spans = Vec::new();
         if self.eat_symbol(close) {
-            return Ok(values);
+            return Ok((values, spans));
         }
         loop {
+            let span = self.peek().span;
             values.push(self.expect_ident()?);
+            spans.push(span);
             if self.eat_symbol(close) {
-                return Ok(values);
+                return Ok((values, spans));
             }
             self.expect_symbol(",")?;
             if self.eat_symbol(close) {
-                return Ok(values);
+                return Ok((values, spans));
             }
         }
     }

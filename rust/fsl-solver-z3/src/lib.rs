@@ -324,11 +324,15 @@ impl SmtSolver for Z3Solver {
     }
 
     fn div(&self, left: &Self::Term, right: &Self::Term) -> SolverResult<Self::Term> {
-        Ok(Z3Term::Int(expect_int(left)?.div(expect_int(right)?)))
+        let (left, right) = (expect_int(left)?, expect_int(right)?);
+        let zero = Int::from_i64(0);
+        Ok(Z3Term::Int(right.eq(&zero).ite(&zero, &left.div(right))))
     }
 
     fn modulo(&self, left: &Self::Term, right: &Self::Term) -> SolverResult<Self::Term> {
-        Ok(Z3Term::Int(expect_int(left)?.modulo(expect_int(right)?)))
+        let (left, right) = (expect_int(left)?, expect_int(right)?);
+        let zero = Int::from_i64(0);
+        Ok(Z3Term::Int(right.eq(&zero).ite(&zero, &left.modulo(right))))
     }
 
     fn lt(&self, left: &Self::Term, right: &Self::Term) -> SolverResult<Self::Term> {
@@ -541,6 +545,28 @@ mod tests {
             return Err(SolverError::new("integer model value was not available"));
         };
         assert!((4..7).contains(&value));
+        Ok(())
+    }
+
+    /// DESIGN-divmod.md §2.1: `a / 0 = 0` and `a % 0 = 0` must hold for every
+    /// integer `a`, not merely by chance for the specific queries a caller
+    /// happens to issue. Reverting the `ite(right == 0, 0, ...)` pin in
+    /// `div`/`modulo` back to a bare `Int::div`/`Int::modulo` call leaves
+    /// zero-divisor results uninterpreted, so the negation below becomes
+    /// satisfiable and this assertion fails (issue #477).
+    #[test]
+    fn div_and_modulo_totalize_the_zero_divisor_for_every_integer() -> SolverResult<()> {
+        let mut solver = Z3Solver::new()?;
+        let a = solver.constant("a", &Sort::Int)?;
+        let zero = solver.int_value(0);
+        let quotient = solver.div(&a, &zero)?;
+        let remainder = solver.modulo(&a, &zero)?;
+        let totalized = solver.and(&[
+            solver.equal(&quotient, &zero)?,
+            solver.equal(&remainder, &zero)?,
+        ])?;
+        solver.assert(&solver.not(&totalized)?)?;
+        assert_eq!(block_on_ready(solver.check())?, SatResult::Unsat);
         Ok(())
     }
 

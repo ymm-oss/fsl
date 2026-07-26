@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// A quantified `leadsTo` where binding `p = 0` responds immediately but
+// `p = 1` requires more steps (`advance` x5 then `finish1`) than the shallow
+// search depth used in tests, so its antecedent triggers (`pending[1]`
+// becomes true) without ever closing a response within that depth. This
+// is bounded progress, not a genuine liveness violation: `progress` only
+// increases, so BMC finds no non-progress cycle at any depth (issue #526 —
+// this must warn "no response scenario", distinct from an antecedent that
+// never holds at all).
+spec ScenarioLeadstoDelayedBinding {
+  type ProcId = 0..1
+  type Counter = 0..5
+  state {
+    pending: Map<ProcId, Bool>,
+    done: Map<ProcId, Bool>,
+    progress: Map<ProcId, Counter>
+  }
+  init {
+    forall p: ProcId { pending[p] = false }
+    forall p: ProcId { done[p] = false }
+    forall p: ProcId { progress[p] = 0 }
+  }
+
+  action trigger(p: ProcId) {
+    requires not pending[p]
+    pending[p] = true
+  }
+
+  fair action advance(p: ProcId) {
+    requires pending[p] and p == 1 and progress[p] < 5 and not done[p]
+    progress[p] = progress[p] + 1
+  }
+
+  fair action finish0() {
+    requires pending[0] and not done[0]
+    done[0] = true
+  }
+
+  fair action finish1() {
+    requires pending[1] and progress[1] >= 5
+    done[1] = true
+  }
+
+  leadsTo Responds {
+    forall p: ProcId { pending[p] ~> done[p] }
+  }
+}

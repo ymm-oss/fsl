@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement PartitionedQueueToSharedLock {
+  impl PartitionedQueueOwnership
+  abs SharedLockOwnership
+  map owner = owner
+  map locked = owner != none
+  action route(w) -> stutter
+  action claim(w) -> claim(w)
+  action release(w) -> release(w)
+}

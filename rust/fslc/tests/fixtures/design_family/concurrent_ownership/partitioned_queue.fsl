@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// MODEL-OWNER-004: Routing pins the worker before the queue grants ownership.
+spec PartitionedQueueOwnership {
+  type Worker = 0..1
+  state { owner: Option<Worker>, routed: Option<Worker> }
+  init { owner = none  routed = none }
+
+  action route(w: Worker) { requires routed == none  routed = some(w) }
+  action claim(w: Worker) { requires owner == none  requires routed == some(w)  owner = some(w)  routed = none }
+  action release(w: Worker) { requires owner == some(w)  owner = none }
+
+  reachable CanOwn { owner != none }
+}

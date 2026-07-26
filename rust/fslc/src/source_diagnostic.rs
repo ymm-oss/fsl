@@ -8,6 +8,12 @@ pub struct SourceDiagnostic {
     pub code: String,
     pub message: String,
     pub span: Span,
+    /// Whether [`Self::span`] is the diagnostic's real location.
+    ///
+    /// The LSP needs a span for every diagnostic and accepts the start of the
+    /// document as a last resort, but the CLI's `loc` must stay absent rather
+    /// than claim a position the diagnostic does not have (issue 555).
+    pub located: bool,
 }
 
 /// Run the authoritative syntax and typed-model gates and return editor diagnostics.
@@ -41,6 +47,7 @@ pub fn diagnostics_with_model(
                     code: error.code().to_owned(),
                     message: error.to_string(),
                     span: error.span,
+                    located: true,
                 }],
                 None,
             ),
@@ -55,6 +62,7 @@ pub fn diagnostics_with_model(
                     code: error.code().to_owned(),
                     message: error.to_string(),
                     span: error.span,
+                    located: true,
                 }],
                 None,
             );
@@ -79,7 +87,7 @@ pub fn diagnostics_with_model(
 fn core_diagnostic(source: &str, error: &fsl_core::CoreError) -> SourceDiagnostic {
     let message = error.to_string();
     SourceDiagnostic {
-        kind: crate::verification_output::semantic_error_kind(&message),
+        kind: crate::verification_output::diagnostic_kind(&message, error.name_resolution),
         code: "FSL-SEMANTIC".to_owned(),
         message,
         span: error
@@ -88,28 +96,39 @@ fn core_diagnostic(source: &str, error: &fsl_core::CoreError) -> SourceDiagnosti
             .and_then(|origin| origin.primary.as_ref())
             .and_then(|site| site.span)
             .unwrap_or_else(|| point_span(source, error.line, error.column)),
+        // `CoreError` carries `line: 0` as its "unknown" sentinel.
+        located: error.line != 0
+            || error
+                .origin
+                .as_deref()
+                .and_then(|origin| origin.primary.as_ref())
+                .is_some_and(|site| site.span.is_some()),
     }
 }
 
 fn model_diagnostic(source: &str, error: &fsl_core::ModelError) -> SourceDiagnostic {
     let message = error.to_string();
-    let kind = crate::verification_output::semantic_error_kind(&message);
-    let span = error
-        .origin
-        .as_deref()
-        .and_then(|origin| origin.primary.as_ref())
-        .and_then(|site| site.span)
-        .or_else(|| diagnostic_span_from_message(source, &message))
-        .unwrap_or_else(|| point_span(source, 1, 1));
+    let kind = crate::verification_output::diagnostic_kind(&message, error.name_resolution);
+    let located = error
+        .span
+        .or_else(|| {
+            error
+                .origin
+                .as_deref()
+                .and_then(|origin| origin.primary.as_ref())
+                .and_then(|site| site.span)
+        })
+        .or_else(|| diagnostic_span_from_message(source, &message));
     SourceDiagnostic {
         kind,
-        code: if kind == "type" {
-            "FSL-TYPE".to_owned()
-        } else {
-            "FSL-SEMANTIC".to_owned()
+        code: match kind {
+            "type" => "FSL-TYPE".to_owned(),
+            "name" => "FSL-NAME".to_owned(),
+            _ => "FSL-SEMANTIC".to_owned(),
         },
         message,
-        span,
+        span: located.unwrap_or_else(|| point_span(source, 1, 1)),
+        located: located.is_some(),
     }
 }
 
@@ -147,6 +166,7 @@ fn migration_diagnostics(source: &str) -> Vec<SourceDiagnostic> {
                         code: code.to_owned(),
                         message: message.to_owned(),
                         span: rewrite.span,
+                        located: true,
                     }
                 })
                 .collect()

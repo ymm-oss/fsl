@@ -4,7 +4,9 @@
 use serde_json::{Map, Value, json};
 
 use crate::{
-    AiComponent, Annotations, Binder, DbSystem, DomainSpec, Expr, QualifiedName, Span, SymbolPath,
+    AiAgentContract, AiAgentGrant, AiAgentOutput, AiAuthority, AiComponent, AiDelegationEdge,
+    AiFailurePolicy, AiLoc, AiTool, Annotations, Binder, DbSystem, DomainSpec, Expr, QualifiedName,
+    Span, SymbolPath,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -125,11 +127,23 @@ pub enum SpecItem {
     Enum {
         name: String,
         members: Vec<String>,
+        /// The span of each member, positionally parallel to `members`.
+        ///
+        /// A duplicate-member diagnostic must name the *repeated* occurrence.
+        /// Without this the report falls back to the first token matching the
+        /// name, which for a duplicate is the earlier, innocent declaration by
+        /// construction (issue 576). Generated enums carry an empty vector;
+        /// the diagnostic then keeps whatever location its origin supplies.
+        member_spans: Vec<Span>,
         symmetric: bool,
     },
     Struct {
         name: String,
         fields: Vec<(String, TypeExpr)>,
+        /// The `struct` declaration's own span. `TypeExpr` carries none, so a
+        /// field-level type diagnostic has no closer location to report
+        /// (issue 555).
+        span: Span,
     },
     Entity(String, Span),
     Number(String, Span),
@@ -252,6 +266,20 @@ pub enum RefinementItem {
     Impl(String),
     Abs(String),
     MapsAuto(Span),
+    EnumConversion {
+        name: String,
+        source: String,
+        target: String,
+        members: Vec<(String, String, Span)>,
+        span: Span,
+    },
+    EnumAbstraction {
+        name: String,
+        source: String,
+        target: String,
+        members: Vec<(String, String, Span)>,
+        span: Span,
+    },
     Map {
         name: String,
         binder: Option<Binder>,
@@ -638,10 +666,30 @@ pub struct SurfaceCompose {
     pub items: Vec<ComposeItem>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Recursive `agent` dialect body (issue #468). Nested agents are ordinary
+/// `SurfaceAgent` values held in `children` -- lexical nesting only, not a
+/// distinct sub-agent type (`docs/LANGUAGE.md` §13.6).
+#[derive(Clone, Debug, PartialEq)]
 pub struct SurfaceAgent {
     pub name: String,
     pub span: Span,
+    pub model: Option<String>,
+    pub prompt: Option<String>,
+    pub context: Vec<String>,
+    /// Bare names from a `tools [X, Y];` list, kept separate from `tools`
+    /// (full `tool X { ... }` blocks) -- `docs/LANGUAGE.md` §13.6.
+    pub tool_names: Vec<String>,
+    pub tools: Vec<AiTool>,
+    pub authority: AiAuthority,
+    pub grants: Vec<AiAgentGrant>,
+    pub outputs: Vec<AiAgentOutput>,
+    pub orchestration: Vec<AiDelegationEdge>,
+    pub failure_policy: Vec<AiFailurePolicy>,
+    pub contracts: Vec<AiAgentContract>,
+    pub children: Vec<SurfaceAgent>,
+    pub trust: Option<String>,
+    pub review_gates: Vec<String>,
+    pub loc: AiLoc,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -844,6 +892,7 @@ impl SpecItem {
                 name,
                 members,
                 symmetric,
+                ..
             } => {
                 let mut values = vec![json!("enum"), json!(name), json!(members)];
                 if *symmetric {
@@ -851,7 +900,7 @@ impl SpecItem {
                 }
                 Value::Array(values)
             }
-            Self::Struct { name, fields } => {
+            Self::Struct { name, fields, .. } => {
                 let fields = fields
                     .iter()
                     .map(|(name, ty)| (name.clone(), ty.python_ast()))
@@ -1045,6 +1094,40 @@ impl RefinementItem {
             Self::Impl(name) => json!(["impl", name]),
             Self::Abs(name) => json!(["abs", name]),
             Self::MapsAuto(span) => json!(["maps_auto", span.python_loc()]),
+            Self::EnumConversion {
+                name,
+                source,
+                target,
+                members,
+                span,
+            } => json!([
+                "enum_conversion",
+                name,
+                source,
+                target,
+                members
+                    .iter()
+                    .map(|(source, target, span)| { json!([source, target, span.python_loc()]) })
+                    .collect::<Vec<_>>(),
+                span.python_loc()
+            ]),
+            Self::EnumAbstraction {
+                name,
+                source,
+                target,
+                members,
+                span,
+            } => json!([
+                "enum_abstraction",
+                name,
+                source,
+                target,
+                members
+                    .iter()
+                    .map(|(source, target, span)| { json!([source, target, span.python_loc()]) })
+                    .collect::<Vec<_>>(),
+                span.python_loc()
+            ]),
             Self::Map {
                 name,
                 binder,

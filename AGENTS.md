@@ -57,6 +57,11 @@ The complete required product gate has one Rust-native entrypoint and does not e
 ./tools/check-native-integration.sh
 ```
 
+Pull requests into `main` may use the bounded `merge readiness` gate defined in
+`docs/DESIGN-ci.md`; it is not product verification. Every merged `main` state and every
+production/release promotion must still receive the complete product evidence. Do not hide a
+post-merge product-gate failure or treat its automatically created issue as a waiver.
+
 Python is optional and is used only for changes explicitly scoped to the frozen compatibility
 reference or Python-based repository hooks. Native solver changes should also run
 the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests.
@@ -70,9 +75,17 @@ the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests.
   evidence contract. Do not allowlist verdict, location, assurance, or exit-code differences.
 - A language feature moves with its grammar/lowering, typed model, symbolic and concrete semantics,
   regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/reference.md`, a design
-  note, and `CHANGELOG.md`. `docs/LANGUAGE.ja.md` is a second canonical source kept section-aligned
+  note, and `CHANGELOG.md`. A new declaration, binder, or reference form additionally moves with
+  `rust/fsl-lsp/src/index.rs` and a targeted role/scope test, or it silently loses
+  definition/references/rename/documentSymbol with no parse failure to surface the gap;
+  `rust/fsl-lsp/tests/corpus.rs` only asserts that every identifier is indexed as something.
+  `docs/LANGUAGE.ja.md` is a second canonical source kept section-aligned
   1:1 with `docs/LANGUAGE.md` (same count/order of `## ` sections) — `tools/build_site_reference.py`
-  fails loudly on drift; see `docs/DESIGN-docs-site.md` D7.
+  fails loudly on drift; see `docs/DESIGN-docs-site.md` D7. A new dialect's top-level construct (and
+  any new `examples/`/`specs/` directory) additionally moves with `tests/dialect_registry.py`
+  (`DIALECTS`, `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS`), or the conformance harness
+  (`docs/DESIGN-conformance-harness.md`) fails loudly with an unregistered-construct error instead
+  of silently excluding the corpus.
 - Do not weaken or hollow out `.fsl` specs to make checks pass. Verify mutation/vacuity evidence.
 - Every formal-to-implementation conformance anchor must include a negative control that rejects a
   known contract-violating trace, transition, or mutation. A green positive path alone does not

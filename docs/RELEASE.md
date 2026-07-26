@@ -66,19 +66,42 @@ It also rejects a dynamic dependency on `libz3`.
    Do not hand-edit `rust/Cargo.lock`. Do not bump `pyproject.toml` for a native
    GitHub Release; the Python package is a frozen, unpublished compatibility
    reference.
-5. Move all current `[Unreleased]` entries under
+5. Bump the VS Code extension to the same version, so the release unit stays
+   atomic. Let npm write both files rather than hand-editing the lockfile:
+
+   ```bash
+   ( cd editors/vscode && npm version X.Y.Z --no-git-tag-version )
+   ```
+
+   `native_release_unit_is_atomic_pinned_and_platform_closed` asserts
+   `editors/vscode/package.json`'s version equals the workspace version, so
+   skipping this fails the product gate rather than shipping a mismatched
+   extension.
+6. Regenerate the domain characterization baseline, which embeds the CLI
+   version in every recorded envelope:
+
+   ```bash
+   UPDATE_DOMAIN_CHARACTERIZATION=1 \
+     cargo test --manifest-path rust/Cargo.toml -p fslc-rust \
+     --test domain_expression_characterization --locked
+   ```
+
+   Review the diff and require it to contain version strings only. A generated
+   snapshot is regenerated, never hand-edited; any other change in that diff is
+   a contract change that does not belong in a release commit.
+7. Move all current `[Unreleased]` entries under
    `## [X.Y.Z] - YYYY-MM-DD`, leaving an empty `## [Unreleased]`. Update the
    link references so `[Unreleased]` compares `vX.Y.Z...HEAD` and `[X.Y.Z]`
    compares the previous tag with `vX.Y.Z`.
-6. Confirm the complete `X.Y.Z` changelog section is non-empty and suitable for
+8. Confirm the complete `X.Y.Z` changelog section is non-empty and suitable for
    the GitHub Release body.
-7. Run the complete product gate:
+9. Run the complete product gate:
 
    ```bash
    ./tools/check-native-integration.sh
    ```
 
-8. Commit `chore(release): vX.Y.Z`, open a pull request to `main`, and merge it
+10. Commit `chore(release): vX.Y.Z`, open a pull request to `main`, and merge it
    only after required checks pass. Record the exact merged `main` SHA as the
    release candidate.
 

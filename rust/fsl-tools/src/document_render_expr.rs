@@ -21,7 +21,7 @@ use fsl_core::{
     Pattern, source_binder_text,
 };
 
-use crate::document_render::Locale;
+use crate::document_presentation::Locale;
 
 /// Longest canonical code-span text allowed inside a natural-language atom
 /// before the whole enclosing proposition falls back (issue #326 §4.0).

@@ -512,6 +512,19 @@ induction、Public Kernel v1 は、等価な `init` ブロックと同じ意味�
 
 ## 3. 式
 
+`true` / `false` / `none` は**予約語**である。式中では常にリテラルに解決されるため、
+宣言名として使えない —— 仕様名、const、`def` とその引数、型、enum とそのメンバー、
+struct とそのフィールド、状態変数、アクションとその引数、プロパティ、
+量化子/集約の束縛変数、`is some(x)` のパターン束縛のいずれにおいてもである。
+これらの名前を持つ宣言はどの式からも読めなくなり、しかもその読み違えは沈黙する。
+検査が入る前は、`state { true: Bool }` と `invariant AlwaysHolds { true }` は
+`proved` を返し、`init { true = false }` は何からも読めない変数への代入になっていた。
+予約語はこの 3 語のみである。`count`、`sum`、`stage`、`in`、`is`、`where`、`old`、
+`abs`、`and`、`or` は文脈依存であり、名前として引き続き有効である。`some`、`Set`、
+`Seq`、`unique`、`exactlyOne`、`forall`、`exists` は後続の構文がある場合にのみ
+認識されるため、名前として誤用してもリテラルへの沈黙した解決ではなくパースエラーになる。
+
+
 名前付き述語は、繰り返される式や業務上重要な式をくくり出します:
 
 ```fsl
@@ -527,7 +540,18 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
 
 - 算術: `+ - * / %`、単項 `-`、`min(a, b)` / `max(a, b)` / `abs(a)`
   (`a//b` は `//` 以降がすべてコメントになってしまうので、除算は空白を入れて
-  `a / b` と書きます)
+  `a / b` と書きます)。`/` と `%` は `b != 0` のとき Euclidean(ユークリッド)
+  剰余系に従います(`a == b * (a / b) + (a % b)` かつ `0 <= a % b < |b|`。
+  よって `-7 / 2 == -4`、`-7 % 2 == 1`)。ゼロ除算は**全域的に定義**されており、
+  `a / 0 == 0` と `a % 0 == 0` は常に評価できます — invariant/trans/reachable/
+  leadsTo/refinement の state map 式で `a / 0` を読んでも評価が失敗することは
+  ありません。action の `requires`/本体/`ensures` 内では、ゼロになりうる除数への
+  未ガードの `/`/`%` は値自体が定義されていても `partial_op`(§6 参照)として
+  報告されます — `y != 0 => P(x / y)` や `requires y != 0` でガードしてください。
+  refinement の action 対応の**引数**式(§10、`impl_action(a) -> abs_action(a / c)`)
+  は、抽象 action 呼び出しを構成するものなので property 文脈の mapping 式ではなく
+  action 文脈であり、同じ `partial_op` 扱いを受けて `kind: "map_partial_op"` として
+  報告されます。
 - 比較: `== != < <= > >=`
 - 論理: `and or not =>`
 - 条件: `if condition then when_true else when_false`。条件は `Bool` で、両方の
@@ -566,7 +590,12 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   `reachable(r, a, b)`、`acyclic(r)`、`functional(r)`、`injective(r)`、
   `domain(r)`、`range(r)`。`reachable` と `acyclic` は自己関係
   (`relation T -> T`)を要求します。端点の型/アリティのエラーは修復ヒントを
-  含みます。
+  含みます。`reachable(r, a, a)` は構造上**反射的ではありません**——`a` から
+  `a` に戻る、1本以上の辺からなる本物のパスがある場合にのみ真です(空の関係
+  や非巡回の関係では、すべての `a` について `reachable(r, a, a) == false`)。
+  反射的な読みだと、任意の非空ドメインで `not reachable(r, a, a)` が構造上
+  充足不能になり、述語から意味が失われます。「`r` のどこにも自己ループや
+  サイクルがない」を述べるには `acyclic(r)` を使ってください。
 - ensures / trans の内側のみ: `old(expr)` で遷移前の状態を読む
 - leadsTo ブロックの内側のみ: `P ~> Q`(応答プロパティ。一般式の演算子階層の一部ではありません)。
   Q の前に有界の締め切り `within K` を、応答本体の後に induction のランキング用の
@@ -637,7 +666,7 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 | 検査 | 内容 | 違反時 |
 |---|---|---|
 | 型境界 | すべての有界型の状態変数(Map の値、struct のフィールド、Seq の要素を含む)が範囲内にある | `violated` / `type_bound` / `_bounds_<var>` |
-| 部分演算 | `pop()`/`head()`/`at(i)` の時点で列が非空かつインデックスが範囲内であり、`/` `%` の除数が非ゼロ | `violated` / `partial_op` / `_partial_<action>` |
+| 部分演算(action 文脈限定: `requires`/本体/`ensures` のみ、§3 参照) | `pop()`/`head()`/`at(i)` の時点で列が非空かつインデックスが範囲内であり、`/` `%` の除数が非ゼロ | `violated` / `partial_op` / `_partial_<action>` |
 | action カバレッジ | 各 action が深さ K 以内に少なくとも 1 回 enabled になる | `action_coverage` にブロックしている requires の診断 |
 | デッドロック | すべての action が disabled になる状態への到達 | 警告(`--deadlock error` で `violated`) |
 | trans | 2 状態の述語が到達可能なすべての遷移で成立するか | `violated` / `trans` / `trans` + トレース |
@@ -790,8 +819,12 @@ Public Kernel v2 はオプトインで、
 ついて `respond_<Name>[_<binding>]` シナリオを出力します。各シナリオは
 `kind: "leadsTo"`、`pending_at`、`satisfied_at`、`bindings`、`steps`、
 `initial_state`、`expected_states` を持ち、P の成立から深さ K 以内での Q の成立
-までの最短トレースを表します。P が決して成立しないバインディングはシナリオに
-ならず、`warnings` に現れます。
+までの最短トレースを表します。数量化された性質は性質名単位ではなくバインディ
+ング単位で追跡されます: あるバインディングの応答シナリオが見つかっても、応答
+のない別のバインディングの完全性警告を隠しません。P が深さ K 以内で一度も成立
+しないバインディングは「antecedent never holds within depth K」という専用の
+警告になり、P は成立したが応答が一度も閉じなかったバインディングは
+「has no response scenario within depth K」になります。両者は混同されません。
 
 `verify --property Name` は invariant、`trans`、`leadsTo`、`reachable` の宣言を
 横断して解決し、指名されたプロパティ種別だけを単独で検査します。
@@ -821,7 +854,11 @@ Public Kernel v2 はオプトインで、
 したスコープを `sweep.minimal_counterexample` として返します。`--values` に
 ついては、sweep は下限を固定して上限を拡大します(`lo..lo`, `lo..lo+1`, ...,
 `lo..hi`)。sweep の合格は「このグリッドに反例がない」ことを意味し、非有界の証明
-ではありません。
+ではありません。グリッド中のいずれかのスコープが spec `error`(parse / type /
+semantics / io / vacuous / …)を返した場合、それは反例ではありません。`sweep` は
+その基盤のエラー envelope をそのまま返します(`result`、`kind`、`message`、
+`loc`、exit code は変更しません)。`sweep_passed`/`sweep_failed` に畳み込むこと
+はありません。
 
 `diff` は、ソーステキストではなく状態機械の意味を比較します。有界の refinement を
 両方向に実行します: NEW→OLD の失敗は `behavior_added`、OLD→NEW の失敗は
@@ -878,7 +915,12 @@ imported / imported_with_warnings、
 refinement_failed / sweep_failed / observed_mismatch、
 `2` = spec エラー(parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
-`imported`/`imported_with_warnings` は `fslc db import` の結果です。
+`imported`/`imported_with_warnings` は `fslc db import` の結果です。同じ `2` の
+対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
+セクションが0個、パース不能な `depth`/`refine_depth` — `docs/DESIGN-layers.md` §7)
+と、`ledger --impl-log` の replay 入力(replay エラーは実装ログの証跡ではなく、
+空の台帳行として描画してはならない — `docs/DESIGN-ledger.md`)でもフェイルクローズド
+に適用されます。
 
 ### 結果の種類
 
@@ -1212,7 +1254,15 @@ refinement CartImplRefinesCart {
 - `maps auto` — 省略可能な恒等デフォルト。明示の `map` のない同名で互換な状態変数
   には `map x = x` を合成し、明示の対応のない同名で互換な action には
   `action f(params...) -> f(params...)` を合成します。明示のエントリはデフォルトを
-  上書きします。互換でない同名の候補は `kind: "type"` エラーとして報告されます。
+  上書きします。action のパラメータは**位置ではなく名前**で対応付けられます:
+  各抽象パラメータは、abstract action 自身のパラメータ順で、まったく同じ名前を持つ
+  impl パラメータに束縛されます(そのため、純粋な並べ替えは引き続き auto-map
+  されます)。auto は決して推測しません — 同名の action ペアでもアリティが異なる、
+  impl 側に余剰パラメータがある、パラメータ名が変わっている、あるいは同名の impl
+  パラメータを持たない抽象パラメータがある場合(issue #494)は、位置付きの
+  `kind: "type"` エラーになります。そのペアには明示の `action ... -> ...`
+  対応を書いてください。互換でない同名の状態候補も同様に `kind: "type"` エラー
+  として報告されます。
 - `action <impl>(<formal params>) -> <abs>(<expr>) | stutter` — すべての impl
   action に必須です。形式パラメータは裸の名前でも、impl の action 宣言に一致する
   `name: Type` の注釈でもかまいません。
@@ -1229,15 +1279,101 @@ refinement のマップと action の引数は、`if <condition> then <expr> els
 含め、通常の spec と同じ式文法と型規則を使います。条件が定数であっても、両方の分岐
 が名前と型の検査を受けます。
 
+異なる名前付き enum の間では、明示的に名前を付けた enum mapping が必要です。
+メンバーごとの全単射には、refinement 内で conversion を宣言し、状態マップまたは
+action の引数から呼び出します:
+
+```fsl
+enum conversion use_case_stage UnitOfWorkStage -> CommandStage {
+  Received -> Received
+  Validated -> Validated
+  Executing -> Executing
+  Completed -> Completed
+}
+map command_stage[c: Command] = convert(use_case_stage, stage[c])
+```
+
+両端は enum 型でなければなりません。source と target の全メンバーをそれぞれ正確に
+1 回ずつ指定する必要があり、未知・重複・欠落したメンバーは変換宣言の位置を伴う
+`kind: "type"`(exit 2)になります。宣言順や同じメンバー名から変換を推論することは
+なく、2 つの enum の直接代入は引き続き型エラーです。target には requirements の
+`process` lowering が生成した stage enum を指定できます。その場合は `fslc kernel`
+で確認できる checked Kernel 名(例: `CommandStage`)を使います。既存の raw
+`replay --from-log` と causal observation のマッピングには型付き impl model がないため、
+変換宣言/呼び出しを位置付き型エラーとして拒否します。`convert` を使う前に型付き
+refinement へ移行してください。
+
+多対一の境界では、source-total な abstraction を宣言し、専用の呼び出し形式を
+使います:
+
+```fsl
+enum abstraction lifecycle ImplStage -> AbsStage {
+  Received  -> Pending
+  Validated -> Pending
+  Completed -> Done
+}
+map status = abstract(lifecycle, stage)
+```
+
+両端の enum は空であってはならず、source の全メンバーを正確に 1 回ずつ指定する
+必要があります。source の重複や欠落、
+未知または異なる nominal 型のメンバーは、位置付き型エラーになります。target の
+重複は許可され、どの行にも現れない target メンバーは、この abstraction では意図的に
+未使用です。`enum conversion` は引き続き全単射であり、target の重複や欠落を拒否します。
+conversion と abstraction の名前は refinement ローカルの名前空間を共有し、
+`convert` と `abstract` を取り違えることはできません。どちらも enum の宣言順に依存
+しません。raw production-log と causal のマッピングには型付き impl model がないため、
+abstraction も拒否します。
+
+抽象側の生成 enum が Map の binder で、実装側の Map が design enum をキーにするときは、
+binder を逆方向に変換します。例えば `column_key Column -> DesignColumn` に対して
+`map column_exists[c: Column] = design_exists[convert(column_key, c)]` と書きます。
+
 ```bash
 fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
 ```
 
 成功: `result: "refines"`(exit 0)。違反: `refinement_failed`(exit 1)で、
 `kind`(`abs_requires_failed` / `abs_state_mismatch` / `stutter_changed_abs` /
-`map_out_of_bounds`)、`impl_trace`、マッピング後の `abs_before` /
-`abs_after_*` を伴います。静的なエラー(マップの欠落、未知の action など)は
-`kind: "type"`(exit 2)です。
+`map_out_of_bounds` / `map_partial_op`)、`impl_trace`、マッピング後の
+`abs_before` / `abs_after_*` を伴います。静的なエラー(マップの欠落、未知の
+action など)は `kind: "type"`(exit 2)です。`map_partial_op` は、action 対応の
+引数式(`impl_action(a) -> abs_action(a / c)`)がゼロになりうる impl の state
+変数で除算しているケースです — action 文脈であり、refinement の state map が
+受ける「チェックなし」の property 文脈ではありません(§3 のゼロ除算規則)。
+
+`refine` はどの対応関係も検査する前に、まず impl spec が `--depth` の範囲内で
+それ自身の型境界や不変条件を破っていないか(内部的に一貫しているか)を検証しま
+す。壊れた impl を refinement mapping で意味のあるものにすることはできないため、
+これは abstraction や mapping とは独立に検査されます: `result: "violated"`
+(exit 1)に `violation_kind` と、これが fidelity の失敗ではなく refinement
+*入力*自体の性質であることを説明する `note` を伴います。`refines` として報告さ
+れることはなく、`refinement_failed`(上記の `kind` 群は impl と abs の**間**の
+不一致を表すものであり、impl 単独の欠陥ではありません)に畳み込まれることもあり
+ません。`fslc diff` は同じ条件を `impl_violated` の finding として表面化させ、
+gate を無条件に(`--forbid` の対象ではなく)失敗させます。自己矛盾した側がある
+比較そのものが信頼できないためです。
+
+`init` がどの経路でも一度も代入しない状態変数(例えば、代入されていない `Bool`
+を読む `init if`)は、黙ってデフォルト値になるのではなく、その型の全域にわたって
+本当に自由な初期値です — `refine` は impl 側でも abs 側でもこの通りに検査します。
+上記の自己一貫性の precondition と、それが供給する init 対応関係は、いずれも
+`init` が許すあらゆる具体的初期値評価を検査します。一つだけ任意に選ばれた
+デフォルトではありません: impl 側のあらゆる初期値評価は impl 自身の意味論に
+違反してはならず、そのマップ後の状態は、両側のそうしたあらゆる初期値評価について、
+abs 自身の有効な初期値評価の集合のメンバーでなければなりません。同名の状態変数が
+一部の経路(例えば `else` のない `if` の内側だけ)で代入されない場合は、この
+列挙の対象にはならず、以前どおり単一の値としての振る舞いを維持します。
+
+これは 2 つの逆向きの欠陥を解消するものであり、いずれかの側の `init` が状態変数を
+どの経路でも代入しない mapping について、`refine` の判定に対する**破壊的変更**
+です: 以前は impl のデフォルトの初期分岐だけが検査されていたために `refines` と
+報告されていた refinement が、(以前は見落とされていた別の impl 分岐での
+init 対応関係の違反により)`refinement_failed` を報告するようになる場合があります。
+また、以前は abs のデフォルトの初期分岐がマップ後の impl 状態と一致しないという
+理由だけで `refinement_failed` と報告されていた refinement が、(impl の状態が
+別の、なお有効な abs の初期分岐と一致するため)`refines` を報告するようになる
+場合があります。
 
 状態変数のペアが 1:1 でマップされる場合でも、impl と abs には**別々の enum/struct
 型名**を与えてください。型メタデータは refinement 検査のために名前でマージされ
@@ -2064,7 +2200,9 @@ dbsystem <Name> {
 ライフサイクル、destructive のアノテーション、preservation-transform の
 アノテーション、API/オフラインの互換性をカバーします。`data_preserved` と
 `rollback_equivalent` はオプトインの有界検査で、`DB-ASSUME-BOUNDED-ROW-MODEL` を
-報告します。
+報告します。上記の閉じた語彙にない `rule` 名や、宣言された厳密に順序付けられた
+マイグレーション計画では到達しない `environment schema lo..hi` は、何も検査せず
+に静かに通るのではなく、検証で exit 2 になります。
 
 フィーチャーフラグは有限の環境次元です。`fslc db check` は、宣言されたバリアント
 を schema のスナップショットとともに列挙し、
@@ -2105,6 +2243,12 @@ migration/schema の要素、最小の競合集合、修復候補を含む `find
 ログからの不在は、未使用の振る舞いの証明ではありません。
 生成されたカーネルの反例を直接調べたいときは、通常の `fslc verify` を使って
 ください。
+
+`fslc db observe` は、観測イベントを評価する前に、観測エンベロープ/イベントを
+`schemas/fslc/db/observation.v0.schema.json` に対して検証します(型付きの必須
+フィールド、閉じた `capability` 語彙、不正なレコードでは exit 2)。各イベントの
+任意の `flags` スナップショットは、`fslc db check` と同じ方法でアーティファクト
+のウィンドウと照合されます。
 
 汎用の `requires` / `provides` ケイパビリティにより、AI モデル/プロンプト/
 リトリーバー/ツールスキーマと出力スキーマのプロファイルが、DB/API/モバイル/
@@ -2243,14 +2387,31 @@ fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 プロジェクトレベルの fsl-ai エビデンス宣言は、`ai_component`、
 `dataset`、`evaluator`、`failure_mode`、`statistical_property`、
 `ai_migration`、`observed_property` を組み合わせられます。`fslc ai check` は
-これらのファイルをパースして `ai_project_analyzed` を返します。`fslc ai eval` は
-Wilson 区間つきで、事前計算された JSONL から Bernoulli/比率のメトリクスを検査
-します。`fslc ai regress` は集約の `no_regression` のメトリクス低下/増加の節を
-検査します。`fslc ai compare` は閾値の主張なしにメトリクスの差分を報告します。
-`fslc ai drift` はランタイムのテレメトリの閾値とドリフトを検査します。そして
-`fslc ai compat` は有限の
-`dbsystem artifact` ケイパビリティプロファイルを出力します。これらはすべて
-`formal_result:"not_run"` を使います。
+これらのファイルをエビデンス系コマンドと同じパーサでパースして
+`ai_project_analyzed` を返します。`fslc ai eval` は
+選択された `statistical_property` が宣言する `slice`/`min_samples`/
+`ci_lower`/`ci_upper` の要件を、事前計算された JSONL（`--records`、または
+宣言された `dataset` の `source` ファイル）に対して Wilson 区間つきで検査
+します。`fslc ai regress` は選択された `ai_migration` が宣言する集約の
+`no_regression` メトリクス低下/増加の節を検査します。`fslc ai compare` は
+閾値の主張なしにメトリクスの差分を報告します。`fslc ai drift` は選択された
+`observed_property` が宣言する `observed`/`drift` の要件をランタイムの
+テレメトリに対して検査します（`observed_supported` / `observed_mismatch`）。
+そして `fslc ai compat` は、1 つの `ai_component`、またはプロジェクトが
+宣言するすべての `ai_component` について有限の `dbsystem artifact`
+ケイパビリティプロファイルを出力し、AI ではない入力や `ai_component` を
+1 つも宣言しない AI プロジェクトは拒否します（exit 2）。これらはすべて
+`formal_result:"not_run"` を使います。既知のエビデンス節文法
+（`min_samples`、`ci_lower`、`ci_upper`、点推定、`observed`、`drift`）の
+いずれにも一致しない `require` 節は、`fslc ai check` と `fslc check` の
+どちらでもチェック時の spec エラー（exit 2）であり、解析済みプロジェクト
+とはしません。`eval`/`drift` が実行できないものを check が受理しては
+なりません。未知の `--property`/`--migration` の
+選択はチェック時エラー（exit 2）です。選択された `statistical_property` の
+ゲート状態（`dataset_invalid`、`evaluator_untrusted`、`slice_missing`、
+`insufficient_samples`、`inconclusive`、`statistically_unsupported`）は
+exit 1 となり、唯一の成功ケースである `statistically_supported` の exit 0
+と対比されます。
 
 再帰的な `agent` の形:
 
@@ -2409,7 +2570,11 @@ DESIGN-*.md があります)。
   エッジを公開します。`--projection impact_graph --focus NODE` は、TSG のノードの
   周りの上流/下流のスライスを出力します。バッチモードで複数のファイルや
   ディレクトリを受け付けます。
-  ディレクトリは `*.fsl` について再帰的に展開され、決定的にソートされます。
+  ディレクトリは `*.fsl` について再帰的に展開され、決定的にソートされます —
+  明示的に指定されたファイルは拡張子によらず常に保持されます（`.toml` の
+  プロジェクトマニフェストは単一ファイルモードと同じ経路で処理され、それ以外の
+  解析できないファイルは `files[]`/`errors[]` 上の実際のエラーとなり、
+  無言で捨てられることはありません）。
   スタンドアロンの refinement マッピングは `--projection
   refinement_graph` で見られます。このコマンドは impl/abs のモデルのパスを持たない
   ため、これは未解決の構造ビューです。プロジェクトのマニフェストは `--projection
@@ -2462,10 +2627,17 @@ DESIGN-*.md があります)。
 ## 16. ghost 型への昇格判定(typestate)
 
 `fslc typestate <file.fsl> [--ts]` は、設計 spec の状態機械(enum 値の struct
-フィールド / 状態変数 / `Option<_>` スロット)を、ホスト言語の typestate
+フィールド — フィールド名と所有する struct の型の両方でスコープされ、同名の
+フィールドを持つ別々の struct は独立した機械のまま扱われます / 状態変数 /
+`Option<_>` スロット)を、ホスト言語の typestate
 (ghost 型)へどれだけ健全にマップできるかを判定します。各
 `(entity, action)` を、`derivable`(from の状態がエンティティ自身のローカルな
-ガード)/ `branching`(`if` の内側でデータ依存)/ `relational`(ローカルな
+ガード — 複合ガードの from 状態は式**全体**が含意するものです。`or` は各選言項
+が含意する状態の**和集合**ですが、それはすべての選言項がエンティティを制約
+している場合に限ります。ある選言項がエンティティについて何も述べていない
+(例: 無関係なフラグ)場合、ガード全体を絞り込むのではなく、そのガード自体を
+落とします)/
+`branching`(`if` の内側でデータ依存)/ `relational`(ローカルな
 ガードがなく、事前条件が外部の構造に住む — 型では表現できず、ランタイム/検証の
 義務として残る)に分類します。エンティティの
 `applicability` が `full` になるのは、すべての遷移が derivable/branching のとき

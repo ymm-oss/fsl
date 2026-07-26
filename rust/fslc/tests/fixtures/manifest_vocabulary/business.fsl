@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Manifest-vocabulary fixture, business layer. Declares a `control` catalog
+// entry, which has no Kernel-lowered form and therefore only reaches the graph
+// through the source-level enrichment. Shares the `REQ-SHARED` id with the
+// requirements layer on purpose: the manifest graph must keep the two apart by
+// layer prefix rather than merging them into one node.
+business ManifestVocabularyBusiness {
+  actor Agent
+  entity Item
+
+  process Item {
+    stages Open, Done
+    initial Open
+    transition finish Open -> Done by Agent
+  }
+
+  control CTRL-CLOSURE
+    "Every opened item must reach a closed outcome"
+    owner Agent
+    severity high
+    applies_to Item
+
+  policy REQ-SHARED "every opened item is eventually finished"
+    satisfies CTRL-CLOSURE
+    every Item in Open must eventually be Done
+}
+
+verify {
+  instances Item = 2
+}

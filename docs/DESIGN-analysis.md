@@ -83,14 +83,25 @@ Graphviz or Mermaid runtime dependency.
 Single-file success is `result: "analyzed"` and exits 0. Parse, name, type,
 semantics, io, and internal failures reuse the normal fslc error envelope.
 `impact_graph` requires `--focus <node-id>` where the id comes from the TSG
-(`state:x`, `action:checkout`, `requirement:REQ-3`, etc.). Unknown focus ids
-use the normal `kind: "name"` error envelope. `--focus` is single-file only and
-is not accepted with `--profile`.
+(`state:x`, `action:checkout`, `requirement:REQ-3`, etc.). A node's TSG `label`
+is its display name (`fsl_core::display_name`: the internal `__` logical/physical
+marker becomes `.`, and a db-dialect internal separator sentinel is restored to
+`__`) — `--focus` accepts that displayed name too, resolving it to the matching
+node's raw id, so a caller does not need to know the internal sentinel form to
+reference a target `verify` already named for them. Unknown focus ids (neither
+a raw id nor a displayed name that resolves to one) use the normal
+`kind: "name"` error envelope. `--focus` is single-file only and is not
+accepted with `--profile`.
 Batch mode accepts files and directories. Directories are expanded recursively
 for `*.fsl`, sorted by normalized path, and emitted as one deterministic JSON
 envelope with `mode: "batch"`. If any file fails, successful entries remain in
 `files[]`, failed entries are also summarized in `errors[]`, and the command
-exits 2.
+exits 2. The `*.fsl` filter applies only to directory expansion — a file
+named explicitly on the command line is always kept, whatever its extension
+(including a `.toml` project manifest, routed the same way single-file mode
+routes one). An explicitly named file that cannot be analyzed is a real
+error in `files[]`/`errors[]`, never a silent omission; a batch that
+analyzed nothing never reports `result: "analyzed"`/exit 0.
 
 ## 2. Typed Semantic Graph (TSG)
 
@@ -116,6 +127,38 @@ Stable node kinds include `spec`, `requirement`, `state`, `phys_state`,
 `reachable`, `acceptance`, and `forbidden`. KPI and control nodes are emitted
 when the validated spec carries that metadata.
 
+`requirement` nodes and their `covers` edges are model-only
+(`KernelModel::requirement_targets`, native `Builder::build`), so every
+dialect reaching `build_tsg` gets them, not only project manifests. A
+requirement attached to nothing the graph represents (e.g. only to `init`,
+which has no node) still gets its own node with zero `covers` edges — this
+is the `disconnected_requirement` review signal, not a dropped node.
+`acceptance`/`forbidden` scenario nodes are requirements-dialect-only (they
+have no Kernel-lowered form, so building them needs source text, not just
+the checked model) and gain a `covers` edge from any `@requirement(...)`
+requirement that names them, plus a `starts_with` edge to the action their
+first step calls and a `precedes` edge to the action of every later step. A
+step edge runs scenario → action and carries the 0-based `step` index, so a
+scenario that calls one action twice keeps one edge per step. This is what
+makes `unanchored_property` skip a `reachable` an acceptance scenario
+anchors; without the step edges that suppression can never apply. KPI nodes
+project `kpi NAME = count ENTITY in STAGE` declarations. `control` nodes
+project governance/business `control ID "text"` catalog entries, which
+likewise survive only in source text. A control is a catalog entry, not a
+property, and the edge vocabulary has no `satisfies` kind, so a control node
+carries only its `declares` edge and no review finding reads control nodes
+today.
+
+The vocabulary does not depend on input form. A `.toml` project manifest runs
+the same source-level enrichment a standalone file runs, once per layer and on
+that layer's own unprefixed graph, so a manifest layer slice carries the node
+and edge kinds that layer's file carries standalone; the `<layer>:` prefix is
+then applied to enrichment-added nodes like any other, so two layers declaring
+the same id stay two nodes. A manifest additionally carries
+`file`/`refinement`/`*_map` nodes and cross-layer edges with no standalone
+equivalent, and renames a layer's `spec` node by role — those are manifest-only
+structure, not a vocabulary difference (#558).
+
 Stable edge kinds include `declares`, `covers`, `has_guard`, `has_effect`,
 `has_ensures`, `reads`, `writes`, `checks`, `starts_with`, and `precedes`.
 
@@ -127,7 +170,12 @@ structural sources:
 - `action_state_graph`: actions connected to state variables they read/write.
 - `action_dependency_graph`: action-to-action structural `enables` edges through
   read/write state bridges, plus write/write `conflicts_with` edges over shared
-  state. These are over-approximations, not scheduling semantics.
+  state. These are over-approximations, not scheduling semantics. An action
+  pair can be bridged through more than one shared state variable; `states`
+  (plural) carries the complete, sorted set, and `state` (singular) is only
+  its first entry kept for backward compatibility — consumers that need every
+  bridge (e.g. attaching a `progressless_cycle` finding to a leadsTo/terminal
+  that only touches one of several shared states) must read `states`.
 - `impact_graph`: the induced TSG slice around `--focus`, with upstream and
   downstream closure annotations (`direction`, `directions`, hop distances) for
   review impact analysis. `direction` is one of `focus`, `upstream`, or

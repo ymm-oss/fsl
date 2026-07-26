@@ -16,7 +16,7 @@ requirements OrderOmissionInjected {
   }
 
   requirement OR-PLACE "orders can be placed with a positive quantity" {
-    action place(o: OrderId, q: Qty) "OR-PLACE: place positive quantity" {
+    action place(o: OrderId, q: Qty) {
       requires orders[o].status == Draft
       requires q >= 1
       orders[o].status = Placed

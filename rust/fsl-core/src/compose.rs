@@ -9,8 +9,11 @@ use fsl_syntax::{
     SpecItem, Statement, SurfaceCompose, SurfaceDocument, SurfaceSpec, SyncAction, TypeExpr,
     parse_document,
 };
+use serde_json::{Value, json};
 
-use crate::{CoreError, KernelSpec, PredicateExpander, expand_spec_domains, substitute};
+use crate::{
+    CoreError, IndexedReplacements, KernelSpec, PredicateExpander, expand_spec_domains, substitute,
+};
 
 pub trait FileResolver {
     /// Read one source-relative FSL dependency.
@@ -40,6 +43,7 @@ impl FileResolver for FsResolver {
             line: 1,
             column: 1,
             origin: None,
+            name_resolution: false,
         })
     }
 }
@@ -69,6 +73,7 @@ pub fn parse_kernel_source(
             line: 1,
             column: 1,
             origin: None,
+            name_resolution: false,
         }),
     }?;
     kernel
@@ -147,19 +152,85 @@ impl ComponentNames {
     }
 }
 
+/// Re-anchor a failure that happened *inside* a component onto the parent's
+/// `use ... from` declaration (issue #567).
+///
+/// `loc` is `{line, column}` with no `file` (`docs/DESIGN-v1.md`), so it can
+/// only ever mean "a position in the file the envelope names". A component's
+/// line and column reported against the parent's path therefore points at
+/// whatever happens to sit there — for the compose error gallery fixture, a
+/// comment. The position now belongs to the `use` declaration, which really is
+/// in the parent and really is the line to look at, and the component's own
+/// path and position move into the message so nothing is lost.
+fn component_error(
+    path: &str,
+    use_span: fsl_syntax::Span,
+    error: &CoreError,
+    verb: &str,
+) -> CoreError {
+    CoreError {
+        message: format!(
+            "component \"{path}\" {verb} ({} at {path}:{}:{})",
+            error.message, error.line, error.column
+        ),
+        line: use_span.start.line,
+        column: use_span.start.column,
+        // Not propagated from `error`. What this value reports is a compose-level
+        // failure to load a component, anchored at the parent's `use`
+        // declaration — it is not itself a name-resolution failure, and
+        // `docs/DESIGN-v1.md` §8's repair branch for `name` ("add a declaration
+        // or change a type") would be wrong advice at that location. The
+        // component's own classification survives inside the message, together
+        // with its path and position (issue 565's flag, issue 567's anchoring).
+        name_resolution: false,
+        // The origin's span is the `use` declaration, which really is in the
+        // parent, so `with_source_file` stamps the parent path onto a position
+        // that exists there. Carrying the component's span here is what let the
+        // rendered message pair the parent's path with the component's line.
+        origin: Some(Box::new(crate::OriginChain {
+            id: crate::OriginId(format!(
+                "compose:use:{}:{}",
+                use_span.start.offset, use_span.end.offset
+            )),
+            dialect: "compose".to_owned(),
+            primary: Some(crate::OriginSite {
+                source_file: None,
+                span: Some(use_span),
+                dialect: "compose".to_owned(),
+                declaration_path: vec!["use".to_owned(), path.to_owned()],
+            }),
+            secondary: Vec::new(),
+            lowering_steps: Vec::new(),
+            generated: false,
+        })),
+    }
+}
+
 fn parse_component(
     source: &str,
+    path: &str,
     use_span: fsl_syntax::Span,
 ) -> Result<(SurfaceSpec, Annotations), CoreError> {
-    let parsed = parse_document(SourceFile::new(source))?;
+    let parsed = parse_document(SourceFile::new(source)).map_err(|error| {
+        component_error(path, use_span, &CoreError::from(error), "failed to parse")
+    })?;
     let SurfaceDocument::Spec(spec) = parsed.surface else {
         return Err(error_at("compose use must reference a spec", use_span));
     };
-    let spec = PredicateExpander::new(&spec)?.expand(spec)?;
-    Ok((expand_spec_domains(spec)?, parsed.annotations))
+    let spec = PredicateExpander::new(&spec)
+        .and_then(|expander| expander.expand(spec))
+        .map_err(|error| component_error(path, use_span, &error, "failed to lower"))?;
+    let spec = expand_spec_domains(spec)
+        .map_err(|error| component_error(path, use_span, &error, "failed to lower"))?;
+    Ok((spec, parsed.annotations))
 }
 
-fn composed_kernel(name: String, items: Vec<SpecItem>, annotations: Annotations) -> KernelSpec {
+fn composed_kernel(
+    name: String,
+    items: Vec<SpecItem>,
+    annotations: Annotations,
+    diagnostics: Vec<Value>,
+) -> KernelSpec {
     let mut kernel = KernelSpec {
         spec: SurfaceSpec {
             name,
@@ -169,6 +240,7 @@ fn composed_kernel(name: String, items: Vec<SpecItem>, annotations: Annotations)
         origins: crate::OriginRegistry::default(),
         annotations: fsl_syntax::AnnotationRegistry::default(),
         projections: Vec::new(),
+        diagnostics,
     };
     kernel.annotations.extend(crate::SPEC_TARGET, annotations);
     kernel
@@ -201,8 +273,10 @@ pub fn lower_compose(
         if components.contains_key(alias) {
             return Err(error_at(format!("duplicate alias '{alias}'"), *span));
         }
-        let source = resolver.read(path)?;
-        let (spec, annotations) = parse_component(&source, *span)?;
+        let source = resolver
+            .read(path)
+            .map_err(|error| component_error(path, *span, &error, "could not be read"))?;
+        let (spec, annotations) = parse_component(&source, path, *span)?;
         component_annotations.extend(annotations.source_order().iter().cloned());
         order.push(alias.clone());
         components.insert(
@@ -223,6 +297,7 @@ pub fn lower_compose(
         })
         .collect::<HashSet<_>>();
 
+    let mut warnings = Vec::new();
     let mut static_items = Vec::new();
     let mut init = Vec::new();
     let mut init_meta = None;
@@ -277,7 +352,7 @@ pub fn lower_compose(
                 static_items.push(rewrite_compose_item(item.clone(), &components)?);
             }
             ComposeItem::SyncAction(action) => {
-                actions.push(sync_action(action, &components)?);
+                actions.push(sync_action(action, &components, &mut warnings)?);
             }
             ComposeItem::Use { .. } | ComposeItem::Internal { .. } => {}
         }
@@ -292,6 +367,7 @@ pub fn lower_compose(
         compose.name,
         static_items,
         component_annotations,
+        warnings,
     ))
 }
 
@@ -305,6 +381,7 @@ fn error_at(message: impl Into<String>, span: fsl_syntax::Span) -> CoreError {
         line: span.start.line,
         column: span.start.column,
         origin: None,
+        name_resolution: false,
     }
 }
 
@@ -330,14 +407,17 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
         SpecItem::Enum {
             name,
             members,
+            member_spans,
             symmetric,
         } => SpecItem::Enum {
             name: prefix(alias, &name),
             members,
+            member_spans,
             symmetric,
         },
-        SpecItem::Struct { name, fields } => SpecItem::Struct {
+        SpecItem::Struct { name, fields, span } => SpecItem::Struct {
             name: prefix(alias, &name),
+            span,
             fields: fields
                 .into_iter()
                 .map(|(name, ty)| (name, rewrite_type(ty, component)))
@@ -929,6 +1009,7 @@ fn resolve_alias_statement(
 fn sync_action(
     action: &SyncAction,
     components: &BTreeMap<String, Component>,
+    warnings: &mut Vec<Value>,
 ) -> Result<SpecItem, CoreError> {
     let params = action
         .params
@@ -937,12 +1018,14 @@ fn sync_action(
         .map(|param| resolve_alias_param(param, components))
         .collect::<Result<Vec<_>, _>>()?;
     let mut items = Vec::new();
+    let mut fair_constituents = Vec::new();
     for reference in &action.refs {
         let component = components.get(&reference.alias).ok_or_else(|| CoreError {
             message: format!("unknown alias '{}'", reference.alias),
             line: action.span.start.line,
             column: action.span.start.column,
             origin: None,
+            name_resolution: false,
         })?;
         let source = component
             .spec
@@ -955,7 +1038,16 @@ fn sync_action(
                 line: action.span.start.line,
                 column: action.span.start.column,
                 origin: None,
+                name_resolution: false,
             })?;
+        // Fairness is not inherited through synchronization (docs/LANGUAGE.md
+        // "Compose"): capture the constituent's own `fair` marker here, before
+        // `rewrite_component_item` and the composite's single `fair: action.fair`
+        // below discard it, so a non-fair composite that references a fair
+        // constituent can be reported.
+        if matches!(&source, SpecItem::Action { fair: true, .. }) {
+            fair_constituents.push(format!("{}.{}", reference.alias, reference.action));
+        }
         let SpecItem::Action {
             params: source_params,
             items: source_items,
@@ -1000,6 +1092,17 @@ fn sync_action(
             .map(|item| resolve_alias_action_item(item, components))
             .collect::<Result<Vec<_>, _>>()?,
     );
+    if !action.fair && !fair_constituents.is_empty() {
+        let refs = fair_constituents.join(", ");
+        warnings.push(json!({
+            "kind": "fair_not_inherited",
+            "message": format!(
+                "synchronized action '{}' is not fair; fair constituent action(s) {refs} will not contribute fairness unless the composite action is declared fair",
+                action.name,
+            ),
+            "loc": action.span.python_loc(),
+        }));
+    }
     Ok(SpecItem::Action {
         name: action.name.clone(),
         params,
@@ -1039,6 +1142,7 @@ fn resolve_alias_qualified_name(
                 line: 1,
                 column: 1,
                 origin: None,
+                name_resolution: false,
             });
         }
         Ok(QualifiedName {
@@ -1242,15 +1346,16 @@ fn resolve_alias_action_item(
 }
 
 fn substitute_action_item(item: ActionItem, replacements: &HashMap<String, Expr>) -> ActionItem {
+    let indexed = IndexedReplacements::new();
     match item {
         ActionItem::Requires(expr, span) => {
-            ActionItem::Requires(substitute(expr, replacements), span)
+            ActionItem::Requires(substitute(expr, replacements, &indexed), span)
         }
         ActionItem::Ensures(expr, span) => {
-            ActionItem::Ensures(substitute(expr, replacements), span)
+            ActionItem::Ensures(substitute(expr, replacements, &indexed), span)
         }
         ActionItem::Let(name, expr, span) => {
-            ActionItem::Let(name, substitute(expr, replacements), span)
+            ActionItem::Let(name, substitute(expr, replacements, &indexed), span)
         }
         ActionItem::Statement(statement) => {
             ActionItem::Statement(substitute_statement(statement, replacements))
@@ -1259,6 +1364,7 @@ fn substitute_action_item(item: ActionItem, replacements: &HashMap<String, Expr>
 }
 
 fn substitute_statement(statement: Statement, replacements: &HashMap<String, Expr>) -> Statement {
+    let indexed = IndexedReplacements::new();
     match statement {
         Statement::Assign {
             target,
@@ -1266,7 +1372,7 @@ fn substitute_statement(statement: Statement, replacements: &HashMap<String, Exp
             span,
         } => Statement::Assign {
             target: substitute_lvalue(target, replacements),
-            value: substitute(value, replacements),
+            value: substitute(value, replacements, &indexed),
             span,
         },
         Statement::If {
@@ -1275,7 +1381,7 @@ fn substitute_statement(statement: Statement, replacements: &HashMap<String, Exp
             else_statements,
             span,
         } => Statement::If {
-            condition: substitute(condition, replacements),
+            condition: substitute(condition, replacements, &indexed),
             then_statements: then_statements
                 .into_iter()
                 .map(|statement| substitute_statement(statement, replacements))
@@ -1303,7 +1409,10 @@ fn substitute_statement(statement: Statement, replacements: &HashMap<String, Exp
 
 fn substitute_lvalue(lvalue: LValue, replacements: &HashMap<String, Expr>) -> LValue {
     match lvalue {
-        LValue::Index(name, expr) => LValue::Index(name, substitute(expr, replacements)),
+        LValue::Index(name, expr) => LValue::Index(
+            name,
+            substitute(expr, replacements, &IndexedReplacements::new()),
+        ),
         LValue::Field(base, field) => {
             LValue::Field(Box::new(substitute_lvalue(*base, replacements)), field)
         }

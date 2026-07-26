@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 
 use crate::annotation_parse::leading_annotations;
 use crate::lexer::lex_declaration_prefix;
-use crate::{Annotations, ParseError, Span, SurfaceAgent, SurfaceDocument, Token, TokenKind, lex};
+use crate::{Annotations, ParseError, SurfaceDocument, Token, TokenKind, lex};
 
 /// Original source passed beside the shared token stream to a dialect frontend.
 #[derive(Clone, Copy, Debug)]
@@ -223,66 +223,11 @@ fn parse_ai(
 }
 
 fn parse_agent(
-    _source: SourceFile<'_>,
+    source: SourceFile<'_>,
     tokens: Vec<Token>,
     cursor: usize,
 ) -> Result<SurfaceDocument, ParseError> {
-    let mut tokens = tokens.into_iter().skip(cursor);
-    let start = tokens.next().expect("dispatch selected agent token").span;
-    let name = match tokens.next() {
-        Some(Token {
-            kind: TokenKind::Ident(name),
-            ..
-        }) => name,
-        Some(token) => {
-            return Err(ParseError::coded(
-                "FSL-PARSE",
-                "expected agent name",
-                token.span,
-            ));
-        }
-        None => unreachable!("lexer always appends EOF"),
-    };
-    let open = tokens.next().expect("lexer appends EOF");
-    if !matches!(&open.kind, TokenKind::Symbol(symbol) if symbol == "{") {
-        return Err(ParseError::new("expected '{' after agent name", open.span));
-    }
-    let mut depth = 1_usize;
-    let end = loop {
-        let token = tokens.next().expect("lexer appends EOF");
-        match &token.kind {
-            TokenKind::Symbol(symbol) if symbol == "{" => {
-                depth += 1;
-            }
-            TokenKind::Symbol(symbol) if symbol == "}" => {
-                depth -= 1;
-                if depth == 0 {
-                    break token.span;
-                }
-            }
-            TokenKind::Eof => {
-                return Err(ParseError::new(
-                    "agent declaration must contain balanced braces",
-                    token.span,
-                ));
-            }
-            _ => {}
-        }
-    };
-    let trailing = tokens.next().expect("lexer appends EOF");
-    if !matches!(trailing.kind, TokenKind::Eof) {
-        return Err(ParseError::new(
-            "unexpected token after agent",
-            trailing.span,
-        ));
-    }
-    Ok(SurfaceDocument::Agent(SurfaceAgent {
-        name,
-        span: Span {
-            start: start.start,
-            end: end.end,
-        },
-    }))
+    crate::ai::parse_agent_tokens(source.source(), tokens, cursor).map(SurfaceDocument::Agent)
 }
 
 #[cfg(test)]

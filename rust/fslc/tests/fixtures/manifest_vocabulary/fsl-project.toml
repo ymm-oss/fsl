@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+[business]
+file = "business.fsl"
+depth = 1
+
+[requirements]
+file = "requirements.fsl"
+depth = 1

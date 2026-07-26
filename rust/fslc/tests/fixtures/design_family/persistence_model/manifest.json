@@ -1,0 +1,58 @@
+{
+  "schema_version": "fsl-design-family.v0",
+  "family_id": "persistence_model",
+  "contract": {
+    "source": "contract.fsl",
+    "symbol": "PersistenceContract",
+    "inputs": ["contract.fsl"]
+  },
+  "verification": { "engine": "bmc", "depth": 4 },
+  "variants": [
+    {
+      "id": "crud",
+      "source": "crud.fsl",
+      "symbol": "CrudPersistence",
+      "refinement": "crud_refines_contract.fsl",
+      "inputs": ["crud.fsl", "crud_refines_contract.fsl"]
+    },
+    {
+      "id": "event_log",
+      "source": "event_log.fsl",
+      "symbol": "EventLogPersistence",
+      "refinement": "event_log_refines_contract.fsl",
+      "inputs": ["event_log.fsl", "event_log_refines_contract.fsl"]
+    },
+    {
+      "id": "snapshot_log",
+      "source": "snapshot_log.fsl",
+      "symbol": "SnapshotLogPersistence",
+      "refinement": "snapshot_log_refines_contract.fsl",
+      "inputs": ["snapshot_log.fsl", "snapshot_log_refines_contract.fsl"]
+    }
+  ],
+  "comparisons": [
+    {
+      "id": "crud__to__event_log",
+      "old": "crud",
+      "new": "event_log",
+      "scope_owner": "new",
+      "depth": 4,
+      "mapping": "event_log_to_crud.fsl",
+      "mapping_direction": "new_to_old"
+    },
+    {
+      "id": "crud__to__snapshot_log",
+      "old": "crud",
+      "new": "snapshot_log",
+      "scope_owner": "new",
+      "depth": 4,
+      "mapping": "snapshot_log_to_crud.fsl",
+      "mapping_direction": "new_to_old"
+    }
+  ],
+  "bundle_control": {
+    "entry": "bundle_probe.fsl",
+    "dependency": "bundle_dependency.fsl",
+    "inputs": ["bundle_probe.fsl", "bundle_dependency.fsl"]
+  }
+}

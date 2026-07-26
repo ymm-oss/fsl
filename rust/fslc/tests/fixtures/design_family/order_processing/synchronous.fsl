@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+// MODEL-ORDER-002: A synchronous commit is represented as one atomic finish step.
+spec SynchronousOrder {
+  type Phase = 0..2
+  state { phase: Phase, committed: Bool }
+  init { phase = 0  committed = false }
+
+  action finish() { requires phase == 0  phase = 1  committed = true }
+  action cancel() { requires phase == 0  phase = 2 }
+
+  invariant CommitMatchesFinish { committed => phase == 1 }
+  reachable CanFinish { phase == 1 }
+  reachable CanCancel { phase == 2 }
+}

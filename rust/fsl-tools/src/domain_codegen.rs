@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::domain_naming::snake;
 use crate::public_kernel::{public_kernel_v1_root, required_array, required_object, required_str};
 
 pub(crate) const METADATA_SCHEMA_ID: &str =
@@ -385,17 +386,6 @@ pub(crate) fn generate(
         )])),
         _ => Err(format!("unsupported domain generation target: {target}")),
     }
-}
-
-fn snake(name: &str) -> String {
-    let mut output = String::new();
-    for (index, character) in name.chars().enumerate() {
-        if index > 0 && character.is_ascii_uppercase() {
-            output.push('_');
-        }
-        output.push(character.to_ascii_lowercase());
-    }
-    output
 }
 
 fn generate_python(domain: &DomainScaffoldMetadata) -> String {
@@ -1293,6 +1283,58 @@ mod tests {
         assert_eq!(
             generate(&kernel, &metadata, "typescript").expect_err("reject missing action"),
             "public Kernel is missing lowered domain action 'order_approve'"
+        );
+    }
+
+    #[test]
+    fn shared_naming_keeps_analysis_and_codegen_grounding_aligned() {
+        let source = r"
+domain Naming {
+  type Id = 0..0
+  type Status = New | Approved
+  aggregate Order2__Item {
+    id Id
+    state { status: Status = New; }
+    command Approve2__Now {}
+    event Approved2__Now {}
+    decide Approve2__Now { emits Approved2__Now }
+    evolve Approved2__Now { status = Approved }
+  }
+}
+";
+        let SurfaceDocument::Domain(domain) =
+            parse_surface_document(source).expect("parse naming fixture")
+        else {
+            panic!("expected domain fixture");
+        };
+        let kernel = parse_kernel_source(source, &FsResolver::new(Path::new(".")))
+            .expect("lower naming fixture");
+        let model = build_model(kernel.clone()).expect("check naming fixture");
+        let public = public_kernel_contract(&kernel, &model, "naming.fsl", "domain")
+            .expect("export naming fixture");
+        let metadata = crate::domain::domain_scaffold_metadata(&domain);
+        let expected_action = "order2___item_approve2___now";
+
+        let checked = crate::domain::check_domain(&domain, &public).expect("check domain");
+        assert_eq!(
+            checked["generated_actions"],
+            serde_json::json!([expected_action])
+        );
+
+        let generated = generate(&public, &metadata, "python").expect("generate scaffold");
+        assert!(generated["domain_scaffold.py"].contains("def decide_order2___item"));
+
+        let mut divergent = public;
+        let action = divergent["actions"]
+            .as_array_mut()
+            .expect("actions")
+            .iter_mut()
+            .find(|action| action["name"] == expected_action)
+            .expect("expected action");
+        action["name"] = Value::String("order2__item_approve2__now".to_owned());
+        assert_eq!(
+            generate(&divergent, &metadata, "python").expect_err("reject naming divergence"),
+            "public Kernel is missing lowered domain action 'order2___item_approve2___now'"
         );
     }
 

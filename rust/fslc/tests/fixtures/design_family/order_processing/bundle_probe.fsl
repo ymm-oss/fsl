@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+compose OrderBundleProbe {
+  use OrderBundleDependency as dependency from "bundle_dependency.fsl"
+  action observe() = dependency.observe() { }
+  internal dependency.observe
+}

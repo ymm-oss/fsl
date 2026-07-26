@@ -1,10 +1,10 @@
-name: ci
+name: product gate
 
 env:
   MACOSX_DEPLOYMENT_TARGET: "14.0"
 
-# Python is a frozen reference implementation and optional LSP surface. The
-# required product gate executes only the authoritative Rust and WASM surfaces.
+# Python is a frozen compatibility reference and repository-hook runtime. The
+# required product gate executes the authoritative Rust CLI, LSP, and WASM surfaces.
 
 on:
   push:
@@ -17,6 +17,25 @@ on:
 permissions:
   contents: read
 
+# The Linux evidence — `rust workspace` and `WASM` — runs on every pull request.
+# It is where the tests live: 103 of the repository's 124 integration test files
+# sit in `fslc`, `fsl-tools`, `fsl-verifier` and `fsl-lsp`, none of which the
+# bounded `merge readiness` gate compiles or runs, and its `cargo check` carries
+# no `--all-targets`, so a type error or a failing assertion in any of them used
+# to reach main and surface only after the merge.
+#
+# Only the cross-platform matrix — `native Z3 4.16` on macOS and Windows — stays
+# post-merge under FSL_OPTIMISTIC_CI, reported by the post-merge CI reporter.
+# That is where platform failures have actually occurred (Windows PATH and
+# `core.autocrlf` line endings), and Windows is the slowest job in the gate, so
+# deferring it is what buys the merge-throughput this split is for.
+#
+# Product gates for main pushes, schedules, manual runs, and production
+# promotions never honor that opt-out.
+concurrency:
+  group: product-gate-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   rust-workspace:
     name: rust workspace
@@ -28,6 +47,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
 
       - name: Check Rust workspace
         run: ./tools/check-native-integration.sh rust
@@ -42,6 +65,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
 
       - uses: actions/setup-node@v4
         with:
@@ -70,19 +97,84 @@ jobs:
 
   rust-native-z3:
     name: native Z3 4.16 (${{ matrix.os }})
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.base_ref != 'main' ||
+      vars.FSL_OPTIMISTIC_CI != 'enabled'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15, windows-latest]
+        # ubuntu-latest is covered by the full rust-workspace test gate above.
+        os: [macos-15, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
         with:
-          components: clippy,rustfmt
+          workspaces: rust -> target
 
       - name: Test pinned native solver and BMC crates
         working-directory: rust
         run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
+
+  production-native-z3-linux:
+    name: native Z3 4.16 (ubuntu-latest)
+    if: github.event_name == 'pull_request' && github.base_ref == 'production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      - name: Test pinned native solver and BMC crates
+        working-directory: rust
+        run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
+
+  product-gate:
+    name: product gate
+    if: >-
+      always() &&
+      (
+        github.event_name != 'pull_request' ||
+        github.base_ref != 'main' ||
+        vars.FSL_OPTIMISTIC_CI != 'enabled'
+      )
+    needs:
+      - rust-workspace
+      - wasm
+      - rust-native-z3
+      - production-native-z3-linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require complete product evidence
+        env:
+          RUST_WORKSPACE: ${{ needs.rust-workspace.result }}
+          WASM: ${{ needs.wasm.result }}
+          NATIVE_Z3: ${{ needs.rust-native-z3.result }}
+          PRODUCTION_NATIVE_Z3_LINUX: ${{ needs.production-native-z3-linux.result }}
+          BASE_REF: ${{ github.base_ref }}
+        shell: bash
+        run: |
+          failures=0
+          for result in "$RUST_WORKSPACE" "$WASM" "$NATIVE_Z3"; do
+            if [ "$result" != "success" ]; then
+              failures=1
+            fi
+          done
+          if [ "$BASE_REF" = "production" ] && [ "$PRODUCTION_NATIVE_Z3_LINUX" != "success" ]; then
+            failures=1
+          fi
+          if [ "$failures" -ne 0 ]; then
+            echo "product gate failed: rust=$RUST_WORKSPACE wasm=$WASM native-z3=$NATIVE_Z3 production-linux=$PRODUCTION_NATIVE_Z3_LINUX" >&2
+            exit 1
+          fi

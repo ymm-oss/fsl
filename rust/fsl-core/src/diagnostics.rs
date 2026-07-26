@@ -89,3 +89,25 @@ pub fn insert_requirement_metadata(
         output.insert("requirements".to_owned(), Value::Array(requirements));
     }
 }
+
+/// The complete, closed set of warning `kind` values `--vacuity` selects
+/// over (`warn`/`error`/`ignore`). Mirrors the frozen Python reference's
+/// `diagnostics._VACUITY_KINDS`. Kept as an explicit enumeration rather than
+/// a `"vacuous_"` name-prefix check: `always_true_requires`,
+/// `tautology_over_frozen`, and `urgency_freeze` are vacuity findings but do
+/// not share that prefix, so a prefix check silently exempts them from both
+/// `--vacuity ignore` (they would stay in `warnings`) and `--vacuity error`
+/// (a hollow spec carrying only one of these three would never fail closed).
+pub const VACUITY_KINDS: [&str; 5] = [
+    "vacuous_implication",
+    "vacuous_leadsto",
+    "tautology_over_frozen",
+    "urgency_freeze",
+    "always_true_requires",
+];
+
+/// Whether `kind` is one of the closed [`VACUITY_KINDS`] `--vacuity` selects over.
+#[must_use]
+pub fn is_vacuity_kind(kind: &str) -> bool {
+    VACUITY_KINDS.contains(&kind)
+}

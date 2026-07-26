@@ -2,20 +2,21 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fsl_core::{
-    FslValue, KernelBinder, KernelModel, LeadsToDef, TraceAction, TraceChange, TraceStep,
-    static_leadsto_bindings,
-};
-use fsl_solver::{ModelValue, SatResult, SmtSolver};
+use fsl_core::{FslValue, KernelModel, LeadsToDef, TraceStep};
+use fsl_solver::{SatResult, SmtSolver};
 
 use crate::VerifyError;
-use crate::eval::{binder_values, eval};
+use crate::eval::eval;
+use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
+use crate::symmetry::canonical_constraint;
+use crate::trace::project_trace;
 use crate::transition::{
     ActionInstance, action_guards, action_instances, init_constraints, transition_constraint,
 };
+use crate::vacuity::{VacuityFinding, retain_covered, static_findings};
 use crate::value::{
     Bindings, SymbolicState, bool_term, bounds, concrete_value, i64_index, logical_equal,
-    project_state, project_value, symbolic_state,
+    symbolic_state,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -56,6 +57,9 @@ pub struct BmcResult {
     pub deadlock_trace: Option<Vec<TraceStep>>,
     pub action_coverage: BTreeMap<String, bool>,
     pub frontier_progress: bool,
+    /// Solver-dependent vacuity facts (`docs/DESIGN-vacuity.md` §2 lanes 3–5).
+    /// Depth-independent by construction; see [`crate::vacuity`].
+    pub vacuity: Vec<VacuityFinding>,
 }
 
 /// Explore all symbolic executions up to `depth` using a backend-neutral SMT solver.
@@ -168,6 +172,7 @@ async fn verify_bounded_config<S: SmtSolver>(
             .map(|action| (action.name.clone(), false))
             .collect(),
         frontier_progress: false,
+        vacuity: Vec::new(),
     };
     let mut pending_reachables = model
         .reachables
@@ -260,6 +265,23 @@ async fn verify_bounded_config<S: SmtSolver>(
         let unrolled_depth = states.len() - 1;
         result.leadsto_violation =
             check_leadstos(solver, model, &states, &choices, &instances, unrolled_depth).await?;
+    }
+    // The solver-dependent vacuity lanes run last, after every witness,
+    // reachable, and deadlock trace has been projected. They ask nothing about
+    // the unrolled states — each lane quantifies over freshly named ones — but
+    // a query still moves the backend's internal state, and two Z3 builds may
+    // then resolve an under-determined model differently. The native and
+    // browser evidence contract is byte-compared, so no new query may run
+    // before the evidence it could perturb.
+    //
+    // By this point the unrolling has asserted a mandatory forward transition
+    // out of every state, which a spec that deadlocks on every path makes
+    // globally unsatisfiable. In such a session every query answers `unsat`
+    // and every lane would fire on nothing. Report no vacuity rather than a
+    // fabricated one.
+    if session_satisfiable(solver).await? {
+        result.vacuity = static_findings(model, solver, &instances).await?;
+        retain_covered(&mut result.vacuity, &result.action_coverage);
     }
     Ok(result)
 }
@@ -560,135 +582,6 @@ async fn build_witness<S: SmtSolver>(
     projected
 }
 
-pub(crate) fn project_trace<S: SmtSolver>(
-    solver: &S,
-    model: &KernelModel,
-    states: &[SymbolicState<S::Term>],
-    choices: &[S::Term],
-    instances: &[ActionInstance<S::Term>],
-    upto: usize,
-) -> Result<Vec<TraceStep>, VerifyError> {
-    let mut trace = Vec::new();
-    for step in 0..=upto {
-        let state = project_state(solver, model, &states[step])?;
-        let action = if step == 0 {
-            None
-        } else {
-            Some(project_action(
-                solver,
-                model,
-                &choices[step - 1],
-                instances,
-            )?)
-        };
-        let changes = trace
-            .last()
-            .map_or_else(BTreeMap::new, |previous: &TraceStep| {
-                state
-                    .iter()
-                    .filter_map(|(name, value)| {
-                        let before = &previous.state[name];
-                        (before != value).then(|| {
-                            (
-                                name.clone(),
-                                TraceChange {
-                                    from: before.clone(),
-                                    to: value.clone(),
-                                },
-                            )
-                        })
-                    })
-                    .collect()
-            });
-        trace.push(TraceStep {
-            step,
-            state,
-            action,
-            changes,
-        });
-    }
-    Ok(trace)
-}
-
-fn project_action<S: SmtSolver>(
-    solver: &S,
-    model: &KernelModel,
-    choice: &S::Term,
-    instances: &[ActionInstance<S::Term>],
-) -> Result<TraceAction, VerifyError> {
-    let index = match solver.model_eval(choice)? {
-        Some(ModelValue::Int(value)) => usize::try_from(value)
-            .map_err(|_| VerifyError::new("negative action choice in model"))?,
-        Some(ModelValue::Bool(_)) => {
-            return Err(VerifyError::new("Boolean action choice in model"));
-        }
-        None => return Err(VerifyError::new("action choice is unavailable in model")),
-    };
-    let instance = instances
-        .get(index)
-        .ok_or_else(|| VerifyError::new("action choice outside instance range"))?;
-    Ok(TraceAction {
-        name: instance.action.clone(),
-        params: instance
-            .params
-            .iter()
-            .map(|(name, value)| Ok((name.clone(), project_value(solver, model, value)?)))
-            .collect::<Result<BTreeMap<String, FslValue>, VerifyError>>()?,
-    })
-}
-
-#[derive(Clone)]
-pub(crate) struct LeadstoBinding<T> {
-    pub concrete: BTreeMap<String, FslValue>,
-    pub symbolic: Bindings<T>,
-}
-
-pub(crate) fn leadsto_bindings<S: SmtSolver>(
-    solver: &S,
-    model: &KernelModel,
-    property: &LeadsToDef,
-) -> Result<Vec<LeadstoBinding<S::Term>>, VerifyError> {
-    let mut expanded = vec![Bindings::new()];
-    for binder in &property.binders {
-        let symbolic = binder_values(solver, model, binder)?;
-        let name = match binder {
-            KernelBinder::Typed { name, .. }
-            | KernelBinder::Range { name, .. }
-            | KernelBinder::Collection { name, .. } => name,
-        };
-        let mut next = Vec::new();
-        for binding in expanded {
-            for (_, term) in &symbolic {
-                let mut candidate = binding.clone();
-                candidate.insert(name.clone(), term.clone());
-                next.push(candidate);
-            }
-        }
-        expanded = next;
-    }
-    let concrete = static_leadsto_bindings(model, property)?;
-    if concrete.len() != expanded.len() {
-        return Err(VerifyError::new("leadsTo binder expansion mismatch"));
-    }
-    Ok(concrete
-        .into_iter()
-        .zip(expanded)
-        .map(|(concrete, symbolic)| LeadstoBinding { concrete, symbolic })
-        .collect())
-}
-
-pub(crate) fn leadsto_condition<S: SmtSolver>(
-    solver: &S,
-    model: &KernelModel,
-    expr: &fsl_core::KernelExpr,
-    state: &SymbolicState<S::Term>,
-    binding: &Bindings<S::Term>,
-) -> Result<S::Term, VerifyError> {
-    let mut binding = binding.clone();
-    let value = eval(solver, model, expr, state, &mut binding, None)?;
-    Ok(bool_term(&value)?.clone())
-}
-
 fn states_equal<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
@@ -792,12 +685,14 @@ async fn check_leadsto_stagnation<S: SmtSolver>(
     enabled: &[S::Term],
 ) -> Result<Option<BmcViolation>, VerifyError> {
     let deadlock = solver.not(&solver.or(enabled)?)?;
+    let canonical = canonical_constraint(solver, model, &states[step])?;
     for property in &model.leadstos {
         solver.set_query_context("leadsTo", &property.name);
         for binding in leadsto_bindings(solver, model, property)? {
             for pending in 0..=step {
                 let mut terms = vec![
                     deadlock.clone(),
+                    canonical.clone(),
                     leadsto_condition(
                         solver,
                         model,
@@ -936,6 +831,11 @@ async fn check_leadstos<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     depth: usize,
 ) -> Result<Option<BmcViolation>, VerifyError> {
+    let canonical = states
+        .iter()
+        .take(depth + 1)
+        .map(|state| canonical_constraint(solver, model, state))
+        .collect::<Result<Vec<_>, _>>()?;
     for property in &model.leadstos {
         solver.set_query_context("leadsTo", &property.name);
         for binding in leadsto_bindings(solver, model, property)? {
@@ -949,6 +849,7 @@ async fn check_leadstos<S: SmtSolver>(
                     for pending in 0..loop_end {
                         let mut terms = vec![
                             loop_equal.clone(),
+                            canonical[loop_start].clone(),
                             fair.clone(),
                             leadsto_condition(
                                 solver,
@@ -1001,6 +902,12 @@ async fn check_leadstos<S: SmtSolver>(
         }
     }
     Ok(None)
+}
+
+/// Whether the accumulated unrolling session still has a model at all.
+async fn session_satisfiable<S: SmtSolver>(solver: &mut S) -> Result<bool, VerifyError> {
+    solver.set_query_context("vacuity", "session");
+    Ok(matches!(solver.check().await?, SatResult::Sat))
 }
 
 async fn probe_not<S: SmtSolver>(solver: &mut S, condition: &S::Term) -> Result<bool, VerifyError> {

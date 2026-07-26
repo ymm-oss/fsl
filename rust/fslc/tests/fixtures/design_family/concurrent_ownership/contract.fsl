@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// MODEL-OWNER-001: Artificial single-item ownership contract.
+spec OwnershipContract {
+  type Worker = 0..1
+  state { owner: Option<Worker> }
+  init { owner = none }
+
+  action claim(w: Worker) { requires owner == none  owner = some(w) }
+  action release(w: Worker) { requires owner == some(w)  owner = none }
+
+  reachable CanOwn { owner != none }
+  reachable CanRelease { owner == none }
+}

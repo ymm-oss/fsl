@@ -16,8 +16,9 @@ use serde_json::Value;
 pub use fsl_syntax::{
     AggregateKind as KernelAggregateKind, Annotation, AnnotationError,
     AnnotationRegistry as KernelAnnotationRegistry, AnnotationValue, Annotations,
-    Binder as KernelBinder, CorrespondenceOrigin, Expr as KernelExpr, LValue as KernelLValue,
-    Pattern, QualifiedName, RequirementLink, Statement as KernelStatement, SymbolPath,
+    Binder as KernelBinder, CorrespondenceOrigin, Expr as KernelExpr, HelpfulAction,
+    LValue as KernelLValue, Pattern, QualifiedName, RequirementLink, Span,
+    Statement as KernelStatement, SymbolPath,
 };
 
 mod compose;
@@ -31,19 +32,22 @@ mod model;
 mod origin;
 mod public_kernel;
 mod refinement;
+mod reserved;
 mod trace;
 mod trace_json;
+mod typecheck;
 
 pub use compose::{
     FileResolver, FsResolver, lower_compose, parse_kernel_source, parse_kernel_source_with_file,
 };
-pub use db::db_kernel_source;
 pub use diagnostics::{
-    insert_requirement_metadata, model_warnings, requirement_metadata, version_metadata,
+    VACUITY_KINDS, insert_requirement_metadata, is_vacuity_kind, model_warnings,
+    requirement_metadata, version_metadata,
 };
 pub use dialect::{
-    GovernanceContract, GovernanceDelegate, GovernancePreservation, RequirementsTraceCase,
-    RequirementsTraceContract, RequirementsTraceExpectation, RequirementsTraceStep,
+    AiToolSets, GovernanceContract, GovernanceDelegate, GovernancePreservation,
+    RequirementsTraceCase, RequirementsTraceContract, RequirementsTraceExpectation,
+    RequirementsTraceStep, ai_approval_invariant_name, ai_forbidden_invariant_name, ai_tool_sets,
     governance_contract, lower_ai_component, lower_business, lower_db, lower_domain,
     lower_governance, lower_requirements, requirements_trace_contract,
 };
@@ -55,8 +59,9 @@ pub use model::{
 };
 pub use origin::{
     INIT_TARGET, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET,
-    TERMINAL_TARGET, TraceabilityRegistry, action_guard_target, action_statement_target,
-    action_target, init_statement_target, property_target, state_target, type_target,
+    TERMINAL_TARGET, TraceabilityRegistry, URGENT_ACTIONS_STEP, action_guard_target,
+    action_statement_target, action_target, init_statement_target, property_target, state_target,
+    type_target,
 };
 pub use public_kernel::{
     KERNEL_SCHEMA_ID, KERNEL_SCHEMA_VERSION, KERNEL_V1_SCHEMA_ID, KERNEL_V1_SCHEMA_VERSION,
@@ -82,9 +87,24 @@ pub struct CoreError {
     pub line: u32,
     pub column: u32,
     pub origin: Option<Box<OriginChain>>,
+    /// Whether this is a name-resolution failure — a declaration that is
+    /// duplicated, missing, or shadowed.
+    ///
+    /// `docs/DESIGN-v1.md` §7.2 fixes `kind` as a closed set whose `name`
+    /// member covers exactly these. Carrying the classification on the error
+    /// keeps it out of message-string matching, which cannot survive a message
+    /// edit (issue 565, the direction issue 484 established).
+    pub name_resolution: bool,
 }
 
 impl CoreError {
+    /// Classify this diagnostic as a name-resolution failure.
+    #[must_use]
+    pub fn into_name_resolution(mut self) -> Self {
+        self.name_resolution = true;
+        self
+    }
+
     #[must_use]
     pub fn with_source_file(mut self, source_file: impl AsRef<str>) -> Self {
         if let Some(origin) = &mut self.origin {
@@ -141,6 +161,7 @@ impl From<ParseError> for CoreError {
                 lowering_steps: Vec::new(),
                 generated: false,
             })),
+            name_resolution: false,
         }
     }
 }
@@ -151,6 +172,12 @@ pub struct KernelSpec {
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
     projections: Vec<ProjectionDef>,
+    /// Warnings discovered only while lowering the surface document (e.g.
+    /// compose's `fair_not_inherited`), which the checked [`KernelModel`]
+    /// cannot reconstruct on its own because the information that produced
+    /// them (per-component `fair` markers) does not survive expansion.
+    /// `check`/`verify` merge these with [`model_warnings`].
+    diagnostics: Vec<Value>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -176,6 +203,7 @@ pub fn build_surface_model(spec: SurfaceSpec) -> Result<KernelModel, ModelError>
         origins: OriginRegistry::default(),
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
+        diagnostics: Vec::new(),
     })
 }
 
@@ -215,6 +243,11 @@ impl KernelSpec {
         &self.projections
     }
 
+    #[must_use]
+    pub fn diagnostics(&self) -> &[Value] {
+        &self.diagnostics
+    }
+
     pub(crate) fn set_projections(&mut self, projections: Vec<ProjectionDef>) {
         self.projections = projections;
     }
@@ -244,6 +277,7 @@ pub fn parse_direct_kernel_spec(source: &str) -> Result<KernelSpec, CoreError> {
             line: 1,
             column: 1,
             origin: None,
+            name_resolution: false,
         });
     };
     let mut kernel = lower_direct_spec(spec)?;
@@ -277,6 +311,7 @@ fn validate_direct_scope_overrides(
         line: 1,
         column: 1,
         origin: None,
+        name_resolution: false,
     };
     if (!instances.is_empty() || !values.is_empty()) && entities.is_empty() && numbers.is_empty() {
         return Err(error(
@@ -373,6 +408,7 @@ pub fn parse_kernel_source_with_bounds(
             line: 1,
             column: 1,
             origin: None,
+            name_resolution: false,
         }),
     }?;
     kernel.annotations.extend(SPEC_TARGET, parsed.annotations);
@@ -399,6 +435,7 @@ fn lower_direct_spec_with_origins(
         origins,
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
+        diagnostics: Vec::new(),
     })
 }
 
@@ -535,24 +572,44 @@ impl PredicateExpander {
                 continue;
             };
             if definitions.contains_key(name) {
-                return Err(core_error(format!("duplicate def '{name}'"), *span));
+                return Err(
+                    core_error(format!("duplicate def '{name}'"), *span).into_name_resolution()
+                );
+            }
+            // `def` items are inlined and dropped before `build_model` runs, so
+            // this is the only point at which the definition's own name is
+            // still visible to the reserved-word check (issue #570).
+            if crate::reserved::is_reserved(name) {
+                return Err(core_error(
+                    crate::reserved::reserved_message(name, "def"),
+                    *span,
+                ));
+            }
+            for (param, _) in params {
+                if crate::reserved::is_reserved(param) {
+                    return Err(core_error(
+                        crate::reserved::reserved_message(param, "def parameter"),
+                        *span,
+                    ));
+                }
             }
             let names = params
                 .iter()
                 .map(|(name, _)| name.clone())
                 .collect::<Vec<_>>();
             if names.iter().collect::<HashSet<_>>().len() != names.len() {
-                return Err(core_error(
-                    format!("duplicate parameter in def '{name}'"),
-                    *span,
-                ));
+                return Err(
+                    core_error(format!("duplicate parameter in def '{name}'"), *span)
+                        .into_name_resolution(),
+                );
             }
             let bound = bound_vars(value);
             if let Some(shadowed) = names.iter().filter(|name| bound.contains(*name)).min() {
                 return Err(core_error(
                     format!("def '{name}' parameter is shadowed by binder '{shadowed}'"),
                     *span,
-                ));
+                )
+                .into_name_resolution());
             }
             definitions.insert(
                 name.clone(),
@@ -584,6 +641,7 @@ impl PredicateExpander {
                 line: definition.line,
                 column: definition.column,
                 origin: None,
+                name_resolution: false,
             });
         }
         stack.push(name.to_owned());
@@ -598,7 +656,8 @@ impl PredicateExpander {
         } = expr
         {
             let Some(definition) = self.definitions.get(name) else {
-                return Err(core_error(format!("undefined predicate '{name}'"), *span));
+                return Err(core_error(format!("undefined predicate '{name}'"), *span)
+                    .into_name_resolution());
             };
             if args.len() != definition.params.len() {
                 return Err(core_error(
@@ -645,8 +704,9 @@ impl PredicateExpander {
                 hi: Box::new(self.expand_expr(*hi, &mut Vec::new())?),
                 symmetric,
             },
-            SpecItem::Struct { name, fields } => SpecItem::Struct {
+            SpecItem::Struct { name, fields, span } => SpecItem::Struct {
                 name,
+                span,
                 fields: fields
                     .into_iter()
                     .map(|(name, ty)| Ok((name, self.expand_type(ty)?)))
@@ -993,7 +1053,8 @@ impl PredicateExpander {
     fn expand_expr(&self, expr: Expr, stack: &mut Vec<String>) -> Result<Expr, CoreError> {
         if let Expr::Call { name, args, span } = expr {
             let Some(definition) = self.definitions.get(&name) else {
-                return Err(core_error(format!("undefined predicate '{name}'"), span));
+                return Err(core_error(format!("undefined predicate '{name}'"), span)
+                    .into_name_resolution());
             };
             if stack.contains(&name) {
                 let mut cycle = stack.clone();
@@ -1039,7 +1100,7 @@ impl PredicateExpander {
                 .cloned()
                 .zip(args)
                 .collect::<HashMap<_, _>>();
-            return Ok(substitute(body, &replacements));
+            return Ok(substitute(body, &replacements, &IndexedReplacements::new()));
         }
         Ok(match expr {
             Expr::Some(expr) => Expr::Some(Box::new(self.expand_expr(*expr, stack)?)),
@@ -1153,6 +1214,7 @@ fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
         line: span.start.line,
         column: span.start.column,
         origin: None,
+        name_resolution: false,
     }
 }
 
@@ -1225,9 +1287,27 @@ pub(crate) fn visit_expr_children(
             visitor(second)?;
             visitor(third)?;
         }
-        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) => {}
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {}
     }
     Ok(())
+}
+
+/// Return the first source span of a named expression call, including nested calls.
+#[must_use]
+pub fn expression_call_span(expr: &Expr, call_name: &str) -> Option<fsl_syntax::Span> {
+    if let Expr::Call { name, span, .. } = expr
+        && name == call_name
+    {
+        return Some(*span);
+    }
+    let mut found = None;
+    let _ = visit_expr_children(expr, &mut |child| {
+        if found.is_none() {
+            found = expression_call_span(child, call_name);
+        }
+        Ok(())
+    });
+    found
 }
 
 fn visit_binder_exprs(
@@ -1358,10 +1438,18 @@ fn binder_name(binder: &Binder) -> &str {
     }
 }
 
+/// Indexed (per-element) replacement: a state variable name maps to its own
+/// binder and mapping expression, e.g. `map a[i: Id] = b[i]` becomes
+/// `("a", (i-binder, b[i]))`. Each read `a[e]` is replaced by the mapping
+/// expression with its binder substituted by `e` (DESIGN-refinement.md's
+/// "substituted on the read" rule).
+pub type IndexedReplacements = HashMap<String, (Binder, Expr)>;
+
 #[allow(clippy::too_many_lines)]
 pub(crate) fn substitute<S: std::hash::BuildHasher>(
     expr: Expr,
     replacements: &HashMap<String, Expr, S>,
+    indexed: &IndexedReplacements,
 ) -> Expr {
     if let Expr::Var(name) = &expr
         && let Some(replacement) = replacements.get(name)
@@ -1369,58 +1457,70 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
         return replacement.clone();
     }
     match expr {
-        Expr::Some(expr) => Expr::Some(Box::new(substitute(*expr, replacements))),
+        Expr::Some(expr) => Expr::Some(Box::new(substitute(*expr, replacements, indexed))),
         Expr::Set(items) => Expr::Set(
             items
                 .into_iter()
-                .map(|item| substitute(item, replacements))
+                .map(|item| substitute(item, replacements, indexed))
                 .collect(),
         ),
         Expr::Seq(items) => Expr::Seq(
             items
                 .into_iter()
-                .map(|item| substitute(item, replacements))
+                .map(|item| substitute(item, replacements, indexed))
                 .collect(),
         ),
         Expr::Struct { name, fields } => Expr::Struct {
             name,
             fields: fields
                 .into_iter()
-                .map(|(name, expr)| (name, substitute(expr, replacements)))
+                .map(|(name, expr)| (name, substitute(expr, replacements, indexed)))
                 .collect(),
         },
         Expr::Call { name, args, span } => Expr::Call {
             name,
             args: args
                 .into_iter()
-                .map(|arg| substitute(arg, replacements))
+                .map(|arg| substitute(arg, replacements, indexed))
                 .collect(),
             span,
         },
-        Expr::Index(base, index) => Expr::Index(
-            Box::new(substitute(*base, replacements)),
-            Box::new(substitute(*index, replacements)),
-        ),
-        Expr::Field(base, name) => Expr::Field(Box::new(substitute(*base, replacements)), name),
+        Expr::Index(base, index) => {
+            let substituted_index = Box::new(substitute(*index, replacements, indexed));
+            if let Expr::Var(name) = base.as_ref()
+                && let Some((binder, state_expr)) = indexed.get(name)
+            {
+                let single = HashMap::from([(binder_name(binder).to_owned(), *substituted_index)]);
+                substitute(state_expr.clone(), &single, indexed)
+            } else {
+                Expr::Index(
+                    Box::new(substitute(*base, replacements, indexed)),
+                    substituted_index,
+                )
+            }
+        }
+        Expr::Field(base, name) => {
+            Expr::Field(Box::new(substitute(*base, replacements, indexed)), name)
+        }
         Expr::Method {
             receiver,
             name,
             args,
         } => Expr::Method {
-            receiver: Box::new(substitute(*receiver, replacements)),
+            receiver: Box::new(substitute(*receiver, replacements, indexed)),
             name,
             args: args
                 .into_iter()
-                .map(|arg| substitute(arg, replacements))
+                .map(|arg| substitute(arg, replacements, indexed))
                 .collect(),
         },
         Expr::Binary { op, left, right } => Expr::Binary {
             op,
-            left: Box::new(substitute(*left, replacements)),
-            right: Box::new(substitute(*right, replacements)),
+            left: Box::new(substitute(*left, replacements, indexed)),
+            right: Box::new(substitute(*right, replacements, indexed)),
         },
-        Expr::Neg(expr) => Expr::Neg(Box::new(substitute(*expr, replacements))),
-        Expr::Not(expr) => Expr::Not(Box::new(substitute(*expr, replacements))),
+        Expr::Neg(expr) => Expr::Neg(Box::new(substitute(*expr, replacements, indexed))),
+        Expr::Not(expr) => Expr::Not(Box::new(substitute(*expr, replacements, indexed))),
         Expr::Conditional {
             condition,
             then_expr,
@@ -1428,12 +1528,12 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
             spans,
         } => Expr::Conditional {
             spans,
-            condition: Box::new(substitute(*condition, replacements)),
-            then_expr: Box::new(substitute(*then_expr, replacements)),
-            else_expr: Box::new(substitute(*else_expr, replacements)),
+            condition: Box::new(substitute(*condition, replacements, indexed)),
+            then_expr: Box::new(substitute(*then_expr, replacements, indexed)),
+            else_expr: Box::new(substitute(*else_expr, replacements, indexed)),
         },
         Expr::Is { expr, pattern } => Expr::Is {
-            expr: Box::new(substitute(*expr, replacements)),
+            expr: Box::new(substitute(*expr, replacements, indexed)),
             pattern,
         },
         Expr::Quantified {
@@ -1441,12 +1541,12 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
             binder,
             body,
         } => {
-            let (binder, mut contents, scoped) =
-                capture_avoiding_binding(binder, vec![*body], replacements);
+            let (binder, mut contents, scoped, scoped_indexed) =
+                capture_avoiding_binding(binder, vec![*body], replacements, indexed);
             Expr::Quantified {
                 quantifier,
-                binder: substitute_binder(binder, replacements),
-                body: Box::new(substitute(contents.remove(0), &scoped)),
+                binder: substitute_binder(binder, replacements, indexed),
+                body: Box::new(substitute(contents.remove(0), &scoped, &scoped_indexed)),
             }
         }
         Expr::Aggregate {
@@ -1455,25 +1555,25 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
             value,
         } => {
             let contents = value.map_or_else(Vec::new, |expr| vec![*expr]);
-            let (binder, mut contents, scoped) =
-                capture_avoiding_binding(binder, contents, replacements);
+            let (binder, mut contents, scoped, scoped_indexed) =
+                capture_avoiding_binding(binder, contents, replacements, indexed);
             Expr::Aggregate {
                 kind,
-                binder: substitute_binder(binder, replacements),
+                binder: substitute_binder(binder, replacements, indexed),
                 value: contents
                     .pop()
-                    .map(|expr| Box::new(substitute(expr, &scoped))),
+                    .map(|expr| Box::new(substitute(expr, &scoped, &scoped_indexed))),
             }
         }
         Expr::UnaryNamed { name, expr, span } => Expr::UnaryNamed {
             name,
-            expr: Box::new(substitute(*expr, replacements)),
+            expr: Box::new(substitute(*expr, replacements, indexed)),
             span,
         },
         Expr::BinaryNamed { name, left, right } => Expr::BinaryNamed {
             name,
-            left: Box::new(substitute(*left, replacements)),
-            right: Box::new(substitute(*right, replacements)),
+            left: Box::new(substitute(*left, replacements, indexed)),
+            right: Box::new(substitute(*right, replacements, indexed)),
         },
         Expr::TernaryNamed {
             name,
@@ -1482,15 +1582,15 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
             third,
         } => Expr::TernaryNamed {
             name,
-            first: Box::new(substitute(*first, replacements)),
-            second: Box::new(substitute(*second, replacements)),
-            third: Box::new(substitute(*third, replacements)),
+            first: Box::new(substitute(*first, replacements, indexed)),
+            second: Box::new(substitute(*second, replacements, indexed)),
+            third: Box::new(substitute(*third, replacements, indexed)),
         },
         other => other,
     }
 }
 
-/// Substitute free variable references in an expression.
+/// Substitute free scalar variable references in an expression.
 ///
 /// Refinement uses this to pull abstract properties back through scalar state
 /// maps before bounded progress checking.
@@ -1499,7 +1599,21 @@ pub fn substitute_expr<S: std::hash::BuildHasher>(
     expr: Expr,
     replacements: &HashMap<String, Expr, S>,
 ) -> Expr {
-    substitute(expr, replacements)
+    substitute(expr, replacements, &IndexedReplacements::new())
+}
+
+/// Substitute both free scalar variable references and indexed map reads
+/// (`m[e]`, see [`IndexedReplacements`]) in an expression.
+///
+/// Refinement uses this to pull abstract properties back through both scalar
+/// and per-element (indexed) state maps before bounded progress checking.
+#[must_use]
+pub fn substitute_expr_indexed<S: std::hash::BuildHasher>(
+    expr: Expr,
+    replacements: &HashMap<String, Expr, S>,
+    indexed: &IndexedReplacements,
+) -> Expr {
+    substitute(expr, replacements, indexed)
 }
 
 fn without_replacement<S: std::hash::BuildHasher>(
@@ -1513,24 +1627,48 @@ fn without_replacement<S: std::hash::BuildHasher>(
         .collect()
 }
 
+fn without_indexed_replacement(
+    indexed: &IndexedReplacements,
+    binding: &str,
+) -> IndexedReplacements {
+    indexed
+        .iter()
+        .filter(|(name, _)| name.as_str() != binding)
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
+}
+
 fn capture_avoiding_binding<S: std::hash::BuildHasher>(
     binder: Binder,
     contents: Vec<Expr>,
     replacements: &HashMap<String, Expr, S>,
-) -> (Binder, Vec<Expr>, HashMap<String, Expr>) {
+    indexed: &IndexedReplacements,
+) -> (
+    Binder,
+    Vec<Expr>,
+    HashMap<String, Expr>,
+    IndexedReplacements,
+) {
     let binding = binder_name(&binder).to_owned();
     let scoped = without_replacement(replacements, &binding);
-    if !scoped
+    let scoped_indexed = without_indexed_replacement(indexed, &binding);
+    let captures = scoped
         .values()
         .any(|replacement| free_vars(replacement).contains(&binding))
-    {
-        return (binder, contents, scoped);
+        || scoped_indexed
+            .values()
+            .any(|(_, state_expr)| free_vars(state_expr).contains(&binding));
+    if !captures {
+        return (binder, contents, scoped, scoped_indexed);
     }
 
     let mut names = HashSet::from([binding.clone()]);
     names.extend(scoped.keys().cloned());
     for replacement in scoped.values() {
         collect_names(replacement, &mut names);
+    }
+    for (_, state_expr) in scoped_indexed.values() {
+        collect_names(state_expr, &mut names);
     }
     collect_binder_names(&binder, &mut names);
     for content in &contents {
@@ -1550,9 +1688,9 @@ fn capture_avoiding_binding<S: std::hash::BuildHasher>(
     let binder = rename_binder_binding(binder, fresh, &rename);
     let contents = contents
         .into_iter()
-        .map(|content| substitute(content, &rename))
+        .map(|content| substitute(content, &rename, &IndexedReplacements::new()))
         .collect();
-    (binder, contents, scoped)
+    (binder, contents, scoped, scoped_indexed)
 }
 
 fn rename_binder_binding(binder: Binder, fresh: String, rename: &HashMap<String, Expr>) -> Binder {
@@ -1564,7 +1702,8 @@ fn rename_binder_binding(binder: Binder, fresh: String, rename: &HashMap<String,
         } => Binder::Typed {
             name: fresh,
             type_name,
-            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, rename))),
+            where_expr: where_expr
+                .map(|expr| Box::new(substitute(*expr, rename, &IndexedReplacements::new()))),
         },
         Binder::Range {
             lo, hi, where_expr, ..
@@ -1572,7 +1711,8 @@ fn rename_binder_binding(binder: Binder, fresh: String, rename: &HashMap<String,
             name: fresh,
             lo,
             hi,
-            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, rename))),
+            where_expr: where_expr
+                .map(|expr| Box::new(substitute(*expr, rename, &IndexedReplacements::new()))),
         },
         Binder::Collection {
             collection,
@@ -1581,7 +1721,8 @@ fn rename_binder_binding(binder: Binder, fresh: String, rename: &HashMap<String,
         } => Binder::Collection {
             name: fresh,
             collection,
-            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, rename))),
+            where_expr: where_expr
+                .map(|expr| Box::new(substitute(*expr, rename, &IndexedReplacements::new()))),
         },
     }
 }
@@ -1632,8 +1773,10 @@ fn collect_names(expr: &Expr, names: &mut HashSet<String>) {
 fn substitute_binder<S: std::hash::BuildHasher>(
     binder: Binder,
     replacements: &HashMap<String, Expr, S>,
+    indexed: &IndexedReplacements,
 ) -> Binder {
     let scoped = without_replacement(replacements, binder_name(&binder));
+    let scoped_indexed = without_indexed_replacement(indexed, binder_name(&binder));
     match binder {
         Binder::Typed {
             name,
@@ -1642,7 +1785,8 @@ fn substitute_binder<S: std::hash::BuildHasher>(
         } => Binder::Typed {
             name,
             type_name,
-            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, &scoped))),
+            where_expr: where_expr
+                .map(|expr| Box::new(substitute(*expr, &scoped, &scoped_indexed))),
         },
         Binder::Range {
             name,
@@ -1651,9 +1795,10 @@ fn substitute_binder<S: std::hash::BuildHasher>(
             where_expr,
         } => Binder::Range {
             name,
-            lo: Box::new(substitute(*lo, replacements)),
-            hi: Box::new(substitute(*hi, replacements)),
-            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, &scoped))),
+            lo: Box::new(substitute(*lo, replacements, indexed)),
+            hi: Box::new(substitute(*hi, replacements, indexed)),
+            where_expr: where_expr
+                .map(|expr| Box::new(substitute(*expr, &scoped, &scoped_indexed))),
         },
         Binder::Collection {
             name,
@@ -1661,8 +1806,9 @@ fn substitute_binder<S: std::hash::BuildHasher>(
             where_expr,
         } => Binder::Collection {
             name,
-            collection: Box::new(substitute(*collection, replacements)),
-            where_expr: where_expr.map(|expr| Box::new(substitute(*expr, &scoped))),
+            collection: Box::new(substitute(*collection, replacements, indexed)),
+            where_expr: where_expr
+                .map(|expr| Box::new(substitute(*expr, &scoped, &scoped_indexed))),
         },
     }
 }

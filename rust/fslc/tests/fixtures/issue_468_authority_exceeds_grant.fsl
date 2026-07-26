@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+
+agent Parent {
+  context [Ticket];
+  tools [SearchDocs, RefundPayment];
+  authority { may_execute [SearchDocs, RefundPayment]; }
+
+  agent Child {
+    grant authority [SearchDocs];
+    grant context [Ticket];
+    tools [RefundPayment];
+    authority { may_execute [RefundPayment]; }
+  }
+}

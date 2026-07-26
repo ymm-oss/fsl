@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ApplicationUnitOfWorkDesign {
+  entity Command
+  enum UnitOfWorkStage {
+    Conflict, Rejected, Committed, Decided, Loaded, Received
+  }
+
+  state {
+    stage: Map<Command, UnitOfWorkStage>
+  }
+
+  init {
+    forall c: Command {
+      stage[c] = Received
+    }
+  }
+
+  action load(c: Command) {
+    requires stage[c] == Received
+    stage[c] = Loaded
+  }
+}
+
+verify {
+  instances Command = 1
+}

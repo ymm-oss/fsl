@@ -51,7 +51,10 @@ enum Expr {
     },
     Not(Box<Self>),
     Neg(Box<Self>),
-    Field(Box<Self>, String),
+    /// `base.field`. The third element is the public Kernel `named` type of
+    /// `base` itself (the owning struct), when known — it scopes a field
+    /// access to the struct that actually declares `field` (issue #520).
+    Field(Box<Self>, String, Option<String>),
     Index(Box<Self>, Box<Self>),
     Method {
         receiver: Box<Self>,
@@ -65,6 +68,11 @@ enum Expr {
     Set,
     Seq,
     Struct {
+        /// The struct literal's own declared type, e.g. `Ticket` in
+        /// `Ticket { status: Closed }`. Scopes whole-struct re-literal
+        /// assignments to the struct they actually construct (issue #520);
+        /// see [`Expr::Field`].
+        name: String,
         fields: Vec<(String, Self)>,
     },
     Placeholder(String),
@@ -74,7 +82,9 @@ enum Expr {
 enum LValue {
     Var(String),
     Index(String, Expr),
-    Field(Box<Self>, String),
+    /// See [`Expr::Field`]: the third element is the owning struct's public
+    /// Kernel `named` type, when known.
+    Field(Box<Self>, String, Option<String>),
 }
 
 #[derive(Clone)]
@@ -111,7 +121,13 @@ struct PublicKernelView {
 
 #[derive(Clone, Copy)]
 enum EnumLocation<'a> {
-    Field(&'a str),
+    /// A struct field, scoped to the struct's own public Kernel type name
+    /// (`owner`) so two structs that both declare a same-named field do not
+    /// share a state machine (issue #520).
+    Field {
+        name: &'a str,
+        owner: &'a str,
+    },
     Var(&'a str),
 }
 
@@ -126,6 +142,10 @@ struct Assignment {
 #[derive(Clone)]
 struct Entity {
     kind: &'static str,
+    /// Public Kernel type name (undisplayed) owning `field`. Only set for
+    /// `kind == "enum"` struct-field entities; used to scope
+    /// `EnumLocation::Field` to this entity's struct (issue #520).
+    type_key: String,
     type_name: String,
     field: Option<String>,
     var: Option<String>,
@@ -174,6 +194,20 @@ fn parse_type(value: &Value, context: &str) -> Result<TypeRef, String> {
     }
 }
 
+/// The public Kernel `named` type name of an expression/lvalue JSON node's
+/// own `type` field, if it has one. Public Kernel v1 tags every expression
+/// and lvalue node with its resolved type (`fsl-core::public_kernel::expr_json`
+/// / `lvalue_json`), so reading a field access's `value`/`target` node's own
+/// `type` gives the owning struct's type name without re-deriving it here.
+fn named_type_name(node: &Value) -> Option<String> {
+    let ty = node.get("type")?.as_object()?;
+    if ty.get("kind")?.as_str()? == "named" {
+        ty.get("name")?.as_str().map(str::to_owned)
+    } else {
+        None
+    }
+}
+
 fn parse_expr(value: &Value, context: &str) -> Result<Expr, String> {
     let object = required_object(value, context)?;
     let kind = required_str(object, "kind", context)?;
@@ -210,6 +244,7 @@ fn parse_expr(value: &Value, context: &str) -> Result<Expr, String> {
         "field" => Ok(Expr::Field(
             Box::new(child("value")?),
             required_str(object, "field", context)?.to_owned(),
+            object.get("value").and_then(named_type_name),
         )),
         "index" => Ok(Expr::Index(
             Box::new(child("collection")?),
@@ -254,7 +289,10 @@ fn parse_expr(value: &Value, context: &str) -> Result<Expr, String> {
                 ))
             })
             .collect::<Result<Vec<_>, String>>()?;
-            Ok(Expr::Struct { fields })
+            Ok(Expr::Struct {
+                name: required_str(object, "name", context)?.to_owned(),
+                fields,
+            })
         }
         "ite" => Err(format!(
             "public Kernel {context} uses conditional expressions, which typestate does not support"
@@ -284,15 +322,16 @@ fn parse_lvalue(value: &Value, context: &str) -> Result<LValue, String> {
                 &format!("{context}.index"),
             )?,
         )),
-        "field_lv" => Ok(LValue::Field(
-            Box::new(parse_lvalue(
-                object
-                    .get("target")
-                    .ok_or_else(|| format!("public Kernel {context}.target is required"))?,
-                &format!("{context}.target"),
-            )?),
-            required_str(object, "field", context)?.to_owned(),
-        )),
+        "field_lv" => {
+            let target = object
+                .get("target")
+                .ok_or_else(|| format!("public Kernel {context}.target is required"))?;
+            Ok(LValue::Field(
+                Box::new(parse_lvalue(target, &format!("{context}.target"))?),
+                required_str(object, "field", context)?.to_owned(),
+                named_type_name(target),
+            ))
+        }
         kind => Err(format!(
             "unsupported public Kernel lvalue kind '{kind}' at {context}"
         )),
@@ -496,7 +535,7 @@ fn adapt_public_kernel(kernel: &Value) -> Result<PublicKernelView, String> {
 }
 
 fn display_name(name: &str) -> String {
-    name.replacen("__", ".", 1)
+    fsl_core::display_name(name)
 }
 
 fn expr_source(expr: &Expr) -> String {
@@ -510,7 +549,7 @@ fn expr_source(expr: &Expr) -> String {
         }
         Expr::Not(value) => format!("not {}", expr_source(value)),
         Expr::Neg(value) => format!("-{}", expr_source(value)),
-        Expr::Field(base, field) => format!("{}.{field}", expr_source(base)),
+        Expr::Field(base, field, _) => format!("{}.{field}", expr_source(base)),
         Expr::Index(base, index) => format!("{}[{}]", expr_source(base), expr_source(index)),
         Expr::Method { receiver, name } => format!("{}.{name}(...)", expr_source(receiver)),
         Expr::Some(value) => format!("some({})", expr_source(value)),
@@ -533,14 +572,14 @@ fn lvalue_source(value: &LValue) -> String {
     match value {
         LValue::Var(name) => display_name(name),
         LValue::Index(name, index) => format!("{}[{}]", display_name(name), expr_source(index)),
-        LValue::Field(base, field) => format!("{}.{field}", lvalue_source(base)),
+        LValue::Field(base, field, _) => format!("{}.{field}", lvalue_source(base)),
     }
 }
 
 fn expr_base_var(expr: &Expr) -> Option<&str> {
     match expr {
         Expr::Var(name) => Some(name),
-        Expr::Index(base, _) | Expr::Field(base, _) => expr_base_var(base),
+        Expr::Index(base, _) | Expr::Field(base, _, _) => expr_base_var(base),
         _ => None,
     }
 }
@@ -548,14 +587,18 @@ fn expr_base_var(expr: &Expr) -> Option<&str> {
 fn lvalue_base_var(value: &LValue) -> &str {
     match value {
         LValue::Var(name) | LValue::Index(name, _) => name,
-        LValue::Field(base, _) => lvalue_base_var(base),
+        LValue::Field(base, _, _) => lvalue_base_var(base),
     }
 }
 
 fn enum_expr_location(expr: &Expr, location: EnumLocation<'_>) -> Option<String> {
     match location {
-        EnumLocation::Field(expected) => match expr {
-            Expr::Field(base, field) if field == expected => Some(expr_source(base)),
+        EnumLocation::Field { name, owner } => match expr {
+            Expr::Field(base, field, base_type)
+                if field == name && base_type.as_deref() == Some(owner) =>
+            {
+                Some(expr_source(base))
+            }
             _ => None,
         },
         EnumLocation::Var(expected) if expr_base_var(expr) == Some(expected) => match expr {
@@ -568,13 +611,17 @@ fn enum_expr_location(expr: &Expr, location: EnumLocation<'_>) -> Option<String>
 
 fn enum_lvalue_location(value: &LValue, location: EnumLocation<'_>) -> Option<String> {
     match location {
-        EnumLocation::Field(expected) => match value {
-            LValue::Field(base, field) if field == expected => Some(lvalue_source(base)),
+        EnumLocation::Field { name, owner } => match value {
+            LValue::Field(base, field, base_type)
+                if field == name && base_type.as_deref() == Some(owner) =>
+            {
+                Some(lvalue_source(base))
+            }
             _ => None,
         },
         EnumLocation::Var(expected) if lvalue_base_var(value) == expected => match value {
             LValue::Var(_) | LValue::Index(_, _) => Some(lvalue_source(value)),
-            LValue::Field(_, _) => None,
+            LValue::Field(_, _, _) => None,
         },
         EnumLocation::Var(_) => None,
     }
@@ -597,6 +644,29 @@ fn and_states(base: &StateMap, constraint: &StateMap) -> StateMap {
     result
 }
 
+/// Combines the guard-state maps of the two sides of an `or` node.
+///
+/// `or` is a disjunction, so a state is sound for the whole formula as soon
+/// as *either* disjunct implies it: the from-states are the **union** of the
+/// two sides. But that union is only meaningful when *both* disjuncts
+/// actually constrain the entity — if one says nothing about it (no entry in
+/// its map, e.g. an unrelated flag), that disjunct is satisfiable at *any*
+/// state, so the whole `or` does not pin the entity at all and the entity is
+/// dropped rather than unioned with a vacuous "every state" set. This is why
+/// `status == A or bypass` drops `status` entirely (`bypass` doesn't
+/// constrain it) while `status == A or status == B` — both disjuncts
+/// constrain `status` — keeps the union `{A, B}` (#521).
+fn or_guard_states(left: StateMap, right: &StateMap) -> StateMap {
+    let mut result = StateMap::new();
+    for (entity, mut states) in left {
+        if let Some(right_states) = right.get(&entity) {
+            states.extend(right_states.iter().cloned());
+            result.insert(entity, states);
+        }
+    }
+    result
+}
+
 fn enum_guard_states(
     expr: &Expr,
     location: EnumLocation<'_>,
@@ -604,9 +674,15 @@ fn enum_guard_states(
 ) -> StateMap {
     let mut result = StateMap::new();
     match expr {
-        Expr::Binary { op, left, right } if op == "or" || op == "and" => {
+        Expr::Binary { op, left, right } if op == "and" => {
             merge_states(&mut result, enum_guard_states(left, location, members));
             merge_states(&mut result, enum_guard_states(right, location, members));
+        }
+        Expr::Binary { op, left, right } if op == "or" => {
+            result = or_guard_states(
+                enum_guard_states(left, location, members),
+                &enum_guard_states(right, location, members),
+            );
         }
         Expr::Binary { op, left, right } if op == "==" => {
             for (candidate, value) in [(left.as_ref(), right.as_ref()), (right, left)] {
@@ -664,8 +740,12 @@ fn enum_assignments(
                         branch_states: branch_states.clone(),
                     });
                 } else if let Some(field) = field
-                    && let Expr::Struct { fields, .. } = value
+                    && let Expr::Struct {
+                        name: struct_name,
+                        fields,
+                    } = value
                     && matches!(target, LValue::Var(_) | LValue::Index(_, _))
+                    && matches!(location, EnumLocation::Field { owner, .. } if owner == struct_name)
                     && let Some((_, Expr::Var(member))) =
                         fields.iter().find(|(name, _)| name == field)
                     && members.contains(member)
@@ -735,9 +815,15 @@ fn enum_assignments(
 fn option_guard_states(expr: &Expr, var: &str) -> StateMap {
     let mut result = StateMap::new();
     match expr {
-        Expr::Binary { op, left, right } if op == "or" || op == "and" => {
+        Expr::Binary { op, left, right } if op == "and" => {
             merge_states(&mut result, option_guard_states(left, var));
             merge_states(&mut result, option_guard_states(right, var));
+        }
+        Expr::Binary { op, left, right } if op == "or" => {
+            result = or_guard_states(
+                option_guard_states(left, var),
+                &option_guard_states(right, var),
+            );
         }
         Expr::Binary { op, left, right } if op == "==" || op == "!=" => {
             for (candidate, value) in [(left.as_ref(), right.as_ref()), (right, left)] {
@@ -1102,6 +1188,7 @@ fn discover_entities(model: &PublicKernelView) -> Vec<Entity> {
             };
             entities.push(Entity {
                 kind: "enum",
+                type_key: type_name.clone(),
                 type_name: display_name(type_name),
                 field: Some(field.clone()),
                 var: None,
@@ -1136,6 +1223,7 @@ fn discover_entities(model: &PublicKernelView) -> Vec<Entity> {
         {
             entities.push(Entity {
                 kind: "enum",
+                type_key: String::new(),
                 type_name: camel(&display_name(var)),
                 field: None,
                 var: Some(var.clone()),
@@ -1163,6 +1251,7 @@ fn discover_entities(model: &PublicKernelView) -> Vec<Entity> {
             });
             entities.push(Entity {
                 kind: "option",
+                type_key: String::new(),
                 type_name,
                 field: None,
                 var: Some(var.clone()),
@@ -1189,7 +1278,10 @@ pub fn analyze_typestate(kernel: &Value) -> Result<Value, String> {
         let (actions, key, note) = if entity.kind == "enum" {
             let location = entity.field.as_deref().map_or_else(
                 || EnumLocation::Var(entity.var.as_deref().unwrap_or_default()),
-                EnumLocation::Field,
+                |field| EnumLocation::Field {
+                    name: field,
+                    owner: &entity.type_key,
+                },
             );
             let members: BTreeSet<_> = entity.states.iter().cloned().collect();
             let actions = model

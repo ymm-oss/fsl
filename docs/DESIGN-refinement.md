@@ -50,9 +50,19 @@ refinement CartImplRefinesCart {
   synthesizes `map x = x` for same-named compatible state variables and
   `action f(params...) -> f(params...)` for same-named compatible actions that
   do not already have explicit entries. Explicit `map` and `action ... ->`
-  entries always win. When a same-name candidate exists but its state type,
-  action arity, or action parameter types are incompatible, `build_refinement`
-  raises a `kind: "type"` error instead of guessing.
+  entries always win. An action pair's parameters are matched **by name**,
+  never by position: each abstract parameter is bound to the impl parameter
+  sharing its exact name, in the abstract action's own parameter order, so a
+  purely reordered same-named pair still auto-maps. When a same-name
+  candidate exists but its state type is incompatible, its action arity
+  differs, or an abstract parameter has no same-named impl parameter (a
+  renamed parameter, an impl parameter left over/"surplus" with nothing on
+  the abs side to bind it, or two same-typed parameters that a
+  position-based fallback would otherwise have to guess between —
+  issue #494), `build_refinement` raises a located `kind: "type"` error
+  instead of guessing. A parameter *type* mismatch between two identically
+  named parameters is caught by the same `validate_expression_type` check
+  every other authoring route already goes through, not duplicated here.
 - `action <impl_action>(<formal parameter list>) -> <abs_action>(<expr list>) | stutter`
   The formal parameters are the parameter names of the impl action (matching
   order). They may be written bare (`u`) or with a type annotation matching the
@@ -165,8 +175,26 @@ Two consequences fall out of reusing the same merge, not from new logic:
 
 α(s) := the mapping that defines the impl state → abs state mapping.
 
-1. **init correspondence**: for the impl's initial state s₀, α(s₀) satisfies the
-   abs init constraints. Counterexample: `refinement_failed` / `at: "init"`.
+0. **impl self-consistency (precondition, issue #466)**: before any of the
+   following steps run, the impl spec's own reachable states up to depth K —
+   including its initial state — are checked concretely for a type-bound,
+   invariant, `trans`, or `ensures` violation, independent of the mapping and
+   the abstraction entirely. This is a property of the refinement *input*
+   (the impl spec is broken on its own), not a refinement fidelity verdict:
+   `result:"violated"` with the impl's own `violation_kind`/trace and an
+   explanatory `note`, never `result:"refines"` and never folded into
+   `refinement_failed` (whose `kind`s below describe a mismatch *between*
+   impl and abs, not a defect in the impl alone). If this precondition finds
+   a violation, steps 1-4 do not run. This precondition and step 1 below both
+   reason over the impl's full set of concrete initial valuations (§2.8), not
+   one materialized default, so a self-violation reachable only from a
+   non-default nondeterministic initial branch is not missed either.
+1. **init correspondence**: for *every* concrete initial valuation s₀ the
+   impl's `init` permits, α(s₀) satisfies the abs init constraints — i.e.
+   α(s₀) is a member of the set of concrete initial valuations the abs's own
+   `init` permits, not equal to one arbitrarily materialized default on
+   either side (§2.8, issue #493). Counterexample: `refinement_failed` /
+   `at: "init"`.
 2. **transition correspondence**: for a reachable impl transition
    s →[a, params] s':
    - `a -> stutter` case: **α(s') == α(s)** (logical equality reuses leadsTo's
@@ -252,6 +280,201 @@ refinement SeatImplRefinesBooking {
   the node and its semantics already existed in both v1 and v2 schemas, this
   change does not alter either schema version.
 
+## 2.6 Exhaustive nominal-enum conversion (issue #450)
+
+The checked-boundary ownership and flat-index compatibility decision is recorded in
+[DESIGN-enum-member-identity.md](DESIGN-enum-member-identity.md). In particular, a bare
+member shared by the implementation and abstraction inventories is rejected rather than
+resolved by merge order.
+
+Refinement preserves nominal enum identity. Distinct impl/abs enums are never
+assignment-compatible and are never converted by ordinal. A refinement that needs a
+member-wise representation change declares a named conversion and calls it from a state
+map or action argument:
+
+```fsl
+refinement ApplicationUnitOfWorkRefinesUseCase {
+  impl ApplicationUnitOfWorkDesign
+  abs ApplicationUseCaseRequirements
+
+  enum conversion use_case_stage UnitOfWorkStage -> CommandStage {
+    Received  -> Received
+    Loaded    -> Loaded
+    Decided   -> Decided
+    Committed -> Committed
+    Rejected  -> Rejected
+    Conflict  -> Conflict
+  }
+
+  map command_stage[c: Command] = convert(use_case_stage, stage[c])
+  action load(c) -> load(c)
+}
+```
+
+The declaration is a refinement item, so the same syntax is accepted in a standalone
+`refinement` file and an inline requirements `implements { }` block. Its name is local to
+that refinement block. Invocation uses the dedicated
+`convert(<conversion-name>, <expression>)` form and is valid in both state-map expressions
+and abstract action arguments. The first argument is a syntactic conversion name, not a
+value expression; this keeps conversion names out of the namespace of special expression
+calls such as `stage`, `old`, and `abs`.
+
+The source and target names must resolve to enums in the merged impl/abs checked-Kernel
+type inventory. This includes requirements `process` stage enums, DB/domain generated
+enums, and compose-renamed enum types. Conversion rows use the checked-Kernel member
+spellings. Requirements stages retain their source spelling; domain lowering intentionally
+namespaces members (for example `OrderStatus_Pending`), so a mapping at the Kernel
+refinement boundary uses the names published by `fslc kernel`, not the shorter domain-source
+alias. Diagnostics point to the conversion row and list the checked members; they do not
+fabricate a source-level domain span after lowering. The declaration is a checked bijection:
+
+- every declared source member appears exactly once on the left;
+- every declared target member appears exactly once on the right;
+- unknown source/target types or members, duplicate source/target members, a missing
+  member on either side, and a non-enum endpoint are `kind:"type"` errors at the
+  declaration/member location;
+- the call argument must have the declared source nominal type and the call result has
+  the declared target nominal type; and
+- duplicate conversion names, unknown conversion calls, and wrong call arity fail
+  statically.
+
+Requiring both source-totality and target-totality deliberately makes this construct a
+one-to-one representation conversion. A genuine abstraction that collapses several impl
+states into one abs state uses the separate source-total contract in section 2.7 rather
+than weakening this fail-closed bijection.
+
+### Checked representation and evaluation
+
+The private checked expression IR gains an enum-member literal carrying both
+`type_name` and `member`; it is not surface `Type.Member` syntax and never consults the
+flat bare-member namespace. Before storing the checked `Refinement`, the frontend
+elaborates each conversion call to the existing nested conditional (`ite`) shape whose
+conditions and results use these typed literals. Repeating the pure argument expression in
+that tree has no observable evaluation-order effect. The last branch is safe as the
+fallback only because source coverage was proved complete.
+
+Concrete Monitor/refinement evaluation maps the selected source member to the declared
+target member. Symbolic evaluation uses the same conditional tree and the enums' own
+member encodings; reversing declaration order therefore cannot change the result.
+Preserved-progress substitution, semantic diff, and inline `implements` consume the
+already-elaborated expression through the shared refinement builder. Production-log and
+causal replay are different: their `impl` is an untyped external JSON schema, so no source
+enum can be resolved. Those raw-surface mapping paths must reject an `enum conversion`
+declaration or `convert(...)` call with a located `kind:"type"` error explaining that a
+typed impl model is required; they must never ignore or partially evaluate it.
+
+Public Kernel model contracts do not contain refinement mappings, and this change does not
+invent a standalone mapping schema. For sidecars that publish an already-checked mapping
+expression, `public_kernel_expression` projects the elaborated form using the existing
+typed `ite` and `var` shape: an internal enum-member literal becomes
+`{"kind":"var","name":<member>,"type":{"kind":"named","name":<type>},...}`.
+The `(type, name)` pair round-trips nominal identity even when impl and abs use identical
+member spelling; projection does not reconstruct it through `base_env`. Public Kernel v1
+and v2 therefore need no new expression kind or schema version. An unelaborated
+`convert(...)` call fails export instead of being omitted or emitted as an untyped call.
+
+### Migration
+
+A pre-3.1 conditional mapping with distinct, unambiguous member spellings remains valid.
+For a bijection, replace a colliding or exhaustively intended conditional with
+`enum conversion` plus `convert(<name>, <expr>)`. For a source-total many-to-one
+mapping, use the abstraction contract in section 2.7.
+Do not rename both layers to one enum type and do not map by declaration order; those
+workarounds erase layer identity or recreate the ordinal false-green that nominal typing
+prevents.
+
+## 2.7 Source-total nominal-enum abstraction (issue #455)
+
+A many-to-one representation boundary declares a distinct `enum abstraction` and invokes
+it with `abstract(<name>, <expr>)`:
+
+```fsl
+enum abstraction lifecycle ImplStage -> AbsStage {
+  Received  -> Pending
+  Validated -> Pending
+  Completed -> Done
+  Rejected  -> Failed
+}
+map status = abstract(lifecycle, stage)
+```
+
+This declaration is a source-total function, not a bijection. Both endpoint enums must be
+non-empty so the total mapping has a representable result and the checked conditional has
+a fallback. Every source member must appear exactly once. Unknown endpoint types or members, non-enum endpoints, duplicate
+source rows, missing source rows, wrong call arity, unknown names, and a call argument of
+the wrong nominal source type are located type errors. Multiple source rows may select the
+same target. Target members absent from all rows are intentionally unused by this
+abstraction and require no separate declaration. An injective table is accepted, but
+authors should use `enum conversion` when target-totality and target uniqueness are part of
+the intended assurance.
+
+Conversion and abstraction names share one refinement-local namespace, while their call
+forms are not interchangeable. Keeping both declaration and invocation distinct prevents
+a call site from silently claiming bijective assurance for a source-total mapping. Both
+forms lower through the same typed enum-member conditional representation, so concrete
+refinement, symbolic expression agreement, preserved progress, inline `implements`, CLI,
+Worker, and Public Kernel expression projection retain one evaluation path. Reversing
+either enum's declaration order cannot change the result.
+
+Raw production and causal replay lack a typed implementation model and therefore reject
+either an abstraction declaration or `abstract(...)` call with a located type error. They
+must not infer endpoint types from JSON values. Migrate an ambiguous conditional that
+collapses nominal members to `enum abstraction` plus `abstract`; migrate a one-to-one table
+to `enum conversion` plus `convert` so its stronger target guarantees remain executable.
+
+## 2.8 Nondeterministic init (v2.x — issue #493)
+
+`init` need not assign every state variable: a state variable an `init if` (or a `forall`
+branch) never assigns on any path is a genuinely free/unconstrained initial value across
+its declared type's domain, the same way `fsl-verifier`'s symbolic BMC init lowering leaves
+an omitted assignment unconstrained (DESIGN-init-if.md). Before this fix, the concrete
+refinement checker instead ran the impl and abs each through one solver-free `Monitor`,
+which fills an unassigned variable with its type's *default* value before executing `init`
+— a single, arbitrarily chosen representative of what may be several valid initial states,
+not the full set §2 step 1 requires. That single-state approximation produced two opposite
+symptoms depending on which side was nondeterministic:
+
+- an impl `init` reading an unassigned variable let the checker silently pick only the
+  default-valued initial state, missing both that state's own initial-correspondence
+  violation on another valuation and the reachable set below it (`refines` reported for a
+  refinement that actually fails);
+- an abs `init` reading an unassigned variable made the checker compare α(s₀) for equality
+  against the single default abs initial state, rejecting a correct refinement whose impl
+  deterministically starts in a different — but still abs-valid — initial valuation
+  (`refinement_failed / abs_state_mismatch@init` reported for a refinement that actually
+  holds).
+
+**Fix**: `check_refinement` enumerates every concrete initial valuation a model's `init`
+permits (`concrete_initial_states` in `rust/fsl-runtime/src/lib.rs`) instead of
+materializing one. A state variable init never assigns on *any* path is domain-enumerated
+(`explicit::unassigned_init_state_vars`); a model with no such variable still produces
+exactly the single state a plain `Monitor` would build, so an ordinary deterministic-init
+spec is unaffected. Step 0's self-consistency precondition and step 1's init correspondence
+both consume this set:
+
+- step 0 checks every impl initial valuation for a self-violation, not just the default;
+- step 1 checks that *every* impl initial valuation's α is a member of the abs's own
+  initial-valuation set, and seeds one BFS root per surviving impl valuation, so the walk
+  covers the full nondeterministic-init reachable set rather than one branch.
+
+**Scope**: only a state variable with *zero* assignment coverage — never an assignment
+target on any init path — is treated as free. A variable assigned on some but not all
+paths (e.g. only inside an `if` with no `else`) is left out of the enumeration and keeps
+the prior default-filled behavior for the branch that skips it; the static analysis cannot
+always prove such a remaining value is genuinely unconstrained rather than an approximation
+artifact (a `where`-filtered `forall`, for instance), so this checker does not guess there
+either. Fully characterizing that partial-coverage case is `Monitor` construction's own
+concern generally, not this refinement-local enumeration (issue #519, a different surface).
+
+**Breaking change**: `fslc refine` verdicts change for a mapping between two specs where
+either side's `init` leaves a state variable fully unassigned on every path. A refinement
+that used to report `refines` because only the impl's default initial branch was checked
+may now report `refinement_failed / abs_state_mismatch@init` (or `map_out_of_bounds`) if
+another impl initial branch is not abs-valid. A refinement that used to report
+`refinement_failed / abs_state_mismatch@init` solely because the abs's default initial
+branch did not equal α(s₀) may now report `refines` if α(s₀) matches a different, still
+valid, abs initial branch.
+
 ## 3. CLI / JSON
 
 ```
@@ -275,7 +498,7 @@ Violation:
   "violated_at_step": 3,
   "impl_action": { "name": "rebalance", "params": {...}, "loc": ... },
   "kind": "abs_requires_failed" | "abs_state_mismatch" | "stutter_changed_abs"
-        | "map_out_of_bounds",
+        | "map_out_of_bounds" | "map_partial_op",
   "impl_trace": [ ...existing trace format... ],
   "abs_before": { ...logical state of α(s)... },
   "abs_after_expected": { ...after applying b... } | null,
@@ -351,8 +574,32 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    out-of-range impl value there is already caught downstream as
    `abs_state_mismatch`, so merging is safe. The fix: give impl and abs
    layers distinct type names.
-8. No regression of existing features (refine is a completely independent CLI
+9. **impl self-violation (precondition, issue #466)**: an impl whose own
+   guard/type-bound weakening lets it violate itself within depth K (e.g. a
+   dropped `requires` that lets a state variable step outside its declared
+   type bound) → `result:"violated"` with the impl's own `violation_kind`,
+   never `refines`. `docs/DESIGN-refinement.md` §2 step 0. Rust coverage:
+   `rust/fsl-runtime/tests/refinement.rs` (the `check_refinement` contract
+   directly, plus a regression control distinguishing this from a pure
+   guard-weakening `abs_requires_failed`) and
+   `rust/fslc/tests/issue_466_refine_impl_self_violation.rs` (the `fslc
+   refine` and `fslc diff` CLI contract).
+10. No regression of existing features (refine is a completely independent CLI
    path).
+11. **action-correspondence argument partial_op (issue #512)**: an
+   action-correspondence argument expression (`impl_action(a) -> abs_action(a / c)`)
+   that divides by an impl state variable which can be zero — distinct from
+   `map_out_of_bounds` (a range problem) and from the impl's own body dividing by
+   zero (`abs_requires_failed`'s precondition, issue #466's `impl_violation`, since
+   here the impl's own body has no division at all) → `map_partial_op`, not an
+   unclassified `kind:"type"` error. `docs/DESIGN-divmod.md` §2.2/§2.3: this is
+   action context, not the read-only "mapping expression" §2.3 exempts, so it gets
+   the same partial_op treatment a division inside the abstract action's own body
+   would. A guarded correspondence (the divisor is never zero on any reachable impl
+   step) still `refines`. Rust coverage: `rust/fsl-runtime/tests/refinement.rs` (the
+   `check_refinement` contract directly) and
+   `rust/fslc/tests/issue_512_refine_map_partial_op.rs` (the `fslc refine` CLI
+   contract).
 
 ## 6. Documentation Reflection
 

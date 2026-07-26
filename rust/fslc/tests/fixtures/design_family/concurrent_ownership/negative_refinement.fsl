@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement InvalidSharedLockMapping {
+  impl SharedLockOwnership
+  abs OwnershipContract
+  map owner = none
+  action claim(w) -> claim(w)
+  action release(w) -> release(w)
+}

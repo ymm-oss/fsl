@@ -59,7 +59,11 @@ inventory and explicitly optional Python surfaces.
 
 - **Language or semantics:** update Rust syntax/lowering, typed model, symbolic and concrete evaluation,
   regression cases, `docs/LANGUAGE.md`, `skills/fsl/reference.md`, an accepted design note, and
-  `CHANGELOG.md` together.
+  `CHANGELOG.md` together. A new dialect's top-level construct, and any new `examples/`/`specs/`
+  directory it lands in, must also be registered in `tests/dialect_registry.py` (`DIALECTS`,
+  `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS` with a reason) — the conformance harness
+  (`docs/DESIGN-conformance-harness.md`) scans every `.fsl` under `specs/`/`examples/` and fails
+  loudly on an unregistered construct instead of silently skipping it.
 - **Public Kernel contract:** update schemas, Rust exporter/consumer paths, conformance vectors,
   agreement tests, `docs/DESIGN-kernel-contract.md`, language/reference docs, and changelog.
 - **CLI/JSON contract:** preserve field meanings, ordering requirements, raw-output modes, exit codes,

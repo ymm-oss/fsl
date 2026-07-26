@@ -142,6 +142,9 @@ fn expr_text_with_origins(model: Option<&KernelModel>, expr: &Expr) -> String {
             .join(", ")
         ),
         Expr::Var(name) => display_name(name),
+        Expr::EnumMember { type_name, member } => {
+            format!("{}.{}", display_name(type_name), display_name(member))
+        }
         Expr::Call { name, args, .. } => format!(
             "{}({})",
             display_name(name),

@@ -526,6 +526,20 @@ scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
 
 ## 3. Expressions
 
+`true`, `false`, and `none` are **reserved**: they always resolve to the literal,
+so they cannot name a declaration anywhere — specification, const, `def` and its
+parameters, type, enum and its members, struct and its fields, state variable,
+action and its parameters, property, or a quantifier/aggregate binder or `is
+some(x)` pattern binding. A declaration with one of those names would be
+unreadable from every expression, and the misreading is silent: before this was
+checked, `state { true: Bool }` with `invariant AlwaysHolds { true }` returned
+`proved` while `init { true = false }` assigned a variable nothing could read.
+No other word is reserved. `count`, `sum`, `stage`, `in`, `is`, `where`, `old`,
+`abs`, `and`, and `or` are contextual and remain valid names; `some`, `Set`,
+`Seq`, `unique`, `exactlyOne`, `forall`, and `exists` are only recognized before
+further syntax, so misusing one as a name is a parse error rather than a silent
+literal.
+
 Named predicates factor repeated or business-significant expressions:
 
 ```fsl
@@ -542,7 +556,18 @@ variable capture instead of inventing internal binder names. See
 
 - Arithmetic: `+ - * / %`, unary `-`, `min(a, b)` / `max(a, b)` / `abs(a)`
   (since `a//b` would turn everything after `//` into a comment, write division
-  as `a / b` with whitespace)
+  as `a / b` with whitespace). `/` and `%` are Euclidean for `b != 0`
+  (`a == b * (a / b) + (a % b)` and `0 <= a % b < |b|`, so `-7 / 2 == -4` and
+  `-7 % 2 == 1`). Division by zero is **totally defined**: `a / 0 == 0` and
+  `a % 0 == 0` always evaluate, so an invariant/trans/reachable/leadsTo/refinement
+  state-map expression that reads `a / 0` never fails to evaluate. Inside an
+  action's `requires`/body/`ensures`, an unguarded `/`/`%` whose divisor can
+  reach zero is still reported as `partial_op` (see §6) even though the value
+  is defined — guard it with `y != 0 => P(x / y)` or `requires y != 0`. A
+  refinement action-correspondence *argument* expression (§10,
+  `impl_action(a) -> abs_action(a / c)`) is action context, not a property-context
+  mapping expression, since it constructs an abstract action call: it gets the
+  same `partial_op` treatment, surfaced as `kind: "map_partial_op"`.
 - Comparison: `== != < <= > >=`
 - Logical: `and or not =>`
 - Conditional: `if condition then when_true else when_false`. The condition is
@@ -583,6 +608,12 @@ variable capture instead of inventing internal binder names. See
   `reachable(r, a, b)`, `acyclic(r)`, `functional(r)`, `injective(r)`,
   `domain(r)`, `range(r)`. `reachable` and `acyclic` require a self-relation
   (`relation T -> T`); endpoint type/arity errors include repair hints.
+  `reachable(r, a, a)` is **not** reflexive by construction: it is true only
+  if a real path of one or more edges leads from `a` back to `a` (so an empty
+  or acyclic relation gives `reachable(r, a, a) == false` for every `a`). A
+  reflexive reading would make `not reachable(r, a, a)` unsatisfiable by
+  construction for any inhabited domain, draining the predicate of meaning;
+  use `acyclic(r)` to state "no self-loops or cycles anywhere in `r`".
 - Inside ensures / trans only: read the pre-transition state with `old(expr)`
 - Inside a leadsTo block only: `P ~> Q` (response property. not part of the operator hierarchy of general expressions);
   optional `within K` before Q for a bounded deadline, and optional
@@ -657,7 +688,7 @@ variable.
 | Check | Content | On violation |
 |---|---|---|
 | Type bounds | Every bounded-type state variable (including Map values, struct fields, and Seq elements) is within range | `violated` / `type_bound` / `_bounds_<var>` |
-| Partial operations | At the time of `pop()`/`head()`/`at(i)`, the sequence is non-empty and the index is in range, and the divisor of `/` `%` is non-zero | `violated` / `partial_op` / `_partial_<action>` |
+| Partial operations (action context: `requires`/body/`ensures` only, see §3) | At the time of `pop()`/`head()`/`at(i)`, the sequence is non-empty and the index is in range, and the divisor of `/` `%` is non-zero | `violated` / `partial_op` / `_partial_<action>` |
 | action coverage | Each action is enabled at least once within depth K | diagnosis of the blocking requires in `action_coverage` |
 | Deadlock | Reaching a state where all actions become disabled | warning (`violated` with `--deadlock error`) |
 | trans | Whether the two-state predicate holds across all reachable transitions | `violated` / `trans` / `trans` + trace |
@@ -811,8 +842,13 @@ In addition to `reachable` and action coverage, `scenarios` outputs, for each
 `leadsTo P ~> Q`, a `respond_<Name>[_<binding>]` scenario. Each scenario has
 `kind: "leadsTo"`, `pending_at`, `satisfied_at`, `bindings`, `steps`,
 `initial_state`, and `expected_states`, representing the shortest trace from P
-holding to Q holding within depth K. Bindings for which P never holds are not
-turned into scenarios and appear in `warnings`.
+holding to Q holding within depth K. A quantified property is tracked
+per binding, not per property name: one binding's response scenario never
+suppresses the completeness warning for a sibling binding with none. A
+binding for which P never holds within depth K gets its own warning worded
+"antecedent never holds within depth K"; a binding for which P held but no
+response ever closed gets "has no response scenario within depth K" — the
+two are never conflated.
 
 `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
 `reachable` declarations and checks only the named property kind in isolation.
@@ -844,6 +880,10 @@ verification result under `sweep.results`, and returns the first failing scope
 under `sweep.minimal_counterexample`. For `--values`, the sweep fixes the lower
 bound and expands the upper bound (`lo..lo`, `lo..lo+1`, ..., `lo..hi`). A
 passing sweep means "no counterexample in this grid", not an unbounded proof.
+A spec `error` (parse / type / semantics / io / vacuous / …) from any scope in
+the grid is not a counterexample: `sweep` returns that underlying error
+envelope verbatim (`result`, `kind`, `message`, `loc`, exit code unchanged)
+instead of folding it into `sweep_passed`/`sweep_failed`.
 
 `diff` compares state-machine meaning instead of source text. It runs bounded
 refinement in both directions: NEW→OLD failure is `behavior_added`, while
@@ -903,7 +943,12 @@ imported / imported_with_warnings,
 refinement_failed / sweep_failed / observed_mismatch,
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
-result; `imported`/`imported_with_warnings` is `fslc db import`'s.
+result; `imported`/`imported_with_warnings` is `fslc db import`'s. The same
+`2` mapping is fail-closed for `chain`'s project-manifest reader (unrecognized
+section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
+`docs/DESIGN-layers.md` §7) and for `ledger --impl-log`'s replay input (a
+replay error is not implementation-log evidence and must not be rendered as
+an empty ledger row — `docs/DESIGN-ledger.md`).
 
 ### Kinds of result
 
@@ -1242,7 +1287,15 @@ refinement CartImplRefinesCart {
   variables with no explicit `map`, it synthesizes `map x = x`; for same-named
   compatible actions with no explicit correspondence, it synthesizes
   `action f(params...) -> f(params...)`. Explicit entries override the defaults.
-  Incompatible same-name candidates are reported as `kind: "type"` errors.
+  Action parameters are matched **by name, never by position**: each abstract
+  parameter binds to the impl parameter sharing its exact name (so a pure
+  reorder still auto-maps), in the abstract action's parameter order. Auto
+  never guesses — a same-name action pair with a different arity, a surplus
+  impl parameter, a renamed parameter, or any abstract parameter with no
+  same-named impl counterpart is a located `kind: "type"` error; write an
+  explicit `action ... -> ...` correspondence for that pair instead.
+  Incompatible same-name state candidates are likewise reported as
+  `kind: "type"` errors.
 - `action <impl>(<formal params>) -> <abs>(<expr>) | stutter` — required for every impl action.
   Formal params may be bare names or `name: Type` annotations matching the impl action declaration.
   `stutter` is an internal step in which the abstract state does not change.
@@ -1258,15 +1311,107 @@ Refinement maps and action arguments use the same expression grammar and type
 rules as ordinary specs, including `if <condition> then <expr> else <expr>`.
 Both branches are name- and type-checked even when the condition is constant.
 
+Distinct nominal enums require an explicit, named enum mapping. For a
+member-wise bijection, declare a conversion in the refinement and call it from
+a state map or action argument:
+
+```fsl
+enum conversion use_case_stage UnitOfWorkStage -> CommandStage {
+  Received -> Received
+  Validated -> Validated
+  Executing -> Executing
+  Completed -> Completed
+}
+map command_stage[c: Command] = convert(use_case_stage, stage[c])
+```
+
+Both endpoints must be enum types. Every source and target member must appear
+exactly once; unknown, duplicate, or missing members are `kind: "type"`
+(exit 2) errors at the conversion site. Conversion is never inferred from
+declaration order or equal member spelling, so direct assignment between the
+two enums remains a type error. The target may be a requirements `process`
+stage enum synthesized by lowering; use its checked Kernel name (visible in
+`fslc kernel`), such as `CommandStage`. Existing raw `replay --from-log` and
+causal observation mappings have no typed impl model and reject conversion
+declarations/calls with a located type error; migrate those mappings to a typed
+refinement before using `convert`.
+
+For a many-to-one boundary, declare a source-total abstraction and use its
+distinct call form:
+
+```fsl
+enum abstraction lifecycle ImplStage -> AbsStage {
+  Received  -> Pending
+  Validated -> Pending
+  Completed -> Done
+}
+map status = abstract(lifecycle, stage)
+```
+
+Both endpoint enums must be non-empty, and every source member must appear
+exactly once. Duplicate or missing source
+members and unknown or wrong-nominal members are located type errors. Repeated
+targets are allowed; target members omitted from all rows are intentionally
+unused by this abstraction. `enum conversion` remains a bijection and still
+rejects duplicate or missing targets. Conversion and abstraction names share
+one refinement-local namespace, and `convert`/`abstract` cannot be
+interchanged. Both forms are independent of enum declaration order. Raw
+production-log and causal mappings reject abstractions too because they have
+no typed implementation model.
+
+When an abstract generated enum is the binder for a map whose implementation
+uses a design enum as its key, convert the binder in the reverse direction,
+for example `map column_exists[c: Column] =
+design_exists[convert(column_key, c)]` with `column_key Column -> DesignColumn`.
+
 ```bash
 fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth 8
 ```
 
 Success: `result: "refines"` (exit 0). Violation: `refinement_failed` (exit 1)
 with `kind` (`abs_requires_failed` / `abs_state_mismatch` / `stutter_changed_abs` /
-`map_out_of_bounds`), `impl_trace`, and the post-mapping `abs_before` /
-`abs_after_*`. A static error (a missing map, an unknown action, etc.) is
-`kind: "type"` (exit 2).
+`map_out_of_bounds` / `map_partial_op`), `impl_trace`, and the post-mapping
+`abs_before` / `abs_after_*`. A static error (a missing map, an unknown action,
+etc.) is `kind: "type"` (exit 2). `map_partial_op` is an action-correspondence
+argument expression (`impl_action(a) -> abs_action(a / c)`) dividing by an impl
+state variable that can be zero — action context (§3/§6's `partial_op` rule),
+not the "no check" property context a refinement *state* map gets.
+
+Before any correspondence is checked, `refine` first verifies that the impl
+spec is internally consistent on its own — does not violate its own type
+bounds or invariants — within `--depth`. A refinement mapping cannot make a
+broken impl meaningful, so this is checked independently of the abstraction
+and the mapping: `result: "violated"` (exit 1) with `violation_kind` and a
+`note` explaining this is a property of the refinement *input*, not a
+fidelity failure. It is never reported `refines`, and never folded into
+`refinement_failed` (whose `kind`s above describe a mismatch *between* impl
+and abs, not a defect in the impl alone). `fslc diff` surfaces the same
+condition as an `impl_violated` finding and fails its gate unconditionally
+(not subject to `--forbid`), since a self-violating side makes the
+comparison itself untrustworthy.
+
+A state variable `init` never assigns on any path (an `init if` reading an
+unassigned `Bool`, for example) is a genuinely free initial value across its
+full type domain, not a value silently defaulted — `refine` checks it that
+way on both the impl and abs side. The self-consistency precondition above
+and the init correspondence it feeds both reason over **every** concrete
+initial valuation `init` permits, not one arbitrarily chosen default: an
+impl-side initial valuation must not violate the impl's own semantics, and
+its mapped state must be a member of the abs's own set of valid initial
+valuations, for every such valuation on both sides. A same-named state
+variable init leaves unassigned on *some* but not all paths (e.g. only
+inside an `if` with no `else`) is not enumerated this way and keeps the
+prior single-valuation behavior.
+
+This closed two opposite defects and is a **breaking change** to `refine`'s
+verdicts for a mapping where either side's `init` leaves a state variable
+fully unassigned: a refinement that previously reported `refines` because
+only the impl's default initial branch was ever checked may now report
+`refinement_failed` (an initial-correspondence violation on another impl
+branch was missed before); a refinement that previously reported
+`refinement_failed` solely because the abs's default initial branch did not
+equal the mapped impl state may now report `refines` (the impl state
+matches a different, still-valid, abs initial branch).
 
 Give impl and abs **distinct enum/struct type names**, even when a state
 variable pair is mapped 1:1. Type metadata is merged by name for refinement
@@ -2108,7 +2253,10 @@ dbsystem <Name> {
 If `check compatibility` is omitted, default rules cover read/write lifecycle,
 destructive annotations, preservation-transform annotations, and API/offline
 compatibility. `data_preserved` and `rollback_equivalent` are opt-in bounded
-checks and report `DB-ASSUME-BOUNDED-ROW-MODEL`.
+checks and report `DB-ASSUME-BOUNDED-ROW-MODEL`. A `rule` name outside the
+closed vocabulary above, or an `environment schema lo..hi` that the declared,
+strictly sequential migration plan never reaches, fails validation with exit 2
+instead of silently checking nothing.
 
 Feature flags are finite environment dimensions. `fslc db check` enumerates the
 declared variants with schema snapshots and reports
@@ -2148,6 +2296,12 @@ candidates. Runtime observation returns `observed_mismatch` with
 `formal_result: "not_run"`; absence from logs is not proof of unused behavior.
 Use ordinary `fslc verify` when you want to inspect the generated kernel
 counterexample directly.
+
+`fslc db observe` validates the observation envelope/events against
+`schemas/fslc/db/observation.v0.schema.json` (typed required fields, a closed
+`capability` vocabulary, exit 2 on a malformed record) before evaluating them,
+and matches each event's optional `flags` snapshot against artifact windows the
+same way `fslc db check` does.
 
 Generic `requires` / `provides` capabilities let AI model/prompt/retriever/tool
 schema and output schema profiles share the same compatibility check as
@@ -2285,14 +2439,30 @@ graph analysis, not kernel proof. `fslc ai replay` accepts JSONL or
 
 Project-level fsl-ai evidence declarations can combine `ai_component`,
 `dataset`, `evaluator`, `failure_mode`, `statistical_property`,
-`ai_migration`, and `observed_property`. `fslc ai check` parses these files and
-returns `ai_project_analyzed`; `fslc ai eval` checks Bernoulli/proportion
-metrics from precomputed JSONL with Wilson intervals; `fslc ai regress` checks
-aggregate `no_regression` metric drop/increase clauses; `fslc ai compare`
-reports metric deltas without a threshold claim; `fslc ai drift` checks runtime
-telemetry thresholds and drift; and `fslc ai compat` emits a finite
-`dbsystem artifact` capability profile. All of these use
-`formal_result:"not_run"`.
+`ai_migration`, and `observed_property`. `fslc ai check` parses these files with
+the same parser the evidence commands run and returns `ai_project_analyzed`;
+`fslc ai eval` checks the selected
+`statistical_property`'s declared `slice`/`min_samples`/`ci_lower`/`ci_upper`
+requirements against precomputed JSONL (`--records`, or the declared
+`dataset`'s `source` file) with Wilson intervals; `fslc ai regress` checks the
+selected `ai_migration`'s declared aggregate `no_regression` metric
+drop/increase clauses; `fslc ai compare` reports metric deltas without a
+threshold claim; `fslc ai drift` checks the selected `observed_property`'s
+declared `observed`/`drift` requirements over runtime telemetry
+(`observed_supported` / `observed_mismatch`); and `fslc ai compat` emits a
+finite `dbsystem artifact` capability profile for one `ai_component` or every
+`ai_component` a project declares, rejecting non-AI input and an AI project
+with no `ai_component` at all (exit 2). All of these use
+`formal_result:"not_run"`. A `require` clause matching none of the known
+evidence-clause grammars (`min_samples`, `ci_lower`, `ci_upper`, a point
+estimate, `observed`, `drift`) is a spec error (exit 2) at `check` time, in
+both `fslc ai check` and the `fslc check` dispatch: the check stage must not
+report an analyzed project that `eval`/`drift` cannot execute. An unknown
+`--property`/`--migration` selection is
+a check-time error (exit 2); a selected `statistical_property`'s gate status
+(`dataset_invalid`, `evaluator_untrusted`, `slice_missing`,
+`insufficient_samples`, `inconclusive`, or `statistically_unsupported`) exits
+1, matching `statistically_supported`'s exit 0 as the only success case.
 
 Recursive `agent` shape:
 
@@ -2452,7 +2622,11 @@ DESIGN-*.md).
   action enables/conflict edges; `--projection impact_graph --focus NODE` emits
   the upstream/downstream slice around a TSG node. It accepts multiple files or
   directories in batch mode;
-  directories are expanded recursively for `*.fsl` and sorted deterministically.
+  directories are expanded recursively for `*.fsl` and sorted deterministically —
+  an explicitly named file is always kept regardless of extension (a `.toml`
+  project manifest routes the same way it does in single-file mode; anything
+  else that cannot be analyzed is a real error in `files[]`/`errors[]`, never
+  a silent drop).
   Standalone refinement mappings can be viewed with `--projection
   refinement_graph`; this is an unresolved structural view because the command
   has no impl/abs model paths. Project manifests can be viewed with `--projection
@@ -2502,10 +2676,16 @@ is under [`examples/validation/`](https://github.com/ymm-oss/fsl/tree/main/examp
 ## 16. Promotion judgment to ghost types (typestate)
 
 `fslc typestate <file.fsl> [--ts]` decides how soundly the state machine of a
-design spec (enum-valued struct fields / state variables / `Option<_>` slots)
-can be mapped to the host language's typestate (ghost types). It classifies each
+design spec (enum-valued struct fields, scoped by field name **and** owning
+struct type so two structs with a same-named field remain independent
+machines / state variables / `Option<_>` slots) can be mapped to the host
+language's typestate (ghost types). It classifies each
 `(entity, action)` as `derivable` (the from-state is the entity's own local
-guard) / `branching` (data-dependent inside an `if`) / `relational` (no local
+guard — a compound guard's from-state is what the **whole** formula implies:
+`or` is a union of what each disjunct implies, but only when every disjunct
+constrains the entity; a disjunct silent about the entity, e.g. an unrelated
+flag, drops the guard entirely rather than narrowing it) /
+`branching` (data-dependent inside an `if`) / `relational` (no local
 guard, and the precondition lives in an external structure — cannot be expressed
 in the type and remains as a runtime/verification obligation). An entity's
 `applicability` is `full` only when all transitions are derivable/branching.

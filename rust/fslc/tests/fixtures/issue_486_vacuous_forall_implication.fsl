@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// `active[i]` is never assigned `true` by any action, so the antecedent of
+// the forall-wrapped implication below is unreachable within any depth.
+// Before #486, native `vacuous_implication` only matched an invariant whose
+// *top-level* expression was `Binary{op: "=>"}`; a `forall`-quantified
+// implication (the shape `docs/DESIGN-vacuity.md:22` documents as the
+// primary case) was never unwrapped, so this hollow invariant verified
+// clean instead of being flagged.
+spec ForallVacuousImplication {
+  type Id = 0..1
+  state { active: Map<Id, Bool> }
+  init { forall i: Id { active[i] = false } }
+
+  action stay(i: Id) {
+    active[i] = active[i]
+  }
+
+  invariant NeverActivated {
+    forall i: Id { active[i] => false }
+  }
+}

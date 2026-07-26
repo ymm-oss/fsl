@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec HelpfulPumpedMeasure {
+  state { x: Int }
+  init { x = 5 }
+
+  fair action work() {
+    requires x > 0
+    x = x - 1
+  }
+
+  action pump() {
+    requires x > 0
+    x = x + 2
+  }
+
+  invariant NonNeg { x >= 0 }
+
+  leadsTo Finishes {
+    x > 0 ~> x == 0
+    helpful work()
+    decreases x
+  }
+}

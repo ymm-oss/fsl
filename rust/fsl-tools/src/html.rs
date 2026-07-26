@@ -569,32 +569,92 @@ fn actions_section(actions: &[Value], coverage: &Value) -> String {
     )
 }
 
+/// The depth an assurance label reports, `checked_to_depth` first.
+fn checked_depth(verification: &Value) -> Option<u64> {
+    verification
+        .get("checked_to_depth")
+        .or_else(|| verification.get("depth"))
+        .and_then(Value::as_u64)
+}
+
+/// The report-wide assurance of one verification envelope, for the status
+/// panel. This is a whole-report summary and must never be reused as a
+/// per-property class: see `property_assurance`.
 fn assurance(verification: &Value) -> String {
-    if verification["completeness"] == "unbounded" {
-        "proved(induction)".to_owned()
-    } else if verification["completeness"] == "bounded" {
-        format!(
-            "bounded(BMC depth {})",
-            text(
-                verification
-                    .get("checked_to_depth")
-                    .unwrap_or(&verification["depth"])
-            )
-        )
-    } else {
-        "not_run".to_owned()
+    crate::ledger::assurance_label(
+        crate::ledger::assurance_token(verification),
+        checked_depth(verification),
+    )
+}
+
+/// The html property `kind` to the ledger's element group
+/// (`docs/DESIGN-assurance-classes.md`: "Assurance column per property row
+/// via `classify_element` (kind->group: invariant->invariants,
+/// leadsTo->leadstos, reachable->reachables, trans->transitions)").
+fn property_group(kind: &str) -> Option<&'static str> {
+    match kind {
+        "invariant" => Some("invariants"),
+        "trans" => Some("transitions"),
+        "leadsTo" => Some("leadstos"),
+        "reachable" => Some("reachables"),
+        _ => None,
     }
 }
 
+/// One property row's own assurance class, from the ledger's per-element
+/// rule (issue #525). A reachability witness and action coverage stay
+/// `bounded` even inside an `--engine induction` report, because
+/// k-induction ranks only invariants and leadsTo; labelling them
+/// `proved(induction)` overstates the evidence in an audit artifact.
+fn property_assurance(property: &Value, verification: &Value) -> String {
+    property_group(&text(&property["kind"])).map_or_else(String::new, |group| {
+        crate::ledger::assurance_label(
+            crate::ledger::formal_assurance(group, &text(&property["name"]), verification),
+            checked_depth(verification),
+        )
+    })
+}
+
+/// The declared `leadsTo ... within` deadline of one property row, if it has
+/// one. A property carries `within` only when it declares a deadline
+/// (`model_skeleton` omits the key otherwise), so this is also the test for
+/// whether the Deadline column exists at all.
+fn property_deadline(property: &Value) -> Option<&Value> {
+    property.get("within").filter(|within| !within.is_null())
+}
+
 fn properties_section(properties: &[Value], checks: &[Value], verification: &Value) -> String {
+    // Conditional column: `docs/DESIGN-html-report.md` puts the Deadline column
+    // in the table only when at least one property declares a deadline, under
+    // the same rule that forbids `none` filler cells for absent requirement
+    // captions. Rendering it always with empty cells would violate the spec it
+    // implements.
+    let has_deadline = properties
+        .iter()
+        .any(|property| property_deadline(property).is_some());
     let mut rows = String::new();
     for property in properties {
+        let deadline_cell = if has_deadline {
+            property_deadline(property).map_or_else(
+                || "<td></td>".to_owned(),
+                |within| {
+                    format!(
+                        "<td><span class=\"chip fair\">within {}</span></td>",
+                        escape(&text(within))
+                    )
+                },
+            )
+        } else {
+            String::new()
+        };
         let _ = write!(
             rows,
-            "<tr><td>{}</td><td><code>{}</code></td><td>{}</td><td>{}</td></tr>",
+            "<tr><td>{}</td><td><code>{}</code>{}</td>{}<td>{}</td><td>{}</td></tr>",
             escape(&text(&property["kind"])),
             escape(&text(&property["name"])),
-            escape(&assurance(verification)),
+            requirement_caption(&property["requirement"]),
+            deadline_cell,
+            escape(&property_assurance(property, verification)),
             escape(&text(&property["body_text"]))
         );
     }
@@ -616,6 +676,10 @@ fn properties_section(properties: &[Value], checks: &[Value], verification: &Val
             escape(&source)
         );
     }
+    let empty_properties_row = format!(
+        "<tr><td colspan=\"{}\">No user properties.</td></tr>",
+        if has_deadline { 5 } else { 4 }
+    );
     format!(
         r#"
       <section class="section" id="properties">
@@ -628,7 +692,7 @@ fn properties_section(properties: &[Value], checks: &[Value], verification: &Val
         <div class="stack">
           <div class="panel table-wrap">
             <table>
-              <thead><tr><th>Kind</th><th>Name</th><th>Assurance</th><th>Body</th></tr></thead>
+              <thead><tr><th>Kind</th><th>Name</th>{}<th>Assurance</th><th>Body</th></tr></thead>
               <tbody>{}</tbody>
             </table>
           </div>
@@ -641,8 +705,13 @@ fn properties_section(properties: &[Value], checks: &[Value], verification: &Val
         </div>
       </section>
 "#,
+        if has_deadline {
+            "<th>Deadline</th>"
+        } else {
+            ""
+        },
         if rows.is_empty() {
-            "<tr><td colspan=\"4\">No user properties.</td></tr>"
+            empty_properties_row.as_str()
         } else {
             &rows
         },

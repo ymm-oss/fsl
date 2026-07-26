@@ -19,9 +19,31 @@ of JSON output actually confirmed with `fslc`.
 ```
 
 ```json
+// name_duplicate_state_variable.fsl
+{"result":"error","kind":"name","message":"duplicate state variable 'x'"}
+```
+
+```json
 // semantics_duplicate_assignment.fsl
 {"result":"error","kind":"semantics","message":"double assignment to 'x' on the same execution path"}
 ```
+
+```json
+// semantics_compose_component_parse_failure.fsl
+{"result":"error","kind":"semantics","message":"component \"semantics_compose_broken_component.fsl\" failed to parse (expected expression at semantics_compose_broken_component.fsl:7:18) at examples/gallery/errors/semantics_compose_component_parse_failure.fsl:13:3","loc":{"line":13,"column":3}}
+```
+
+`semantics_compose_component_parse_failure.fsl`, with its
+`semantics_compose_broken_component.fsl` helper, is the native↔Worker parity
+control for the kernel stage (issue #556). Its own top level parses, so the
+failure comes from resolving and lowering the component; the component's syntax
+error is not this document's own syntax error, so it stays `semantics` on both
+surfaces rather than becoming `parse`. No corpus case reached that stage
+before, which is why the Worker could classify all of it as `parse` undetected.
+The reported `loc` is the parent's `use` declaration, not the component's
+position: `loc` carries no `file`, so a component line reported against the
+parent's path pointed at whatever sat there — here, a comment (issue #567). The
+component's own path and position stay in the message.
 
 ```json
 // vacuous_contradictory_init.fsl

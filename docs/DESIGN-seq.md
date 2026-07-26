@@ -1,5 +1,13 @@
 # FSL v1.1 — `Seq<T, N>` (capacity-bounded sequence) Implementation Design
 
+Status: adopted feature design with migration-era implementation notes. The type
+and operation rationale remains useful, but current language semantics are
+governed by
+[`LANGUAGE.md`](LANGUAGE.md#5-semantics) and native transition/failure behavior by
+[`DESIGN-kernel-contract.md`](DESIGN-kernel-contract.md#transition-and-failure-semantics).
+Where this record describes the original solver/Python evaluation strategy, it is
+migration evidence rather than current implementation authority.
+
 The last v1.1 item in DESIGN-v1.md §10. It expresses "ordered bounded
 collections" such as FIFO queues and append-only logs. The design principles are
 the same as the existing ones: G1 (easy to generate), G5 (structural elimination
@@ -89,12 +97,15 @@ attached to the transition as an implicit check:
   is `"_partial_<action name>"`, loc is the expression in question, hint:
   `"guard the action with requires q.size() > 0 (or bound the index)"`.
   With a trace (it can ride on the same mechanism as ensures violations).
-- **Treatment inside requires** (evaluation order): since the evaluation of the
+- **Historical solver treatment inside requires** (evaluation order): since the evaluation of the
   requires conjunction does not short-circuit, when `requires q.size() > 0` and
   `requires q.head() == x` appear side by side, the partial_op check is performed
   only on **the transition where all requires hold** (= in the branch where the
   guard fails, head()'s garbage is treated as not read). This makes the standard
   idiom (writing the guard requires first) pass correctly.
+  This paragraph records the original lowering; it does not define current guard
+  evaluation. Current guard and transition-outcome behavior must be read from the
+  maintained language and Kernel contracts linked above.
 - **Inside invariant / reachable**: no implicit check is attached (a state
   property has no "firing"). The value of an out-of-range read is **unspecified**
   (don't-care). Present the guarded idiom

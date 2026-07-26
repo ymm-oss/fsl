@@ -1,0 +1,2 @@
+{"component":"ReplayComponent","event":"tool_call","tool":"UnauthorizedTool","mode":"suggest"}
+{"component":"ReplayComponent","event":"tool_call","tool":"AuditTool","mode":"execute"}

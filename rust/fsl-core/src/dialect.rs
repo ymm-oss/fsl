@@ -5,12 +5,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use fsl_syntax::{
-    ActionItem, AggregateKind, Annotation, Annotations, Binder, BusinessGoalBody, BusinessItem,
-    BusinessPolicyBody, Expr, GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem,
-    LValue, MetaTag, Param, PreservationItem, ProcessField, ProcessItem, ProcessTransition,
-    QualifiedName, RequirementAction, RequirementActionItem, RequirementBlockItem,
-    RequirementsItem, SpecItem, StateField, Statement, SurfaceBusiness, SurfaceDocument,
-    SurfaceGovernance, SurfaceRequirements, SurfaceSpec, TimeItem, TypeExpr, VerifyItem,
+    ActionItem, ActionTarget, AggregateKind, Annotation, Annotations, Binder, BusinessGoalBody,
+    BusinessItem, BusinessPolicyBody, Expr, GovernanceArtifactRef, GovernanceDelegateItem,
+    GovernanceItem, LValue, MapsClause, MetaTag, Param, PreservationItem, ProcessField,
+    ProcessItem, ProcessTransition, QualifiedName, RequirementAction, RequirementActionItem,
+    RequirementBlockItem, RequirementsItem, SpecItem, StateField, Statement, SurfaceBusiness,
+    SurfaceDocument, SurfaceGovernance, SurfaceRequirements, SurfaceSpec, TimeItem, TypeExpr,
+    VerifyItem,
 };
 
 use crate::{
@@ -939,6 +940,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
         items.push(SpecItem::Enum {
             name: process_enum(&process.name),
             members: process.stages.clone(),
+            member_spans: Vec::new(),
             symmetric: false,
         });
     }
@@ -1196,6 +1198,7 @@ fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
         line: span.start.line,
         column: span.start.column,
         origin: None,
+        name_resolution: false,
     }
 }
 
@@ -1344,10 +1347,31 @@ fn with_meta(item: SpecItem, metadata: Option<MetaTag>) -> SpecItem {
     }
 }
 
+/// Renders a `branches { when ... } maps <target>` correspondence target for
+/// an origin's `lowering_steps` detail (issue #528).
+fn maps_clause_text(maps: &MapsClause) -> String {
+    match &maps.target {
+        ActionTarget::Stutter => "stutter".to_owned(),
+        ActionTarget::Action(name, args) if args.is_empty() => name.clone(),
+        ActionTarget::Action(name, args) => format!(
+            "{name}({})",
+            args.iter()
+                .map(crate::expr_text)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+/// `lower_requirement_action`'s branch-split actions (`name__bN`) alongside
+/// the origin each one needs so `explain` can recover the authored action
+/// identity and each branch's guard/correspondence instead of leaking the
+/// lowered `name.bN` display form (issue #528). `None` for the single,
+/// unbranched action case — its own name already is the authored identity.
 fn lower_requirement_action(
     action: &RequirementAction,
     metadata: Option<MetaTag>,
-) -> Vec<SpecItem> {
+) -> Vec<(SpecItem, Option<OriginChain>)> {
     let ordinary = action
         .items
         .iter()
@@ -1361,16 +1385,19 @@ fn lower_requirement_action(
         RequirementActionItem::Action(_) => None,
     });
     match branches {
-        None => vec![SpecItem::Action {
-            name: action.name.clone(),
-            params: action.params.clone(),
-            items: ordinary,
-            span: action.span,
-            fair: action.fair,
-            meta: metadata.or_else(|| action.meta.clone()),
-            sync: false,
-            annotations: action.annotations.clone(),
-        }],
+        None => vec![(
+            SpecItem::Action {
+                name: action.name.clone(),
+                params: action.params.clone(),
+                items: ordinary,
+                span: action.span,
+                fair: action.fair,
+                meta: metadata.or_else(|| action.meta.clone()),
+                sync: false,
+                annotations: action.annotations.clone(),
+            },
+            None,
+        )],
         Some(branches) => branches
             .iter()
             .enumerate()
@@ -1378,16 +1405,43 @@ fn lower_requirement_action(
                 let mut items = ordinary.clone();
                 items.push(ActionItem::Requires(branch.condition.clone(), branch.span));
                 items.extend(branch.statements.iter().cloned().map(ActionItem::Statement));
-                SpecItem::Action {
-                    name: format!("{}__b{}", action.name, index + 1),
-                    params: action.params.clone(),
-                    items,
-                    span: action.span,
-                    fair: action.fair,
-                    meta: metadata.clone().or_else(|| action.meta.clone()),
-                    sync: false,
-                    annotations: action.annotations.clone(),
-                }
+                let branch_name = format!("{}__b{}", action.name, index + 1);
+                let origin = OriginChain {
+                    id: OriginId(format!(
+                        "requirements:branch:{}:{}",
+                        branch_name, branch.span.start.offset
+                    )),
+                    dialect: "requirements".to_owned(),
+                    primary: Some(OriginSite {
+                        source_file: None,
+                        span: Some(action.span),
+                        dialect: "requirements".to_owned(),
+                        declaration_path: vec![action.name.clone()],
+                    }),
+                    secondary: Vec::new(),
+                    lowering_steps: vec![LoweringStep {
+                        kind: "branch".to_owned(),
+                        detail: Some(format!(
+                            "when {} maps {}",
+                            crate::expr_text(&branch.condition),
+                            maps_clause_text(&branch.maps)
+                        )),
+                    }],
+                    generated: true,
+                };
+                (
+                    SpecItem::Action {
+                        name: branch_name,
+                        params: action.params.clone(),
+                        items,
+                        span: action.span,
+                        fair: action.fair,
+                        meta: metadata.clone().or_else(|| action.meta.clone()),
+                        sync: false,
+                        annotations: action.annotations.clone(),
+                    },
+                    Some(origin),
+                )
             })
             .collect(),
     }
@@ -1542,6 +1596,11 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
     }
     let mut items = Vec::new();
     let mut extra_annotations = Vec::new();
+    // Generated declarations (SLA `tick`, `_deadline_*`) get no source span of
+    // their own, but explain/analyze still need to tell them apart from
+    // authored declarations (issue #530): bind a `generated_only` origin for
+    // each, applied once `resolve_stage_items` has built the registry below.
+    let mut extra_origins: Vec<(String, OriginChain)> = Vec::new();
     for (name, span) in &entities {
         let count = instance_bounds.get(name).ok_or_else(|| {
             core_error(
@@ -1577,6 +1636,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         items.push(SpecItem::Enum {
             name: process_enum(&process.process.name),
             members: process.process.stages.clone(),
+            member_spans: Vec::new(),
             symmetric: false,
         });
     }
@@ -1737,7 +1797,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             match declaration {
                 RequirementBlockItem::Action(action) => {
                     let lowered = lower_requirement_action(action, metadata.clone());
-                    for item in &lowered {
+                    for (item, origin) in &lowered {
                         if let SpecItem::Action { name, span, .. } = item {
                             extra_annotations.push((
                                 crate::action_target(name),
@@ -1761,9 +1821,12 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                                 extra_annotations
                                     .push((crate::action_target(name), annotation.clone()));
                             }
+                            if let Some(origin) = origin {
+                                extra_origins.push((crate::action_target(name), origin.clone()));
+                            }
                         }
                     }
-                    items.extend(lowered);
+                    items.extend(lowered.into_iter().map(|(item, _)| item));
                 }
                 RequirementBlockItem::Property(property) => {
                     let lowered = with_meta(property.clone(), metadata.clone());
@@ -1811,7 +1874,12 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         }
     }
     for action in standalone_actions {
-        items.extend(lower_requirement_action(action, None));
+        for (item, origin) in lower_requirement_action(action, None) {
+            if let (SpecItem::Action { name, .. }, Some(origin)) = (&item, origin) {
+                extra_origins.push((crate::action_target(name), origin));
+            }
+            items.push(item);
+        }
     }
     if !deadlines.is_empty() && time_items.is_none() {
         return Err(core_error(
@@ -2012,6 +2080,18 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             sync: false,
             annotations: Annotations::default(),
         });
+        let mut tick_origin = OriginChain::generated_only("requirements:sla-tick", "requirements");
+        if !urgent.is_empty() {
+            // The `urgent` action names are consumed structurally into
+            // `requires not(<enabled ...>)` above and are not otherwise
+            // recoverable from the Kernel. The `urgency_freeze` vacuity lane
+            // needs them to name the actions that freeze time.
+            tick_origin.lowering_steps.push(crate::LoweringStep {
+                kind: crate::URGENT_ACTIONS_STEP.to_owned(),
+                detail: Some(urgent.join(",")),
+            });
+        }
+        extra_origins.push((crate::action_target("tick"), tick_origin));
         for (
             index,
             (name, bound, span, metadata, requirement_id, requirement_text, requirement_span),
@@ -2057,6 +2137,13 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                     span: *requirement_span,
                 },
             ));
+            extra_origins.push((
+                crate::property_target("invariant", &generated_name),
+                OriginChain::generated_only(
+                    format!("requirements:sla-deadline:{generated_name}"),
+                    "requirements",
+                ),
+            ));
             items.push(SpecItem::Invariant {
                 name: generated_name,
                 expr: Box::new(expression),
@@ -2079,7 +2166,10 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         })
         .map(|item| kpi_projection(item, &stage_processes))
         .collect::<Result<Vec<_>, _>>()?;
-    let origins = resolve_stage_items(&mut items, &stage_processes, "requirements")?;
+    let mut origins = resolve_stage_items(&mut items, &stage_processes, "requirements")?;
+    for (target, origin) in extra_origins {
+        origins.bind(target, origin);
+    }
     let mut kernel = crate::lower_direct_spec_with_origins(
         SurfaceSpec {
             name: requirements.name,
@@ -2198,64 +2288,14 @@ pub fn lower_governance(governance: SurfaceGovernance) -> Result<KernelSpec, Cor
     })
 }
 
-fn lower_catalog_sentinel(name: String, prefix: &str, id: &str) -> Result<KernelSpec, CoreError> {
-    let span = zero_span();
-    let state_name = format!("_{prefix}_ok");
-    let action_name = format!("_{prefix}_noop");
-    let invariant_name = format!("_{prefix}_catalog_ok");
-    let metadata = meta(id, format!("{prefix} catalog {name}"));
-    lower_direct_spec(SurfaceSpec {
-        name,
-        meta: None,
-        items: vec![
-            SpecItem::State(vec![StateField::generated(
-                state_name.clone(),
-                TypeExpr::Bool,
-                span,
-            )]),
-            SpecItem::Init {
-                statements: vec![Statement::Assign {
-                    target: LValue::Var(state_name.clone()),
-                    value: Expr::Bool(true),
-                    span,
-                }],
-                meta: None,
-                annotations: Annotations::default(),
-            },
-            SpecItem::Action {
-                name: action_name,
-                params: Vec::new(),
-                items: vec![ActionItem::Requires(Expr::Bool(false), span)],
-                span,
-                fair: false,
-                meta: metadata.clone(),
-                sync: false,
-                annotations: Annotations::default(),
-            },
-            SpecItem::Invariant {
-                name: invariant_name,
-                expr: Box::new(Expr::Var(state_name)),
-                span,
-                meta: metadata,
-                annotations: Annotations::default(),
-            },
-            SpecItem::Terminal {
-                expr: Box::new(Expr::Bool(true)),
-                span,
-            },
-        ],
-    })
-}
-
 /// Lower a database compatibility document to its executable catalog kernel.
 ///
 /// # Errors
 ///
-/// Returns [`CoreError`] if the generated kernel catalog is invalid.
+/// Returns [`CoreError`] if the lowered kernel catalog is invalid.
 pub fn lower_db(system: &fsl_syntax::DbSystem) -> Result<KernelSpec, CoreError> {
-    let source = crate::db_kernel_source(system);
-    let spec = fsl_syntax::parse_surface_spec(&source)?;
-    lower_direct_spec(spec)
+    let (surface, origins) = crate::db::lower_db_surface(system);
+    crate::lower_direct_spec_with_origins(surface, origins)
 }
 
 /// Lower a Functional-DDD document to its executable catalog kernel.
@@ -2268,13 +2308,460 @@ pub fn lower_domain(domain: &fsl_syntax::DomainSpec) -> Result<KernelSpec, CoreE
     crate::lower_direct_spec_with_origins(surface, origins)
 }
 
-/// Lower an AI hard-contract document to its executable catalog kernel.
+/// The five documented `ai_component` `check hard { rule <Name>; }` rules
+/// (`docs/DESIGN-ai-hard.md` "Static Rules"). Naming any other rule is a
+/// check-time error (`docs/LANGUAGE.md` §13.6).
+const AI_HARD_RULES: [&str; 5] = [
+    "tool_authority",
+    "human_approval_required",
+    "forbidden_tool_blocked",
+    "tool_schema_declared",
+    "tool_precondition_declared",
+];
+
+/// Name of the generated `forbidden_tool_blocked` invariant for one tool.
+/// Shared with `fsl_tools::check_ai`, which must translate a kernel
+/// invariant-violation name back to the failed hard-contract rule and tool.
+#[must_use]
+pub fn ai_forbidden_invariant_name(tool_name: &str) -> String {
+    format!("ai_forbidden_tool_not_executed__{}", ai_safe(tool_name))
+}
+
+/// Name of the generated `human_approval_required` invariant for one tool.
+/// Shared with `fsl_tools::check_ai` (see [`ai_forbidden_invariant_name`]).
+#[must_use]
+pub fn ai_approval_invariant_name(tool_name: &str) -> String {
+    format!("ai_approval_before_execute__{}", ai_safe(tool_name))
+}
+
+fn ai_safe(name: &str) -> String {
+    let mut out = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if out.is_empty() {
+        out.push('x');
+    } else if out.starts_with(|ch: char| ch.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    out
+}
+
+fn ai_tool_member(name: &str) -> String {
+    format!("tool_{}", ai_safe(name))
+}
+
+fn ai_span(loc: fsl_syntax::AiLoc) -> fsl_syntax::Span {
+    let position = fsl_syntax::SourcePos {
+        offset: 0,
+        line: loc.line,
+        column: loc.column,
+    };
+    fsl_syntax::Span {
+        start: position,
+        end: position,
+    }
+}
+
+/// Validate and resolve `check hard { rule ...; }`, defaulting to all five
+/// rules when the block is omitted (`docs/LANGUAGE.md` §13.6).
 ///
 /// # Errors
 ///
-/// Returns [`CoreError`] if the generated kernel catalog is invalid.
+/// Returns [`CoreError`] when a named rule is not one of [`AI_HARD_RULES`].
+fn ai_rule_set(component: &fsl_syntax::AiComponent) -> Result<BTreeSet<String>, CoreError> {
+    let names = if component.check.rules.is_empty() {
+        AI_HARD_RULES
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect::<Vec<_>>()
+    } else {
+        component
+            .check
+            .rules
+            .iter()
+            .map(|rule| rule.name.clone())
+            .collect::<Vec<_>>()
+    };
+    for name in &names {
+        if !AI_HARD_RULES.contains(&name.as_str()) {
+            let loc = component.check.loc.unwrap_or(component.loc);
+            return Err(core_error(
+                format!("unknown ai hard-contract rule '{name}'"),
+                ai_span(loc),
+            ));
+        }
+    }
+    Ok(names.into_iter().collect())
+}
+
+/// Tool-authority sets shared by lowering (`lower_ai_component`) and the
+/// static/kernel-translated hard-contract findings (`fsl_tools::check_ai`),
+/// so both compute exactly the same executable/approval-required/forbidden
+/// membership instead of drifting apart.
+#[derive(Debug)]
+pub struct AiToolSets<'a> {
+    pub suggestible: BTreeSet<&'a str>,
+    pub executable: BTreeSet<&'a str>,
+    pub approval_required: BTreeSet<&'a str>,
+    pub forbidden: BTreeSet<&'a str>,
+}
+
+#[must_use]
+pub fn ai_tool_sets(component: &fsl_syntax::AiComponent) -> AiToolSets<'_> {
+    AiToolSets {
+        suggestible: component
+            .authority
+            .may_suggest
+            .iter()
+            .map(|rule| rule.name.as_str())
+            .collect(),
+        executable: component
+            .authority
+            .may_execute
+            .iter()
+            .chain(&component.authority.requires_human_approval)
+            .map(|rule| rule.name.as_str())
+            .collect(),
+        approval_required: component
+            .authority
+            .requires_human_approval
+            .iter()
+            .map(|rule| rule.name.as_str())
+            .chain(
+                component
+                    .tools
+                    .iter()
+                    .filter(|tool| tool.irreversible)
+                    .map(|tool| tool.name.as_str()),
+            )
+            .collect(),
+        forbidden: component
+            .authority
+            .forbidden
+            .iter()
+            .map(|rule| rule.name.as_str())
+            .collect(),
+    }
+}
+
+fn ai_action(
+    name: String,
+    statement: Statement,
+    span: fsl_syntax::Span,
+    meta_id: &str,
+    meta_text: String,
+) -> SpecItem {
+    SpecItem::Action {
+        name,
+        params: Vec::new(),
+        items: vec![ActionItem::Statement(statement)],
+        span,
+        fair: false,
+        meta: meta(meta_id, meta_text),
+        sync: false,
+        annotations: Annotations::default(),
+    }
+}
+
+fn ai_index_assign(map_name: &str, index: Expr, value: Expr, span: fsl_syntax::Span) -> Statement {
+    Statement::Assign {
+        target: LValue::Index(map_name.to_owned(), index),
+        value,
+        span,
+    }
+}
+
+/// Lower an AI hard-contract document to its executable catalog kernel.
+///
+/// Mirrors the frozen reference's `expand_ai_component`
+/// (`src/fslc/ai_expand.py`) behaviorally: a `Tool` enum over declared tools
+/// (declaration order); `human_approved` / `tool_executed` / `tool_suggested:
+/// Map<Tool, Bool>` and `fallback_required: Bool` state; generated
+/// `suggest_*` / `approve_*` / `execute_*` / `fallback_*` actions (a
+/// forbidden tool gets no `execute_*` action, an approval-required
+/// executable tool's `execute_*` action carries `requires
+/// human_approved[tool]`); and, gated by the resolved rule set, generated
+/// `ai_forbidden_tool_not_executed__<Tool>` / `ai_approval_before_execute__
+/// <Tool>` invariants.
+///
+/// # Errors
+///
+/// Returns [`CoreError`] when `check hard { rule ... }` names an unknown rule
+/// or the generated kernel catalog is invalid.
+#[allow(clippy::too_many_lines)]
 pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSpec, CoreError> {
-    lower_catalog_sentinel(component.name, "ai", "AI")
+    let rules = ai_rule_set(&component)?;
+    let span = zero_span();
+
+    let members = component
+        .tools
+        .iter()
+        .map(|tool| (tool.name.as_str(), ai_tool_member(&tool.name)))
+        .collect::<BTreeMap<_, _>>();
+    let tool_by_name = component
+        .tools
+        .iter()
+        .map(|tool| (tool.name.as_str(), tool))
+        .collect::<BTreeMap<_, _>>();
+    let member_expr = |tool_name: &str| Expr::Var(members[tool_name].clone());
+    let tool_span = |tool_name: &str| {
+        tool_by_name
+            .get(tool_name)
+            .and_then(|tool| tool.loc)
+            .map_or(span, ai_span)
+    };
+
+    let mut items = vec![
+        SpecItem::Enum {
+            name: "Tool".to_owned(),
+            members: component
+                .tools
+                .iter()
+                .map(|tool| members[tool.name.as_str()].clone())
+                .collect(),
+            member_spans: Vec::new(),
+            symmetric: false,
+        },
+        SpecItem::State(vec![
+            StateField::generated(
+                "human_approved",
+                TypeExpr::Map(
+                    Box::new(TypeExpr::Name("Tool".to_owned())),
+                    Box::new(TypeExpr::Bool),
+                ),
+                span,
+            ),
+            StateField::generated(
+                "tool_executed",
+                TypeExpr::Map(
+                    Box::new(TypeExpr::Name("Tool".to_owned())),
+                    Box::new(TypeExpr::Bool),
+                ),
+                span,
+            ),
+            StateField::generated(
+                "tool_suggested",
+                TypeExpr::Map(
+                    Box::new(TypeExpr::Name("Tool".to_owned())),
+                    Box::new(TypeExpr::Bool),
+                ),
+                span,
+            ),
+            StateField::generated("fallback_required", TypeExpr::Bool, span),
+        ]),
+        SpecItem::Init {
+            statements: vec![
+                Statement::ForAll {
+                    binder: typed_binder("t", "Tool"),
+                    statements: vec![
+                        ai_index_assign(
+                            "human_approved",
+                            Expr::Var("t".to_owned()),
+                            Expr::Bool(false),
+                            span,
+                        ),
+                        ai_index_assign(
+                            "tool_executed",
+                            Expr::Var("t".to_owned()),
+                            Expr::Bool(false),
+                            span,
+                        ),
+                        ai_index_assign(
+                            "tool_suggested",
+                            Expr::Var("t".to_owned()),
+                            Expr::Bool(false),
+                            span,
+                        ),
+                    ],
+                    span,
+                },
+                Statement::Assign {
+                    target: LValue::Var("fallback_required".to_owned()),
+                    value: Expr::Bool(false),
+                    span,
+                },
+            ],
+            meta: None,
+            annotations: Annotations::default(),
+        },
+    ];
+
+    let AiToolSets {
+        suggestible,
+        executable,
+        approval_required,
+        forbidden,
+    } = ai_tool_sets(&component);
+
+    let mut generated_names = Vec::new();
+    for &tool_name in &suggestible {
+        let name = format!("suggest_{}", ai_safe(tool_name));
+        generated_names.push(name.clone());
+        items.push(ai_action(
+            name,
+            ai_index_assign(
+                "tool_suggested",
+                member_expr(tool_name),
+                Expr::Bool(true),
+                tool_span(tool_name),
+            ),
+            tool_span(tool_name),
+            "AI-AUTHORITY",
+            format!("{} may suggest {tool_name}", component.name),
+        ));
+    }
+    for &tool_name in approval_required.difference(&forbidden) {
+        let name = format!("approve_{}", ai_safe(tool_name));
+        generated_names.push(name.clone());
+        items.push(ai_action(
+            name,
+            ai_index_assign(
+                "human_approved",
+                member_expr(tool_name),
+                Expr::Bool(true),
+                tool_span(tool_name),
+            ),
+            tool_span(tool_name),
+            "AI-HUMAN-APPROVAL",
+            format!("human approval token is finite state for {tool_name}"),
+        ));
+    }
+    for &tool_name in executable.difference(&forbidden) {
+        let name = format!("execute_{}", ai_safe(tool_name));
+        generated_names.push(name.clone());
+        let mut action_items = Vec::new();
+        if approval_required.contains(tool_name) {
+            action_items.push(ActionItem::Requires(
+                Expr::Index(
+                    Box::new(Expr::Var("human_approved".to_owned())),
+                    Box::new(member_expr(tool_name)),
+                ),
+                tool_span(tool_name),
+            ));
+        }
+        action_items.push(ActionItem::Statement(ai_index_assign(
+            "tool_executed",
+            member_expr(tool_name),
+            Expr::Bool(true),
+            tool_span(tool_name),
+        )));
+        let text = if approval_required.contains(tool_name) {
+            format!(
+                "{} may execute {tool_name} after human approval",
+                component.name
+            )
+        } else {
+            format!("{} may execute {tool_name}", component.name)
+        };
+        items.push(SpecItem::Action {
+            name,
+            params: Vec::new(),
+            items: action_items,
+            span: tool_span(tool_name),
+            fair: false,
+            meta: meta("AI-TOOL-EXECUTE", text),
+            sync: false,
+            annotations: Annotations::default(),
+        });
+    }
+    if generated_names.is_empty() {
+        generated_names.push("observe_component".to_owned());
+        items.push(ai_action(
+            "observe_component".to_owned(),
+            Statement::Assign {
+                target: LValue::Var("fallback_required".to_owned()),
+                value: Expr::Var("fallback_required".to_owned()),
+                span,
+            },
+            span,
+            "AI-OBSERVE",
+            format!(
+                "{} has no executable hard-contract transition",
+                component.name
+            ),
+        ));
+    }
+
+    if rules.contains("forbidden_tool_blocked") {
+        for &tool_name in &forbidden {
+            let name = ai_forbidden_invariant_name(tool_name);
+            generated_names.push(name.clone());
+            items.push(SpecItem::Invariant {
+                name,
+                expr: Box::new(Expr::Not(Box::new(Expr::Index(
+                    Box::new(Expr::Var("tool_executed".to_owned())),
+                    Box::new(member_expr(tool_name)),
+                )))),
+                span: tool_span(tool_name),
+                meta: meta(
+                    "AI-FORBIDDEN",
+                    format!("{tool_name} is forbidden and cannot be executed"),
+                ),
+                annotations: Annotations::default(),
+            });
+        }
+    }
+    if rules.contains("human_approval_required") {
+        for &tool_name in approval_required.difference(&forbidden) {
+            let name = ai_approval_invariant_name(tool_name);
+            generated_names.push(name.clone());
+            items.push(SpecItem::Invariant {
+                name,
+                expr: Box::new(Expr::Binary {
+                    op: "=>".to_owned(),
+                    left: Box::new(Expr::Index(
+                        Box::new(Expr::Var("tool_executed".to_owned())),
+                        Box::new(member_expr(tool_name)),
+                    )),
+                    right: Box::new(Expr::Index(
+                        Box::new(Expr::Var("human_approved".to_owned())),
+                        Box::new(member_expr(tool_name)),
+                    )),
+                }),
+                span: tool_span(tool_name),
+                meta: meta(
+                    "AI-HUMAN-APPROVAL",
+                    format!("{tool_name} can execute only after human approval"),
+                ),
+                annotations: Annotations::default(),
+            });
+        }
+    }
+
+    for fallback in &component.fallback {
+        let name = format!("fallback_{}", ai_safe(&fallback.reason));
+        generated_names.push(name.clone());
+        let fallback_span = ai_span(fallback.loc);
+        items.push(ai_action(
+            name,
+            Statement::Assign {
+                target: LValue::Var("fallback_required".to_owned()),
+                value: Expr::Bool(true),
+                span: fallback_span,
+            },
+            fallback_span,
+            "AI-FALLBACK",
+            format!("{} requires {}", fallback.reason, fallback.target),
+        ));
+    }
+
+    items.push(SpecItem::Terminal {
+        expr: Box::new(Expr::Bool(false)),
+        span,
+    });
+
+    lower_direct_spec(SurfaceSpec {
+        name: component.name,
+        meta: None,
+        items,
+    })
 }
 
 /// Extract executable acceptance and must-forbid traces from requirements.

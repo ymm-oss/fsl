@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// MODEL-PERSIST-003: Every accepted write appends the logical value to a finite log.
+spec EventLogPersistence {
+  const CAP = 4
+  type Value = 0..2
+  state { value: Value, log: Seq<Value, CAP> }
+  init { value = 0  log = Seq {} }
+  action write(v: Value) { requires log.size() < CAP  value = v  log = log.push(v) }
+  invariant LatestEventMatchesValue {
+    log.size() > 0 => value == log.at(log.size() - 1)
+  }
+  reachable CanChange { value == 2 }
+}

@@ -5,6 +5,1198 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-07-27
+
+### Changed
+- Pull requests into `main` now run the complete Linux product evidence — `rust workspace`
+  and `WASM` — instead of deferring it to after the merge. Only the cross-platform
+  `native Z3 4.16` matrix (macOS, Windows) stays post-merge under `FSL_OPTIMISTIC_CI`. The
+  bounded `merge readiness` lane is kept as a sub-minute fail-fast check; adding
+  `--all-targets` to its `cargo check` was tried and reverted after measuring 12m42s in
+  CI, since `rust workspace` now compiles and runs those targets on the same pull
+  request. 103 of the repository's 124
+  integration test files live in `fslc`, `fsl-tools`, `fsl-verifier` and `fsl-lsp`, none of
+  which `merge readiness` runs, so that evidence only reached `main` post-merge
+  (`docs/DESIGN-ci.md`).
+
+### Fixed
+- `fslc ai check` now rejects duplicate `dataset` and `evaluator` declaration
+  names, which the frozen reference has always rejected
+  (`src/fslc/ai_project.py:237-241`). Native validated only three of the five
+  declaration kinds, so a project declaring `dataset Shared` twice exited 0 and
+  reported `datasets: ['Shared', 'Shared']`. Because a `dataset X` reference
+  resolves by name, two declarations sharing one made resolution depend on
+  declaration order — the false green was silently picking a winner, not merely
+  echoing a name twice (#571).
+- Native now emits `kind:"name"` for name-resolution failures instead of
+  collapsing them into `semantics`, making every member of the
+  `docs/DESIGN-v1.md` §7.2 closed set reachable. `duplicate state variable`,
+  `duplicate enum member`, `duplicate def`, `duplicate parameter in def`,
+  `def ... parameter is shadowed by binder`, and `undefined predicate` were all
+  reported as `semantics`, sending an agent following the §8 repair protocol
+  down the wrong branch. `CoreError` and `ModelError` now carry the
+  classification the frontend already determined, and it survives through
+  `SpecLoadError` to the one renderer — the same direction as #484, rather than
+  adding patterns to the message-string classifier, which has no text these
+  diagnostics share and would silently reclassify them on any wording change.
+  Messages are byte-identical and no other `kind` moves.
+  `examples/gallery/errors/name_duplicate_state_variable.fsl` is the corpus
+  golden the classification never had; its absence is why this survived #484 and
+  #555. Its `loc` now names the redeclaration rather than the first binding:
+  the diagnostic carried no span of its own, so it fell back to the
+  message-derived heuristic, which finds the *earlier* `x` and pointed a repair
+  agent at the innocent declaration (#565).
+- A `duplicate enum member` diagnostic now points at the repeated member rather
+  than the first declaration of that name. `SpecItem::Enum` carried no
+  per-member span, so the report fell back to `source_diagnostic`'s
+  message-derived heuristic — the first token matching the quoted name — which
+  for a *duplicate* is the earlier, innocent declaration by construction. For
+  `enum E { A, B } enum F { B, C }` it named `B` in `E` (2:15) instead of the
+  redeclaration in `F` (3:12). A `loc` that exists but names the wrong construct
+  is worse than none: `docs/DESIGN-v1.md` G2 assumes the position is correct.
+  `SpecItem::Enum` now carries `member_spans` positionally parallel to
+  `members`, the same shape `SpecItem::Struct` gained in #555 and the same the
+  domain surface already used, and the diagnostic attaches the offending
+  member's own span (#576).
+- The native<->Worker parity corpus's `unsupportedDocuments` exclusions in
+  `rust/fsl-wasm/test-browser.mjs` are now self-retiring. The map excluded 32
+  refinement/agent/causal documents from the comparison and recorded only a
+  document type, so if the Worker ever gained a verb for one of them the
+  exclusion would keep suppressing the comparison forever -- the shape that
+  left #556's divergent path with zero corpus coverage. Each entry now carries
+  the measured reason it holds, and every excluded document is probed on the
+  Worker alone: the recorded premise is that the Worker cannot analyze it, and
+  the day that stops being true the harness fails and names the entry to
+  remove. The compared-pair count is unchanged at 351 -- no exclusion was
+  retired and no document newly compared -- and the run now also reports
+  `exclusionProbes`. This stays a capability exclusion, not a
+  tolerated-difference allowlist: the envelopes are still not compared for
+  these documents and no verdict, location, or exit-code difference is
+  allowlisted (#568).
+- The 28 `refinement`-typed entries in `rust/fsl-wasm/test-browser.mjs`'s
+  `unsupportedDocuments` exclusion map are retired; the compared native<->Worker
+  parity corpus grows from 359 to 415 cases and `exclusionProbes` drops from 32
+  to 4 (agent + 3 causal only). The exclusion premise was measured stale: #574
+  gave native and the Worker one shared classifier (`kernel_load_error`) for a
+  document whose top level parses but is not Kernel-shaped, so `check`/`verify`
+  on every refinement document in the corpus now produce byte-identical
+  `semantics`/"spec has no state block" envelopes on both surfaces -- the
+  exclusion was suppressing zero divergence. `specs/cart_refines.fsl` is now
+  asserted by name to remain a compared parity case, the same way
+  `duplicateWriteCase`/`governanceErrorCase` are, so a future silent
+  re-exclusion fails loudly instead of only showing up as a quiet drop in
+  `parityCases.length` (#577).
+- Every parity-corpus exclusion is now checked to have native answer
+  non-`error`, before the Worker launches. This closes the blindness that let
+  the 28 retired entries go stale: #568's probe tests only the *Worker* side
+  (`result !== "error"`), which detects agreement only when native answers
+  non-`error` — agreement then forces the Worker non-`error` too. Native
+  answered `error` for all 28 refinement documents, so two sides erroring
+  looked identical whether or not the errors matched, and the probe stayed
+  green for weeks. Native answers non-`error` for all 4 surviving exclusions
+  (`ok` for agent, `causal_model_checked` for the 3 causal), so the cheap
+  Worker-only probe is sound for them — and the day an exclusion is added
+  whose native side errors, this assertion names it instead of silently
+  reverting the corpus to that blind state. Full envelope comparison was
+  evaluated and rejected: the causal envelope carries no `versions` block, so
+  `validateEnvelope` throws before any comparison, which is a normalizer
+  rejection rather than a verdict. The assertion runs in the candidate loop
+  rather than beside the Worker probe because it depends on nothing but
+  native, turning a ~6-minute failure into a sub-second one (#577).
+- The browser parity harness no longer embeds a developer's absolute path.
+  `rust/fsl-wasm/test-browser.mjs` hardcoded one machine's
+  `/Users/<name>/Library/Caches/ms-playwright/chromium_headless_shell-1208/...`
+  Chrome, the only committed line in the repository containing an absolute home
+  path, which `AGENTS.md` forbids. Playwright installs each build under its own
+  version directory and has changed the internal layout between them — both
+  `chrome-mac/headless_shell` and
+  `chrome-headless-shell-<platform>/chrome-headless-shell` exist on a machine
+  with two builds installed — so the version, the platform directory, and the
+  binary name are all discovered rather than spelled out, newest build first
+  (#583).
+- A dropped or half-open Chrome DevTools Protocol connection no longer hangs
+  the browser gate forever. `cdp()` returned a promise that only the message
+  listener could ever settle, with no timeout and no socket `close`/`error`
+  handler, so a response that never arrived hung Node indefinitely; the
+  surrounding `for (attempt < 360)` loop is not a bound when a single `await`
+  inside it never returns. Because the hang left the process to be killed
+  externally, the `finally` that terminates Chrome and removes the profile
+  directory never ran: an orphaned `chrome-headless-shell` (parent gone,
+  4h13m old) and seven leaked profile directories were measured on one machine,
+  and an orphan over two hours old blocked a later gate. `cdp()` now times out
+  naming the method, and both socket `close` and `error` reject every
+  outstanding request, so the failure is loud and the cleanup runs (#584).
+- `rust/fsl-wasm/web/cases.mjs` no longer claims its smoke cases are compared
+  against native. The native comparison keyed on them (`nativeVerdict`) was
+  removed in `d30f456` when the corpus-wide parity run replaced it, but the
+  now-unused `import { cases }` in `test-browser.mjs` and the header comment
+  promising "the parity comparison stays honest" both survived, so the file
+  documented a check that no longer existed. The import is removed and the
+  comment states what is true: these 9 inline sources are Worker smoke cases
+  checked in the browser against their own `expected`, and the 415-case corpus
+  comparison supersedes the removed one (#585).
+- A kernel-stage failure inside a `use ... from` component now reports the
+  parent's `use` declaration as its `loc`, and names the component's own path
+  and position in the message. The two used to be mixed: the path came from the
+  parent (`source_file`) while the line and column came from the component's
+  parser, so `check` on
+  `examples/gallery/errors/semantics_compose_component_parse_failure.fsl`
+  reported `…:7:18` — and line 7 of that file is a comment. A location in the
+  wrong file is worse than none, and `docs/DESIGN-v1.md` G2 requires the output
+  JSON alone to say where the problem is. `loc` is `{line, column}` with no
+  `file` in all five of its `docs/DESIGN-v1.md` examples, so it can only mean a
+  position in the file the envelope is about; the `use` declaration is that
+  position, and it is also the line to look at first. The message now reads
+  `component "<component>" failed to parse (<inner> at <component>:<l>:<c>) at
+  <parent>:<use line>:<use column>`, naming both files explicitly. An
+  unreadable component is re-anchored the same way, instead of reporting `1:1`.
+  Native and the browser Worker share the loader, so both return the identical
+  string; the file is a parity corpus case, so
+  `./tools/check-native-integration.sh` checks that on every run (#567).
+- The fsl-ai project check's unexecutable-`require` spec error (#542) now
+  carries a `loc` pointing at the offending clause's own line and column.
+  `rust/fsl-syntax/src/ai_project.rs` tracked no positions at all, so the error
+  named the declaration and slice but no position, breaking
+  `docs/DESIGN-v1.md` §7.2's guarantee that every `parse` error has one. Block
+  bodies and their statement lines now carry their char offset through
+  `top_blocks`/`top_lines`, each metric/observed requirement records the
+  position of the clause that produced it, and both `fslc ai check` and the
+  `fslc check` dispatch emit it. A clause nested in a `slice` reports its own
+  line, not the enclosing block's. Which projects are accepted is unchanged
+  (#562, partial -- see below).
+- **Not fixed, recorded:** an unknown *non-*`require` line inside a declaration
+  body is still silently ignored, so acceptance still turns on the line's first
+  word. Closing that requires deciding a closed body grammar, and no current
+  source specifies one: the frozen `src/fslc/ai_project.py` ignores unrecognized
+  lines by construction (an `if`/`elif` chain with no `else`) and downgrades an
+  unparseable `require` to `kind="inconclusive"` rather than erroring;
+  `docs/LANGUAGE.md` and `skills/fsl/reference.md` state only the `require` rule
+  #542 added; and `skills/fsl/reference.md` documents unvalidated block bodies
+  as intended for `ai_action`/`retriever`/`trust_boundary`/`authority`. The one
+  corpus project file additionally uses free-form predicate lines
+  (`language in ["ja", "en"]`, `condition output.claims not_supported_by
+  retrieved.sources`) that both implementations store verbatim and never parse
+  (#562).
+- **Breaking (input).** `true`, `false`, and `none` are now rejected as
+  declaration names; a specification that used one will stop checking. They
+  always resolve to the literal in an expression, so a declaration with one of
+  those names was unreadable from every expression — and the misreading was
+  silent, not an error. `state { true: Bool }` with
+  `invariant AlwaysHolds { true }` returned `ok` from `check`, `verified` from
+  `verify`, and **`proved`** from `verify --engine explicit`, while
+  `init { true = false }` assigned a variable nothing could read: the author
+  read "the variable holds" and the verifier proved the literal. All three
+  engines agreed, so symbolic/concrete/BFS agreement did not catch it.
+  `none` appeared to be rejected already, but only incidentally — the error came
+  from Option-type inference failing on a bare `none`, so
+  `state { none: Bool, slot: Option<Bool> }` with `slot = none` checked `ok` and
+  silently assigned the literal. The check now covers the specification name,
+  `const`, `def` and its parameters, `type`, `enum` and its members, `struct`
+  and its fields, state variables, actions and their parameters, properties
+  (including `leadsTo`), quantifier and aggregate binders, and `is some(x)`
+  pattern bindings. The reserved set is derived from the native expression
+  parser rather than copied from the frozen reference: only those three
+  identifiers are matched unconditionally as literals, so `count`, `sum`,
+  `stage`, `in`, `is`, `where`, `old`, `abs`, `and`, and `or` remain valid names
+  and every `.fsl` under `specs/` and `examples/` still checks unchanged.
+  The diagnostic is `kind: "semantics"` with a `loc`; `docs/DESIGN-v1.md` §7.2
+  puts it in the `name` class, which native does not yet emit anywhere (#565)
+  (#570).
+- `fslc analyze` on a `.toml` project manifest now emits the same TSG
+  vocabulary a standalone file emits for the same source. The manifest loop
+  built each layer with `fsl_tools::build_tsg` alone, which only sees the
+  lowered `KernelModel`, so none of the source-only kinds ever appeared on that
+  path — `acceptance`/`forbidden` scenario nodes with their `covers` and
+  `starts_with`/`precedes` edges, and `control` catalog nodes — and the graph
+  vocabulary silently depended on which input form named the spec. Each layer
+  now runs the same source-level enrichment, on its own file
+  and its unprefixed graph, so `<layer>:` prefixing still applies to
+  enrichment-added nodes and two layers declaring the same id stay two nodes.
+  No ordering change was needed: `Builder::build` drops a `covers` edge whose
+  target has no node yet and runs first, but the edges it computes come from
+  `KernelModel::requirement_targets`, which enumerates only `init`, `action:*`,
+  and `property:*` targets and can never name a scenario or a control, and
+  every enrichment-added edge has both endpoints created by the enrichment
+  itself.
+  Verdicts and exit codes are unaffected, and no review finding changes — the
+  manifest path accepts only `--projection traceability_graph`, so no structural
+  detector runs there at all (#558).
+- Native `fslc ai check` on an fsl-ai project now emits the six fields the
+  frozen reference's `analyze_ai_project` emits and native omitted:
+  `ai_project`, `assumptions`, `datasets`, `dialect`, `evaluators`, and
+  `failure_modes`. `evaluators` and `failure_modes` were not merely
+  unprojected — the Rust project parser did not descend into `evaluator` /
+  `failure_mode` blocks at all, so the data did not exist; it now records their
+  names, the only thing the reference projects. `skills/fsl/reference.md`
+  already documented `failure_mode` as listed under `failure_modes`, so the
+  skill AI agents read promised output native had never produced; the skill was
+  right and the implementation moved to match it. Native's `ai check` output
+  now equals the frozen reference on all 13 of its keys, and
+  `tools/check_rust_phase3_commands.py`'s `ai-project-check` projection — which
+  compared only six of them, and is why the gap went unnoticed — now compares
+  the whole set (#563).
+- `fslc html`'s property table now renders the "Deadline" column
+  `docs/DESIGN-html-report.md` specifies. `grep -ci deadline
+  rust/fsl-tools/src/html.rs` was 0: the caption half of that design paragraph
+  landed with #525 and this was its unimplemented remainder, so a
+  `leadsTo ... within` deadline was invisible in the report. The column is
+  conditional, as the same paragraph's no-`none`-filler rule requires — it
+  appears only when some property declares a deadline, a property that declares
+  none gets an empty cell rather than a filler, and a spec with no deadline
+  anywhere renders no column at all. `explain`'s `skeleton` properties now also
+  carry `within` for a `leadsTo ... within`, additively and only when declared,
+  matching the frozen reference's `_property_skeleton` (#564).
+- **Breaking (exit code).** `fslc mutate` on a spec whose baseline already
+  fails now exits 1 instead of 0. `mutate` re-emits the baseline `verify`
+  envelope verbatim when the baseline does not verify, but derived its exit
+  code from `result == "error"` alone, so every other non-success verdict fell
+  through to 0 and `result:"violated"` returned a green exit — a mutation score
+  is meaningless over a spec that already fails, and a gate reading only the
+  exit code saw a pass. `docs/LANGUAGE.md`'s exit-code table maps `violated`
+  to 1 with no per-command exemption, and `scenarios`/`testgen` re-emit the
+  same envelope and already exited 1. The status is now a total match over the
+  results a mutation run can carry (`mutate_exit_status`): `mutated`/
+  `verified`/`proved` → 0, `violated`/`reachable_failed`/`unknown_cti`/
+  `unknown_budget` → 1, `error` → the code the envelope was already classified
+  with, and anything unmapped → 3 rather than silently 0. Mapping the whole
+  vocabulary also closed a second reachable false green in the same command:
+  `--from <unreadable file>` returned `result:"error"`, `kind:"io"` with exit 0
+  and now exits 2 (#554).
+- Native `fslc mutate` now defaults to 200 built-in mutants instead of 100,
+  matching the `max_mutants` default its own published CLI contract
+  (`rust/fslc/cli-contract.json`) advertises and the 200 fixed by
+  `docs/DESIGN-mutate.md`, `skills/fsl/reference.md`, and the frozen
+  `src/fslc/mutate.py` (`DEFAULT_MAX_MUTANTS`). For a model with more than 100
+  candidates the smaller default silently evaluated a different mutant set and
+  reported a different kill count, making native reports incomparable with the
+  documented baseline and skewing hollow-spec triage. Explicit `--max-mutants`
+  behavior is unchanged, and the runtime default is now a single
+  `DEFAULT_MAX_MUTANTS` constant rather than a literal that can drift from the
+  contract (#524).
+- **Breaking (output).** `fslc html` no longer labels every property row with
+  one report-wide assurance class. `html.rs::assurance` derived a single class
+  from root completeness and `properties_section` reused it for every row, so
+  under `--engine induction` a `reachable` and an ordinary unranked `leadsTo`
+  both rendered `proved(induction)` even though k-induction ranks only
+  invariants and transitions -- a reachability witness comes from the bounded
+  base BMC. In an audit artifact "proved" claims all-depth universal evidence,
+  so this was an assurance misstatement. Property rows now classify per element
+  through the ledger's existing `formal_assurance` rule
+  (`docs/DESIGN-assurance-classes.md`) instead of a second local
+  classification, and the report-wide status row now shares the ledger's
+  `assurance_token`/`assurance_label` pair as well. For
+  `examples/pm/cancel_flow.fsl --engine induction`, `CanRetain`, `CanChurn`,
+  `POL-1`, and `POL-2` change from `proved(induction)` to
+  `bounded(BMC depth 8)`. The same renderer also never called
+  `requirement_caption` for property rows, so invariant/reachable/leadsTo rows
+  dropped the requirement text actions and counterfactuals keep; each row now
+  renders its own caption under the declaration name, escaped, and omits it
+  entirely when the property carries no requirement tag
+  (`docs/DESIGN-html-report.md`) (#525).
+- **Breaking (output).** `fslc ai check` and the `fslc check` dispatch for
+  fsl-ai project files no longer accept a declaration whose `require` clauses
+  are unparseable. Both ran `ai_project_summary`, a line scanner that
+  collected declaration *names* by string prefix and never read a clause body,
+  so a project whose clauses match no known evidence grammar returned
+  `ai_project_analyzed` / `findings: []` / exit 0 from `check` and was then
+  rejected by `eval`/`regress`/`drift`/`compat` -- the confidently green false
+  negative `AGENTS.md` calls more dangerous than a crash. The check stage now
+  reports from `fsl_syntax::parse_ai_project`, the parser those commands
+  already execute, and an unexecutable `require` clause is a spec error
+  (`result:"error"`, `kind:"parse"`, exit 2) naming the declaration, slice, and
+  clause text, matching `docs/LANGUAGE.md`'s exit-code table and the exit 2 the
+  same dialect already returns for non-AI `ai compat` input and an unknown
+  `--property`/`--migration` selection. Reporting from the parser also corrects
+  two `ai check` output fields: `components` is now the declared `ai_component`
+  names (`[]` when none, previously the scanner's placeholder `[""]`), and
+  `raw_blocks` entries carry `{kind, name}` per block as
+  `skills/fsl/reference.md` specifies (previously `{kind}` only, deduplicated
+  by kind). Raw blocks stay unvalidated: garbage inside `ai_action`,
+  `ai_contract`, `authority`, `retriever`, or `trust_boundary` still passes
+  `check`, because those are contractually block boundaries only (#542).
+- `type` and `semantics` errors now carry `loc` on every spec-reading command,
+  completing the `docs/DESIGN-v1.md` §7.2 clause that guarantees a location for
+  `parse`/`name`/`type`/`semantics`. Issue 484 delivered the `parse` half; the
+  other half returned `loc: null` everywhere, including `check`, so the §8
+  repair protocol could not mechanically locate a `type`/`name` failure from
+  the output JSON alone. `SpecLoadError::Semantic` now carries the structured
+  diagnostic instead of a flattened `String`, and `ModelError` carries the span
+  of the construct that failed — a kernel `spec` registers no lowering origins,
+  so the three corpus goldens previously had no location to report at all. The
+  reported position is the offending construct, not the enclosing declaration:
+  the state field for an unknown type, the `struct` declaration for a
+  non-scalar field (`TypeExpr` carries no span of its own), and the *second*
+  write for a duplicate assignment. Messages are unchanged — the span is a new
+  field that `ModelError`'s Display deliberately ignores — and no `kind`
+  moves. A diagnostic that names no construct in the reported file still omits
+  `loc` rather than emitting a `{line: 0, column: 0}` placeholder;
+  `docs/DESIGN-v1.md` now states that exception explicitly instead of leaving
+  the clause overstating the implementation (#555).
+- The browser Worker no longer classifies a kernel-stage load failure
+  differently from the native CLI. `rust/fsl-wasm`'s `build()` hard-coded every
+  `fsl_core::parse_kernel_source_with_file` failure to `kind: "parse"`, while
+  native carried the same `CoreError` through `kernel_load_error` and reported
+  `semantics`/`type`/`name` — the same input classified two ways depending on
+  which surface ran it, which `AGENTS.md` forbids allowlisting and which makes
+  `docs/DESIGN-v1.md`'s closed `kind` set meaningless. The classifier and its
+  render dispatch moved out of the `fslc` binary into `fslc_rust::spec_load`
+  (`SpecLoadError`, `kernel_load_error`, `surface_parse_failure`,
+  `render_spec_load_error`) so both surfaces run the same one; the Worker gained
+  no classifier of its own, since a parallel classifier is what diverged.
+  Native's classification is unchanged.
+  Detection power was zero: `examples/gallery/errors/` had no input that fails
+  at the kernel stage while its own top level parses — every such file in
+  `specs/`+`examples/` is a refinement, agent, or causal document the parity
+  harness excludes as unsupported — so the divergence was invisible to
+  `./tools/check-native-integration.sh`.
+  `examples/gallery/errors/semantics_compose_component_parse_failure.fsl` and
+  its `semantics_compose_broken_component.fsl` helper close that hole, taking
+  the native↔Worker parity corpus from 351 to 355 cases, and
+  `rust/fsl-wasm/test-browser.mjs` now fails loudly if the case ever leaves the
+  corpus (#556).
+- Every spec-reading native command now classifies a syntax error the way
+  `check` does: `kind: "parse"` with `diagnostic_code: "FSL-PARSE"` and a
+  `loc`. `rust/fslc/src/main.rs`'s `load_kernel_model` flattened the frontend's
+  structured failure into a `String`, so `kernel`, `conformance`, `scenarios`,
+  `explain`, `analyze`, `typestate`, `ledger`, `testgen`, `document generate`,
+  `diff`, `replay`, and `html` re-classified an unparseable file as
+  `kind: "semantics"` with `loc: null`, and `verify`/`sweep` reported
+  `kind: "parse"` with the `loc` dropped — breaking the schema guarantee in
+  `docs/DESIGN-v1.md` §7.2 that `parse` always carries a location, and sending
+  the §8 repair protocol into the wrong branch. The loader now returns a typed
+  `SpecLoadError` (`Io`/`Parse`/`Semantic`) and every consumer renders it
+  through the same `frontend_output::render_surface_parse_error` `check` uses.
+  Exit codes and `result: "error"` were already correct and are unchanged.
+  The browser Worker's `verify` moved with the CLI so the native/Worker parity
+  contract still holds (#484, #497).
+- A missing or unreadable specification is now `kind: "io"` for every command
+  instead of falling through the message-string classifier to
+  `kind: "semantics"`. `fslc analyze` disagreed with itself: one missing input
+  reported `semantics` and the same missing input alongside a second file
+  reported `io`. `check` and `verify` also no longer silently continue when the
+  spec cannot be read (#497).
+- `fslc mutate` on a specification that fails to load now exits 2 instead of 0.
+  A non-`verified` baseline still scores 0, but a spec error keeps its own exit
+  code, as `docs/LANGUAGE.md`'s exit-code table requires with no per-command
+  exemption; exit 0 on an unparseable spec was a green gate over a
+  specification that was never analysed (#484).
+- `rust/fslc/tests/testgen_contract.rs`'s
+  `symlink_source_name_and_canonical_pytest_path_remain_distinct` no longer
+  panics with `create output-parent symlink: AlreadyExists` on a repeated
+  local run whose previous invocation was interrupted before its own
+  trailing cleanup ran: the fixture directory and both symlinks it creates
+  now live under a fresh, uniquely named scratch directory (same idiom as
+  `rust/fslc/tests/chain_cli.rs`'s `scratch_dir`) instead of a fixed, reused
+  path, so there is nothing left over to collide with on the next run
+  regardless of how the previous one ended (#539).
+- `rust/fslc/tests/domain_codegen_contract.rs`'s
+  `all_five_public_kernel_domain_targets_match_pre_migration_goldens` and
+  `every_valid_domain_corpus_entry_generates_all_five_targets` no longer
+  intermittently fail (a golden digest mismatch or a
+  `clear generated directory: No such file or directory`) when cargo runs
+  them in parallel in the same test binary, the default: both used to
+  `exists()`-then-`remove_dir_all()` a directory under a shared
+  `rust/target/domain-codegen-contract/` parent before generating into it,
+  leaving a window one test's cleanup could race against the other's
+  read/write. Each generation call now gets its own uniquely named scratch
+  directory (same idiom as `rust/fslc/tests/chain_cli.rs`'s `scratch_dir`),
+  which needs no `exists()`/`remove_dir_all()` step at all — closing the
+  race window rather than narrowing it (#546).
+- Native `reachable(r, a, a)` is now non-reflexive on every engine: true
+  only via a real path of one or more edges back to `a`, never a free
+  zero-hop `a == a` step. `rust/fsl-runtime/src/lib.rs`'s concrete
+  `relation_reachable` (used by the `--engine explicit` BFS oracle, and by
+  the default engine's own trace-replay consistency check) started its BFS
+  frontier at `[source]` and checked `current == target` before traversing
+  any edge, so it reported self-reachability as trivially true for *any*
+  relation, including an empty one -- a free zero-hop step the symbolic
+  evaluator's convention never took. Neither `docs/LANGUAGE.md` nor
+  `docs/LANGUAGE.ja.md` previously stated whether `reachable` was
+  reflexive; both now document the non-reflexive contract explicitly.
+  Matches the frozen Python reference's `_relation_reachable`
+  (`src/fslc/runtime.py`) and native BMC exactly -- confirmed by direct
+  code reading and by running the frozen `verify`/`scenarios` commands
+  against the same repro spec, both `violated_at_step:1`, not the reflexive
+  `0` the pre-fix native concrete engine reported. Before the fix an empty
+  relation disagreed between engines (`violated_at_step` 0 vs. 1) and a
+  multi-hop-cycle spec made the default engine's own trace-replay
+  consistency check fail outright (`kind:"internal"`,
+  `"trace state mismatch"`, exit 3), since BMC's concrete replay of its own
+  symbolic counterexample used the same disagreeing evaluator (#502).
+- `relation A -> B` state is now usable end to end in the native symbolic
+  verifier: `r = Set {}` types and evaluates as the empty relation (both
+  `fslc check` and the concrete Monitor previously rejected or mistyped it),
+  and `fslc verify`/`fslc mutate` implement all seven relation operations
+  (`.contains(a, b)`, `.add(a, b)`, `.remove(a, b)`, `reachable(r, a, b)`,
+  `acyclic(r)`, `functional(r)`, `injective(r)`, `domain(r)`, `range(r)`),
+  matching the frozen Python reference's semantics (`reachable`/`acyclic`
+  require a self-relation and are rejected otherwise; a memoized bounded-hop
+  closure avoids the unmemoized-blowup class of bug already fixed in the
+  Python reference) (#467).
+- Native `leadsTo` lasso and deadlock-stall search now applies the documented
+  `symmetric type` / `symmetric enum` liveness symmetry reduction: the
+  designated representative state (lasso loop head, or the stalled state) is
+  constrained to the canonical permutation of each symmetric type's
+  per-entity rows, built from `Map<SymmetricType, V>` and
+  `Set<SymmetricType>` state (skipping any `V` that itself mentions a
+  symmetric identity type), matching the frozen Python reference. A genuine
+  per-entity violation (only one identity ever stalls) is still found under
+  both `Map`- and `Set`-shaped symmetric state (#461).
+- `verify --engine induction` now implements `leadsTo ... helpful` per-binding
+  ranking proofs natively, matching the documented idiom for per-entity
+  progress under interleaving. `fslc check` rejects a `helpful` action that
+  names an undeclared action or has the wrong arity; ranking induction
+  additionally proves the four `helpful`-specific obligations (matching
+  action `fair`, an enabled matching instance whenever pending, stable
+  enabledness across two or more `helpful` actions, and non-helpful actions
+  neither dropping the pending obligation nor increasing the measure),
+  reporting `progress_action_not_fair`, `helpful_action_not_enabled`,
+  `helpful_action_enabledness_not_sticky`, `non_decreasing_helpful_action`,
+  `non_helpful_action_increases_measure`, or `pending_not_preserved` on
+  failure and echoing `helpful` on both the proof and CTI (#473).
+
+### Added
+- Native `verify` now reports the three remaining `docs/DESIGN-vacuity.md` §2
+  lanes — `always_true_requires`, `tautology_over_frozen`, and
+  `urgency_freeze` — closing the last of issue 465. A spec whose only emptiness
+  was one of them previously came back `result:"verified"` / exit 0 even under
+  `--vacuity error`; the three-line reproduction (a `Bool` set by `init`,
+  assigned by no action, asserted as an invariant) now exits 2 with
+  `kind:"tautology_over_frozen"` and `trace_type:"vacuity"`. All three are
+  proved in `fsl-verifier`, so `fsl-runtime` stays solver-independent, and all
+  three report identically on `--engine bmc`, `explicit`, and `induction`.
+
+  Unlike the frozen Python reference, the native lanes decide "always true over
+  all reachable states" over the **declared type space** rather than over the
+  states an unrolling happened to witness, so no verdict moves with `--depth`.
+  Python reports `examples/causal/funnel.fsl`'s `requires visits < 100` as dead
+  at depth 8 because `visits` only reaches 8; with `visits: 0..100` declared,
+  native correctly stays silent at every depth. The lanes are sound and
+  deliberately incomplete: an unproven obligation, an `unknown` backend
+  verdict, a compose-synchronized action, a generated declaration, and an
+  action that was never enabled all yield no finding.
+- Added an optimistic CI lane with one stable, parallelized `merge readiness`
+  context for pull requests and merge queues, while preserving the complete
+  Rust/WASM/macOS/Windows product gate for every merged `main` state and
+  production promotion. Failed post-merge jobs now create or update
+  deduplicated `ci/post-merge` issues and close them only after observed
+  recovery; rollout is fail-safe behind the `FSL_OPTIMISTIC_CI` repository
+  variable. The readiness compile lane deliberately excludes native-Z3 and
+  default-feature builds, which remain mandatory post-merge evidence.
+- Native `analyze`'s TSG projection now emits `requirement`/`acceptance`/
+  `forbidden`/`kpi` nodes and `covers` edges for a standalone `.fsl`/
+  requirements spec, not only for a `.toml` project manifest.
+  `requirement`/`covers`/`kpi` are model-only (`build_tsg` itself now
+  projects them from `KernelModel::requirement_targets`/`.projections`, so
+  every dialect gets them); `acceptance`/`forbidden` scenario nodes need
+  requirements-dialect source text (`fsl_core::requirements_trace_contract`)
+  since they have no Kernel-lowered form, and gain a `covers` edge from any
+  `@requirement(...)`-annotated requirement that names them. A requirement
+  connected to nothing the graph represents still gets its own node with no
+  `covers` edges, rather than being silently dropped, so
+  `disconnected_requirement` (`--profile ai-review`) can detect it.
+  `requirement_property_graph` and `--focus requirement:ID` previously had
+  zero edges/always failed for a standalone spec; both now work (#495).
+- Native `analyze`'s TSG projection now also emits the remaining documented
+  vocabulary: `starts_with`/`precedes` step edges and `control` nodes. An
+  acceptance/forbidden case gains a `starts_with` edge to the action its first
+  step calls and a `precedes` edge to each later step's action, running
+  scenario → action and carrying the 0-based `step` index (the direction and
+  split the frozen reference fixes in `src/fslc/analysis/tsg.py`); the index is
+  part of the edge id, so a case that calls one action twice keeps both edges.
+  `control` nodes project governance/business `control ID "text"` catalog
+  entries, which have no Kernel-lowered form. Because scenario nodes
+  previously had no outgoing edge at all, `unanchored_property`'s
+  scenario-anchor suppression (`scenario_actions && kind == "reachable"`) could
+  never apply, so a `reachable` anchored by an acceptance scenario was reported
+  as unanchored — a structurally guaranteed false positive that the step edges
+  remove. No review finding reads `control` nodes yet; the edge vocabulary has
+  no `satisfies` kind, so a control node carries only its `declares` edge
+  (#495).
+- Added an evidence-gated `fsl-design-family.v0` sidecar prototype with three
+  maintained three-variant dogfood families, native check/verify/refine/diff
+  orchestration tests, raw producer and deterministic digest controls, and an
+  accepted agent/workflow-only decision without new language or CLI semantics
+  (#427).
+- Refinement mappings can declare a source-total `enum abstraction` and invoke
+  it with `abstract(name, expr)` for nominal many-to-one mappings. Repeated and
+  unused targets are allowed, while missing, duplicate, unknown, or
+  wrong-nominal sources fail closed; concrete, symbolic, progress, CLI, Worker,
+  Public Kernel projection, and raw-replay guards share the checked semantics
+  without weakening bijective `enum conversion` (#455).
+- Native `verify` now reports the `vacuous_leadsto` vacuity lane: a `leadsTo`
+  whose trigger never becomes reachable within `--depth` is a hollow
+  property, the same class BMC already reports for an implication invariant's
+  unreachable antecedent (`vacuous_implication`). Detected via the same
+  solver-free existential-reachability BFS `fsl-runtime::verification_warnings`
+  already uses, so `fsl-runtime` gains no new solver dependency (#465, partial;
+  `always_true_requires`, `tautology_over_frozen`, and `urgency_freeze` remain
+  unimplemented on native — see `docs/DESIGN-rust-port.md` "Shared semantic
+  diagnostics").
+
+### Fixed
+- The native LSP's document index no longer lets an `@` annotation swallow the
+  declaration that follows it. `@requirement("REQ-COMMAND", "…")` shares its
+  name with the `requirement NAME { … }` declaration keyword, and the index
+  handled no `@` at all, so the annotation armed a pending declaration that
+  nothing between there and the next identifier disarmed — the *next line's*
+  construct keyword was consumed as the declaration name. In
+  `examples/annotations/annotated_domain.fsl` that registered a Property symbol
+  literally named `command` and left `command Place { … }`'s real name `Place`
+  with no declaration at all, so definition/references/rename returned nothing
+  and `documentSymbol` listed a construct keyword. 13 sites across the four
+  `examples/annotations/*.fsl` files were affected, every one of them from
+  `@requirement`. Nothing from `@` through the annotation's closing `)` may now
+  declare anything or consume a pending declaration, in any dialect; non-keyword
+  names inside an annotation stay references. Resolved by position, not by
+  removing `requirement` from the declaration keywords, which would have broken
+  the real declaration form (#551).
+- `rust/fsl-lsp/tests/corpus.rs` now also asserts, over every corpus file, that
+  a declaration keyword owning a name has actually declared that name
+  (`DocumentIndex::misprojected_declarations`). The previous whole-corpus check
+  only required every identifier to have *some* entry, which a swallowed name
+  satisfies as a reference to nothing, so it passed while roles and scopes were
+  wrong. This is the drift detector the `#504`/`#551` class of index bug had
+  been missing (#551).
+- The native LSP's document index now recognizes `def` declarations and their
+  parameters, aggregate/quantifier binders written with a `name: Type` form
+  (`count(c: Id where ...)`, `sum(...)`, `unique(...)`, `exactlyOne(...)`,
+  `forall`/`exists`), `is some(v)` pattern binders, named `preservation NAME {
+  ... }` governance blocks, and every name in a comma-separated `actor A, B`
+  list — each previously indexed as an ordinary reference with no matching
+  declaration, so `textDocument/definition`/`references`/`rename` returned
+  nothing and `documentSymbol` omitted them. Also fixed a `reachable`/`domain`
+  collision: both name a top-level declaration keyword (`reachable NAME {
+  expr }`, `domain SpecName { ... }`) and a relation builtin call
+  (`reachable(r, a, b)`, `domain(r)`); an unconditional keyword match
+  previously consumed the identifier immediately following either builtin
+  call as a brand-new self-defining declaration, corrupting the referenced
+  state variable's definition/reference set (#504).
+- `fslc db check` no longer reports a confidently green `verified_under_assumptions`
+  over a genuine compatibility violation. `validate_db` now rejects a `check
+  compatibility` rule name outside the closed vocabulary and an `environment
+  schema lo..hi` the declared migration plan never reaches (exit 2 instead of
+  silently checking nothing). `findings()` is rewritten around a materialized
+  per-migration column-state simulation (mirroring the frozen Python
+  reference's `_static_findings`) instead of syntactic pattern matching, which
+  fixes: `set_not_null` without a prior `backfill` (previously made the
+  violating kernel transition unreachable instead of reported);
+  `rollback_not_equivalent` never firing for a lossy rollbackable
+  split/merge (only `drop` was checked); `data_preservation_loss` never
+  firing for dropping an existing column (only split/merge were checked);
+  reads/writes checked against "a drop op exists somewhere in the source"
+  instead of actual per-snapshot column state (missed an initially absent
+  column with a live reader, and false-fired on a column dropped then
+  re-added); and an offline payload's TTL window never extending its
+  acceptance obligation past the emitting schema snapshot. An `active`
+  artifact's own `calls`/`expects`/`emits_offline`/`requires` declarations
+  are now checked too — previously only artifacts other than `active` were
+  treated as consumers (#490).
+- `fslc db check` no longer false-fires against already-annotated migrations
+  and supported providers. A `supported` (not just `active`) artifact's
+  `accepts`/`responds`/`provides` now counts toward compatibility (`may_exist`
+  still does not); `drop ... destructive` is accepted alongside
+  `irreversible`, and dropping an already-absent column no longer fires
+  `destructive_migration_unannotated`; `split`/`merge ... irreversible` is
+  accepted as a preservation classification alongside `lossless`/`lossy`; and
+  every finding kind is now gated by its documented rule (`rule_enabled`,
+  centralized instead of scattered per-finding conditionals), so an opt-in
+  `data_preserved`/`rollback_equivalent` rule no longer fires when it was not
+  selected (#491).
+- `api_response_field_missing`'s `failed_rule` is now the documented
+  `api_responses_expected` instead of the undocumented
+  `api_response_fields_available` (#492).
+- `fslc db observe` validates its observation envelope and every event
+  against `schemas/fslc/db/observation.v0.schema.json` before evaluating them
+  — a declared `schema_version` must equal `fsl-db-observation.v0`, and each
+  event must be an object with typed required fields and a `capability` from
+  the closed vocabulary — and fails with a located exit-2 error instead of
+  defaulting a missing/mistyped field into a fabricated `unsupported_artifact_observed`
+  witness (#505).
+- `fslc db observe` now matches an event's `flags` snapshot against artifact
+  window conditions the same way `fslc db check` does; an artifact observed
+  under the wrong feature-flag variant is `unsupported_artifact_observed`
+  instead of silently `observed_conformant` (#506).
+- `fslc db import`'s SQL importer now lowers `ALTER TABLE ... DROP COLUMN`
+  into a `drop ... irreversible` migration op as documented (previously
+  unimplemented — the construct fell through to `unsupported_sql`), and a
+  malformed `CREATE TABLE` (unbalanced/missing parentheses) now produces an
+  `unsupported_sql` warning instead of being silently skipped with no warning
+  and no table (#507).
+- `fslc ai compat` no longer line-scans any readable file and reports
+  `compat_profile_generated` with a syntactically empty `dbsystem` fragment
+  (`artifact  { requires ; provides ; }`) for non-AI input or an fsl-ai
+  project that declares no `ai_component` at all — indistinguishable from a
+  genuine clean result. Native now parses either a single `ai_component`
+  document or a full fsl-ai project (`fsl_syntax::parse_ai_project`,
+  `AiComponent.tools[].schema` preferred over the tool name, matching the
+  frozen reference) and rejects wrong-dialect input and a component-less
+  project with exit 2 (#511).
+- `fslc ai eval`/`regress`/`drift` now execute the selected
+  `statistical_property`/`ai_migration`/`observed_property` declaration
+  instead of aggregating records against two hardcoded example
+  metrics/thresholds. `eval` applies every declared slice's
+  `min_samples`/`ci_lower`/`ci_upper` gate and evaluator-trust check
+  (`fsl_tools::evaluate_statistical_property`); `regress`/`drift` read the
+  spec path and the selected `ai_migration`/`observed_property`'s declared
+  metric clauses (`evaluate_migration`/`evaluate_observed_property`) instead
+  of ignoring it; an unknown `--property`/`--migration` selection is now a
+  check-time error (exit 2) instead of a fabricated statistical/observed
+  verdict. `ai eval` also honors the documented `--records`-less invocation
+  by falling back to the declared `dataset`'s `source` file. As part of this,
+  `fslc ai drift`'s success result changes from `observed_conformant` to the
+  documented `observed_supported` (`docs/LANGUAGE.md`,
+  `docs/DESIGN-assurance-classes.md`); `observed_conformant` remains correct
+  and unchanged for `fslc db observe`, which is a different command with its
+  own, still-valid result vocabulary (#509).
+- `fslc ai eval` results now carry every field
+  `schemas/fslc/ai/statistical-result.v0.schema.json` requires
+  (`schema_version`/`status`/`slice`/`metric`/`n`/`estimate`/`threshold`/
+  `evaluator`/`assumptions`, not just `result`/`interval`/`checks`), and
+  every non-`statistically_supported` terminal status (`dataset_invalid`,
+  `evaluator_untrusted`, `slice_missing`, `insufficient_samples`,
+  `inconclusive`) now exits 1 instead of 0 (#510).
+- Native `verify`'s `vacuous_implication` lane now unwraps a
+  `forall`-quantified implication before checking antecedent reachability,
+  not only a bare top-level `Binary{op: "=>"}`. `docs/DESIGN-vacuity.md:22`
+  already documented "a single `=>` directly under `forall*`" as the
+  primary shape, but `verification_warnings` matched only
+  `property.expr` itself being `=>`, so any invariant of the ordinary form
+  `forall x: T { P(x) => Q(x) }` was invisible to the lane: a hollow
+  invariant of this shape verified clean instead of being flagged, and
+  `--vacuity error` had nothing to select. Every leading `forall` is now
+  peeled (nested foralls included, matching the frozen Python reference's
+  `_implication_antecedent_candidate`) and the antecedent is existentially
+  closed over the collected binders (reusing the existing `exists_wrap`
+  helper already used for `leadsTo` triggers) before the reachability
+  check; with zero leading foralls this is a no-op, so the previous
+  top-level-`=>` shape still works unchanged (#486).
+- `fslc refine` now classifies a zero divisor in a refinement
+  action-correspondence *argument* expression (`impl_action(a) ->
+  abs_action(a / c)`, where `c` is an impl state variable that can be zero)
+  as a located `refinement_failed`/`kind:"map_partial_op"` finding, joining
+  the existing closed kind set (`abs_requires_failed` / `abs_state_mismatch`
+  / `stutter_changed_abs` / `map_out_of_bounds`). Constructing an abstract
+  action call is action context (`docs/DESIGN-divmod.md` §2.2), not the
+  read-only "mapping expression" §2.3 exempts (a refinement *state* map,
+  distinct from an action-correspondence argument), so it gets the same
+  `partial_op` treatment a division inside the abstract action's own body
+  would. Before this fix `check_refinement` propagated the divisor's raw
+  `RuntimeError` unclassified, surfacing as `result:"error"`,
+  `kind:"type"`, `message:"division by zero"` — neither of the two
+  documented `/0` treatments, and not a member of the refinement contract's
+  kind set. A correspondence whose divisor is always guarded on every
+  reachable impl step is unaffected and still `refines` (#512).
+- `analyze`'s TSG no longer leaks the internal db-dialect `QqDbSepqQ`
+  separator sentinel into node labels: a db-dialect invariant/action label
+  now matches the display name `verify` reports for the same target (both
+  now go through the shared `fsl_core::display_name`; two independent local
+  reimplementations in `fsl-tools` — `analysis.rs`'s `display` and
+  `typestate.rs`'s `display_name` — were each missing the sentinel
+  replacement `fsl_core::display_name` already does). Node ids keep their
+  raw, guaranteed-unique internal form, but `--focus` now also accepts a
+  node's displayed name (resolving it to the matching raw id), so a caller
+  no longer needs to know the internal sentinel to reference a target
+  `verify` already named for them.
+- `action_dependency_graph` no longer collapses an action pair connected
+  through more than one shared read/write state bridge down to a single
+  bridge. `enables`/`conflicts_with` edges are deduplicated by
+  `(from, kind, to)`, and the projection previously pushed one edge object
+  per bridge state for the same pair, so the dedup silently kept only
+  whichever state happened to be processed last (alphabetically, since the
+  underlying map iterates that way) — renaming a state variable could flip
+  which bridge a pair reported, and `progressless_cycle`
+  (`--profile ai-review`) attached its leadsTo/terminal check to only that
+  one surviving state, potentially missing progress attached through a
+  different shared bridge. Every bridge state for a pair is now aggregated
+  into `states` (plural) before emitting one edge, and the
+  `progressless_cycle` consumer reads the full `states` array instead of
+  the legacy singular `state` field (#498).
+- `analyze` batch mode no longer silently drops an explicitly-named input
+  just because it does not end in `.fsl`. `collect_analysis_files`'s
+  `*.fsl`-only filter applied even to files named directly on the command
+  line (not only to directory expansion, where it belongs), so
+  `analyze a.toml b.txt` returned `files:[]`, `errors:[]`,
+  `result:"analyzed"`, exit 0 — a batch that analyzed nothing reported
+  success. Explicit files are now always kept regardless of extension: a
+  `.toml` project manifest routes through the same handling single-file
+  mode already uses, and anything else that cannot be analyzed is a real
+  error in `files[]`/`errors[]`. Directory expansion is unaffected and
+  still filters to `.fsl` only (#496).
+- `fslc refine`! `maps auto` no longer guesses a binding for an incompatible
+  same-name action pair. Auto-matched action parameters are now resolved by
+  name only, never by position: with impl `go(a: K, extra: K)` and abstract
+  `go(wanted: K)` under a bare `maps auto`, native previously bound
+  `wanted <- a` positionally and silently dropped `extra`, returning
+  `refines`/exit 0 for a mapping the frozen Python reference correctly
+  rejects. Now a same-name action pair with a different arity, a surplus
+  impl parameter, a renamed parameter, or an abstract parameter with no
+  same-named impl counterpart is a located `kind:"type"` error, matching the
+  contract `docs/DESIGN-refinement.md` already documented. A legitimately
+  auto-mappable pair — including a pure parameter reorder — still auto-maps.
+  `examples/e2e/2_requirements.fsl`'s `submit` correspondence (a genuine
+  arity-changing map between the business and requirements layers) now
+  declares its correspondence explicitly instead of relying on the removed
+  guess (#494).
+- `fslc refine`! init-state handling now reasons over *every* concrete
+  initial valuation a nondeterministic `init` permits (an `init if` reading
+  a state variable init never assigns, on either the impl or abs side)
+  instead of comparing against the single default state a solver-free
+  `Monitor` happened to materialize. This closed two opposite false
+  verdicts: a nondeterministic impl `init` no longer lets native silently
+  check only the default branch and miss both that branch's own
+  initial-correspondence violation and the reachable set below the other
+  branch (previously `refines`/exit 0 where the frozen reference correctly
+  returns `refinement_failed`/`abs_state_mismatch@init`/exit 1); a
+  nondeterministic abs `init` is now checked as set membership rather than
+  equality against one materialized abs default, so a correct refinement
+  whose impl deterministically starts in a different, still-valid, abs
+  initial branch is no longer wrongly rejected (previously
+  `refinement_failed`/exit 1 where the frozen reference correctly returns
+  `refines`/exit 0). The step-0 impl self-consistency precondition (#466)
+  shares the same enumeration, so a self-violation reachable only from a
+  non-default initial branch is no longer missed either. A state variable
+  assigned on only some init paths (not any) is unaffected and keeps the
+  prior single-valuation behavior (#493).
+- `fslc chain`'s project-manifest reader now fails closed instead of silently
+  discarding malformed input: an unrecognized top-level section (including a
+  plain typo), zero recognized `[business]`/`[requirements]`/`[design]`/
+  `[impl]` sections (including an empty manifest), or a present-but-unparseable
+  `depth`/`refine_depth` value (for example one followed by a TOML inline
+  comment) is now a `kind: "parse"` error at exit 2 instead of a silently
+  dropped layer, a vacuous `verified` over zero executed layers, or a silently
+  substituted default depth that understates a declared depth (#489).
+- `fslc chain`'s documented default and bare-filename invocations (e.g.
+  `fslc chain` or `fslc chain fsl-project.toml` from the manifest's own
+  directory) no longer fail the `[impl]` layer with an io error: an empty
+  manifest parent directory now normalizes to `.` before resolving files and
+  launching the implementation command (#500).
+- `fslc ledger --impl-log` no longer discards a replay error (missing file,
+  malformed JSON, wrong-spec trace, schema-invalid trace): it now fails the
+  whole `ledger` command through the standard error envelope and exit code,
+  the same as `--evidence`, instead of silently rendering a ledger with the
+  implementation-log conformance row missing (#499).
+- `fslc ledger --evidence` now surfaces a failing external evidence source
+  (a definitive nonconformant/mismatch/unsupported verdict) as a 🔴 要確認
+  finding for every requirement it attaches to — recursively, via its root
+  `requirements`/`requirement.id` or a `requirement.id` nested inside a
+  `findings`/`checks` array item — or as a spec-level finding when it fails
+  with no requirement attribution at all. Previously a failing source only
+  ever affected the assurance-class column, so a requirement explicitly
+  attached to failing evidence still rendered green with no finding; the
+  assurance-class computation itself is unchanged (class and verdict stay
+  orthogonal, so a failing source still never lowers an independently
+  proven requirement's class) (#508).
+- **Breaking:** `fslc typestate` no longer treats a state comparison in one arm
+  of an `or` as sufficient to pin a transition's from-state when the other arm
+  says nothing about the entity. Previously `enum_guard_states`/
+  `option_guard_states` unioned the states extracted from both arms of `and`
+  **and** `or` alike, so `requires e.status == A or bypass` reported
+  `derivable` with `from: ["A"]` and `--ts` emitted `self: E<"A">` even though
+  the action is also reachable from every other state whenever `bypass` holds
+  — a generated ghost type that excluded behavior the checked model accepts.
+  `or` now unions the states each disjunct implies (as `and` already did),
+  computed per entity, but only when **every** disjunct actually constrains
+  the entity: a disjunct that says nothing about it (e.g. an unrelated flag)
+  drops the guard entirely rather than leaving the other disjunct's state
+  unioned in on its own. `status == A or status == B` — where both disjuncts
+  constrain the entity, just to different states — correctly remains
+  `derivable` with `from` covering both; only a mix of a real state
+  constraint and an unconstrained disjunct (like `status == A or bypass`)
+  stops being derivable. `and` is unchanged (#521).
+- **Breaking:** `fslc typestate` struct-field state machines are now scoped by
+  field name **and** owning struct type, not field name alone. `EnumLocation::Field`
+  previously carried only the field name, so `enum_expr_location`/`enum_lvalue_location`
+  matched any struct field with that name regardless of which struct declared it;
+  two structs that both declare a same-named field backed by the same enum type
+  (e.g. `struct Order { status: St }` and `struct Ticket { status: St }`) had each
+  entity's report and `--ts` output absorb the other's transitions — a method
+  emitted against the wrong host type. The same field-name-only matching also let
+  a whole-struct-literal reassignment (`ticket = Ticket { status: Closed }`, as
+  opposed to `ticket.status = Closed`) leak into an unrelated same-named-field
+  entity's report, up to fabricating a `derivable` transition it never had.
+  Field accesses/writes and struct literals now carry the public Kernel `named`
+  type of their base/own declared type (already present on every public Kernel
+  v1 expression/lvalue/struct-literal node), and a struct-field location matches
+  only when the field name and that owner type both agree. Two entities with the
+  same field name and different owning structs now stay fully independent in the
+  JSON report and in `--ts`; an entity with multiple actions over its own field
+  still aggregates into one machine, unchanged (#520).
+- `fslc scenarios --deadlock error` now preserves the same `violated` /
+  `deadlock` / exit 1 verdict `fslc verify --deadlock error` already reports
+  for the same spec, instead of silently discarding the promoted failure and
+  returning `result:"scenarios"` / exit 0. `--deadlock warn` still generates
+  a `deadlock_terminal` scenario, now carrying the required explanatory
+  `note: "after these steps no action is enabled"` (#522).
+- `fslc scenarios` no longer describes a never-enabled action (a genuinely
+  unsatisfiable `requires` conjunction, per verify's own `action_coverage`
+  verdict) as "was enabled but no cover trace could be built": it now says
+  the action is never enabled, with the same hint and `blocking_requires`
+  verify already computes for it. The original wording is reserved for an
+  action verify found enabled whose cover trace scenario generation still
+  failed to build (#523).
+- `fslc scenarios` now warns for every quantified `leadsTo` binding without a
+  response witness individually, instead of collapsing completeness to one
+  warning per property name: a witnessed binding for one binding value no
+  longer hides the missing-response warning for every other binding. A
+  binding whose antecedent never held within `--depth` is now worded
+  distinctly ("antecedent never holds within depth K") from one whose
+  antecedent held but never closed with a response ("has no response
+  scenario within depth K") (#526).
+- `fslc explain --readable` no longer prints a branch-lowered action's
+  internal `name.bN` form: a `branches { when P { … } maps Q }` action now
+  resolves back to its authored name (via a new `OriginChain` bound at the
+  branch-splitting site), with a `branch:` line naming each branch's guard
+  and `maps` correspondence, and an `Implements:` section when the source
+  declares a refinement mapping — restoring the branch-lowering and
+  synthesized-refinement-mapping detail `docs/DESIGN-explain.md` §2
+  documents. The JSON skeleton's `actions[].name` for the same branch
+  actions is corrected the same way, with the lowered form preserved as
+  `generated_name` (#528).
+- `fslc explain`'s JSON skeleton restores three fields the native
+  implementation had dropped versus the documented contract: `spec_kind`
+  (was hard-coded `null`), `auto_checks` entries of `kind:"partial_op"` for
+  every syntactic `pop`/`head`/`at`/`/`/`%` site (previously `type_bound`
+  only), and `generated:true` origin provenance on the SLA-synthesized
+  `tick` action and `_deadline_*` invariants (previously indistinguishable
+  from authored declarations) (#530).
+- `fslc domain check` now folds a nested kernel's non-`verified`/`proved`
+  result (`violated`, `reachable_failed`, `unknown_cti`, `unknown_budget`)
+  into the top-level verdict and exit code instead of unconditionally
+  reporting `result:"verified_under_assumptions"`/`formal_result:"verified"`/
+  exit 0 regardless of what `kernel.result` actually said — a confidently
+  green false negative on a domain whose aggregate invariant the kernel
+  proves violated. `run_domain_check` also now returns a non-{0,1} `verify`
+  status (spec error, internal error) verbatim instead of letting it reach
+  `check_domain` and be misread as a kernel result, and the internal
+  `stable_kernel_projection` allowlist gained the violated-path evidence
+  keys (`loc`, `violated_at_step`, `violating_bindings`, `blame`,
+  `last_action`, `trace`) so the nested `kernel` stays a replayable
+  counterexample rather than only the bare verdict string (#515).
+- `fslc domain replay` now actually drives a concrete Monitor over the
+  lowered domain/effect model — stepping `command` and `effect_completion`
+  log entries as real action calls — instead of only maintaining a
+  `(effect, correlation_id)` bookkeeping set. Previously only 1 of the 4
+  documented detection categories (completion without a prior request)
+  could fire; a rejected command, a duplicate irreversible effect commit,
+  and a lifecycle ordering mismatch (e.g. a completion observed after the
+  aggregate moved into a state that rejects it) all silently passed as
+  `conformance_checked`/exit 0. `unknown_domain_event`, `unknown_effect`,
+  `effect_completion_event_not_declared`, and `unknown_runtime_event_kind`
+  (including a `{"kind": ...}`-keyed log entry, which previously evaluated
+  zero log lines and still reported success) are also now detected, and
+  `final_state`/`assumptions` are populated from the same Monitor and
+  assumption computation `domain analyze` already uses instead of always
+  returning `{}`/`[]` (#518).
+- `fslc domain replay` and `fslc domain analyze` now reject an unrecognized
+  trailing argument (`result:"error"`/`kind:"usage"`/exit 2), matching
+  every other `domain` subcommand and the rest of the CLI, instead of
+  silently discarding it and returning a result computed without it (#516).
+- `fslc lint`/`fslc migrate` now checked-model-validate every input,
+  unconditionally, instead of only validating a file `plan_migration` found
+  legacy syntax to rewrite. Previously an input with no legacy tokens for
+  `plan_migration` to fix was never checked at all — a spec with a genuine
+  type error, or a canonical requirements spec whose `implements ... from`
+  target had moved, could still report `lint`/`migrate` exit 0 purely
+  because it happened to have nothing to migrate, while the identical defect
+  with one unrelated legacy token present correctly failed. The new
+  pre-flight (shared by both commands through `load_migration_plan`) mirrors
+  `fslc check`'s own kind/location convention exactly, so the same input
+  gets the same verdict from both commands. `refinement`/`agent` dialects
+  are excluded (same carve-out `fmt --check` already uses: a mapping file
+  has no `state` block by design), and a refused plan (a legacy construct
+  `plan_migration` recognizes but cannot machine-apply, e.g. `&&`) is also
+  excluded, since no pre-migration checked model exists to compare for such
+  input in the first place (#517).
+- `Monitor::new` (the solver-independent concrete interpreter `replay` and
+  BMC's concrete pre-scan build on) now runs the same deterministic-init gate
+  the explicit engine's own construction check already had, instead of
+  silently default-filling any state component `init` leaves free and
+  treating that one arbitrary value as the specification's initial state.
+  Previously `replay` compared an observed trace's initial state against
+  that default and falsely reported `initial_state_mismatch` on a BMC-valid
+  trace whose free component held a different, equally admissible value. A
+  caller that already has its own complete concrete initial state (an
+  observed replay trace's own step 0, an explicit `--from-state`/
+  `--initial-state` snapshot, or a BMC witness's first state) is unaffected:
+  it now builds through the new `Monitor::from_state`, which has nothing to
+  ask `init` to compute and so is not subject to the gate.
+  `initial_state_mismatch` is still fully checked whenever `init` determines
+  every state variable; when it does not, the whole state is trusted from
+  the caller rather than compared component-wise (#519).
+- Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
+  model and reports missing actions, incompatible arity, or incompatible NEW
+  argument domains as explicit `unknown` findings instead of a false
+  `no_semantic_change` result (#460, prerequisite for #427).
+- `fslc testgen` (and `domain testgen`) no longer converts a genuine
+  `violated`/`reachable_failed` counterexample from the underlying scenarios
+  machinery into an unrelated exit-2 `kind:"semantics"` spec error. The
+  guard that only short-circuited on `status == 2` let a real `violated`
+  invariant/`leadsTo`, or a `--strict` `reachable_failed`, fall through to
+  `fsl_tools::validate_scenarios`, which found no `scenarios` array in what
+  was actually a `verify`-shaped envelope and reported a generic error —
+  changing the exit code from 1 to 2, replacing `result` with `"error"`,
+  and destroying the trace/blame evidence a repair loop depends on. Both
+  guards (`run_testgen`, `run_domain_testgen`) now propagate any non-zero
+  status verbatim; the success path (`result:"generated"`, exit 0) is
+  unaffected (#472).
+- `fslc refine` now verifies the impl spec's own internal consistency (type
+  bounds, invariants, `trans`, `ensures`) before checking any correspondence
+  against the abstraction. An impl that violates itself within `--depth` —
+  e.g. a dropped `requires` that lets a state variable step outside its
+  declared type bound — is reported `result:"violated"` with a `note`
+  explaining this is a property of the refinement input, never `refines`
+  and never folded into `refinement_failed`. Previously `check_refinement`'s
+  BFS silently discarded (`continue`d past) any violation the impl produced
+  while stepping, so a guard weakening that broke the impl's own bounds
+  could pass as `refines`/exit 0 with no counterexample at all. `fslc diff`
+  gains the same detection as a new `impl_violated` finding kind that fails
+  its gate unconditionally (unlike other finding kinds, not subject to
+  `--forbid`), since a self-violating side makes the comparison untrustworthy;
+  the `implements`-clause mutation oracle and the `implements:` verify
+  metadata (`requirements_implements_output`) are also corrected to stop
+  reporting the impl-violation case as a clean/`"refines"` refinement (#466).
+- `--vacuity {error,ignore}` now selects over the complete documented 5-kind
+  vacuity lane set (`fsl_core::VACUITY_KINDS`) instead of only the two kinds
+  spelled `vacuous_*`. `always_true_requires`, `tautology_over_frozen`, and
+  `urgency_freeze` previously could not be promoted to `--vacuity error` or
+  suppressed by `--vacuity ignore` because none of the three names start
+  with `vacuous_`; native `apply_vacuity_mode` matched by name prefix rather
+  than the closed kind set (#465, the CLI half; the lanes for these three
+  kinds are still unimplemented on native, see above — this fix prevents a
+  *second*, independent bug from compounding the first once they land).
+- `sweep` no longer folds a spec `error` (parse / type / semantics / io /
+  vacuous / a mistyped `--instances`/`--values` name / a missing file) into
+  the positive `sweep_passed`/exit-0 verdict. Any scope in the grid that
+  errors now short-circuits the sweep with that error's envelope and exit
+  code (2, or 3 for `kind:"internal"`) returned verbatim, instead of being
+  discarded as an unrecognized grid-cell result while the top-level verdict
+  fell back to "no counterexample found" — previously a one-character typo
+  in `--instances` could turn a sweep over a genuinely violating spec from
+  exit 1 `sweep_failed` into exit 0 `sweep_passed` (#464).
+- `verify --engine explicit` now agrees with symbolic BMC on a contradictory
+  `init`: a `forall` binder that writes different concrete values to the same
+  non-indexed location across binder values (e.g. `forall k: K { x = k }`
+  with `|K| > 1`) is detected by the concrete Monitor without a solver and
+  reported as `result:"error"`, `kind:"vacuous"`,
+  `message:"init constraints are unsatisfiable"`, exit 2 — matching BMC
+  exactly instead of silently running the forall as a last-write-wins loop
+  and returning `result:"proved"` / exit 0 for a spec with no valid initial
+  state (#480).
+- `fslc testgen`'s `pytest` target now emits the `forbidden`-scenario rejection
+  assertion (`result = adapter.step(...)` / `_assert_rejected(...)`) that every
+  other testgen target already emitted, restoring byte-identity with the
+  frozen Python reference and giving the generated conformance harness a real
+  negative control against a guard-weakened implementation (#471).
+- The `examples/gallery/injected/` negative-control detector matrix and its
+  primary/blind calibration are now measured on the authoritative native CLI,
+  not only the frozen Python reference: 17 injected specs and the
+  `agentic_rag` `backported_constraints_slice.fsl` mutation slice carried a
+  `requirement` annotation text conflict between their outer block and an
+  inner legacy tag (checked-model error since #237) that the corpus never
+  followed; the redundant inner tag is removed and the outer block's already-
+  correct requirement text is the sole source of truth. Adds
+  `rust/fslc/tests/injection_detector_matrix.rs` (the native primary/blind
+  matrix, run by `tools/check-native-integration.sh`) and
+  `rust/fslc/tests/corpus_check_sweep.rs` (an exhaustive `specs/`+`examples/`
+  `check` sweep closing the gap left by `rust/fsl-lsp/tests/corpus.rs`, which
+  never builds a checked model) (#485).
+- `preserve progress` now works with an indexed (per-element) refinement state
+  map (`map a[i: K] = expr`), not only scalar maps. `fsl-core::substitute_expr_indexed`
+  substitutes each pulled-back read `a[e]` with the map's own expression, its
+  binder replaced by `e` (DESIGN-refinement.md's "substituted on the read"
+  rule), matching capture-avoidance already applied to scalar substitution.
+  `rust/fsl-verifier/src/refinement.rs`'s `check_refinement_progress` no
+  longer rejects the mapping outright the moment *any* indexed map exists
+  (previously `VerifyError("indexed progress map for '<name>' is not
+  implemented")`, `kind:"semantics"`, exit 2) — including when the pulled
+  `leadsTo` does not even read that map. This restores the documented
+  DESIGN-refinement.md:20-40 canonical shape (indexed map + `preserve
+  progress` in the same mapping) and the `examples/agentic_rag` and
+  `examples/multi_agent_system` cross-layer `refine` commands, which
+  previously reported the verifier's own missing feature as a spec error
+  instead of `refines`/`refinement_failed` (#483).
+- Zero-division is now totally defined in property-context expressions
+  (`invariant`, `trans`, `reachable`, `leadsTo`, and refinement state mapping),
+  matching `DESIGN-divmod.md` §2.1/§2.3: `a / 0` and `a % 0` evaluate to `0`
+  instead of raising a concrete `RuntimeError` there, in both the Z3 symbolic
+  encoding (`div`/`modulo` are now pinned with `ite(divisor == 0, 0, ...)`)
+  and the concrete Monitor/BFS evaluator. Previously an unrelated `/0`/`%0`
+  inside an invariant could mask a genuine, independent invariant violation
+  behind a misattributed `violation_kind:"partial_op"` / `_partial_<action>`
+  counterexample under the default (BMC) and `--engine induction` engines,
+  and made `--engine explicit` return a raw `result:"error"` / `kind:"semantics"`
+  instead of the real verdict — breaking the documented symbolic/concrete/BFS
+  agreement invariant. Action-context (`requires`/body/`ensures`) division by
+  a divisor that can reach zero is still reported as `partial_op` (§2.2 is
+  unchanged); Euclidean negative-number division/modulo semantics were
+  already correct and are unaffected (#477).
+- The recursive `agent` dialect (`docs/LANGUAGE.md` §13.6) now has a real grammar and structural
+  analyzer in native, matching the frozen reference's `src/fslc/ai_parser.py`/`ai_agent.py` exactly
+  (confirmed by byte-identical JSON, including `agent_ir`/`graph_summary`, on
+  `examples/ai/recursive_support_agent.fsl` and every documented finding-kind fixture). Previously
+  `rust/fsl-syntax`'s `parse_agent` only balanced braces and discarded the entire body, so any token
+  soup that lexed cleanly parsed as an empty agent and `fslc ai check` on a recursive `agent` document
+  returned `"expected an ai_component document"` (native rejected the dialect entirely) while `fslc
+  check` unconditionally reported the hardcoded constant `agent_analysis_result: "agent_analyzed"`
+  with no analysis behind it — a confidently green false negative on AI agent authority-delegation
+  safety, and native's own CLI contract (`rust/fslc/cli-contract.json`) already advertised "check an
+  ai_component hard contract or recursive agent structure" as a capability it did not have. A `grant
+  authority`/`grant context` that exceeds the immediate parent's declared boundary is now a check-time
+  `kind:"semantics"` error from `ai check` and `check` alike; the six documented
+  `agent_structural_violation` finding kinds (`child_authority_exceeds_parent_authority`,
+  `child_context_exceeds_parent_context`, `irreversible_operation_without_human_approval_path`,
+  `visibility_leak_across_sibling_agents`, `low_trust_agent_path_to_high_authority_tool`,
+  `policy_review_bypass_in_orchestration`) are all computed by `fslc ai check`. `fslc verify`'s
+  rejection of agent documents and `fslc fmt`'s refusal to reformat a well-formed agent body (no
+  native pretty-printer exists yet) are both unchanged (#468).
+- Native `ai_component` lowering (`fslc check`/`verify`/`ai check`) no longer collapses to a
+  one-boolean catalog sentinel with an unsatisfiable no-op action. It now generates the documented
+  `Tool` enum, `human_approved`/`tool_executed`/`tool_suggested: Map<Tool, Bool>` and
+  `fallback_required: Bool` state, `suggest_*`/`approve_*`/`execute_*`/`fallback_*` actions (no
+  `execute_*` action is ever generated for a forbidden tool; an approval-required tool's `execute_*`
+  action always carries `requires human_approved[tool]`), and the
+  `ai_forbidden_tool_not_executed__<Tool>` / `ai_approval_before_execute__<Tool>` invariants. `check
+  hard { rule <Name>; }` now rejects an unknown rule name as a check-time `kind:"semantics"` error
+  (previously silently accepted) from `ai check`, `check`, and `verify` alike. `fslc ai check` also
+  implements the four previously-unchecked hard rules (`tool_authority`, the two static findings
+  were entirely missing; `tool_schema_declared` was missing; `human_approval_required` used a
+  narrower `irreversible && may_execute && !approved` predicate than the documented
+  `irreversible && !requires_human_approval && !forbidden` rule, so a tool only in `may_suggest`
+  passed silently) and populates `repair_candidates` instead of always emitting `[]`. `fslc ai
+  replay` gains the matching `tool_authority` findings for `suggest`/`execute` calls outside
+  authority and now flags a declared precondition with no `preconditions` evidence object at all
+  (previously only an explicit `false` value was caught, so missing evidence passed silently). This
+  was AGENTS.md's "confidently green false negative" on the AI dialect's tool-authority /
+  human-approval safety claims (#470).
+- Native `fslc db check` now evaluates `rule all_active_writes_exist` the same way it already
+  evaluated `rule all_active_reads_exist`: dropping a column that is still declared as an active
+  artifact's write capability now yields a `column_removed_while_still_written` finding with
+  `witness`, `minimal_conflict_set`, `repair_candidates`, and `artifact_version` populated, and the
+  top-level JSON `result` is reconciled to `"violated"` whenever the attached `kernel` projection
+  reports a violation. Previously the write branch was silently missing (a regressive port relative
+  to the frozen Python reference), so a write-drop incompatibility returned `verified_under_assumptions`
+  with an empty `findings` array — a confidently green false negative, and one that escaped a
+  hardcoded kernel depth-8 default entirely for deep migration histories, since the findings layer
+  is depth-independent once the write branch exists (#469).
+- Native `fslc check`/`verify`/`db check` no longer reject two writes indexed by distinct enum
+  members as a possible alias (`"an action may not assign the same state location more than once"`).
+  The write-aliasing analysis now resolves enum-member indices (both the typed `Expr::EnumMember`
+  literal and a local constant bound to an enum value) to their nominal `(type_name, member)`
+  identity, matching the same-index detection already applied to `Int`/`Bool` constants. This
+  restores `fslc check`/`db check` on the four `examples/db/` `dbsystem` `rename`/`split`/`merge`
+  preservation fixtures, which previously exited 2 against a golden corpus snapshot of `"ok"` (#475).
+- Native `fslc check`/`verify` now emit the documented `fair_not_inherited` `compose` warning: when a
+  non-fair synchronized action references a `fair` component action, `warnings` includes a
+  `kind: "fair_not_inherited"` entry naming the composite action and fair constituent(s), matching the
+  frozen Python reference's message and `loc` exactly. Compose lowering previously discarded
+  constituent `fair` markers with no warning at all (`rust/fsl-core/src/compose.rs` had no warnings
+  channel), so a declared `fair` constituent silently stopped contributing fairness through
+  synchronization with no diagnostic signal — the same failure mode issue #16 fixed in the frozen
+  Python reference, regressed by the native port (#474).
+- The frozen `tests/test_dialect_conformance.py` corpus-conformance harness (`docs/DESIGN-conformance-harness.md`)
+  is green again (0 failing of 212, up from 201 passed / 6 failed). Four intentional-error `governance`
+  gallery fixtures gained the `// expected-result: error` front matter that reclassifies them as
+  `DECLARED_ERROR` instead of `CONFORMANCE`; the no-action `governance_semantic_before.fsl` "before"
+  fragment and the three `examples/causal/*.fsl` files (a dialect the frozen Python reference does not
+  implement at all) are now registered exclusions (`MONITOR_EXCLUSIONS` and a new `causal` entry in
+  `EVIDENCE_CONSTRUCTS`/`is_causal_source`) instead of falling through to `UNKNOWN`. The always-red
+  harness had made a new registration gap indistinguishable from a pre-existing one (#476).
+- Refinement typechecking now rejects an unshadowed bare enum member shared by distinct
+  implementation and abstraction enums, preventing checked and evaluation
+  merge order from assigning different nominal identities. Existing identifier
+  shadowing by implementation inputs is preserved, unevaluable abstraction
+  constants are excluded, bijections use explicit typed conversion, and
+  many-to-one mappings use explicit source-total abstraction (#454, #455).
+- Refinement mappings can now declare an exhaustive, type-safe member-wise
+  conversion between distinct nominal enums and invoke it from state maps or
+  action arguments. This includes requirements `process` stage enums, rejects
+  unknown/duplicate/non-total mappings and implicit ordinal conversion, and
+  fails closed in raw replay modes that lack a typed implementation model
+  (#450).
+- The embedded native CLI contract and exact help tree now include all six documented causal
+  command leaves, while the deliberately absent `causal verify` path remains rejected (#442).
+- Verifier transition-outcome agreement now proves actual guard failure and
+  representable defined post-update failure phases in native evaluation order,
+  rejects malformed, relabelled, partial, or checked-arithmetic evidence, and
+  fails closed for `partial_op` or concrete evidence outside the bounded
+  symbolic representation (#428).
+
+### Changed
+- The shared parser evaluation retains one cursor, annotation, location, diagnostic, and standard
+  grammar owner. The Public Kernel evaluation likewise retains its v1/v2 projector, but selects the
+  six independently evolving testgen/replay trace schema constants as one neutral-owner child slice
+  with unchanged crate-root symbols, byte-stable values, and schema drift negative controls (#399;
+  follow-up #448).
+- `dbsystem` executable lifecycle lowering now constructs typed Kernel surface IR
+  directly instead of rendering and re-parsing generated FSL. The migration preserves
+  types, state, action/property semantics, metadata, annotations, and deterministic
+  ordering, removes the obsolete public source generator, and binds generated targets
+  to authored DB declarations so diagnostics and Public Kernel v2 provenance no longer
+  cite fabricated generated-source lines (#410).
+- The `fsl-runtime` touch-driven extraction evaluation retains the current public facade and
+  physical eval, Monitor, liveness, refinement, search, and replay owners. Evidence is insufficient
+  to select a move-only slice after the short migration/feature burst, so no implementation child
+  is created; future extraction remains gated by owner change, dependency direction, solver-free
+  production dependencies, and positive/rejecting semantic agreement controls (#398).
+- The `fsl-core` dialect/domain lowering evaluation retains the existing syntax, checked dispatch,
+  structural lowering, and generated-source projection owners. Evidence is insufficient to select
+  a naming-policy slice or establish a current naming local optimum, so it creates no implementation
+  slice and records the exact evidence and controls required before sharing the duplicate private
+  core naming policy (#397).
+- The native CLI output-boundary evaluation inventories all 50 command leaves and rejects a typed
+  `Command`/`CommandOutcome` framework. A future, separately scoped change may centralize only
+  regular-command JSON/raw process delivery, with exact byte, envelope, stderr, exit-status, and
+  Worker-separation controls (#394; follow-up #441).
+- The native causal command parser, I/O preparation, tool calls, and JSON/status projection now
+  have one explicit `causal.rs` module owner, while top-level dispatch, shared process helpers, raw
+  output, serialization, and exit normalization remain in `main.rs` with unchanged CLI contracts
+  (#393).
+- Native BMC, explicit/auto, and browser verification now share the single
+  `verification_output` renderer owner, while native engine selection and cache policy remain in
+  `verification` with explicit dependencies and unchanged output and exit contracts. Explicit
+  witnesses are replayed before rendering, and malformed or cross-family cache entries degrade to
+  misses instead of producing a verdict (#396).
+- The pure `conservation_candidate` classifier now belongs to the existing `fsl-tools` analysis
+  family, while the CLI retains ai-review orchestration, envelope formatting, mode validation, and
+  transport with unchanged findings, ordering, and exit codes (#395).
+- Test generation now receives an explicit delivery-normalized path context,
+  removing filesystem and CWD observation from the pure generator while
+  preserving existing, missing, and symlinked pytest paths and every other
+  target's output bytes (#423).
+- Requirements-document locale parsing and selection now has one private
+  neutral presentation owner shared by rendering, markers, glossary, and
+  document checking, while preserving the `fsl_tools::Locale` facade and
+  generated output bytes (#422).
+- BMC and induction now share neutral private liveness and trace-projection
+  owners, preserving verdicts, evidence, trace output, and solver boundaries
+  (#421).
+- Checked-model type validation now has one private neutral `fsl-core` owner
+  shared by model construction, refinement, and Public Kernel export, with
+  unchanged Kernel schemas, ordering, diagnostics, and fail-closed controls
+  (#420).
+- The duplicated Domain naming transform now has one private neutral owner used
+  by analysis, Kernel grounding, and code generation, with mixed-case, digit,
+  consecutive-underscore, and one-sided divergence controls (#419).
+- Claude's path-scoped Rust rule now links the accepted component and internal
+  architecture, names all crate owners and hard delivery boundaries, rejects
+  eager or unscoped C2 rewrites, and has positive/negative loading controls for
+  Rust versus frozen-Python paths (#392).
+- Migration-era porting, Python bridge, and sequence design text now marks its
+  historical authority explicitly and links to the maintained native Rust
+  contracts. The Kernel contract now records native outcome priority, while
+  future C2 ownership candidates are explicitly non-authorizing and require
+  separately scoped, audited, independently revertible changes (#430).
+- The authoritative Rust workspace now has one evidence-backed component design
+  record covering all eleven crates, their state and responsibility ownership,
+  dependency gates, public contracts, design pressures, and reevaluation
+  triggers, plus a companion internal design covering directed value flow,
+  mutable-state and failure ownership, targeted dependency normalization, and
+  touch-driven extraction. Migration-era documentation now consistently treats
+  Python as frozen compatibility evidence rather than the active product
+  authority, and concrete/symbolic failure agreement now includes a
+  corrupted-evidence negative control.
+
 ## [3.1.0] - 2026-07-20
 
 ### Fixed
@@ -2511,7 +3703,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/ymm-oss/fsl/compare/v3.1.0...v4.0.0
 [3.1.0]: https://github.com/ymm-oss/fsl/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/ymm-oss/fsl/compare/v2.7.0...v3.0.0
 [2.7.0]: https://github.com/ymm-oss/fsl/compare/v2.6.3...v2.7.0

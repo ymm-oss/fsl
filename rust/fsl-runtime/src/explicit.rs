@@ -11,7 +11,9 @@ use fsl_core::{
     TypeRef,
 };
 
-use super::{Bindings, Monitor, RuntimeError, State, Violation, eval, runtime_error};
+use super::{
+    Bindings, Monitor, RuntimeError, State, Violation, eval, runtime_error, with_total_division,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplicitViolation {
@@ -96,7 +98,8 @@ pub fn explicit_unsupported_reason(model: &KernelModel) -> Option<String> {
 /// Returns [`RuntimeError`] when init is nondeterministic, partially assigned, or cannot be
 /// evaluated concretely.
 pub fn deterministic_initial_state(model: &KernelModel) -> Result<State, RuntimeError> {
-    check_deterministic_init(model)?;
+    // `Monitor::new` itself now runs this same deterministic-init gate, so
+    // there is no separate check to run here.
     Ok(Monitor::new(model.clone())?.state)
 }
 
@@ -254,31 +257,33 @@ fn record_reachables(
     parents: &BTreeMap<State, ParentLink>,
     result: &mut ExplicitResult,
 ) -> Result<(), RuntimeError> {
-    for property in &monitor.model.reachables {
-        if result.reachables[&property.name].is_some() {
-            continue;
-        }
-        match eval(
-            &property.expr,
-            &monitor.state,
-            &mut Bindings::new(),
-            &monitor.model,
-            None,
-        )? {
-            Value::Bool(true) => {
-                result.reachables.insert(
-                    property.name.clone(),
-                    Some(ExplicitReachableWitness {
-                        step: level,
-                        trace: reconstruct_trace(initial_state, &monitor.state, parents),
-                    }),
-                );
+    with_total_division(|| {
+        for property in &monitor.model.reachables {
+            if result.reachables[&property.name].is_some() {
+                continue;
             }
-            Value::Bool(false) => {}
-            _ => return Err(runtime_error("reachable expression must be Boolean")),
+            match eval(
+                &property.expr,
+                &monitor.state,
+                &mut Bindings::new(),
+                &monitor.model,
+                None,
+            )? {
+                Value::Bool(true) => {
+                    result.reachables.insert(
+                        property.name.clone(),
+                        Some(ExplicitReachableWitness {
+                            step: level,
+                            trace: reconstruct_trace(initial_state, &monitor.state, parents),
+                        }),
+                    );
+                }
+                Value::Bool(false) => {}
+                _ => return Err(runtime_error("reachable expression must be Boolean")),
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 fn reconstruct_trace(
@@ -361,7 +366,62 @@ enum Coverage {
     Fields(BTreeMap<String, Coverage>),
 }
 
-fn check_deterministic_init(model: &KernelModel) -> Result<(), RuntimeError> {
+/// Names and declared types of state roots that `model`'s init never
+/// assigns on *any* path — fully free / unconstrained by init, per the same
+/// symbolic-free-variable semantics `fsl-verifier`'s BMC init lowering gives
+/// an omitted assignment (DESIGN-init-if.md; issue #493).
+///
+/// This is deliberately simpler than — and not layered on — the
+/// [`check_deterministic_init`]/[`walk_init`] coverage gate: that walk
+/// rejects a condition/index expression reading a not-yet-assigned root as
+/// an error (`init references state variable '...' before it is
+/// assigned`), which is exactly the pattern a nondeterministic `init if`
+/// legitimately uses (the motivating case for #493). This scan instead only
+/// asks whether a root is ever an assignment *target* anywhere in init,
+/// regardless of read order or which branch is taken; it never errors and
+/// never rejects a read.
+///
+/// A root assigned on *some* but not all paths (e.g. only inside an `if`
+/// with no `else`) is left out — treated as "assigned", not free — and
+/// keeps the prior default-filled behavior for the remaining path. Fully
+/// characterizing that partial-coverage case belongs to `Monitor`
+/// construction generally (issue #519), not this refinement-local
+/// enumeration.
+pub(crate) fn unassigned_init_state_vars(model: &KernelModel) -> Vec<(String, TypeRef)> {
+    let mut assigned = BTreeSet::new();
+    collect_assigned_init_roots(&model.init, &mut assigned);
+    model
+        .state
+        .iter()
+        .filter(|(name, _)| !assigned.contains(name.as_str()))
+        .map(|(name, ty)| (name.clone(), ty.clone()))
+        .collect()
+}
+
+fn collect_assigned_init_roots(statements: &[Statement], assigned: &mut BTreeSet<String>) {
+    for statement in statements {
+        match statement {
+            Statement::Assign { target, .. } => {
+                if let Some(name) = logical_var(target) {
+                    assigned.insert(name.to_owned());
+                }
+            }
+            Statement::If {
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                collect_assigned_init_roots(then_statements, assigned);
+                collect_assigned_init_roots(else_statements, assigned);
+            }
+            Statement::ForAll { statements, .. } => {
+                collect_assigned_init_roots(statements, assigned);
+            }
+        }
+    }
+}
+
+pub(crate) fn check_deterministic_init(model: &KernelModel) -> Result<(), RuntimeError> {
     let (assigned, _) = walk_init(
         &model.init,
         BTreeMap::new(),
@@ -736,7 +796,7 @@ fn collect_state_references(
                 output.insert(name.clone());
             }
         }
-        Expr::Num(_) | Expr::Bool(_) | Expr::None => {}
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::EnumMember { .. } => {}
         Expr::Some(value)
         | Expr::Neg(value)
         | Expr::Not(value)

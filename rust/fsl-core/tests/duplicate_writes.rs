@@ -12,6 +12,7 @@ impl FileResolver for EmptyResolver {
             line: 1,
             column: 1,
             origin: None,
+            name_resolution: false,
         })
     }
 }
@@ -112,6 +113,40 @@ fn rejects_a_write_that_may_overlap_a_forall_write() {
          action write() { forall i: K { m[i] = true } m[0] = false } }",
     )
     .expect_err("post-forall write overlaps one binder value");
+
+    assert!(error.message.contains("same state location"));
+}
+
+#[test]
+fn permits_provably_distinct_enum_member_indexes() {
+    build(
+        "spec DistinctEnum { enum Color { Red, Green } state { flag: Map<Color, Bool> } \
+         init { flag[Red] = false flag[Green] = false } \
+         action both() { flag[Red] = true flag[Green] = true } }",
+    )
+    .expect("distinct enum-member indexes cannot alias");
+}
+
+#[test]
+fn rejects_a_repeated_enum_member_index() {
+    let error = build(
+        "spec RepeatedEnum { enum Color { Red, Green } state { flag: Map<Color, Bool> } \
+         init { flag[Red] = false flag[Green] = false } \
+         action dup() { flag[Red] = true flag[Red] = false } }",
+    )
+    .expect_err("the same enum member written twice must fail");
+
+    assert!(error.message.contains("same state location"));
+}
+
+#[test]
+fn rejects_an_enum_member_write_that_may_overlap_a_forall_write() {
+    let error = build(
+        "spec EnumBulkThenOne { enum Color { Red, Green } state { flag: Map<Color, Bool> } \
+         init { forall c: Color { flag[c] = false } } \
+         action write() { forall c: Color { flag[c] = true } flag[Red] = false } }",
+    )
+    .expect_err("post-forall write overlaps the Red binder value");
 
     assert!(error.message.contains("same state location"));
 }

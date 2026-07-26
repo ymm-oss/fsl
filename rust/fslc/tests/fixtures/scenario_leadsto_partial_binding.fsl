@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// A quantified `leadsTo` where only binding `p = 0` ever triggers: for
+// `p = 1` the antecedent `x == 1` never holds, since the only action always
+// keeps `x == 0` (issue #526: a per-binding response found for `p = 0` must
+// not suppress the completeness warning for `p = 1`).
+spec ScenarioLeadstoPartialBinding {
+  type ProcId = 0..1
+  state { x: Int }
+  init { x = 0 }
+
+  action stay() {
+    x = 0
+  }
+
+  invariant Stable { x == 0 }
+
+  leadsTo MaybePending {
+    forall p: ProcId {
+      (p == 0 or x == 1) ~> x == 0
+    }
+  }
+}

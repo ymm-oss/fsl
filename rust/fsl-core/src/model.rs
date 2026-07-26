@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use fsl_syntax::{
-    ActionItem, Annotation, AnnotationRegistry, Annotations, Binder, Expr, LValue, MetaTag, Param,
-    RequirementLink, SourcePos, Span, SpecItem, Statement, SurfaceSpec, TypeExpr,
+    ActionItem, Annotation, AnnotationRegistry, Annotations, Binder, Expr, HelpfulAction, LValue,
+    MetaTag, Param, RequirementLink, SourcePos, Span, SpecItem, Statement, SurfaceSpec, TypeExpr,
 };
 
 use crate::{
@@ -92,6 +92,11 @@ pub struct ActionDef {
     pub ensures: Vec<Expr>,
     pub ensure_spans: Vec<Span>,
     pub fair: bool,
+    /// Set by compose expansion for a synchronized action. Its `requires` are
+    /// inherited copies from several components, so per-clause redundancy
+    /// diagnostics must not treat a duplicated component guard as removable
+    /// (`docs/DESIGN-vacuity.md` §2).
+    pub sync: bool,
     pub meta: Option<MetaTag>,
     pub annotations: Annotations,
 }
@@ -122,6 +127,7 @@ pub struct LeadsToDef {
     pub annotations: Annotations,
     pub decreases: Option<Expr>,
     pub within: Option<i64>,
+    pub helpful: Vec<HelpfulAction>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -395,11 +401,39 @@ fn static_leadsto_int(expr: &Expr, model: &KernelModel) -> Result<i64, ModelErro
 pub struct ModelError {
     pub message: String,
     pub origin: Option<Box<crate::OriginChain>>,
+    /// The diagnostic's own source location, for constructs that carry no
+    /// lowering origin — a kernel `spec` registers none at all.
+    ///
+    /// Deliberately not read by [`fmt::Display`]: the rendered message already
+    /// embeds the origin's location where one exists, and duplicating it here
+    /// would change every existing message. The CLI reports this as the `loc`
+    /// that `docs/DESIGN-v1.md` §7.2 guarantees (issue 555).
+    pub span: Option<Span>,
+    /// Whether this is a name-resolution failure. See
+    /// [`crate::CoreError::name_resolution`] (issue 565).
+    pub name_resolution: bool,
 }
 
 impl ModelError {
+    /// Classify this diagnostic as a name-resolution failure.
+    #[must_use]
+    fn into_name_resolution(mut self) -> Self {
+        self.name_resolution = true;
+        self
+    }
+
     fn with_origin(mut self, origin: Option<crate::OriginChain>) -> Self {
         self.origin = origin.map(Box::new);
+        self
+    }
+
+    /// Record where the diagnostic happened, keeping a more precise location
+    /// an inner step already recorded.
+    #[must_use]
+    fn at(mut self, span: Span) -> Self {
+        if self.span.is_none() {
+            self.span = Some(span);
+        }
         self
     }
 }
@@ -483,6 +517,7 @@ impl ModelBuilder {
             origins,
             annotations,
             projections,
+            diagnostics: _,
         } = kernel;
         Self {
             spec,
@@ -497,12 +532,18 @@ impl ModelBuilder {
 
     #[allow(clippy::too_many_lines)]
     fn build(mut self) -> Result<KernelModel, ModelError> {
+        // Before anything reads a name: a declaration named `true`/`false`/
+        // `none` is unreadable from every expression, and the misreading is
+        // silent rather than an error (issue #570).
+        crate::reserved::check_reserved_names(&self.spec)?;
         self.collect_consts()?;
         self.collect_types()?;
         self.collect_declaration_annotations();
         self.annotations.validate().map_err(|error| ModelError {
             message: error.message,
             origin: Some(Box::new(source_origin("annotation", error.span, None))),
+            span: Some(error.span),
+            name_resolution: false,
         })?;
         let state_names = self
             .spec
@@ -561,9 +602,13 @@ impl ModelBuilder {
                                 "duplicate state variable '{}'",
                                 field.name
                             ))
-                            .with_origin(
-                                self.origins.diagnostic_origin(&state_target(&field.name)),
-                            ));
+                            .with_origin(self.origins.diagnostic_origin(&state_target(&field.name)))
+                            // The redeclaration, not the first binding: the
+                            // registry origin and the message-derived fallback
+                            // both name the innocent earlier `field.name`
+                            // (issues 555, 565).
+                            .at(field.span)
+                            .into_name_resolution());
                         }
                         if let Some(initializer) = &field.initializer {
                             if let Some(form) = unsupported_inline_form(initializer) {
@@ -615,7 +660,13 @@ impl ModelBuilder {
                         state.push((
                             field.name.clone(),
                             self.resolve_type(&field.ty)
-                                .map_err(|error| error.with_origin(origin))?,
+                                .map_err(|error| error.with_origin(origin))
+                                // A kernel `spec` registers no lowering origins,
+                                // so an unresolvable state type would otherwise
+                                // reach the CLI with no location at all. The
+                                // declaration's own span is the construct the
+                                // reader has to edit (issue 555).
+                                .map_err(|error| error.at(field.span))?,
                         ));
                     }
                 }
@@ -638,6 +689,7 @@ impl ModelBuilder {
                     fair,
                     meta,
                     span,
+                    sync,
                     ..
                 } => {
                     let origin = self.origins.diagnostic_origin(&action_target(name));
@@ -646,10 +698,14 @@ impl ModelBuilder {
                             model_error(format!("duplicate action '{name}'")).with_origin(origin)
                         );
                     }
-                    actions.push(
-                        self.action(name, params, items, *span, *fair, meta.clone())
-                            .map_err(|error| error.with_origin(origin))?,
-                    );
+                    let mut action = self
+                        .action(name, params, items, *span, *fair, meta.clone())
+                        .map_err(|error| error.with_origin(origin))?;
+                    // Carried outside `action` so its argument list stays
+                    // within the workspace Clippy budget; `sync` is a compose
+                    // marker, not part of the action's own lowering.
+                    action.sync = *sync;
+                    actions.push(action);
                 }
                 SpecItem::Invariant {
                     name,
@@ -757,6 +813,7 @@ impl ModelBuilder {
                             .clone(),
                         decreases: None,
                         within: None,
+                        helpful: Vec::new(),
                     });
                 }
                 SpecItem::LeadsTo {
@@ -768,6 +825,7 @@ impl ModelBuilder {
                     meta,
                     decreases,
                     within,
+                    helpful,
                     ..
                 } => {
                     let origin = self
@@ -790,6 +848,7 @@ impl ModelBuilder {
                             .map(|expr| self.const_int(expr))
                             .transpose()
                             .map_err(|error| error.with_origin(origin))?,
+                        helpful: helpful.clone(),
                     });
                 }
                 _ => {}
@@ -826,7 +885,7 @@ impl ModelBuilder {
             .map(|(index, name, span)| (index, (name, span)))
             .collect::<BTreeMap<_, _>>();
         for (index, statement) in model.init.iter().enumerate() {
-            crate::public_kernel::validate_statement_types(statement, &model).map_err(|error| {
+            crate::typecheck::validate_statement_types(statement, &model).map_err(|error| {
                 let origin = error.span.map(type_diagnostic_origin);
                 if let Some((name, _)) = inline_initializers.get(&index) {
                     model_error(format!(
@@ -840,12 +899,12 @@ impl ModelBuilder {
                 }
             })?;
         }
-        crate::public_kernel::validate_model_expression_types(&model).map_err(|error| {
+        crate::typecheck::validate_model_expression_types(&model).map_err(|error| {
             let origin = error.span.map(type_diagnostic_origin);
             model_error(format!("invalid model expression: {}", error.message)).with_origin(origin)
         })?;
         for projection in &model.projections {
-            crate::public_kernel::validate_expression_type(
+            crate::typecheck::validate_expression_type(
                 &projection.expr,
                 &TypeRef::Int,
                 &[],
@@ -903,6 +962,7 @@ impl ModelBuilder {
                 SpecItem::Enum {
                     name,
                     members,
+                    member_spans,
                     symmetric,
                 } => {
                     let origin = self.origins.diagnostic_origin(&type_target(name));
@@ -914,10 +974,21 @@ impl ModelBuilder {
                         },
                     )
                     .map_err(|error| error.with_origin(origin.clone()))?;
-                    for member in members {
+                    for (index, member) in members.iter().enumerate() {
                         if self.enum_members.contains_key(member) {
-                            return Err(model_error(format!("duplicate enum member '{member}'"))
-                                .with_origin(origin));
+                            let mut duplicate =
+                                model_error(format!("duplicate enum member '{member}'"))
+                                    .with_origin(origin)
+                                    .into_name_resolution();
+                            // The repeated occurrence, not the first one. Left
+                            // unlocated the report falls back to the first
+                            // token matching the quoted name, which for a
+                            // duplicate is the earlier, innocent declaration by
+                            // construction (issue 576).
+                            if let Some(span) = member_spans.get(index) {
+                                duplicate = duplicate.at(*span);
+                            }
+                            return Err(duplicate);
                         }
                         self.enum_members.insert(
                             member.clone(),
@@ -932,23 +1003,27 @@ impl ModelBuilder {
             }
         }
         for item in &items {
-            if let SpecItem::Struct { name, fields } = item {
+            if let SpecItem::Struct { name, fields, span } = item {
                 let origin = self.origins.diagnostic_origin(&type_target(name));
+                // `TypeExpr` carries no span of its own, so the declaration's
+                // span is the closest true location a field-level type
+                // diagnostic can report (issue 555).
                 let resolved = fields
                     .iter()
                     .map(|(field, ty)| Ok((field.clone(), self.resolve_type(ty)?)))
                     .collect::<Result<Vec<_>, ModelError>>()
-                    .map_err(|error| error.with_origin(origin.clone()))?;
+                    .map_err(|error| error.with_origin(origin.clone()).at(*span))?;
                 for (field, ty) in &resolved {
                     if !self.is_scalar_struct_field(ty) {
                         return Err(model_error(format!(
                             "struct field '{name}.{field}' has non-scalar type"
                         ))
-                        .with_origin(origin));
+                        .with_origin(origin)
+                        .at(*span));
                     }
                 }
                 self.insert_type(name, TypeDef::Struct { fields: resolved })
-                    .map_err(|error| error.with_origin(origin))?;
+                    .map_err(|error| error.with_origin(origin).at(*span))?;
             }
         }
         Ok(())
@@ -1031,11 +1106,13 @@ impl ModelBuilder {
         }
         let mut index_constants = self.consts.clone();
         index_constants.extend(self.enum_members.clone());
-        if duplicate_statement_write(&statements, &index_constants).is_some() {
+        if let Some((_, duplicate_span)) = duplicate_statement_write(&statements, &index_constants)
+        {
             return Err(model_error(
                 "an action may not assign the same state location more than once",
             )
-            .with_origin(self.origins.diagnostic_origin(&action_target(name))));
+            .with_origin(self.origins.diagnostic_origin(&action_target(name)))
+            .at(duplicate_span));
         }
         Ok(ActionDef {
             name: name.to_owned(),
@@ -1049,6 +1126,7 @@ impl ModelBuilder {
             ensures,
             ensure_spans,
             fair,
+            sync: false,
             meta,
             annotations: self
                 .annotations
@@ -1281,18 +1359,26 @@ fn const_int(expr: &Expr, consts: &BTreeMap<String, Value>) -> Result<i64, Model
     }
 }
 
+/// One write to a state location, with the span of the statement performing it.
+type StateWrite = (LValue, Span);
+
+/// Find a state location an action writes twice, with the span of the write
+/// that repeats it.
+///
+/// The span travels with the target so the diagnostic can point at the offending
+/// assignment rather than at the action as a whole (issue 555).
 fn duplicate_statement_write(
     statements: &[Statement],
     constants: &BTreeMap<String, Value>,
-) -> Option<LValue> {
+) -> Option<StateWrite> {
     fn writes(
         statements: &[Statement],
         constants: &BTreeMap<String, Value>,
-    ) -> Result<Vec<LValue>, Box<LValue>> {
-        let mut seen = Vec::new();
+    ) -> Result<Vec<StateWrite>, Box<StateWrite>> {
+        let mut seen: Vec<(LValue, Span)> = Vec::new();
         for statement in statements {
             let candidates = match statement {
-                Statement::Assign { target, .. } => vec![target.clone()],
+                Statement::Assign { target, span, .. } => vec![(target.clone(), *span)],
                 Statement::If {
                     then_statements,
                     else_statements,
@@ -1306,26 +1392,26 @@ fn duplicate_statement_write(
                     binder, statements, ..
                 } => {
                     let repeated = writes(statements, constants)?;
-                    if let Some(target) = repeated
+                    if let Some(write) = repeated
                         .iter()
-                        .find(|target| !write_is_injective_for_binder(target, binder))
+                        .find(|(target, _)| !write_is_injective_for_binder(target, binder))
                     {
-                        return Err(Box::new(target.clone()));
+                        return Err(Box::new(write.clone()));
                     }
                     repeated
                 }
             };
-            if let Some(target) = candidates.iter().find(|target| {
+            if let Some(write) = candidates.iter().find(|(target, _)| {
                 seen.iter()
-                    .any(|previous| lvalues_may_alias(previous, target, constants))
+                    .any(|(previous, _)| lvalues_may_alias(previous, target, constants))
             }) {
-                return Err(Box::new(target.clone()));
+                return Err(Box::new(write.clone()));
             }
             seen.extend(candidates);
         }
         Ok(seen)
     }
-    writes(statements, constants).err().map(|target| *target)
+    writes(statements, constants).err().map(|write| *write)
 }
 
 fn write_is_injective_for_binder(target: &LValue, binder: &Binder) -> bool {
@@ -1337,6 +1423,30 @@ fn write_is_injective_for_binder(target: &LValue, binder: &Binder) -> bool {
     matches!(index, Some(Expr::Var(index)) if index == name)
 }
 
+/// Resolve an index expression to a comparable static identity, if it has one.
+///
+/// This is used only for the write-aliasing check in [`lvalues_may_alias`]. It
+/// recognizes enum-member indices (both the typed `Expr::EnumMember` literal and
+/// a local constant bound to an enum value) in addition to the `Int`/`Bool`
+/// constants that [`eval_const`] already handles, so two writes indexed by
+/// distinct enum members are provably distinct. It must not be used to widen
+/// what counts as a constant expression elsewhere (`eval_const`/`ConstType` are
+/// shared with `const_int`, domain-type bounds, `Seq` capacity, and `within`
+/// deadlines).
+fn static_index_identity(expr: &Expr, constants: &BTreeMap<String, Value>) -> Option<Value> {
+    match expr {
+        Expr::EnumMember { type_name, member } => Some(Value::Enum {
+            type_name: type_name.clone(),
+            member: member.clone(),
+        }),
+        Expr::Var(name) => match constants.get(name) {
+            Some(value @ Value::Enum { .. }) => Some(value.clone()),
+            _ => eval_const(expr, constants).ok(),
+        },
+        _ => eval_const(expr, constants).ok(),
+    }
+}
+
 fn lvalues_may_alias(left: &LValue, right: &LValue, constants: &BTreeMap<String, Value>) -> bool {
     let (left_root, left_index, left_fields) = lvalue_path(left);
     let (right_root, right_index, right_fields) = lvalue_path(right);
@@ -1344,7 +1454,10 @@ fn lvalues_may_alias(left: &LValue, right: &LValue, constants: &BTreeMap<String,
         return false;
     }
     if let (Some(left), Some(right)) = (left_index, right_index)
-        && let (Ok(left), Ok(right)) = (eval_const(left, constants), eval_const(right, constants))
+        && let (Some(left), Some(right)) = (
+            static_index_identity(left, constants),
+            static_index_identity(right, constants),
+        )
         && left != right
     {
         return false;
@@ -1528,7 +1641,9 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
             third,
             ..
         } => vec![first, second, third],
-        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) => Vec::new(),
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {
+            Vec::new()
+        }
     }
 }
 
@@ -1837,5 +1952,7 @@ fn model_error(message: impl Into<String>) -> ModelError {
     ModelError {
         message: message.into(),
         origin: None,
+        span: None,
+        name_resolution: false,
     }
 }

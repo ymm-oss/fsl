@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// `pending` is only ever set true and never observed together with `done`
+// becoming true afterward within a small depth: the leadsTo genuinely
+// violates, matching #472's leadsTo repro.
+spec TestgenLeadstoViolation {
+  state { pending: Bool, done: Bool }
+  init { pending = false done = false }
+
+  action request() {
+    requires not pending
+    pending = true
+  }
+
+  leadsTo Served { pending ~> done }
+}

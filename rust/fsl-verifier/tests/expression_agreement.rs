@@ -5,7 +5,7 @@ use std::future::Future;
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
-use fsl_core::{FsResolver, build_model, parse_kernel_source};
+use fsl_core::{FsResolver, FslValue as Value, build_model, parse_kernel_source, parse_refinement};
 
 fn block_on<F: Future>(future: F) -> F::Output {
     let mut future = pin!(future);
@@ -96,6 +96,150 @@ spec Agreement {
 }
 
 #[test]
+fn elaborated_enum_conversion_agrees_concretely_symbolically_and_in_preserved_progress() {
+    let resolver = FsResolver::new(".");
+    let implementation = build_model(
+        parse_kernel_source(
+            "spec Impl { enum ImplStage { C, B, A } state { stage: ImplStage } init { stage = A } fair action step() { requires stage == A stage = B } }",
+            &resolver,
+        )
+        .expect("parse implementation"),
+    )
+    .expect("build implementation");
+    let abstraction = build_model(
+        parse_kernel_source(
+            "spec Abs { enum AbsStage { A, B, C } state { status: AbsStage } init { status = A } fair action step() { requires status == A status = B } leadsTo Advances { status == A ~> status == B } }",
+            &resolver,
+        )
+        .expect("parse abstraction"),
+    )
+    .expect("build abstraction");
+    let mapping = parse_refinement(
+        "refinement R { impl Impl abs Abs enum conversion stage ImplStage -> AbsStage { A -> A B -> B C -> C } map status = convert(stage, stage) action step() -> step() preserve progress { respond Advances by step } }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("build conversion mapping");
+
+    let expression = &mapping.state_maps["status"].expr;
+    let mut merged = implementation.clone();
+    merged.types.extend(abstraction.types.clone());
+    merged.enum_members.extend(abstraction.enum_members.clone());
+    let mut monitor = fsl_runtime::Monitor::new(implementation.clone()).expect("monitor");
+    let mut states = vec![monitor.state.clone()];
+    let action = monitor.enabled().expect("enabled")[0].clone();
+    monitor.step(&action).expect("step");
+    states.push(monitor.state.clone());
+    for state in states {
+        let expected = fsl_runtime::eval(expression, &state, &mut BTreeMap::new(), &merged, None)
+            .expect("concrete conversion");
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("solver");
+        assert!(
+            block_on(fsl_verifier::expression_matches_value(
+                &merged,
+                &mut solver,
+                expression,
+                &state,
+                &expected,
+            ))
+            .expect("symbolic conversion agreement")
+        );
+    }
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("solver");
+    let progress = block_on(fsl_verifier::check_refinement_progress(
+        &implementation,
+        &abstraction,
+        &mapping,
+        &mut solver,
+        2,
+    ))
+    .expect("preserved progress check");
+    assert!(progress.violation.is_none(), "{progress:?}");
+}
+
+#[test]
+fn enum_abstraction_agrees_symbolically_and_rejects_a_wrong_target() {
+    let resolver = FsResolver::new(".");
+    let implementation = build_model(
+        parse_kernel_source(
+            "spec Impl { enum ImplStage { C, B, A } state { stage: ImplStage } init { stage = A } action hold() { requires stage == A stage = B } fair action advance() { requires stage == B stage = C } }",
+            &resolver,
+        )
+        .expect("parse implementation"),
+    )
+    .expect("build implementation");
+    let abstraction = build_model(
+        parse_kernel_source(
+            "spec Abs { enum AbsStage { Y, X, Unused } state { status: AbsStage } init { status = X } action hold() { requires status == X status = X } fair action advance() { requires status == X status = Y } leadsTo Advances { status == X ~> status == Y } }",
+            &resolver,
+        )
+        .expect("parse abstraction"),
+    )
+    .expect("build abstraction");
+    let mapping = parse_refinement(
+        "refinement R { impl Impl abs Abs enum abstraction stage ImplStage -> AbsStage { A -> X B -> X C -> Y } map status = abstract(stage, stage) action hold() -> hold() action advance() -> advance() preserve progress { respond Advances by advance } }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("build many-to-one mapping");
+
+    let expression = &mapping.state_maps["status"].expr;
+    let mut merged = implementation.clone();
+    merged.types.extend(abstraction.types.clone());
+    merged.enum_members.extend(abstraction.enum_members.clone());
+    let state = BTreeMap::from([(
+        "stage".to_owned(),
+        Value::Enum {
+            type_name: "ImplStage".to_owned(),
+            member: "C".to_owned(),
+        },
+    )]);
+    let correct = Value::Enum {
+        type_name: "AbsStage".to_owned(),
+        member: "Y".to_owned(),
+    };
+    let wrong = Value::Enum {
+        type_name: "AbsStage".to_owned(),
+        member: "X".to_owned(),
+    };
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("solver");
+    assert!(
+        block_on(fsl_verifier::expression_matches_value(
+            &merged,
+            &mut solver,
+            expression,
+            &state,
+            &correct,
+        ))
+        .expect("prove correct many-to-one target")
+    );
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("solver");
+    assert!(
+        !block_on(fsl_verifier::expression_matches_value(
+            &merged,
+            &mut solver,
+            expression,
+            &state,
+            &wrong,
+        ))
+        .expect("reject wrong many-to-one target"),
+        "symbolic anchor must reject the deliberately wrong mapped target"
+    );
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("solver");
+    let progress = block_on(fsl_verifier::check_refinement_progress(
+        &implementation,
+        &abstraction,
+        &mapping,
+        &mut solver,
+        3,
+    ))
+    .expect("preserved progress check");
+    assert!(progress.violation.is_none(), "{progress:?}");
+}
+
+#[test]
 fn nested_option_equality_uses_the_existing_option_capability() {
     let source = r"
 spec NestedOptionEquality {
@@ -179,6 +323,37 @@ spec EmptyActionInitialViolation {
     let violation = result.violation.expect("initial invariant violation");
     assert_eq!(violation.name, "MustBeDone");
     assert_eq!(violation.step, 0);
+}
+
+/// DESIGN-divmod.md §2.1: the Z3 encoding must pin `/0`/`%0` to the total
+/// value `0`, independent of the CLI's concrete `find_boundary_violation`
+/// pre-check. This calls `verify_bounded` directly so a regression in the
+/// solver-level `div`/`modulo` pin (reverting the `ite(right == 0, 0, ...)`
+/// wrapping in `fsl-solver-z3`) is caught even if the concrete fast path
+/// were ever removed or bypassed. Without the pin, `ZeroDivTotal` masks the
+/// real `GenuineViolation` behind `partial_op`/`_partial_bump` (issue #477).
+#[test]
+fn symbolic_bmc_totalizes_property_context_zero_division() {
+    let source = r"
+spec MaskTest {
+  type Qty = 0..3
+  state { n: Qty }
+  init { n = 0 }
+  action bump() { requires n < 3  n = n + 1 }
+  invariant GenuineViolation { n <= 1 }
+  invariant ZeroDivTotal { 5 / 0 == 0 }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let result = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 4))
+        .expect("bounded verification must not error on /0 in ZeroDivTotal");
+
+    let violation = result.violation.expect("n=2 violates GenuineViolation");
+    assert_eq!(violation.kind, "invariant");
+    assert_eq!(violation.name, "GenuineViolation");
+    assert_eq!(violation.step, 2);
 }
 
 #[test]

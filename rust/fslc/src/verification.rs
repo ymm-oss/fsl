@@ -1,7 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use super::*;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use fsl_core::{FslValue, KernelExpr, KernelModel};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
+
+use super::{
+    CliVerifyOptions, ScopeBounds, SpecLoadError, add_strict_tag_warnings, apply_vacuity_mode,
+    block_on_native, display, envelope, error_output, implements_error_output, implements_result,
+    invariant_names, load_kernel_model, load_model, load_model_scoped, load_snapshot_value_object,
+    load_state_snapshot, read_spec_source, select_properties, selected_implicit_bounds,
+    semantic_error_output, spec_load_error_output, surface_parse_error_output,
+    validate_requirement_traces, validate_specialized_document,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum VerificationEngine {
@@ -120,36 +133,7 @@ fn verification_cost(started: Instant, statistics: &fsl_solver::VerificationStat
         .expect("verification cost serializes")
 }
 
-fn finish_solver_verification(
-    output: &mut Map<String, Value>,
-    checked: usize,
-    started: Instant,
-    statistics: &fsl_solver::VerificationStatistics,
-) {
-    output.insert("checked_to_depth".to_owned(), json!(checked));
-    output.insert("completeness".to_owned(), json!("bounded"));
-    output.insert("cost".to_owned(), verification_cost(started, statistics));
-}
-
-fn finish_verification(
-    output: &mut Map<String, Value>,
-    checked: usize,
-    started: Instant,
-    statistics: Option<&fsl_solver::VerificationStatistics>,
-) {
-    if let Some(statistics) = statistics {
-        finish_solver_verification(output, checked, started, statistics);
-    } else {
-        finish_solver_verification(
-            output,
-            checked,
-            started,
-            &fsl_solver::VerificationStatistics::default(),
-        );
-    }
-}
-
-fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, String> {
+fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, SpecLoadError> {
     let mut model = match selection.model {
         Some(model) => model.clone(),
         None => selection.scope.map_or_else(
@@ -157,7 +141,10 @@ fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, Str
             |scope| load_model_scoped(selection.path, scope),
         )?,
     };
-    select_properties(&mut model, selection.property, selection.excluded)?;
+    // A rejected `--property`/`--exclude` names a property that is absent from
+    // the model, so there is no construct in the source to point at.
+    select_properties(&mut model, selection.property, selection.excluded)
+        .map_err(SpecLoadError::unlocated_semantic)?;
     Ok(model)
 }
 
@@ -180,8 +167,18 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         Ok(execution) => execution,
         Err(output) => return output,
     };
-    let (base_value, base_status) =
-        render_bmc_result(&base_request, &base_prepared, &base_solved, started);
+    let (base_value, base_status) = fslc_rust::verification_output::render_bmc_output(
+        envelope(),
+        &base_prepared.model,
+        &base_solved.result,
+        fslc_rust::verification_output::BmcOutputOptions {
+            depth: base_request.depth,
+            deadlock: base_request.deadlock,
+            checked_bounds: base_prepared.checked_bounds.as_ref(),
+            elapsed_s: started.elapsed().as_secs_f64(),
+            statistics: &base_solved.statistics,
+        },
+    );
     let Value::Object(base) = &base_value else {
         return (
             error_output("internal", "BMC returned a non-object envelope"),
@@ -189,6 +186,25 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         );
     };
     if base.get("result").and_then(Value::as_str) != Some("verified") {
+        // A base-case `leadsTo` violation may be a raw BMC stall/lasso trace
+        // that a ranking proof can diagnose more precisely (e.g. a missing
+        // `fair` on the `helpful` action, or a permanently-blocked helpful
+        // instance) -- mirrors the frozen Python reference's `prove()`,
+        // which prefers `_prove_ranked_leadstos`' rank_failure over the raw
+        // BMC counterexample whenever ranking has something more specific to
+        // say.
+        if base.get("result").and_then(Value::as_str) == Some("violated")
+            && base.get("violation_kind").and_then(Value::as_str) == Some("leadsTo")
+            && let Ok(model) = load_induction_model(selection, auxiliary)
+            && let Ok(mut solver) = fsl_solver_z3::Z3Solver::new()
+            && let Ok(ranked) =
+                block_on_native(fsl_verifier::prove_ranked_leadstos(&model, &mut solver))
+            && let Some(failure) = &ranked.failure
+        {
+            let mut statistics = base_solved.statistics.clone();
+            statistics.merge(&fsl_solver::SmtSolver::statistics(&solver));
+            return render_rank_failure(&model, failure, depth, started, &statistics);
+        }
         return (base_value, base_status);
     }
 
@@ -236,7 +252,7 @@ fn load_induction_model(
     auxiliary: &[(String, KernelExpr)],
 ) -> Result<KernelModel, CommandResult> {
     let mut model =
-        load_selected_model(selection).map_err(|error| (semantic_error_output(&error), 2))?;
+        load_selected_model(selection).map_err(|error| (spec_load_error_output(&error), 2))?;
     model
         .invariants
         .extend(auxiliary.iter().map(|(name, expr)| fsl_core::PropertyDef {
@@ -539,6 +555,7 @@ fn render_rank_failure(
         json!(ranking_measure_text(&failure.measure)),
     );
     output.insert("rank_failure".to_owned(), json!(failure.kind));
+    insert_helpful_rank_failure_json(&mut output, model, failure);
     if let Some(value) = failure.measure_value {
         output.insert("measure_value".to_owned(), json!(value));
     }
@@ -660,6 +677,18 @@ fn render_induction_success(
                     "decreases".to_owned(),
                     json!(ranking_measure_text(&proof.measure)),
                 );
+                if !proof.helpful.is_empty() {
+                    entry.insert(
+                        "helpful".to_owned(),
+                        json!(
+                            proof
+                                .helpful
+                                .iter()
+                                .map(helpful_action_label)
+                                .collect::<Vec<_>>()
+                        ),
+                    );
+                }
             }
         }
         output.insert("leads_to".to_owned(), Value::Object(leads_to));
@@ -687,11 +716,81 @@ fn ranking_measure_text(expr: &KernelExpr) -> String {
     }
 }
 
+fn helpful_action_label(helper: &fsl_core::HelpfulAction) -> String {
+    let args = helper
+        .args
+        .iter()
+        .map(::fslc_rust::expr_text)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{}({args})", helper.action)
+}
+
+fn insert_helpful_rank_failure_json(
+    output: &mut Map<String, Value>,
+    model: &KernelModel,
+    failure: &fsl_verifier::RankFailure,
+) {
+    if !failure.helpful.is_empty() {
+        output.insert(
+            "helpful".to_owned(),
+            json!(
+                failure
+                    .helpful
+                    .iter()
+                    .map(helpful_action_label)
+                    .collect::<Vec<_>>()
+            ),
+        );
+    }
+    if !failure.helpful_actions.is_empty() {
+        output.insert(
+            "helpful_actions".to_owned(),
+            Value::Array(
+                failure
+                    .helpful_actions
+                    .iter()
+                    .map(|witness| {
+                        let params = witness
+                            .params
+                            .iter()
+                            .map(|(name, value)| (name.clone(), ::fslc_rust::fsl_value_json(value)))
+                            .collect::<Map<_, _>>();
+                        origin_aware_action_json(model, &witness.action, &params, Value::Null)
+                    })
+                    .collect(),
+            ),
+        );
+    }
+}
+
+/// Prove the solver-dependent vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes
+/// 3–5) for a run decided by the solver-free explicit-state engine.
+///
+/// The lanes describe the model, not the exploration, so `--engine explicit`
+/// must surface the same vacuity kinds `--engine bmc` does; letting the engine
+/// choice change which kinds `--vacuity error` can see would be exactly the
+/// exit-code divergence `docs/DESIGN-rust-port.md` forbids. A solver or
+/// semantics failure is surfaced, never swallowed.
+fn explicit_vacuity_findings(
+    model: &KernelModel,
+    action_coverage: &std::collections::BTreeMap<String, bool>,
+) -> Result<Vec<fsl_verifier::VacuityFinding>, (Value, i32)> {
+    let mut solver = fsl_solver_z3::Z3Solver::new()
+        .map_err(|error| (error_output("internal", &error.to_string()), 3))?;
+    block_on_native(fsl_verifier::model_vacuity_findings(
+        model,
+        &mut solver,
+        action_coverage,
+    ))
+    .map_err(|error| (error_output("semantics", &error.to_string()), 2))
+}
+
 pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
     let started = Instant::now();
     let model = match load_selected_model(request.selection) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     if model.actions.is_empty() {
         return (semantic_error_output("spec has no actions"), 2);
@@ -710,13 +809,19 @@ pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32
         Ok(result) => result,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    render_explicit_result(
+    let vacuity = match explicit_vacuity_findings(&model, &result.action_coverage) {
+        Ok(findings) => findings,
+        Err(output) => return output,
+    };
+    finish_explicit_output(fslc_rust::verification_output::render_explicit_output(
+        envelope(),
         &model,
         &result,
         checked_bounds.as_ref(),
         request.deadlock,
-        started,
-    )
+        started.elapsed().as_secs_f64(),
+        &vacuity,
+    ))
 }
 
 /// Composite engine: try explicit-state exploration first and fall back to
@@ -738,7 +843,7 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
     let started = Instant::now();
     let model = match load_selected_model(request.selection) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     if model.actions.is_empty() {
         return (semantic_error_output("spec has no actions"), 2);
@@ -760,13 +865,20 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
         Ok(result) => result,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    let (output, status) = render_explicit_result(
-        &model,
-        &result,
-        checked_bounds.as_ref(),
-        request.deadlock,
-        started,
-    );
+    let vacuity = match explicit_vacuity_findings(&model, &result.action_coverage) {
+        Ok(findings) => findings,
+        Err(output) => return output,
+    };
+    let (output, status) =
+        finish_explicit_output(fslc_rust::verification_output::render_explicit_output(
+            envelope(),
+            &model,
+            &result,
+            checked_bounds.as_ref(),
+            request.deadlock,
+            started.elapsed().as_secs_f64(),
+            &vacuity,
+        ));
     if output.get("result").and_then(Value::as_str) == Some("unknown_budget") {
         return auto_fallback_to_bmc(request, &budget_fallback_reason(&output), "budget");
     }
@@ -816,255 +928,11 @@ fn budget_fallback_reason(explicit_output: &Value) -> String {
     }
 }
 
-fn explicit_as_bmc(result: &fsl_runtime::ExplicitResult) -> fsl_verifier::BmcResult {
-    fsl_verifier::BmcResult {
-        spec: result.spec.clone(),
-        depth: result.depth,
-        violation: result
-            .violation
-            .as_ref()
-            .map(|violation| fsl_verifier::BmcViolation {
-                kind: violation.violation.kind.clone(),
-                name: violation.violation.name.clone(),
-                step: violation.violation.step,
-                last_action: violation
-                    .trace
-                    .last()
-                    .and_then(|entry| entry.action.as_ref())
-                    .map(|action| action.name.clone()),
-                trace: violation.trace.clone(),
-                leads_to: None,
-            }),
-        leadsto_violation: None,
-        reachables: result
-            .reachables
-            .iter()
-            .map(|(name, witness)| {
-                (
-                    name.clone(),
-                    witness
-                        .as_ref()
-                        .map(|witness| fsl_verifier::ReachableWitness {
-                            step: witness.step,
-                            trace: witness.trace.clone(),
-                        }),
-                )
-            })
-            .collect(),
-        deadlock_step: result.deadlock_step,
-        deadlock_trace: result.deadlock_trace.clone(),
-        action_coverage: result.action_coverage.clone(),
-        frontier_progress: !result.closure && !result.budget_exceeded,
+fn finish_explicit_output(rendered: Result<(Value, i32), String>) -> (Value, i32) {
+    match rendered {
+        Ok(output) => output,
+        Err(error) => (error_output("internal", &error), 3),
     }
-}
-
-fn render_explicit_result(
-    model: &KernelModel,
-    result: &fsl_runtime::ExplicitResult,
-    checked_bounds: Option<&std::collections::BTreeSet<String>>,
-    deadlock: DeadlockMode,
-    started: Instant,
-) -> CommandResult {
-    let compatible = explicit_as_bmc(result);
-    if let Some(violation) = &compatible.violation {
-        let (mut output, status) = render_bmc_violation(model, violation, started, None);
-        add_explicit_metadata(&mut output, result);
-        return (output, status);
-    }
-
-    if deadlock == DeadlockMode::Error
-        && let Some(step) = result.deadlock_step
-    {
-        let (mut output, status) = render_deadlock_failure(model, &compatible, step, started, None);
-        add_explicit_metadata(&mut output, result);
-        return (output, status);
-    }
-
-    if result.budget_exceeded {
-        return render_explicit_budget(
-            model,
-            result,
-            &compatible,
-            checked_bounds,
-            deadlock,
-            started,
-        );
-    }
-
-    let unreached = compatible
-        .reachables
-        .iter()
-        .filter(|(_, witness)| witness.is_none())
-        .filter_map(|(name, _)| {
-            model
-                .reachables
-                .iter()
-                .find(|property| property.name == *name)
-        })
-        .collect::<Vec<_>>();
-    if !unreached.is_empty() {
-        let (mut output, status) = render_reachable_failure(
-            model,
-            &compatible,
-            &unreached,
-            result.depth_reached,
-            checked_bounds,
-            started,
-            None,
-        );
-        if result.closure {
-            mark_reachables_definitively_unreachable(&mut output);
-        }
-        add_explicit_metadata(&mut output, result);
-        return (output, status);
-    }
-
-    render_explicit_success(
-        model,
-        result,
-        &compatible,
-        checked_bounds,
-        deadlock,
-        started,
-    )
-}
-
-fn render_explicit_budget(
-    model: &KernelModel,
-    result: &fsl_runtime::ExplicitResult,
-    compatible: &fsl_verifier::BmcResult,
-    checked_bounds: Option<&std::collections::BTreeSet<String>>,
-    deadlock: DeadlockMode,
-    started: Instant,
-) -> CommandResult {
-    let mut output = envelope();
-    output.insert("spec".to_owned(), json!(model.name));
-    output.insert("result".to_owned(), json!("unknown_budget"));
-    add_common_verification(
-        &mut output,
-        model,
-        compatible,
-        result.depth_reached,
-        checked_bounds,
-    );
-    output.insert("depth".to_owned(), json!(result.depth));
-    output.insert("completeness".to_owned(), json!("unknown"));
-    if deadlock == DeadlockMode::Ignore {
-        output.insert("deadlock".to_owned(), json!({"found": false}));
-    }
-    output.insert(
-        "hint".to_owned(),
-        json!(format!(
-            "explicit-state exploration reached its {}-state budget; increase --explicit-budget or use --engine bmc",
-            result.states_explored
-        )),
-    );
-    output.insert(
-        "cost".to_owned(),
-        verification_cost(started, &fsl_solver::VerificationStatistics::default()),
-    );
-    let mut value = Value::Object(output);
-    add_explicit_metadata(&mut value, result);
-    (value, 1)
-}
-
-fn render_explicit_success(
-    model: &KernelModel,
-    result: &fsl_runtime::ExplicitResult,
-    compatible: &fsl_verifier::BmcResult,
-    checked_bounds: Option<&std::collections::BTreeSet<String>>,
-    deadlock: DeadlockMode,
-    started: Instant,
-) -> CommandResult {
-    if !result.closure {
-        let (mut output, status) = render_bmc_success(
-            model,
-            compatible,
-            result.depth,
-            checked_bounds,
-            deadlock,
-            started,
-            None,
-        );
-        add_explicit_metadata(&mut output, result);
-        return (output, status);
-    }
-
-    let mut output = envelope();
-    output.insert("spec".to_owned(), json!(model.name));
-    output.insert("result".to_owned(), json!("proved"));
-    add_common_verification(
-        &mut output,
-        model,
-        compatible,
-        result.depth_reached,
-        checked_bounds,
-    );
-    output.insert("depth".to_owned(), json!(result.depth));
-    output.insert("engine".to_owned(), json!("explicit"));
-    output.insert("completeness".to_owned(), json!("unbounded"));
-    if deadlock == DeadlockMode::Ignore {
-        output.insert("deadlock".to_owned(), json!({"found": false}));
-    }
-    output.insert(
-        "warnings".to_owned(),
-        Value::Array(shared_warnings(
-            model,
-            compatible,
-            result.depth_reached,
-            deadlock,
-        )),
-    );
-    output.insert(
-        "note".to_owned(),
-        json!(
-            "explicit-state exploration reached closure; invariants hold in every reachable state"
-        ),
-    );
-    output.insert(
-        "cost".to_owned(),
-        verification_cost(started, &fsl_solver::VerificationStatistics::default()),
-    );
-    let mut value = Value::Object(output);
-    add_explicit_metadata(&mut value, result);
-    (value, 0)
-}
-
-fn add_explicit_metadata(output: &mut Value, result: &fsl_runtime::ExplicitResult) {
-    let Some(output) = output.as_object_mut() else {
-        return;
-    };
-    output.insert("engine".to_owned(), json!("explicit"));
-    output.insert("closure".to_owned(), json!(result.closure));
-    output.insert("states_explored".to_owned(), json!(result.states_explored));
-    output.insert(
-        "max_frontier_width".to_owned(),
-        json!(result.max_frontier_width),
-    );
-    output.insert("depth_reached".to_owned(), json!(result.depth_reached));
-}
-
-fn mark_reachables_definitively_unreachable(output: &mut Value) {
-    let Some(output) = output.as_object_mut() else {
-        return;
-    };
-    if let Some(unreached) = output.get_mut("unreached").and_then(Value::as_array_mut) {
-        for item in unreached {
-            if let Value::Object(item) = item {
-                item.insert("classification".to_owned(), json!("unreachable"));
-                item.insert(
-                    "hint".to_owned(),
-                    json!(
-                        "not witnessed before explicit state-space closure; the goal is unreachable"
-                    ),
-                );
-            }
-        }
-    }
-    output.insert(
-        "hint".to_owned(),
-        json!("explicit state-space closure proves that the requested reachable goal cannot be reached"),
-    );
 }
 
 pub(super) fn run_bmc_filtered(request: BmcRequest<'_>) -> (Value, i32) {
@@ -1073,7 +941,18 @@ pub(super) fn run_bmc_filtered(request: BmcRequest<'_>) -> (Value, i32) {
         Ok(execution) => execution,
         Err(output) => return output,
     };
-    render_bmc_result(&request, &prepared, &solved, started)
+    fslc_rust::verification_output::render_bmc_output(
+        envelope(),
+        &prepared.model,
+        &solved.result,
+        fslc_rust::verification_output::BmcOutputOptions {
+            depth: request.depth,
+            deadlock: request.deadlock,
+            checked_bounds: prepared.checked_bounds.as_ref(),
+            elapsed_s: started.elapsed().as_secs_f64(),
+            statistics: &solved.statistics,
+        },
+    )
 }
 
 fn execute_bmc(
@@ -1087,13 +966,23 @@ fn execute_bmc(
 
 fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc, CommandResult> {
     let model = load_selected_model(request.selection)
-        .map_err(|error| (semantic_error_output(&error), 2))?;
+        .map_err(|error| (spec_load_error_output(&error), 2))?;
     let checked_bounds = selected_implicit_bounds(
         &model,
         request.selection.property,
         request.selection.excluded,
     );
-    if checked_bounds.is_none() && request.initial_state.is_none() {
+    // `find_boundary_violation` is a concrete pre-scan: an optional
+    // shortcut ahead of the full Z3-backed solve below, not the source of
+    // verify's soundness. It needs a deterministic concrete initial state
+    // to run at all (#519); a model whose init leaves some state free is
+    // still fully supported by `solve_bmc`, which explores every
+    // admissible initial value symbolically, so skip the shortcut rather
+    // than failing the whole command when it does not apply.
+    if checked_bounds.is_none()
+        && request.initial_state.is_none()
+        && fsl_runtime::deterministic_initial_state(&model).is_ok()
+    {
         match fsl_runtime::find_boundary_violation(model.clone(), request.depth) {
             Ok(Some((violation, trace))) => {
                 let statistics = fsl_solver::VerificationStatistics::default();
@@ -1159,435 +1048,6 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
     })
 }
 
-fn render_bmc_result(
-    request: &BmcRequest<'_>,
-    prepared: &PreparedBmc,
-    solved: &SolvedBmc,
-    started: Instant,
-) -> CommandResult {
-    fslc_rust::verification_output::render_bmc_output(
-        envelope(),
-        &prepared.model,
-        &solved.result,
-        fslc_rust::verification_output::BmcOutputOptions {
-            depth: request.depth,
-            deadlock: request.deadlock,
-            checked_bounds: prepared.checked_bounds.as_ref(),
-            elapsed_s: started.elapsed().as_secs_f64(),
-            statistics: &solved.statistics,
-        },
-    )
-}
-
-#[allow(clippy::too_many_lines)]
-fn render_bmc_violation(
-    model: &KernelModel,
-    violation: &fsl_verifier::BmcViolation,
-    started: Instant,
-    statistics: Option<&fsl_solver::VerificationStatistics>,
-) -> (Value, i32) {
-    let mut output = envelope();
-    output.insert("spec".to_owned(), json!(model.name));
-    output.insert("result".to_owned(), json!("violated"));
-    output.insert("violation_kind".to_owned(), json!(violation.kind));
-    let (property_kind, property) = if violation.kind == "trans" {
-        (
-            "trans",
-            model
-                .transitions
-                .iter()
-                .find(|property| property.name == violation.name),
-        )
-    } else {
-        (
-            "invariant",
-            model
-                .invariants
-                .iter()
-                .find(|property| property.name == violation.name),
-        )
-    };
-    let origin = model.property_origin(property_kind, &violation.name);
-    let display_name = origin
-        .and_then(|origin| origin.primary.as_ref())
-        .and_then(|site| site.declaration_path.last())
-        .map_or_else(|| display(&violation.name), String::clone);
-    if violation.kind == "trans" {
-        output.insert("trans".to_owned(), json!(display_name));
-    }
-    output.insert("invariant".to_owned(), json!(display_name));
-    if let Some(origin) = origin {
-        output.insert("generated_name".to_owned(), json!(display(&violation.name)));
-        output.insert(
-            "origin".to_owned(),
-            ::fslc_rust::internal_origin_json(origin),
-        );
-    }
-    if let Some(property) = property {
-        insert_requirement_metadata(&mut output, &property.annotations, property.meta.as_ref());
-    }
-    output.insert(
-        "loc".to_owned(),
-        property.map_or(Value::Null, |property| property.span.python_loc()),
-    );
-    output.insert("violated_at_step".to_owned(), json!(violation.step));
-    let final_state = violation.trace.last().map(|entry| &entry.state);
-    let violating = violation_bindings_json(
-        model,
-        violation.kind.as_str(),
-        violation.name.as_str(),
-        property.map(|property| &property.expr),
-        final_state,
-    );
-    output.insert("violating_bindings".to_owned(), violating.clone());
-    output.insert(
-        "blame".to_owned(),
-        violation_blame_json(
-            model,
-            violation.kind.as_str(),
-            violation.name.as_str(),
-            property.map(|property| &property.expr),
-            violating,
-        ),
-    );
-    output.insert(
-        "last_action".to_owned(),
-        violation
-            .trace
-            .last()
-            .and_then(|entry| entry.action.as_ref())
-            .map_or(Value::Null, |action| {
-                let definition = model
-                    .actions
-                    .iter()
-                    .find(|definition| definition.name == action.name);
-                let origin = model.action_origin(&action.name);
-                let mut rendered = json!({
-                    "name": origin
-                        .and_then(|origin| origin.primary.as_ref())
-                        .and_then(|site| site.declaration_path.last())
-                        .map_or_else(|| display(&action.name), String::clone),
-                    "params": action.params.iter().map(|(name, value)| (
-                        name.clone(), ::fslc_rust::fsl_value_json(value)
-                    )).collect::<Map<_, _>>(),
-                    "loc": definition.map(|definition| definition.span.python_loc()),
-                });
-                if let Some(origin) = origin
-                    && let Value::Object(rendered) = &mut rendered
-                {
-                    rendered.insert("generated_name".to_owned(), json!(display(&action.name)));
-                    rendered.insert(
-                        "origin".to_owned(),
-                        ::fslc_rust::internal_origin_json(origin),
-                    );
-                }
-                rendered
-            }),
-    );
-    let mut trace = ::fslc_rust::trace_json(model, &violation.trace);
-    if let Value::Array(entries) = &mut trace {
-        for entry in entries.iter_mut().skip(1) {
-            if let Value::Object(entry) = entry {
-                entry.insert("blame".to_owned(), json!({"guards": [], "effects": []}));
-            }
-        }
-    }
-    output.insert("trace".to_owned(), trace);
-    finish_verification(&mut output, violation.step, started, statistics);
-    output.insert(
-        "trace_type".to_owned(),
-        json!(if violation.name.starts_with("_deadline_") {
-            "sla"
-        } else {
-            violation.kind.as_str()
-        }),
-    );
-    (Value::Object(output), 1)
-}
-
-fn render_reachable_failure(
-    model: &KernelModel,
-    result: &fsl_verifier::BmcResult,
-    unreached: &[&fsl_core::PropertyDef],
-    depth: usize,
-    checked_bounds: Option<&std::collections::BTreeSet<String>>,
-    started: Instant,
-    statistics: Option<&fsl_solver::VerificationStatistics>,
-) -> (Value, i32) {
-    let mut output = envelope();
-    output.insert("spec".to_owned(), json!(model.name));
-    output.insert("result".to_owned(), json!("reachable_failed"));
-    output.insert(
-        "unreached".to_owned(),
-        Value::Array(
-            unreached
-                .iter()
-                .map(|property| {
-                    let origin = model.property_origin("reachable", &property.name);
-                    let mut item = json!({
-                        "name": origin
-                            .and_then(|origin| origin.primary.as_ref())
-                            .and_then(|site| site.declaration_path.last())
-                            .map_or_else(|| display(&property.name), String::clone),
-                        "loc": property.span.python_loc(),
-                        "classification": "insufficient_depth",
-                        "hint": format!("not witnessed within depth {depth}; try a larger --depth"),
-                        "faithfulness_class": "intent_unexercised",
-                        "recommended_action": "add a single-shot reachable for the action / raise --depth",
-                    });
-                    if let Value::Object(item) = &mut item {
-                        insert_requirement_metadata(
-                            item,
-                            &property.annotations,
-                            property.meta.as_ref(),
-                        );
-                    }
-                    if let Some(origin) = origin
-                        && let Value::Object(item) = &mut item
-                    {
-                        item.insert("generated_name".to_owned(), json!(display(&property.name)));
-                        item.insert(
-                            "origin".to_owned(),
-                            ::fslc_rust::internal_origin_json(origin),
-                        );
-                    }
-                    item
-                })
-                .collect(),
-        ),
-    );
-    add_common_verification(&mut output, model, result, depth, checked_bounds);
-    output.remove("reachables");
-    output.remove("deadlock");
-    output.insert(
-        "hint".to_owned(),
-        json!(format!(
-            "within depth {depth} no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth"
-        )),
-    );
-    output.insert("faithfulness_class".to_owned(), json!("intent_unexercised"));
-    output.insert(
-        "recommended_action".to_owned(),
-        json!("add a single-shot reachable for the action / raise --depth"),
-    );
-    finish_verification(&mut output, depth, started, statistics);
-    output.insert("trace_type".to_owned(), json!("reachable"));
-    (Value::Object(output), 1)
-}
-
-fn render_deadlock_failure(
-    model: &KernelModel,
-    result: &fsl_verifier::BmcResult,
-    step: usize,
-    started: Instant,
-    statistics: Option<&fsl_solver::VerificationStatistics>,
-) -> (Value, i32) {
-    let mut output = envelope();
-    output.insert("spec".to_owned(), json!(model.name));
-    output.insert("result".to_owned(), json!("violated"));
-    output.insert("violation_kind".to_owned(), json!("deadlock"));
-    output.insert("invariant".to_owned(), json!("deadlock"));
-    output.insert("violated_at_step".to_owned(), json!(step));
-    if let Some(trace) = &result.deadlock_trace {
-        output.insert("trace".to_owned(), ::fslc_rust::trace_json(model, trace));
-        output.insert(
-            "last_action".to_owned(),
-            trace
-                .last()
-                .and_then(|entry| entry.action.as_ref())
-                .map_or(Value::Null, |action| json!({"name": display(&action.name)})),
-        );
-    }
-    finish_verification(&mut output, step, started, statistics);
-    output.insert("trace_type".to_owned(), json!("deadlock"));
-    (Value::Object(output), 1)
-}
-
-fn render_bmc_success(
-    model: &KernelModel,
-    result: &fsl_verifier::BmcResult,
-    depth: usize,
-    checked_bounds: Option<&std::collections::BTreeSet<String>>,
-    deadlock: DeadlockMode,
-    started: Instant,
-    statistics: Option<&fsl_solver::VerificationStatistics>,
-) -> (Value, i32) {
-    let mut output = envelope();
-    output.insert("spec".to_owned(), json!(model.name));
-    output.insert("result".to_owned(), json!("verified"));
-    add_common_verification(&mut output, model, result, depth, checked_bounds);
-    if deadlock == DeadlockMode::Ignore {
-        output.insert("deadlock".to_owned(), json!({"found": false}));
-    }
-    if !model.leadstos.is_empty() {
-        output.insert(
-            "leads_to".to_owned(),
-            Value::Object(
-                model
-                    .leadstos
-                    .iter()
-                    .map(|property| {
-                        let mut checked = json!({"checked_to_depth": depth});
-                        if let Some(within) = property.within
-                            && let Value::Object(entry) = &mut checked
-                        {
-                            entry.insert("within".to_owned(), json!(within));
-                        }
-                        (display(&property.name), checked)
-                    })
-                    .collect(),
-            ),
-        );
-    }
-    let warnings = shared_warnings(model, result, depth, deadlock);
-    output.insert("warnings".to_owned(), Value::Array(warnings));
-    output.insert(
-        "note".to_owned(),
-        json!(format!(
-            "bounded verification: no violation within depth {depth}"
-        )),
-    );
-    if result.frontier_progress {
-        output.insert(
-            "hint".to_owned(),
-            json!(format!(
-                "state space not saturated at depth {depth}; a violation could exist beyond depth {depth}; consider a larger --depth or the induction engine"
-            )),
-        );
-    }
-    if let Some(statistics) = statistics {
-        output.insert("cost".to_owned(), verification_cost(started, statistics));
-    } else {
-        output.insert(
-            "cost".to_owned(),
-            verification_cost(started, &fsl_solver::VerificationStatistics::default()),
-        );
-    }
-    (Value::Object(output), 0)
-}
-
-fn shared_warnings(
-    model: &KernelModel,
-    result: &fsl_verifier::BmcResult,
-    depth: usize,
-    deadlock: DeadlockMode,
-) -> Vec<Value> {
-    fsl_runtime::verification_warnings(
-        model,
-        depth,
-        deadlock == DeadlockMode::Warn,
-        result.deadlock_step,
-        result
-            .deadlock_trace
-            .as_ref()
-            .and_then(|trace| trace.last())
-            .map(|entry| &entry.state),
-        &result.action_coverage,
-    )
-}
-
-fn add_common_verification(
-    output: &mut Map<String, Value>,
-    model: &KernelModel,
-    result: &fsl_verifier::BmcResult,
-    depth: usize,
-    checked_bounds: Option<&std::collections::BTreeSet<String>>,
-) {
-    output.insert("depth".to_owned(), json!(depth));
-    output.insert("checked_to_depth".to_owned(), json!(depth));
-    output.insert("completeness".to_owned(), json!("bounded"));
-    output.insert(
-        "invariants_checked".to_owned(),
-        Value::Array(
-            invariant_names_selected(model, checked_bounds)
-                .into_iter()
-                .map(Value::String)
-                .collect(),
-        ),
-    );
-    output.insert(
-        "transitions_checked".to_owned(),
-        Value::Array(
-            model
-                .transitions
-                .iter()
-                .map(|property| Value::String(display(&property.name)))
-                .collect(),
-        ),
-    );
-    output.insert(
-        "reachables".to_owned(),
-        Value::Object(
-            result
-                .reachables
-                .iter()
-                .filter_map(|(name, witness)| {
-                    witness.as_ref().map(|witness| {
-                        (
-                            display(name),
-                            json!({
-                                "witnessed_at_step": witness.step,
-                                "witness": ::fslc_rust::trace_json(model, &witness.trace),
-                            }),
-                        )
-                    })
-                })
-                .collect(),
-        ),
-    );
-    output.insert(
-        "action_coverage".to_owned(),
-        Value::Object(
-            result
-                .action_coverage
-                .iter()
-                .map(|(name, covered)| {
-                    (
-                        display(name),
-                        if *covered {
-                            json!(true)
-                        } else {
-                            let action = model
-                                .actions
-                                .iter()
-                                .find(|action| action.name == *name);
-                            let mut diagnostic = json!({
-                                "covered": false,
-                                "blocking_requires": [],
-                                "hint": coverage_hint(depth),
-                                "faithfulness_class": "intent_unexercised",
-                                "recommended_action": "add a single-shot reachable for the action / raise --depth",
-                            });
-                            if let Some(action) = action
-                                && let Value::Object(entry) = &mut diagnostic
-                            {
-                                insert_requirement_metadata(
-                                    entry,
-                                    &action.annotations,
-                                    action.meta.as_ref(),
-                                );
-                            }
-                            diagnostic
-                        },
-                    )
-                })
-                .collect(),
-        ),
-    );
-    output.insert(
-        "deadlock".to_owned(),
-        result.deadlock_step.map_or_else(
-            || json!({"found": false}),
-            |step| {
-                json!({
-                    "found": true,
-                    "at_step": step,
-                    "trace": result.deadlock_trace.as_ref().map(|trace| ::fslc_rust::trace_json(model, trace)),
-                })
-            },
-        ),
-    );
-}
 fn synthetic_span() -> fsl_syntax::Span {
     let position = fsl_syntax::SourcePos {
         offset: 0,
@@ -1839,7 +1299,7 @@ fn load_lemma_model(
     path: &Path,
     options: &CliVerifyOptions,
 ) -> Result<(KernelModel, std::collections::BTreeSet<String>), CommandResult> {
-    let mut model = load_model(path).map_err(|error| (semantic_error_output(&error), 2))?;
+    let mut model = load_model(path).map_err(|error| (spec_load_error_output(&error), 2))?;
     let occupied_names = model
         .invariants
         .iter()
@@ -2043,6 +1503,9 @@ fn verify_cache_keys_with_fingerprints(
 }
 
 fn verify_cache_path(key: &str) -> Option<PathBuf> {
+    if !valid_cache_key(key) {
+        return None;
+    }
     Some(
         cache_root()?
             .join("verify/v2")
@@ -2051,14 +1514,22 @@ fn verify_cache_path(key: &str) -> Option<PathBuf> {
     )
 }
 
+fn valid_cache_key(key: &str) -> bool {
+    key.len() == 64
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 fn verify_cache_lookup(key: &str, xdepth: &str, depth: usize) -> Option<Value> {
+    if !valid_cache_key(xdepth) {
+        return None;
+    }
     let path = verify_cache_path(key)?;
     if let Ok(bytes) = std::fs::read(path)
         && let Ok(entry) = serde_json::from_slice::<Value>(&bytes)
-        && entry.get("schema").and_then(Value::as_str) == Some("fslc-rust-cache.v2")
-        && entry.get("key").and_then(Value::as_str) == Some(key)
+        && let Some(mut output) = verified_cache_entry_output(&entry, key, xdepth)
     {
-        let mut output = entry.get("output")?.clone();
         output.as_object_mut()?.insert(
             "cache".to_owned(),
             json!({"hit": true, "key": key, "source": "exact"}),
@@ -2069,6 +1540,11 @@ fn verify_cache_lookup(key: &str, xdepth: &str, depth: usize) -> Option<Value> {
         .join("verify/v2/xdepth")
         .join(format!("{xdepth}.json"));
     let pointer: Value = serde_json::from_slice(&std::fs::read(pointer_path).ok()?).ok()?;
+    if pointer.get("schema").and_then(Value::as_str) != Some("fslc-rust-cache-pointer.v2")
+        || pointer.get("xdepth").and_then(Value::as_str) != Some(xdepth)
+    {
+        return None;
+    }
     let violation_step = usize::try_from(pointer.get("violated_at_step")?.as_u64()?).ok()?;
     if violation_step > depth {
         return None;
@@ -2076,7 +1552,7 @@ fn verify_cache_lookup(key: &str, xdepth: &str, depth: usize) -> Option<Value> {
     let target = pointer.get("entry_key")?.as_str()?;
     let entry: Value =
         serde_json::from_slice(&std::fs::read(verify_cache_path(target)?).ok()?).ok()?;
-    let mut output = entry.get("output")?.clone();
+    let mut output = verified_cross_depth_output(&entry, target, xdepth, violation_step)?;
     output.as_object_mut()?.insert(
         "cache".to_owned(),
         json!({"hit": true, "key": target, "source": "cross_depth"}),
@@ -2084,7 +1560,35 @@ fn verify_cache_lookup(key: &str, xdepth: &str, depth: usize) -> Option<Value> {
     Some(output)
 }
 
+fn verified_cache_entry_output(
+    entry: &Value,
+    expected_key: &str,
+    expected_xdepth: &str,
+) -> Option<Value> {
+    (entry.get("schema").and_then(Value::as_str) == Some("fslc-rust-cache.v2")
+        && entry.get("key").and_then(Value::as_str) == Some(expected_key)
+        && entry.get("xdepth").and_then(Value::as_str) == Some(expected_xdepth))
+    .then(|| entry.get("output").cloned())?
+    .filter(|output| cached_output_status(output).is_some())
+}
+
+fn verified_cross_depth_output(
+    entry: &Value,
+    expected_key: &str,
+    expected_xdepth: &str,
+    violation_step: usize,
+) -> Option<Value> {
+    let output = verified_cache_entry_output(entry, expected_key, expected_xdepth)?;
+    (output.get("result").and_then(Value::as_str) == Some("violated")
+        && output.get("violated_at_step").and_then(Value::as_u64)
+            == Some(u64::try_from(violation_step).ok()?))
+    .then_some(output)
+}
+
 fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
+    if !valid_cache_key(key) || !valid_cache_key(xdepth) {
+        return;
+    }
     if !matches!(
         output.get("result").and_then(Value::as_str),
         Some(
@@ -2112,6 +1616,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
     let entry = json!({
         "schema": "fslc-rust-cache.v2",
         "key": key,
+        "xdepth": xdepth,
         "backend": if explicit { "native-explicit" } else { "native-z3" },
         "solver_version": if explicit {
             Value::Null
@@ -2135,10 +1640,15 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
         if std::fs::create_dir_all(&directory).is_ok() {
             let pointer = directory.join(format!("{xdepth}.json"));
             let temporary = directory.join(format!(".{xdepth}.{}.tmp", std::process::id()));
-            if serde_json::to_vec(&json!({"entry_key":key,"violated_at_step":step}))
-                .ok()
-                .and_then(|bytes| std::fs::write(&temporary, bytes).ok())
-                .is_some()
+            if serde_json::to_vec(&json!({
+                "schema": "fslc-rust-cache-pointer.v2",
+                "xdepth": xdepth,
+                "entry_key": key,
+                "violated_at_step": step,
+            }))
+            .ok()
+            .and_then(|bytes| std::fs::write(&temporary, bytes).ok())
+            .is_some()
             {
                 let _ = std::fs::rename(temporary, pointer);
             }
@@ -2149,9 +1659,14 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
 struct PreparedCliVerification {
     has_scope: bool,
     is_agent_document: bool,
-    model: Result<KernelModel, String>,
+    model: Result<KernelModel, SpecLoadError>,
     initial_state: Option<std::collections::BTreeMap<String, FslValue>>,
     has_trace_contract: bool,
+    /// Compose-lowering warnings (e.g. `fair_not_inherited`), computed while
+    /// lowering the surface document, before `build_model` drops the per-
+    /// component information (like constituent `fair` markers) that produced
+    /// them. `model`/`fsl_runtime::verification_warnings` cannot recover them.
+    compose_warnings: Vec<Value>,
 }
 
 pub(super) fn run_verify_cli(
@@ -2219,14 +1734,11 @@ fn prepare_cli_verification(
     path: &Path,
     options: &CliVerifyOptions,
 ) -> Result<PreparedCliVerification, CommandResult> {
-    let is_agent_document = if let Ok(source) = std::fs::read_to_string(path) {
-        match fsl_syntax::parse_surface_document(&source) {
-            Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,
-            Ok(_) => false,
-            Err(error) => return Err((error_output("parse", &error.to_string()), 2)),
-        }
-    } else {
-        false
+    let source = read_spec_source(path).map_err(|error| (spec_load_error_output(&error), 2))?;
+    let is_agent_document = match fsl_syntax::parse_surface_document(&source) {
+        Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,
+        Ok(_) => false,
+        Err(error) => return Err((surface_parse_error_output(&error), 2)),
     };
     let has_scope = !options.scope.instances.is_empty() || !options.scope.values.is_empty();
     if let Err(error) = validate_specialized_document(path) {
@@ -2240,7 +1752,7 @@ fn prepare_cli_verification(
     let initial_state = if let Some(snapshot_path) = options.from_state.as_deref() {
         let model = snapshot_model
             .as_ref()
-            .map_err(|error| (semantic_error_output(error), 2))?;
+            .map_err(|error| (spec_load_error_output(error), 2))?;
         match load_state_snapshot(snapshot_path, model) {
             Ok(state) => Some(state),
             Err((kind, error)) => return Err((error_output(&kind, &error), 2)),
@@ -2256,6 +1768,17 @@ fn prepare_cli_verification(
             Err(error) => return Err((semantic_error_output(&error), 2)),
         }
     }
+    // `--instances`/`--values` scope overrides go through
+    // `parse_kernel_source_with_bounds` (`load_model_scoped`), a separate
+    // lowering entrypoint that does not apply to compose documents, so
+    // compose-lowering warnings are only collected in the unscoped case.
+    let compose_warnings = if has_scope {
+        Vec::new()
+    } else {
+        load_kernel_model(path)
+            .map(|(_, kernel, _)| kernel.diagnostics().to_vec())
+            .unwrap_or_default()
+    };
     validate_cli_property_selection(path, options, has_scope, snapshot_model.as_ref().ok())?;
     Ok(PreparedCliVerification {
         has_scope,
@@ -2263,6 +1786,7 @@ fn prepare_cli_verification(
         model: snapshot_model,
         initial_state,
         has_trace_contract,
+        compose_warnings,
     })
 }
 
@@ -2280,7 +1804,7 @@ fn validate_cli_property_selection(
         None if has_scope => load_model_scoped(path, &options.scope),
         None => load_model(path),
     }
-    .map_err(|error| (semantic_error_output(&error), 2))?;
+    .map_err(|error| (spec_load_error_output(&error), 2))?;
     if options.engine == "induction"
         && let Some(name) = options.property.as_deref()
         && let Some(kind) = model
@@ -2330,14 +1854,65 @@ fn cached_verification(
         return None;
     }
     let output = verify_cache_lookup(key, xdepth, options.depth)?;
-    let status = cached_output_status(&output);
+    let status = cached_output_status(&output)?;
     Some((output, status))
 }
 
-fn cached_output_status(output: &Value) -> i32 {
+fn cached_output_status(output: &Value) -> Option<i32> {
+    let output = output.as_object()?;
+    if output.get("fsl").and_then(Value::as_str) != Some("1.0")
+        || output.get("spec").and_then(Value::as_str)?.is_empty()
+    {
+        return None;
+    }
+    let completeness = output.get("completeness").and_then(Value::as_str);
     match output.get("result").and_then(Value::as_str) {
-        Some("violated" | "reachable_failed" | "unknown_cti" | "unknown_budget") => 1,
-        _ => 0,
+        Some("verified") if completeness == Some("bounded") => Some(0),
+        Some("proved") if completeness == Some("unbounded") => Some(0),
+        Some("violated") if valid_cached_violation(output, completeness) => Some(1),
+        Some("reachable_failed")
+            if matches!(completeness, Some("bounded" | "unbounded"))
+                && output.get("unreached").and_then(Value::as_array).is_some() =>
+        {
+            Some(1)
+        }
+        Some("unknown_cti")
+            if completeness == Some("bounded")
+                && output.get("cti").and_then(Value::as_object).is_some() =>
+        {
+            Some(1)
+        }
+        Some("unknown_budget")
+            if completeness == Some("unknown")
+                && output
+                    .get("states_explored")
+                    .and_then(Value::as_u64)
+                    .is_some() =>
+        {
+            Some(1)
+        }
+        _ => None,
+    }
+}
+
+fn valid_cached_violation(output: &Map<String, Value>, completeness: Option<&str>) -> bool {
+    if completeness != Some("bounded") || output.get("trace").and_then(Value::as_array).is_none() {
+        return false;
+    }
+    match output.get("violation_kind").and_then(Value::as_str) {
+        Some("leadsTo") => {
+            output
+                .get("pending_since")
+                .and_then(Value::as_u64)
+                .is_some()
+                && output.get("bindings").and_then(Value::as_object).is_some()
+                && output.get("trace_type").and_then(Value::as_str) == Some("leadsTo")
+        }
+        Some(_) => output
+            .get("violated_at_step")
+            .and_then(Value::as_u64)
+            .is_some(),
+        None => false,
     }
 }
 
@@ -2396,7 +1971,7 @@ fn cached_auto_verification(
     if let Some(output) = &explicit_cached
         && output.get("result").and_then(Value::as_str) != Some("unknown_budget")
     {
-        let status = cached_output_status(output);
+        let status = cached_output_status(output)?;
         return Some((output.clone(), status));
     }
     let (reason, kind) = if let Some(reason) = explicit_gate_reason(source_path, options, prepared)
@@ -2411,7 +1986,7 @@ fn cached_auto_verification(
         verify_cache_keys_for_engine(source_path, identity_path, options, "bmc").ok()?;
     let mut output = verify_cache_lookup(&key, &xdepth, options.depth)?;
     annotate_auto_fallback(&mut output, &reason, kind);
-    let status = cached_output_status(&output);
+    let status = cached_output_status(&output)?;
     Some((output, status))
 }
 
@@ -2476,14 +2051,14 @@ fn execute_cli_verification(
     };
     let model = match &prepared.model {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(error), 2),
+        Err(error) => return (spec_load_error_output(error), 2),
     };
     let implements = if filtered {
         None
     } else {
         match implements_result(path, model, options.depth) {
             Ok(implements) => implements,
-            Err(error) => return (error_output("type", &error), 2),
+            Err(error) => return (implements_error_output(&error), 2),
         }
     };
     let selection = ModelSelection {
@@ -2522,7 +2097,12 @@ fn execute_cli_verification(
         Err(error) => return (error_output("usage", &error), 2),
     };
     if !filtered {
-        decorate_default_cli_verification(&mut output, implements, prepared.has_trace_contract);
+        decorate_default_cli_verification(
+            &mut output,
+            implements,
+            prepared.has_trace_contract,
+            &prepared.compose_warnings,
+        );
     }
     (output, status)
 }
@@ -2531,6 +2111,7 @@ fn decorate_default_cli_verification(
     output: &mut Value,
     implements: Option<Value>,
     has_trace_contract: bool,
+    compose_warnings: &[Value],
 ) {
     let Value::Object(envelope) = output else {
         return;
@@ -2547,6 +2128,16 @@ fn decorate_default_cli_verification(
             warning.get("message").and_then(Value::as_str)
                 != Some("spec declares no user invariants (only implicit type bounds are checked)")
         });
+    }
+    if !compose_warnings.is_empty()
+        && envelope.get("result").and_then(Value::as_str) != Some("error")
+        && let Some(Value::Array(warnings)) = envelope.get_mut("warnings")
+    {
+        // Compose-lowering warnings (e.g. `fair_not_inherited`) are computed
+        // while lowering, before the checked KernelModel drops the per-
+        // component information that produced them, so they cannot be
+        // recovered from `model`/`fsl_runtime::verification_warnings` alone.
+        warnings.splice(0..0, compose_warnings.iter().cloned());
     }
 }
 
@@ -2645,7 +2236,7 @@ fn add_cli_strict_tag_warnings(
     } else {
         load_model(path)
     }
-    .map_err(|error| (semantic_error_output(&error), 2))?;
+    .map_err(|error| (spec_load_error_output(&error), 2))?;
     add_strict_tag_warnings(output, &model, path, true, options.requirements.as_deref())
         .map_err(|error| (error_output("io", &error), 2))
 }
@@ -2729,6 +2320,44 @@ mod tests {
     }
 
     #[test]
+    fn corrupted_explicit_evidence_becomes_an_internal_exit_three() {
+        let source = r"spec CorruptExplicitEvidence {
+  state { done: Bool }
+  init { done = false }
+  action finish() { requires not done done = true }
+  invariant NeverDone { not done }
+}";
+        let kernel = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+            .expect("lower explicit fixture");
+        let model = fsl_core::build_model(kernel).expect("build explicit fixture");
+        let mut result =
+            fsl_runtime::verify_explicit(model.clone(), 2, 100).expect("run explicit verification");
+        result
+            .violation
+            .as_mut()
+            .expect("violation evidence")
+            .trace
+            .last_mut()
+            .expect("violating state")
+            .state
+            .insert("done".to_owned(), FslValue::Bool(false));
+
+        let rendered = fslc_rust::verification_output::render_explicit_output(
+            envelope(),
+            &model,
+            &result,
+            None,
+            DeadlockMode::Ignore,
+            0.0,
+            &[],
+        );
+        let (output, status) = finish_explicit_output(rendered);
+        assert_eq!(status, 3);
+        assert_eq!(output["result"], "error");
+        assert_eq!(output["kind"], "internal");
+    }
+
+    #[test]
     fn explicit_cache_keys_include_the_engine_and_state_budget() {
         let path = repository_path("examples/gallery/valid/tiny_turnstile.fsl");
         let bmc = CliVerifyOptions::default();
@@ -2760,6 +2389,66 @@ mod tests {
                 .expect("updated solver cache keys");
 
         assert_ne!(current, updated);
+    }
+
+    #[test]
+    fn cache_entries_and_cross_depth_pointers_fail_closed_on_mismatch() {
+        const KEY: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const XDEPTH: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let valid = json!({
+            "schema": "fslc-rust-cache.v2",
+            "key": KEY,
+            "xdepth": XDEPTH,
+            "output": {
+                "fsl": "1.0",
+                "spec": "CacheTest",
+                "result": "violated",
+                "violation_kind": "invariant",
+                "violated_at_step": 2,
+                "trace": [],
+                "completeness": "bounded",
+            },
+        });
+        assert_eq!(
+            verified_cross_depth_output(&valid, KEY, XDEPTH, 2),
+            valid.get("output").cloned()
+        );
+
+        for mismatched in [
+            json!({"schema":"other","key":KEY,"xdepth":XDEPTH,"output":valid["output"]}),
+            json!({"schema":"fslc-rust-cache.v2","key":"other","xdepth":XDEPTH,"output":valid["output"]}),
+            json!({"schema":"fslc-rust-cache.v2","key":KEY,"xdepth":"other","output":valid["output"]}),
+            json!({"schema":"fslc-rust-cache.v2","key":KEY,"xdepth":XDEPTH,"output":{"fsl":"1.0","spec":"CacheTest","result":"verified","completeness":"bounded"}}),
+            json!({"schema":"fslc-rust-cache.v2","key":KEY,"xdepth":XDEPTH,"output":{"fsl":"1.0","spec":"CacheTest","result":"violated","violation_kind":"invariant","violated_at_step":3,"trace":[],"completeness":"bounded"}}),
+        ] {
+            assert!(
+                verified_cross_depth_output(&mismatched, KEY, XDEPTH, 2).is_none(),
+                "accepted mismatched cache entry: {mismatched}"
+            );
+        }
+
+        for malformed in [
+            "",
+            "a",
+            "é",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ] {
+            assert!(verify_cache_path(malformed).is_none());
+        }
+        assert!(
+            verified_cache_entry_output(
+                &json!({"schema":"fslc-rust-cache.v2","key":KEY,"xdepth":XDEPTH,"output":{}}),
+                KEY,
+                XDEPTH,
+            )
+            .is_none()
+        );
+        assert!(verified_cache_entry_output(
+            &json!({"schema":"fslc-rust-cache.v2","key":KEY,"xdepth":XDEPTH,"output":{"result":"bogus"}}),
+            KEY,
+            XDEPTH,
+        )
+        .is_none());
     }
 
     #[cfg(unix)]

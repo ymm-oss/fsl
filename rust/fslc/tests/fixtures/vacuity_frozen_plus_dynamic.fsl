@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Non-firing control for `tautology_over_frozen`: the invariant reads the
+// frozen `ghost` but its truth still depends on the dynamic `x`, so it is not
+// a tautology over the frozen values alone.
+spec FrozenPlusDynamic {
+  state { ghost: Bool, x: Bool }
+  init {
+    ghost = true
+    x = false
+  }
+  action keep_x_dynamic() { x = false }
+  invariant DependsOnDynamic { ghost => not x }
+}

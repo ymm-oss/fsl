@@ -2,13 +2,14 @@
 
 use std::collections::BTreeMap;
 
-use fsl_core::{FslValue, KernelModel, TypeDef, TypeRef};
+use fsl_core::{FslValue, HelpfulAction, KernelExpr, KernelModel, LeadsToDef, TypeDef, TypeRef};
 use fsl_solver::{ModelValue, SatResult, SmtSolver};
 
 use crate::VerifyError;
-use crate::bmc::{leadsto_bindings, leadsto_condition, project_trace};
 use crate::eval::eval;
-use crate::transition::{action_instances, transition_constraint};
+use crate::liveness::{leadsto_bindings, leadsto_condition};
+use crate::trace::project_trace;
+use crate::transition::{ActionInstance, action_instances, transition_constraint};
 use crate::value::{
     Bindings, SymbolicState, bool_term, bounds, i64_index, int_term, symbolic_state_with_suffix,
 };
@@ -31,6 +32,18 @@ pub struct InductionResult {
 pub struct RankProof {
     pub name: String,
     pub measure: fsl_core::KernelExpr,
+    /// The leadsTo's declared `helpful` action metadata, carried through
+    /// unformatted so the CLI can render display labels.
+    pub helpful: Vec<HelpfulAction>,
+}
+
+/// One `helpful`-matching or `helpful`-blocking action instance, named for
+/// JSON rendering by the caller (mirrors the frozen Python reference's
+/// `helpful_actions` display list).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HelpfulActionWitness {
+    pub action: String,
+    pub params: BTreeMap<String, FslValue>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -46,6 +59,14 @@ pub struct RankFailure {
     pub trace: Vec<fsl_core::TraceStep>,
     pub hint: String,
     pub message: String,
+    /// The leadsTo's declared `helpful` action metadata (empty unless the
+    /// property declares `helpful`).
+    pub helpful: Vec<HelpfulAction>,
+    /// The matched/blocked helpful action instance(s) relevant to this
+    /// failure (empty unless `kind` is one of the `helpful_*`/
+    /// `progress_action_not_fair`/`non_helpful_action_increases_measure`
+    /// kinds).
+    pub helpful_actions: Vec<HelpfulActionWitness>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -268,6 +289,143 @@ fn model_int<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<i64, VerifyErro
     }
 }
 
+fn model_bool<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<bool, VerifyError> {
+    match solver.model_eval(term)? {
+        Some(ModelValue::Bool(value)) => Ok(value),
+        Some(ModelValue::Int(_)) => Err(VerifyError::new("ranking condition is an integer")),
+        None => Err(VerifyError::new(
+            "ranking condition is unavailable in model",
+        )),
+    }
+}
+
+const HELPFUL_ARG_HINT: &str = "helpful action arguments must be state-independent leadsto \
+    binders, constants, enum members, or arithmetic (+, -, *) over those values";
+
+const HELPFUL_PROGRESS_HINT: &str = "helpful marks which action instance is responsible for \
+    progress. The matching action must be declared `fair action`, must be enabled whenever the \
+    obligation is pending, and must strictly decrease the rank when it fires; other actions must \
+    keep the pending obligation true (unless they make Q true) and must not increase the measure \
+    -- an unbounded increase between helpful firings can outpace the guaranteed decrease and \
+    prevent Q from ever being reached";
+
+/// Evaluate one `helpful` action argument expression to a concrete value.
+///
+/// `helpful` arguments select a per-binding action instance; they must be
+/// state-independent (leadsTo binders, constants, enum members, or `+`/`-`/`*`
+/// over those values), matching the frozen Python reference's
+/// `_helpful_arg_value`.
+///
+/// # Errors
+///
+/// Returns [`VerifyError`] when the expression references anything other than
+/// a bound leadsTo binder or a constant, or does not fold to an integer,
+/// Boolean, or enum-member value.
+fn eval_state_independent(
+    expr: &KernelExpr,
+    binder_env: &BTreeMap<String, FslValue>,
+) -> Result<FslValue, VerifyError> {
+    match expr {
+        KernelExpr::Num(value) => Ok(FslValue::Int(*value)),
+        KernelExpr::Bool(value) => Ok(FslValue::Bool(*value)),
+        KernelExpr::EnumMember { type_name, member } => Ok(FslValue::Enum {
+            type_name: type_name.clone(),
+            member: member.clone(),
+        }),
+        KernelExpr::Var(name) => binder_env
+            .get(name)
+            .cloned()
+            .ok_or_else(|| VerifyError::new(format!("{HELPFUL_ARG_HINT}: unknown name '{name}'"))),
+        KernelExpr::Neg(inner) => match eval_state_independent(inner, binder_env)? {
+            FslValue::Int(value) => Ok(FslValue::Int(-value)),
+            _ => Err(VerifyError::new(HELPFUL_ARG_HINT)),
+        },
+        KernelExpr::Binary { op, left, right } => {
+            let left = eval_state_independent(left, binder_env)?;
+            let right = eval_state_independent(right, binder_env)?;
+            match (op.as_str(), left, right) {
+                ("+", FslValue::Int(a), FslValue::Int(b)) => Ok(FslValue::Int(a + b)),
+                ("-", FslValue::Int(a), FslValue::Int(b)) => Ok(FslValue::Int(a - b)),
+                ("*", FslValue::Int(a), FslValue::Int(b)) => Ok(FslValue::Int(a * b)),
+                _ => Err(VerifyError::new(HELPFUL_ARG_HINT)),
+            }
+        }
+        _ => Err(VerifyError::new(HELPFUL_ARG_HINT)),
+    }
+}
+
+/// Resolve a leadsTo's declared `helpful` action entries against the
+/// enumerated action instances, for one concrete leadsTo binding.
+///
+/// Mirrors the frozen Python reference's `_helpful_matches`: a `helpful`
+/// entry naming an undeclared action is skipped rather than erroring here,
+/// since `fslc check` (`validate_model_expression_types`) already rejects
+/// that at the static-check stage.
+///
+/// # Errors
+///
+/// Returns [`VerifyError`] when a `helpful` argument expression is not
+/// state-independent (see [`eval_state_independent`]).
+fn helpful_matches<S: SmtSolver>(
+    model: &fsl_core::KernelModel,
+    leadsto: &LeadsToDef,
+    binder_concrete: &BTreeMap<String, FslValue>,
+    instances: &[ActionInstance<S::Term>],
+) -> Result<Vec<usize>, VerifyError> {
+    let mut out = Vec::new();
+    for helper in &leadsto.helpful {
+        let Some(action) = model
+            .actions
+            .iter()
+            .find(|action| action.name == helper.action)
+        else {
+            continue;
+        };
+        let param_names = action
+            .params
+            .iter()
+            .map(fsl_core::ParamDef::name)
+            .collect::<Vec<_>>();
+        let expected = helper
+            .args
+            .iter()
+            .map(|arg| eval_state_independent(arg, binder_concrete))
+            .collect::<Result<Vec<_>, _>>()?;
+        for (index, instance) in instances.iter().enumerate() {
+            if instance.action != helper.action {
+                continue;
+            }
+            let matches = param_names
+                .iter()
+                .zip(&expected)
+                .all(|(name, value)| instance.concrete_params.get(*name) == Some(value));
+            if matches {
+                out.push(index);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn helpful_witnesses<S: SmtSolver>(
+    indices: &[usize],
+    instances: &[ActionInstance<S::Term>],
+) -> Vec<HelpfulActionWitness> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for &index in indices {
+        if !seen.insert(index) {
+            continue;
+        }
+        let instance = &instances[index];
+        out.push(HelpfulActionWitness {
+            action: instance.action.clone(),
+            params: instance.concrete_params.clone(),
+        });
+    }
+    out
+}
+
 /// Prove explicitly ranked `leadsTo` properties over one arbitrary transition.
 ///
 /// # Errors
@@ -339,6 +497,8 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
                                 "leadsTo '{}' decreases measure can be negative while P holds and Q is false",
                                 property.name
                             ),
+                            helpful: Vec::new(),
+                            helpful_actions: Vec::new(),
                         }),
                     });
                 }
@@ -346,6 +506,59 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
                 SatResult::Unknown => {
                     solver.pop(1)?;
                     return Err(VerifyError::new("solver returned unknown in ranking proof"));
+                }
+            }
+
+            let helpful_idx = helpful_matches::<S>(model, property, &binding.concrete, &instances)?;
+
+            if !property.helpful.is_empty() {
+                // helpful_fairness: the matching helpful action instance(s)
+                // must be declared `fair action`; helpful metadata alone does
+                // not create a fairness assumption.
+                let nonfair = helpful_idx
+                    .iter()
+                    .copied()
+                    .filter(|&index| !model.actions[instances[index].action_index].fair)
+                    .collect::<Vec<_>>();
+                if !nonfair.is_empty() {
+                    solver.push();
+                    solver.assert(&pending)?;
+                    match solver.check().await? {
+                        SatResult::Sat => {
+                            let measure_value = model_int(solver, &measure0)?;
+                            let trace =
+                                project_trace(solver, model, &[state0], &[], &instances, 0)?;
+                            solver.pop(1)?;
+                            return Ok(RankedLeadstoResult {
+                                proofs,
+                                failure: Some(RankFailure {
+                                    name: property.name.clone(),
+                                    bindings: binding.concrete,
+                                    measure: measure_expr.clone(),
+                                    kind: "progress_action_not_fair".to_owned(),
+                                    measure_value: Some(measure_value),
+                                    measure_before: None,
+                                    measure_after: None,
+                                    action: None,
+                                    trace,
+                                    hint: "helpful only identifies the per-binding progress action. Add `fair` to the lower-layer action instance that must eventually run; helpful does not create a fairness assumption.".to_owned(),
+                                    message: format!(
+                                        "leadsTo '{}' uses helpful action metadata, but a matching progress action is not declared fair",
+                                        property.name
+                                    ),
+                                    helpful: property.helpful.clone(),
+                                    helpful_actions: helpful_witnesses::<S>(&nonfair, &instances),
+                                }),
+                            });
+                        }
+                        SatResult::Unsat => solver.pop(1)?,
+                        SatResult::Unknown => {
+                            solver.pop(1)?;
+                            return Err(VerifyError::new(
+                                "solver returned unknown in ranking proof",
+                            ));
+                        }
+                    }
                 }
             }
 
@@ -363,26 +576,130 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
             )?;
             let measure1 = int_term(&measure1)?.clone();
             let decreases = solver.lt(&measure1, &measure0)?;
-            let keeps_pending = solver.and(&[p1, decreases])?;
-            let progresses = solver.or(&[q1, keeps_pending])?;
+            let keeps_pending = solver.and(&[p1.clone(), decreases])?;
+            let progresses = solver.or(&[q1.clone(), keeps_pending])?;
 
-            for (index, instance) in instances.iter().enumerate() {
-                let selected = solver.equal(&choice, &solver.int_value(i64_index(index)?))?;
-                let failure = solver.and(&[pending.clone(), selected, solver.not(&progresses)?])?;
+            // helpful_sticky: with two or more matching helpful instances, a
+            // single enabled disjunct is not enough -- once one becomes
+            // enabled while pending, it must stay enabled until it fires (or
+            // Q resolves), or its `fair` declaration is never obligated to
+            // fire because a *different* instance can satisfy the
+            // disjunction at every step.
+            if helpful_idx.len() >= 2 {
+                for &sticky_index in &helpful_idx {
+                    let action = &model.actions[instances[sticky_index].action_index];
+                    let (guards0, _) = crate::transition::action_guards(
+                        solver,
+                        model,
+                        action,
+                        &state0,
+                        &instances[sticky_index].params,
+                    )?;
+                    let enabled0 = solver.and(&guards0)?;
+                    let (guards1, _) = crate::transition::action_guards(
+                        solver,
+                        model,
+                        action,
+                        &state1,
+                        &instances[sticky_index].params,
+                    )?;
+                    let enabled1 = solver.and(&guards1)?;
+                    let not_selected = solver.not(
+                        &solver.equal(&choice, &solver.int_value(i64_index(sticky_index)?))?,
+                    )?;
+                    let flickers = solver.and(&[
+                        pending.clone(),
+                        enabled0,
+                        not_selected,
+                        solver.not(&q1)?,
+                        solver.not(&enabled1)?,
+                    ])?;
+                    solver.push();
+                    solver.assert(&flickers)?;
+                    match solver.check().await? {
+                        SatResult::Sat => {
+                            let trace = project_trace(
+                                solver,
+                                model,
+                                &[state0, state1],
+                                std::slice::from_ref(&choice),
+                                &instances,
+                                1,
+                            )?;
+                            let last_action = trace
+                                .get(1)
+                                .and_then(|step| step.action.as_ref())
+                                .map(|action| action.name.clone());
+                            solver.pop(1)?;
+                            let witnesses = helpful_witnesses::<S>(
+                                std::slice::from_ref(&sticky_index),
+                                &instances,
+                            );
+                            let witness_name = witnesses
+                                .first()
+                                .map_or_else(String::new, |witness| witness.action.clone());
+                            return Ok(RankedLeadstoResult {
+                                proofs,
+                                failure: Some(RankFailure {
+                                    name: property.name.clone(),
+                                    bindings: binding.concrete,
+                                    measure: measure_expr.clone(),
+                                    kind: "helpful_action_enabledness_not_sticky".to_owned(),
+                                    measure_value: None,
+                                    measure_before: None,
+                                    measure_after: None,
+                                    action: last_action,
+                                    trace,
+                                    hint: "with more than one `helpful` action, each instance's enabledness must not flicker: once a helpful instance becomes enabled while the obligation is pending, it must stay enabled until it fires (or Q holds) -- otherwise its weak fairness is never triggered. Guard the other actions so they cannot disable a pending helpful instance, or split into a leadsTo per helpful action so each owns a stable region".to_owned(),
+                                    message: format!(
+                                        "helpful action '{witness_name}' can become disabled again while leadsTo '{}' is still pending, without itself having fired",
+                                        property.name
+                                    ),
+                                    helpful: property.helpful.clone(),
+                                    helpful_actions: witnesses,
+                                }),
+                            });
+                        }
+                        SatResult::Unsat => solver.pop(1)?,
+                        SatResult::Unknown => {
+                            solver.pop(1)?;
+                            return Err(VerifyError::new(
+                                "solver returned unknown in ranking proof",
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // no_deadlock (helpful variant): a pending obligation must not
+            // reach a state where no matching helpful action instance is
+            // enabled -- otherwise none of them is ever obligated to fire by
+            // weak fairness.
+            if !property.helpful.is_empty() {
+                let mut enabled0_terms = Vec::with_capacity(helpful_idx.len());
+                for &deadlock_index in &helpful_idx {
+                    let action = &model.actions[instances[deadlock_index].action_index];
+                    let (guards, _) = crate::transition::action_guards(
+                        solver,
+                        model,
+                        action,
+                        &state0,
+                        &instances[deadlock_index].params,
+                    )?;
+                    enabled0_terms.push(solver.and(&guards)?);
+                }
+                let any_helpful_enabled = if enabled0_terms.is_empty() {
+                    solver.bool_value(false)
+                } else {
+                    solver.or(&enabled0_terms)?
+                };
                 solver.push();
-                solver.assert(&failure)?;
+                solver.assert(&pending)?;
+                solver.assert(&solver.not(&any_helpful_enabled)?)?;
                 match solver.check().await? {
                     SatResult::Sat => {
-                        let before = model_int(solver, &measure0)?;
-                        let after = model_int(solver, &measure1)?;
-                        let trace = project_trace(
-                            solver,
-                            model,
-                            &[state0, state1],
-                            std::slice::from_ref(&choice),
-                            &instances,
-                            1,
-                        )?;
+                        let measure_value = model_int(solver, &measure0)?;
+                        let trace = project_trace(solver, model, &[state0], &[], &instances, 0)?;
                         solver.pop(1)?;
                         return Ok(RankedLeadstoResult {
                             proofs,
@@ -390,17 +707,19 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
                                 name: property.name.clone(),
                                 bindings: binding.concrete,
                                 measure: measure_expr.clone(),
-                                kind: "non_decreasing_action".to_owned(),
-                                measure_value: None,
-                                measure_before: Some(before),
-                                measure_after: Some(after),
-                                action: Some(instance.action.clone()),
+                                kind: "helpful_action_not_enabled".to_owned(),
+                                measure_value: Some(measure_value),
+                                measure_before: None,
+                                measure_after: None,
+                                action: None,
                                 trace,
-                                hint: "from every state where P holds and Q is false, each enabled action must either make Q true, or keep P true and strictly decrease the measure".to_owned(),
+                                hint: HELPFUL_PROGRESS_HINT.to_owned(),
                                 message: format!(
-                                    "enabled action '{}' can leave leadsTo '{}' pending without strictly decreasing the measure",
-                                    instance.action, property.name
+                                    "leadsTo '{}' can be pending while no matching helpful action instance is enabled",
+                                    property.name
                                 ),
+                                helpful: property.helpful.clone(),
+                                helpful_actions: helpful_witnesses::<S>(&helpful_idx, &instances),
                             }),
                         });
                     }
@@ -411,10 +730,153 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
                     }
                 }
             }
+
+            if property.helpful.is_empty() {
+                for (index, instance) in instances.iter().enumerate() {
+                    let selected = solver.equal(&choice, &solver.int_value(i64_index(index)?))?;
+                    let failure =
+                        solver.and(&[pending.clone(), selected, solver.not(&progresses)?])?;
+                    solver.push();
+                    solver.assert(&failure)?;
+                    match solver.check().await? {
+                        SatResult::Sat => {
+                            let before = model_int(solver, &measure0)?;
+                            let after = model_int(solver, &measure1)?;
+                            let trace = project_trace(
+                                solver,
+                                model,
+                                &[state0, state1],
+                                std::slice::from_ref(&choice),
+                                &instances,
+                                1,
+                            )?;
+                            solver.pop(1)?;
+                            return Ok(RankedLeadstoResult {
+                                proofs,
+                                failure: Some(RankFailure {
+                                    name: property.name.clone(),
+                                    bindings: binding.concrete,
+                                    measure: measure_expr.clone(),
+                                    kind: "non_decreasing_action".to_owned(),
+                                    measure_value: None,
+                                    measure_before: Some(before),
+                                    measure_after: Some(after),
+                                    action: Some(instance.action.clone()),
+                                    trace,
+                                    hint: "from every state where P holds and Q is false, each enabled action must either make Q true, or keep P true and strictly decrease the measure".to_owned(),
+                                    message: format!(
+                                        "enabled action '{}' can leave leadsTo '{}' pending without strictly decreasing the measure",
+                                        instance.action, property.name
+                                    ),
+                                    helpful: Vec::new(),
+                                    helpful_actions: Vec::new(),
+                                }),
+                            });
+                        }
+                        SatResult::Unsat => solver.pop(1)?,
+                        SatResult::Unknown => {
+                            solver.pop(1)?;
+                            return Err(VerifyError::new(
+                                "solver returned unknown in ranking proof",
+                            ));
+                        }
+                    }
+                }
+            } else {
+                let helpful_le = solver.le(&measure1, &measure0)?;
+                let pending_preserved =
+                    solver.or(&[q1.clone(), solver.and(&[p1.clone(), helpful_le])?])?;
+                for (index, instance) in instances.iter().enumerate() {
+                    let is_helpful = helpful_idx.contains(&index);
+                    let allowed = if is_helpful {
+                        progresses.clone()
+                    } else {
+                        pending_preserved.clone()
+                    };
+                    let selected = solver.equal(&choice, &solver.int_value(i64_index(index)?))?;
+                    let failure =
+                        solver.and(&[pending.clone(), selected, solver.not(&allowed)?])?;
+                    solver.push();
+                    solver.assert(&failure)?;
+                    match solver.check().await? {
+                        SatResult::Sat => {
+                            let before = model_int(solver, &measure0)?;
+                            let after = model_int(solver, &measure1)?;
+                            let q_next_holds = model_bool(solver, &q1)?;
+                            let p_next_holds = model_bool(solver, &p1)?;
+                            let kind = if !q_next_holds && !p_next_holds {
+                                "pending_not_preserved"
+                            } else if is_helpful && after >= before {
+                                "non_decreasing_helpful_action"
+                            } else if !is_helpful && after > before {
+                                "non_helpful_action_increases_measure"
+                            } else {
+                                "non_decreasing_action"
+                            };
+                            let message = match kind {
+                                "pending_not_preserved" => format!(
+                                    "enabled action '{}' can make leadsTo '{}' no longer pending without making Q true",
+                                    instance.action, property.name
+                                ),
+                                "non_decreasing_helpful_action" => format!(
+                                    "helpful action '{}' can leave leadsTo '{}' pending without strictly decreasing the measure",
+                                    instance.action, property.name
+                                ),
+                                "non_helpful_action_increases_measure" => format!(
+                                    "non-helpful action '{}' can increase the measure while leadsTo '{}' is still pending, which could outpace the helpful action's guaranteed decrease",
+                                    instance.action, property.name
+                                ),
+                                _ => format!(
+                                    "enabled action '{}' can leave leadsTo '{}' pending without strictly decreasing the measure",
+                                    instance.action, property.name
+                                ),
+                            };
+                            let trace = project_trace(
+                                solver,
+                                model,
+                                &[state0, state1],
+                                std::slice::from_ref(&choice),
+                                &instances,
+                                1,
+                            )?;
+                            solver.pop(1)?;
+                            return Ok(RankedLeadstoResult {
+                                proofs,
+                                failure: Some(RankFailure {
+                                    name: property.name.clone(),
+                                    bindings: binding.concrete,
+                                    measure: measure_expr.clone(),
+                                    kind: kind.to_owned(),
+                                    measure_value: None,
+                                    measure_before: Some(before),
+                                    measure_after: Some(after),
+                                    action: Some(instance.action.clone()),
+                                    trace,
+                                    hint: HELPFUL_PROGRESS_HINT.to_owned(),
+                                    message,
+                                    helpful: property.helpful.clone(),
+                                    helpful_actions: helpful_witnesses::<S>(
+                                        &helpful_idx,
+                                        &instances,
+                                    ),
+                                }),
+                            });
+                        }
+                        SatResult::Unsat => solver.pop(1)?,
+                        SatResult::Unknown => {
+                            solver.pop(1)?;
+                            return Err(VerifyError::new(
+                                "solver returned unknown in ranking proof",
+                            ));
+                        }
+                    }
+                }
+            }
         }
         proofs.push(RankProof {
             name: property.name.clone(),
             measure: measure_expr.clone(),
+            helpful: property.helpful.clone(),
         });
     }
     Ok(RankedLeadstoResult {

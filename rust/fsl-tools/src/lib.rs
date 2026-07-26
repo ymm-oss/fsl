@@ -2,7 +2,9 @@
 
 //! Native report generators and specialized FSL dialect engines.
 
+mod agent;
 mod ai;
+mod ai_stochastic;
 mod analysis;
 mod analysis_export;
 mod analysis_graph;
@@ -22,11 +24,13 @@ mod document_digest;
 mod document_evidence;
 mod document_glossary;
 mod document_markers;
+mod document_presentation;
 mod document_project;
 mod document_render;
 mod document_render_expr;
 mod domain;
 mod domain_codegen;
+mod domain_naming;
 mod html;
 mod ledger;
 mod mutate;
@@ -36,8 +40,15 @@ mod testgen;
 mod typestate;
 mod undecided;
 
+pub use agent::{AgentError, analyze_ai_agent};
 pub use ai::{check_ai, replay_ai};
-pub use analysis::{analyze_model, build_tsg, review_finding, structural_review_findings};
+pub use ai_stochastic::{
+    evaluate_migration, evaluate_observed_property, evaluate_statistical_property,
+};
+pub use analysis::{
+    analyze_model, analyze_tsg, build_tsg, conservation_review_findings, review_finding,
+    structural_review_findings,
+};
 pub use analysis_export::export_analysis_graph;
 pub use causal::{
     Binding, BindingKind, CausalError, CausalModel, CausalWarning, Claim as CausalClaim,
@@ -90,23 +101,25 @@ pub use document_markers::{
     NORMATIVE_SCOPE, ParsedDocument, SLOT_NAMES, Segment, parse_frontmatter_only,
     parse_generated_document,
 };
+pub use document_presentation::Locale;
 pub use document_project::{
     DocumentDialect, DocumentInput, DocumentProjectionError, RCIR_SUPPORTED_DIALECTS,
     project_requirement_claims, project_requirement_claims_from_source,
 };
 pub use document_render::{
-    AppliedApproval, AppliedApprovals, Locale, RenderedDocument, render_requirements_document,
+    AppliedApproval, AppliedApprovals, RenderedDocument, render_requirements_document,
 };
 pub use domain::{
-    analyze_domain, check_domain, domain_adapter_files, domain_kernel_source, domain_scaffold,
-    domain_scaffold_metadata,
+    analyze_domain, assumptions as domain_assumptions, check_domain, domain_adapter_files,
+    domain_kernel_source, domain_scaffold, domain_scaffold_metadata,
 };
 pub use html::render_html_report;
 pub use ledger::{render_ledger, render_ledger_with_approvals};
 pub use mutate::{BuiltinMutant, enumerate_builtin_mutants};
 pub use refinement_analysis::analyze_refinement;
 pub use testgen::{
-    TestgenInput, compose_testgen_input, generate_testgen, public_kernel_testgen_input,
+    TestgenInput, TestgenPathContext, compose_testgen_input, generate_testgen,
+    public_kernel_testgen_input,
 };
 pub use typestate::analyze_typestate;
 pub use undecided::{UndecidedRecord, undecided_declarations, undecided_records};

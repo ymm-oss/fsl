@@ -9,7 +9,7 @@ requirements BankOverStrengthenedGuardInjected {
   init { balance = 0 }
 
   requirement BANK-DEPOSIT "positive deposits increase balance" {
-    action deposit(a: Amount) "BANK-DEPOSIT: impossible over-strengthened guard" {
+    action deposit(a: Amount) {
       requires a > 3
       balance = balance + a
     }

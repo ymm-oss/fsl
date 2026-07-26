@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+
+statistical_property Whatever {
+  target X
+  require this is not a valid clause at all !!! ### $$$
+}

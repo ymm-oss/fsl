@@ -2,8 +2,11 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use sha2::{Digest, Sha256};
+
+static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -13,7 +16,24 @@ fn root() -> PathBuf {
         .to_owned()
 }
 
-fn generated_digest(spec: &str, depth: &str, target: &str, stem: &str) -> String {
+/// A fresh scratch directory per call under `rust/target/`, so parallel test
+/// binaries — and repeated runs in the same worktree — never collide and no
+/// cleanup step is required (gitignored). Same idiom as
+/// `rust/fslc/tests/chain_cli.rs`'s `scratch_dir` (issue #539).
+fn scratch_dir(name: &str) -> PathBuf {
+    let id = NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed);
+    let dir = root().join(format!(
+        "rust/target/testgen-contract-{name}-{}-{id}",
+        std::process::id()
+    ));
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).expect("clean stale scratch dir");
+    }
+    std::fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
+}
+
+fn generated_content(spec: &str, depth: &str, target: &str, stem: &str) -> String {
     let root = root();
     let directory = root.join("rust/target/testgen-contract");
     std::fs::create_dir_all(&directory).expect("create testgen output directory");
@@ -29,9 +49,13 @@ fn generated_digest(spec: &str, depth: &str, target: &str, stem: &str) -> String
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    std::fs::read_to_string(output_path).expect("read generated scaffold")
+}
+
+fn generated_digest(spec: &str, depth: &str, target: &str, stem: &str) -> String {
     format!(
         "{:x}",
-        Sha256::digest(std::fs::read(output_path).expect("read generated scaffold"))
+        Sha256::digest(generated_content(spec, depth, target, stem).as_bytes())
     )
 }
 
@@ -90,4 +114,78 @@ fn compose_bridge_preserves_pytest_and_baked_target_goldens() {
             "compose {target} output changed"
         );
     }
+}
+
+/// Issue #471: the native `emit_pytest` scenario loop dropped the
+/// `forbidden`-scenario rejection assertion (`_assert_rejected`), so a
+/// generated pytest harness that named itself `test_scenario_forbidden_FB_1`
+/// asserted nothing about the forbidden transition and passed against a
+/// guard-weakened implementation. `specs/cart_v1.fsl` (the golden above) has
+/// no `forbidden` declaration, so that golden alone cannot catch this class
+/// of regression. This is the coupled regression case: a golden digest for a
+/// spec that *does* declare `forbidden`, plus the byte-identical-to-Python
+/// content this golden guards being non-trivial (both lines the emitter had
+/// been silently dropping, mirroring `tests/test_verified_bugs.py`'s
+/// `test_forbidden_testgen_rejection_assertion`, which only exercises the
+/// frozen Python `fslc.cli.run_testgen`).
+#[test]
+fn pytest_target_emits_the_forbidden_rejection_assertion() {
+    let content = generated_content(
+        "examples/gallery/valid/small_forbidden_guarded_cancel.fsl",
+        "3",
+        "pytest",
+        "fbcancel",
+    );
+    assert!(
+        content.contains("result = adapter.step('cancel', {'o': 0})"),
+        "forbidden step call missing from generated pytest:\n{content}"
+    );
+    assert!(
+        content.contains("_assert_rejected(result, 'requires_failed')"),
+        "forbidden rejection assertion missing from generated pytest:\n{content}"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(content.as_bytes())),
+        "da26cf763e96508472a0fcda8c2b4d7c69652d478794c772bd2053389e1b2e51",
+        "small_forbidden_guarded_cancel.fsl pytest output changed"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_source_name_and_canonical_pytest_path_remain_distinct() {
+    use std::os::unix::fs::symlink;
+
+    let root = root();
+    let fixture_root = scratch_dir("symlink");
+    let directory = fixture_root.join("path-context");
+    let real_output_parent = fixture_root.join("path-output-real");
+    std::fs::create_dir_all(&directory).expect("create path-context fixture");
+    std::fs::create_dir_all(&real_output_parent).expect("create real output directory");
+    let generated = directory.join("generated-link");
+    symlink(&real_output_parent, &generated).expect("create output-parent symlink");
+    let alias = directory.join("cart-alias.fsl");
+    symlink(root.join("specs/cart_v1.fsl"), &alias).expect("create spec symlink");
+    let output_path = generated.join("cart.py");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .arg("testgen")
+        .arg(&alias)
+        .args(["--depth", "3", "--target", "pytest", "-o"])
+        .arg(&output_path)
+        .current_dir(&root)
+        .output()
+        .expect("run symlinked native testgen");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let generated = std::fs::read_to_string(&output_path).expect("read symlink pytest output");
+    assert!(generated.contains("Source: cart-alias.fsl"));
+    assert!(
+        generated.contains(
+            "SPEC_PATH = Path(__file__).resolve().parent / '../../../../specs/cart_v1.fsl'"
+        )
+    );
 }

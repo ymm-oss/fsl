@@ -43,6 +43,33 @@ bugs. Conventionally `kind:"vacuous"` referred only to init unsatisfiability.
    every action. This is depth-independent and intentionally incomplete: if the initial or
    inductive proof fails, no warning is emitted.
 
+### Native lanes 3–5: "over all reachable states" is decided over the type space
+
+The frozen Python reference discharges lane 3 from the states an unrolling actually witnesses:
+a clause survives to a warning when nothing within depth K falsified it. That reports a real
+guard as dead merely because the bound was too small. `examples/causal/funnel.fsl` declares
+`state { visits: 0..100 }` and `requires visits < 100`; at depth 8 `visits` reaches only 8, so
+Python warns — and the warning disappears when `--depth` rises. A judgment that moves with the
+bound is not evidence of a hollow spec (issue #465).
+
+The native implementation (`fsl-verifier::vacuity`) therefore decides all three solver-dependent
+lanes over the **declared type space**, which is a superset of the reachable states: for clause
+`j`, `type bounds ∧ clauses[..j] ∧ ¬clauses[j]` unsat means the clause cannot be false in any
+reachable state at any depth. `visits == 100` is inside `0..100`, so `funnel.fsl` is correctly
+silent. Every lane is a bounded number of one-shot queries over freshly named states, and each
+verdict is therefore independent of `--depth`.
+
+This is sound and deliberately incomplete in the same direction as lane 5: a clause that is dead
+for a reason the type space cannot see goes unreported, and an `unknown` backend verdict yields
+no finding. The exploration contributes exactly one input, action coverage, and only to suppress
+lane 3 for actions that were never enabled.
+
+Two exclusions keep the lanes pointed at authored text. Generated declarations are skipped, and
+so is any declaration without a source location: some dialect lowerings synthesize an entire
+catalog kernel (the governance catalog's `_governance_catalog_ok` over a frozen generated Bool)
+with a zero span rather than a `generated_only` origin, and warning about that scaffolding is
+noise in every governance spec.
+
 ### Reason for excluding compose-synchronized actions (important)
 
 `deposit_audited = bank.submit_deposit || audit.deposit` inherits `requires a > 0` from both

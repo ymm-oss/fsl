@@ -24,6 +24,28 @@ fn explicit_bfs_proves_at_state_space_closure() {
     assert_eq!(result.deadlock_step, None);
 }
 
+/// DESIGN-divmod.md §2.1/§2.3: an invariant's own `5 / 0` must not turn
+/// `--engine explicit` verification into a raw `RuntimeError` ("division by
+/// zero"). Reverting the concrete evaluator's zero-divisor totality (or its
+/// `TOTAL_DIVISION` property-context scoping) makes this `Err` instead of
+/// reporting the real `GenuineViolation` (issue #477, symptom 2).
+#[test]
+fn explicit_engine_totalizes_property_context_zero_division() {
+    let model = model(
+        "spec MaskTest { type Qty = 0..3 state { n: Qty } init { n = 0 } \
+         action bump() { requires n < 3 n = n + 1 } \
+         invariant GenuineViolation { n <= 1 } \
+         invariant ZeroDivTotal { 5 / 0 == 0 } }",
+    );
+    let result =
+        fsl_runtime::verify_explicit(model, 4, 100).expect("explicit verification must not error");
+    let violation = result
+        .violation
+        .expect("depth 4 reaches n=2, which violates GenuineViolation");
+    assert_eq!(violation.violation.kind, "invariant");
+    assert_eq!(violation.violation.name, "GenuineViolation");
+}
+
 #[test]
 fn explicit_bfs_fails_closed_at_the_state_budget() {
     let model = model(
@@ -171,6 +193,36 @@ fn deterministic_init_tracks_branches_foralls_and_duplicate_locations() {
     let error = fsl_runtime::verify_explicit(nested_forall, 1, 100)
         .expect_err("nested init forall rejected");
     assert_eq!(error.message, "nested forall in init is not supported");
+}
+
+/// Negative control for #480: a `forall` binder over more than one value
+/// that writes to a target *not* indexed by the binder demands the same
+/// location equal every binder value simultaneously. When those values
+/// differ, no initial state can satisfy every iteration at once — the same
+/// contradiction the symbolic engine already reports as unsatisfiable init.
+/// Before the fix, `Monitor::new` executed the forall as an imperative
+/// last-write-wins loop and silently produced a (bogus) initial state.
+#[test]
+fn forall_init_writing_conflicting_values_to_the_same_location_is_unsatisfiable() {
+    let contradictory = model(
+        "spec Contradictory { type K = 0..1 state { x: Int } \
+         init { forall k: K { x = k } } action noop() { } }",
+    );
+    let error = fsl_runtime::verify_explicit(contradictory, 4, 100)
+        .expect_err("contradictory forall init rejected");
+    assert_eq!(error.message, "init constraints are unsatisfiable");
+
+    // Regression control: repeating the *same* value on every iteration is
+    // satisfiable and must not be flagged.
+    let consistent = model(
+        "spec Consistent { type K = 0..2 state { ready: Bool } \
+         init { forall k: K { ready = true } } \
+         action noop() { } invariant AlwaysReady { ready } }",
+    );
+    let result =
+        fsl_runtime::verify_explicit(consistent, 4, 100).expect("consistent forall init accepted");
+    assert!(result.closure);
+    assert!(result.violation.is_none());
 }
 
 #[test]

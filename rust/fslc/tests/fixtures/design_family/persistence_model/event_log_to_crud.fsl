@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement EventLogToCrud {
+  impl EventLogPersistence
+  abs CrudPersistence
+  map value = value
+  map writes = log.size()
+  action write(v) -> write(v)
+}

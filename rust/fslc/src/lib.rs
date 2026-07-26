@@ -11,6 +11,7 @@ pub mod migration;
 pub mod origin_coverage;
 pub mod replay_trace;
 pub mod source_diagnostic;
+pub mod spec_load;
 pub mod verification_output;
 
 pub use fsl_core::{

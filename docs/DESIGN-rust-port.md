@@ -1,9 +1,9 @@
 # fslc Rust port: native CLI and browser WASM architecture
 
-Status: accepted migration design (issue #195). This document does **not** claim
-that a Rust implementation exists. Each phase below has an explicit parity gate;
-until that gate passes, the Python implementation remains authoritative for that
-surface.
+Status: accepted migration design (issue #195), now implemented. This document
+retains the phase gates and original migration rationale; the current component
+authority is the native Rust workspace, as recorded in section 9 and
+[`DESIGN-rust-components.md`](DESIGN-rust-components.md).
 
 The objective is to produce two distribution targets without changing the FSL
 language or its evidence contract:
@@ -251,9 +251,31 @@ solver-independent crates used by both delivery surfaces:
   the same semantic gate.
 - `fsl-core` owns model-only warnings, requirement metadata projection, and
   deterministic state summaries.
-- `fsl-runtime::verification_warnings` owns vacuous-implication reachability,
-  deadlock warnings, and action-coverage warnings. It consumes only the checked
-  model and backend-neutral result facts.
+- `fsl-runtime::verification_warnings` owns vacuous-implication and
+  vacuous-leadsto reachability, deadlock warnings, and action-coverage
+  warnings. It consumes only the checked model and backend-neutral result
+  facts. The remaining three `docs/DESIGN-vacuity.md` §2 lanes
+  (`always_true_requires`, `tautology_over_frozen`, `urgency_freeze`) are
+  solver-dependent, so `fsl-verifier::vacuity` proves them and carries them
+  out of the verifier as `BmcResult.vacuity`. The frontend renders that into
+  warning JSON and passes it back into `verification_warnings`, which keeps
+  the documented warning order in one place without giving `fsl-runtime` a
+  solver dependency. `--vacuity` selects over the closed 5-kind set in
+  `fsl-core::VACUITY_KINDS`, not a `"vacuous_"` name-prefix check.
+- The solver-dependent lanes run after every witness, reachable, and deadlock
+  trace has been projected. They quantify over freshly named states and never
+  read the unrolled ones, but a query still moves the backend's internal
+  state, and the native and browser Z3 builds may then resolve an
+  under-determined model differently — which the byte-compared evidence
+  contract reports as a parity failure. No new query may run before the
+  evidence it could perturb.
+- Backend-neutral analysis must keep its symbolic-state allocation independent
+  of the spec's size. Every constraint a probe needs is asserted inside a
+  `push`/`pop`, so one reusable state per analysis is enough; allocating one
+  per invariant or per action instance multiplies the live Z3 term count by
+  the corpus's largest spec and exhausts the browser backend's bounded heap,
+  where the failure surfaces as a Worker that stops answering rather than as a
+  diagnosable error.
 - Shared warnings use typed `kind` values for downstream selection. In
   particular, induction removes bounded `kind:"deadlock"` warnings through
   `fsl-runtime::induction_warnings`; frontends never classify a warning by
@@ -351,7 +373,7 @@ drift:
 | Z3 witnesses differ | compare verdict/envelope structure and replay traces instead of byte-comparing traces |
 | npm solver cannot be interrupted | terminate and recreate the Worker and solver context |
 | browser payload is large | lazy loading and Service Worker caching |
-| Python evolves during port | dual-implementation change policy and permanent parity CI |
+| New native behavior is accidentally assigned to the frozen Python reference | Rust-native product gate and explicitly scoped, optional compatibility evidence |
 
 This design intentionally separates architectural acceptance from implementation
 progress. Follow-up implementation PRs should cite the phase and gate they move;

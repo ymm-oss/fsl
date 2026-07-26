@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement InvalidCrudMapping {
+  impl CrudPersistence
+  abs PersistenceContract
+  map value = 0
+  action write(v) -> write(v)
+}

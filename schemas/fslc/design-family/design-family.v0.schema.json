@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/design-family/design-family.v0.schema.json",
+  "title": "FSL design family Phase 0 manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "family_id", "contract", "verification", "variants", "comparisons", "bundle_control"],
+  "properties": {
+    "schema_version": { "const": "fsl-design-family.v0" },
+    "family_id": { "$ref": "#/$defs/id" },
+    "contract": { "$ref": "#/$defs/model" },
+    "verification": { "$ref": "#/$defs/verification" },
+    "variants": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "$ref": "#/$defs/variant" }
+    },
+    "comparisons": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/comparison" }
+    },
+    "bundle_control": { "$ref": "#/$defs/bundle_control" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_./-]*$",
+      "not": { "pattern": "(^|/)\\.\\.(/|$)" }
+    },
+    "inputs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/path" }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "symbol", "inputs"],
+      "properties": {
+        "source": { "$ref": "#/$defs/path" },
+        "symbol": { "type": "string", "minLength": 1 },
+        "inputs": { "$ref": "#/$defs/inputs" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "depth"],
+      "properties": {
+        "engine": { "const": "bmc" },
+        "depth": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source", "symbol", "refinement", "inputs"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "source": { "$ref": "#/$defs/path" },
+        "symbol": { "type": "string", "minLength": 1 },
+        "refinement": { "$ref": "#/$defs/path" },
+        "inputs": { "$ref": "#/$defs/inputs" }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "old", "new", "scope_owner", "depth", "mapping", "mapping_direction"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "old": { "$ref": "#/$defs/id" },
+        "new": { "$ref": "#/$defs/id" },
+        "scope_owner": { "const": "new" },
+        "depth": { "type": "integer", "minimum": 1 },
+        "mapping": { "$ref": "#/$defs/path" },
+        "mapping_direction": { "const": "new_to_old" }
+      }
+    },
+    "bundle_control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry", "dependency", "inputs"],
+      "properties": {
+        "entry": { "$ref": "#/$defs/path" },
+        "dependency": { "$ref": "#/$defs/path" },
+        "inputs": { "$ref": "#/$defs/inputs" }
+      }
+    }
+  }
+}

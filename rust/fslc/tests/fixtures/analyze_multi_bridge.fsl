@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// `producer` writes both `audit` and `stock`; `consumer` reads both. The
+// action_dependency_graph `enables` edge from producer to consumer is
+// therefore bridged through *two* shared state variables, not one.
+spec AnalyzeMultiBridge {
+  state { audit: Int, stock: Int }
+  init { audit = 0 stock = 0 }
+
+  action producer() {
+    audit = audit + 1
+    stock = stock + 1
+  }
+
+  action consumer() {
+    requires audit > 0 or stock > 0
+    audit = 0
+  }
+}

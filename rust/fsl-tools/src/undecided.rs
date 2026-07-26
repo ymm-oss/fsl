@@ -75,7 +75,10 @@ fn expression_roots(model: &KernelModel, expr: &KernelExpr) -> BTreeSet<String> 
                     collect(value, roots);
                 }
             }
-            KernelExpr::Num(_) | KernelExpr::Bool(_) | KernelExpr::None => {}
+            KernelExpr::Num(_)
+            | KernelExpr::Bool(_)
+            | KernelExpr::None
+            | KernelExpr::EnumMember { .. } => {}
         }
     }
 

@@ -27,20 +27,92 @@ pub fn render_surface_parse_error(
     Value::Object(output)
 }
 
-/// Render the legacy multi-declaration AI project check result when applicable.
+/// The `ai_project` name project commands report -- the source's file stem,
+/// mirroring the frozen reference's `parse_ai_project(src, name=Path(path).stem)`.
+#[must_use]
+pub fn ai_project_name(source_file: &str) -> &str {
+    std::path::Path::new(source_file)
+        .file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("AiProject")
+}
+
+/// Parse an fsl-ai project the way the check stage must: a source whose
+/// `require` clauses no evidence command can execute is a spec error, not an
+/// analyzed project (issue #542).
+///
+/// The clause classification is the parser's own
+/// (`AiProject::unparsed_clauses`), never a second grammar -- reimplementing
+/// it here is exactly how `check` and `eval` drifted apart.
+///
+/// # Errors
+///
+/// Returns the parse or unexecutable-clause message, carrying the position of
+/// the first offending clause when there is one, for `kind: "parse"`.
+pub fn parse_checked_ai_project(
+    source: &str,
+    name: &str,
+) -> Result<fsl_syntax::AiProject, AiProjectParseError> {
+    let project =
+        fsl_syntax::parse_ai_project(source, name).map_err(|message| AiProjectParseError {
+            message,
+            position: None,
+        })?;
+    let unparsed = project.unparsed_clauses();
+    if unparsed.is_empty() {
+        return Ok(project);
+    }
+    let detail = unparsed
+        .iter()
+        .map(|clause| {
+            format!(
+                "{} '{}' (slice '{}'): require {}",
+                clause.declaration_kind, clause.declaration, clause.slice, clause.source
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    // `unparsed_clauses` walks declarations in source order, so the first entry
+    // is the first offending clause; report its own line, not its block's.
+    let first = &unparsed[0];
+    Err(AiProjectParseError {
+        message: format!(
+            "require clause matches no known fsl-ai evidence clause grammar \
+             (min_samples, ci_lower, ci_upper, a point estimate, observed, or drift): {detail}"
+        ),
+        position: Some((first.line, first.column)),
+    })
+}
+
+/// An fsl-ai project check failure, carrying the offending clause's position
+/// when the parser resolved one. `docs/DESIGN-v1.md` §7.2 guarantees every
+/// `parse` error carries a `loc` (#562).
+pub struct AiProjectParseError {
+    pub message: String,
+    pub position: Option<(u32, u32)>,
+}
+
+/// Render the multi-declaration AI project check result when applicable,
+/// paired with its process exit code.
 #[must_use]
 pub fn ai_project_check_output(
     source: &str,
     source_file: &str,
     mut output: Map<String, Value>,
-) -> Option<Value> {
+) -> Option<(Value, i32)> {
     if !is_ai_project(source) {
         return None;
     }
-    let spec = std::path::Path::new(source_file)
-        .file_stem()
-        .and_then(std::ffi::OsStr::to_str)
-        .unwrap_or("AiProject");
+    let spec = ai_project_name(source_file);
+    if let Err(error) = parse_checked_ai_project(source, spec) {
+        output.insert("result".to_owned(), json!("error"));
+        output.insert("kind".to_owned(), json!("parse"));
+        output.insert("message".to_owned(), json!(error.message));
+        if let Some((line, column)) = error.position {
+            output.insert("loc".to_owned(), json!({"line": line, "column": column}));
+        }
+        return Some((Value::Object(output), 2));
+    }
     output.insert("result".to_owned(), json!("ok"));
     output.insert("spec".to_owned(), json!(spec));
     output.insert("dialect".to_owned(), json!("fsl-ai-project.v0"));
@@ -49,7 +121,7 @@ pub fn ai_project_check_output(
         "ai_analysis_result".to_owned(),
         json!("ai_project_analyzed"),
     );
-    Some(Value::Object(output))
+    Some((Value::Object(output), 0))
 }
 
 /// Return whether source uses the legacy multi-declaration AI project dialect.

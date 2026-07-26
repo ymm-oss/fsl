@@ -67,6 +67,7 @@ impl FileResolver for MemoryResolver {
             line: 1,
             column: 1,
             origin: None,
+            name_resolution: false,
         })
     }
 }
@@ -94,23 +95,70 @@ fn error(solver_version: &str, kind: &str, message: impl AsRef<str>) -> Value {
     Value::Object(output)
 }
 
-fn build(request: &Request, solver_version: &str) -> Result<KernelModel, Value> {
+fn implements_error(
+    solver_version: &str,
+    failure: &fslc_rust::verification_output::RequirementsImplementsError,
+) -> Value {
+    let mut output = error(solver_version, "type", &failure.message);
+    if let Some(span) = failure.span
+        && let Some(object) = output.as_object_mut()
+    {
+        object.insert("loc".to_owned(), span.python_loc());
+        object.insert("span".to_owned(), json!(span));
+    }
+    output
+}
+
+/// Render a solver or verifier failure, which names no construct in the source:
+/// it carries no `loc` (issue 555) and resolves no name, so it keeps the
+/// message-based classification (issue 565).
+fn verifier_error(solver_version: &str, failure: &impl std::fmt::Display) -> Value {
+    fslc_rust::verification_output::render_semantic_error(
+        envelope(solver_version),
+        &failure.to_string(),
+        None,
+        false,
+    )
+}
+
+fn build(request: &Request, solver_version: &str) -> Result<(KernelModel, Vec<Value>), Value> {
     let resolver = MemoryResolver {
         files: request.files.clone(),
     };
+    // Classified by the same `kernel_load_error` the native CLI runs and
+    // rendered by the same dispatch. This stage used to be hard-coded to
+    // `kind:"parse"` here while native reported `semantics`/`type` for the very
+    // same input (issue #556); a second classifier on this side is what
+    // produced that divergence, so there must not be one.
     let kernel =
         fsl_core::parse_kernel_source_with_file(&request.source, &resolver, &request.source_file)
-            .map_err(|failure| error(solver_version, "parse", failure.to_string()))?;
-    fsl_core::build_model(kernel).map_err(|failure| {
+            .map_err(|failure| {
+            fslc_rust::spec_load::render_spec_load_error(
+                envelope(solver_version),
+                &fslc_rust::spec_load::kernel_load_error(&request.source, &failure),
+            )
+        })?;
+    // Compose-lowering warnings (e.g. `fair_not_inherited`) are computed while
+    // lowering, before `build_model` drops the per-component information that
+    // produced them, so they must be captured here rather than derived from
+    // the checked KernelModel below.
+    let diagnostics = kernel.diagnostics().to_vec();
+    let model = fsl_core::build_model(kernel).map_err(|failure| {
+        // The same span and classification the native CLI reports, so the
+        // Worker envelope does not diverge from `fslc` (issues 555, 565).
+        let loc = fslc_rust::verification_output::model_error_loc(&failure);
         fslc_rust::verification_output::render_semantic_error(
             envelope(solver_version),
             &failure.to_string(),
+            loc,
+            failure.name_resolution,
         )
-    })
+    })?;
+    Ok((model, diagnostics))
 }
 
 async fn check(request: &Request, solver_version: &str) -> Value {
-    if let Some(output) = fslc_rust::frontend_output::ai_project_check_output(
+    if let Some((output, _)) = fslc_rust::frontend_output::ai_project_check_output(
         &request.source,
         &request.source_file,
         envelope(solver_version),
@@ -123,8 +171,8 @@ async fn check(request: &Request, solver_version: &str) -> Value {
             &failure,
         );
     }
-    let model = match build(request, solver_version) {
-        Ok(model) => model,
+    let (model, compose_warnings) = match build(request, solver_version) {
+        Ok(built) => built,
         Err(error) => return error,
     };
     let has_trace_contract = match fslc_rust::verification_output::validate_requirement_trace_source(
@@ -139,7 +187,11 @@ async fn check(request: &Request, solver_version: &str) -> Value {
     let mut output = envelope(solver_version);
     output.insert("result".to_owned(), json!("ok"));
     output.insert("spec".to_owned(), json!(model.name));
-    output.insert("warnings".to_owned(), Value::Array(model_warnings(&model)));
+    let warnings = compose_warnings
+        .into_iter()
+        .chain(model_warnings(&model))
+        .collect::<Vec<_>>();
+    output.insert("warnings".to_owned(), Value::Array(warnings));
     let mut output = add_frontend_metadata(
         request,
         solver_version,
@@ -292,7 +344,7 @@ fn add_frontend_metadata(
             remove_generic_invariant_warning(&mut output);
         }
         Ok(None) => {}
-        Err(failure) => return error(solver_version, "semantics", failure),
+        Err(failure) => return implements_error(solver_version, &failure),
     }
     let additions = fslc_rust::frontend_output::implicit_initial_value_warnings(
         &request.source,
@@ -314,10 +366,16 @@ fn add_frontend_metadata(
 async fn verify(request: &Request, solver_version: &str) -> Value {
     let started = performance_now();
     if let Err(failure) = fsl_syntax::parse_surface_document(&request.source) {
-        return error(solver_version, "parse", failure.to_string());
+        // Same envelope `check` renders, and the one the native CLI now
+        // renders for every spec-reading command: `kind:"parse"` with
+        // `diagnostic_code` and `loc` (#484).
+        return fslc_rust::frontend_output::render_surface_parse_error(
+            envelope(solver_version),
+            &failure,
+        );
     }
-    let model = match build(request, solver_version) {
-        Ok(model) => model,
+    let (model, compose_warnings) = match build(request, solver_version) {
+        Ok(built) => built,
         Err(error) => return error,
     };
     let has_trace_contract = match fslc_rust::verification_output::validate_requirement_trace_source(
@@ -334,30 +392,35 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             Ok(deadlock) => deadlock,
             Err(message) => return error(solver_version, "usage", message),
         };
-    match fsl_runtime::find_boundary_violation(model.clone(), request.options.depth) {
-        Ok(Some((violation, trace))) => {
-            let statistics = fsl_solver::VerificationStatistics::default();
-            return fslc_rust::verification_output::render_boundary_output(
-                envelope(solver_version),
-                &model,
-                &violation,
-                &trace,
-                &fslc_rust::verification_output::BmcOutputOptions {
-                    depth: request.options.depth,
-                    deadlock,
-                    checked_bounds: None,
-                    elapsed_s: (performance_now() - started) / 1000.0,
-                    statistics: &statistics,
-                },
-            )
-            .0;
-        }
-        Ok(None) => {}
-        Err(failure) => {
-            return fslc_rust::verification_output::render_semantic_error(
-                envelope(solver_version),
-                &failure.to_string(),
-            );
+    // Mirrors the native CLI's `prepare_bmc` (`fslc/src/verification.rs`):
+    // this pre-scan is an optional shortcut ahead of the full solve below
+    // and needs a deterministic concrete initial state to run at all
+    // (#519). Skip it rather than failing the whole command when a model's
+    // init legitimately leaves some state free — the full solve below
+    // still explores every admissible initial value symbolically.
+    if fsl_runtime::deterministic_initial_state(&model).is_ok() {
+        match fsl_runtime::find_boundary_violation(model.clone(), request.options.depth) {
+            Ok(Some((violation, trace))) => {
+                let statistics = fsl_solver::VerificationStatistics::default();
+                return fslc_rust::verification_output::render_boundary_output(
+                    envelope(solver_version),
+                    &model,
+                    &violation,
+                    &trace,
+                    &fslc_rust::verification_output::BmcOutputOptions {
+                        depth: request.options.depth,
+                        deadlock,
+                        checked_bounds: None,
+                        elapsed_s: (performance_now() - started) / 1000.0,
+                        statistics: &statistics,
+                    },
+                )
+                .0;
+            }
+            Ok(None) => {}
+            Err(failure) => {
+                return verifier_error(solver_version, &failure);
+            }
         }
     }
     let mut solver = fsl_solver_z3js::Z3JsSolver::new();
@@ -365,10 +428,7 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
         match fsl_verifier::verify_bounded(&model, &mut solver, request.options.depth).await {
             Ok(result) => result,
             Err(failure) => {
-                return fslc_rust::verification_output::render_semantic_error(
-                    envelope(solver_version),
-                    &failure.to_string(),
-                );
+                return verifier_error(solver_version, &failure);
             }
         };
     if let Err(failure) =
@@ -377,7 +437,7 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
         return error(solver_version, "internal", failure);
     }
     let statistics = fsl_solver::SmtSolver::statistics(&solver);
-    let (output, _) = fslc_rust::verification_output::render_bmc_output(
+    let (mut output, _) = fslc_rust::verification_output::render_bmc_output(
         envelope(solver_version),
         &model,
         &result,
@@ -389,6 +449,16 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             statistics: &statistics,
         },
     );
+    if !compose_warnings.is_empty()
+        && let Some(object) = output.as_object_mut()
+        && object.get("result").and_then(Value::as_str) != Some("error")
+        && let Some(Value::Array(warnings)) = object.get_mut("warnings")
+    {
+        // See the matching comment in native `run_verify` (rust/fslc/src/main.rs):
+        // compose-lowering warnings must be captured before `build_model` drops
+        // per-component fairness information, so they cannot come from `model`.
+        warnings.splice(0..0, compose_warnings);
+    }
     add_frontend_metadata(
         request,
         solver_version,
@@ -564,6 +634,97 @@ mod tests {
     }
 
     #[test]
+    fn check_keeps_inline_enum_conversion_error_location() {
+        let request = Request {
+            cmd: "check".to_owned(),
+            source: r#"requirements Impl {
+  implements Abs from "abs.fsl" {
+    enum conversion stage ImplStage -> AbsStage { A -> A }
+    map status = convert(stage, stage)
+    action step() -> step()
+  }
+  enum ImplStage { A, B }
+  state { stage: ImplStage }
+  init { stage = A }
+  action step() { stage = B }
+}
+"#
+            .to_owned(),
+            source_file: "impl.fsl".to_owned(),
+            files: BTreeMap::from([(
+                "abs.fsl".to_owned(),
+                "spec Abs { enum AbsStage { A, B } state { status: AbsStage } init { status = A } action step() { status = B } }".to_owned(),
+            )]),
+            options: Options::default(),
+        };
+
+        let failure = block_on(check(&request, TEST_SOLVER_VERSION));
+
+        assert_eq!(failure["result"], "error");
+        assert_eq!(failure["kind"], "type");
+        assert_eq!(failure["loc"], json!({"line": 3, "column": 5}));
+        assert!(failure["span"].is_object());
+        assert!(
+            failure["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("missing source: [B]"))
+        );
+    }
+
+    #[test]
+    fn check_preserves_enum_abstraction_verdicts_and_locations() {
+        let source = r#"requirements Impl {
+  implements Abs from "abs.fsl" {
+    enum abstraction stage ImplStage -> AbsStage { A -> X B -> X C -> Y }
+    map status = abstract(stage, stage)
+    action hold() -> hold()
+    action advance() -> advance()
+  }
+  enum ImplStage { C, B, A }
+  state { stage: ImplStage }
+  init { stage = A }
+  action hold() { requires stage == A stage = B }
+  action advance() { requires stage == B stage = C }
+}
+"#;
+        let request = |source: String| {
+            Request {
+            cmd: "check".to_owned(),
+            source,
+            source_file: "impl.fsl".to_owned(),
+            files: BTreeMap::from([(
+                "abs.fsl".to_owned(),
+                "spec Abs { enum AbsStage { Y, X, Unused } state { status: AbsStage } init { status = X } action hold() { requires status == X status = X } action advance() { requires status == X status = Y } }".to_owned(),
+            )]),
+            options: Options::default(),
+        }
+        };
+
+        let success = block_on(check(&request(source.to_owned()), TEST_SOLVER_VERSION));
+        assert_eq!(success["result"], "ok", "{success}");
+        assert_eq!(success["implements"]["result"], "refines", "{success}");
+
+        let wrong = block_on(check(
+            &request(source.replace("C -> Y", "C -> X")),
+            TEST_SOLVER_VERSION,
+        ));
+        assert_eq!(wrong["result"], "ok", "{wrong}");
+        assert_eq!(
+            wrong["implements"]["result"], "refinement_failed",
+            "{wrong}"
+        );
+
+        let incomplete = block_on(check(
+            &request(source.replace(" C -> Y", "")),
+            TEST_SOLVER_VERSION,
+        ));
+        assert_eq!(incomplete["result"], "error", "{incomplete}");
+        assert_eq!(incomplete["kind"], "type", "{incomplete}");
+        assert_eq!(incomplete["loc"], json!({"line": 3, "column": 5}));
+        assert!(incomplete["span"].is_object(), "{incomplete}");
+    }
+
+    #[test]
     fn verified_result_contains_shared_warnings() {
         let model = model_from(
             "spec Warnings { state { x: Bool } init { x = false } \
@@ -586,6 +747,7 @@ mod tests {
             deadlock_trace: Some(vec![initial]),
             action_coverage: BTreeMap::from([("blocked".to_owned(), false)]),
             frontier_progress: false,
+            vacuity: Vec::new(),
         };
 
         let envelope = render_verify(
@@ -659,6 +821,7 @@ mod tests {
             deadlock_trace: Some(Vec::new()),
             action_coverage: BTreeMap::new(),
             frontier_progress: false,
+            vacuity: Vec::new(),
         };
         let options = Options {
             depth: 4,

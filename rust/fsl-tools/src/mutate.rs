@@ -192,6 +192,18 @@ fn expr_mutations(expr: &Expr, enums: &BTreeMap<String, Vec<String>>) -> Vec<Exp
                 });
             }
         }
+        Expr::EnumMember { type_name, member } if enums.contains_key(member) => {
+            for sibling in &enums[member] {
+                output.push(ExprMutation {
+                    expr: Expr::EnumMember {
+                        type_name: type_name.clone(),
+                        member: sibling.clone(),
+                    },
+                    op: "enum_constant_swap",
+                    enum_swap: None,
+                });
+            }
+        }
         Expr::Some(value) => {
             for mutation in expr_mutations(value, enums) {
                 output.push(ExprMutation {
@@ -555,7 +567,7 @@ fn expr_mutations(expr: &Expr, enums: &BTreeMap<String, Vec<String>>) -> Vec<Exp
                 });
             }
         }
-        Expr::Bool(_) | Expr::None | Expr::Var(_) => {}
+        Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {}
     }
     output
 }

@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// #515 positive control: same shape as issue_515_domain_broken_invariant.fsl
+// but with a genuinely provable invariant, so `domain check` must still
+// report `verified_under_assumptions`/exit 0 (the fix must not over-trigger).
+domain OkDomain {
+  implementation_profile functional_ddd
+
+  enum Status { Open, Closed }
+
+  aggregate Doc {
+    id DocId
+
+    state {
+      status: Status = Open;
+    }
+
+    command CloseDoc {}
+    event DocClosed {}
+
+    decide CloseDoc {
+      requires status == Open
+      emits DocClosed
+    }
+
+    evolve DocClosed {
+      status = Closed
+    }
+
+    invariant openOrClosed { status == Open || status == Closed }
+  }
+}

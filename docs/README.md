@@ -18,6 +18,7 @@
 | [`DESIGN-stochastic.md`](DESIGN-stochastic.md) | **fsl-stochastic external evidence layer**. Implemented semantics for precomputed eval JSONL, Bernoulli/proportion metrics, Wilson intervals, result statuses, and the boundary between statistical support and formal proof |
 | [`DESIGN-causal.md`](DESIGN-causal.md) | **`causal` profile (review-only causal hypothesis graphs)**. Typed CausalModel, scope containment, lag/persists time semantics, delayed-feedback classification, evidence/expectation plane boundaries, and JSON contracts — causal claims never receive `proved`/`verified` |
 | [`DESIGN-v1.md`](DESIGN-v1.md) | Language design document (design principles G1-G5, type-system design decisions, the repair protocol, and the roadmap) |
+| [`DESIGN-enum-member-identity.md`](DESIGN-enum-member-identity.md) | Checked-Kernel enum-member identity and lookup: nominal resolution of bare enum-member syntax, shadowing precedence, and the refinement-boundary go/no-go for `KernelModel.enum_members` |
 
 ## Implementation design by architecture and feature (DESIGN-*)
 
@@ -41,6 +42,7 @@
 | [`DESIGN-temporal.md`](DESIGN-temporal.md) | leadsTo, weak fairness (lasso counterexamples), and respond scenarios |
 | [`DESIGN-refinement.md`](DESIGN-refinement.md) | Refinement checking (mapping files, conditional expressions, preserve progress) |
 | [`DESIGN-semantic-diff.md`](DESIGN-semantic-diff.md) | `fslc diff` bounded semantic comparison (bidirectional refinement, invariant implication, forbidden replay, scope and gate contract) |
+| [`DESIGN-design-family.md`](DESIGN-design-family.md) | Accepted Phase 0 design-family decision: closed sidecar catalog, independent variant eligibility, directed bounded comparison, provenance/digest gaps, dogfood controls, and no native language/CLI commitment (#427) |
 | [`DESIGN-diff-git.md`](DESIGN-diff-git.md) | Git/CI adapter for revision-consistent full-tree materialization and changed-spec batch semantic diff |
 | [`DESIGN-approval.md`](DESIGN-approval.md) | Digest-bound human approval records, rendering drift checks, and approved-baseline semantic diff |
 | [`DESIGN-compose.md`](DESIGN-compose.md) | Spec composition (namespaces, synchronized actions, internal) |
@@ -61,6 +63,14 @@
 | [`DESIGN-precedence-policy.md`](DESIGN-precedence-policy.md) | The business-layer no-bypass precedence policy (#75) — why `business` keeps users from writing `state`/`invariant` directly |
 | [`DESIGN-ledger.md`](DESIGN-ledger.md) | `fslc ledger` (turning verifier evidence into a per-requirement-id Markdown audit ledger for PM/audit) |
 | [`DESIGN-assurance-classes.md`](DESIGN-assurance-classes.md) | Assurance-class vocabulary (`proved`/`bounded`/`replay-observed`/`statistical`/`not_run`) shared by `fslc ledger` and `fslc html`, and what each class does/does not guarantee |
+| [`DESIGN-document-requirement-claim-ir.md`](DESIGN-document-requirement-claim-ir.md) | `fslc document` foundation (issue #325): the versioned Requirement Claim IR (RCIR) v1 public contract and the deterministic requirement-claim projector |
+| [`DESIGN-document-controlled-language-renderer.md`](DESIGN-document-controlled-language-renderer.md) | ja/en controlled-language renderer (issue #326): converts an RCIR v1 claim set into `fsl_tools::render_requirements_document` prose |
+| [`DESIGN-document-cli.md`](DESIGN-document-cli.md) | `fslc document generate` / `fslc document claims` (issue #327): wires the RCIR projector and controlled-language renderer into the two CLI entry points |
+| [`DESIGN-document-generated-markers-and-check.md`](DESIGN-document-generated-markers-and-check.md) | Generated block markers and `fslc document check` (issue #329): structural markers/frontmatter on generated artifacts and the purely structural drift checker |
+| [`DESIGN-document-glossary.md`](DESIGN-document-glossary.md) | Glossary sidecar for `fslc document` (issue #330): presentation-only glossary generation and glossary-parity awareness in `fslc document check` |
+| [`DESIGN-document-evidence-overlay.md`](DESIGN-document-evidence-overlay.md) | Evidence/assurance overlay for `fslc document` (issue #332): overlays saved external verification evidence onto a generated requirements document at requirement granularity |
+| [`DESIGN-document-dialect-adapters.md`](DESIGN-document-dialect-adapters.md) | `fslc document`'s dialect boundary (issue #334, v1 slice): explicit rejection of non-kernel dialects rather than adapters, and the scope left open for cross-layer views |
+| [`DESIGN-document-coverage-registry.md`](DESIGN-document-coverage-registry.md) | RCIR coverage registry and no-silent-omission gate (issue #328): classifies every authored semantic target into exactly one of `rendered`/deliberately-excluded/flagged-as-missing |
 | [`DESIGN-mutate.md`](DESIGN-mutate.md) | `fslc mutate` (spec mutation, requirement stress report) |
 | [`DESIGN-explain.md`](DESIGN-explain.md) | `fslc explain --readable` (verification bounds, skeleton enumeration, counterfactuals, witness narration) |
 | [`DESIGN-html-report.md`](DESIGN-html-report.md) | `fslc html` (self-contained visual review report from explain + verify evidence) |
@@ -70,6 +80,8 @@
 | [`DESIGN-verification-cost.md`](DESIGN-verification-cost.md) | Fixed native/Worker verification cost schema, common Z3 statistics, property attribution, and aggregation semantics |
 | [`DESIGN-conformance-harness.md`](DESIGN-conformance-harness.md) | Dialect corpus conformance harness (`tests/test_dialect_conformance.py`, `tests/dialect_registry.py`): the Monitor/BMC-agreement/oracle safety net as a CI gate over every `.fsl` under `specs/`/`examples/`, with a loud, reviewable exclusion policy |
 | [`DESIGN-coupled-change-metatest.md`](DESIGN-coupled-change-metatest.md) | Coupled-change metatests: native LSP corpus/index coverage in `rust/fsl-lsp/tests/corpus.rs`, plus frozen Python compatibility and DESIGN-doc map checks |
+| [`DESIGN-rust-components.md`](DESIGN-rust-components.md) | Evidence-backed current design for all eleven Rust crates: responsibility and state ownership, dependency direction, contracts, candidates, uncertainty, and reevaluation triggers |
+| [`DESIGN-rust-component-internals.md`](DESIGN-rust-component-internals.md) | Evidence-backed internal design for all eleven Rust crates: value flow, mutable-state ownership, failure and I/O boundaries, targeted dependency normalization, and touch-driven extraction |
 | [`DESIGN-rust-port.md`](DESIGN-rust-port.md) | Accepted phased architecture for a native Rust CLI and browser Web Worker/WASM port, including solver/runtime dependency boundaries, shared semantic diagnostics, and cross-implementation parity gates |
 | [`DESIGN-rust-integration.md`](DESIGN-rust-integration.md) | Required Rust-native product integration gate, contract inventory, dependency boundaries, and optional compatibility evidence |
 | [`DESIGN-rust-lsp.md`](DESIGN-rust-lsp.md) | Accepted Rust-native `fslc-lsp` architecture: authoritative analysis boundary, document overlays/indexes, protocol contract, release migration, and ELD grounding laws |

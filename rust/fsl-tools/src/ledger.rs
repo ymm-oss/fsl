@@ -408,6 +408,10 @@ fn translate(finding: &Finding) -> String {
         ),
         "refinement" => "詳細仕様が上位契約から逸脱している。対応付け（mapping）かガードを修正する。".to_owned(),
         "conformance" => "実装ログが仕様に非適合。実装か仕様のどちらが正かを確定する。".to_owned(),
+        "external_evidence" => format!(
+            "外部証跡『{}』が非適合/失敗を報告している。証跡（実装ログ・統計評価等）と仕様のどちらが正かを責任者が確認する。",
+            finding.name
+        ),
         "coverage" => format!(
             "アクション『{}』が一度も実行可能にならない（死アクション）。ガードを緩めるか前提アクションを追加する。",
             finding.name
@@ -433,6 +437,7 @@ fn next_action(finding: &Finding) -> String {
             "sla" => "urgent 前提 or 期限値を見直し",
             "refinement" => "mapping / ガードを修正",
             "conformance" => "実装 or 仕様を一致させる",
+            "external_evidence" => "外部証跡の結果を確認し、要件 or 実装のどちらを直すか判断",
             "coverage" => "ガードを緩める / 前提アクションを追加",
             "vacuity" => "fslc mutate で実効性を確認",
             _ => "責任者が対応方針を決定",
@@ -462,6 +467,114 @@ pub(crate) fn evidence_requirement_ids(item: &Value) -> Vec<&str> {
         ids.push(id);
     }
     ids
+}
+
+/// Every requirement ID an evidence envelope attaches to, recursively:
+/// [`evidence_requirement_ids`] at the root, plus the same lookup applied to
+/// each item of a top-level `findings`/`checks` array (issue #508 — a
+/// producer such as `fsl-ai check` attributes per-finding rather than only
+/// at the envelope root).
+fn evidence_attached_requirement_ids(item: &Value) -> Vec<String> {
+    let mut ids = evidence_requirement_ids(item)
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    for key in ["findings", "checks"] {
+        for nested in item
+            .get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            ids.extend(
+                evidence_requirement_ids(nested)
+                    .into_iter()
+                    .map(str::to_owned),
+            );
+        }
+    }
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// Whether an evidence envelope's own result token is a definitive `pass`,
+/// a definitive `fail`, or carries no verdict at all (gate failures like
+/// `dataset_invalid`, or structural-only output like `compared`) — issue
+/// #508 / `docs/DESIGN-assurance-classes.md` `classify_source`. This is
+/// deliberately independent of [`assurance_token`]: class (method strength)
+/// and verdict (outcome) are orthogonal, so a failing source must never
+/// change the assurance label, only add a finding.
+fn evidence_verdict(value: &Value) -> Option<bool> {
+    let result = value.get("result").and_then(Value::as_str).unwrap_or("");
+    if matches!(
+        result,
+        "conformant"
+            | "replay_conformant"
+            | "observed_conformant"
+            | "conformance_checked"
+            | "observed_supported"
+            | "evidence_supported"
+    ) {
+        return Some(true);
+    }
+    if matches!(
+        result,
+        "nonconformant" | "replay_nonconformant" | "observed_mismatch" | "evidence_failed"
+    ) {
+        return Some(false);
+    }
+    match value.get("status").and_then(Value::as_str) {
+        Some("statistically_supported") => Some(true),
+        Some("statistically_unsupported") => Some(false),
+        _ => None,
+    }
+}
+
+/// Turn every failing `--evidence` envelope into ledger [`Finding`]s (issue
+/// #508): a failing source must surface as a 🔴 要確認 row for every
+/// requirement it attaches to (root `requirements`/`requirement.id`, or
+/// nested inside `findings`/`checks`), and as a spec-level finding when it
+/// fails without attaching to any requirement at all. A passing or
+/// verdict-less envelope (gate failure, structural analysis) contributes no
+/// finding — it only ever affects [`assurance_cell`]'s class.
+fn collect_evidence_findings(evidence: &[(String, Value)]) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for (source, item) in evidence {
+        if evidence_verdict(item) != Some(false) {
+            continue;
+        }
+        let result = item
+            .get("result")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let summary = format!("外部証跡『{source}』が非適合/失敗を報告(result: {result})");
+        let ids = evidence_attached_requirement_ids(item);
+        if ids.is_empty() {
+            findings.push(Finding {
+                requirement_id: None,
+                requirement_text: None,
+                trace_type: "external_evidence".to_owned(),
+                name: source.clone(),
+                summary,
+                next_action: None,
+                raw: item.clone(),
+            });
+            continue;
+        }
+        for id in ids {
+            findings.push(Finding {
+                requirement_id: Some(id),
+                requirement_text: None,
+                trace_type: "external_evidence".to_owned(),
+                name: source.clone(),
+                summary: summary.clone(),
+                next_action: None,
+                raw: item.clone(),
+            });
+        }
+    }
+    findings
 }
 
 /// Classify one JSON envelope (an evidence file's parsed contents, or a
@@ -540,7 +653,13 @@ pub(crate) fn assurance_label(token: &str, depth: Option<u64>) -> String {
     }
 }
 
-fn formal_assurance(group: &str, name: &str, verification: &Value) -> &'static str {
+/// Classify one spec element (an invariant/leadsTo/reachable/transition by
+/// group and name) against a `verify`/`prove` result. `pub(crate)` so
+/// `html.rs`'s property rows (issue #525) reuse this exact rule rather than
+/// re-deriving it -- re-deriving it locally is how the html report came to
+/// stamp one report-wide class on every row and call a bounded reachability
+/// witness `proved(induction)`.
+pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) -> &'static str {
     if verification.get("result").and_then(Value::as_str) == Some("proved") {
         if matches!(group, "invariants" | "transitions") {
             return "proved";
@@ -593,7 +712,10 @@ fn assurance_cell(
         }
     }
     for (_, item) in evidence {
-        if evidence_requirement_ids(item).contains(&requirement_id) {
+        if evidence_attached_requirement_ids(item)
+            .iter()
+            .any(|id| id == requirement_id)
+        {
             sources.push(assurance_token(item));
         }
     }
@@ -693,9 +815,10 @@ pub fn render_ledger_with_approvals(
     let (mut requirement_order, registry) = requirement_registry(model);
     let undecided = undecided_declarations(model);
     let findings = collect_findings(model, verification);
+    let evidence_findings = collect_evidence_findings(evidence);
     let mut by_requirement: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
     let mut spec_level = Vec::new();
-    for finding in &findings {
+    for finding in findings.iter().chain(evidence_findings.iter()) {
         if let Some(requirement_id) = &finding.requirement_id {
             by_requirement
                 .entry(requirement_id.clone())
@@ -1031,10 +1154,7 @@ pub fn render_ledger_with_approvals(
             "## 外部エビデンス\n\n| ファイル | producer結果 | 保証クラス | 対象要件ID |\n|---|---|---|---|\n",
         );
         for (source, item) in evidence {
-            let ids = evidence_requirement_ids(item)
-                .into_iter()
-                .map(str::to_owned)
-                .collect::<Vec<_>>();
+            let ids = evidence_attached_requirement_ids(item);
             let ids = if ids.is_empty() {
                 "（仕様全体）".to_owned()
             } else {
@@ -1054,7 +1174,13 @@ pub fn render_ledger_with_approvals(
     output.push_str(
         "## 付録: 生 JSON 反例（証跡）\n\n<details><summary>raw findings</summary>\n\n```json\n",
     );
-    let raw = Value::Array(findings.into_iter().map(|finding| finding.raw).collect());
+    let raw = Value::Array(
+        findings
+            .into_iter()
+            .chain(evidence_findings)
+            .map(|finding| finding.raw)
+            .collect(),
+    );
     output.push_str(&serde_json::to_string_pretty(&raw).unwrap_or_else(|_| "[]".to_owned()));
     output.push_str("\n```\n\n</details>\n");
     output

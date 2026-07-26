@@ -32,7 +32,13 @@ from fslc.parser import parse_src
 from fslc.runtime import Monitor
 
 from agreement import assert_expr_agreement
-from dialect_registry import DIALECTS, EVIDENCE_CONSTRUCTS, MONITOR_EXCLUSIONS, SCAN_ROOTS
+from dialect_registry import (
+    DIALECTS,
+    EVIDENCE_CONSTRUCTS,
+    MONITOR_EXCLUSIONS,
+    SCAN_ROOTS,
+    is_causal_source,
+)
 from oracle import ROOT, VerifyCase, assert_verdict_agrees, bfs_oracle, can_monitor
 
 EXPR_STATES = 40
@@ -83,6 +89,8 @@ def classify(path: Path) -> Classified:
         return Classified(path, EXCLUDED, reason="ai-project")
     if is_ai_agent_source(src):
         return Classified(path, EXCLUDED, reason="ai-agent")
+    if is_causal_source(src):
+        return Classified(path, EXCLUDED, reason="causal")
 
     construct = dialect_keyword(src)
     if construct == "refinement":
@@ -193,6 +201,9 @@ def test_exclusion_still_holds(case: Classified):
     if case.reason == "ai-agent":
         assert is_ai_agent_source(src), (case.id, "no longer an ai-agent source — remove the exclusion")
         return
+    if case.reason == "causal":
+        assert is_causal_source(src), (case.id, "no longer a causal source — remove the exclusion")
+        return
     ok, _reason = can_monitor(case.path)
     assert not ok, (
         f"{case.id}: Monitor can now load this file — the exclusion in "
@@ -227,10 +238,11 @@ def test_registry_floors():
 
 
 def test_registry_covers_ai_evidence_constructs():
-    # EVIDENCE_CONSTRUCTS is documentation of *why* ai-project/ai-agent files
-    # are excluded; make sure the corpus still actually contains at least one
-    # of each so the exclusion reasons stay exercised, not just declared.
-    assert set(EVIDENCE_CONSTRUCTS) == {"ai-project", "ai-agent"}
+    # EVIDENCE_CONSTRUCTS is documentation of *why* ai-project/ai-agent/causal
+    # files are excluded; make sure the corpus still actually contains at
+    # least one of each so the exclusion reasons stay exercised, not just
+    # declared.
+    assert set(EVIDENCE_CONSTRUCTS) == {"ai-project", "ai-agent", "causal"}
     reasons = {c.reason for c in EXCLUDED_CASES}
     for construct in EVIDENCE_CONSTRUCTS:
         assert construct in reasons, f"no corpus file currently exercises the '{construct}' exclusion"

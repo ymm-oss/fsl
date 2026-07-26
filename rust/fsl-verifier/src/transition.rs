@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::BTreeMap;
+
 use fsl_core::{
     ActionDef, ActionGuard, FslValue, KernelLValue as LValue, KernelModel,
     KernelStatement as Statement, ParamDef, TypeRef,
@@ -7,7 +9,7 @@ use fsl_core::{
 use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
-use crate::eval::{binder_values, binder_where, eval};
+use crate::eval::{binder_values, binder_where, definedness, eval, index_accessible};
 use crate::value::{
     Bindings, SymbolicState, SymbolicValue, bool_term, coerce, i64_index, ite_value, logical_equal,
     select_finite, store_finite,
@@ -20,6 +22,16 @@ pub(crate) struct ActionInstance<T> {
     pub action_index: usize,
     pub action: String,
     pub params: Bindings<T>,
+    /// Concrete parameter values in declaration order, alongside `params`'
+    /// solver terms, so host-side code (leadsTo `helpful` matching) can
+    /// compare instances without a solver round-trip.
+    pub concrete_params: BTreeMap<String, FslValue>,
+}
+
+pub(crate) struct ActionGuardDefinedness<T> {
+    pub enabled: T,
+    pub defined: T,
+    pub bindings: Bindings<T>,
 }
 
 pub(crate) fn action_instances<S: SmtSolver>(
@@ -28,7 +40,7 @@ pub(crate) fn action_instances<S: SmtSolver>(
 ) -> Result<Vec<ActionInstance<S::Term>>, VerifyError> {
     let mut instances = Vec::new();
     for (action_index, action) in model.actions.iter().enumerate() {
-        let mut bindings = vec![Bindings::new()];
+        let mut bindings = vec![(Bindings::new(), BTreeMap::new())];
         for param in &action.params {
             let values = match param {
                 ParamDef::Typed { ty, .. } => model.domain_values(ty)?,
@@ -39,23 +51,30 @@ pub(crate) fn action_instances<S: SmtSolver>(
                 ParamDef::Range { lo, hi, .. } => TypeRef::Range(*lo, *hi),
             };
             let mut next = Vec::new();
-            for existing in bindings {
+            for (existing_terms, existing_concrete) in bindings {
                 for value in &values {
-                    let mut candidate = existing.clone();
-                    candidate.insert(
+                    let mut terms = existing_terms.clone();
+                    terms.insert(
                         param.name().to_owned(),
                         crate::value::concrete_value(solver, model, &ty, value)?,
                     );
-                    next.push(candidate);
+                    let mut concrete = existing_concrete.clone();
+                    concrete.insert(param.name().to_owned(), value.clone());
+                    next.push((terms, concrete));
                 }
             }
             bindings = next;
         }
-        instances.extend(bindings.into_iter().map(|params| ActionInstance {
-            action_index,
-            action: action.name.clone(),
-            params,
-        }));
+        instances.extend(
+            bindings
+                .into_iter()
+                .map(|(params, concrete_params)| ActionInstance {
+                    action_index,
+                    action: action.name.clone(),
+                    params,
+                    concrete_params,
+                }),
+        );
     }
     Ok(instances)
 }
@@ -82,6 +101,172 @@ pub(crate) fn action_guards<S: SmtSolver>(
         }
     }
     Ok((guards, bindings))
+}
+
+pub(crate) fn action_guard_definedness<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    action: &ActionDef,
+    state: &SymbolicState<S::Term>,
+    params: &Bindings<S::Term>,
+) -> Result<ActionGuardDefinedness<S::Term>, VerifyError> {
+    let mut bindings = params.clone();
+    let mut reaches_guard = solver.bool_value(true);
+    let mut guard_terms = Vec::new();
+    for guard in &action.guards {
+        let expression = match guard {
+            ActionGuard::Let(_, expression) | ActionGuard::Requires(expression) => expression,
+        };
+        let expression_defined = definedness(solver, model, expression, state, &bindings, None)?;
+        guard_terms.push(solver.implies(&reaches_guard, &expression_defined)?);
+        let value = eval(solver, model, expression, state, &mut bindings, None)?;
+        match guard {
+            ActionGuard::Let(name, _) => {
+                reaches_guard = solver.and(&[reaches_guard, expression_defined])?;
+                bindings.insert(name.clone(), value);
+            }
+            ActionGuard::Requires(_) => {
+                reaches_guard = solver.and(&[
+                    reaches_guard,
+                    expression_defined,
+                    bool_term(&value)?.clone(),
+                ])?;
+            }
+        }
+    }
+    Ok(ActionGuardDefinedness {
+        enabled: reaches_guard,
+        defined: solver.and(&guard_terms)?,
+        bindings,
+    })
+}
+
+pub(crate) fn action_statements_definedness<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    action: &ActionDef,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+) -> Result<S::Term, VerifyError> {
+    statements_definedness(
+        solver,
+        model,
+        &action.statements,
+        state,
+        &mut bindings.clone(),
+    )
+}
+
+fn statements_definedness<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    statements: &[Statement],
+    read_state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+) -> Result<S::Term, VerifyError> {
+    let terms = statements
+        .iter()
+        .map(|statement| statement_definedness(solver, model, statement, read_state, bindings))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(solver.and(&terms)?)
+}
+
+fn statement_definedness<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    statement: &Statement,
+    read_state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+) -> Result<S::Term, VerifyError> {
+    match statement {
+        Statement::Assign { target, value, .. } => {
+            let value_defined = definedness(solver, model, value, read_state, bindings, None)?;
+            let _ = eval(solver, model, value, read_state, bindings, None)?;
+            let target_defined = lvalue_definedness(solver, model, target, read_state, bindings)?;
+            Ok(solver.and(&[value_defined, target_defined])?)
+        }
+        Statement::If {
+            condition,
+            then_statements,
+            else_statements,
+            ..
+        } => {
+            let condition_defined =
+                definedness(solver, model, condition, read_state, bindings, None)?;
+            let condition = eval(solver, model, condition, read_state, bindings, None)?;
+            let then_defined = statements_definedness(
+                solver,
+                model,
+                then_statements,
+                read_state,
+                &mut bindings.clone(),
+            )?;
+            let else_defined = statements_definedness(
+                solver,
+                model,
+                else_statements,
+                read_state,
+                &mut bindings.clone(),
+            )?;
+            Ok(solver.and(&[
+                condition_defined,
+                solver.ite(bool_term(&condition)?, &then_defined, &else_defined)?,
+            ])?)
+        }
+        Statement::ForAll {
+            binder, statements, ..
+        } => {
+            let mut terms = Vec::new();
+            for (name, value) in binder_values(solver, model, binder)? {
+                let mut local = bindings.clone();
+                local.insert(name, value);
+                let where_defined = match binder {
+                    fsl_core::KernelBinder::Typed { where_expr, .. }
+                    | fsl_core::KernelBinder::Range { where_expr, .. }
+                    | fsl_core::KernelBinder::Collection { where_expr, .. } => {
+                        where_expr.as_deref().map_or_else(
+                            || Ok(solver.bool_value(true)),
+                            |expression| {
+                                definedness(solver, model, expression, read_state, &local, None)
+                            },
+                        )?
+                    }
+                };
+                let where_term = binder_where(solver, model, binder, read_state, &mut local, None)?
+                    .unwrap_or_else(|| solver.bool_value(true));
+                let body_defined =
+                    statements_definedness(solver, model, statements, read_state, &mut local)?;
+                terms.push(
+                    solver.and(&[where_defined, solver.implies(&where_term, &body_defined)?])?,
+                );
+            }
+            Ok(solver.and(&terms)?)
+        }
+    }
+}
+
+fn lvalue_definedness<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    target: &LValue,
+    read_state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+) -> Result<S::Term, VerifyError> {
+    match target {
+        LValue::Var(_) => Ok(solver.bool_value(true)),
+        LValue::Index(name, index) => {
+            let index_defined = definedness(solver, model, index, read_state, bindings, None)?;
+            let index_value = eval(solver, model, index, read_state, bindings, None)?;
+            let root = read_state
+                .get(name)
+                .ok_or_else(|| VerifyError::new(format!("unknown state variable '{name}'")))?;
+            Ok(solver.and(&[
+                index_defined,
+                index_accessible(solver, model, root, &index_value)?,
+            ])?)
+        }
+        LValue::Field(base, _) => lvalue_definedness(solver, model, base, read_state, bindings),
+    }
 }
 
 pub(crate) fn init_constraints<S: SmtSolver>(

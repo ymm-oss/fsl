@@ -1,5 +1,13 @@
 # FSL v2.0 — Implementation Bridge (runtime monitor / replay / testgen) Implementation Design
 
+Status: migration-era bridge design with later compatibility updates. Its
+execution sections record the original v2.0 design and remain useful history,
+but they are not current product authority. The native
+Rust ownership map is in
+[`DESIGN-rust-components.md`](DESIGN-rust-components.md), and current transition,
+failure-order, and rollback authority is in
+[`DESIGN-kernel-contract.md`](DESIGN-kernel-contract.md#transition-and-failure-semantics).
+
 DESIGN-v1.md §10 v2.0 "the body of the implementation bridge." Three bridges are
 built between the spec and the implementation:
 
@@ -62,10 +70,13 @@ The result of `step` (the same vocabulary as verify's JSON):
   type_bound / ensures / invariant all roll back before the transition). No
   exception is thrown — always return a result dict (easy to embed as a monitor,
   and readable by the LLM).
-- The semantics of `step` are identical to BMC: evaluate all requires (no
+- The historical bridge design modeled `step`/BMC as evaluating all requires (no
   short-circuit) → apply the body by simultaneous assignment (all RHS read the
   old state) → partial_op check (considering path conditions) → ensures
   (old = old state) → invariant of the new state + automatic bounds check.
+- That sequence is retained as migration history, not as the current contract.
+  Current guard and outcome priority must be read from the maintained Kernel
+  transition/failure contract linked above, not inferred from this paragraph.
 - An unknown action name, a missing parameter, or being out of type range is `kind: "bad_call"`.
 
 ### 1.3 Determinism of init
@@ -85,6 +96,18 @@ Concrete execution requires a deterministic initial state. Static check at
   + hint "runtime monitor requires a deterministic init".
 - All existing specs satisfy this (a spec that does not satisfy it passes verify
   but errors in Monitor — prompting a fix on the spec side).
+- This gate lives in `Monitor::new` itself (#519), not only in the explicit
+  engine's own construction check (`explicit::check_deterministic_init`, which
+  `Monitor::new` now reuses) — every caller that asks `Monitor::new` to compute
+  the concrete initial state from `init` gets it, including `replay`'s witness
+  reconstruction and BMC's concrete pre-scan (`find_boundary_violation`).
+  A caller that already has its own complete concrete initial state — an
+  observed replay trace's own step 0, an explicit `--from-state`/
+  `--initial-state` snapshot, or a BMC witness's first state — is not asking
+  `init` to compute anything, so it builds through `Monitor::from_state`
+  instead and is unaffected by this gate: `init` may leave a component free
+  (BMC explores every admissible value there), and a concrete run pinned to
+  one already-admissible value has nothing left for the gate to check.
 
 ### 1.4 Expression evaluation
 
@@ -135,6 +158,15 @@ Output:
 ```
 
 exit code: conformant = 0, nonconformant = 1, input/spec error = 2.
+
+A versioned trace's declared `initial` state is compared against `init`'s own
+computed initial state only when `init` fully determines one (every state
+variable, not component-wise); when it does not, the trace's own `initial` is
+used as the concrete starting point directly instead (see §1.3's
+`Monitor::from_state` note, #519), and `initial_state_mismatch` is not
+checked for that run at all — there is currently no per-component fallback
+that still cross-checks a state variable init *does* fully determine while
+skipping only the ones a free component shares a root with.
 
 ## 3. `fslc testgen` — generation of a conformance-test skeleton
 
@@ -190,7 +222,13 @@ pseudorandom walk and `pathlib` for resolving the SPEC path):
    If some `reachable` targets are not witnessed at the requested depth, testgen
    still embeds the witnessed scenarios and returns warning JSON naming each
    missing target with a depth hint. `--strict` restores all-or-nothing
-   `reachable_failed`.
+   `reachable_failed`. A genuine `violated`/`reachable_failed` verdict from the
+   underlying scenarios machinery — the spec itself has a bug, not a testgen
+   input problem — is returned verbatim (`result`, exit code, and trace
+   unchanged), the same envelope `fslc verify`/`fslc scenarios` return for the
+   identical spec; it is never re-wrapped as a generic exit-2 spec error (a
+   native-only regression fixed in issue #472, see `rust/fslc/src/main.rs`
+   `run_testgen`/`run_domain_testgen`).
 3. **Random-walk conformance test**: with the concrete Monitor as the oracle, choose actions
    from `mon.enabled()` by pseudorandom (fixed seed, `random.Random(0)`) for
    N=100 steps, and on every step assert `adapter.step(...)` → `observe() == mon.state`.

@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement ActorRefinesOwnershipContract {
+  impl ActorOwnership
+  abs OwnershipContract
+  map owner = owner
+  action enqueue(w) -> stutter
+  action claim(w) -> claim(w)
+  action release(w) -> release(w)
+}

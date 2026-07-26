@@ -25,6 +25,36 @@ pub use explicit::{
 pub type State = BTreeMap<String, Value>;
 pub type Bindings = BTreeMap<String, Value>;
 
+std::thread_local! {
+    /// DESIGN-divmod.md §2.1/§2.3: while set, `/` and `%` by a zero divisor
+    /// evaluate to the totally-defined value `0` instead of raising the
+    /// §2.2 action-context unguarded-operation error. Property-context
+    /// evaluation entry points (invariant, trans, reachable, leadsTo, and
+    /// refinement state mapping) scope this with [`with_total_division`];
+    /// action guard/statement/ensures evaluation leaves it unset so an
+    /// unguarded `/`/`%` there is still classified `partial_op`.
+    static TOTAL_DIVISION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+struct TotalDivisionScope {
+    previous: bool,
+}
+
+impl Drop for TotalDivisionScope {
+    fn drop(&mut self) {
+        TOTAL_DIVISION.with(|flag| flag.set(self.previous));
+    }
+}
+
+/// Evaluate property-context expressions with `/` and `%` by zero totally
+/// defined as `0` (DESIGN-divmod.md §2.1, §2.3) for the duration of `body`.
+fn with_total_division<T>(body: impl FnOnce() -> T) -> T {
+    let _scope = TotalDivisionScope {
+        previous: TOTAL_DIVISION.with(|flag| flag.replace(true)),
+    };
+    body()
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeError {
     pub message: String,
@@ -102,6 +132,20 @@ pub fn eval(
             .or_else(|| model.enum_members.get(name))
             .cloned()
             .ok_or_else(|| runtime_error(format!("unknown identifier '{name}'"))),
+        Expr::EnumMember { type_name, member } => {
+            let Some(TypeDef::Enum { members, .. }) = model.types.get(type_name) else {
+                return Err(runtime_error(format!("unknown enum type '{type_name}'")));
+            };
+            if !members.contains(member) {
+                return Err(runtime_error(format!(
+                    "unknown enum member '{type_name}.{member}'"
+                )));
+            }
+            Ok(Value::Enum {
+                type_name: type_name.clone(),
+                member: member.clone(),
+            })
+        }
         Expr::Call { name, .. } => {
             Err(runtime_error(format!("unexpanded predicate call '{name}'")))
         }
@@ -277,7 +321,7 @@ pub fn eval(
             third,
         } if name == "rel_reachable" => relation_reachable(
             eval(first, state, bindings, model, old_state)?,
-            eval(second, state, bindings, model, old_state)?,
+            &eval(second, state, bindings, model, old_state)?,
             &eval(third, state, bindings, model, old_state)?,
         ),
         Expr::TernaryNamed { name, .. } => Err(runtime_error(format!(
@@ -335,7 +379,7 @@ pub fn violating_bindings(
         }
     }
 
-    search(expr, state, &Bindings::new(), model)
+    with_total_division(|| search(expr, state, &Bindings::new(), model))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -453,7 +497,11 @@ fn eval_binary(
             let left = as_int(left)?;
             let right = as_int(right)?;
             if right == 0 {
-                Err(runtime_error("division by zero"))
+                if TOTAL_DIVISION.with(std::cell::Cell::get) {
+                    Ok(Value::Int(0))
+                } else {
+                    Err(runtime_error("division by zero"))
+                }
             } else {
                 Ok(Value::Int(left.div_euclid(right)))
             }
@@ -462,7 +510,11 @@ fn eval_binary(
             let left = as_int(left)?;
             let right = as_int(right)?;
             if right == 0 {
-                Err(runtime_error("remainder by zero"))
+                if TOTAL_DIVISION.with(std::cell::Cell::get) {
+                    Ok(Value::Int(0))
+                } else {
+                    Err(runtime_error("remainder by zero"))
+                }
             } else {
                 Ok(Value::Int(left.rem_euclid(right)))
             }
@@ -534,14 +586,29 @@ fn binder_where_holds(
 
 fn relation_reachable(
     relation: Value,
-    source: Value,
+    source: &Value,
     target: &Value,
 ) -> Result<Value, RuntimeError> {
     let Value::Relation(edges) = relation else {
         return Err(runtime_error("reachable() requires a relation"));
     };
-    let mut seen = BTreeSet::from([source.clone()]);
-    let mut frontier = vec![source];
+    // Non-reflexive: `reachable(r, a, a)` is true only via a real path of
+    // one or more edges back to `a`, never a free zero-hop `a == a` step
+    // (`docs/LANGUAGE.md`'s relation section; matches the frozen Python
+    // reference's `_relation_reachable` in `src/fslc/runtime.py`, and this
+    // crate's own symbolic evaluator). The frontier starts at `source`'s
+    // *direct successors*, not `source` itself, so an empty or acyclic
+    // relation never reports self-reachability by construction. `source`
+    // itself is deliberately left out of `seen` here, so a cycle that
+    // leads back to `source` still re-enqueues it -- needed to detect
+    // `reachable(r, a, a)` via a multi-hop cycle through `a`.
+    let mut seen = BTreeSet::new();
+    let mut frontier = Vec::new();
+    for (_, next) in edges.iter().filter(|(from, _)| from == source) {
+        if seen.insert(next.clone()) {
+            frontier.push(next.clone());
+        }
+    }
     while let Some(current) = frontier.pop() {
         if &current == target {
             return Ok(Value::Bool(true));
@@ -593,7 +660,7 @@ fn eval_relation_unary(
                 for (_, next) in edges.iter().filter(|(source, _)| source == &node) {
                     if as_bool(relation_reachable(
                         Value::Relation(edges.clone()),
-                        next.clone(),
+                        next,
                         &node,
                     )?)? {
                         return Ok(Value::Bool(false));
@@ -759,21 +826,49 @@ impl Monitor {
         }
     }
 
+    /// Build a monitor whose initial state is exactly `state`, without
+    /// running `model`'s init at all.
+    ///
+    /// For a caller that already has a complete concrete initial state —
+    /// an observed replay trace's own step 0, an explicit
+    /// `--initial-state` snapshot, or a BMC witness's first state — there
+    /// is nothing left for init to compute. `init` may legitimately leave
+    /// some state free (a symbolic engine explores every admissible
+    /// value), so building through [`Monitor::new`] here would wrongly
+    /// demand a determinism [`Monitor::new`] does not need to provide
+    /// (#519).
+    #[must_use]
+    pub fn from_state(model: KernelModel, state: State) -> Self {
+        Self {
+            model,
+            state,
+            step: 0,
+        }
+    }
+
     /// Initialize a solver-independent concrete monitor.
     ///
     /// # Errors
     ///
-    /// Returns [`RuntimeError`] when default construction or sequential init
-    /// execution fails.
+    /// Returns [`RuntimeError`] when init does not deterministically assign
+    /// every state variable (component-wise; see
+    /// `docs/DESIGN-bridge.md` "Determinism of init") or sequential init
+    /// execution fails. A model whose init leaves some state free is
+    /// admissible to `verify`/BMC, which explores every admissible value —
+    /// concrete execution has no such freedom to explore, so construction
+    /// fails closed instead of picking one arbitrary default value and
+    /// silently treating it as the specification's initial state.
     pub fn new(model: KernelModel) -> Result<Self, RuntimeError> {
+        explicit::check_deterministic_init(&model)?;
         let mut state = model
             .state
             .iter()
             .map(|(name, ty)| Ok((name.clone(), model.default_value(ty)?)))
             .collect::<Result<State, RuntimeError>>()?;
         let mut bindings = Bindings::new();
+        let mut written = BTreeMap::new();
         for statement in &model.init {
-            execute_init_statement(statement, &mut state, &mut bindings, &model)?;
+            execute_init_statement(statement, &mut state, &mut bindings, &model, &mut written)?;
         }
         Ok(Self {
             model,
@@ -1079,6 +1174,14 @@ impl BoundedLivenessMonitor {
         state: &State,
         step: usize,
     ) -> Result<Option<BoundedLivenessViolation>, RuntimeError> {
+        with_total_division(|| self.observe_inner(state, step))
+    }
+
+    fn observe_inner(
+        &mut self,
+        state: &State,
+        step: usize,
+    ) -> Result<Option<BoundedLivenessViolation>, RuntimeError> {
         if step != self.next_step {
             return Err(runtime_error(format!(
                 "bounded liveness expected step {}, got {step}",
@@ -1221,6 +1324,13 @@ pub struct RefinementCheck {
     pub action_map: BTreeMap<String, String>,
     pub abs_has_ensures: bool,
     pub failure: Option<RefinementFailure>,
+    /// Set instead of `failure` when the implementation violates its own
+    /// semantics (a type bound, invariant, `trans`, `ensures`, or
+    /// `partial_op`) within `depth`, independent of the refinement mapping.
+    /// This is a property of the refinement *input* (the impl spec is
+    /// broken on its own), not a refinement fidelity verdict, so it must
+    /// never be reported as `refines` or folded into `refinement_failed`.
+    pub impl_violation: Option<(Violation, Vec<TraceStep>)>,
 }
 
 fn merged_refinement_model(
@@ -1250,6 +1360,24 @@ fn merged_refinement_model(
 }
 
 fn alpha_state(
+    implementation_state: &State,
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    mapping: &Refinement,
+    eval_model: &KernelModel,
+) -> Result<State, RuntimeError> {
+    with_total_division(|| {
+        alpha_state_inner(
+            implementation_state,
+            implementation,
+            abstraction,
+            mapping,
+            eval_model,
+        )
+    })
+}
+
+fn alpha_state_inner(
     implementation_state: &State,
     implementation: &KernelModel,
     abstraction: &KernelModel,
@@ -1401,6 +1529,60 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
     Ok(projected)
 }
 
+/// Every concrete initial state consistent with `model`'s init.
+///
+/// A model whose init assigns every state variable on every path returns
+/// exactly the single state [`Monitor::new`] would build — no behavior
+/// change for the common deterministic case. A model with a state variable
+/// init never assigns on any path (nondeterministic init, DESIGN-init-if.md)
+/// is domain-enumerated instead: refinement's step-0 self-consistency
+/// precondition and init correspondence must reason about every reachable
+/// initial valuation, not one arbitrarily materialized default (issue
+/// #493). This does not touch [`Monitor::new`] itself or any other caller —
+/// the general Monitor-construction gate for partial/nondeterministic init
+/// is a different surface (issue #519).
+///
+/// # Errors
+///
+/// Returns [`RuntimeError`] when a free variable's type is not a finite
+/// scalar domain, or a combination cannot be evaluated concretely.
+fn concrete_initial_states(model: &KernelModel) -> Result<Vec<State>, RuntimeError> {
+    let free = explicit::unassigned_init_state_vars(model);
+    if free.is_empty() {
+        return Ok(vec![Monitor::new(model.clone())?.state]);
+    }
+    let mut combinations: Vec<BTreeMap<String, Value>> = vec![BTreeMap::new()];
+    for (name, ty) in &free {
+        let domain = model.domain_values(ty)?;
+        combinations = combinations
+            .into_iter()
+            .flat_map(|combination| {
+                domain.iter().map(move |value| {
+                    let mut next = combination.clone();
+                    next.insert(name.clone(), value.clone());
+                    next
+                })
+            })
+            .collect();
+    }
+    let mut states = BTreeSet::new();
+    for combination in combinations {
+        let mut state = model
+            .state
+            .iter()
+            .map(|(name, ty)| Ok((name.clone(), model.default_value(ty)?)))
+            .collect::<Result<State, RuntimeError>>()?;
+        state.extend(combination);
+        let mut bindings = Bindings::new();
+        let mut written = BTreeMap::new();
+        for statement in &model.init {
+            execute_init_statement(statement, &mut state, &mut bindings, model, &mut written)?;
+        }
+        states.insert(state);
+    }
+    Ok(states.into_iter().collect())
+}
+
 /// Exhaustively check bounded concrete refinement simulation.
 ///
 /// The checker is solver-independent and evaluates every reachable bounded
@@ -1417,16 +1599,38 @@ pub fn check_refinement(
     mapping: &Refinement,
     depth: usize,
 ) -> Result<RefinementCheck, RuntimeError> {
+    // The impl spec must be internally consistent before its transitions are
+    // compared against the abstraction at all: refinement fidelity is
+    // meaningless to evaluate for a spec that already breaks its own type
+    // bounds or invariants. Checking this first — and returning immediately
+    // — means the correspondence walk below never needs to decide what a
+    // mid-walk self-violation means; by construction it cannot encounter
+    // one within the same `depth`. `impl_initial_states` covers every
+    // concrete initial valuation a nondeterministic impl `init` permits
+    // (issue #493), not one arbitrarily materialized default, so this
+    // precondition cannot miss a self-violation reachable only from a
+    // non-default initial branch either.
+    let impl_initial_states = concrete_initial_states(implementation)?;
+    if let Some((violation, trace)) =
+        first_self_violation(implementation, &impl_initial_states, depth)?
+    {
+        return Ok(RefinementCheck {
+            implementation: implementation.name.clone(),
+            abstraction: abstraction.name.clone(),
+            depth,
+            action_map: BTreeMap::new(),
+            abs_has_ensures: false,
+            failure: None,
+            impl_violation: Some((violation, trace)),
+        });
+    }
     let eval_model = merged_refinement_model(implementation, abstraction)?;
-    let impl_initial = Monitor::new(implementation.clone())?;
-    let abs_initial = Monitor::new(abstraction.clone())?;
-    let alpha_initial = alpha_state(
-        &impl_initial.state,
-        implementation,
-        abstraction,
-        mapping,
-        &eval_model,
-    )?;
+    // The set of every concrete state abs's own (possibly nondeterministic)
+    // init permits — init correspondence below asks whether α(s₀) is a
+    // *member* of this set, not whether it equals one materialized default
+    // abs initial state.
+    let abs_initial_states: BTreeSet<State> =
+        concrete_initial_states(abstraction)?.into_iter().collect();
     let action_map = mapping
         .action_correspondences
         .iter()
@@ -1448,46 +1652,82 @@ pub fn check_refinement(
             .iter()
             .any(|action| !action.ensures.is_empty()),
         failure: None,
+        impl_violation: None,
     };
-    let initial_trace = vec![TraceStep {
-        step: 0,
-        state: impl_initial.state.clone(),
-        action: None,
-        changes: BTreeMap::new(),
-    }];
-    let mut initial_alpha_monitor = Monitor::new(abstraction.clone())?;
-    initial_alpha_monitor.state = alpha_initial.clone();
-    if let Some(violation) = initial_alpha_monitor.current_violation()? {
-        let kind = if violation.kind == "type_bound" {
-            "map_out_of_bounds"
-        } else {
-            "abs_state_mismatch"
-        };
-        check.failure = Some(refinement_failure(
-            kind,
-            Some("init"),
-            0,
-            &initial_trace,
-            None,
-            None,
-            Some(alpha_initial),
+
+    // §2 step 1 (init correspondence): for *every* impl initial valuation
+    // s₀ (plural — nondeterministic impl init has more than one), α(s₀)
+    // must satisfy the abs init constraints. A candidate that fails seeds
+    // no BFS root and is reported immediately (deterministic order: the
+    // states are visited in `impl_initial_states`'s sorted order, so the
+    // failure reported is stable). Every candidate that passes seeds its
+    // own root below, so the walk explores the full reachable set of every
+    // nondeterministic initial branch, not just one.
+    let mut queue = VecDeque::new();
+    for impl_state in impl_initial_states {
+        let alpha_initial = alpha_state(
+            &impl_state,
+            implementation,
+            abstraction,
+            mapping,
+            &eval_model,
+        )?;
+        let initial_trace = vec![TraceStep {
+            step: 0,
+            state: impl_state.clone(),
+            action: None,
+            changes: BTreeMap::new(),
+        }];
+        // `alpha_initial` is already a complete concrete abs state (the
+        // impl initial state mapped through the refinement correspondence),
+        // so there is nothing for the abstraction's own `init` to compute —
+        // `Monitor::from_state` skips it entirely rather than demanding a
+        // determinism `abstraction.init` may not have (issue #519's gate
+        // interacting with #493's nondeterministic-abs-init support: a
+        // nondeterministic abs init is intentionally never fully
+        // deterministic, so `Monitor::new(abstraction...)` fails closed here
+        // even for a genuinely correct refinement).
+        let initial_alpha_monitor = Monitor::from_state(abstraction.clone(), alpha_initial.clone());
+        if let Some(violation) = initial_alpha_monitor.current_violation()? {
+            let kind = if violation.kind == "type_bound" {
+                "map_out_of_bounds"
+            } else {
+                "abs_state_mismatch"
+            };
+            check.failure = Some(refinement_failure(
+                kind,
+                Some("init"),
+                0,
+                &initial_trace,
+                None,
+                None,
+                Some(alpha_initial),
+            ));
+            return Ok(check);
+        }
+        if !abs_initial_states.contains(&alpha_initial) {
+            check.failure = Some(refinement_failure(
+                "abs_state_mismatch",
+                Some("init"),
+                0,
+                &initial_trace,
+                None,
+                abs_initial_states.iter().next().cloned(),
+                Some(alpha_initial),
+            ));
+            return Ok(check);
+        }
+        queue.push_back((
+            Monitor {
+                model: implementation.clone(),
+                state: impl_state,
+                step: 0,
+            },
+            0_usize,
+            initial_trace,
         ));
-        return Ok(check);
-    }
-    if alpha_initial != abs_initial.state {
-        check.failure = Some(refinement_failure(
-            "abs_state_mismatch",
-            Some("init"),
-            0,
-            &initial_trace,
-            None,
-            Some(abs_initial.state),
-            Some(alpha_initial),
-        ));
-        return Ok(check);
     }
 
-    let mut queue = VecDeque::from([(impl_initial, 0_usize, initial_trace)]);
     let mut visited = BTreeSet::new();
     while let Some((_, step, _)) = queue.front() {
         let step = *step;
@@ -1536,6 +1776,12 @@ pub fn check_refinement(
             let mut child = monitor.clone();
             let stepped = child.step(&enabled)?;
             if stepped.violation.is_some() {
+                // Unreachable in practice: `first_self_violation` above
+                // already proved the impl has no self-violation within
+                // `depth`, and this walk never explores past `depth`. Kept
+                // as a defensive skip (never a silent `refines`) rather than
+                // an `unreachable!()`, since only silence here — not a
+                // panic — would resurrect the false-green #466 fixes.
                 continue;
             }
             let mut child_trace = trace.clone();
@@ -1578,23 +1824,54 @@ pub fn check_refinement(
                             runtime_error(format!("unknown abstract action '{name}'"))
                         })?;
                     let mut bindings = enabled.params.clone();
-                    let values = args
+                    let values = match args
                         .iter()
                         .map(|expr| eval(expr, &monitor.state, &mut bindings, &eval_model, None))
-                        .collect::<Result<Vec<_>, _>>()?;
+                        .collect::<Result<Vec<_>, _>>()
+                    {
+                        Ok(values) => values,
+                        // An action-correspondence argument expression (not
+                        // the impl action's own body -- that self-violation
+                        // is already excluded above) hit an undefined
+                        // operation for this reachable impl instance, e.g. a
+                        // `/`/`%` divisor that is zero only through the
+                        // mapping's argument expression. `docs/DESIGN-divmod.md`
+                        // §2.2's action-context partial_op check applies here
+                        // by the same G5 rationale (constructing an abstract
+                        // action call is action context, not the read-only
+                        // "mapping expression" §2.3 exempts): this must be a
+                        // located refinement finding, not an unclassified
+                        // internal error that the CLI defaults to `kind:"type"`.
+                        Err(error) if is_partial_operation_error(&error.message) => {
+                            check.failure = Some(refinement_failure(
+                                "map_partial_op",
+                                Some("step"),
+                                step + 1,
+                                &child_trace,
+                                Some(alpha_before.clone()),
+                                Some(alpha_after.clone()),
+                                Some(alpha_after),
+                            ));
+                            return Ok(check);
+                        }
+                        Err(error) => return Err(error),
+                    };
                     let expected_params = abs_action
                         .params
                         .iter()
                         .zip(values)
                         .map(|(param, value)| (param.name().to_owned(), value))
                         .collect::<BTreeMap<_, _>>();
-                    let mut abs_monitor = Monitor::new(abstraction.clone())?;
-                    abs_monitor.state = abstract_action_state(
+                    // See the step-0 `Monitor::from_state` note above: this
+                    // state is already fully computed, so there is nothing
+                    // for `abstraction.init` to determine here either.
+                    let abs_state = abstract_action_state(
                         &alpha_before,
                         abstraction,
                         abs_action,
                         &expected_params,
                     )?;
+                    let mut abs_monitor = Monitor::from_state(abstraction.clone(), abs_state);
                     let Some(abs_enabled) =
                         refinement_action_instance(&abs_monitor, abs_action, expected_params)?
                     else {
@@ -1625,8 +1902,7 @@ pub fn check_refinement(
                     }
                 }
             }
-            let mut alpha_monitor = Monitor::new(abstraction.clone())?;
-            alpha_monitor.state = alpha_after.clone();
+            let alpha_monitor = Monitor::from_state(abstraction.clone(), alpha_after.clone());
             if let Some(violation) = alpha_monitor.current_violation()? {
                 let kind = if violation.kind == "type_bound" {
                     "map_out_of_bounds"
@@ -1764,6 +2040,80 @@ pub fn find_boundary_violation(
     Ok(None)
 }
 
+/// Find the first violation of ANY kind (type bound, user invariant, `trans`,
+/// `ensures`, or `partial_op`) the model has against its own semantics,
+/// concretely, within `depth` — i.e. whether the model is internally
+/// consistent at all, independent of any refinement mapping.
+///
+/// `initial_states` is every concrete initial valuation
+/// [`concrete_initial_states`] found for `model` — plural, because a
+/// nondeterministic init has more than one, and a self-violation reachable
+/// only from a non-default initial branch must not be missed (issue #493).
+/// They are checked for an immediate violation in order first (stable,
+/// deterministic reporting), then explored together as one BFS (a state
+/// reachable from more than one root is only visited once).
+///
+/// Unlike [`find_boundary_violation`], which is scoped to
+/// `partial_op`/`type_bound` for its own narrower callers, this checks every
+/// violation kind `Monitor::current_violation`/`Monitor::step` can report,
+/// including a violation already present in the initial state (init can
+/// itself violate an invariant or type bound before any action runs).
+///
+/// # Errors
+///
+/// Returns [`RuntimeError`] when concrete evaluation or execution fails.
+fn first_self_violation(
+    model: &KernelModel,
+    initial_states: &[State],
+    depth: usize,
+) -> Result<Option<(Violation, Vec<TraceStep>)>, RuntimeError> {
+    let mut queue = VecDeque::new();
+    let mut visited = BTreeSet::new();
+    for state in initial_states {
+        let initial = Monitor {
+            model: model.clone(),
+            state: state.clone(),
+            step: 0,
+        };
+        let initial_trace = vec![TraceStep {
+            step: 0,
+            state: initial.state.clone(),
+            action: None,
+            changes: BTreeMap::new(),
+        }];
+        if let Some(violation) = initial.current_violation()? {
+            return Ok(Some((violation, initial_trace)));
+        }
+        if visited.insert(initial.state.clone()) {
+            queue.push_back((initial, initial_trace, 0_usize));
+        }
+    }
+    while let Some((monitor, trace, step)) = queue.pop_front() {
+        if step >= depth {
+            continue;
+        }
+        for instance in monitor.enabled()? {
+            let mut child = monitor.clone();
+            let before = child.state.clone();
+            let stepped = child.step(&instance)?;
+            let mut child_trace = trace.clone();
+            child_trace.push(trace_step_from_result(
+                step + 1,
+                &before,
+                &instance,
+                &stepped,
+            ));
+            if let Some(violation) = stepped.violation {
+                return Ok(Some((violation, child_trace)));
+            }
+            if visited.insert(child.state.clone()) {
+                queue.push_back((child, child_trace, step + 1));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Return whether a Boolean expression holds in any concrete state up to `depth`.
 ///
 /// # Errors
@@ -1779,13 +2129,15 @@ pub fn expression_reachable(
     let mut queue = VecDeque::from([(initial.clone(), 0_usize)]);
     let mut visited = BTreeSet::from([initial.state.clone()]);
     while let Some((monitor, step)) = queue.pop_front() {
-        if as_bool(eval(
-            expression,
-            &monitor.state,
-            &mut Bindings::new(),
-            &monitor.model,
-            None,
-        )?)? {
+        if as_bool(with_total_division(|| {
+            eval(
+                expression,
+                &monitor.state,
+                &mut Bindings::new(),
+                &monitor.model,
+                None,
+            )
+        })?)? {
             return Ok(true);
         }
         if step >= depth {
@@ -1802,7 +2154,29 @@ pub fn expression_reachable(
     Ok(false)
 }
 
-/// Build solver-independent verification warnings shared by native and browser frontends.
+/// Wrap `expr` in a nested `exists` quantifier over `binders`, outermost
+/// binder first — the same existential closure the frozen Python reference
+/// (`bmc._exists_wrap`) uses to check reachability of a leadsTo trigger or
+/// implication antecedent independent of any particular binding.
+fn exists_wrap(binders: &[Binder], expr: Expr) -> Expr {
+    binders
+        .iter()
+        .rev()
+        .fold(expr, |body, binder| Expr::Quantified {
+            quantifier: "exists".to_owned(),
+            binder: binder.clone(),
+            body: Box::new(body),
+        })
+}
+
+/// Build the verification warnings shared by native and browser frontends.
+///
+/// The two reachability vacuity lanes are computed here and stay
+/// solver-independent. `solver_vacuity` carries the already-rendered
+/// `docs/DESIGN-vacuity.md` §2 lanes 3–5 that only `fsl-verifier` can decide;
+/// passing them in keeps the documented warning order (model → vacuity →
+/// deadlock → action coverage) owned by one function without giving
+/// `fsl-runtime` a solver dependency.
 #[must_use]
 pub fn verification_warnings(
     model: &KernelModel,
@@ -1811,16 +2185,43 @@ pub fn verification_warnings(
     deadlock_step: Option<usize>,
     deadlock_state: Option<&State>,
     action_coverage: &BTreeMap<String, bool>,
+    solver_vacuity: &[JsonValue],
 ) -> Vec<JsonValue> {
     let mut warnings = model_warnings(model);
     for property in &model.invariants {
-        let Expr::Binary { op, left, .. } = &property.expr else {
+        // `docs/DESIGN-vacuity.md`'s primary `vacuous_implication` shape is a
+        // single `=>` directly under `forall*`: peel every leading `forall`
+        // (nested foralls included, matching the frozen Python reference's
+        // `_implication_antecedent_candidate`), then existentially close the
+        // antecedent over the collected binders before checking
+        // reachability. With zero leading foralls this is a no-op
+        // (`exists_wrap` over an empty slice returns the antecedent
+        // unchanged), so the original top-level-`=>` shape still works.
+        let mut binders = Vec::new();
+        let mut inner = &property.expr;
+        while let Expr::Quantified {
+            quantifier,
+            binder,
+            body,
+        } = inner
+        {
+            if quantifier != "forall" {
+                break;
+            }
+            binders.push(binder.clone());
+            inner = body;
+        }
+        let Expr::Binary { op, left, .. } = inner else {
             continue;
         };
         if op != "=>" {
             continue;
         }
-        if matches!(expression_reachable(model.clone(), left, depth), Ok(false)) {
+        let antecedent = exists_wrap(&binders, (**left).clone());
+        if matches!(
+            expression_reachable(model.clone(), &antecedent, depth),
+            Ok(false)
+        ) {
             let mut warning = json!({
                 "kind": "vacuous_implication",
                 "name": display_name(&property.name),
@@ -1838,6 +2239,30 @@ pub fn verification_warnings(
             warnings.push(warning);
         }
     }
+    for property in &model.leadstos {
+        let trigger = exists_wrap(&property.binders, property.before.clone());
+        if matches!(
+            expression_reachable(model.clone(), &trigger, depth),
+            Ok(false)
+        ) {
+            let mut warning = json!({
+                "kind": "vacuous_leadsto",
+                "name": display_name(&property.name),
+                "message": format!("leadsTo '{}' has a trigger that is unreachable within depth {depth}", display_name(&property.name)),
+                "hint": "the trigger is not reachable within this depth; check whether an action that should establish it is missing, or whether the trigger expression is wrong",
+                "loc": property.span.python_loc(),
+                "classification": "insufficient_depth",
+                "blocking": [],
+                "faithfulness_class": "intent_unexercised",
+                "recommended_action": "add a single-shot reachable for the action / raise --depth",
+            });
+            if let JsonValue::Object(warning) = &mut warning {
+                insert_requirement_metadata(warning, &property.annotations, property.meta.as_ref());
+            }
+            warnings.push(warning);
+        }
+    }
+    warnings.extend(solver_vacuity.iter().cloned());
     if warn_deadlock && let Some(step) = deadlock_step {
         let summary = deadlock_state.map_or_else(String::new, |state| state_summary(model, state));
         warnings.push(json!({
@@ -1906,10 +2331,13 @@ fn replay_trace_with_initial(
     if first.step != 0 || first.action.is_some() {
         return Err(runtime_error("trace must begin with an action-free step 0"));
     }
-    let mut monitor = Monitor::new(model)?;
-    if let Some(initial_state) = initial_state {
-        monitor.state.clone_from(initial_state);
-    }
+    // A caller-provided initial state (the trace's own witnessed step 0, or
+    // an explicit `--initial-state`) makes `Monitor::from_state` the right
+    // constructor here — see its doc comment (#519).
+    let mut monitor = match initial_state {
+        Some(initial_state) => Monitor::from_state(model, initial_state.clone()),
+        None => Monitor::new(model)?,
+    };
     if monitor.state != first.state {
         return Err(runtime_error(
             "trace initial state does not match Monitor init",
@@ -2024,7 +2452,21 @@ pub struct LeadstoResponse {
     pub trace: Vec<TraceStep>,
 }
 
+/// `(found responses, missing (property, binding, triggered) triples)` — see
+/// [`leadsto_response_traces`]. `triggered` is true when the antecedent held
+/// at some visited state (a genuine incomplete response) and false when it
+/// never held within `depth` (nothing was ever pending for that binding);
+/// callers must word the two differently rather than reporting both as "no
+/// response scenario" (issue #526).
+pub type LeadstoResponseTraces = (Vec<LeadstoResponse>, Vec<(String, Bindings, bool)>);
+
 /// Find concrete response examples for each finite `leadsTo` binding.
+///
+/// Also returns every `(property, binding)` with no response witness within
+/// `depth`, tagged with whether its antecedent ever held — scenario
+/// completeness (issue #526) must warn for each such binding individually
+/// rather than collapsing to one warning per property, since a single
+/// witnessed binding would otherwise hide every other binding's gap.
 ///
 /// # Errors
 ///
@@ -2032,9 +2474,9 @@ pub struct LeadstoResponse {
 pub fn leadsto_response_traces(
     model: &KernelModel,
     depth: usize,
-) -> Result<Vec<LeadstoResponse>, RuntimeError> {
+) -> Result<LeadstoResponseTraces, RuntimeError> {
     if model.leadstos.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
     let initial = Monitor::new(model.clone())?;
     let bindings = model
@@ -2055,6 +2497,7 @@ pub fn leadsto_response_traces(
         changes: BTreeMap::new(),
     }];
     let mut responses = BTreeMap::<(String, Bindings), LeadstoResponse>::new();
+    let mut triggered = BTreeSet::<(String, Bindings)>::new();
     let mut queue = VecDeque::from([(initial, initial_trace, 0_usize)]);
     while let Some((monitor, trace, step)) = queue.pop_front() {
         for property in &model.leadstos {
@@ -2065,7 +2508,7 @@ pub fn leadsto_response_traces(
                 }
                 if let Some(pending_at) = response_pending_at(property, binding, &trace, model)? {
                     responses.insert(
-                        key,
+                        key.clone(),
                         LeadstoResponse {
                             property: property.name.clone(),
                             bindings: binding.clone(),
@@ -2074,6 +2517,20 @@ pub fn leadsto_response_traces(
                             trace: trace.clone(),
                         },
                     );
+                    triggered.insert(key);
+                    continue;
+                }
+                if let Some(last) = trace.last() {
+                    let mut probe = binding.clone();
+                    if as_bool(eval(
+                        &property.before,
+                        &last.state,
+                        &mut probe,
+                        model,
+                        None,
+                    )?)? {
+                        triggered.insert(key);
+                    }
                 }
             }
         }
@@ -2096,10 +2553,28 @@ pub fn leadsto_response_traces(
             queue.push_back((child, child_trace, step + 1));
         }
     }
-    Ok(responses.into_values().collect())
+    let missing = bindings
+        .iter()
+        .flat_map(|(name, property_bindings)| {
+            property_bindings.iter().filter_map(|binding| {
+                let key = (name.clone(), binding.clone());
+                (!responses.contains_key(&key))
+                    .then(|| (key.0.clone(), key.1.clone(), triggered.contains(&key)))
+            })
+        })
+        .collect();
+    Ok((responses.into_values().collect(), missing))
 }
 
 fn leadsto_bindings(
+    property: &fsl_core::LeadsToDef,
+    state: &State,
+    model: &KernelModel,
+) -> Result<Vec<Bindings>, RuntimeError> {
+    with_total_division(|| leadsto_bindings_inner(property, state, model))
+}
+
+fn leadsto_bindings_inner(
     property: &fsl_core::LeadsToDef,
     state: &State,
     model: &KernelModel,
@@ -2121,6 +2596,15 @@ fn leadsto_bindings(
 }
 
 fn response_pending_at(
+    property: &fsl_core::LeadsToDef,
+    binding: &Bindings,
+    trace: &[TraceStep],
+    model: &KernelModel,
+) -> Result<Option<usize>, RuntimeError> {
+    with_total_division(|| response_pending_at_inner(property, binding, trace, model))
+}
+
+fn response_pending_at_inner(
     property: &fsl_core::LeadsToDef,
     binding: &Bindings,
     trace: &[TraceStep],
@@ -2209,24 +2693,26 @@ fn record_reachables(
     step: usize,
     result: &mut BfsResult,
 ) -> Result<(), RuntimeError> {
-    for property in &monitor.model.reachables {
-        if result.reachables[&property.name].is_some() {
-            continue;
+    with_total_division(|| {
+        for property in &monitor.model.reachables {
+            if result.reachables[&property.name].is_some() {
+                continue;
+            }
+            let mut bindings = Bindings::new();
+            if as_bool(eval(
+                &property.expr,
+                &monitor.state,
+                &mut bindings,
+                &monitor.model,
+                None,
+            )?)? {
+                result
+                    .reachables
+                    .insert(property.name.clone(), Some(ReachableWitness { step }));
+            }
         }
-        let mut bindings = Bindings::new();
-        if as_bool(eval(
-            &property.expr,
-            &monitor.state,
-            &mut bindings,
-            &monitor.model,
-            None,
-        )?)? {
-            result
-                .reachables
-                .insert(property.name.clone(), Some(ReachableWitness { step }));
-        }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 fn check_state(
@@ -2239,6 +2725,18 @@ fn check_state(
 }
 
 fn check_state_selected(
+    state: &State,
+    old_state: Option<&State>,
+    model: &KernelModel,
+    step: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<Option<Violation>, RuntimeError> {
+    with_total_division(|| {
+        check_state_selected_inner(state, old_state, model, step, checked_bounds)
+    })
+}
+
+fn check_state_selected_inner(
     state: &State,
     old_state: Option<&State>,
     model: &KernelModel,
@@ -2380,16 +2878,40 @@ fn evaluate_action_guards(
     Ok(Some(bindings))
 }
 
+/// Execute one `init` statement, threading `written` — the concrete value
+/// already assigned to each resolved lvalue location during this `init`
+/// execution — through every branch and `forall` iteration.
+///
+/// `forall` bulk-initializes by executing its body once per binder value.
+/// When distinct binder values resolve to the *same* concrete location
+/// (typically a target that does not index by the binder), imperative
+/// last-write-wins would silently discard every assignment but the last —
+/// masking exactly the case the symbolic engine reports as unsatisfiable
+/// init (`forall k: K { x = k }` demands `x` equal every member of `K`
+/// simultaneously). Detecting a location written to two different concrete
+/// values keeps the concrete and symbolic engines in agreement without
+/// requiring a solver: unsatisfiability is witnessed directly by the
+/// conflicting concrete values, no search needed.
 fn execute_init_statement(
     statement: &Statement,
     state: &mut State,
     bindings: &mut Bindings,
     model: &KernelModel,
+    written: &mut BTreeMap<String, Value>,
 ) -> Result<(), RuntimeError> {
     match statement {
         Statement::Assign { target, value, .. } => {
             let value = eval(value, state, bindings, model, None)?;
             let read_state = state.clone();
+            let key = lvalue_key(target, &read_state, bindings, model)?;
+            match written.get(&key) {
+                Some(previous) if *previous != value => {
+                    return Err(runtime_error("init constraints are unsatisfiable"));
+                }
+                _ => {
+                    written.insert(key, value.clone());
+                }
+            }
             assign(target, value, &read_state, state, bindings, model)?;
         }
         Statement::If {
@@ -2404,7 +2926,7 @@ fn execute_init_statement(
                 else_statements
             };
             for statement in branch {
-                execute_init_statement(statement, state, bindings, model)?;
+                execute_init_statement(statement, state, bindings, model, written)?;
             }
         }
         Statement::ForAll {
@@ -2417,7 +2939,7 @@ fn execute_init_statement(
                     continue;
                 }
                 for statement in statements {
-                    execute_init_statement(statement, state, &mut local, model)?;
+                    execute_init_statement(statement, state, &mut local, model, written)?;
                 }
             }
         }
@@ -2488,7 +3010,7 @@ fn assign(
 ) -> Result<(), RuntimeError> {
     match target {
         LValue::Var(name) => {
-            target_state.insert(name.clone(), value);
+            target_state.insert(name.clone(), coerce_relation_literal(name, value, model));
         }
         LValue::Index(name, index_expr) => {
             let index = eval(index_expr, read_state, bindings, model, None)?;
@@ -2561,6 +3083,22 @@ fn assign(
         },
     }
     Ok(())
+}
+
+/// `Set {}` is the only relation literal surface syntax accepts (public
+/// Kernel typing rejects a non-empty one), but `eval`'s `Expr::Set` arm has
+/// no assignment-target type context and always produces `Value::Set`.
+/// Coerce it here, where the target variable's declared type is known --
+/// mirrors the symbolic evaluator's `SymbolicValue::SetLiteral` ->
+/// `SymbolicValue::Relation` coercion (`fsl-verifier/src/value.rs::coerce`).
+fn coerce_relation_literal(name: &str, value: Value, model: &KernelModel) -> Value {
+    if let Value::Set(items) = &value
+        && items.is_empty()
+        && matches!(model.state_type(name), Some(TypeRef::Relation(_, _)))
+    {
+        return Value::Relation(BTreeSet::new());
+    }
+    value
 }
 
 fn lvalue_key(

@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement PartitionedQueueRefinesOwnershipContract {
+  impl PartitionedQueueOwnership
+  abs OwnershipContract
+  map owner = owner
+  action route(w) -> stutter
+  action claim(w) -> claim(w)
+  action release(w) -> release(w)
+}

@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Non-firing control for `always_true_requires`: a capacity guard that the
+// declared bound can falsify. Reaching `slots == 3` takes three steps, so a
+// depth-derived judgment would call this dead at `--depth 2` — the false
+// positive issue #465 rules out. The type space says otherwise.
+spec CapacityGuard {
+  state { slots: 0..3 }
+  init { slots = 0 }
+  action take() {
+    requires slots < 3
+    slots = slots + 1
+  }
+  invariant Bounded { slots >= 0 and slots <= 3 }
+}

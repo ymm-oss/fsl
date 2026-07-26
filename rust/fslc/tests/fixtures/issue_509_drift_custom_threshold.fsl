@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
+observed_property LenientDriftProperty {
+  target SupportAnswerAgent
+  source production_logs
+  window last_7_days
+
+  require observed(metric.hallucination_rate) <= 0.90
+}

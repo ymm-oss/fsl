@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// MODEL-ORDER-001: Artificial Phase 0 contract; not a production order policy.
+spec OrderContract {
+  type Phase = 0..2
+  state { phase: Phase }
+  init { phase = 0 }
+
+  action finish() { requires phase == 0  phase = 1 }
+  action cancel() { requires phase == 0  phase = 2 }
+
+  reachable CanFinish { phase == 1 }
+  reachable CanCancel { phase == 2 }
+}
