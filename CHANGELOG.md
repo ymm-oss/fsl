@@ -129,9 +129,23 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `covers` edges, rather than being silently dropped, so
   `disconnected_requirement` (`--profile ai-review`) can detect it.
   `requirement_property_graph` and `--focus requirement:ID` previously had
-  zero edges/always failed for a standalone spec; both now work. `control`
-  nodes and `starts_with`/`precedes` edges remain unimplemented on native
-  (#495, partial — see `docs/DESIGN-analysis.md` §2).
+  zero edges/always failed for a standalone spec; both now work (#495).
+- Native `analyze`'s TSG projection now also emits the remaining documented
+  vocabulary: `starts_with`/`precedes` step edges and `control` nodes. An
+  acceptance/forbidden case gains a `starts_with` edge to the action its first
+  step calls and a `precedes` edge to each later step's action, running
+  scenario → action and carrying the 0-based `step` index (the direction and
+  split the frozen reference fixes in `src/fslc/analysis/tsg.py`); the index is
+  part of the edge id, so a case that calls one action twice keeps both edges.
+  `control` nodes project governance/business `control ID "text"` catalog
+  entries, which have no Kernel-lowered form. Because scenario nodes
+  previously had no outgoing edge at all, `unanchored_property`'s
+  scenario-anchor suppression (`scenario_actions && kind == "reachable"`) could
+  never apply, so a `reachable` anchored by an acceptance scenario was reported
+  as unanchored — a structurally guaranteed false positive that the step edges
+  remove. No review finding reads `control` nodes yet; the edge vocabulary has
+  no `satisfies` kind, so a control node carries only its `declares` edge
+  (#495).
 - Added an evidence-gated `fsl-design-family.v0` sidecar prototype with three
   maintained three-variant dogfood families, native check/verify/refine/diff
   orchestration tests, raw producer and deterministic digest controls, and an

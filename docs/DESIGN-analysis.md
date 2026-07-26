@@ -136,9 +136,18 @@ is the `disconnected_requirement` review signal, not a dropped node.
 `acceptance`/`forbidden` scenario nodes are requirements-dialect-only (they
 have no Kernel-lowered form, so building them needs source text, not just
 the checked model) and gain a `covers` edge from any `@requirement(...)`
-requirement that names them. KPI nodes project `kpi NAME = count ENTITY in
-STAGE` declarations. Control nodes and the `starts_with`/`precedes` edge
-kinds are not yet implemented on native (#495).
+requirement that names them, plus a `starts_with` edge to the action their
+first step calls and a `precedes` edge to the action of every later step. A
+step edge runs scenario → action and carries the 0-based `step` index, so a
+scenario that calls one action twice keeps one edge per step. This is what
+makes `unanchored_property` skip a `reachable` an acceptance scenario
+anchors; without the step edges that suppression can never apply. KPI nodes
+project `kpi NAME = count ENTITY in STAGE` declarations. `control` nodes
+project governance/business `control ID "text"` catalog entries, which
+likewise survive only in source text. A control is a catalog entry, not a
+property, and the edge vocabulary has no `satisfies` kind, so a control node
+carries only its `declares` edge and no review finding reads control nodes
+today.
 
 Stable edge kinds include `declares`, `covers`, `has_guard`, `has_effect`,
 `has_ensures`, `reads`, `writes`, `checks`, `starts_with`, and `precedes`.
