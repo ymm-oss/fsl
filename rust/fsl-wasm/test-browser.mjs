@@ -351,11 +351,37 @@ async function devtoolsPort() {
 }
 let nextId = 1;
 const pending = new Map();
+const cdpTimeoutMs = 30_000;
+// Unlike command(), which has always had a timeout, a dropped or half-open
+// CDP connection used to leave the returned promise unsettled forever: the
+// message listener is the only thing that ever resolved or rejected a
+// pending entry, so a response that never arrives hung node indefinitely,
+// and the `for (attempt < 360)` probe loop below is not actually a bound
+// once a single `await cdp(...)` inside it never returns (#584). Both the
+// per-call timeout here and rejectPending's socket close/error handlers
+// below turn that hang into a loud, named failure, which lets the
+// surrounding `finally` still run and clean up the child process and
+// profile directory.
 function cdp(socket, method, params = {}) {
   const id = nextId;
   nextId += 1;
   socket.send(JSON.stringify({ id, method, params }));
-  return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`CDP method "${method}" timed out after ${cdpTimeoutMs}ms`));
+    }, cdpTimeoutMs);
+    pending.set(id, {
+      resolve: (value) => { clearTimeout(timeout); resolve(value); },
+      reject: (error) => { clearTimeout(timeout); reject(error); },
+    });
+  });
+}
+function rejectPending(error) {
+  for (const [id, waiter] of pending) {
+    pending.delete(id);
+    waiter.reject(error);
+  }
 }
 let details;
 try {
@@ -364,6 +390,8 @@ try {
   const page = targets.find((target) => target.type === "page");
   if (!page) throw new Error("Chrome did not expose a page target");
   const socket = new WebSocket(page.webSocketDebuggerUrl);
+  socket.addEventListener("close", () => rejectPending(new Error("CDP socket closed with requests outstanding")));
+  socket.addEventListener("error", () => rejectPending(new Error("CDP socket error with requests outstanding")));
   socket.addEventListener("message", ({ data }) => {
     const message = JSON.parse(data);
     if (!message.id || !pending.has(message.id)) return;
