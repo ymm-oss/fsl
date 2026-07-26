@@ -48,6 +48,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `members`, the same shape `SpecItem::Struct` gained in #555 and the same the
   domain surface already used, and the diagnostic attaches the offending
   member's own span (#576).
+- The native<->Worker parity corpus's `unsupportedDocuments` exclusions in
+  `rust/fsl-wasm/test-browser.mjs` are now self-retiring. The map excluded 32
+  refinement/agent/causal documents from the comparison and recorded only a
+  document type, so if the Worker ever gained a verb for one of them the
+  exclusion would keep suppressing the comparison forever -- the shape that
+  left #556's divergent path with zero corpus coverage. Each entry now carries
+  the measured reason it holds, and every excluded document is probed on the
+  Worker alone: the recorded premise is that the Worker cannot analyze it, and
+  the day that stops being true the harness fails and names the entry to
+  remove. The compared-pair count is unchanged at 351 -- no exclusion was
+  retired and no document newly compared -- and the run now also reports
+  `exclusionProbes`. This stays a capability exclusion, not a
+  tolerated-difference allowlist: the envelopes are still not compared for
+  these documents and no verdict, location, or exit-code difference is
+  allowlisted (#568).
 - The fsl-ai project check's unexecutable-`require` spec error (#542) now
   carries a `loc` pointing at the offending clause's own line and column.
   `rust/fsl-syntax/src/ai_project.rs` tracked no positions at all, so the error
