@@ -30,6 +30,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   that exited 0 would previously pass unnoticed.
 
 ### Fixed
+- `rust/fslc/tests/corpus_check_sweep.rs`'s module doc claimed (per issue
+  #483) that "the gallery fixtures and `examples/refinement_liveness/*`"
+  are refined by a test; only 6 of the 28 `refinement`-dialect corpus files
+  are, and that exercise was never wired into CI. Reworded to name the 6
+  covered files and their owning test, `refine_corpus_parity.rs` (issue
+  #593; same "comment claims a contract the implementation does not back"
+  shape as #585).
 - A CDP timeout in the browser parity gate now reports the call ordinal, the
   socket's `readyState`, how many other requests were outstanding, and Chrome's
   own stderr, instead of only the method and the elapsed budget. The stall it

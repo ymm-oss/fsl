@@ -15,10 +15,16 @@
 //! `fslc check` always reports `semantics`/"spec has no state block" for one
 //! regardless of whether the mapping itself is sound. Whether a given
 //! mapping is actually exercised by `fslc refine` is a separate, narrower
-//! claim this sweep does not make (of the 28 such files, issue #483 found
-//! only the gallery fixtures and `examples/refinement_liveness/*` are
-//! refined by any test; the `agentic_rag`/`multi_agent_system` mappings are
-//! refined by nothing — see #483, not re-asserted as closed here).
+//! claim this sweep does not make. Of the 28 such files, only 6 are
+//! exercised by any native test — `refine_corpus_parity.rs` (issue #593):
+//! `specs/cart_refines.fsl`, `specs/seat_refines.fsl`,
+//! `examples/gallery/errors/refinement_failed_map.fsl`,
+//! `examples/gallery/adversarial/refine_mapping_boundary_map.fsl`, and 2 of
+//! the 5 `examples/refinement_liveness/*_refines.fsl` files (the
+//! `*_progress_refines` pair; the other 3 and the remaining 22 mappings
+//! across `agentic_rag`, `multi_agent_system`, `refinement_chain`, and
+//! elsewhere are refined by nothing — see #593, tracked separately from
+//! this sweep).
 //! `examples/gallery/injected/` (its own primary/blind detector matrix in
 //! `injection_detector_matrix.rs`) is a genuine verified-elsewhere category,
 //! not a silent skip.
