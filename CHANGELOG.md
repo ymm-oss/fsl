@@ -24,6 +24,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   the diagnostic carried no span of its own, so it fell back to the
   message-derived heuristic, which finds the *earlier* `x` and pointed a repair
   agent at the innocent declaration (#565).
+- A `duplicate enum member` diagnostic now points at the repeated member rather
+  than the first declaration of that name. `SpecItem::Enum` carried no
+  per-member span, so the report fell back to `source_diagnostic`'s
+  message-derived heuristic — the first token matching the quoted name — which
+  for a *duplicate* is the earlier, innocent declaration by construction. For
+  `enum E { A, B } enum F { B, C }` it named `B` in `E` (2:15) instead of the
+  redeclaration in `F` (3:12). A `loc` that exists but names the wrong construct
+  is worse than none: `docs/DESIGN-v1.md` G2 assumes the position is correct.
+  `SpecItem::Enum` now carries `member_spans` positionally parallel to
+  `members`, the same shape `SpecItem::Struct` gained in #555 and the same the
+  domain surface already used, and the diagnostic attaches the offending
+  member's own span (#576).
 - The fsl-ai project check's unexecutable-`require` spec error (#542) now
   carries a `loc` pointing at the offending clause's own line and column.
   `rust/fsl-syntax/src/ai_project.rs` tracked no positions at all, so the error

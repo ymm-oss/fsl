@@ -952,6 +952,7 @@ impl ModelBuilder {
                 SpecItem::Enum {
                     name,
                     members,
+                    member_spans,
                     symmetric,
                 } => {
                     let origin = self.origins.diagnostic_origin(&type_target(name));
@@ -963,11 +964,21 @@ impl ModelBuilder {
                         },
                     )
                     .map_err(|error| error.with_origin(origin.clone()))?;
-                    for member in members {
+                    for (index, member) in members.iter().enumerate() {
                         if self.enum_members.contains_key(member) {
-                            return Err(model_error(format!("duplicate enum member '{member}'"))
-                                .with_origin(origin)
-                                .into_name_resolution());
+                            let mut duplicate =
+                                model_error(format!("duplicate enum member '{member}'"))
+                                    .with_origin(origin)
+                                    .into_name_resolution();
+                            // The repeated occurrence, not the first one. Left
+                            // unlocated the report falls back to the first
+                            // token matching the quoted name, which for a
+                            // duplicate is the earlier, innocent declaration by
+                            // construction (issue 576).
+                            if let Some(span) = member_spans.get(index) {
+                                duplicate = duplicate.at(*span);
+                            }
+                            return Err(duplicate);
                         }
                         self.enum_members.insert(
                             member.clone(),

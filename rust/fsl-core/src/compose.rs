@@ -344,10 +344,12 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
         SpecItem::Enum {
             name,
             members,
+            member_spans,
             symmetric,
         } => SpecItem::Enum {
             name: prefix(alias, &name),
             members,
+            member_spans,
             symmetric,
         },
         SpecItem::Struct { name, fields, span } => SpecItem::Struct {

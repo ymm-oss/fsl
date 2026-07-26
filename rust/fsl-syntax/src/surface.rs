@@ -127,6 +127,14 @@ pub enum SpecItem {
     Enum {
         name: String,
         members: Vec<String>,
+        /// The span of each member, positionally parallel to `members`.
+        ///
+        /// A duplicate-member diagnostic must name the *repeated* occurrence.
+        /// Without this the report falls back to the first token matching the
+        /// name, which for a duplicate is the earlier, innocent declaration by
+        /// construction (issue 576). Generated enums carry an empty vector;
+        /// the diagnostic then keeps whatever location its origin supplies.
+        member_spans: Vec<Span>,
         symmetric: bool,
     },
     Struct {
@@ -884,6 +892,7 @@ impl SpecItem {
                 name,
                 members,
                 symmetric,
+                ..
             } => {
                 let mut values = vec![json!("enum"), json!(name), json!(members)];
                 if *symmetric {
