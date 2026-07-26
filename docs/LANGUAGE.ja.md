@@ -756,7 +756,9 @@ fslc document check <file.fsl> <document.md> [--glossary glossary.json] [--evide
 fslc approval create <file.fsl> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
                [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
                                                   # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
-fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem] # approved | drifted | signature-invalid
+fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem]
+                                                  # approved (exit 0) | drifted (exit 0、分析結果)
+                                                  # | signature-invalid (exit 1); DESIGN-approval.md 参照
 fslc approval diff   <file.fsl> --record <record.json> [--depth K] [--trust-key public.pem]
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
 fslc domain check <file.fsl> [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
