@@ -1,0 +1,22 @@
+// expected-command: check
+// expected-result: error
+// expected-kind: semantics
+//
+// Issue #570. `true`, `false`, and `none` resolve to literals in every
+// expression, so a declaration with one of those names can never be read back.
+// Before the reserved-name check this file returned `ok` from `check`,
+// `verified` from `verify`, and `proved` from `verify --engine explicit`: the
+// author reads `invariant AlwaysHolds { true }` as "the variable holds" and the
+// verifier proved the literal, while `init` assigned a variable nothing can
+// read. All three engines agreed, so symbolic/concrete/BFS agreement did not
+// catch it.
+//
+// `expected-kind` is `semantics` because that is what native classifies it as
+// today; `docs/DESIGN-v1.md` §7.2 puts a reserved-word diagnostic in the `name`
+// class, which native does not yet emit anywhere (issue #565).
+spec GalleryNameReservedDeclaration {
+  state { true: Bool }
+  init { true = false }
+  action noop() { true = true }
+  invariant AlwaysHolds { true }
+}

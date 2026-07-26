@@ -526,6 +526,20 @@ scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
 
 ## 3. Expressions
 
+`true`, `false`, and `none` are **reserved**: they always resolve to the literal,
+so they cannot name a declaration anywhere — specification, const, `def` and its
+parameters, type, enum and its members, struct and its fields, state variable,
+action and its parameters, property, or a quantifier/aggregate binder or `is
+some(x)` pattern binding. A declaration with one of those names would be
+unreadable from every expression, and the misreading is silent: before this was
+checked, `state { true: Bool }` with `invariant AlwaysHolds { true }` returned
+`proved` while `init { true = false }` assigned a variable nothing could read.
+No other word is reserved. `count`, `sum`, `stage`, `in`, `is`, `where`, `old`,
+`abs`, `and`, and `or` are contextual and remain valid names; `some`, `Set`,
+`Seq`, `unique`, `exactlyOne`, `forall`, and `exists` are only recognized before
+further syntax, so misusing one as a name is a parse error rather than a silent
+literal.
+
 Named predicates factor repeated or business-significant expressions:
 
 ```fsl
