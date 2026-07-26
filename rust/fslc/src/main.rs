@@ -13,6 +13,9 @@ use fsl_core::{
     ParamDef, TraceStep, TypeDef, TypeRef, insert_requirement_metadata, model_warnings,
     requirement_metadata,
 };
+use fslc_rust::spec_load::{
+    SemanticDiagnostic, SpecLoadError, kernel_load_error, surface_parse_failure,
+};
 use serde_json::{Map, Value, json};
 
 mod approval;
@@ -15358,86 +15361,6 @@ fn parse_param_value(
     }
 }
 
-/// A spec-loading failure that keeps the diagnostic class the frontend
-/// determined instead of flattening it to a message string.
-///
-/// `docs/DESIGN-v1.md` §7.2 fixes the error classification as a closed set and
-/// guarantees `loc` for `parse`. Flattening a surface-parse failure into a
-/// `String` erased that class, so every command loading a spec through
-/// [`load_kernel_model`] re-classified a syntax error as `semantics` with no
-/// `loc`, while `check` — which runs the surface parser directly — reported
-/// `parse` with a span.
-///
-/// Issue 555 completed the other half: `Semantic` flattened the typed-model
-/// diagnostic to a `String` too, dropping the span the model had already bound
-/// to the offending construct, so `type` and `semantics` reported `loc: null`
-/// on every command including `check`. It now carries the span alongside the
-/// message.
-#[derive(Debug)]
-enum SpecLoadError {
-    Io(String),
-    Parse(Box<fsl_syntax::ParseError>),
-    Semantic(SemanticDiagnostic),
-}
-
-/// A typed-model spec-load failure with the location the model recorded for the
-/// construct that failed, when it recorded one.
-#[derive(Debug)]
-struct SemanticDiagnostic {
-    message: String,
-    loc: Option<Value>,
-}
-
-impl SemanticDiagnostic {
-    /// A diagnostic raised where no origin is in scope. `loc` stays absent: a
-    /// `{line: 0, column: 0}` placeholder would satisfy the schema while
-    /// pointing a repair agent at a location that does not exist.
-    fn unlocated(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            loc: None,
-        }
-    }
-
-    /// A diagnostic carrying the origin the frontend bound to the offending
-    /// construct. Yields the same `loc` as [`Self::unlocated`] when that origin
-    /// has no span, rather than inventing one.
-    fn located(message: impl Into<String>, origin: Option<&fsl_core::OriginChain>) -> Self {
-        Self {
-            message: message.into(),
-            loc: fslc_rust::verification_output::origin_loc(origin),
-        }
-    }
-
-    /// A typed-model failure, located by the span it recorded for itself or by
-    /// its enclosing construct's lowering origin.
-    fn from_model_error(error: &fsl_core::ModelError) -> Self {
-        Self {
-            message: error.to_string(),
-            loc: fslc_rust::verification_output::model_error_loc(error),
-        }
-    }
-}
-
-impl SpecLoadError {
-    /// A `semantics` failure that owns no construct in the specification: a
-    /// rejected CLI selection, a whole-document shape mismatch, or a diagnostic
-    /// whose span belongs to a different file than the one being reported on.
-    fn unlocated_semantic(message: impl Into<String>) -> Self {
-        Self::Semantic(SemanticDiagnostic::unlocated(message))
-    }
-}
-
-impl std::fmt::Display for SpecLoadError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(message) => formatter.write_str(message),
-            Self::Semantic(diagnostic) => formatter.write_str(&diagnostic.message),
-            Self::Parse(error) => write!(formatter, "{error}"),
-        }
-    }
-}
-
 fn load_model(path: &Path) -> Result<KernelModel, SpecLoadError> {
     load_kernel_model(path).map(|(_, _, model)| model)
 }
@@ -15463,36 +15386,6 @@ fn load_kernel_model(path: &Path) -> Result<(String, KernelSpec, KernelModel), S
 fn read_spec_source(path: &Path) -> Result<String, SpecLoadError> {
     std::fs::read_to_string(path)
         .map_err(|error| SpecLoadError::Io(format!("{}: {error}", path.display())))
-}
-
-/// Recover the typed surface-parse diagnostic behind a lowering or projection
-/// failure that only reports a message.
-///
-/// The kernel and document entrypoints run the surface parser themselves and
-/// report the result as a `CoreError`/projection message, so the class is
-/// recovered by re-running the same parser on the failure path only. A compose
-/// document whose *component* fails to parse still lowers its own top level
-/// successfully and therefore stays `semantics`, exactly as `check` reports it.
-fn surface_parse_failure(source: &str) -> Option<fsl_syntax::ParseError> {
-    fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)).err()
-}
-
-/// Classify a kernel lowering failure, preserving a surface-parse span.
-fn kernel_load_error(source: &str, error: &fsl_core::CoreError) -> SpecLoadError {
-    if let Some(parse_error) = surface_parse_failure(source) {
-        return SpecLoadError::Parse(Box::new(parse_error));
-    }
-    // The substituted "spec has no state block" message describes the document
-    // as a whole rather than the construct the lowering gate stopped at, so it
-    // keeps no location; the original diagnostic keeps whatever origin the
-    // frontend recorded.
-    if error.message == "top-level document has not reached the kernel lowering gate" {
-        return SpecLoadError::Semantic(SemanticDiagnostic::unlocated("spec has no state block"));
-    }
-    SpecLoadError::Semantic(SemanticDiagnostic::located(
-        error.to_string(),
-        error.origin.as_deref(),
-    ))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -15826,17 +15719,7 @@ fn baseline_error_status(baseline: &Value, status: i32) -> i32 {
 /// every spec-reading command emits the envelope `check` emits for the same
 /// file (`kind:"parse"` + `diagnostic_code` + `loc` for a syntax error).
 fn spec_load_error_output(error: &SpecLoadError) -> Value {
-    match error {
-        SpecLoadError::Io(message) => error_output("io", message),
-        SpecLoadError::Parse(error) => surface_parse_error_output(error),
-        SpecLoadError::Semantic(diagnostic) => {
-            fslc_rust::verification_output::render_semantic_error(
-                envelope(),
-                &diagnostic.message,
-                diagnostic.loc.clone(),
-            )
-        }
-    }
+    fslc_rust::spec_load::render_spec_load_error(envelope(), error)
 }
 
 fn finish(output: &mut Map<String, Value>, checked: usize, started: Instant) {
