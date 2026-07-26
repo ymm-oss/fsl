@@ -395,6 +395,38 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   only), and `generated:true` origin provenance on the SLA-synthesized
   `tick` action and `_deadline_*` invariants (previously indistinguishable
   from authored declarations) (#530).
+- `fslc domain check` now folds a nested kernel's non-`verified`/`proved`
+  result (`violated`, `reachable_failed`, `unknown_cti`, `unknown_budget`)
+  into the top-level verdict and exit code instead of unconditionally
+  reporting `result:"verified_under_assumptions"`/`formal_result:"verified"`/
+  exit 0 regardless of what `kernel.result` actually said — a confidently
+  green false negative on a domain whose aggregate invariant the kernel
+  proves violated. `run_domain_check` also now returns a non-{0,1} `verify`
+  status (spec error, internal error) verbatim instead of letting it reach
+  `check_domain` and be misread as a kernel result, and the internal
+  `stable_kernel_projection` allowlist gained the violated-path evidence
+  keys (`loc`, `violated_at_step`, `violating_bindings`, `blame`,
+  `last_action`, `trace`) so the nested `kernel` stays a replayable
+  counterexample rather than only the bare verdict string (#515).
+- `fslc domain replay` now actually drives a concrete Monitor over the
+  lowered domain/effect model — stepping `command` and `effect_completion`
+  log entries as real action calls — instead of only maintaining a
+  `(effect, correlation_id)` bookkeeping set. Previously only 1 of the 4
+  documented detection categories (completion without a prior request)
+  could fire; a rejected command, a duplicate irreversible effect commit,
+  and a lifecycle ordering mismatch (e.g. a completion observed after the
+  aggregate moved into a state that rejects it) all silently passed as
+  `conformance_checked`/exit 0. `unknown_domain_event`, `unknown_effect`,
+  `effect_completion_event_not_declared`, and `unknown_runtime_event_kind`
+  (including a `{"kind": ...}`-keyed log entry, which previously evaluated
+  zero log lines and still reported success) are also now detected, and
+  `final_state`/`assumptions` are populated from the same Monitor and
+  assumption computation `domain analyze` already uses instead of always
+  returning `{}`/`[]` (#518).
+- `fslc domain replay` and `fslc domain analyze` now reject an unrecognized
+  trailing argument (`result:"error"`/`kind:"usage"`/exit 2), matching
+  every other `domain` subcommand and the rest of the CLI, instead of
+  silently discarding it and returning a result computed without it (#516).
 - Native semantic diff now evaluates OLD forbidden arguments in the OLD typed
   model and reports missing actions, incompatible arity, or incompatible NEW
   argument domains as explicit `unknown` findings instead of a false

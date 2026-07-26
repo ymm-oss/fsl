@@ -1,0 +1,82 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// #518: a self-contained domain/effect model exercising all four documented
+// `domain replay` detection categories (rejected command, completion
+// without request, duplicate irreversible completion, lifecycle ordering
+// mismatch) plus the schema's remaining runtime finding kinds.
+domain MinReplay {
+  implementation_profile functional_ddd
+
+  enum MsgStatus { New, Sent, Cancelled }
+  enum DeliveryStatus { NotRequested, Requested, Done, Failed }
+
+  aggregate Msg {
+    id MsgId
+
+    state {
+      status: MsgStatus = New;
+      delivery: DeliveryStatus = NotRequested;
+    }
+
+    command SendMsg {
+      input ref_id: RefId
+    }
+    command CancelMsg {}
+
+    event MsgSent {
+      ref_id: RefId
+    }
+    event MsgCancelled {}
+    event Delivered {
+      ref_id: RefId
+    }
+    event DeliveryFailed {
+      ref_id: RefId
+    }
+
+    decide SendMsg {
+      requires status == New
+      emits MsgSent
+    }
+
+    decide CancelMsg {
+      requires status == Sent
+      emits MsgCancelled
+    }
+
+    evolve MsgSent {
+      status = Sent
+      delivery = Requested
+    }
+
+    evolve MsgCancelled {
+      status = Cancelled
+    }
+
+    evolve Delivered {
+      requires status != Cancelled
+      delivery = Done
+    }
+
+    evolve DeliveryFailed {
+      delivery = Failed
+    }
+  }
+
+  effect Deliver {
+    async
+    irreversible
+    idempotency_key Msg.id
+    correlation_id MsgSent.ref_id
+    handles MsgSent
+    emits one_of [Delivered, DeliveryFailed]
+    retry {
+      max_attempts 2
+      backoff exponential
+    }
+    timeout after 5m emits DeliveryFailed
+    compensation {
+      emits DeliveryFailed
+    }
+  }
+}

@@ -1,0 +1,3 @@
+{"event":"command","aggregate":"Msg","command":"SendMsg","params":{"ref_id":"r1"}}
+{"event":"domain_event","aggregate":"Msg","name":"MsgSent","params":{"ref_id":"r1"}}
+{"event":"command","aggregate":"Msg","command":"SendMsg","params":{"ref_id":"r1"}}
