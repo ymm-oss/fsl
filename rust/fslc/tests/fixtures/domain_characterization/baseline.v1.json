@@ -8241,6 +8241,10 @@
           "result": "error",
           "kind": "semantics",
           "message": "unknown domain symbol 'missing_status' at rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl:10:29",
+          "loc": {
+            "line": 10,
+            "column": 29
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
@@ -8265,6 +8269,10 @@
           "result": "error",
           "kind": "semantics",
           "message": "unknown domain symbol 'missing_status' at rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl:10:29",
+          "loc": {
+            "line": 10,
+            "column": 29
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
@@ -8291,6 +8299,10 @@
           "result": "error",
           "kind": "semantics",
           "message": "unknown domain symbol 'Cancelled' at rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_member.fsl:10:41",
+          "loc": {
+            "line": 10,
+            "column": 41
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
@@ -8315,6 +8327,10 @@
           "result": "error",
           "kind": "semantics",
           "message": "unknown domain symbol 'Cancelled' at rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_member.fsl:10:41",
+          "loc": {
+            "line": 10,
+            "column": 41
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
@@ -8341,6 +8357,10 @@
           "result": "error",
           "kind": "semantics",
           "message": "comparison operand type mismatch at rust/fslc/tests/fixtures/domain_characterization/invalid_type_mismatch.fsl:10:37",
+          "loc": {
+            "line": 10,
+            "column": 37
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
@@ -8365,6 +8385,10 @@
           "result": "error",
           "kind": "semantics",
           "message": "comparison operand type mismatch at rust/fslc/tests/fixtures/domain_characterization/invalid_type_mismatch.fsl:10:37",
+          "loc": {
+            "line": 10,
+            "column": 37
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
@@ -8511,6 +8535,10 @@
           "result": "error",
           "kind": "semantics",
           "message": "unknown domain symbol 'Status_Draft' at rust/fslc/tests/fixtures/domain_characterization/ai_internal_name_misuse.fsl:10:41",
+          "loc": {
+            "line": 10,
+            "column": 41
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",
@@ -8535,6 +8563,10 @@
           "result": "error",
           "kind": "semantics",
           "message": "unknown domain symbol 'Status_Draft' at rust/fslc/tests/fixtures/domain_characterization/ai_internal_name_misuse.fsl:10:41",
+          "loc": {
+            "line": 10,
+            "column": 41
+          },
           "versions": {
             "verifier": {
               "name": "fslc-rust",

@@ -521,7 +521,17 @@ Differences from v0:
 
 The error classification is a fixed closed set, and the fields each
 classification has are guaranteed by the schema (`parse`/`name`/`type`/
-`semantics` always have `loc`).
+`semantics` always have `loc`), with one exception: a `semantics` diagnostic
+that names no construct in the file the envelope reports on omits `loc` rather
+than inventing one. That is exactly three cases — a rejected CLI selection
+(`--property`, `--exclude`, `--instances`/`--values`), a whole-document shape
+mismatch (`spec has no state block`, `expected refinement mapping`), and a
+diagnostic whose subject is a different file than the reported one (the
+`analyze --project` manifest and the refinement mapping it names, since `loc`
+carries no file). An absent `loc` means the location is unknown; `line: 0` is
+never emitted, because a position that does not exist misleads a repair agent
+more than no position does. Every diagnostic that does name a construct in the
+reported file carries `loc`, on every command (issue 555).
 
 ### 7.3 Value Display and the Invisibility of Lowering
 

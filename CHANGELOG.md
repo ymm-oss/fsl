@@ -58,6 +58,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   by kind). Raw blocks stay unvalidated: garbage inside `ai_action`,
   `ai_contract`, `authority`, `retriever`, or `trust_boundary` still passes
   `check`, because those are contractually block boundaries only (#542).
+- `type` and `semantics` errors now carry `loc` on every spec-reading command,
+  completing the `docs/DESIGN-v1.md` §7.2 clause that guarantees a location for
+  `parse`/`name`/`type`/`semantics`. Issue 484 delivered the `parse` half; the
+  other half returned `loc: null` everywhere, including `check`, so the §8
+  repair protocol could not mechanically locate a `type`/`name` failure from
+  the output JSON alone. `SpecLoadError::Semantic` now carries the structured
+  diagnostic instead of a flattened `String`, and `ModelError` carries the span
+  of the construct that failed — a kernel `spec` registers no lowering origins,
+  so the three corpus goldens previously had no location to report at all. The
+  reported position is the offending construct, not the enclosing declaration:
+  the state field for an unknown type, the `struct` declaration for a
+  non-scalar field (`TypeExpr` carries no span of its own), and the *second*
+  write for a duplicate assignment. Messages are unchanged — the span is a new
+  field that `ModelError`'s Display deliberately ignores — and no `kind`
+  moves. A diagnostic that names no construct in the reported file still omits
+  `loc` rather than emitting a `{line: 0, column: 0}` placeholder;
+  `docs/DESIGN-v1.md` now states that exception explicitly instead of leaving
+  the clause overstating the implementation (#555).
 - Every spec-reading native command now classifies a syntax error the way
   `check` does: `kind: "parse"` with `diagnostic_code: "FSL-PARSE"` and a
   `loc`. `rust/fslc/src/main.rs`'s `load_kernel_model` flattened the frontend's

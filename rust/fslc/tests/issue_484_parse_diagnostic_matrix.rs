@@ -278,3 +278,80 @@ fn a_missing_input_is_io_for_every_spec_reading_command() {
 
     std::fs::remove_dir_all(&directory).expect("remove fixture directory");
 }
+
+/// The corpus `type`/`semantics` goldens, with the construct each diagnostic
+/// must point at.
+///
+/// `examples/gallery/errors/` has no `name`-kind fixture, so that third
+/// classification in the `docs/DESIGN-v1.md` §7.2 clause has no corpus case to
+/// pin here.
+const LOCATED_SEMANTIC_FIXTURES: &[(&str, &str, u64, u64)] = &[
+    // `state { owner: UserId }` — the state declaration naming the unknown type.
+    (
+        "examples/gallery/errors/type_undeclared_type.fsl",
+        "type",
+        5,
+        11,
+    ),
+    // `struct Bag { members: Set<K> }` — `TypeExpr` carries no span of its own,
+    // so the declaration is the closest true location.
+    (
+        "examples/gallery/errors/type_struct_set_field.fsl",
+        "type",
+        6,
+        3,
+    ),
+    // The *second* `x = 2`, not the first write and not the enclosing action.
+    (
+        "examples/gallery/errors/semantics_duplicate_assignment.fsl",
+        "semantics",
+        9,
+        5,
+    ),
+];
+
+/// Issue 555: `docs/DESIGN-v1.md` §7.2 guarantees `loc` for `type` and
+/// `semantics`, not only for `parse`. Issue 484 delivered the `parse` half; the
+/// other half returned `loc: null` from every command, including `check`.
+///
+/// The line and column are asserted exactly. "`loc` is not null" cannot
+/// distinguish a correct location from a wrong one, and a `loc` that points at
+/// the wrong construct is a worse outcome for a repair agent than no `loc`.
+#[test]
+fn every_spec_reading_command_locates_a_type_or_semantic_error() {
+    let directory = fixture_directory("semantic-loc-matrix");
+    let trace = write_fixture(
+        &directory,
+        "trace.json",
+        r#"{"schema_version":1,"spec":"Valid","initial":{"value":0},"events":[]}"#,
+    );
+    let other = write_fixture(&directory, "other.fsl", VALID_SOURCE);
+
+    for (fixture, expected_kind, line, column) in LOCATED_SEMANTIC_FIXTURES {
+        for (name, arguments) in spec_reading_commands(fixture, &trace, &other) {
+            // `fmt` never lowers to the kernel and refuses these inputs as
+            // `usage` before any typed-model diagnostic exists.
+            if name == "fmt" {
+                continue;
+            }
+            let (output, status) = run_cli(&arguments);
+            assert_eq!(output["result"], "error", "{fixture}/{name}: {output}");
+            assert_eq!(output["kind"], *expected_kind, "{fixture}/{name}: {output}");
+            assert_eq!(status, 2, "{fixture}/{name}: {output}");
+            // `lint` adds a `file` key to its own `loc`; the guaranteed fields
+            // are `line`/`column` (`docs/DESIGN-v1.md` §7.2).
+            assert_eq!(
+                output["loc"]["line"].as_u64(),
+                Some(*line),
+                "{fixture}/{name}: {output}"
+            );
+            assert_eq!(
+                output["loc"]["column"].as_u64(),
+                Some(*column),
+                "{fixture}/{name}: {output}"
+            );
+        }
+    }
+
+    std::fs::remove_dir_all(&directory).expect("remove fixture directory");
+}

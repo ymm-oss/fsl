@@ -2115,6 +2115,7 @@ pub(crate) fn lower_domain_surface(
                         ))
                     })
                     .collect::<Result<Vec<_>, CoreError>>()?,
+                span: span_at(ty.loc),
             }),
             other => {
                 return Err(error_at(

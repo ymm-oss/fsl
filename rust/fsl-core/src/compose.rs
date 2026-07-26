@@ -347,8 +347,9 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             members,
             symmetric,
         },
-        SpecItem::Struct { name, fields } => SpecItem::Struct {
+        SpecItem::Struct { name, fields, span } => SpecItem::Struct {
             name: prefix(alias, &name),
+            span,
             fields: fields
                 .into_iter()
                 .map(|(name, ty)| (name, rewrite_type(ty, component)))
