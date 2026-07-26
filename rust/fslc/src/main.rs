@@ -11217,7 +11217,10 @@ fn run_ledger_report(
     // (`verified`/`proved`/`violated`/`unknown_cti`/`unknown_budget`/`error`)
     // because both call the same `run_verify`. Reusing the mapping here
     // instead of writing a second one is the fix issue #592 asked for.
-    (result, mutate_exit_status(&prepared.verification, prepared.verification_status))
+    (
+        result,
+        mutate_exit_status(&prepared.verification, prepared.verification_status),
+    )
 }
 
 fn generate_unapproved_ledger_report(request: &LedgerReportRequest<'_>) -> (Value, i32) {

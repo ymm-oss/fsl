@@ -320,9 +320,10 @@ fn run_exit_status(args: &[&str]) -> i32 {
         .current_dir(root())
         .output()
         .expect("run native CLI");
-    output.status.code().unwrap_or_else(|| {
-        panic!("`fslc {args:?}` terminated by signal, no exit code")
-    })
+    output
+        .status
+        .code()
+        .unwrap_or_else(|| panic!("`fslc {args:?}` terminated by signal, no exit code"))
 }
 
 /// Verdict Conservation Law for `fslc ledger` (issue #592), checked without
@@ -360,7 +361,14 @@ fn ledger_exit_status_agrees_with_its_verify_baseline() {
         let rel = repo_relative(&root, path);
         let path_str = path.to_str().expect("utf8 path");
         let verify_exit = run_exit_status(&[
-            "verify", path_str, "--depth", "2", "--deadlock", "ignore", "--engine", "bmc",
+            "verify",
+            path_str,
+            "--depth",
+            "2",
+            "--deadlock",
+            "ignore",
+            "--engine",
+            "bmc",
         ]);
         let ledger_exit = run_exit_status(&["ledger", path_str, "--depth", "2"]);
 
