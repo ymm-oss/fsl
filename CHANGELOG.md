@@ -48,6 +48,39 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `members`, the same shape `SpecItem::Struct` gained in #555 and the same the
   domain surface already used, and the diagnostic attaches the offending
   member's own span (#576).
+- The native<->Worker parity corpus's `unsupportedDocuments` exclusions in
+  `rust/fsl-wasm/test-browser.mjs` are now self-retiring. The map excluded 32
+  refinement/agent/causal documents from the comparison and recorded only a
+  document type, so if the Worker ever gained a verb for one of them the
+  exclusion would keep suppressing the comparison forever -- the shape that
+  left #556's divergent path with zero corpus coverage. Each entry now carries
+  the measured reason it holds, and every excluded document is probed on the
+  Worker alone: the recorded premise is that the Worker cannot analyze it, and
+  the day that stops being true the harness fails and names the entry to
+  remove. The compared-pair count is unchanged at 351 -- no exclusion was
+  retired and no document newly compared -- and the run now also reports
+  `exclusionProbes`. This stays a capability exclusion, not a
+  tolerated-difference allowlist: the envelopes are still not compared for
+  these documents and no verdict, location, or exit-code difference is
+  allowlisted (#568).
+- A kernel-stage failure inside a `use ... from` component now reports the
+  parent's `use` declaration as its `loc`, and names the component's own path
+  and position in the message. The two used to be mixed: the path came from the
+  parent (`source_file`) while the line and column came from the component's
+  parser, so `check` on
+  `examples/gallery/errors/semantics_compose_component_parse_failure.fsl`
+  reported `…:7:18` — and line 7 of that file is a comment. A location in the
+  wrong file is worse than none, and `docs/DESIGN-v1.md` G2 requires the output
+  JSON alone to say where the problem is. `loc` is `{line, column}` with no
+  `file` in all five of its `docs/DESIGN-v1.md` examples, so it can only mean a
+  position in the file the envelope is about; the `use` declaration is that
+  position, and it is also the line to look at first. The message now reads
+  `component "<component>" failed to parse (<inner> at <component>:<l>:<c>) at
+  <parent>:<use line>:<use column>`, naming both files explicitly. An
+  unreadable component is re-anchored the same way, instead of reporting `1:1`.
+  Native and the browser Worker share the loader, so both return the identical
+  string; the file is a parity corpus case, so
+  `./tools/check-native-integration.sh` checks that on every run (#567).
 - The fsl-ai project check's unexecutable-`require` spec error (#542) now
   carries a `loc` pointing at the offending clause's own line and column.
   `rust/fsl-syntax/src/ai_project.rs` tracked no positions at all, so the error
@@ -351,6 +384,25 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   failure and echoing `helpful` on both the proof and CTI (#473).
 
 ### Added
+- Native `verify` now reports the three remaining `docs/DESIGN-vacuity.md` §2
+  lanes — `always_true_requires`, `tautology_over_frozen`, and
+  `urgency_freeze` — closing the last of issue 465. A spec whose only emptiness
+  was one of them previously came back `result:"verified"` / exit 0 even under
+  `--vacuity error`; the three-line reproduction (a `Bool` set by `init`,
+  assigned by no action, asserted as an invariant) now exits 2 with
+  `kind:"tautology_over_frozen"` and `trace_type:"vacuity"`. All three are
+  proved in `fsl-verifier`, so `fsl-runtime` stays solver-independent, and all
+  three report identically on `--engine bmc`, `explicit`, and `induction`.
+
+  Unlike the frozen Python reference, the native lanes decide "always true over
+  all reachable states" over the **declared type space** rather than over the
+  states an unrolling happened to witness, so no verdict moves with `--depth`.
+  Python reports `examples/causal/funnel.fsl`'s `requires visits < 100` as dead
+  at depth 8 because `visits` only reaches 8; with `visits: 0..100` declared,
+  native correctly stays silent at every depth. The lanes are sound and
+  deliberately incomplete: an unproven obligation, an `unknown` backend
+  verdict, a compose-synchronized action, a generated declaration, and an
+  action that was never enabled all yield no finding.
 - Added an optimistic CI lane with one stable, parallelized `merge readiness`
   context for pull requests and merge queues, while preserving the complete
   Rust/WASM/macOS/Windows product gate for every merged `main` state and

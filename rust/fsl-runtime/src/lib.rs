@@ -2169,7 +2169,14 @@ fn exists_wrap(binders: &[Binder], expr: Expr) -> Expr {
         })
 }
 
-/// Build solver-independent verification warnings shared by native and browser frontends.
+/// Build the verification warnings shared by native and browser frontends.
+///
+/// The two reachability vacuity lanes are computed here and stay
+/// solver-independent. `solver_vacuity` carries the already-rendered
+/// `docs/DESIGN-vacuity.md` §2 lanes 3–5 that only `fsl-verifier` can decide;
+/// passing them in keeps the documented warning order (model → vacuity →
+/// deadlock → action coverage) owned by one function without giving
+/// `fsl-runtime` a solver dependency.
 #[must_use]
 pub fn verification_warnings(
     model: &KernelModel,
@@ -2178,6 +2185,7 @@ pub fn verification_warnings(
     deadlock_step: Option<usize>,
     deadlock_state: Option<&State>,
     action_coverage: &BTreeMap<String, bool>,
+    solver_vacuity: &[JsonValue],
 ) -> Vec<JsonValue> {
     let mut warnings = model_warnings(model);
     for property in &model.invariants {
@@ -2254,6 +2262,7 @@ pub fn verification_warnings(
             warnings.push(warning);
         }
     }
+    warnings.extend(solver_vacuity.iter().cloned());
     if warn_deadlock && let Some(step) = deadlock_step {
         let summary = deadlock_state.map_or_else(String::new, |state| state_summary(model, state));
         warnings.push(json!({

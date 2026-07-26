@@ -74,6 +74,31 @@ const candidates = [
   ...await collectFslFiles(join(repository, "specs")),
   ...await collectFslFiles(join(repository, "examples")),
 ].sort();
+// Documents the Worker has no verb for, and therefore cannot be compared
+// against the native CLI. Each entry records the document type and the
+// *measured* reason the exclusion holds, so the next reader does not re-derive
+// it. `workerSignature` below turns each entry into a self-retiring one: the
+// harness probes the Worker for every excluded document and fails loudly when
+// the Worker's behaviour no longer matches the recorded premise, i.e. when the
+// exclusion has become unnecessary (#568). This is a *capability* exclusion,
+// never a tolerated-difference allowlist: the native<->Worker envelopes are
+// still not compared for these documents, and no verdict, location, or
+// exit-code difference is allowlisted anywhere.
+const unsupportedReasons = {
+  refinement:
+    "the Worker exposes only check/verify over Kernel specs and has no `refine` verb. NOTE (measured "
+    + "on the post-#574 tree): native and Worker check/verify envelopes now AGREE for every refinement "
+    + "document in the corpus, so this exclusion no longer suppresses any divergence and is retirable. "
+    + "Retiring it adds 54 compared cases and is a corpus-scope decision tracked separately -- the probe "
+    + "below only detects the Worker gaining a verb, not this agreement-staleness (#568)",
+  agent:
+    "native `check` runs the lenient fsl-ai agent analysis (result \"ok\", dialect fsl-ai-agent.v0); "
+    + "the Worker has no agent path at all and stops at the kernel lowering gate",
+  causal:
+    "standalone causal models bypass dialect dispatch (docs/DESIGN-causal.md); native answers with the "
+    + "causal envelope (`causal_model_checked`, no `versions` block) which the shared parity normalizer "
+    + "cannot validate, so there is no comparable pair to build",
+};
 const unsupportedDocuments = new Map(Object.entries({
   "examples/agentic_rag/agentic_rag_design_refines_requirements.fsl": "refinement",
   "examples/agentic_rag/agentic_rag_requirements_refines_business.fsl": "refinement",
@@ -109,6 +134,7 @@ const unsupportedDocuments = new Map(Object.entries({
   "examples/causal/subscription_retention.fsl": "causal",
 }));
 const observedUnsupported = new Set();
+const exclusionProbes = [];
 const parityCases = [];
 for (const path of candidates) {
   const repositoryPath = relative(repository, path).split("\\").join("/");
@@ -131,6 +157,19 @@ for (const path of candidates) {
       throw new Error(`unreviewed unsupported ${documentType} document: ${repositoryPath}`);
     }
     observedUnsupported.add(repositoryPath);
+    // Not compared against native -- probed on the Worker alone, so that the
+    // day the Worker grows a verb for this document type the recorded premise
+    // stops matching and the exclusion fails instead of silently persisting.
+    exclusionProbes.push({
+      id: `exclusion-${exclusionProbes.length}`,
+      cmd: "check",
+      path: repositoryPath,
+      source: await readFile(path, "utf8"),
+      source_file: repositoryPath,
+      files: {},
+      options: {},
+      documentType,
+    });
     continue;
   }
   if (unsupportedDocuments.has(repositoryPath)) {
@@ -188,7 +227,11 @@ parityCases.push({
   options: {},
   expected_status: 2,
 });
-await writeFile(join(dist, "parity-cases.json"), `${JSON.stringify(parityCases)}\n`, "utf8");
+await writeFile(
+  join(dist, "parity-cases.json"),
+  `${JSON.stringify([...parityCases, ...exclusionProbes])}\n`,
+  "utf8",
+);
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -344,6 +387,29 @@ for (let index = 0; index < parityCases.length; index += 1) {
     });
   }
 }
+// #568: an exclusion that is no longer needed must fail, not stay green. Each
+// excluded document is probed on the Worker; the recorded premise is that the
+// Worker cannot analyze it. `check` on a document the Worker has no verb for
+// stops at the kernel lowering gate (refinement/agent) or fails the surface
+// parse (causal) -- either way it never produces an analysis. The day the
+// Worker gains the verb, `result` stops being `"error"` and this fails,
+// naming the entry to remove.
+const staleExclusions = [];
+for (let index = 0; index < exclusionProbes.length; index += 1) {
+  const probe = exclusionProbes[index];
+  const envelope = browser.parityEnvelopes[parityCases.length + index];
+  if (envelope?.result !== "error") {
+    staleExclusions.push(
+      `${probe.path}: the Worker now returns ${JSON.stringify(envelope?.result)} for this `
+      + `${probe.documentType} document, so the unsupportedDocuments entry is stale. `
+      + `Recorded reason: ${unsupportedReasons[probe.documentType]}. `
+      + `Remove the entry and let the document join the compared corpus, or update the reason.`,
+    );
+  }
+}
+if (staleExclusions.length > 0) {
+  throw new Error(`stale parity-corpus exclusions:\n${staleExclusions.join("\n")}`);
+}
 if (mismatches.length > 0) {
   const report = JSON.stringify({
     schema: "fsl-native-wasm-parity-failure.v1",
@@ -359,4 +425,5 @@ console.log(JSON.stringify({
   cancelled: true,
   nativeParity: true,
   parityCases: parityCases.length,
+  exclusionProbes: exclusionProbes.length,
 }, null, 2));

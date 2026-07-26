@@ -13,6 +13,7 @@ use crate::trace::project_trace;
 use crate::transition::{
     ActionInstance, action_guards, action_instances, init_constraints, transition_constraint,
 };
+use crate::vacuity::{VacuityFinding, retain_covered, static_findings};
 use crate::value::{
     Bindings, SymbolicState, bool_term, bounds, concrete_value, i64_index, logical_equal,
     symbolic_state,
@@ -56,6 +57,9 @@ pub struct BmcResult {
     pub deadlock_trace: Option<Vec<TraceStep>>,
     pub action_coverage: BTreeMap<String, bool>,
     pub frontier_progress: bool,
+    /// Solver-dependent vacuity facts (`docs/DESIGN-vacuity.md` §2 lanes 3–5).
+    /// Depth-independent by construction; see [`crate::vacuity`].
+    pub vacuity: Vec<VacuityFinding>,
 }
 
 /// Explore all symbolic executions up to `depth` using a backend-neutral SMT solver.
@@ -168,6 +172,7 @@ async fn verify_bounded_config<S: SmtSolver>(
             .map(|action| (action.name.clone(), false))
             .collect(),
         frontier_progress: false,
+        vacuity: Vec::new(),
     };
     let mut pending_reachables = model
         .reachables
@@ -260,6 +265,23 @@ async fn verify_bounded_config<S: SmtSolver>(
         let unrolled_depth = states.len() - 1;
         result.leadsto_violation =
             check_leadstos(solver, model, &states, &choices, &instances, unrolled_depth).await?;
+    }
+    // The solver-dependent vacuity lanes run last, after every witness,
+    // reachable, and deadlock trace has been projected. They ask nothing about
+    // the unrolled states — each lane quantifies over freshly named ones — but
+    // a query still moves the backend's internal state, and two Z3 builds may
+    // then resolve an under-determined model differently. The native and
+    // browser evidence contract is byte-compared, so no new query may run
+    // before the evidence it could perturb.
+    //
+    // By this point the unrolling has asserted a mandatory forward transition
+    // out of every state, which a spec that deadlocks on every path makes
+    // globally unsatisfiable. In such a session every query answers `unsat`
+    // and every lane would fire on nothing. Report no vacuity rather than a
+    // fabricated one.
+    if session_satisfiable(solver).await? {
+        result.vacuity = static_findings(model, solver, &instances).await?;
+        retain_covered(&mut result.vacuity, &result.action_coverage);
     }
     Ok(result)
 }
@@ -880,6 +902,12 @@ async fn check_leadstos<S: SmtSolver>(
         }
     }
     Ok(None)
+}
+
+/// Whether the accumulated unrolling session still has a model at all.
+async fn session_satisfiable<S: SmtSolver>(solver: &mut S) -> Result<bool, VerifyError> {
+    solver.set_query_context("vacuity", "session");
+    Ok(matches!(solver.check().await?, SatResult::Sat))
 }
 
 async fn probe_not<S: SmtSolver>(solver: &mut S, condition: &S::Term) -> Result<bool, VerifyError> {

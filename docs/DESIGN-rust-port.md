@@ -256,11 +256,26 @@ solver-independent crates used by both delivery surfaces:
   warnings. It consumes only the checked model and backend-neutral result
   facts. The remaining three `docs/DESIGN-vacuity.md` §2 lanes
   (`always_true_requires`, `tautology_over_frozen`, `urgency_freeze`) are
-  solver-dependent and are not yet implemented on the Rust side (#465);
-  `--vacuity` selects over the closed 5-kind set in
-  `fsl-core::VACUITY_KINDS`, not a `"vacuous_"` name-prefix check, so the
-  three unimplemented lanes fail closed by absence rather than by a
-  misclassified warning once they are added.
+  solver-dependent, so `fsl-verifier::vacuity` proves them and carries them
+  out of the verifier as `BmcResult.vacuity`. The frontend renders that into
+  warning JSON and passes it back into `verification_warnings`, which keeps
+  the documented warning order in one place without giving `fsl-runtime` a
+  solver dependency. `--vacuity` selects over the closed 5-kind set in
+  `fsl-core::VACUITY_KINDS`, not a `"vacuous_"` name-prefix check.
+- The solver-dependent lanes run after every witness, reachable, and deadlock
+  trace has been projected. They quantify over freshly named states and never
+  read the unrolled ones, but a query still moves the backend's internal
+  state, and the native and browser Z3 builds may then resolve an
+  under-determined model differently — which the byte-compared evidence
+  contract reports as a parity failure. No new query may run before the
+  evidence it could perturb.
+- Backend-neutral analysis must keep its symbolic-state allocation independent
+  of the spec's size. Every constraint a probe needs is asserted inside a
+  `push`/`pop`, so one reusable state per analysis is enough; allocating one
+  per invariant or per action instance multiplies the live Z3 term count by
+  the corpus's largest spec and exhausts the browser backend's bounded heap,
+  where the failure surfaces as a Worker that stops answering rather than as a
+  diagnosable error.
 - Shared warnings use typed `kind` values for downstream selection. In
   particular, induction removes bounded `kind:"deadlock"` warnings through
   `fsl-runtime::induction_warnings`; frontends never classify a warning by
