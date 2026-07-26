@@ -2066,6 +2066,8 @@ pub(crate) fn lower_domain_surface(
                     .iter()
                     .map(|member| format!("{}_{}", ty.name, member))
                     .collect(),
+                // The domain surface already records each member's span.
+                member_spans: ty.member_spans.clone(),
                 symmetric: false,
             }),
             "range" | "external" => {
@@ -2143,6 +2145,8 @@ pub(crate) fn lower_domain_surface(
             .iter()
             .map(|member| status_member(effect, member))
             .collect(),
+            // Generated effect-status members have no source text.
+            member_spans: Vec::new(),
             symmetric: false,
         });
         items.push(SpecItem::Type {

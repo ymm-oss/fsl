@@ -459,3 +459,56 @@ fn name_resolution_messages_are_unchanged_and_classify_without_message_matching(
 
     std::fs::remove_dir_all(&directory).expect("remove fixture directory");
 }
+/// A duplicate declaration and the exact position that must be reported for it.
+///
+/// For a *duplicate* diagnostic, `source_diagnostic`'s message-derived fallback
+/// — the first token matching the quoted name — is wrong by construction: a
+/// duplicate is the same name appearing twice, so the first match is always the
+/// earlier, innocent declaration. Carrying the span on the diagnostic is the
+/// only correct direction, and the one issues 484, 555 and 565 all took
+/// (issue 576).
+const DUPLICATE_DECLARATION_POSITIONS: &[(&str, &str, u64, u64)] = &[
+    // `enum F { B, C }` on line 3 — the redeclaration of `B`, not the `B` in
+    // `enum E { A, B }` on line 2 at column 15.
+    (
+        "spec DupEnum {\n  enum E { A, B }\n  enum F { B, C }\n  state { e: E }\n  init { e = A }\n  action stay() { e = e }\n}\n",
+        "duplicate enum member 'B'",
+        3,
+        12,
+    ),
+    // The sibling case, `duplicate state variable`, landed with issue 565 and
+    // is pinned by `NAME_FIXTURE_LINE`/`NAME_FIXTURE_COLUMN` in the
+    // every-command test above, so it is deliberately not repeated here.
+];
+
+/// A `loc` that exists but names the wrong construct is worse than no `loc`:
+/// `docs/DESIGN-v1.md` G2 assumes the position is *correct*, and for a
+/// duplicate the wrong one accuses the declaration that is not the problem.
+///
+/// The classification is deliberately not asserted here — it is issue 565's
+/// subject and moves independently — so this stays a pure position contract.
+#[test]
+fn a_duplicate_declaration_is_located_at_the_repeated_occurrence() {
+    let directory = fixture_directory("duplicate-declaration-loc");
+
+    for (index, (source, message, line, column)) in
+        DUPLICATE_DECLARATION_POSITIONS.iter().enumerate()
+    {
+        let spec = write_fixture(&directory, &format!("duplicate_{index}.fsl"), source);
+        let (output, status) = run_cli(&["check", &spec]);
+        assert_eq!(status, 2, "{message}: {output}");
+        assert_eq!(output["message"], *message, "{message}: {output}");
+        assert_eq!(
+            output["loc"]["line"].as_u64(),
+            Some(*line),
+            "{message}: {output}"
+        );
+        assert_eq!(
+            output["loc"]["column"].as_u64(),
+            Some(*column),
+            "{message}: {output}"
+        );
+    }
+
+    std::fs::remove_dir_all(&directory).expect("remove fixture directory");
+}

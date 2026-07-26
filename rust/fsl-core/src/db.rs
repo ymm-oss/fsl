@@ -307,6 +307,7 @@ pub(crate) fn lower_db_surface(system: &DbSystem) -> (SurfaceSpec, OriginRegistr
         SpecItem::Enum {
             name: "Column".to_owned(),
             members: columns.keys().map(column_member).collect(),
+            member_spans: Vec::new(),
             symmetric: false,
         },
         SpecItem::State(vec![

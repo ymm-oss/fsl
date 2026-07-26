@@ -1430,10 +1430,11 @@ impl<'a> Parser<'a> {
             self.bump();
             let name = self.expect_ident()?;
             self.expect_symbol("{")?;
-            let members = self.ident_list("}")?;
+            let (members, member_spans) = self.ident_list_with_spans("}")?;
             return Ok(SpecItem::Enum {
                 name,
                 members,
+                member_spans,
                 symmetric,
             });
         }
@@ -1949,19 +1950,28 @@ impl<'a> Parser<'a> {
         Some(MetaTag::parse(&value, token.span))
     }
 
-    fn ident_list(&mut self, close: &str) -> Result<Vec<String>, ParseError> {
+    /// A comma-separated name list, with each name's span, so a diagnostic can
+    /// name the offending occurrence rather than the first one that matches
+    /// (issue 576).
+    fn ident_list_with_spans(
+        &mut self,
+        close: &str,
+    ) -> Result<(Vec<String>, Vec<Span>), ParseError> {
         let mut values = Vec::new();
+        let mut spans = Vec::new();
         if self.eat_symbol(close) {
-            return Ok(values);
+            return Ok((values, spans));
         }
         loop {
+            let span = self.peek().span;
             values.push(self.expect_ident()?);
+            spans.push(span);
             if self.eat_symbol(close) {
-                return Ok(values);
+                return Ok((values, spans));
             }
             self.expect_symbol(",")?;
             if self.eat_symbol(close) {
-                return Ok(values);
+                return Ok((values, spans));
             }
         }
     }

@@ -940,6 +940,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
         items.push(SpecItem::Enum {
             name: process_enum(&process.name),
             members: process.stages.clone(),
+            member_spans: Vec::new(),
             symmetric: false,
         });
     }
@@ -1635,6 +1636,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         items.push(SpecItem::Enum {
             name: process_enum(&process.process.name),
             members: process.process.stages.clone(),
+            member_spans: Vec::new(),
             symmetric: false,
         });
     }
@@ -2516,6 +2518,7 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
                 .iter()
                 .map(|tool| members[tool.name.as_str()].clone())
                 .collect(),
+            member_spans: Vec::new(),
             symmetric: false,
         },
         SpecItem::State(vec![
