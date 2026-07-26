@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// `ghost` is set by init and assigned by no action, so `FrozenGhost` holds for
+// every dynamics: the hollow invariant of issue #465's headline reproduction.
+spec FrozenGhostTautology {
+  state { ghost: Bool, x: Bool }
+  init {
+    ghost = true
+    x = false
+  }
+  action flip() { x = not x }
+  invariant FrozenGhost { ghost }
+}

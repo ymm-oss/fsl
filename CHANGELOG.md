@@ -351,6 +351,25 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   failure and echoing `helpful` on both the proof and CTI (#473).
 
 ### Added
+- Native `verify` now reports the three remaining `docs/DESIGN-vacuity.md` §2
+  lanes — `always_true_requires`, `tautology_over_frozen`, and
+  `urgency_freeze` — closing the last of issue 465. A spec whose only emptiness
+  was one of them previously came back `result:"verified"` / exit 0 even under
+  `--vacuity error`; the three-line reproduction (a `Bool` set by `init`,
+  assigned by no action, asserted as an invariant) now exits 2 with
+  `kind:"tautology_over_frozen"` and `trace_type:"vacuity"`. All three are
+  proved in `fsl-verifier`, so `fsl-runtime` stays solver-independent, and all
+  three report identically on `--engine bmc`, `explicit`, and `induction`.
+
+  Unlike the frozen Python reference, the native lanes decide "always true over
+  all reachable states" over the **declared type space** rather than over the
+  states an unrolling happened to witness, so no verdict moves with `--depth`.
+  Python reports `examples/causal/funnel.fsl`'s `requires visits < 100` as dead
+  at depth 8 because `visits` only reaches 8; with `visits: 0..100` declared,
+  native correctly stays silent at every depth. The lanes are sound and
+  deliberately incomplete: an unproven obligation, an `unknown` backend
+  verdict, a compose-synchronized action, a generated declaration, and an
+  action that was never enabled all yield no finding.
 - Added an optimistic CI lane with one stable, parallelized `merge readiness`
   context for pull requests and merge queues, while preserving the complete
   Rust/WASM/macOS/Windows product gate for every merged `main` state and

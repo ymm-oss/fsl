@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Non-firing control for `urgency_freeze`: the documented deadline-urgency
+// pattern makes only the deadline-guarded action urgent, so the urgent
+// condition is false at init and `tick` really runs.
+requirements DeadlineUrgencyPattern {
+  const SLA = 1
+  state { pending: Bool }
+  init { pending = true }
+  action respond_due() {
+    requires pending
+    requires age >= SLA
+    pending = false
+  }
+  time {
+    urgent respond_due
+    age age while pending
+  }
+  requirement NFR-1 "deadline" { deadline age <= SLA }
+}

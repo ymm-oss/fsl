@@ -92,6 +92,11 @@ pub struct ActionDef {
     pub ensures: Vec<Expr>,
     pub ensure_spans: Vec<Span>,
     pub fair: bool,
+    /// Set by compose expansion for a synchronized action. Its `requires` are
+    /// inherited copies from several components, so per-clause redundancy
+    /// diagnostics must not treat a duplicated component guard as removable
+    /// (`docs/DESIGN-vacuity.md` §2).
+    pub sync: bool,
     pub meta: Option<MetaTag>,
     pub annotations: Annotations,
 }
@@ -684,6 +689,7 @@ impl ModelBuilder {
                     fair,
                     meta,
                     span,
+                    sync,
                     ..
                 } => {
                     let origin = self.origins.diagnostic_origin(&action_target(name));
@@ -692,10 +698,14 @@ impl ModelBuilder {
                             model_error(format!("duplicate action '{name}'")).with_origin(origin)
                         );
                     }
-                    actions.push(
-                        self.action(name, params, items, *span, *fair, meta.clone())
-                            .map_err(|error| error.with_origin(origin))?,
-                    );
+                    let mut action = self
+                        .action(name, params, items, *span, *fair, meta.clone())
+                        .map_err(|error| error.with_origin(origin))?;
+                    // Carried outside `action` so its argument list stays
+                    // within the workspace Clippy budget; `sync` is a compose
+                    // marker, not part of the action's own lowering.
+                    action.sync = *sync;
+                    actions.push(action);
                 }
                 SpecItem::Invariant {
                     name,
@@ -1116,6 +1126,7 @@ impl ModelBuilder {
             ensures,
             ensure_spans,
             fair,
+            sync: false,
             meta,
             annotations: self
                 .annotations

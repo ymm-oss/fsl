@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// `spin` is always enabled and declared urgent, so the generated `tick` guard
+// `not(enabled spin)` is false in every reachable state: time never advances
+// and the deadline invariant is satisfied for want of a clock.
+requirements UrgencyFreezeTrap {
+  state { pending: Bool }
+  init { pending = true }
+  action spin() { pending = pending }
+  time {
+    urgent spin
+    age age while pending
+  }
+  requirement NFR-1 "deadline" { deadline age <= 0 }
+}

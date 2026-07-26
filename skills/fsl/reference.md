@@ -876,7 +876,11 @@ verifying the component spec on its own), and **an invariant that depends only o
 frozen state variable no action ever assigns to and is dynamically always true**
 (`tautology_over_frozen` — a dead ghost; make it `const`, or suspect a missing
 action that should change it), and a generated deadline `tick` proven dead because
-urgency freezes time (`urgency_freeze`). `--vacuity error` gives
+urgency freezes time (`urgency_freeze`). The last three are decided over the
+declared type space rather than over the states reached within `--depth`, so
+their verdict never moves with the bound: `requires visits < 100` on
+`visits: 0..100` is a real guard and stays unreported even at a depth that
+never reaches 100. `--vacuity error` gives
 `result:"error"`; `--vacuity ignore` disables it.
 
 ## 7. CLI and JSON essentials

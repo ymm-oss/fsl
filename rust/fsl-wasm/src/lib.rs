@@ -747,6 +747,7 @@ mod tests {
             deadlock_trace: Some(vec![initial]),
             action_coverage: BTreeMap::from([("blocked".to_owned(), false)]),
             frontier_progress: false,
+            vacuity: Vec::new(),
         };
 
         let envelope = render_verify(
@@ -820,6 +821,7 @@ mod tests {
             deadlock_trace: Some(Vec::new()),
             action_coverage: BTreeMap::new(),
             frontier_progress: false,
+            vacuity: Vec::new(),
         };
         let options = Options {
             depth: 4,

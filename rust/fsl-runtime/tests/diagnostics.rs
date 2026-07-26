@@ -25,8 +25,15 @@ fn vacuous_leadsto_is_reported_when_the_trigger_is_unreachable() {
          action finish() { requires pending pending = false done = true } \
          leadsTo Served { pending ~> done } }",
     );
-    let warnings =
-        fsl_runtime::verification_warnings(&unreachable, 3, false, None, None, &BTreeMap::new());
+    let warnings = fsl_runtime::verification_warnings(
+        &unreachable,
+        3,
+        false,
+        None,
+        None,
+        &BTreeMap::new(),
+        &[],
+    );
     assert!(
         warnings
             .iter()
@@ -44,7 +51,7 @@ fn vacuous_leadsto_is_reported_when_the_trigger_is_unreachable() {
          leadsTo Served { pending ~> done } }",
     );
     let warnings =
-        fsl_runtime::verification_warnings(&reachable, 3, false, None, None, &BTreeMap::new());
+        fsl_runtime::verification_warnings(&reachable, 3, false, None, None, &BTreeMap::new(), &[]);
     assert!(
         !warnings
             .iter()

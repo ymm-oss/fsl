@@ -2080,10 +2080,18 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             sync: false,
             annotations: Annotations::default(),
         });
-        extra_origins.push((
-            crate::action_target("tick"),
-            OriginChain::generated_only("requirements:sla-tick", "requirements"),
-        ));
+        let mut tick_origin = OriginChain::generated_only("requirements:sla-tick", "requirements");
+        if !urgent.is_empty() {
+            // The `urgent` action names are consumed structurally into
+            // `requires not(<enabled ...>)` above and are not otherwise
+            // recoverable from the Kernel. The `urgency_freeze` vacuity lane
+            // needs them to name the actions that freeze time.
+            tick_origin.lowering_steps.push(crate::LoweringStep {
+                kind: crate::URGENT_ACTIONS_STEP.to_owned(),
+                detail: Some(urgent.join(",")),
+            });
+        }
+        extra_origins.push((crate::action_target("tick"), tick_origin));
         for (
             index,
             (name, bound, span, metadata, requirement_id, requirement_text, requirement_span),

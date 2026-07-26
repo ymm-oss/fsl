@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Non-firing control for `always_true_requires`: the second clause is
+// trivially implied by the first, but `impossible` is never enabled and
+// already carries its own never-enabled warning
+// (`docs/DESIGN-vacuity.md` §2 puts coverage-false actions out of scope).
+spec CoverageFalseSuppressesRequires {
+  state { x: Int }
+  init { x = 0 }
+  action noop() { x = x }
+  action impossible() {
+    requires x == 1
+    requires x == 1
+    x = x
+  }
+  invariant Stable { x == 0 }
+}

@@ -12,7 +12,7 @@ use fsl_core::{
     state_json, trace_json,
 };
 use fsl_solver::VerificationStatistics;
-use fsl_verifier::{BmcResult, BmcViolation};
+use fsl_verifier::{BmcResult, BmcViolation, VacuityFinding};
 use serde_json::{Map, Value, json};
 
 /// Deadlock reporting policy shared by native and browser verification.
@@ -957,8 +957,9 @@ pub fn render_explicit_output(
     checked_bounds: Option<&BTreeSet<String>>,
     deadlock: DeadlockMode,
     elapsed_s: f64,
+    vacuity: &[VacuityFinding],
 ) -> Result<(Value, i32), String> {
-    let compatible = explicit_as_bmc(result);
+    let compatible = explicit_as_bmc(result, vacuity);
     replay_bmc_witnesses(model, &compatible, None)?;
     let statistics = VerificationStatistics::default();
 
@@ -1044,7 +1045,11 @@ pub fn render_explicit_output(
     ))
 }
 
-fn explicit_as_bmc(result: &fsl_runtime::ExplicitResult) -> BmcResult {
+/// Project a solver-free explicit-state result onto the bounded-verification
+/// shape. `vacuity` carries the solver-decided lanes proved separately by the
+/// caller: the explicit engine has no solver, but the lanes are properties of
+/// the model rather than of the exploration, so the same findings apply.
+fn explicit_as_bmc(result: &fsl_runtime::ExplicitResult, vacuity: &[VacuityFinding]) -> BmcResult {
     BmcResult {
         spec: result.spec.clone(),
         depth: result.depth,
@@ -1080,6 +1085,7 @@ fn explicit_as_bmc(result: &fsl_runtime::ExplicitResult) -> BmcResult {
         deadlock_trace: result.deadlock_trace.clone(),
         action_coverage: result.action_coverage.clone(),
         frontier_progress: !result.closure && !result.budget_exceeded,
+        vacuity: vacuity.to_vec(),
     }
 }
 
@@ -1673,7 +1679,139 @@ fn shared_warnings(
             .and_then(|trace| trace.last())
             .map(|entry| &entry.state),
         &result.action_coverage,
+        &solver_vacuity_warnings(model, result),
     )
+}
+
+/// Render the solver-decided vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes
+/// 3–5) that `fsl-verifier` proved for this model.
+///
+/// None of the messages mention `--depth`: unlike the two reachability lanes,
+/// these judgments quantify over the declared type space and therefore hold at
+/// every bound (issue #465).
+fn solver_vacuity_warnings(model: &KernelModel, result: &BmcResult) -> Vec<Value> {
+    result
+        .vacuity
+        .iter()
+        .map(|finding| vacuity_warning(model, finding))
+        .collect()
+}
+
+fn vacuity_warning(model: &KernelModel, finding: &VacuityFinding) -> Value {
+    let label = display_name(finding.name());
+    let (message, hint) = match finding {
+        VacuityFinding::TautologyOverFrozen { frozen_vars, .. } => {
+            let names = frozen_vars
+                .iter()
+                .map(|name| display_name(name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            (
+                format!(
+                    "invariant '{label}' is a tautology over frozen state ({names}): it holds for all dynamics because every state variable it depends on is never modified by any action"
+                ),
+                "make such variables 'const', or add the action that should modify them".to_owned(),
+            )
+        }
+        VacuityFinding::UrgencyFreeze { deadlines, .. } => {
+            let urgent = urgent_action_labels(model);
+            let urgent_text = if urgent.is_empty() {
+                "the generated urgent condition".to_owned()
+            } else {
+                urgent
+                    .iter()
+                    .map(|name| format!("'{name}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let deadline_text = deadlines
+                .iter()
+                .map(|name| format!("'{}'", display_name(name)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            (
+                format!(
+                    "urgent condition for action(s) {urgent_text} holds initially and is preserved by every action, so generated action 'tick' is never enabled; time is frozen and deadline invariant(s) {deadline_text} are vacuously satisfied"
+                ),
+                "use the deadline-urgency pattern: make only the action guarded by deadline arrival (for example, requires age >= K) urgent".to_owned(),
+            )
+        }
+        VacuityFinding::AlwaysTrueRequires { .. } => (
+            format!(
+                "action '{label}' has a requires clause that is always true when the preceding clauses hold — no value the declared types allow can falsify it"
+            ),
+            "this requires clause is not acting as a constraint; decide whether the model is missing state where it matters, or the clause is redundant".to_owned(),
+        ),
+    };
+    let mut warning = json!({
+        "kind": finding.kind(),
+        "name": label,
+        "message": message,
+        "hint": hint,
+    });
+    if let Value::Object(entry) = &mut warning {
+        entry.insert("loc".to_owned(), finding.span().python_loc());
+        if matches!(finding, VacuityFinding::TautologyOverFrozen { .. }) {
+            entry.insert(
+                "faithfulness_class".to_owned(),
+                json!("frozen_only_invariant"),
+            );
+            entry.insert(
+                "recommended_action".to_owned(),
+                json!("run mutate to check kill-rate"),
+            );
+        }
+        insert_vacuity_requirement(entry, model, finding);
+    }
+    warning
+}
+
+/// Attach the requirement metadata of the declaration the finding blames: the
+/// invariant, the action, or — for `urgency_freeze`, whose blamed `tick` is
+/// generated — the first deadline invariant it renders vacuous.
+fn insert_vacuity_requirement(
+    entry: &mut Map<String, Value>,
+    model: &KernelModel,
+    finding: &VacuityFinding,
+) {
+    match finding {
+        VacuityFinding::TautologyOverFrozen {
+            invariant: name, ..
+        } => {
+            if let Some(property) = model.invariants.iter().find(|entry| entry.name == *name) {
+                insert_requirement_metadata(entry, &property.annotations, property.meta.as_ref());
+            }
+        }
+        VacuityFinding::UrgencyFreeze { deadlines, .. } => {
+            if let Some(property) = deadlines
+                .first()
+                .and_then(|name| model.invariants.iter().find(|entry| entry.name == *name))
+            {
+                insert_requirement_metadata(entry, &property.annotations, property.meta.as_ref());
+            }
+        }
+        VacuityFinding::AlwaysTrueRequires { action: name, .. } => {
+            if let Some(action) = model.actions.iter().find(|entry| entry.name == *name) {
+                insert_requirement_metadata(entry, &action.annotations, action.meta.as_ref());
+            }
+        }
+    }
+}
+
+/// The `urgent` action names the requirements lowering consumed into the
+/// generated `tick` guard, recorded on `tick`'s origin because the Kernel
+/// keeps only the expanded `requires not(<enabled ...>)`.
+fn urgent_action_labels(model: &KernelModel) -> Vec<String> {
+    model
+        .action_origin("tick")
+        .into_iter()
+        .flat_map(|origin| origin.lowering_steps.iter())
+        .filter(|step| step.kind == fsl_core::URGENT_ACTIONS_STEP)
+        .filter_map(|step| step.detail.as_ref())
+        .flat_map(|detail| detail.split(','))
+        .filter(|name| !name.is_empty())
+        .map(display_name)
+        .collect()
 }
 
 fn invariant_names_selected(
@@ -1879,6 +2017,7 @@ mod tests {
             None,
             DeadlockMode::Ignore,
             0.0,
+            &[],
         );
         assert!(rendered.is_err());
     }
@@ -1896,7 +2035,7 @@ mod tests {
         let explicit =
             fsl_runtime::verify_explicit(model.clone(), 0, 100).expect("run explicit verification");
         assert!(!explicit.closure);
-        let compatible = explicit_as_bmc(&explicit);
+        let compatible = explicit_as_bmc(&explicit, &[]);
         let statistics = VerificationStatistics::default();
         let (bmc, bmc_status) = render_bmc_output(
             test_envelope(),
@@ -1917,6 +2056,7 @@ mod tests {
             None,
             DeadlockMode::Ignore,
             0.0,
+            &[],
         )
         .expect("explicit evidence replays");
         let explicit_envelope = explicit_output.as_object_mut().expect("explicit envelope");

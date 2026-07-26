@@ -11,6 +11,7 @@ mod refinement;
 mod symmetry;
 mod trace;
 mod transition;
+mod vacuity;
 mod value;
 
 use std::error::Error;
@@ -32,6 +33,7 @@ pub use induction::{
     prove_ranked_leadstos,
 };
 pub use refinement::{ProgressCheck, check_refinement_progress};
+pub use vacuity::{VacuityFinding, model_vacuity_findings};
 pub use value::{Bindings, SymbolicState, SymbolicValue};
 
 #[derive(Clone, Debug, Eq, PartialEq)]

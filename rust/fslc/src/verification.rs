@@ -764,6 +764,28 @@ fn insert_helpful_rank_failure_json(
     }
 }
 
+/// Prove the solver-dependent vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes
+/// 3–5) for a run decided by the solver-free explicit-state engine.
+///
+/// The lanes describe the model, not the exploration, so `--engine explicit`
+/// must surface the same vacuity kinds `--engine bmc` does; letting the engine
+/// choice change which kinds `--vacuity error` can see would be exactly the
+/// exit-code divergence `docs/DESIGN-rust-port.md` forbids. A solver or
+/// semantics failure is surfaced, never swallowed.
+fn explicit_vacuity_findings(
+    model: &KernelModel,
+    action_coverage: &std::collections::BTreeMap<String, bool>,
+) -> Result<Vec<fsl_verifier::VacuityFinding>, (Value, i32)> {
+    let mut solver = fsl_solver_z3::Z3Solver::new()
+        .map_err(|error| (error_output("internal", &error.to_string()), 3))?;
+    block_on_native(fsl_verifier::model_vacuity_findings(
+        model,
+        &mut solver,
+        action_coverage,
+    ))
+    .map_err(|error| (error_output("semantics", &error.to_string()), 2))
+}
+
 pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
     let started = Instant::now();
     let model = match load_selected_model(request.selection) {
@@ -787,6 +809,10 @@ pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32
         Ok(result) => result,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
+    let vacuity = match explicit_vacuity_findings(&model, &result.action_coverage) {
+        Ok(findings) => findings,
+        Err(output) => return output,
+    };
     finish_explicit_output(fslc_rust::verification_output::render_explicit_output(
         envelope(),
         &model,
@@ -794,6 +820,7 @@ pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32
         checked_bounds.as_ref(),
         request.deadlock,
         started.elapsed().as_secs_f64(),
+        &vacuity,
     ))
 }
 
@@ -838,6 +865,10 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
         Ok(result) => result,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
+    let vacuity = match explicit_vacuity_findings(&model, &result.action_coverage) {
+        Ok(findings) => findings,
+        Err(output) => return output,
+    };
     let (output, status) =
         finish_explicit_output(fslc_rust::verification_output::render_explicit_output(
             envelope(),
@@ -846,6 +877,7 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
             checked_bounds.as_ref(),
             request.deadlock,
             started.elapsed().as_secs_f64(),
+            &vacuity,
         ));
     if output.get("result").and_then(Value::as_str) == Some("unknown_budget") {
         return auto_fallback_to_bmc(request, &budget_fallback_reason(&output), "budget");
@@ -2317,6 +2349,7 @@ mod tests {
             None,
             DeadlockMode::Ignore,
             0.0,
+            &[],
         );
         let (output, status) = finish_explicit_output(rendered);
         assert_eq!(status, 3);

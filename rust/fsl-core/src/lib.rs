@@ -17,8 +17,8 @@ pub use fsl_syntax::{
     AggregateKind as KernelAggregateKind, Annotation, AnnotationError,
     AnnotationRegistry as KernelAnnotationRegistry, AnnotationValue, Annotations,
     Binder as KernelBinder, CorrespondenceOrigin, Expr as KernelExpr, HelpfulAction,
-    LValue as KernelLValue, Pattern, QualifiedName, RequirementLink, Statement as KernelStatement,
-    SymbolPath,
+    LValue as KernelLValue, Pattern, QualifiedName, RequirementLink, Span,
+    Statement as KernelStatement, SymbolPath,
 };
 
 mod compose;
@@ -59,8 +59,9 @@ pub use model::{
 };
 pub use origin::{
     INIT_TARGET, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET,
-    TERMINAL_TARGET, TraceabilityRegistry, action_guard_target, action_statement_target,
-    action_target, init_statement_target, property_target, state_target, type_target,
+    TERMINAL_TARGET, TraceabilityRegistry, URGENT_ACTIONS_STEP, action_guard_target,
+    action_statement_target, action_target, init_statement_target, property_target, state_target,
+    type_target,
 };
 pub use public_kernel::{
     KERNEL_SCHEMA_ID, KERNEL_SCHEMA_VERSION, KERNEL_V1_SCHEMA_ID, KERNEL_V1_SCHEMA_VERSION,

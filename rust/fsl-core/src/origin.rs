@@ -184,3 +184,9 @@ pub fn property_target(kind: &str, name: &str) -> String {
 }
 
 pub const TERMINAL_TARGET: &str = "terminal";
+
+/// [`LoweringStep::kind`] recording, on the generated requirements `tick`
+/// action, the comma-separated `urgent` action names that were consumed
+/// structurally into its `requires not(<enabled ...>)` guard. The
+/// `urgency_freeze` vacuity lane needs them to name what freezes time.
+pub const URGENT_ACTIONS_STEP: &str = "urgent_actions";
