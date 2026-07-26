@@ -615,15 +615,45 @@ fn property_assurance(property: &Value, verification: &Value) -> String {
     })
 }
 
+/// The declared `leadsTo ... within` deadline of one property row, if it has
+/// one. A property carries `within` only when it declares a deadline
+/// (`model_skeleton` omits the key otherwise), so this is also the test for
+/// whether the Deadline column exists at all.
+fn property_deadline(property: &Value) -> Option<&Value> {
+    property.get("within").filter(|within| !within.is_null())
+}
+
 fn properties_section(properties: &[Value], checks: &[Value], verification: &Value) -> String {
+    // Conditional column: `docs/DESIGN-html-report.md` puts the Deadline column
+    // in the table only when at least one property declares a deadline, under
+    // the same rule that forbids `none` filler cells for absent requirement
+    // captions. Rendering it always with empty cells would violate the spec it
+    // implements.
+    let has_deadline = properties
+        .iter()
+        .any(|property| property_deadline(property).is_some());
     let mut rows = String::new();
     for property in properties {
+        let deadline_cell = if has_deadline {
+            property_deadline(property).map_or_else(
+                || "<td></td>".to_owned(),
+                |within| {
+                    format!(
+                        "<td><span class=\"chip fair\">within {}</span></td>",
+                        escape(&text(within))
+                    )
+                },
+            )
+        } else {
+            String::new()
+        };
         let _ = write!(
             rows,
-            "<tr><td>{}</td><td><code>{}</code>{}</td><td>{}</td><td>{}</td></tr>",
+            "<tr><td>{}</td><td><code>{}</code>{}</td>{}<td>{}</td><td>{}</td></tr>",
             escape(&text(&property["kind"])),
             escape(&text(&property["name"])),
             requirement_caption(&property["requirement"]),
+            deadline_cell,
             escape(&property_assurance(property, verification)),
             escape(&text(&property["body_text"]))
         );
@@ -646,6 +676,10 @@ fn properties_section(properties: &[Value], checks: &[Value], verification: &Val
             escape(&source)
         );
     }
+    let empty_properties_row = format!(
+        "<tr><td colspan=\"{}\">No user properties.</td></tr>",
+        if has_deadline { 5 } else { 4 }
+    );
     format!(
         r#"
       <section class="section" id="properties">
@@ -658,7 +692,7 @@ fn properties_section(properties: &[Value], checks: &[Value], verification: &Val
         <div class="stack">
           <div class="panel table-wrap">
             <table>
-              <thead><tr><th>Kind</th><th>Name</th><th>Assurance</th><th>Body</th></tr></thead>
+              <thead><tr><th>Kind</th><th>Name</th>{}<th>Assurance</th><th>Body</th></tr></thead>
               <tbody>{}</tbody>
             </table>
           </div>
@@ -671,8 +705,13 @@ fn properties_section(properties: &[Value], checks: &[Value], verification: &Val
         </div>
       </section>
 "#,
+        if has_deadline {
+            "<th>Deadline</th>"
+        } else {
+            ""
+        },
         if rows.is_empty() {
-            "<tr><td colspan=\"4\">No user properties.</td></tr>"
+            empty_properties_row.as_str()
         } else {
             &rows
         },

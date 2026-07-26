@@ -7780,6 +7780,13 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
         let mut value = json!({"name":fslc_rust::display_name(&property.name),"kind":"leadsTo","body_text":format!("{} ~> {}",fslc_rust::source_expr_text(model,&property.before),fslc_rust::source_expr_text(model,&property.after)),"requirement":Value::Null});
         if let Value::Object(value) = &mut value {
             insert_requirement_metadata(value, &property.annotations, property.meta.as_ref());
+            // Present only for a `leadsTo ... within`, never as a null filler:
+            // `fslc html`'s Deadline column exists exactly when some property
+            // carries one (`docs/DESIGN-html-report.md`), and the frozen
+            // reference's `_property_skeleton` omits the key the same way.
+            if let Some(within) = property.within {
+                value.insert("within".to_owned(), json!(within));
+            }
         }
         properties.push(value);
     }

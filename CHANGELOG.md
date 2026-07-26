@@ -49,6 +49,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   Verdicts and exit codes are unaffected, and no review finding changes — the
   manifest path accepts only `--projection traceability_graph`, so no structural
   detector runs there at all (#558).
+- `fslc html`'s property table now renders the "Deadline" column
+  `docs/DESIGN-html-report.md` specifies. `grep -ci deadline
+  rust/fsl-tools/src/html.rs` was 0: the caption half of that design paragraph
+  landed with #525 and this was its unimplemented remainder, so a
+  `leadsTo ... within` deadline was invisible in the report. The column is
+  conditional, as the same paragraph's no-`none`-filler rule requires — it
+  appears only when some property declares a deadline, a property that declares
+  none gets an empty cell rather than a filler, and a spec with no deadline
+  anywhere renders no column at all. `explain`'s `skeleton` properties now also
+  carry `within` for a `leadsTo ... within`, additively and only when declared,
+  matching the frozen reference's `_property_skeleton` (#564).
 - **Breaking (exit code).** `fslc mutate` on a spec whose baseline already
   fails now exits 1 instead of 0. `mutate` re-emits the baseline `verify`
   envelope verbatim when the baseline does not verify, but derived its exit
