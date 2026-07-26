@@ -760,8 +760,7 @@ fn validate_migration_input_semantics(source: &str, path: &Path) -> Result<(), V
     let resolver = fsl_core::FsResolver::new(base);
     let kernel = fsl_core::parse_kernel_source_with_file(source, &resolver, path.to_string_lossy())
         .map_err(|error| semantic_error_output(&error.to_string()))?;
-    let model =
-        fsl_core::build_model(kernel).map_err(|error| semantic_error_output(&error.to_string()))?;
+    let model = fsl_core::build_model(kernel).map_err(|error| model_error_output(&error))?;
     if matches!(
         fsl_syntax::parse_surface_document(source),
         Ok(fsl_syntax::SurfaceDocument::Requirements(_))
@@ -2128,10 +2127,30 @@ fn load_document_claims_with_label(
         // recover the span and emit the same `kind:"parse"` envelope `check`
         // emits instead of a location-free `semantics` error.
         Err(error) => Err(surface_parse_failure(&source).map_or_else(
-            || document_projection_error_output(&error),
+            || {
+                document_model_failure(&source, base).map_or_else(
+                    || document_projection_error_output(&error),
+                    |failure| model_error_output(&failure),
+                )
+            },
             |error| surface_parse_error_output(&error),
         )),
     }
+}
+
+/// Recover the typed-model diagnostic behind a document-projection failure that
+/// only reports a message.
+///
+/// `fsl_tools::DocumentProjectionError::Other` flattens the `ModelError` to a
+/// `String`, so `document` alone reported a `type`/`semantics` error with no
+/// `loc`. Re-running the same pipeline on the failure path — the recovery
+/// [`surface_parse_failure`] already performs for `parse` — restores it without
+/// widening the `fsl-tools` contract (issue 555). Returns `None` for a
+/// projection failure that is not a model failure, leaving the projector's own
+/// envelope in place.
+fn document_model_failure(source: &str, base: &Path) -> Option<fsl_core::ModelError> {
+    let resolver = fsl_core::FsResolver::new(base);
+    fsl_core::build_model(fsl_core::parse_kernel_source(source, &resolver).ok()?).err()
 }
 
 fn document_diagnostics_error(
@@ -2438,7 +2457,7 @@ fn run_document_generate(
     };
     let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        Err(error) => return (model_error_output(&error), 2),
     };
     let mut label_warnings = Vec::new();
     if let Some((glossary, _)) = &loaded_glossary {
@@ -2803,7 +2822,7 @@ fn run_document_check(
     };
     let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        Err(error) => return (model_error_output(&error), 2),
     };
     let loaded_glossary = match load_glossary(glossary_path, locale) {
         Ok(loaded) => loaded,
@@ -5430,7 +5449,18 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
     .into_iter()
     .find(|diagnostic| diagnostic.kind != "migration")
     {
-        return (semantic_error_output(&diagnostic.message), 2);
+        // `check` returns here before it reaches `load_kernel_model`, so the
+        // location has to travel through this branch too, or `check` alone
+        // reports `loc: null` for a diagnostic every other command locates
+        // (issue 555).
+        return (
+            fslc_rust::verification_output::render_semantic_error(
+                envelope(),
+                &diagnostic.message,
+                diagnostic.located.then(|| diagnostic.span.python_loc()),
+            ),
+            2,
+        );
     }
     if let Err(error) = validate_specialized_document(path) {
         return (semantic_error_output(&error), 2);
@@ -5536,7 +5566,7 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
     };
     let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        Err(error) => return (model_error_output(&error), 2),
     };
     let source_path = portable_path.unwrap_or_else(|| path.to_string_lossy().into_owned());
     match fsl_core::public_kernel_contract_for_version(
@@ -10365,7 +10395,7 @@ fn run_typestate(path: &Path) -> (Value, i32) {
     };
     let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        Err(error) => return (model_error_output(&error), 2),
     };
     let path_text = path.to_string_lossy();
     let contract = match fsl_core::public_kernel_contract(
@@ -10676,8 +10706,8 @@ fn render_document_for_approval(
     let resolver = fsl_core::FsResolver::new(base);
     let kernel = fsl_core::parse_kernel_source(&source, &resolver)
         .map_err(|error| semantic_error_output(&error.to_string()))?;
-    let model = fsl_core::build_model(kernel.clone())
-        .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let model =
+        fsl_core::build_model(kernel.clone()).map_err(|error| model_error_output(&error))?;
     let applied_glossary = loaded_glossary
         .as_ref()
         .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
@@ -12399,7 +12429,10 @@ fn prefixed_analysis_edge(layer: &str, edge: &Value) -> Value {
 #[allow(clippy::too_many_lines)]
 fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
     let source = read_spec_source(path)?;
-    let sections = parse_project_manifest(&source).map_err(SpecLoadError::Semantic)?;
+    // The manifest is TOML, not a specification; its message already names the
+    // manifest line, and a `loc` here would be read as a position in the `.fsl`
+    // file the envelope is reporting on.
+    let sections = parse_project_manifest(&source).map_err(SpecLoadError::unlocated_semantic)?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let manifest = analysis_display_path(path);
     let mut nodes = std::collections::BTreeMap::new();
@@ -12491,16 +12524,21 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
             continue;
         };
         let mapping_path = base.join(mapping);
-        let document = parse_surface_document(&mapping_path).map_err(SpecLoadError::Semantic)?;
+        // These three diagnostics come from the refinement *mapping* file, not
+        // from the manifest the envelope reports on. Their spans exist but
+        // index a different source, and `loc` carries no file, so emitting one
+        // would point a repair agent into the wrong document.
+        let document =
+            parse_surface_document(&mapping_path).map_err(SpecLoadError::unlocated_semantic)?;
         let fsl_syntax::SurfaceDocument::Refinement(refinement) = document else {
-            return Err(SpecLoadError::Semantic(
-                "expected refinement mapping".to_owned(),
+            return Err(SpecLoadError::unlocated_semantic(
+                "expected refinement mapping",
             ));
         };
         let mapping_source = read_spec_source(&mapping_path)?;
         let checked_refinement =
             fsl_core::parse_refinement(&mapping_source, &implementation.model, &abstraction.model)
-                .map_err(|error| SpecLoadError::Semantic(error.message))?;
+                .map_err(|error| SpecLoadError::unlocated_semantic(error.message))?;
         let display = analysis_display_path(&mapping_path);
         let refinement_id = format!("refinement:{layer}->{target}:{}", refinement.name);
         let file_id = format!("file:{layer}->{target}:{display}");
@@ -15311,17 +15349,72 @@ fn parse_param_value(
 /// [`load_kernel_model`] re-classified a syntax error as `semantics` with no
 /// `loc`, while `check` — which runs the surface parser directly — reported
 /// `parse` with a span.
+///
+/// Issue 555 completed the other half: `Semantic` flattened the typed-model
+/// diagnostic to a `String` too, dropping the span the model had already bound
+/// to the offending construct, so `type` and `semantics` reported `loc: null`
+/// on every command including `check`. It now carries the span alongside the
+/// message.
 #[derive(Debug)]
 enum SpecLoadError {
     Io(String),
     Parse(Box<fsl_syntax::ParseError>),
-    Semantic(String),
+    Semantic(SemanticDiagnostic),
+}
+
+/// A typed-model spec-load failure with the location the model recorded for the
+/// construct that failed, when it recorded one.
+#[derive(Debug)]
+struct SemanticDiagnostic {
+    message: String,
+    loc: Option<Value>,
+}
+
+impl SemanticDiagnostic {
+    /// A diagnostic raised where no origin is in scope. `loc` stays absent: a
+    /// `{line: 0, column: 0}` placeholder would satisfy the schema while
+    /// pointing a repair agent at a location that does not exist.
+    fn unlocated(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            loc: None,
+        }
+    }
+
+    /// A diagnostic carrying the origin the frontend bound to the offending
+    /// construct. Yields the same `loc` as [`Self::unlocated`] when that origin
+    /// has no span, rather than inventing one.
+    fn located(message: impl Into<String>, origin: Option<&fsl_core::OriginChain>) -> Self {
+        Self {
+            message: message.into(),
+            loc: fslc_rust::verification_output::origin_loc(origin),
+        }
+    }
+
+    /// A typed-model failure, located by the span it recorded for itself or by
+    /// its enclosing construct's lowering origin.
+    fn from_model_error(error: &fsl_core::ModelError) -> Self {
+        Self {
+            message: error.to_string(),
+            loc: fslc_rust::verification_output::model_error_loc(error),
+        }
+    }
+}
+
+impl SpecLoadError {
+    /// A `semantics` failure that owns no construct in the specification: a
+    /// rejected CLI selection, a whole-document shape mismatch, or a diagnostic
+    /// whose span belongs to a different file than the one being reported on.
+    fn unlocated_semantic(message: impl Into<String>) -> Self {
+        Self::Semantic(SemanticDiagnostic::unlocated(message))
+    }
 }
 
 impl std::fmt::Display for SpecLoadError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io(message) | Self::Semantic(message) => formatter.write_str(message),
+            Self::Io(message) => formatter.write_str(message),
+            Self::Semantic(diagnostic) => formatter.write_str(&diagnostic.message),
             Self::Parse(error) => write!(formatter, "{error}"),
         }
     }
@@ -15341,7 +15434,7 @@ fn load_kernel_model(path: &Path) -> Result<(String, KernelSpec, KernelModel), S
             Err(error) => return Err(kernel_load_error(&source, &error)),
         };
     let model = fsl_core::build_model(kernel.clone())
-        .map_err(|error| SpecLoadError::Semantic(error.to_string()))?;
+        .map_err(|error| SpecLoadError::Semantic(SemanticDiagnostic::from_model_error(&error)))?;
     Ok((source, kernel, model))
 }
 
@@ -15371,13 +15464,17 @@ fn kernel_load_error(source: &str, error: &fsl_core::CoreError) -> SpecLoadError
     if let Some(parse_error) = surface_parse_failure(source) {
         return SpecLoadError::Parse(Box::new(parse_error));
     }
-    SpecLoadError::Semantic(
-        if error.message == "top-level document has not reached the kernel lowering gate" {
-            "spec has no state block".to_owned()
-        } else {
-            error.to_string()
-        },
-    )
+    // The substituted "spec has no state block" message describes the document
+    // as a whole rather than the construct the lowering gate stopped at, so it
+    // keeps no location; the original diagnostic keeps whatever origin the
+    // frontend recorded.
+    if error.message == "top-level document has not reached the kernel lowering gate" {
+        return SpecLoadError::Semantic(SemanticDiagnostic::unlocated("spec has no state block"));
+    }
+    SpecLoadError::Semantic(SemanticDiagnostic::located(
+        error.to_string(),
+        error.origin.as_deref(),
+    ))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -15609,12 +15706,17 @@ fn load_model_scoped(path: &Path, scope: &ScopeBounds) -> Result<KernelModel, Sp
     let kernel =
         match fsl_core::parse_kernel_source_with_bounds(&source, &scope.instances, &scope.values) {
             Ok(kernel) => kernel,
+            // A rejected `--instances`/`--values` bound is a CLI argument
+            // defect, not a construct in the spec, so it owns no location.
             Err(error) if error.message.starts_with("--instances/--values") => {
-                return Err(SpecLoadError::Semantic(error.message));
+                return Err(SpecLoadError::Semantic(SemanticDiagnostic::unlocated(
+                    error.message,
+                )));
             }
             Err(error) => return Err(kernel_load_error(&source, &error)),
         };
-    fsl_core::build_model(kernel).map_err(|error| SpecLoadError::Semantic(error.to_string()))
+    fsl_core::build_model(kernel)
+        .map_err(|error| SpecLoadError::Semantic(SemanticDiagnostic::from_model_error(&error)))
 }
 
 fn envelope() -> Map<String, Value> {
@@ -15676,7 +15778,20 @@ fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
 }
 
 fn semantic_error_output(message: &str) -> Value {
-    fslc_rust::verification_output::render_semantic_error(envelope(), message)
+    fslc_rust::verification_output::render_semantic_error(envelope(), message, None)
+}
+
+/// Render a typed-model failure with the location the model recorded for the
+/// construct that failed.
+///
+/// The message is unchanged from what every command already rendered; only
+/// `loc` is added (issue 555).
+fn model_error_output(error: &fsl_core::ModelError) -> Value {
+    fslc_rust::verification_output::render_semantic_error(
+        envelope(),
+        &error.to_string(),
+        fslc_rust::verification_output::model_error_loc(error),
+    )
 }
 
 /// Keep a spec-error envelope's own exit code when a command would otherwise
@@ -15696,7 +15811,13 @@ fn spec_load_error_output(error: &SpecLoadError) -> Value {
     match error {
         SpecLoadError::Io(message) => error_output("io", message),
         SpecLoadError::Parse(error) => surface_parse_error_output(error),
-        SpecLoadError::Semantic(message) => semantic_error_output(message),
+        SpecLoadError::Semantic(diagnostic) => {
+            fslc_rust::verification_output::render_semantic_error(
+                envelope(),
+                &diagnostic.message,
+                diagnostic.loc.clone(),
+            )
+        }
     }
 }
 

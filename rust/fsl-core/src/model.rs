@@ -396,11 +396,29 @@ fn static_leadsto_int(expr: &Expr, model: &KernelModel) -> Result<i64, ModelErro
 pub struct ModelError {
     pub message: String,
     pub origin: Option<Box<crate::OriginChain>>,
+    /// The diagnostic's own source location, for constructs that carry no
+    /// lowering origin — a kernel `spec` registers none at all.
+    ///
+    /// Deliberately not read by [`fmt::Display`]: the rendered message already
+    /// embeds the origin's location where one exists, and duplicating it here
+    /// would change every existing message. The CLI reports this as the `loc`
+    /// that `docs/DESIGN-v1.md` §7.2 guarantees (issue 555).
+    pub span: Option<Span>,
 }
 
 impl ModelError {
     fn with_origin(mut self, origin: Option<crate::OriginChain>) -> Self {
         self.origin = origin.map(Box::new);
+        self
+    }
+
+    /// Record where the diagnostic happened, keeping a more precise location
+    /// an inner step already recorded.
+    #[must_use]
+    fn at(mut self, span: Span) -> Self {
+        if self.span.is_none() {
+            self.span = Some(span);
+        }
         self
     }
 }
@@ -505,6 +523,7 @@ impl ModelBuilder {
         self.annotations.validate().map_err(|error| ModelError {
             message: error.message,
             origin: Some(Box::new(source_origin("annotation", error.span, None))),
+            span: Some(error.span),
         })?;
         let state_names = self
             .spec
@@ -617,7 +636,13 @@ impl ModelBuilder {
                         state.push((
                             field.name.clone(),
                             self.resolve_type(&field.ty)
-                                .map_err(|error| error.with_origin(origin))?,
+                                .map_err(|error| error.with_origin(origin))
+                                // A kernel `spec` registers no lowering origins,
+                                // so an unresolvable state type would otherwise
+                                // reach the CLI with no location at all. The
+                                // declaration's own span is the construct the
+                                // reader has to edit (issue 555).
+                                .map_err(|error| error.at(field.span))?,
                         ));
                     }
                 }
@@ -937,23 +962,27 @@ impl ModelBuilder {
             }
         }
         for item in &items {
-            if let SpecItem::Struct { name, fields } = item {
+            if let SpecItem::Struct { name, fields, span } = item {
                 let origin = self.origins.diagnostic_origin(&type_target(name));
+                // `TypeExpr` carries no span of its own, so the declaration's
+                // span is the closest true location a field-level type
+                // diagnostic can report (issue 555).
                 let resolved = fields
                     .iter()
                     .map(|(field, ty)| Ok((field.clone(), self.resolve_type(ty)?)))
                     .collect::<Result<Vec<_>, ModelError>>()
-                    .map_err(|error| error.with_origin(origin.clone()))?;
+                    .map_err(|error| error.with_origin(origin.clone()).at(*span))?;
                 for (field, ty) in &resolved {
                     if !self.is_scalar_struct_field(ty) {
                         return Err(model_error(format!(
                             "struct field '{name}.{field}' has non-scalar type"
                         ))
-                        .with_origin(origin));
+                        .with_origin(origin)
+                        .at(*span));
                     }
                 }
                 self.insert_type(name, TypeDef::Struct { fields: resolved })
-                    .map_err(|error| error.with_origin(origin))?;
+                    .map_err(|error| error.with_origin(origin).at(*span))?;
             }
         }
         Ok(())
@@ -1036,11 +1065,13 @@ impl ModelBuilder {
         }
         let mut index_constants = self.consts.clone();
         index_constants.extend(self.enum_members.clone());
-        if duplicate_statement_write(&statements, &index_constants).is_some() {
+        if let Some((_, duplicate_span)) = duplicate_statement_write(&statements, &index_constants)
+        {
             return Err(model_error(
                 "an action may not assign the same state location more than once",
             )
-            .with_origin(self.origins.diagnostic_origin(&action_target(name))));
+            .with_origin(self.origins.diagnostic_origin(&action_target(name)))
+            .at(duplicate_span));
         }
         Ok(ActionDef {
             name: name.to_owned(),
@@ -1286,18 +1317,26 @@ fn const_int(expr: &Expr, consts: &BTreeMap<String, Value>) -> Result<i64, Model
     }
 }
 
+/// One write to a state location, with the span of the statement performing it.
+type StateWrite = (LValue, Span);
+
+/// Find a state location an action writes twice, with the span of the write
+/// that repeats it.
+///
+/// The span travels with the target so the diagnostic can point at the offending
+/// assignment rather than at the action as a whole (issue 555).
 fn duplicate_statement_write(
     statements: &[Statement],
     constants: &BTreeMap<String, Value>,
-) -> Option<LValue> {
+) -> Option<StateWrite> {
     fn writes(
         statements: &[Statement],
         constants: &BTreeMap<String, Value>,
-    ) -> Result<Vec<LValue>, Box<LValue>> {
-        let mut seen = Vec::new();
+    ) -> Result<Vec<StateWrite>, Box<StateWrite>> {
+        let mut seen: Vec<(LValue, Span)> = Vec::new();
         for statement in statements {
             let candidates = match statement {
-                Statement::Assign { target, .. } => vec![target.clone()],
+                Statement::Assign { target, span, .. } => vec![(target.clone(), *span)],
                 Statement::If {
                     then_statements,
                     else_statements,
@@ -1311,26 +1350,26 @@ fn duplicate_statement_write(
                     binder, statements, ..
                 } => {
                     let repeated = writes(statements, constants)?;
-                    if let Some(target) = repeated
+                    if let Some(write) = repeated
                         .iter()
-                        .find(|target| !write_is_injective_for_binder(target, binder))
+                        .find(|(target, _)| !write_is_injective_for_binder(target, binder))
                     {
-                        return Err(Box::new(target.clone()));
+                        return Err(Box::new(write.clone()));
                     }
                     repeated
                 }
             };
-            if let Some(target) = candidates.iter().find(|target| {
+            if let Some(write) = candidates.iter().find(|(target, _)| {
                 seen.iter()
-                    .any(|previous| lvalues_may_alias(previous, target, constants))
+                    .any(|(previous, _)| lvalues_may_alias(previous, target, constants))
             }) {
-                return Err(Box::new(target.clone()));
+                return Err(Box::new(write.clone()));
             }
             seen.extend(candidates);
         }
         Ok(seen)
     }
-    writes(statements, constants).err().map(|target| *target)
+    writes(statements, constants).err().map(|write| *write)
 }
 
 fn write_is_injective_for_binder(target: &LValue, binder: &Binder) -> bool {
@@ -1871,5 +1910,6 @@ fn model_error(message: impl Into<String>) -> ModelError {
     ModelError {
         message: message.into(),
         origin: None,
+        span: None,
     }
 }

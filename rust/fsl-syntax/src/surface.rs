@@ -132,6 +132,10 @@ pub enum SpecItem {
     Struct {
         name: String,
         fields: Vec<(String, TypeExpr)>,
+        /// The `struct` declaration's own span. `TypeExpr` carries none, so a
+        /// field-level type diagnostic has no closer location to report
+        /// (issue 555).
+        span: Span,
     },
     Entity(String, Span),
     Number(String, Span),
@@ -887,7 +891,7 @@ impl SpecItem {
                 }
                 Value::Array(values)
             }
-            Self::Struct { name, fields } => {
+            Self::Struct { name, fields, .. } => {
                 let fields = fields
                     .iter()
                     .map(|(name, ty)| (name.clone(), ty.python_ast()))

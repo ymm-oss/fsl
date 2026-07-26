@@ -1441,11 +1441,11 @@ impl<'a> Parser<'a> {
             return Err(self.error("symmetric must precede type or enum"));
         }
         if self.peek_ident("struct") {
-            self.bump();
+            let span = self.bump().span;
             let name = self.expect_ident()?;
             self.expect_symbol("{")?;
             let fields = self.field_list()?;
-            return Ok(SpecItem::Struct { name, fields });
+            return Ok(SpecItem::Struct { name, fields, span });
         }
         if self.peek_ident("entity") || self.peek_ident("number") {
             let token = self.bump().clone();

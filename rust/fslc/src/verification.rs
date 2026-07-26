@@ -141,8 +141,10 @@ fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, Spe
             |scope| load_model_scoped(selection.path, scope),
         )?,
     };
+    // A rejected `--property`/`--exclude` names a property that is absent from
+    // the model, so there is no construct in the source to point at.
     select_properties(&mut model, selection.property, selection.excluded)
-        .map_err(SpecLoadError::Semantic)?;
+        .map_err(SpecLoadError::unlocated_semantic)?;
     Ok(model)
 }
 

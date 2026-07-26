@@ -83,13 +83,54 @@ pub struct BmcOutputOptions<'a> {
     pub statistics: &'a VerificationStatistics,
 }
 
-/// Render a model-construction error using the public semantic classification.
+/// The source location a typed-model diagnostic carries, if the model bound one
+/// to the offending construct.
+///
+/// The span is read back from the origin the model already recorded; it is
+/// never re-derived or synthesised. A construct with no recorded span yields
+/// `None`, and the caller must leave `loc` absent rather than emit the
+/// `line: 0` sentinel, which would point a repair agent at a location that does
+/// not exist (issue 555).
 #[must_use]
-pub fn render_semantic_error(mut output: Map<String, Value>, message: &str) -> Value {
+pub fn origin_loc(origin: Option<&fsl_core::OriginChain>) -> Option<Value> {
+    origin
+        .and_then(|origin| origin.primary.as_ref())
+        .and_then(|site| site.span)
+        .map(fsl_syntax::Span::python_loc)
+}
+
+/// The source location of a typed-model failure.
+///
+/// Prefers the span the diagnostic recorded for itself over the enclosing
+/// construct's lowering origin, so the report names the assignment or field
+/// that failed rather than the declaration containing it.
+#[must_use]
+pub fn model_error_loc(error: &fsl_core::ModelError) -> Option<Value> {
+    error.span.map_or_else(
+        || origin_loc(error.origin.as_deref()),
+        |span| Some(span.python_loc()),
+    )
+}
+
+/// Render a model-construction error using the public semantic classification.
+///
+/// `docs/DESIGN-v1.md` §7.2 guarantees `loc` for `parse`/`name`/`type`/
+/// `semantics`. This is the single dispatch point for the `type`/`semantics`
+/// half, so the location travels with the diagnostic instead of being
+/// reconstructed per command (issue 555, completing issue 484).
+#[must_use]
+pub fn render_semantic_error(
+    mut output: Map<String, Value>,
+    message: &str,
+    loc: Option<Value>,
+) -> Value {
     let kind = semantic_error_kind(message);
     output.insert("result".to_owned(), json!("error"));
     output.insert("kind".to_owned(), json!(kind));
     output.insert("message".to_owned(), json!(message));
+    if let Some(loc) = loc {
+        output.insert("loc".to_owned(), loc);
+    }
     if message.starts_with("struct field '") && message.ends_with(" has non-scalar type") {
         output.insert(
             "hint".to_owned(),

@@ -418,14 +418,19 @@ fn general_conditionals_cross_cli_verification_and_replay_paths() {
 
 #[test]
 fn conditional_type_diagnostics_point_to_the_invalid_child_expression() {
-    for (fixture, location) in [
+    // Issue 555 moved the location out of the message text into the `loc`
+    // field `docs/DESIGN-v1.md` §7.2 guarantees, so the same position is now
+    // asserted structurally and exactly instead of as a message suffix.
+    for (fixture, line, column) in [
         (
             "rust/fslc/tests/fixtures/conditional_type_error.fsl",
-            "at 7:29",
+            7_u64,
+            29_u64,
         ),
         (
             "rust/fslc/tests/fixtures/conditional_const_type_error.fsl",
-            "at 4:37",
+            4,
+            37,
         ),
     ] {
         let (value, status) = run_cli(&["check", fixture]);
@@ -433,10 +438,14 @@ fn conditional_type_diagnostics_point_to_the_invalid_child_expression() {
         assert_eq!(status, 2, "{fixture}");
         assert_eq!(value["result"], "error", "{fixture}");
         assert_eq!(value["kind"], "semantics", "{fixture}");
-        assert!(
-            value["message"]
-                .as_str()
-                .is_some_and(|message| message.ends_with(location)),
+        assert_eq!(
+            value["loc"]["line"].as_u64(),
+            Some(line),
+            "{fixture}: {value}"
+        );
+        assert_eq!(
+            value["loc"]["column"].as_u64(),
+            Some(column),
             "{fixture}: {value}"
         );
     }

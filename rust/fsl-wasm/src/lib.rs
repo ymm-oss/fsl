@@ -108,6 +108,16 @@ fn implements_error(
     output
 }
 
+/// Render a solver or verifier failure, which names no construct in the source
+/// and so carries no `loc` (issue 555).
+fn verifier_error(solver_version: &str, failure: &impl std::fmt::Display) -> Value {
+    fslc_rust::verification_output::render_semantic_error(
+        envelope(solver_version),
+        &failure.to_string(),
+        None,
+    )
+}
+
 fn build(request: &Request, solver_version: &str) -> Result<(KernelModel, Vec<Value>), Value> {
     let resolver = MemoryResolver {
         files: request.files.clone(),
@@ -121,9 +131,13 @@ fn build(request: &Request, solver_version: &str) -> Result<(KernelModel, Vec<Va
     // the checked KernelModel below.
     let diagnostics = kernel.diagnostics().to_vec();
     let model = fsl_core::build_model(kernel).map_err(|failure| {
+        // The same span the native CLI reports for this diagnostic, so the
+        // Worker envelope does not diverge from `fslc` (issue 555).
+        let loc = fslc_rust::verification_output::model_error_loc(&failure);
         fslc_rust::verification_output::render_semantic_error(
             envelope(solver_version),
             &failure.to_string(),
+            loc,
         )
     })?;
     Ok((model, diagnostics))
@@ -391,10 +405,7 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             }
             Ok(None) => {}
             Err(failure) => {
-                return fslc_rust::verification_output::render_semantic_error(
-                    envelope(solver_version),
-                    &failure.to_string(),
-                );
+                return verifier_error(solver_version, &failure);
             }
         }
     }
@@ -403,10 +414,7 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
         match fsl_verifier::verify_bounded(&model, &mut solver, request.options.depth).await {
             Ok(result) => result,
             Err(failure) => {
-                return fslc_rust::verification_output::render_semantic_error(
-                    envelope(solver_version),
-                    &failure.to_string(),
-                );
+                return verifier_error(solver_version, &failure);
             }
         };
     if let Err(failure) =
