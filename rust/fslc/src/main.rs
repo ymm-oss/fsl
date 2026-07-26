@@ -30,6 +30,15 @@ use verification::{
 const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
 const DEFAULT_EXPLICIT_BUDGET: usize = 1_000_000;
 
+/// `mutate`'s built-in mutant cap when `--max-mutants` is omitted. Must equal
+/// the `max_mutants` default the published CLI contract advertises
+/// (`rust/fslc/cli-contract.json`), which `docs/DESIGN-mutate.md`,
+/// `skills/fsl/reference.md`, and the frozen `src/fslc/mutate.py`
+/// (`DEFAULT_MAX_MUTANTS`) all fix at 200: a smaller runtime default silently
+/// evaluates a different mutant set and reports a different kill rate
+/// (issue #524).
+const DEFAULT_MAX_MUTANTS: usize = 200;
+
 struct LiterateState {
     path: PathBuf,
 }
@@ -1171,7 +1180,7 @@ fn command() -> Result<(Value, i32), String> {
             );
             let mut depth = 8_usize;
             let mut readable = false;
-            let mut max_mutants = 100_usize;
+            let mut max_mutants = DEFAULT_MAX_MUTANTS;
             let mut by_requirement = false;
             let mut typescript_only = false;
             let mut external_mutants = None;
@@ -5394,12 +5403,15 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    if let Some(output) = fslc_rust::frontend_output::ai_project_check_output(
+    // The fsl-ai project gate carries its own exit code: an unexecutable
+    // `require` clause is a spec error (issue #542), so this may not be
+    // flattened back to a fixed exit 0.
+    if let Some(result) = fslc_rust::frontend_output::ai_project_check_output(
         &source,
         &display_path.to_string_lossy(),
         envelope(),
     ) {
-        return (output, 0);
+        return result;
     }
     match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source)) {
         Ok(fsl_syntax::ParsedDocument {
@@ -6053,7 +6065,7 @@ fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
     if fslc_rust::frontend_output::is_ai_project(&source) {
-        return run_ai_project_check(&source);
+        return run_ai_project_check(&source, path);
     }
     match parse_surface_document(path) {
         Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => {
@@ -6183,6 +6195,8 @@ fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> 
     wrap_specialized(fsl_tools::replay_ai(&component, &events))
 }
 
+/// The single `ai_component`'s declared runtime contract, scanned from an
+/// fsl-ai project source for `fslc ai replay`'s observed-event comparison.
 #[derive(Default)]
 struct AiProjectSummary {
     component: String,
@@ -6191,10 +6205,6 @@ struct AiProjectSummary {
     retriever: Option<String>,
     output: Option<String>,
     tools: Vec<String>,
-    statistical: Vec<String>,
-    observed: Vec<String>,
-    migrations: Vec<String>,
-    raw_blocks: Vec<String>,
 }
 fn declaration_name(line: &str, prefix: &str) -> Option<String> {
     line.trim()
@@ -6240,38 +6250,28 @@ fn ai_project_summary(source: &str) -> AiProjectSummary {
             if depth <= 0 {
                 in_component = false;
             }
-            continue;
-        }
-        for (prefix, target) in [
-            ("statistical_property ", &mut summary.statistical),
-            ("observed_property ", &mut summary.observed),
-            ("ai_migration ", &mut summary.migrations),
-        ] {
-            if let Some(name) = declaration_name(line, prefix) {
-                target.push(name);
-            }
-        }
-        for kind in [
-            "ai_action",
-            "ai_contract",
-            "authority",
-            "retriever",
-            "trust_boundary",
-        ] {
-            if line.starts_with(&format!("{kind} "))
-                && !summary.raw_blocks.iter().any(|item| item == kind)
-            {
-                summary.raw_blocks.push(kind.to_owned());
-            }
         }
     }
     summary
 }
 
-fn run_ai_project_check(source: &str) -> (Value, i32) {
-    let summary = ai_project_summary(source);
+/// `fslc ai check` on an fsl-ai project file.
+///
+/// The reported declarations come from `fsl_syntax::parse_ai_project` -- the
+/// same parser `eval`/`regress`/`drift`/`compat` execute -- so `check` can no
+/// longer accept a declaration whose clauses those commands reject (issue
+/// #542). Reporting from the line scanner previously produced
+/// `ai_project_analyzed` with exit 0 for clause bodies that were never read.
+fn run_ai_project_check(source: &str, path: &Path) -> (Value, i32) {
+    let project = match fslc_rust::frontend_output::parse_checked_ai_project(
+        source,
+        &ai_project_name(path),
+    ) {
+        Ok(project) => project,
+        Err(message) => return (error_output("parse", &message), 2),
+    };
     wrap_specialized(
-        json!({"result":"ai_project_analyzed","formal_result":"not_run","components":[summary.component],"statistical_properties":summary.statistical,"observed_properties":summary.observed,"migrations":summary.migrations,"raw_blocks":summary.raw_blocks.into_iter().map(|kind|json!({"kind":kind})).collect::<Vec<_>>(),"findings":[]}),
+        json!({"result":"ai_project_analyzed","formal_result":"not_run","components":project.components.iter().map(|component|&component.name).collect::<Vec<_>>(),"statistical_properties":project.statistical_properties.iter().map(|property|&property.name).collect::<Vec<_>>(),"observed_properties":project.observed_properties.iter().map(|property|&property.name).collect::<Vec<_>>(),"migrations":project.migrations.iter().map(|migration|&migration.name).collect::<Vec<_>>(),"raw_blocks":project.raw_blocks.iter().map(|block|json!({"kind":block.kind,"name":block.name})).collect::<Vec<_>>(),"findings":[]}),
     )
 }
 
@@ -6346,10 +6346,7 @@ fn run_ai_compare(
 /// the spec's file stem, mirroring the frozen reference's
 /// `parse_ai_project(src, name=Path(path).stem)`.
 fn ai_project_name(path: &Path) -> String {
-    path.file_stem()
-        .and_then(std::ffi::OsStr::to_str)
-        .unwrap_or("AiProject")
-        .to_owned()
+    fslc_rust::frontend_output::ai_project_name(&path.to_string_lossy()).to_owned()
 }
 
 fn load_ai_project(path: &Path) -> Result<fsl_syntax::AiProject, (Value, i32)> {

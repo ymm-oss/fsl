@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+
+statistical_property Parseable {
+  target X
+  dataset Eval
+  require ci_lower(metric.accuracy, 0.95) >= 0.45
+}
+
+observed_property Operational {
+  target X
+  source production_logs
+  window last_7_days
+  require hallucination_rate is basically fine probably
+}

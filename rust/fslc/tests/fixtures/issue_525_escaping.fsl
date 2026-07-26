@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Issue #525 escaping control: requirement caption text is rendered as
+// markup, so HTML metacharacters in the declared requirement sentence must
+// stay escaped.
+
+spec CaptionEscaping {
+  state { count: Int }
+
+  init { count = 0 }
+
+  action tick() {
+    requires count < 2
+    count = count + 1
+  }
+
+  invariant Bounded "REQ-ESC: <script> & friends must not render as markup" {
+    count >= 0
+  }
+}

@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// The issue #525 per-property assurance control in one report: under
+// `--engine induction` the invariant row must read `proved(induction)` while
+// the reachable rows stay `bounded(BMC depth k)` (k-induction ranks
+// invariants and transitions; a reachability witness comes only from the
+// bounded base BMC). The two tagged properties must each render their own
+// requirement caption, and the untagged one must render none.
+
+spec PropertyAssuranceRows {
+  type Amount = 0..2
+
+  state { balance: Int }
+
+  init { balance = 0 }
+
+  action deposit(a: Amount) {
+    requires a > 0
+    balance = balance + a
+  }
+
+  action withdraw(a: Amount) {
+    requires a > 0
+    requires balance >= a
+    balance = balance - a
+  }
+
+  invariant NonNegative "REQ-INV: the balance never goes negative" { balance >= 0 }
+
+  reachable Funded "REQ-REACH: a funded balance is reachable" { balance >= 2 }
+
+  reachable Drained { balance == 0 }
+}

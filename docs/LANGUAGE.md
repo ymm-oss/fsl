@@ -2425,8 +2425,9 @@ graph analysis, not kernel proof. `fslc ai replay` accepts JSONL or
 
 Project-level fsl-ai evidence declarations can combine `ai_component`,
 `dataset`, `evaluator`, `failure_mode`, `statistical_property`,
-`ai_migration`, and `observed_property`. `fslc ai check` parses these files and
-returns `ai_project_analyzed`; `fslc ai eval` checks the selected
+`ai_migration`, and `observed_property`. `fslc ai check` parses these files with
+the same parser the evidence commands run and returns `ai_project_analyzed`;
+`fslc ai eval` checks the selected
 `statistical_property`'s declared `slice`/`min_samples`/`ci_lower`/`ci_upper`
 requirements against precomputed JSONL (`--records`, or the declared
 `dataset`'s `source` file) with Wilson intervals; `fslc ai regress` checks the
@@ -2438,7 +2439,12 @@ declared `observed`/`drift` requirements over runtime telemetry
 finite `dbsystem artifact` capability profile for one `ai_component` or every
 `ai_component` a project declares, rejecting non-AI input and an AI project
 with no `ai_component` at all (exit 2). All of these use
-`formal_result:"not_run"`. An unknown `--property`/`--migration` selection is
+`formal_result:"not_run"`. A `require` clause matching none of the known
+evidence-clause grammars (`min_samples`, `ci_lower`, `ci_upper`, a point
+estimate, `observed`, `drift`) is a spec error (exit 2) at `check` time, in
+both `fslc ai check` and the `fslc check` dispatch: the check stage must not
+report an analyzed project that `eval`/`drift` cannot execute. An unknown
+`--property`/`--migration` selection is
 a check-time error (exit 2); a selected `statistical_property`'s gate status
 (`dataset_invalid`, `evaluator_untrusted`, `slice_missing`,
 `insufficient_samples`, `inconclusive`, or `statistically_unsupported`) exits

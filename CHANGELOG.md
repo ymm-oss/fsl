@@ -6,6 +6,58 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- Native `fslc mutate` now defaults to 200 built-in mutants instead of 100,
+  matching the `max_mutants` default its own published CLI contract
+  (`rust/fslc/cli-contract.json`) advertises and the 200 fixed by
+  `docs/DESIGN-mutate.md`, `skills/fsl/reference.md`, and the frozen
+  `src/fslc/mutate.py` (`DEFAULT_MAX_MUTANTS`). For a model with more than 100
+  candidates the smaller default silently evaluated a different mutant set and
+  reported a different kill count, making native reports incomparable with the
+  documented baseline and skewing hollow-spec triage. Explicit `--max-mutants`
+  behavior is unchanged, and the runtime default is now a single
+  `DEFAULT_MAX_MUTANTS` constant rather than a literal that can drift from the
+  contract (#524).
+- **Breaking (output).** `fslc html` no longer labels every property row with
+  one report-wide assurance class. `html.rs::assurance` derived a single class
+  from root completeness and `properties_section` reused it for every row, so
+  under `--engine induction` a `reachable` and an ordinary unranked `leadsTo`
+  both rendered `proved(induction)` even though k-induction ranks only
+  invariants and transitions -- a reachability witness comes from the bounded
+  base BMC. In an audit artifact "proved" claims all-depth universal evidence,
+  so this was an assurance misstatement. Property rows now classify per element
+  through the ledger's existing `formal_assurance` rule
+  (`docs/DESIGN-assurance-classes.md`) instead of a second local
+  classification, and the report-wide status row now shares the ledger's
+  `assurance_token`/`assurance_label` pair as well. For
+  `examples/pm/cancel_flow.fsl --engine induction`, `CanRetain`, `CanChurn`,
+  `POL-1`, and `POL-2` change from `proved(induction)` to
+  `bounded(BMC depth 8)`. The same renderer also never called
+  `requirement_caption` for property rows, so invariant/reachable/leadsTo rows
+  dropped the requirement text actions and counterfactuals keep; each row now
+  renders its own caption under the declaration name, escaped, and omits it
+  entirely when the property carries no requirement tag
+  (`docs/DESIGN-html-report.md`) (#525).
+- **Breaking (output).** `fslc ai check` and the `fslc check` dispatch for
+  fsl-ai project files no longer accept a declaration whose `require` clauses
+  are unparseable. Both ran `ai_project_summary`, a line scanner that
+  collected declaration *names* by string prefix and never read a clause body,
+  so a project whose clauses match no known evidence grammar returned
+  `ai_project_analyzed` / `findings: []` / exit 0 from `check` and was then
+  rejected by `eval`/`regress`/`drift`/`compat` -- the confidently green false
+  negative `AGENTS.md` calls more dangerous than a crash. The check stage now
+  reports from `fsl_syntax::parse_ai_project`, the parser those commands
+  already execute, and an unexecutable `require` clause is a spec error
+  (`result:"error"`, `kind:"parse"`, exit 2) naming the declaration, slice, and
+  clause text, matching `docs/LANGUAGE.md`'s exit-code table and the exit 2 the
+  same dialect already returns for non-AI `ai compat` input and an unknown
+  `--property`/`--migration` selection. Reporting from the parser also corrects
+  two `ai check` output fields: `components` is now the declared `ai_component`
+  names (`[]` when none, previously the scanner's placeholder `[""]`), and
+  `raw_blocks` entries carry `{kind, name}` per block as
+  `skills/fsl/reference.md` specifies (previously `{kind}` only, deduplicated
+  by kind). Raw blocks stay unvalidated: garbage inside `ai_action`,
+  `ai_contract`, `authority`, `retriever`, or `trust_boundary` still passes
+  `check`, because those are contractually block boundaries only (#542).
 - Every spec-reading native command now classifies a syntax error the way
   `check` does: `kind: "parse"` with `diagnostic_code: "FSL-PARSE"` and a
   `loc`. `rust/fslc/src/main.rs`'s `load_kernel_model` flattened the frontend's

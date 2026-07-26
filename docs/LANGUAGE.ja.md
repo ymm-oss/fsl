@@ -2374,7 +2374,8 @@ fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 プロジェクトレベルの fsl-ai エビデンス宣言は、`ai_component`、
 `dataset`、`evaluator`、`failure_mode`、`statistical_property`、
 `ai_migration`、`observed_property` を組み合わせられます。`fslc ai check` は
-これらのファイルをパースして `ai_project_analyzed` を返します。`fslc ai eval` は
+これらのファイルをエビデンス系コマンドと同じパーサでパースして
+`ai_project_analyzed` を返します。`fslc ai eval` は
 選択された `statistical_property` が宣言する `slice`/`min_samples`/
 `ci_lower`/`ci_upper` の要件を、事前計算された JSONL（`--records`、または
 宣言された `dataset` の `source` ファイル）に対して Wilson 区間つきで検査
@@ -2387,7 +2388,12 @@ fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 宣言するすべての `ai_component` について有限の `dbsystem artifact`
 ケイパビリティプロファイルを出力し、AI ではない入力や `ai_component` を
 1 つも宣言しない AI プロジェクトは拒否します（exit 2）。これらはすべて
-`formal_result:"not_run"` を使います。未知の `--property`/`--migration` の
+`formal_result:"not_run"` を使います。既知のエビデンス節文法
+（`min_samples`、`ci_lower`、`ci_upper`、点推定、`observed`、`drift`）の
+いずれにも一致しない `require` 節は、`fslc ai check` と `fslc check` の
+どちらでもチェック時の spec エラー（exit 2）であり、解析済みプロジェクト
+とはしません。`eval`/`drift` が実行できないものを check が受理しては
+なりません。未知の `--property`/`--migration` の
 選択はチェック時エラー（exit 2）です。選択された `statistical_property` の
 ゲート状態（`dataset_invalid`、`evaluator_untrusted`、`slice_missing`、
 `insufficient_samples`、`inconclusive`、`statistically_unsupported`）は

@@ -1,0 +1,77 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Issue #524 high-cardinality fixture: more built-in mutant candidates than
+// either cap, so a default run and an explicit `--max-mutants` run can be
+// told apart, over a state space small enough that adjudicating 200 mutants
+// stays cheap. `S21` is unreachable in the spec as written, so the invariant
+// is a real constraint an enum-swap mutant can break.
+
+spec MutantCardinality {
+  enum Stage { S00, S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S11, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21 }
+
+  state { stage: Stage }
+
+  init { stage = S00 }
+
+  action step00() {
+    requires stage == S00
+    stage = S01
+  }
+
+  action step01() {
+    requires stage == S01
+    stage = S02
+  }
+
+  action step02() {
+    requires stage == S02
+    stage = S03
+  }
+
+  action step03() {
+    requires stage == S03
+    stage = S04
+  }
+
+  action step04() {
+    requires stage == S04
+    stage = S05
+  }
+
+  action step05() {
+    requires stage == S05
+    stage = S06
+  }
+
+  action step06() {
+    requires stage == S06
+    stage = S07
+  }
+
+  action step07() {
+    requires stage == S07
+    stage = S08
+  }
+
+  action step08() {
+    requires stage == S08
+    stage = S09
+  }
+
+  action step09() {
+    requires stage == S09
+    stage = S10
+  }
+
+  action step10() {
+    requires stage == S10
+    stage = S11
+  }
+
+  action step11() {
+    requires stage == S11
+    stage = S12
+  }
+
+  invariant NeverFinal { stage != S21 }
+}
