@@ -115,16 +115,18 @@ pub fn model_error_loc(error: &fsl_core::ModelError) -> Option<Value> {
 /// Render a model-construction error using the public semantic classification.
 ///
 /// `docs/DESIGN-v1.md` §7.2 guarantees `loc` for `parse`/`name`/`type`/
-/// `semantics`. This is the single dispatch point for the `type`/`semantics`
-/// half, so the location travels with the diagnostic instead of being
-/// reconstructed per command (issue 555, completing issue 484).
+/// `semantics` and fixes `kind` as a closed set including `name`. This is the
+/// single dispatch point for that whole half of the set, so both the location
+/// (issue 555) and the classification (issue 565) travel with the diagnostic
+/// instead of being reconstructed per command.
 #[must_use]
 pub fn render_semantic_error(
     mut output: Map<String, Value>,
     message: &str,
     loc: Option<Value>,
+    name_resolution: bool,
 ) -> Value {
-    let kind = semantic_error_kind(message);
+    let kind = diagnostic_kind(message, name_resolution);
     output.insert("result".to_owned(), json!("error"));
     output.insert("kind".to_owned(), json!(kind));
     output.insert("message".to_owned(), json!(message));
@@ -188,6 +190,24 @@ pub fn render_governance_error(
         json!({"line": error.line, "column": error.column}),
     );
     Value::Object(output)
+}
+
+/// The classification for a typed diagnostic, preferring the class the frontend
+/// determined over matching on the message text.
+///
+/// `docs/DESIGN-v1.md` §7.2's closed set includes `name`, which no message
+/// pattern can identify: `duplicate state variable 'x'`,
+/// `duplicate enum member 'B'` and `undefined predicate 'p'` share no prefix or
+/// suffix, and a classifier keyed on message text silently reclassifies a
+/// diagnostic whenever its wording changes. The frontend already knows, so it
+/// says so (issue 565).
+#[must_use]
+pub fn diagnostic_kind(message: &str, name_resolution: bool) -> &'static str {
+    if name_resolution {
+        "name"
+    } else {
+        semantic_error_kind(message)
+    }
 }
 
 /// Classify a typed-model diagnostic identically on every Rust delivery surface.

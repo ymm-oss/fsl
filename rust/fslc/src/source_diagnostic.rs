@@ -87,7 +87,7 @@ pub fn diagnostics_with_model(
 fn core_diagnostic(source: &str, error: &fsl_core::CoreError) -> SourceDiagnostic {
     let message = error.to_string();
     SourceDiagnostic {
-        kind: crate::verification_output::semantic_error_kind(&message),
+        kind: crate::verification_output::diagnostic_kind(&message, error.name_resolution),
         code: "FSL-SEMANTIC".to_owned(),
         message,
         span: error
@@ -108,7 +108,7 @@ fn core_diagnostic(source: &str, error: &fsl_core::CoreError) -> SourceDiagnosti
 
 fn model_diagnostic(source: &str, error: &fsl_core::ModelError) -> SourceDiagnostic {
     let message = error.to_string();
-    let kind = crate::verification_output::semantic_error_kind(&message);
+    let kind = crate::verification_output::diagnostic_kind(&message, error.name_resolution);
     let located = error
         .span
         .or_else(|| {
@@ -121,10 +121,10 @@ fn model_diagnostic(source: &str, error: &fsl_core::ModelError) -> SourceDiagnos
         .or_else(|| diagnostic_span_from_message(source, &message));
     SourceDiagnostic {
         kind,
-        code: if kind == "type" {
-            "FSL-TYPE".to_owned()
-        } else {
-            "FSL-SEMANTIC".to_owned()
+        code: match kind {
+            "type" => "FSL-TYPE".to_owned(),
+            "name" => "FSL-NAME".to_owned(),
+            _ => "FSL-SEMANTIC".to_owned(),
         },
         message,
         span: located.unwrap_or_else(|| point_span(source, 1, 1)),

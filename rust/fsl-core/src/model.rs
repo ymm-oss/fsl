@@ -404,9 +404,19 @@ pub struct ModelError {
     /// would change every existing message. The CLI reports this as the `loc`
     /// that `docs/DESIGN-v1.md` §7.2 guarantees (issue 555).
     pub span: Option<Span>,
+    /// Whether this is a name-resolution failure. See
+    /// [`crate::CoreError::name_resolution`] (issue 565).
+    pub name_resolution: bool,
 }
 
 impl ModelError {
+    /// Classify this diagnostic as a name-resolution failure.
+    #[must_use]
+    fn into_name_resolution(mut self) -> Self {
+        self.name_resolution = true;
+        self
+    }
+
     fn with_origin(mut self, origin: Option<crate::OriginChain>) -> Self {
         self.origin = origin.map(Box::new);
         self
@@ -528,6 +538,7 @@ impl ModelBuilder {
             message: error.message,
             origin: Some(Box::new(source_origin("annotation", error.span, None))),
             span: Some(error.span),
+            name_resolution: false,
         })?;
         let state_names = self
             .spec
@@ -586,9 +597,13 @@ impl ModelBuilder {
                                 "duplicate state variable '{}'",
                                 field.name
                             ))
-                            .with_origin(
-                                self.origins.diagnostic_origin(&state_target(&field.name)),
-                            ));
+                            .with_origin(self.origins.diagnostic_origin(&state_target(&field.name)))
+                            // The redeclaration, not the first binding: the
+                            // registry origin and the message-derived fallback
+                            // both name the innocent earlier `field.name`
+                            // (issues 555, 565).
+                            .at(field.span)
+                            .into_name_resolution());
                         }
                         if let Some(initializer) = &field.initializer {
                             if let Some(form) = unsupported_inline_form(initializer) {
@@ -951,7 +966,8 @@ impl ModelBuilder {
                     for member in members {
                         if self.enum_members.contains_key(member) {
                             return Err(model_error(format!("duplicate enum member '{member}'"))
-                                .with_origin(origin));
+                                .with_origin(origin)
+                                .into_name_resolution());
                         }
                         self.enum_members.insert(
                             member.clone(),
@@ -1915,5 +1931,6 @@ fn model_error(message: impl Into<String>) -> ModelError {
         message: message.into(),
         origin: None,
         span: None,
+        name_resolution: false,
     }
 }

@@ -1507,6 +1507,7 @@ pub(crate) mod tests {
                 line: 1,
                 column: 1,
                 origin: None,
+                name_resolution: false,
             })
         }
     }

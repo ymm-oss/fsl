@@ -31,6 +31,7 @@ JSON is enough.
 | `parse` | `errors/parse_missing_expression.fsl` | `{"result":"error","kind":"parse","expected":"one of: ..."}` |
 | `type` | `errors/type_undeclared_type.fsl` | `unknown type 'UserId'` |
 | `type` | `errors/type_struct_set_field.fsl` | `struct field ... has non-scalar type` |
+| `name` | `errors/name_duplicate_state_variable.fsl` | `duplicate state variable 'x'` |
 | `semantics` | `errors/semantics_duplicate_assignment.fsl` | `double assignment to 'x' on the same execution path` |
 | `vacuous` | `errors/vacuous_contradictory_init.fsl` | `init constraints are unsatisfiable` |
 | `invariant` | `errors/violated_invariant_counter.fsl` | `{"result":"violated","violation_kind":"invariant"}` |

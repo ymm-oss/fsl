@@ -67,6 +67,7 @@ impl FileResolver for MemoryResolver {
             line: 1,
             column: 1,
             origin: None,
+            name_resolution: false,
         })
     }
 }
@@ -108,13 +109,15 @@ fn implements_error(
     output
 }
 
-/// Render a solver or verifier failure, which names no construct in the source
-/// and so carries no `loc` (issue 555).
+/// Render a solver or verifier failure, which names no construct in the source:
+/// it carries no `loc` (issue 555) and resolves no name, so it keeps the
+/// message-based classification (issue 565).
 fn verifier_error(solver_version: &str, failure: &impl std::fmt::Display) -> Value {
     fslc_rust::verification_output::render_semantic_error(
         envelope(solver_version),
         &failure.to_string(),
         None,
+        false,
     )
 }
 
@@ -141,13 +144,14 @@ fn build(request: &Request, solver_version: &str) -> Result<(KernelModel, Vec<Va
     // the checked KernelModel below.
     let diagnostics = kernel.diagnostics().to_vec();
     let model = fsl_core::build_model(kernel).map_err(|failure| {
-        // The same span the native CLI reports for this diagnostic, so the
-        // Worker envelope does not diverge from `fslc` (issue 555).
+        // The same span and classification the native CLI reports, so the
+        // Worker envelope does not diverge from `fslc` (issues 555, 565).
         let loc = fslc_rust::verification_output::model_error_loc(&failure);
         fslc_rust::verification_output::render_semantic_error(
             envelope(solver_version),
             &failure.to_string(),
             loc,
+            failure.name_resolution,
         )
     })?;
     Ok((model, diagnostics))

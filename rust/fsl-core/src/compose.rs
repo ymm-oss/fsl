@@ -43,6 +43,7 @@ impl FileResolver for FsResolver {
             line: 1,
             column: 1,
             origin: None,
+            name_resolution: false,
         })
     }
 }
@@ -72,6 +73,7 @@ pub fn parse_kernel_source(
             line: 1,
             column: 1,
             origin: None,
+            name_resolution: false,
         }),
     }?;
     kernel
@@ -316,6 +318,7 @@ fn error_at(message: impl Into<String>, span: fsl_syntax::Span) -> CoreError {
         line: span.start.line,
         column: span.start.column,
         origin: None,
+        name_resolution: false,
     }
 }
 
@@ -957,6 +960,7 @@ fn sync_action(
             line: action.span.start.line,
             column: action.span.start.column,
             origin: None,
+            name_resolution: false,
         })?;
         let source = component
             .spec
@@ -969,6 +973,7 @@ fn sync_action(
                 line: action.span.start.line,
                 column: action.span.start.column,
                 origin: None,
+                name_resolution: false,
             })?;
         // Fairness is not inherited through synchronization (docs/LANGUAGE.md
         // "Compose"): capture the constituent's own `fair` marker here, before
@@ -1072,6 +1077,7 @@ fn resolve_alias_qualified_name(
                 line: 1,
                 column: 1,
                 origin: None,
+                name_resolution: false,
             });
         }
         Ok(QualifiedName {
