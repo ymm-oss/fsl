@@ -6,6 +6,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Fixed
+- Native `fslc mutate` now defaults to 200 built-in mutants instead of 100,
+  matching the `max_mutants` default its own published CLI contract
+  (`rust/fslc/cli-contract.json`) advertises and the 200 fixed by
+  `docs/DESIGN-mutate.md`, `skills/fsl/reference.md`, and the frozen
+  `src/fslc/mutate.py` (`DEFAULT_MAX_MUTANTS`). For a model with more than 100
+  candidates the smaller default silently evaluated a different mutant set and
+  reported a different kill count, making native reports incomparable with the
+  documented baseline and skewing hollow-spec triage. Explicit `--max-mutants`
+  behavior is unchanged, and the runtime default is now a single
+  `DEFAULT_MAX_MUTANTS` constant rather than a literal that can drift from the
+  contract (#524).
 - **Breaking (output).** `fslc html` no longer labels every property row with
   one report-wide assurance class. `html.rs::assurance` derived a single class
   from root completeness and `properties_section` reused it for every row, so

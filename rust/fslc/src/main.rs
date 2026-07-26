@@ -30,6 +30,15 @@ use verification::{
 const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
 const DEFAULT_EXPLICIT_BUDGET: usize = 1_000_000;
 
+/// `mutate`'s built-in mutant cap when `--max-mutants` is omitted. Must equal
+/// the `max_mutants` default the published CLI contract advertises
+/// (`rust/fslc/cli-contract.json`), which `docs/DESIGN-mutate.md`,
+/// `skills/fsl/reference.md`, and the frozen `src/fslc/mutate.py`
+/// (`DEFAULT_MAX_MUTANTS`) all fix at 200: a smaller runtime default silently
+/// evaluates a different mutant set and reports a different kill rate
+/// (issue #524).
+const DEFAULT_MAX_MUTANTS: usize = 200;
+
 struct LiterateState {
     path: PathBuf,
 }
@@ -1171,7 +1180,7 @@ fn command() -> Result<(Value, i32), String> {
             );
             let mut depth = 8_usize;
             let mut readable = false;
-            let mut max_mutants = 100_usize;
+            let mut max_mutants = DEFAULT_MAX_MUTANTS;
             let mut by_requirement = false;
             let mut typescript_only = false;
             let mut external_mutants = None;
