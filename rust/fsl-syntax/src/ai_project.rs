@@ -163,6 +163,14 @@ pub struct AiProject {
     pub name: String,
     pub components: Vec<AiComponent>,
     pub datasets: Vec<AiDataset>,
+    /// Declared `evaluator` names. Only the name is modelled: the frozen
+    /// reference's `analyze_ai_project` projects nothing else, and no command
+    /// checks an evaluator's body against evidence (issue #563).
+    pub evaluators: Vec<String>,
+    /// Declared `failure_mode` names, modelled for the same reason as
+    /// [`AiProject::evaluators`] -- `skills/fsl/reference.md` calls these
+    /// tracked metadata, not a verified claim.
+    pub failure_modes: Vec<String>,
     pub statistical_properties: Vec<AiStatisticalProperty>,
     pub observed_properties: Vec<AiObservedProperty>,
     pub migrations: Vec<AiMigration>,
@@ -330,6 +338,12 @@ pub fn parse_ai_project(source: &str, name: &str) -> Result<AiProject, String> {
                     .push(parse_ai_component(&block.text).map_err(|error| error.to_string())?);
             }
             "dataset" => project.datasets.push(parse_dataset(block)),
+            // Descended only far enough to record the name: these are tracked
+            // metadata the frozen reference lists under `evaluators` /
+            // `failure_modes`, and dropping them entirely is what left native's
+            // `ai check` short of the reference (issue #563).
+            "evaluator" => project.evaluators.push(block.name.clone()),
+            "failure_mode" => project.failure_modes.push(block.name.clone()),
             "statistical_property" => project
                 .statistical_properties
                 .push(parse_statistical_property(block, source)?),

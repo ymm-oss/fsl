@@ -49,6 +49,47 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   Verdicts and exit codes are unaffected, and no review finding changes — the
   manifest path accepts only `--projection traceability_graph`, so no structural
   detector runs there at all (#558).
+- Native `fslc ai check` on an fsl-ai project now emits the six fields the
+  frozen reference's `analyze_ai_project` emits and native omitted:
+  `ai_project`, `assumptions`, `datasets`, `dialect`, `evaluators`, and
+  `failure_modes`. `evaluators` and `failure_modes` were not merely
+  unprojected — the Rust project parser did not descend into `evaluator` /
+  `failure_mode` blocks at all, so the data did not exist; it now records their
+  names, the only thing the reference projects. `skills/fsl/reference.md`
+  already documented `failure_mode` as listed under `failure_modes`, so the
+  skill AI agents read promised output native had never produced; the skill was
+  right and the implementation moved to match it. Native's `ai check` output
+  now equals the frozen reference on all 13 of its keys, and
+  `tools/check_rust_phase3_commands.py`'s `ai-project-check` projection — which
+  compared only six of them, and is why the gap went unnoticed — now compares
+  the whole set (#563).
+- `fslc html`'s property table now renders the "Deadline" column
+  `docs/DESIGN-html-report.md` specifies. `grep -ci deadline
+  rust/fsl-tools/src/html.rs` was 0: the caption half of that design paragraph
+  landed with #525 and this was its unimplemented remainder, so a
+  `leadsTo ... within` deadline was invisible in the report. The column is
+  conditional, as the same paragraph's no-`none`-filler rule requires — it
+  appears only when some property declares a deadline, a property that declares
+  none gets an empty cell rather than a filler, and a spec with no deadline
+  anywhere renders no column at all. `explain`'s `skeleton` properties now also
+  carry `within` for a `leadsTo ... within`, additively and only when declared,
+  matching the frozen reference's `_property_skeleton` (#564).
+- **Breaking (exit code).** `fslc mutate` on a spec whose baseline already
+  fails now exits 1 instead of 0. `mutate` re-emits the baseline `verify`
+  envelope verbatim when the baseline does not verify, but derived its exit
+  code from `result == "error"` alone, so every other non-success verdict fell
+  through to 0 and `result:"violated"` returned a green exit — a mutation score
+  is meaningless over a spec that already fails, and a gate reading only the
+  exit code saw a pass. `docs/LANGUAGE.md`'s exit-code table maps `violated`
+  to 1 with no per-command exemption, and `scenarios`/`testgen` re-emit the
+  same envelope and already exited 1. The status is now a total match over the
+  results a mutation run can carry (`mutate_exit_status`): `mutated`/
+  `verified`/`proved` → 0, `violated`/`reachable_failed`/`unknown_cti`/
+  `unknown_budget` → 1, `error` → the code the envelope was already classified
+  with, and anything unmapped → 3 rather than silently 0. Mapping the whole
+  vocabulary also closed a second reachable false green in the same command:
+  `--from <unreadable file>` returned `result:"error"`, `kind:"io"` with exit 0
+  and now exits 2 (#554).
 - Native `fslc mutate` now defaults to 200 built-in mutants instead of 100,
   matching the `max_mutants` default its own published CLI contract
   (`rust/fslc/cli-contract.json`) advertises and the 200 fixed by
