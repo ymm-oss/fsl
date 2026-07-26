@@ -358,6 +358,13 @@ pub fn parse_ai_project(source: &str, name: &str) -> Result<AiProject, String> {
             _ => {}
         }
     }
+    // All five declaration kinds the frozen reference rejects duplicates for
+    // (`src/fslc/ai_project.py:237-241`). `dataset` and `evaluator` were absent
+    // until issue 571: a `dataset X` reference resolves by name, so two
+    // declarations sharing one made the resolution depend on declaration order,
+    // and `datasets` echoed the name twice.
+    reject_duplicates(project.datasets.iter().map(|d| d.name.as_str()), "dataset")?;
+    reject_duplicates(project.evaluators.iter().map(String::as_str), "evaluator")?;
     reject_duplicates(
         project
             .statistical_properties
