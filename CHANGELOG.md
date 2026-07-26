@@ -71,6 +71,27 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   tolerated-difference allowlist: the envelopes are still not compared for
   these documents and no verdict, location, or exit-code difference is
   allowlisted (#568).
+- The 28 `refinement`-typed entries in `rust/fsl-wasm/test-browser.mjs`'s
+  `unsupportedDocuments` exclusion map are retired; the compared native<->Worker
+  parity corpus grows from 359 to 415 cases and `exclusionProbes` drops from 32
+  to 4 (agent + 3 causal only). The exclusion premise was measured stale: #574
+  gave native and the Worker one shared classifier (`kernel_load_error`) for a
+  document whose top level parses but is not Kernel-shaped, so `check`/`verify`
+  on every refinement document in the corpus now produce byte-identical
+  `semantics`/"spec has no state block" envelopes on both surfaces -- the
+  exclusion was suppressing zero divergence. `specs/cart_refines.fsl` is now
+  asserted by name to remain a compared parity case, the same way
+  `duplicateWriteCase`/`governanceErrorCase` are, so a future silent
+  re-exclusion fails loudly instead of only showing up as a quiet drop in
+  `parityCases.length`. Evaluated whether #568's Worker-only exclusion probe
+  could be strengthened to also run native and fail on agreement (the general
+  form of the staleness this retirement fixes): measured not adoptable as
+  specified for the 3 remaining causal exclusions, because their native
+  envelope has no `versions` block at all and the shared parity normalizer's
+  `validateEnvelope` throws before an agreement comparison can even run --
+  a normalizer rejection not an agreement, so the strengthening needs its own
+  design decision and is left to a follow-up issue rather than folded in here
+  (#577).
 - A kernel-stage failure inside a `use ... from` component now reports the
   parent's `use` declaration as its `loc`, and names the component's own path
   and position in the message. The two used to be mixed: the path came from the

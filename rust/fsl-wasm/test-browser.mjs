@@ -85,12 +85,6 @@ const candidates = [
 // still not compared for these documents, and no verdict, location, or
 // exit-code difference is allowlisted anywhere.
 const unsupportedReasons = {
-  refinement:
-    "the Worker exposes only check/verify over Kernel specs and has no `refine` verb. NOTE (measured "
-    + "on the post-#574 tree): native and Worker check/verify envelopes now AGREE for every refinement "
-    + "document in the corpus, so this exclusion no longer suppresses any divergence and is retirable. "
-    + "Retiring it adds 54 compared cases and is a corpus-scope decision tracked separately -- the probe "
-    + "below only detects the Worker gaining a verb, not this agreement-staleness (#568)",
   agent:
     "native `check` runs the lenient fsl-ai agent analysis (result \"ok\", dialect fsl-ai-agent.v0); "
     + "the Worker has no agent path at all and stops at the kernel lowering gate",
@@ -100,35 +94,7 @@ const unsupportedReasons = {
     + "cannot validate, so there is no comparable pair to build",
 };
 const unsupportedDocuments = new Map(Object.entries({
-  "examples/agentic_rag/agentic_rag_design_refines_requirements.fsl": "refinement",
-  "examples/agentic_rag/agentic_rag_requirements_refines_business.fsl": "refinement",
-  "examples/agentic_rag/negative/guard_bypass_refines_requirements.fsl": "refinement",
-  "examples/agentic_rag/negative/liveness_drop_refines_requirements.fsl": "refinement",
-  "examples/agentic_rag/negative/tool_approval_bypass_refines_requirements.fsl": "refinement",
   "examples/ai/recursive_support_agent.fsl": "agent",
-  "examples/consulting/tobe_refines_asis.fsl": "refinement",
-  "examples/e2e/3_refines_2.fsl": "refinement",
-  "examples/gallery/adversarial/refine_mapping_boundary_map.fsl": "refinement",
-  "examples/gallery/adversarial/governance_semantic_mapping.fsl": "refinement",
-  "examples/gallery/errors/refinement_failed_map.fsl": "refinement",
-  "examples/layers/return_impl_refines.fsl": "refinement",
-  "examples/multi_agent_system/multi_agent_design_refines_requirements.fsl": "refinement",
-  "examples/multi_agent_system/multi_agent_requirements_refines_business.fsl": "refinement",
-  "examples/nfr/sla_worker_refines.fsl": "refinement",
-  "examples/refinement_chain/bot_refines_mid.fsl": "refinement",
-  "examples/refinement_chain/mid_refines_top.fsl": "refinement",
-  "examples/refinement_liveness/design_bypasses_control_refines.fsl": "refinement",
-  "examples/refinement_liveness/design_drops_liveness_progress_refines.fsl": "refinement",
-  "examples/refinement_liveness/design_drops_liveness_refines.fsl": "refinement",
-  "examples/refinement_liveness/design_keeps_liveness_progress_refines.fsl": "refinement",
-  "examples/refinement_liveness/design_keeps_liveness_refines.fsl": "refinement",
-  "examples/ui_spike/ui_refines_req.fsl": "refinement",
-  "examples/validation/order_refund_instant_refines.fsl": "refinement",
-  "examples/validation/order_refund_windowed_refines.fsl": "refinement",
-  "specs/bank_refines.fsl": "refinement",
-  "specs/cart_refines.fsl": "refinement",
-  "specs/seat_refines.fsl": "refinement",
-  "examples/causal/evidence/incident-log-mapping.fsl": "refinement",
   "examples/causal/incident_response.fsl": "causal",
   "examples/causal/marketing_funnel.fsl": "causal",
   "examples/causal/subscription_retention.fsl": "causal",
@@ -152,7 +118,7 @@ for (const path of candidates) {
       .find((line) => line.length > 0);
     if (stripped !== undefined && /^causal\s/.test(stripped)) documentType = "causal";
   }
-  if (["agent", "refinement", "causal"].includes(documentType)) {
+  if (["agent", "causal"].includes(documentType)) {
     if (unsupportedDocuments.get(repositoryPath) !== documentType) {
       throw new Error(`unreviewed unsupported ${documentType} document: ${repositoryPath}`);
     }
@@ -205,12 +171,25 @@ const governanceErrorCase = "examples/gallery/errors/governance_missing_before.f
 if (!parityCases.some((testCase) => testCase.path === governanceErrorCase)) {
   throw new Error(`${governanceErrorCase} must remain in the parity corpus`);
 }
-// The only corpus input that fails at the kernel stage
-// (`fsl_core::parse_kernel_source_with_file`) while its own top level parses.
-// Every other kernel-stage failure under specs/+examples/ is a refinement,
-// agent, or causal document this harness excludes as unsupported, so without
-// this case the Worker could classify that whole stage differently from native
-// and no parity run would notice (issue #556).
+// #577: anchors the retirement of the 28 stale refinement exclusions. Native
+// and Worker check/verify envelopes now agree for every refinement document
+// in the corpus (the exclusion premise measured in #568 no longer holds), so
+// this document must be a compared parity case, not a Worker-only exclusion
+// probe. If a future change silently re-excludes refinement documents, this
+// fails instead of only showing up as a quiet drop in `parityCases.length`.
+const retiredRefinementCase = "specs/cart_refines.fsl";
+if (!parityCases.some((testCase) => testCase.path === retiredRefinementCase)) {
+  throw new Error(`${retiredRefinementCase} must remain in the parity corpus`);
+}
+// The only corpus input whose kernel-stage failure
+// (`fsl_core::parse_kernel_source_with_file`) keeps its own located message
+// instead of the generic substituted "spec has no state block" that
+// refinement documents get (`kernel_load_error` in spec_load.rs) -- while its
+// own top level parses. Every other located kernel-stage failure under
+// specs/+examples/ is an agent or causal document this harness still excludes
+// as unsupported (refinement is now compared directly, #577), so without this
+// case the Worker could classify a located kernel-stage message differently
+// from native and no parity run would notice (issue #556).
 const kernelStageCase = "examples/gallery/errors/semantics_compose_component_parse_failure.fsl";
 if (!parityCases.some((testCase) => testCase.path === kernelStageCase)) {
   throw new Error(`${kernelStageCase} must remain in the parity corpus`);
