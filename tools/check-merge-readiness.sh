@@ -7,6 +7,11 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
 check_compile() {
+  # Deliberately no `--all-targets`. It was tried and measured at 12m42s in CI,
+  # which destroys this lane's reason to exist — it is the sub-minute fail-fast
+  # signal, not the gate. Test targets are compiled and run by `rust workspace`,
+  # which now runs on every pull request, so `--all-targets` here buys nothing
+  # and costs the fast feedback.
   cargo check \
     --manifest-path rust/Cargo.toml \
     --workspace \

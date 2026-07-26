@@ -5,6 +5,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+### Changed
+- Pull requests into `main` now run the complete Linux product evidence — `rust workspace`
+  and `WASM` — instead of deferring it to after the merge. Only the cross-platform
+  `native Z3 4.16` matrix (macOS, Windows) stays post-merge under `FSL_OPTIMISTIC_CI`. The
+  bounded `merge readiness` lane is kept as a sub-minute fail-fast check; adding
+  `--all-targets` to its `cargo check` was tried and reverted after measuring 12m42s in
+  CI, since `rust workspace` now compiles and runs those targets on the same pull
+  request. 103 of the repository's 124
+  integration test files live in `fslc`, `fsl-tools`, `fsl-verifier` and `fsl-lsp`, none of
+  which `merge readiness` runs, so that evidence only reached `main` post-merge
+  (`docs/DESIGN-ci.md`).
+
 ### Fixed
 - Native now emits `kind:"name"` for name-resolution failures instead of
   collapsing them into `semantics`, making every member of the

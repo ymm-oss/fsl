@@ -6,28 +6,61 @@ Status: Accepted
 
 ## Decision
 
-Pull requests into `main` have one stable required context, `merge readiness`. It is a bounded,
-short-latency confidence gate, not a claim that the product is fully verified. The complete
-Rust/WASM/native-platform product gate runs after every push to `main`, on schedule, on manual
-dispatch, and before promotion to `production`.
+Pull requests into `main` run the **complete Linux evidence** — `merge readiness` as a
+short-latency fail-fast lane, plus `rust workspace` and `WASM`. Only the **cross-platform matrix**,
+`native Z3 4.16` on macOS and Windows, is deferred to after the merge, together with the aggregate
+`product gate` context; that matrix also runs on schedule, on manual dispatch, and before promotion
+to `production`.
 
-This deliberately changes `main` from "every supported platform was green before merge" to
-"reviewed changes passed a bounded readiness gate and every merged state is then fully validated."
-A post-merge failure can therefore expose a temporarily broken `main`. The failed check and its
-deduplicated issue are blocking evidence for production/release promotion and must be repaired or
-reverted; they are not informational warnings.
+This changes `main` from "every supported platform was green before merge" to "every change was
+fully tested on Linux before merge, and the remaining platforms are validated immediately after."
+A post-merge failure can therefore still expose a temporarily broken `main`, but only for a
+platform-specific defect. The failed check and its deduplicated issue are blocking evidence for
+production/release promotion and must be repaired or reverted; they are not informational warnings.
+
+### Why the split falls here
+
+Measured on the batch that motivated this revision:
+
+- **The tests live in the crates the bounded lane excludes.** 103 of 124 integration test files sit
+  in `fslc` (77), `fsl-tools` (16), `fsl-verifier` (8) and `fsl-lsp` (2). `merge readiness` runs 21.
+- **Its compile lane does not build test targets at all** — `cargo check` without `--all-targets` —
+  so a type error or a failing assertion in any of those 103 files reached `main` and surfaced only
+  post-merge. Only `cargo fmt --check` covered them, and only for syntactic breakage. Adding
+  `--all-targets` there was tried and **reverted**: measured at 12m42s in CI, it destroys the lane's
+  reason to exist, and it is redundant once `rust workspace` compiles and runs those targets
+  pre-merge.
+- **Platform failures have been Windows-specific**: a `python` executable absent from `PATH`, and
+  `core.autocrlf` turning `depth = 2` into `depth = 2\r`. No macOS-specific failure has occurred.
+- **Windows is the slowest job in the gate** (≈17 min, against ≈12 min for the Linux workspace on a
+  warm cache and ≈18 min cold), so deferring the matrix is what buys the merge throughput this
+  design is for.
+
+The cost is stated plainly: a pull request into `main` now waits for `rust workspace`, measured at
+18m17s on a cold cache and around twelve minutes warm, rather than forty seconds. Because a branch
+that falls behind `main` must re-run its checks, a serial chain of rebases pays that repeatedly. Two
+mitigations already exist and are worth using before the cost is treated as inherent: independent
+changes can share one pull request with one commit per topic, and `merge-readiness.yml` already
+handles `merge_group`, so a merge queue can validate several candidates as one batch once `ci.yml`
+gains the same trigger.
 
 ## Merge readiness contract
 
 `.github/workflows/merge-readiness.yml` runs for `pull_request` and `merge_group` events targeting
-`main`. The ruleset requires only its always-present `merge readiness` aggregator. The aggregator
-fails unless all of these independent lanes succeed:
+`main`. It is now the **fail-fast lane**: its slowest measured contract lane is 33s and the aggregator
+4s, so obvious breakage is reported in well under a minute rather than after the Linux workspace job.
+Keeping it that fast is the reason `--all-targets` was reverted below. It is no longer the only
+pre-merge evidence, and it was never sufficient on its own. The aggregator fails unless all of these
+independent lanes succeed:
 
-1. `cargo check --workspace --exclude fsl-solver-z3 --exclude fslc-rust
-   --no-default-features --locked` catches compile and dependency-integration drift across the
-   authoritative native-Z3-free Rust surface without paying the vendored native-Z3 build cost
-   before merge. Excluding the native CLI package as a workspace root avoids its Z3-only helper
-   binaries; its library still compiles transitively through the LSP and WASM crates.
+1. `cargo check --workspace --exclude fsl-solver-z3 --exclude fslc-rust --no-default-features
+   --locked` catches compile and dependency-integration drift across the authoritative
+   native-Z3-free Rust surface without paying the vendored native-Z3 build cost before merge.
+   Excluding the native CLI package as a workspace root avoids its Z3-only helper binaries; its
+   library still compiles transitively through the LSP and WASM crates. **`--all-targets` is
+   deliberately absent**: it was added, measured at 12m42s, and reverted, because this lane's whole
+   value is sub-minute feedback and `rust workspace` already compiles and runs those targets on the
+   same pull request.
 2. Formatting, the `fsl-syntax`, `fsl-core`, `fsl-runtime`, and backend-neutral `fsl-solver` tests,
    plus the runtime/WASM dependency negative controls, protect the solver-independent semantic
    foundation.
@@ -49,9 +82,14 @@ candidate against current `main`.
 `.github/workflows/ci.yml` is named `product gate`. A trusted `main` push runs all of these jobs in
 parallel:
 
-- the complete Rust-native integration phase from `tools/check-native-integration.sh rust`;
-- the production WASM/browser phase from `tools/check-native-integration.sh wasm`;
-- focused native-Z3 tests on macOS and Windows.
+- the complete Rust-native integration phase from `tools/check-native-integration.sh rust`
+  (`rust workspace`);
+- the production WASM/browser phase from `tools/check-native-integration.sh wasm` (`WASM`);
+- focused native-Z3 tests on macOS and Windows (`native Z3 4.16`).
+
+**The first two carry no event condition and therefore also run on every pull request**, which is
+what makes the Linux evidence pre-merge. Only `native Z3 4.16` and the aggregate `product gate`
+context honour `FSL_OPTIMISTIC_CI` and skip on pull requests into `main`.
 
 Scheduled and manual runs use the same evidence. Pull requests into `production` also run the
 complete product gate and emit the Linux native-Z3 compatibility context expected by the production
@@ -98,18 +136,27 @@ reported; the aggregate is reported on its own only when it is the sole availabl
 The workflow change must land before the ruleset changes; otherwise existing pull requests cannot
 produce the new required context. Roll out in this order:
 
-1. Merge the workflow change under the existing four required product checks. Until activation,
-   pull requests into `main` continue running the full product gate.
-2. In the `main` repository ruleset, add `merge readiness`, then remove `rust workspace`, `WASM`,
-   `native Z3 4.16 (macos-15)`, and `native Z3 4.16 (windows-latest)` from the required contexts.
-3. Set the repository Actions variable `FSL_OPTIMISTIC_CI=enabled`. This disables the redundant full
-   product gate on pull requests into `main`; main pushes, schedules, manual runs, and production
-   promotions ignore the variable.
-4. Optionally enable auto-merge and a merge queue after the `merge_group` check is observed.
+1. Merge the workflow change. `rust workspace` and `WASM` begin running on pull requests
+   immediately, as visible but not-yet-required evidence.
+2. In the `main` repository ruleset, add `rust workspace` and `WASM` alongside `merge readiness`.
+   `native Z3 4.16 (macos-15)` and `native Z3 4.16 (windows-latest)` stay out of the required set —
+   they are the deferred cross-platform matrix.
+3. Leave `FSL_OPTIMISTIC_CI=enabled`. It now governs only the cross-platform matrix and the
+   aggregate `product gate` context; main pushes, schedules, manual runs, and production promotions
+   ignore it as before.
 
-Rollback is fail-safe: delete or change `FSL_OPTIMISTIC_CI`, restore the four product contexts in the
-main ruleset, and keep `merge readiness` as additional evidence. No source or product artifact
-migration is involved.
+Rollback is fail-safe and has two independent levers. To return the Linux evidence to post-merge,
+restore the `if:` conditions on `rust workspace` and `WASM` and drop them from the ruleset. To return
+to a fully pre-merge gate, delete or change `FSL_OPTIMISTIC_CI` and restore all four product contexts
+in the main ruleset. No source or product artifact migration is involved either way.
+
+### Why the ruleset step is not optional
+
+A job that runs on a pull request but is not a required context is *advisory*: it can fail while the
+merge still succeeds. Until step 2 lands, this change buys visibility, not enforcement — and the
+gap it exists to close is precisely one that a disciplined developer already covers by running
+`./tools/check-native-integration.sh` locally. The point of the change is to stop depending on that
+discipline, which step 1 alone does not achieve.
 
 ## Non-goals
 
