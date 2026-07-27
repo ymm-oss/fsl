@@ -219,6 +219,17 @@ Rebuild cost puts this in the product gate (`tools/check-native-integration.sh`)
 not the per-pull-request gate. Operators patch `rust/fslc` where possible, so
 the rebuild is that crate plus a relink rather than the workspace.
 
+Patches are applied with `git apply`, never the system `patch`. The first CI run
+of this matrix failed (#613) because BSD `patch` on macOS accepted the no-op
+control's hunk — which ends at end-of-file — while GNU `patch` on
+`ubuntu-latest` rejected the identical hunk against identical bytes. The matrix
+was green on the author's machine and red on the runner, so for a moment its
+verdicts were a property of the machine rather than of the fault. That is the
+same class as the scratch-fidelity defect above and the reason both controls
+exist: a calibration harness whose result depends on where it runs calibrates
+nothing. `git apply` is one implementation wherever git is, applies zero fuzz by
+default, and tolerates the prose preamble each patch file carries.
+
 The harness is `tools/run-fault-operators.sh`, reached as the
 `fault-operators` phase of `tools/check-native-integration.sh` and included in
 its `all` — deliberately not in its `rust` phase, which `.github/workflows/ci.yml`

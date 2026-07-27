@@ -103,11 +103,21 @@ sync_scratch() {
   [ -e "$scratch/.git" ] || git -C "$scratch" init --quiet
 }
 
-# Applies one patch to the scratch checkout. Exact context only (`-F 0`): a
-# seam that moved must be refused, not absorbed by fuzz.
+# Applies one patch to the scratch checkout. Exact context only: a seam that
+# moved must be refused, not absorbed by fuzz.
+#
+# `git apply` rather than `patch`, because this harness's verdicts must be a
+# property of the fault and not of the machine. BSD `patch` (macOS) accepted the
+# no-op control against a hunk ending at end-of-file; GNU `patch` (ubuntu-latest)
+# rejected the identical hunk against the identical bytes, so the matrix went
+# green locally and red on its first CI run. `git apply` is one implementation
+# everywhere git is, applies zero fuzz by default, and tolerates the prose
+# preamble each patch file carries. The scratch already has a repository of its
+# own -- `sync_scratch` gives it one so `portable_cli_source_path` cannot walk
+# out into the enclosing tree -- so `git -C` has a work tree to apply into.
 apply_patch() {
   local file="$1" log="$2" status=0
-  patch -d "$scratch" -p1 -N -t -F 0 <"$file" >"$log" 2>&1 || status=$?
+  git -C "$scratch" apply --whitespace=nowarn "$file" >"$log" 2>&1 || status=$?
   return "$status"
 }
 

@@ -103,6 +103,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `MODEL-`/`ASSUME-`prefixed id for modeling intent, and process `covers` for the
   business/requirements dialects. Native only; the frozen Python reference keeps
   its wording, and no parity gate, test, or snapshot compares this string.
+- `tools/run-fault-operators.sh` applies operator patches with `git apply`
+  instead of the system `patch`. The matrix's first CI run failed (#613):
+  BSD `patch` on macOS accepted the no-op control's end-of-file hunk while
+  GNU `patch` on `ubuntu-latest` rejected the identical hunk against
+  identical bytes, so the calibration was green locally and red on the
+  runner. A harness whose verdict depends on where it runs calibrates
+  nothing; `git apply` is one implementation wherever git is.
 - The agent skills now state that typed link as the only canonical form.
   `skills/fsl/SKILL.md` had a worked example writing
   `invariant OnePerUser "ASSUME-1: ..."`, `skills/fsl-design/SKILL.md` — the
