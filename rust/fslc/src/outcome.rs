@@ -254,6 +254,28 @@ pub fn verify_cache_admits(output: &Value) -> bool {
     )
 }
 
+/// Whether a kernel `verify` reached a verdict a dialect check may fold into
+/// its own.
+///
+/// Status 0 is `verified`/`proved` and status 1 is
+/// `violated`/`reachable_failed`/`unknown_cti`/`unknown_budget`: both are
+/// answers about the spec, so a dialect layer may combine them with its own
+/// findings. Anything else — 2 for a spec error, 3 for an internal
+/// inconsistency — is an answer about the *run*, and the kernel envelope must
+/// be returned verbatim rather than absorbed into a `dbsystem` or `domain`
+/// verdict that would then contradict its own exit code.
+///
+/// This lives here because `run_db_check` and `run_domain_check` both need it
+/// and #600 exists because they did not share it: `run_domain_check` had folded
+/// correctly since #515, `run_db_check` tested only `== 2`, and an internal
+/// error read as a `dbsystem` verdict. The rule is one sentence, so the risk
+/// was never that it is hard — it is that a third dialect check will be written
+/// and its author will not know to look at the other two (#612).
+#[must_use]
+pub fn is_definitive_kernel_verdict(status: i32) -> bool {
+    status == 0 || status == 1
+}
+
 /// `docs/LANGUAGE.md`'s exit-code table applied to an envelope, as a total
 /// function over [`outcome_class`].
 ///
@@ -295,7 +317,35 @@ pub fn exit_status(output: &Value, error_status: i32) -> i32 {
 mod tests {
     use serde_json::json;
 
-    use super::{OutcomeClass, outcome_class, verify_cache_admits};
+    use super::{OutcomeClass, is_definitive_kernel_verdict, outcome_class, verify_cache_admits};
+
+    /// The rule `run_db_check` and `run_domain_check` share, pinned where it
+    /// now lives. Both once carried it separately and one of them carried it
+    /// wrong (#600, #612).
+    ///
+    /// Status 3 is the case that matters and the one no `.fsl` input can
+    /// currently produce inside `run_db_check` — `check_db` calls `validate_db`
+    /// first, so everything `run_verify` would reject with status 2 is rejected
+    /// before the kernel runs, and the remaining status-3 exits are internal
+    /// inconsistencies (#610). An end-to-end control is therefore impossible;
+    /// this is where the rule can still be asserted directly, which is a
+    /// by-product of the extraction rather than its reason.
+    #[test]
+    fn only_a_spec_verdict_may_be_folded_into_a_dialect_verdict() {
+        assert!(is_definitive_kernel_verdict(0), "verified/proved");
+        assert!(
+            is_definitive_kernel_verdict(1),
+            "violated/reachable_failed/unknown_*"
+        );
+        assert!(
+            !is_definitive_kernel_verdict(2),
+            "spec error is about the run"
+        );
+        assert!(
+            !is_definitive_kernel_verdict(3),
+            "internal error is about the run"
+        );
+    }
 
     /// Negative control for the `_` arm: a value nobody registered must not
     /// be readable as a pass. This is the property #554 violated.

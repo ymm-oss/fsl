@@ -5929,14 +5929,9 @@ fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
     } else {
         let (kernel, kernel_status) =
             run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
-        // Issue #600, matching the `run_domain_check` sibling below: only a
-        // definitive kernel verdict (status 0 = verified/proved, status 1 =
-        // violated/reachable_failed/unknown_cti/unknown_budget) has a `result`
-        // that can safely be folded into the top-level verdict. Any other
-        // status (2 = spec error, 3 = internal error) must return the kernel
-        // envelope verbatim rather than be misread downstream; testing only
-        // `== 2` let an internal error be absorbed as a `dbsystem` verdict.
-        if kernel_status != 0 && kernel_status != 1 {
+        // Issue #600. The rule and its rationale live with the rest of the
+        // outcome vocabulary; `run_domain_check` calls the same predicate.
+        if !fslc_rust::outcome::is_definitive_kernel_verdict(kernel_status) {
             return (kernel, kernel_status);
         }
         // ... and every non-passing kernel verdict folds through, not just
@@ -6795,12 +6790,9 @@ fn run_domain_check(
         }
     };
     let (kernel, status) = run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
-    // Only a definitive kernel verdict (status 0 = verified/proved, status 1 =
-    // violated/reachable_failed/unknown_cti/unknown_budget) has a `result`
-    // that `check_domain` can safely fold into the top-level verdict. Any
-    // other status (2 = spec error, 3 = internal error, ...) must return the
-    // kernel envelope verbatim rather than let it be misread downstream.
-    if status != 0 && status != 1 {
+    // Issue #515. The rule and its rationale live with the rest of the outcome
+    // vocabulary; `run_db_check` calls the same predicate.
+    if !fslc_rust::outcome::is_definitive_kernel_verdict(status) {
         return apply_domain_edition((kernel, status), path, path, edition);
     }
     let result = match fsl_tools::check_domain(&domain, &stable_kernel_projection(kernel)) {
