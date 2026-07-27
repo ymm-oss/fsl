@@ -1904,7 +1904,16 @@ verify {
   宣言的な射影です。ghost のカウンターや自動の `_kpi_*` invariant を作ることは
   ありません。
 - `implements` があると、`fslc verify` は**上位レイヤーへの refine も同時に実行**
-  し、結果は `implements: {abs, result}` を運びます。空のボディ
+  し、結果は `implements: {abs, result}` を運びます。値は
+  `refines` / `refinement_failed` / `impl_violated` のいずれかです。**この判定は
+  このフィールドにしか現れません。トップレベルの `result` にも exit code にも
+  畳み込まれない**ため、seam が壊れていても `result:"ok"`/`"verified"` と exit 0 を
+  返します — 上の exit code 表の唯一の例外であり、`implements` が表に無い理由です。
+  `implements.result == "refines"` でゲートするか、`fslc chain` を使ってください
+  (chain はまさにこのゲートをレイヤーに適用し exit 1 します。
+  `docs/DESIGN-design-family.md` がオーケストレータ向けに同じ規則を述べています)。
+  スタンドアロンの `fslc refine` は `refinement_failed` で exit 1 します。
+  黙るのはインラインの seam だけです。空のボディ
   (`implements X from "..." { }`)は、process/action/stage の名前が一致するとき、
   恒等の refinement を自動生成します。`implements { }` ブロックの内側には、状態の
   `map` エントリ、`maps auto`、`preserve progress`、そして — #73 以降 —

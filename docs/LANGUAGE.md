@@ -1959,7 +1959,16 @@ verify {
   business and requirements. It does not create a ghost counter or an automatic
   `_kpi_*` invariant.
 - With `implements`, `fslc verify` **also runs the refine to the upper layer
-  simultaneously**, and the result carries `implements: {abs, result}`. An empty
+  simultaneously**, and the result carries `implements: {abs, result}`, whose
+  values are `refines` / `refinement_failed` / `impl_violated`. **That verdict is
+  reported only in this field. It is not folded into the top-level `result` or
+  the exit code**, so a broken seam still returns `result:"ok"`/`"verified"` and
+  exit 0 — the one exception to the exit-code table above, and the reason
+  `implements` has no row in it. Gate on `implements.result == "refines"`, or run
+  `fslc chain`, which applies exactly that gate to the layer and exits 1
+  (`docs/DESIGN-design-family.md` states the same rule for orchestrators).
+  Standalone `fslc refine` does exit 1 on `refinement_failed`; only the inline
+  seam is silent. An empty
   body (`implements X from "..." { }`) auto-generates identity refinement when
   process/action/stage names match. Inside the `implements { }` block you write
   state `map` entries, `maps auto`, `preserve progress`, and — since #73 —
