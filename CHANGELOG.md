@@ -101,6 +101,23 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   definition; `chain` and `analyze` batch now each state their
   empty-workset choice (reject vs allow) as a named local, with the
   asymmetry recorded rather than removed.
+- The agent skills now state that a requirements spec's inline
+  `implements Abs from "business.fsl"` seam is the one exception to the
+  exit-code contract: `check`/`verify` run the refinement to the business
+  layer but report the verdict only in the `implements` field, so a
+  `refinement_failed` / `impl_violated` seam still returns `result: "ok"` /
+  `"verified"` and exit 0, while the same failure is exit 1 through
+  standalone `fslc refine` and through `fslc chain`. `skills/fsl/SKILL.md`
+  previously stated the exit contract with no exception, and its diagnostic
+  table keyed the row on `implements.result: violated` — a value the verdict
+  vocabulary never produces (`refines` / `refinement_failed` /
+  `impl_violated`), so an agent searching the JSON for `violated` would miss
+  a broken seam entirely. `skills/fsl-delivery`'s Requirements stage gate and
+  both skills' "green `implements`" claim-discipline lines now say to assert
+  `implements.result == "refines"` rather than relying on the exit code. Only
+  `docs/DESIGN-design-family.md` ("treat `implements.result != refines` as
+  failure even when the top-level process exits zero") had carried this, and
+  it never reached the skills or `docs/LANGUAGE.md`.
 - `rust/fslc/tests/corpus_check_sweep.rs`'s module doc claimed (per issue
   #483) that "the gallery fixtures and `examples/refinement_liveness/*`"
   are refined by a test; only 6 of the 28 `refinement`-dialect corpus files

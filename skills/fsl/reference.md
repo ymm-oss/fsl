@@ -1793,7 +1793,16 @@ verify {
   with both origin kinds and locations). An inline `action` item cannot target
   a `branches`-split action by its pre-split name — reference the generated
   `name__b<N>` alias. Auto-mapped process transitions are statically
-  actor-checked; an actor mismatch is a check-time type error.
+  actor-checked; an actor mismatch is a check-time type error. The seam's
+  verdict is reported as `implements: {abs, result}` with `result` one of
+  `refines` / `refinement_failed` / `impl_violated` (the last one meaning the
+  requirements spec breaks its own bounds/invariants, so no refinement verdict
+  was reached), plus `violation` on the two failing values. It is **not** folded
+  into the top-level `result` or the exit code — unlike standalone `fslc refine`,
+  where `refinement_failed` is exit 1 — so a broken seam returns
+  `result: "ok"` / `"verified"` and exit 0. Gate on
+  `implements.result == "refines"`, or use `fslc chain`, which applies exactly
+  that gate to the layer and exits 1.
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
   `kind: "acceptance"`). It supports the readable stage form
   `expect <Entity> <id> in <Stage>` alongside `expect <expr>`, is output to

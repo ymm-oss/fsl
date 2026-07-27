@@ -86,7 +86,7 @@ rules in this skill.
 | Stage | Deliverable | Required checks |
 |---|---|---|
 | Business | `business` spec with policies, KPIs, goals | check, verify, induction |
-| Requirements | `requirements` spec with REQ IDs, acceptance, forbidden, NFRs | check, verify, induction, scenarios; implements/refines business when present |
+| Requirements | `requirements` spec with REQ IDs, acceptance, forbidden, NFRs | check, verify, induction, scenarios; when `implements` is present, assert `implements.result == "refines"` in the JSON (or gate with `fslc chain`) — a failed business seam still exits 0 |
 | Design | kernel `spec` plus mapping to requirements | check, verify, induction, refine |
 | Implementation | Adapter or event log connected to real behavior | testgen pytest or replay; do not claim conformance before this |
 | Review/change | proposal spec or before/after contract | verify each side, refine against frozen contract, optional mutate/vacuity |
@@ -109,7 +109,8 @@ For high-risk contracts, add the more expensive checks:
   the stated interpretation.
 - A green requirements layer means the requirements model is internally
   consistent; if `implements` is green, it also preserves the business contract's
-  checked safety obligations.
+  checked safety obligations. "Green" here means `implements.result == "refines"`
+  in the JSON — not exit 0, which stays 0 even when the seam fails.
 - A green design layer means the design model is internally consistent.
 - A green `refine` means lower-layer observable behavior conforms to the upper
   contract for checked safety behavior.
