@@ -40,10 +40,20 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   "a patch that no longer applies is a loud failure, never a skip" verified
   instead of merely intended. Wired into `tools/check-native-integration.sh`
   as its own `fault-operators` phase, part of `all` and deliberately not part
-  of `rust`, which every pull request runs. Adding an operator is a patch file
-  plus one row in `operators.txt` — data, no harness code, and `CONTRIBUTING.md`
-  now asks for one whenever a fixed escaped defect's class can recur at a
-  sibling seam.
+  of `rust`, which every pull request runs. CI runs it as its own post-merge
+  `fault operators` job, required by the `product gate` aggregator: a matrix
+  that never runs is worse than one that skips, because it rots into decoration
+  while reporting green. Adding an operator is a patch file plus one row in
+  `operators.txt` — data, no harness code, and `CONTRIBUTING.md` now asks for
+  one whenever a fixed escaped defect's class can recur at a sibling seam.
+  One blind detector is the public Kernel v2 golden contract, whose
+  `spec.source.file` is repository-relative; naming it makes the no-op control
+  prove the scratch checkout is a *faithful* copy, not merely a compiling one.
+  It caught the first such infidelity immediately: `portable_cli_source_path`
+  finds the repository root by walking ancestors for a `.git`, and a scratch
+  tree without one escaped upward into the enclosing worktree, prefixing every
+  such path with `rust/target/fault-operators/checkout/`. The harness now gives
+  the scratch tree a repository root of its own.
 - `rust/fslc/tests/issue_600_db_check_folds_kernel_verdict.rs` and
   `rust/fslc/tests/fixtures/issue_600_db_inconclusive_kernel.fsl`: the
   rejecting control for #600 below, plus a guard test that fails loudly if

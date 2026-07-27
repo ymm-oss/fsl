@@ -222,7 +222,10 @@ the rebuild is that crate plus a relink rather than the workspace.
 The harness is `tools/run-fault-operators.sh`, reached as the
 `fault-operators` phase of `tools/check-native-integration.sh` and included in
 its `all` — deliberately not in its `rust` phase, which `.github/workflows/ci.yml`
-runs on every pull request. Operators are rows in
+runs on every pull request. CI runs it as its own post-merge `fault operators`
+job, required by the `product gate` aggregator (`docs/DESIGN-ci.md` "Product
+gate contract"): a matrix that never runs is worse than one that skips, so
+"not on pull requests" must not become "nowhere". Operators are rows in
 `rust/fslc/tests/fault_operators/operators.txt`, each naming a patch file, a
 primary detector, and a blind detector; the two controls are
 `controls/no-op.patch` and `controls/stale-seam.patch`. Adding an operator is a
@@ -238,13 +241,23 @@ status-guard half (`!= 0 && != 1`) folds a status-1 kernel identically to
 `issue_600_db_check_folds_kernel_verdict` actually detects. Both are the kind of
 mis-attribution a matrix that never runs its own negative side would have kept.
 
-That second measurement also names an uncovered seam: reverting `run_db_check`'s
-status guard to `== 2` leaves all three tests in
-`issue_600_db_check_folds_kernel_verdict.rs` green, because the file's only
-verbatim-return case (`db_check_returns_a_spec_error_envelope_verbatim`) returns
-at `parse_surface_document` and never reaches the guard. A `kind:"internal"`
-(status 3) kernel envelope absorbed as a `dbsystem` verdict would therefore go
-unnoticed. That is a fourth operator waiting on a detector to calibrate.
+#600's status guard is deliberately **not** a fourth operator, and the reason is
+itself a measurement. Reverting `run_db_check`'s guard to `== 2` and running the
+whole `fslc` suite fails nothing: the two guards differ only for a kernel status
+outside {0,1,2}, and inside `run_db_check` no `.fsl` input can produce one.
+`check_db` calls `validate_db` first, so every input `run_verify` would reject
+with status 2 is already rejected before the kernel runs; `run_verify`'s
+remaining non-{0,1} exits are status 3 from `Z3Solver::new`, from
+`replay_bmc_witnesses`, and from `render_explicit_output` — internal
+inconsistencies, not spec properties. The guard is defensive depth against a
+verifier fault, not a reachable behavior, so no fixture can calibrate it and an
+operator for it would only ever report "primary did not fail". An operator whose
+fault is unobservable is not a missing detector; it is a fault that does not
+exist yet. Recorded as an issue instead, in the shape #594 and #601 use.
+
+This is the distinction the harness has to keep making. "No test covers this
+line" and "no input can reach this line" look identical from a coverage report
+and are opposite conclusions.
 
 ## Coupled changes
 

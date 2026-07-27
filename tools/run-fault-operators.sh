@@ -92,6 +92,15 @@ sync_scratch() {
   rsync -a --delete \
     --exclude=target/ --exclude=.git --exclude=node_modules/ \
     "$root/" "$scratch/"
+  # The scratch tree must be its own repository root. `portable_cli_source_path`
+  # (`rust/fslc/src/main.rs`) resolves a public Kernel v2 `spec.source.file` by
+  # walking ancestors for a `.git`, and the scratch lives *inside* `rust/target/`
+  # of the real tree -- so without a marker of its own that walk escapes upward
+  # and every such path gains a `rust/target/fault-operators/checkout/` prefix.
+  # An infidelity like that makes a detector's verdict a property of the harness
+  # rather than of the fault. `rsync --delete` leaves excluded paths alone, so
+  # this survives the next sync.
+  [ -e "$scratch/.git" ] || git -C "$scratch" init --quiet
 }
 
 # Applies one patch to the scratch checkout. Exact context only (`-F 0`): a
