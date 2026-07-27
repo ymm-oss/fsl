@@ -18,6 +18,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   form. The mapping's #616 exclusion went stale on the fix and is replaced by a
   live manifest row, which is the self-retirement working on a real repair
   rather than a rehearsed one.
+- `run_db_check` and `run_domain_check` now share one
+  `outcome::is_definitive_kernel_verdict` instead of each carrying the rule
+  that only a kernel status of 0 or 1 may be folded into a dialect verdict
+  (#612). #600 existed because they did not: `run_domain_check` had folded
+  correctly since #515 while `run_db_check` tested only `== 2`, so an internal
+  error was absorbed as a `dbsystem` verdict. Behaviour is unchanged; the point
+  is that a third dialect check cannot now be written without the rule.
 ### Added
 - `rust/fslc/tests/refine_corpus_parity.rs`: a command-owned manifest binding
   every corpus refinement mapping to native `fslc refine` (issue #593, #537 C4,
