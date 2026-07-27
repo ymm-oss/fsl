@@ -140,7 +140,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `implements.result == "refines"` rather than relying on the exit code. Only
   `docs/DESIGN-design-family.md` ("treat `implements.result != refines` as
   failure even when the top-level process exits zero") had carried this, and
-  it never reached the skills or `docs/LANGUAGE.md`.
+  it never reached the skills or `docs/LANGUAGE.md`. `docs/LANGUAGE.md` and
+  `docs/LANGUAGE.ja.md` now state it too, beside the `implements` description
+  and naming it the one exception to their exit-code table: the skills derive
+  from the language contract, so recording it only in the skills would leave
+  the canonical source still claiming the contract holds without exception.
 - `rust/fslc/tests/corpus_check_sweep.rs`'s module doc claimed (per issue
   #483) that "the gallery fixtures and `examples/refinement_liveness/*`"
   are refined by a test; only 6 of the 28 `refinement`-dialect corpus files
