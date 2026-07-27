@@ -1,6 +1,7 @@
 // Abstract seat booking: a seat is either free (none) or owned by a user.
 // The two-phase implementation (seat_booking_impl.fsl) refines this via a
 // State-dependent conditional mapping exercises refinement expression lowering.
+//   fslc refine specs/seat_booking_impl.fsl specs/seat_booking.fsl specs/seat_refines.fsl --depth 6   # refines
 spec SeatBooking {
   type SeatId = 0..2
   type UserId = 0..1

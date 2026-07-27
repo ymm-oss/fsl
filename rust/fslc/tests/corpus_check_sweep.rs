@@ -15,16 +15,11 @@
 //! `fslc check` always reports `semantics`/"spec has no state block" for one
 //! regardless of whether the mapping itself is sound. Whether a given
 //! mapping is actually exercised by `fslc refine` is a separate, narrower
-//! claim this sweep does not make. Of the 28 such files, only 6 are
-//! exercised by any native test — `refine_corpus_parity.rs` (issue #593):
-//! `specs/cart_refines.fsl`, `specs/seat_refines.fsl`,
-//! `examples/gallery/errors/refinement_failed_map.fsl`,
-//! `examples/gallery/adversarial/refine_mapping_boundary_map.fsl`, and 2 of
-//! the 5 `examples/refinement_liveness/*_refines.fsl` files (the
-//! `*_progress_refines` pair; the other 3 and the remaining 22 mappings
-//! across `agentic_rag`, `multi_agent_system`, `refinement_chain`, and
-//! elsewhere are refined by nothing — see #593, tracked separately from
-//! this sweep).
+//! claim this sweep does not make. That claim is owned by
+//! `refine_corpus_parity.rs`, whose manifest binds every one of these files
+//! to a `refine` run or to a self-retiring exclusion (issue #593, #537 C4),
+//! and which walks the same corpus rather than listing paths, so a mapping
+//! added here cannot escape both tests at once.
 //! `examples/gallery/injected/` (its own primary/blind detector matrix in
 //! `injection_detector_matrix.rs`) is a genuine verified-elsewhere category,
 //! not a silent skip.
@@ -185,7 +180,7 @@ fn every_corpus_spec_checks_ok_or_declares_its_error() {
 
         let source = std::fs::read_to_string(path).expect("read corpus source");
         if top_level_keyword(&source) == Some("refinement") {
-            continue; // no `state` block to `check`; `fslc refine` coverage tracked by #483, not asserted here
+            continue; // no `state` block to `check`; `refine` coverage is owned by refine_corpus_parity.rs
         }
 
         if governance_exclusions.contains(rel.as_str()) {
