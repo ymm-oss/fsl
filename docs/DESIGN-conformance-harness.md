@@ -257,7 +257,7 @@ exist yet. The unreachability itself needs no issue: an issue asserts there is
 work to do, and for that there is none — the guard is correct, defensive, and
 consistent with its `run_domain_check` sibling. This paragraph is the record.
 
-What #610 does track is a different obligation the measurement surfaced:
+The measurement did surface a separate obligation, tracked as #612:
 `run_db_check` and `run_domain_check` carry the *same* predicate in two places,
 and #600 exists because someone maintained one of them and not the other. That
 duplication is real work whatever the branch's reachability, and it belongs with
