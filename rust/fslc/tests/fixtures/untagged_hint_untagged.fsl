@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Every declaration is untagged, so `check --strict-tags` emits one `untagged`
+// warning per declaration and the hint under test rides on each of them.
+spec UntaggedHintSubject {
+  state { n: 0..3 }
+  init { n = 0 }
+
+  invariant Bounded { n <= 3 }
+
+  action bump() {
+    requires n < 3
+    n = n + 1
+  }
+}

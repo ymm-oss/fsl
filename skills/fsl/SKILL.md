@@ -229,8 +229,10 @@ confirmed assumptions in the `.fsl` itself as comments / tags**:
 
 - Global assumptions → a ledger block at the top of the spec:
   `// ASSUME-1: stock is reserved by only one user at a time`
-- An assumption justifying a specific guard / invariant → tag that declaration:
-  `invariant OnePerUser "ASSUME-1: only one user reserves at a time" { ... }`
+- An assumption justifying a specific guard / invariant → tag that declaration
+  with the canonical typed annotation:
+  `@requirement("ASSUME-STOCK-001", "only one user reserves at a time")` on the
+  line before `invariant OnePerUser { ... }`
 
 This way assumptions travel with the spec, are visible in PRs, and a future
 `--strict-tags` check can distinguish "intended assumptions (tagged)" from
@@ -304,6 +306,15 @@ the formalization memo.**
    (and `--requirements ids.txt` if needed). Only when the result is
    ok/verified/proved do untagged declarations and unreferenced requirement IDs
    become warnings.
+   **The one canonical way to link a declaration to a requirement ID** is the
+   typed annotation on the line before it —
+   `@requirement("REQ-SCOPE-001", "one-sentence intent")` — with process
+   `covers REQ-SCOPE-001 "..."` as the equivalent dialect sugar, and a
+   `MODEL-`/`ASSUME-`prefixed id for modeling intent rather than a source
+   requirement. The `invariant X "REQ-1: text" { ... }` string slot is
+   non-canonical migration input (`docs/DESIGN-id-policy.md`); `--strict-tags`
+   still counts it as tagged, so add `fslc lint file.fsl`, which exits 1 with
+   `legacy_string_metadata` plus a machine-applicable replacement.
 2. `fslc verify file.fsl --depth 8` → see the table below for what each result means
    To ask a bounded operational what-if from a complete `Monitor.state` JSON,
    use `fslc verify file.fsl --from-state state.json --depth 8`; this replaces

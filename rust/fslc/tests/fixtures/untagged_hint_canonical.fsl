@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The repair the `untagged` hint asks for, written out: the typed annotation
+// from `docs/DESIGN-id-policy.md`, including the MODEL-prefixed id the hint
+// offers for modeling intent. Both gates must accept this file.
+spec UntaggedHintCanonical {
+  state { n: 0..3 }
+  init { n = 0 }
+
+  @requirement("MODEL-COUNTER-001", "the counter is modeled as a bounded integer")
+  invariant Bounded { n <= 3 }
+
+  @requirement("REQ-COUNTER-001", "the counter can advance")
+  action bump() {
+    requires n < 3
+    n = n + 1
+  }
+}

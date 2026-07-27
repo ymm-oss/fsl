@@ -95,6 +95,10 @@ For every layer, also run:
 
 - `fslc verify <file> --strict-tags` (traceability — untagged declarations and
   unreferenced requirement IDs)
+- `fslc lint <file>` (ID form — exits 1 on a non-canonical `"REQ-1: text"`
+  string tag, which `--strict-tags` accepts silently, and on an ID outside the
+  active policy. The canonical link is `@requirement("REQ-SCOPE-001", "text")`,
+  or process `covers` in the business/requirements dialects)
 - `fslc explain <file> --readable` (renders the spec as a readable digest; this is
   the spec's documentation, not a separate report)
 
