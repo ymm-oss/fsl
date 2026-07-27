@@ -727,6 +727,67 @@ control for each newly centralized branch rather than treating green positive ou
 Re-evaluate the decision if #441 touches family producers, cannot preserve a stream contract without
 a third delivery concern, or a real production follow-up contradicts the expected edit reduction.
 
+#### Outcome classification (#537 C2)
+
+The Verdict Conservation Law — a failure-class `result` must not exit zero, and a success-class
+`result` must not exit non-zero — needs one definition of those two classes. The crate has 43
+distinct `result` values and no such definition. #596 recorded the consequence from inside: its
+corpus sweep had to carry `CHECK_SUCCESS_RESULTS` in test code because `check`'s arms each set
+their exit code at their own return point, so there was no production enumeration to defer to. A
+conservation check whose class definition lives in the test is the stale-check shape #577 retired
+28 instances of.
+
+`rust/fslc/src/outcome.rs` owns that definition, as a `native-cli` bin module beside `verification.rs`:
+
+```text
+enum OutcomeClass { Success, Failure }
+fn outcome_class(output: &Value) -> OutcomeClass
+```
+
+Three properties are load-bearing:
+
+- **It takes the envelope, not the result string.** `approval check` derives its exit from
+  `status == "signature-invalid"` (`main.rs:11134`), not from `result:"approval_check"`, which is
+  the same value for `approved`, `drifted`, and `signature-invalid`. A `&str` signature cannot
+  express that family and would force a second classifier beside the first — the defect being
+  removed.
+- **It is flat, not per-family.** Classification asks only for the class, and the class does not
+  collide even where meaning does: `"generated"` names different artifacts in `ledger`, `testgen`,
+  and `document`, and is success-class in all three. Six or seven family classifiers would be six or
+  seven places to forget a new value, which is the present defect at smaller scale.
+- **Unknown values classify as `Failure`,** following `mutate_exit_status`'s `_ => 3`. A new result
+  value that nobody registered then fails loudly at its first corpus run instead of exiting zero.
+  This is the direction #554 established: falling through to zero is how that defect arose.
+
+Cacheability is a separate predicate and does not collapse into the classifier. `verify_cache_store`
+admits `violated`, `reachable_failed`, `unknown_cti`, and `unknown_budget` — failure-class results
+that are nonetheless settled verdicts worth storing. It moves next to `outcome_class` so the
+vocabulary has one home, and stays a distinct function so a new value forces an explicit decision in
+both.
+
+Producer signatures do not change. `(Value, i32)` producers keep their contract; what changes is
+that the last line computing `.1` calls the shared classifier instead of comparing literals locally.
+#599 already demonstrated this shape in production by extending `mutate_exit_status` to `ledger`
+without touching a signature. C2 stays rejected and none of its re-evaluation triggers above is
+tripped: no family producer changes, no third delivery concern appears, and the edit count falls.
+
+The nine raw-success sites currently split four ways: five guard on `result` and exit `result.1`,
+two exit `result.1` with no guard (`main.rs:1231`, `1241`), one guards and exits a hard-coded zero
+(`2981`), and one does neither (`3183`, `domain expand`). `3183` is not a live defect — every error
+path in `run_domain_expand` returns before setting `kernel_source`, so the extraction guard implies
+success — but it depends on an unstated invariant, and raw delivery replaces the JSON envelope that
+would otherwise carry the failure. All nine gain the classifier guard. For the three sites that lack
+one, the implementation must measure whether a failure path can reach the extraction rather than
+assert it cannot; if one can, that site is a defect to fix with a rejecting control, not an
+invariant to record.
+
+`empty_allowed` is made explicit, not uniform. #537 C2 asks that a command treating an empty workset
+as success say so in its contract; it does not ask that `chain` (which rejects an empty manifest with
+exit 2) and `analyze` batch (which reports `analyzed` for zero files) agree. They address different
+inputs — a fixed pipeline versus a directory glob — and no accepted decision calls the asymmetry a
+defect. Each aggregation records its choice as a stated constant reproducing today's behavior. If
+`analyze` batch's zero-file success is itself wrong, that is a separate issue with its own evidence.
+
 ### `fsl-wasm`
 
 - `Request`/`Options` own decoded input, `MemoryResolver` owns per-call in-memory files, and each
