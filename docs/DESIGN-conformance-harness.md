@@ -253,9 +253,19 @@ inconsistencies, not spec properties. The guard is defensive depth against a
 verifier fault, not a reachable behavior, so no fixture can calibrate it and an
 operator for it would only ever report "primary did not fail". An operator whose
 fault is unobservable is not a missing detector; it is a fault that does not
-exist yet. No issue tracks it: an issue asserts there is work to do, and there
-is none — the guard is correct, defensive, and consistent with its
-`run_domain_check` sibling. This paragraph is the record.
+exist yet. The unreachability itself needs no issue: an issue asserts there is
+work to do, and for that there is none — the guard is correct, defensive, and
+consistent with its `run_domain_check` sibling. This paragraph is the record.
+
+What #610 does track is a different obligation the measurement surfaced:
+`run_db_check` and `run_domain_check` carry the *same* predicate in two places,
+and #600 exists because someone maintained one of them and not the other. That
+duplication is real work whatever the branch's reachability, and it belongs with
+the rest of the outcome vocabulary in `rust/fslc/src/outcome.rs`. Its
+justification is the duplication and the third site that will otherwise repeat
+#600 — not that extracting it would make a fourth operator possible. Building
+test machinery for a fault that cannot occur is the mistake this paragraph
+exists to prevent.
 
 This is the distinction the harness has to keep making. "No test covers this
 line" and "no input can reach this line" look identical from a coverage report
