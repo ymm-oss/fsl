@@ -176,12 +176,59 @@ inputs.
   `fslc ai`/`db import`/domain replay) are out of scope by extension — the scan
   is `*.fsl` only.
 
+## Implementation fault operators (#537 C5)
+
+`injection_detector_matrix.rs` calibrates detectors against defective *specs*:
+`examples/gallery/injected/*.fsl` are hand-authored, and each names the detector
+that must catch it and one that must stay blind. It answers "can this detector
+see a bad spec?"
+
+C5 asks a different question — "would our test suite notice if the *verifier*
+started lying?" — and needs a different mechanism, because the defect lives in
+Rust, not in a `.fsl` file. Every escaped defect in the 2026-07 batch was of this
+kind: `wrap_specialized`'s `_ => 0` (#601), `run_db_check` folding only
+`violated` (#600), `analyze batch` dropping explicit non-`.fsl` input (#496).
+
+The operators are **patches, not code**. `rust/fslc/tests/fault_operators/` holds
+one minimal diff per operator; the harness applies it to a scratch checkout,
+rebuilds there, runs the test named as that operator's primary detector, and
+**requires that test to fail**. Then it reverts. Nothing is injected at runtime.
+
+No fault-injection hook may exist in the shipped binary, under a feature flag or
+otherwise. For a verifier that is the worst artifact imaginable: a switch that
+makes the product lie about verdicts, in the same codebase whose purpose is to
+prevent exactly that. The mechanism that proves we detect false greens must not
+itself be able to cause one. This is not a cost trade-off, and no build
+convenience overrides it.
+
+Each operator declares a primary detector and a blind detector, reusing
+`injection_detector_matrix.rs`'s discipline: the primary must fail under the
+patch, and the blind must still pass — an operator that breaks everything proves
+nothing about the detector it claims to calibrate.
+
+The harness needs its own negative control. A no-op patch must leave every named
+detector passing; if it does not, the harness reports failure whatever the
+operator does, and every cell in it is meaningless.
+
+A patch that no longer applies is a **loud failure, not a skip**. It means the
+seam it targeted moved, and someone must confirm the fault is still possible
+there and re-target the patch. Silently skipping a stale operator is how a
+detector matrix rots into decoration.
+
+Rebuild cost puts this in the product gate (`tools/check-native-integration.sh`),
+not the per-pull-request gate. Operators patch `rust/fslc` where possible, so
+the rebuild is that crate plus a relink rather than the workspace.
+
 ## Coupled changes
 
 `CONTRIBUTING.md` "Adding a language feature" gains: register any new dialect's
 construct and example corpus in `tests/dialect_registry.py` (and any new example
 directory is claimed automatically by the scan — the harness fails until its
 construct is registered).
+
+A fixed escaped defect gains an entry in `rust/fslc/tests/fault_operators/` when
+its defect class can recur at a sibling seam, so the regression test proves not
+only that the defect is gone but that the suite would notice its return.
 
 ## Non-goals
 
