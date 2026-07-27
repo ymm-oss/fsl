@@ -13,6 +13,7 @@ use fsl_core::{
     ParamDef, TraceStep, TypeDef, TypeRef, insert_requirement_metadata, model_warnings,
     requirement_metadata,
 };
+use fslc_rust::outcome::{OutcomeClass, outcome_class};
 use fslc_rust::spec_load::{
     SemanticDiagnostic, SpecLoadError, kernel_load_error, surface_parse_failure,
 };
@@ -1226,11 +1227,15 @@ fn command() -> Result<(Value, i32), String> {
                 "typestate" => run_typestate(&path),
                 _ => unreachable!(),
             };
-            if readable && let Some(text) = result.0.get("readable").and_then(Value::as_str) {
+            if readable
+                && raw_delivery_allowed(&result)
+                && let Some(text) = result.0.get("readable").and_then(Value::as_str)
+            {
                 println!("{text}");
                 std::process::exit(result.1);
             }
             if typescript_only
+                && raw_delivery_allowed(&result)
                 && let Some(entities) = result.0.get("entities").and_then(Value::as_array)
             {
                 for entity in entities {
@@ -1337,6 +1342,7 @@ fn command() -> Result<(Value, i32), String> {
                 _ => unreachable!(),
             };
             if output.is_none()
+                && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("generated")
                 && let Some(content) = result.0.get("content").and_then(Value::as_str)
             {
@@ -1401,6 +1407,7 @@ fn command() -> Result<(Value, i32), String> {
                 )
             };
             if output_format != "json"
+                && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("analyzed")
                 && let Some(content) = result.0.get("content").and_then(Value::as_str)
             {
@@ -1990,6 +1997,7 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                 output.as_deref(),
             );
             if output.is_none()
+                && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("generated")
                 && let Some(content) = result.0.get("content").and_then(Value::as_str)
             {
@@ -2030,6 +2038,7 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             }
             let result = run_document_claims(&path, output.as_deref());
             if output.is_none()
+                && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("generated")
                 && let Some(content) = result.0.get("content").and_then(Value::as_str)
             {
@@ -2974,6 +2983,11 @@ fn db_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
             }
             let result = run_db_import(&path, &name, &format, output.as_deref());
             if output.is_none()
+                && raw_delivery_allowed(&result)
+                // Kept alongside the class guard, not replaced by it:
+                // `imported_with_warnings` is also success-class, and it
+                // deliberately keeps the JSON envelope so the warnings reach
+                // the caller.
                 && result.0.get("result").and_then(Value::as_str) == Some("imported")
                 && let Some(source) = result.0.get("dbsystem_source").and_then(Value::as_str)
             {
@@ -3177,6 +3191,7 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
             let output = parse_optional_output(&mut args)?;
             let result = run_domain_expand(&path, output.as_deref());
             if output.is_none()
+                && raw_delivery_allowed(&result)
                 && let Some(source) = result.0.get("kernel_source").and_then(Value::as_str)
             {
                 print!("{source}");
@@ -3271,6 +3286,7 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
             let result =
                 run_domain_testgen(&path, depth, &target, &deadlock, strict, output.as_deref());
             if output.is_none()
+                && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("generated")
                 && let Some(content) = result.0.get("content").and_then(Value::as_str)
             {
@@ -3490,17 +3506,16 @@ fn run_sweep(
                     "summary": summary,
                     "verification": verification,
                 });
+                // Issue #594: this was a hand-written failure list that had
+                // silently lost `unknown_budget`, so a grid whose only failing
+                // scope reported it collapsed into `sweep_passed`/exit 0.
+                // Deferring to the shared classifier removes the whole class
+                // of omission -- a new result value cannot be forgotten here
+                // without also being forgotten in `outcome.rs`, where it falls
+                // to the failure class anyway.
                 if minimal.is_none()
-                    && entry["summary"]["result"].as_str().is_some_and(|result| {
-                        matches!(
-                            result,
-                            "violated"
-                                | "reachable_failed"
-                                | "unknown_cti"
-                                | "nonconformant"
-                                | "refinement_failed"
-                        )
-                    })
+                    && !outcome_class(&entry["summary"]).is_success()
+                    && entry["summary"]["result"].is_string()
                 {
                     minimal = Some(entry.clone());
                 }
@@ -3598,23 +3613,12 @@ fn chain_layer_passes(detail: &Value, status: i32) -> bool {
     {
         return false;
     }
-    detail
-        .get("result")
-        .and_then(Value::as_str)
-        .is_some_and(|result| {
-            matches!(
-                result,
-                "ok" | "verified"
-                    | "proved"
-                    | "refines"
-                    | "conformant"
-                    | "generated"
-                    | "scenarios"
-                    | "typestate"
-                    | "mutated"
-                    | "explained"
-            )
-        })
+    // The second guard behind `status != 0`: a layer producer that returned 0
+    // alongside a failure-class `result` must still not pass. This used to be
+    // a hand-maintained success allowlist; it now defers to the one shared
+    // definition (issue #537 C2) so a new layer result cannot be forgotten
+    // here.
+    outcome_class(detail).is_success()
 }
 
 fn skipped_chain_entry(
@@ -3711,7 +3715,14 @@ fn run_project_chain(path: &Path, keep_going: bool) -> (Value, i32) {
     if sections.contains_key("impl") {
         steps.push(("impl".to_owned(), "impl".to_owned()));
     }
-    if steps.is_empty() {
+    // Issue #537 C2: each aggregation states whether an empty workset counts
+    // as success. `chain` rejects one -- its input is a fixed pipeline, and a
+    // manifest that declares no layer is a malformed manifest, not a run with
+    // nothing to do. `analyze` batch deliberately answers the opposite way for
+    // its directory glob; the asymmetry is intentional and neither behavior
+    // changes here.
+    let chain_empty_allowed = false;
+    if steps.is_empty() && !chain_empty_allowed {
         let mut output = error_output(
             "parse",
             "project manifest declares no [business], [requirements], [design], or [impl] section",
@@ -5913,11 +5924,23 @@ fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
     } else {
         let (kernel, kernel_status) =
             run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
-        if kernel_status == 2 {
+        // Issue #600, matching the `run_domain_check` sibling below: only a
+        // definitive kernel verdict (status 0 = verified/proved, status 1 =
+        // violated/reachable_failed/unknown_cti/unknown_budget) has a `result`
+        // that can safely be folded into the top-level verdict. Any other
+        // status (2 = spec error, 3 = internal error) must return the kernel
+        // envelope verbatim rather than be misread downstream; testing only
+        // `== 2` let an internal error be absorbed as a `dbsystem` verdict.
+        if kernel_status != 0 && kernel_status != 1 {
             return (kernel, kernel_status);
         }
+        // ... and every non-passing kernel verdict folds through, not just
+        // `violated`. Reporting `verified_under_assumptions` over a kernel
+        // that came back `unknown_cti`/`reachable_failed`/`unknown_budget`
+        // made the envelope contradict its own exit code.
+        let kernel_passed = outcome_class(&kernel).is_success();
         if let Value::Object(kernel) = kernel {
-            if kernel.get("result").and_then(Value::as_str) == Some("violated") {
+            if !kernel_passed {
                 result.insert("result".to_owned(), json!("violated"));
             }
             let projection = [
@@ -6062,35 +6085,62 @@ fn stable_kernel_projection(kernel: Value) -> Value {
     )
 }
 
+/// Whether a producer's output may be delivered as raw bytes instead of its
+/// JSON envelope (issue #537 C2, Verdict Conservation Law).
+///
+/// Raw delivery *replaces* the envelope that would otherwise carry a failure's
+/// `kind`/`message`/`loc`, so every raw-output path must first confirm the
+/// producer succeeded. This is an **additional** conjunct and never a
+/// replacement for the structural field guard a site already has: `db import`
+/// prints raw source only for `result:"imported"` and keeps the JSON envelope
+/// for `imported_with_warnings`, which is also success-class.
+///
+/// Three of the nine raw-output sites previously had no guard at all
+/// (`--readable`, `--ts`, `domain expand`). Measured rather than assumed: no
+/// failure path can currently reach any of those extractions, because the
+/// extracted field is inserted at exactly one place in each producer, after
+/// every error return -- `"readable"` in `run_explain`, `"entities"` in
+/// `fsl_tools::analyze_typestate`, `"kernel_source"` in `run_domain_expand`.
+/// The guard therefore records an invariant that was until now unstated. It is
+/// not idle: `fsl-tools/src/domain.rs` builds a `result:"violated"` envelope
+/// that also carries `kernel_source`, so the invariant is one routing change
+/// away from breaking.
+fn raw_delivery_allowed(result: &(Value, i32)) -> bool {
+    outcome_class(&result.0).is_success()
+}
+
 fn wrap_specialized(result: Value) -> (Value, i32) {
     let Value::Object(mut result) = result else {
         return (error_output("internal", "invalid specialized result"), 3);
     };
     result.retain(|_, value| !value.is_null());
-    let status = match result.get("result").and_then(Value::as_str) {
-        Some(
-            "violated"
-            | "replay_nonconformant"
-            | "nonconformant"
-            | "statistically_unsupported"
-            | "observed_mismatch"
-            // fsl-ai statistical gate statuses (issue #510): a result that
-            // gates before producing a Wilson interval -- no dataset/schema
-            // evidence, an untrusted evaluator, too few samples, or an
-            // unsupported requirement shape -- is not a passing evaluation
-            // and must not exit 0 alongside `statistically_supported`.
-            | "dataset_invalid"
-            | "evaluator_untrusted"
-            | "slice_missing"
-            | "insufficient_samples"
-            | "inconclusive",
-        ) => 1,
-        Some("error") => 2,
-        _ => 0,
+    // Issue #601. This used to carry its own failure list ending in `_ => 0`,
+    // so every specialized-dialect result nobody had thought to add exited 0
+    // -- the shape #554 arose from, and the opposite default to
+    // `outcome_class`'s `_ => Failure` in the same crate. `check_ai` forwards
+    // its nested kernel's `result` verbatim when it has no finding of its own
+    // (`fsl-tools/src/ai.rs`), so an inconclusive kernel verdict
+    // (`unknown_cti`, `reachable_failed`, `unknown_budget`) reached this
+    // fallthrough and reported success for a verification that had not passed.
+    // `run_domain_check` folds the same way for the `domain` dialect (#515);
+    // this is its missing sibling.
+    //
+    // Deliberately *not* `_ => 1`: every success-class value flowing through
+    // here (`expanded`, `analyzed`, `causal_analyzed`,
+    // `verified_under_assumptions`, `agent_analyzed`, `ai_project_analyzed`,
+    // `compared`, `compat_profile_generated`, ...) must keep exiting 0, which
+    // is what registering them in `outcome_class` guarantees. A value missing
+    // from that registry fails loudly in the corpus sweep rather than here.
+    let mut envelope = envelope();
+    envelope.extend(result);
+    let output = Value::Object(envelope);
+    let status = match outcome_class(&output) {
+        OutcomeClass::Success => 0,
+        // An `error` envelope keeps the spec-error code the dialects use.
+        OutcomeClass::Failure if output.get("result").and_then(Value::as_str) == Some("error") => 2,
+        OutcomeClass::Failure => 1,
     };
-    let mut output = envelope();
-    output.extend(result);
-    (Value::Object(output), status)
+    (output, status)
 }
 
 fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
@@ -13224,7 +13274,17 @@ fn run_analyze_batch(
             }));
         }
     }
-    let failed = !errors.is_empty();
+    // Issue #537 C2: the counterpart of `chain`'s `CHAIN_EMPTY_ALLOWED`. Batch
+    // analyze's input is a directory glob, so "no matching file" is a run with
+    // nothing to do rather than a malformed request, and zero files report
+    // `analyzed`/exit 0. Whether that is the right answer is a separate
+    // question with its own evidence; recording the choice does not change it.
+    let batch_empty_allowed = true;
+    let failed = if entries.is_empty() {
+        !batch_empty_allowed
+    } else {
+        !errors.is_empty()
+    };
     let mut output = envelope();
     output.insert(
         "result".to_owned(),
@@ -15748,34 +15808,14 @@ fn model_error_output(error: &fsl_core::ModelError) -> Value {
 }
 
 /// `docs/LANGUAGE.md`'s exit-code table applied to an envelope `mutate`
-/// returns, as a *total* match over the result vocabulary a mutation run can
-/// carry.
+/// returns.
 ///
-/// `mutate` re-emits its baseline `verify` envelope verbatim when the baseline
-/// does not verify, so the baseline's `result` -- not merely the fact that it
-/// is "not verified" -- decides the exit code. Deriving the status from
-/// `result == "error"` alone let every other non-success value fall through to
-/// 0, so `violated` exited 0 (issue #554): a mutation score is meaningless
-/// over a spec that already fails, and a gate reading only the exit code saw a
-/// pass. `scenarios` and `testgen` re-emit the same baseline envelope and
-/// already exit 1.
-///
-/// `error_status` is the classified spec-error code the caller already holds
-/// (2 for parse/type/semantics/io, or whatever the baseline reported), so an
-/// error envelope is never re-classified here.
+/// The success/failure classification this used to restate now lives once, in
+/// `fslc_rust::outcome` (issue #537 C2); what remains here is the name this
+/// command's call sites already use. See [`fslc_rust::outcome::exit_status`]
+/// for the #554 rationale.
 fn mutate_exit_status(output: &Value, error_status: i32) -> i32 {
-    match output.get("result").and_then(Value::as_str) {
-        // Exit-code table row 0.
-        Some("mutated" | "verified" | "proved") => 0,
-        // Row 1. A baseline `verify` cannot produce that row's remaining
-        // members (`nonconformant`, `refinement_failed`, `sweep_failed`,
-        // `observed_mismatch`); those belong to other commands.
-        Some("violated" | "reachable_failed" | "unknown_cti" | "unknown_budget") => 1,
-        Some("error") => error_status,
-        // An unmapped result is an internal inconsistency, never a silent
-        // success -- falling through to 0 is exactly how #554 arose.
-        _ => 3,
-    }
+    fslc_rust::outcome::exit_status(output, error_status)
 }
 
 /// Pair a `mutate` error envelope with the exit code the table gives it, so no
@@ -15818,6 +15858,78 @@ fn block_on_native<F: Future>(future: F) -> F::Output {
 #[cfg(test)]
 mod exit_status_tests {
     use super::*;
+
+    /// Rejecting control for the `wrap_specialized` fallthrough (issue #601).
+    /// The specialized-dialect aggregation used to end in `_ => 0`, so
+    /// any result value nobody had added to its failure list exited 0.
+    /// `check_ai` forwards its nested kernel's `result` verbatim when it has
+    /// no finding of its own (`fsl-tools/src/ai.rs`), which is how an
+    /// inconclusive kernel verdict reached that arm.
+    ///
+    /// Asserted at the aggregation rather than end-to-end: a differential
+    /// sweep of both binaries over `examples/` + `specs/` found no corpus
+    /// input that reaches it, because every `ai_component` in the corpus
+    /// lowers to a kernel that verifies under both engines `ai check` accepts
+    /// (it rejects `--engine explicit`, and `lower_ai_component` emits no
+    /// `reachable` property). The omission was latent; its `db check` sibling
+    /// (#600) was not, and carries an end-to-end control.
+    #[test]
+    fn wrap_specialized_never_exits_zero_for_an_unregistered_or_failing_result() {
+        for result in [
+            "unknown_cti",
+            "reachable_failed",
+            "unknown_budget",
+            "a_value_nobody_registered",
+        ] {
+            let (_, status) = wrap_specialized(json!({"result": result}));
+            assert_ne!(
+                status, 0,
+                "wrap_specialized must not exit 0 for result={result:?}"
+            );
+        }
+        // The two mappings it did get right must not regress.
+        assert_eq!(wrap_specialized(json!({"result": "violated"})).1, 1);
+        assert_eq!(wrap_specialized(json!({"result": "error"})).1, 2);
+        assert_eq!(
+            wrap_specialized(json!({"result": "verified_under_assumptions"})).1,
+            0
+        );
+        assert_eq!(wrap_specialized(json!({"result": "expanded"})).1, 0);
+    }
+
+    /// The raw-delivery guard the nine `std::process::exit` sites now share.
+    ///
+    /// No failure path can currently reach any of those extractions -- the
+    /// extracted field is inserted at exactly one place in each producer,
+    /// after every error return -- so this cannot be a live end-to-end
+    /// control. What it does pin is the cross-path hazard that motivates the
+    /// guard: `fsl-tools/src/domain.rs` builds a `result:"violated"` envelope
+    /// that *also* carries `kernel_source`, the very field `domain expand`
+    /// extracts. Today that envelope reaches a sibling subcommand arm with no
+    /// raw extraction. If a future routing change sends it to one, this guard
+    /// is what stops the raw bytes from replacing the failure envelope.
+    #[test]
+    fn raw_delivery_rejects_a_failure_envelope_that_carries_the_extracted_field() {
+        let violated_with_kernel_source = (
+            json!({"result": "violated", "kernel_source": "spec X { }"}),
+            1,
+        );
+        assert!(!raw_delivery_allowed(&violated_with_kernel_source));
+
+        let expanded = (
+            json!({"result": "expanded", "kernel_source": "spec X { }"}),
+            0,
+        );
+        assert!(raw_delivery_allowed(&expanded));
+
+        // `db import` keeps both guards: the class guard admits
+        // `imported_with_warnings`, and the structural guard beside it is what
+        // still routes that case to the JSON envelope.
+        assert!(raw_delivery_allowed(&(
+            json!({"result": "imported_with_warnings"}),
+            0
+        )));
+    }
 
     /// Negative control for #465: before the fix, `apply_vacuity_mode`
     /// selected findings with `kind.starts_with("vacuous_")`, which matches
