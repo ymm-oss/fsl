@@ -253,7 +253,7 @@ inconsistencies, not spec properties. The guard is defensive depth against a
 verifier fault, not a reachable behavior, so no fixture can calibrate it and an
 operator for it would only ever report "primary did not fail". An operator whose
 fault is unobservable is not a missing detector; it is a fault that does not
-exist yet. Recorded as an issue instead, in the shape #594 and #601 use.
+exist yet. Recorded as #610 instead, in the shape #594 and #601 use.
 
 This is the distinction the harness has to keep making. "No test covers this
 line" and "no input can reach this line" look identical from a coverage report
