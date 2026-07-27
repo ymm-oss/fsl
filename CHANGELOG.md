@@ -5,6 +5,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- `fslc` now runs on an explicitly sized 8 MiB stack on every platform
+  instead of whatever the OS gives the main thread (#617). Windows gives
+  1 MiB where Linux and macOS give 8, and `fslc refine` needed more than 1
+  on `examples/agentic_rag` and `examples/multi_agent_system`: the same
+  command on the same bytes answered `refines` on Linux and aborted with
+  `has overflowed its stack` on Windows, returning neither a JSON envelope
+  nor an exit code. Those two mappings are among the 22 that #593 counted as
+  never executed, so #616's manifest ran them for the first time and the
+  crash surfaced on its first post-merge Windows run. The recursion is still
+  unbounded — it grows with the spec's structure, not with `--depth` — which
+  is #620; this makes the platforms agree, it does not add a limit.
 - `examples/layers/return_impl_refines.fsl` now declares an `enum abstraction`
   instead of a bare-member if-chain, so the command `examples/layers/README.md`
   documents answers `refines` again rather than `error`/`kind:"type"` (#615).

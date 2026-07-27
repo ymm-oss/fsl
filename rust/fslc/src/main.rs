@@ -298,7 +298,42 @@ fn parse_optional_output(
     }
 }
 
+/// The stack every `fslc` run gets, on every platform.
+///
+/// 8 MiB is the Linux and macOS default for a process's main thread. Windows
+/// gives 1 MiB, and `fslc refine` needs more than that on
+/// `examples/agentic_rag` and `examples/multi_agent_system`: the same command
+/// on the same bytes returned `refines` on Linux and aborted with
+/// `has overflowed its stack` on Windows (issue #617). A verifier whose answer
+/// depends on which machine ran it is the failure this repository spends most
+/// of its effort on, and platform-dependent *crashing* is that failure in its
+/// crudest form.
+///
+/// This makes the platforms agree at the Unix value. It does not make the
+/// recursion bounded: `refine`'s depth grows with the spec's structure rather
+/// than with `--depth` (measured — it aborts at `--depth 2` exactly as at 4,
+/// while `specs/cart_*` survives at `--depth 8`), so a large enough spec will
+/// exhaust any fixed stack. That is issue #620, and it wants a depth guard
+/// that reports `kind:"internal"` instead of aborting.
+const STACK_SIZE: usize = 8 * 1024 * 1024;
+
 fn main() {
+    // `run` on an explicitly sized thread rather than the process's main
+    // thread, whose size the OS picks.
+    let worker = std::thread::Builder::new()
+        .stack_size(STACK_SIZE)
+        .name("fslc".to_owned())
+        .spawn(run)
+        .expect("spawn the fslc worker thread");
+    if worker.join().is_err() {
+        // The panic message has already been printed by the default hook.
+        // Exit as a panicking `main` would, so a crash is never mistaken for
+        // a verdict.
+        std::process::exit(101);
+    }
+}
+
+fn run() {
     if print_cli_metadata() {
         return;
     }
