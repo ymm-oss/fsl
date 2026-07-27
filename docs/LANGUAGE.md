@@ -952,6 +952,14 @@ section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
 replay error is not implementation-log evidence and must not be rendered as
 an empty ledger row — `docs/DESIGN-ledger.md`).
 
+`approval_check` and `approval_diff` are absent from this table because their
+exit code is not a function of `result`. `fslc approval check` reports the same
+`approval_check` for every outcome and carries the verdict in `status`: `0` for
+`approved` and for `drifted`, `1` for `signature-invalid`. Drift exits 0 because
+it is analysis output, as `diff` findings are (§12); `docs/DESIGN-approval.md`
+records why, and why `fslc document check`'s `document_drifted` differs. Gate on
+`status`, not on the exit code.
+
 ### Kinds of result
 
 | result | Meaning | Next move |
