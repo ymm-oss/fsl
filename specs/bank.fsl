@@ -1,5 +1,6 @@
 // Abstract bank account: an immediately-consistent balance.
-// The detailed two-ledger implementation (bank_impl.fsl) refines this.
+// The detailed two-ledger implementation (bank_impl.fsl) refines this:
+//   fslc refine specs/bank_impl.fsl specs/bank.fsl specs/bank_refines.fsl --depth 6   # refines
 spec BankAccount {
   type Amount = 0..3
 

@@ -6,6 +6,43 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `rust/fslc/tests/refine_corpus_parity.rs`: a command-owned manifest binding
+  every corpus refinement mapping to native `fslc refine` (issue #593, #537 C4,
+  `docs/DESIGN-conformance-harness.md` "Refinement mapping manifest"). 22 of the
+  28 mappings had never been executed by any test, and the script covering the
+  other 6 (`tools/check_rust_refinement_parity.py`) was invoked by no workflow and
+  no `tools/check-native-integration.sh` lane. `corpus_check_sweep.rs` cannot
+  close this: a mapping has no `state` block, so `fslc check` answers
+  `semantics`/"spec has no state block" for one whether or not the mapping is
+  sound — a green corpus said nothing about `refine`. The roster is walked from
+  `specs/` + `examples/` rather than listed, so an unregistered mapping fails
+  instead of silently joining the 22, and a registered path that no longer exists
+  fails as a stale entry; a hard-coded list is the shape #577 retired 28 stale
+  instances of. Each of the 26 live rows carries `declared_by`, the `path:line` of
+  the README row or fixture header that **declares** its verdict, and compares
+  `result`, `kind`, **and** the process exit code. Expectations are transcribed
+  from those declarations, never from observed output: pinning a measurement would
+  make a future defect look like the contract, which is exactly the state
+  `examples/layers/return_impl_refines.fsl` is in. Where a mapping declares its
+  own expectation in the gallery `expected-command`/`expected-result`/
+  `expected-kind` header convention, the row is checked against it rather than
+  trusted, `--depth` included — that caught a row running at depth 4 against a
+  header declaring `--depth 3`. 22 of the 26 rows additionally anchor their
+  `declared_by` to the cited file, and the harness requires that file to still
+  contain a line stating the row's verdict, so a citation cannot outlive the
+  declaration it names. That keeps each declaration single-owner:
+  `governance_semantic_mapping.fsl` is declared by the broken implementation it
+  maps, and the citation is checked there rather than copied onto the mapping as
+  a second header to keep in sync. The two exclusions are self-retiring in the #568
+  sense: the harness re-measures each recorded premise and fails, naming the row
+  that must replace it, once the premise stops holding.
+- `specs/bank.fsl` and `specs/seat_booking.fsl`: the `fslc refine` command line
+  each header already implied. Both headers asserted that the paired
+  implementation "refines this" but documented no way to run it, so the manifest
+  row above had no depth to inherit. This promotes an existing assertion to a
+  runnable claim; it introduces no new expectation and deliberately uses prose
+  rather than the `expected-command:` key, which `tests/test_corpus_snapshot.py`
+  and `tools/check_rust_cli_snapshot.py` consume.
 - `rust/fslc/src/outcome.rs`: one definition of the success and failure
   classes over the CLI's `result` vocabulary (issue #537 C2,
   `docs/DESIGN-rust-component-internals.md` "Outcome classification"). The

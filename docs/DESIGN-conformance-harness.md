@@ -176,6 +176,84 @@ inputs.
   `fslc ai`/`db import`/domain replay) are out of scope by extension — the scan
   is `*.fsl` only.
 
+## Refinement mapping manifest (#537 C4, issue #593)
+
+The corpus sweeps above are `check`-shaped, and `check` is structurally blind to a
+refinement mapping: a mapping file has no `state` block, so `fslc check` answers
+`semantics`/"spec has no state block" for one whether or not the mapping is sound.
+A green corpus therefore said nothing about `fslc refine`. Until this manifest only
+6 of the 28 corpus mappings had ever been run through `refine`, by a script
+(`tools/check_rust_refinement_parity.py`) that no workflow and no
+`tools/check-native-integration.sh` lane invoked. The other 22 were executed by
+nothing.
+
+`rust/fslc/tests/refine_corpus_parity.rs` owns the mapping corpus the way
+`tests/dialect_registry.py` owns the dialect corpus, on three rules:
+
+- **The roster is derived, never listed.** The test walks `specs/` + `examples/`
+  for `refinement`-dialect files and requires each to hold a manifest row or an
+  exclusion. Adding a mapping fails the test until it is registered, and a
+  registered path that no longer exists fails as a stale entry. A hard-coded list
+  is the shape #577 retired 28 stale instances of.
+- **Expectations are transcribed from declarations, not from output.** Each row
+  carries `declared_by`, the `path:line` of the README row, documented command
+  comment, or fixture header that states the expected verdict. Recording what the
+  binary prints would pin a defect as the contract the moment one exists — which
+  is exactly the state `examples/layers/return_impl_refines.fsl` is in
+  (issue #615). Where no declaration exists, the correct move is to write one, not
+  to transcribe a measurement. `depth` is deliberately *not* part of that contract:
+  it bounds the search rather than declaring the verdict, so it is taken from the
+  documented command line where one exists.
+- **Both channels, every row.** `result`, `kind`, and the process exit code are all
+  compared (#537 C4). An envelope that disagrees with its exit status is how #554
+  and #600 escaped.
+- **The citation is checked, not trusted.** Where a mapping declares its own
+  expectation in the gallery `expected-command`/`expected-result`/`expected-kind`
+  header convention, the row must agree with it — including the `--depth` inside
+  `expected-command`. Otherwise `declared_by` is prose that can drift from the file
+  it names, which is the same "the citation looked fine" failure the manifest
+  exists to prevent. It caught one on introduction: the `refinement_failed_map.fsl`
+  row ran at depth 4 against a header declaring `--depth 3`.
+
+  22 of the 26 rows additionally carry a `declaration` anchor, and the harness
+  requires the cited file to still contain a line stating this row's verdict.
+  That is what keeps each declaration single-owner. `governance_semantic_mapping`
+  is declared by the broken *implementation* it maps
+  (`governance_semantic_after.fsl:2`, `// expected-result: error`) — the file that
+  owns the error — so the citation is verified where the declaration already
+  lives rather than copied onto the mapping as a second `expected-result` header
+  to keep in sync. The anchor is a text match, not a line number: an edit above
+  the declaration must not fail the test, but deleting it or changing its verdict
+  must. The 4 unanchored rows (the `agentic_rag` and `multi_agent_system` positive
+  pairs) are declared by multi-line statements of the mapping's *purpose* rather
+  than a verdict on one line; they are the manifest's residual trust.
+
+Depth is the one field the corpus is allowed to leave open, and where it is
+declared the declaration wins. 24 of the 26 rows run at the depth their README
+command line or fixture header states. The two that do not —
+`specs/bank_refines.fsl` and `specs/seat_refines.fsl` — had no documented command
+at all; each now carries one in its abstraction's header (`specs/bank.fsl:2-3`,
+`specs/seat_booking.fsl:2-4`), promoting the `refines` those headers already
+asserted into a runnable claim. Their depth 6 is the manifest's own and says so in
+the row: it subsumes the depth-4 `refines` that `tests/test_refine_oracle.py`
+asserted, since a counterexample within 4 steps is also within 6.
+
+Exclusions are self-retiring in the #568 sense: each records the *measured* fact
+that blocks a live row, and the harness re-measures it. `Blocked` re-runs `refine`
+and fails when the recorded failure stops reproducing; `UndeclaredImplOperand`
+fails when the corpus starts declaring the operand the mapping names. Both failure
+messages name the row that must replace the exclusion. Two entries exist:
+`examples/layers/return_impl_refines.fsl` (issue #615 — the README declares
+`refines`, `da003eb` tightened `typecheck.rs` without migrating the corpus to the
+`convert`/`abstract` requirement) and
+`examples/causal/evidence/incident-log-mapping.fsl` (not a `refine` input at all:
+its `impl` operand is a production observation log consumed by
+`fslc causal observe-expectations --mapping`, owned by `causal_cli.rs`).
+
+Cost: ~2m15s wall, the rows being run on a worker pool. Two `agentic_rag` rows are
+~100s and ~126s on their own in a debug build, so the sweep is bounded by its
+slowest row rather than by their sum.
+
 ## Implementation fault operators (#537 C5)
 
 `injection_detector_matrix.rs` calibrates detectors against defective *specs*:
@@ -309,5 +387,8 @@ gone but that the suite would notice its return.
   the harness (they keep their deeper declared-depth cases; overlap ≈ 1 min).
 - Verifying declared verdicts (`expected-result: proved` etc.) — that stays in
   `test_gallery.py`; the harness checks evaluator *agreement*, not spec intent.
-- Refinement-checking the mapping files (covered by `test_refine*.py`).
+- Refinement-checking the mapping files (owned by the manifest in
+  `rust/fslc/tests/refine_corpus_parity.rs`, above — not by this `check` sweep,
+  and no longer by the frozen `tests/test_refine*.py`, which the required product
+  gate does not execute).
 - Making Monitor accept no-action specs or project-level fsl-ai files.
