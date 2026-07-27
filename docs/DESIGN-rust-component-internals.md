@@ -737,12 +737,22 @@ their exit code at their own return point, so there was no production enumeratio
 conservation check whose class definition lives in the test is the stale-check shape #577 retired
 28 instances of.
 
-`rust/fslc/src/outcome.rs` owns that definition, as a `native-cli` bin module beside `verification.rs`:
+`rust/fslc/src/outcome.rs` owns that definition, as a `lib.rs` module rather than a bin module
+beside `verification.rs`, and without a feature gate:
 
 ```text
 enum OutcomeClass { Success, Failure }
 fn outcome_class(output: &Value) -> OutcomeClass
 ```
+
+The lib placement is forced by the requirement it exists to serve. `approval`, `causal`,
+`code_audit`, and `verification` are bin modules declared in `main.rs`, reachable only from the
+inline `#[cfg(test)] mod exit_status_tests`. `corpus_check_sweep.rs` is an integration test that
+runs the binary over the corpus, so a bin module would leave it unable to call the classifier and
+force it to keep its own copy of the success set — the exact stale-check shape the classifier
+removes. Nothing about the classifier needs `native-cli`: it reads `serde_json::Value` and returns
+an enum, touching none of that feature's optional dependencies. It sits beside
+`verification_output.rs`, which already constructs most of the vocabulary it classifies.
 
 Three properties are load-bearing:
 
