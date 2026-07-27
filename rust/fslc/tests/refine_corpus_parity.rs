@@ -35,8 +35,11 @@
 //! **Every `expected_result`/`expected_kind` is transcribed from a
 //! repository declaration, cited in `declared_by`, never from observed
 //! output.** Recording what the binary happens to print would pin a defect
-//! as the contract the moment one exists — which is exactly the state
-//! `examples/layers/return_impl_refines.fsl` is in below. `depth` is not
+//! as the contract the moment one exists. `examples/layers/return_impl_refines.fsl`
+//! was that case: it is a live row now, but it entered this manifest as an
+//! exclusion whose recorded premise was the defect (#615), not an
+//! `expected_result: "error"` that would have made the regression the
+//! contract. `depth` is not
 //! part of that contract: it is taken from the documented command line where
 //! one exists and otherwise chosen to exercise the mapping, because depth
 //! bounds the search rather than declaring the expected verdict.
@@ -292,6 +295,26 @@ const CASES: &[Case] = &[
                       (command line with `# refines`)",
     },
     Case {
+        implementation: "examples/layers/return_impl.fsl",
+        abstraction: "examples/layers/return_system.fsl",
+        mapping: "examples/layers/return_impl_refines.fsl",
+        declaration: Some(Declaration {
+            path: "examples/layers/README.md",
+            anchor: "return_impl_refines.fsl",
+        }),
+        depth: 5,
+        expected_result: "refines",
+        expected_kind: None,
+        // Was an exclusion until issue #615: the mapping used a bare-member
+        // if-chain over names `DSt` and `SSt` both declare, and `da003eb`
+        // rightly began rejecting that ambiguity. The exclusion went stale the
+        // moment the mapping was migrated to `enum abstraction`, and this row
+        // is what its failure message said to write.
+        declared_by: "examples/layers/README.md:10 \
+                      (`| `return_impl_refines.fsl` | design -> requirements mapping | refines |`), \
+                      command at :15-16",
+    },
+    Case {
         implementation: "examples/consulting/tobe_expense.fsl",
         abstraction: "examples/consulting/asis_expense.fsl",
         mapping: "examples/consulting/tobe_refines_asis.fsl",
@@ -484,17 +507,15 @@ const CASES: &[Case] = &[
 /// `every_exclusion_premise_still_holds`, so an exclusion cannot outlive its
 /// reason: when the premise stops holding the test fails and names the row
 /// that must replace it.
+/// There was a second variant, `Blocked`, for an exclusion a defect stands in
+/// the way of: it recorded the `result`/`kind` `refine` answered while broken,
+/// so the exclusion went stale the day that changed. Issue #615 was its only
+/// instance, and fixing #615 retired it exactly that way — the premise failed,
+/// named the row to write, and the row went live. The variant is gone rather
+/// than kept unused: no mapping is currently blocked by a defect, and a type
+/// that says otherwise would be describing a state the corpus is not in. Bring
+/// it back with its first user, whose shape this paragraph records.
 enum Premise {
-    /// A defect blocks the declared expectation. `refine` currently answers
-    /// `result`/`kind` for this triple; the day it stops, the exclusion is
-    /// stale and the declared row must go live.
-    Blocked {
-        implementation: &'static str,
-        abstraction: &'static str,
-        depth: u32,
-        result: &'static str,
-        kind: &'static str,
-    },
     /// The mapping is not a `fslc refine` input at all: its `impl` operand
     /// names an artifact that no corpus declaration defines, so there is no
     /// implementation spec to pair it with. The day such a declaration
@@ -510,30 +531,9 @@ struct Exclusion {
     premise: Premise,
 }
 
-const EXCLUSIONS: &[Exclusion] = &[
-    Exclusion {
-        mapping: "examples/layers/return_impl_refines.fsl",
-        reason: "issue #615: examples/layers/README.md:10 declares `refines` and :15-16 \
-                 gives the exact command, but native `fslc refine` answers \
-                 `error`/`kind:\"type\"` (exit 2) -- `ambiguous enum member 'New' belongs \
-                 to [DSt, SSt]`. `da003eb fix(refine): reject ambiguous enum members` \
-                 tightened rust/fsl-core/src/typecheck.rs without migrating the corpus to \
-                 the new `convert`/`abstract` requirement. The expectation is NOT recorded \
-                 as `error`: doing so would pin the regression as the contract. When #615 \
-                 is fixed this exclusion goes stale, and the row that replaces it is \
-                 depth 5, expected_result \"refines\", declared_by \
-                 examples/layers/README.md:10",
-        premise: Premise::Blocked {
-            implementation: "examples/layers/return_impl.fsl",
-            abstraction: "examples/layers/return_system.fsl",
-            depth: 5,
-            result: "error",
-            kind: "type",
-        },
-    },
-    Exclusion {
-        mapping: "examples/causal/evidence/incident-log-mapping.fsl",
-        reason: "not a `fslc refine` input. Its `impl IncidentProductionLog` names a \
+const EXCLUSIONS: &[Exclusion] = &[Exclusion {
+    mapping: "examples/causal/evidence/incident-log-mapping.fsl",
+    reason: "not a `fslc refine` input. Its `impl IncidentProductionLog` names a \
                  production observation log (examples/causal/evidence/\
                  incident-observation-log.jsonl), not a spec, so no implementation \
                  `.fsl` exists to pair with the abstraction. The command that consumes \
@@ -541,11 +541,10 @@ const EXCLUSIONS: &[Exclusion] = &[
                  owned by rust/fslc/tests/causal_cli.rs (OBS_MAPPING, 6 call sites). \
                  This is a capability exclusion, not a tolerated difference: no verdict, \
                  location, or exit code is allowlisted for it anywhere",
-        premise: Premise::UndeclaredImplOperand {
-            operand: "IncidentProductionLog",
-        },
+    premise: Premise::UndeclaredImplOperand {
+        operand: "IncidentProductionLog",
     },
-];
+}];
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -919,36 +918,19 @@ fn native_refine_matches_the_declared_result_and_exit_for_every_registered_mappi
 
 /// An exclusion may not outlive its reason. Each entry records the fact that
 /// blocks a live row; this re-measures it and fails when it no longer holds,
-/// so fixing #615 — or adding the missing declaration — forces the excluded
-/// mapping into the manifest instead of leaving a permanent hole (#568).
+/// so adding the missing declaration forces the excluded mapping into the
+/// manifest instead of leaving a permanent hole (#568).
+///
+/// This has already fired once for real. Fixing #615 made that exclusion's
+/// premise false, and the failure named the row to write — depth, expected
+/// result, and citation — so the repair and the coverage landed together
+/// rather than the fix quietly outrunning the manifest.
 #[test]
 fn every_exclusion_premise_still_holds() {
     let root = root();
     let failures = for_each_parallel(EXCLUSIONS.len(), |index| {
         let exclusion = &EXCLUSIONS[index];
         match &exclusion.premise {
-            Premise::Blocked {
-                implementation,
-                abstraction,
-                depth,
-                result,
-                kind,
-            } => {
-                let (output, _status) =
-                    run_refine(implementation, abstraction, exclusion.mapping, *depth);
-                if output["result"].as_str() == Some(result)
-                    && output["kind"].as_str() == Some(kind)
-                {
-                    return None;
-                }
-                Some(format!(
-                    "{}: the exclusion is STALE. `fslc refine {implementation} {abstraction} \
-                     {} --depth {depth}` no longer answers result={result:?}/kind={kind:?}; \
-                     it now answers {output}. Delete the exclusion and add the live \
-                     manifest row. Recorded reason: {}",
-                    exclusion.mapping, exclusion.mapping, exclusion.reason
-                ))
-            }
             Premise::UndeclaredImplOperand { operand } => {
                 if !corpus_declares(&root, operand) {
                     return None;
