@@ -2,13 +2,24 @@ refinement ImplRefinesRequirements {
   impl ReturnImpl
   abs  ReturnSystemReq
 
+  // Design's two payment steps collapse to the requirement layer's single Paid,
+  // so this is many-to-one and needs `enum abstraction`, not `enum conversion`.
+  // Written out rather than left as a bare-member if-chain because `New`,
+  // `AutoApproved`, `MgrQueue`, `MgrApproved`, and `MgrRejected` each name a
+  // member of both DSt and SSt: the chain read as if it were the identity while
+  // the compiler had to guess which enum each bare name meant.
+  enum abstraction case_state DSt -> SSt {
+    New          -> New
+    AutoApproved -> AutoApproved
+    MgrQueue     -> MgrQueue
+    MgrApproved  -> MgrApproved
+    MgrRejected  -> MgrRejected
+    PaySubmitted -> Paid
+    PayConfirmed -> Paid
+  }
+
   map sys[c: CaseId] = RCase {
-    st: if d[c].st == New then New
-        else if d[c].st == AutoApproved then AutoApproved
-        else if d[c].st == MgrQueue then MgrQueue
-        else if d[c].st == MgrApproved then MgrApproved
-        else if d[c].st == MgrRejected then MgrRejected
-        else Paid,
+    st: abstract(case_state, d[c].st),
     amount: d[c].amount
   }
   map paid_count = paid

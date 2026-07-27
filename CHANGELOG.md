@@ -5,6 +5,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- `examples/layers/return_impl_refines.fsl` now declares an `enum abstraction`
+  instead of a bare-member if-chain, so the command `examples/layers/README.md`
+  documents answers `refines` again rather than `error`/`kind:"type"` (#615).
+  `da003eb` began rejecting members that name a position in more than one enum,
+  which is correct -- `New`, `AutoApproved`, `MgrQueue`, `MgrApproved`, and
+  `MgrRejected` each belong to both `DSt` and `SSt`, so the chain read as an
+  identity while the compiler had to guess. The corpus was never migrated to
+  the `convert`/`abstract` requirement that change introduced. `DSt`'s
+  `PaySubmitted` and `PayConfirmed` both collapse to `SSt`'s `Paid`, making this
+  many-to-one and `enum abstraction` rather than `enum conversion` the right
+  form. The mapping's #616 exclusion went stale on the fix and is replaced by a
+  live manifest row, which is the self-retirement working on a real repair
+  rather than a rehearsed one.
 ### Added
 - `rust/fslc/tests/refine_corpus_parity.rs`: a command-owned manifest binding
   every corpus refinement mapping to native `fslc refine` (issue #593, #537 C4,
