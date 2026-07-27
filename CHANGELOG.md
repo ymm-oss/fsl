@@ -6,6 +6,26 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 ### Added
+- `rust/fslc/src/outcome.rs`: one definition of the success and failure
+  classes over the CLI's `result` vocabulary (issue #537 C2,
+  `docs/DESIGN-rust-component-internals.md` "Outcome classification"). The
+  crate previously had none — each command arm compared `result` against
+  literals at its own return point, so the class was re-derived, and
+  re-forgotten, once per family. `outcome_class` takes the whole envelope
+  rather than the `result` string because five values carry their verdict in
+  a sibling field (`approval check`'s `status`, `fmt --check`'s `changed`,
+  `lint`'s `finding_count`, `diff`'s `violations` and `gate.passed`) — the
+  same reason `docs/LANGUAGE.md`'s exit-code table excludes
+  `approval_check`/`approval_diff`. Unknown values classify as `Failure`,
+  following `mutate_exit_status`'s `_ => 3`: a result nobody registered now
+  fails loudly instead of exiting 0, which is how #554 arose. Cacheability
+  stays a separate predicate (`verify_cache_admits`), because `violated` is
+  failure-class *and* cacheable.
+- `rust/fslc/tests/issue_600_db_check_folds_kernel_verdict.rs` and
+  `rust/fslc/tests/fixtures/issue_600_db_inconclusive_kernel.fsl`: the
+  rejecting control for #600 below, plus a guard test that fails loudly if
+  the fixture stops producing an inconclusive kernel — otherwise the control
+  would start passing vacuously.
 - `rust/fslc/tests/refine_corpus_parity.rs`: a native port of
   `tools/check_rust_refinement_parity.py`'s 6 corpus refinement-mapping
   regressions (`specs/cart_refines.fsl`, `specs/seat_refines.fsl`,
@@ -38,6 +58,49 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   exit-code class (0 vs non-zero) to agree for every corpus file.
 
 ### Fixed
+- `fslc db check` reported `result:"verified_under_assumptions"` alongside a
+  non-zero exit whenever its nested kernel `verify` came back
+  `unknown_cti`/`reachable_failed`/`unknown_budget` (issue #600).
+  `run_db_check` folded only `violated` into the top-level verdict, so the
+  exit code was right and the envelope contradicted it — the half of the
+  Verdict Conservation Law a gate reading the JSON sees. Its
+  `run_domain_check` sibling has folded every non-passing kernel verdict
+  since #515; `db` now matches it, and its status guard admits both
+  definitive codes (`status != 0 && status != 1`) instead of testing `== 2`,
+  which had let a `kind:"internal"` kernel envelope be absorbed as a
+  `dbsystem` verdict.
+- `wrap_specialized` (the `ai`/`domain`/`db`/`agent` aggregation, 15 call
+  sites) ended its status match in `_ => 0`, so every specialized-dialect
+  result nobody had added to its failure list exited 0 (issue #601) — the
+  shape #554 arose from, and the opposite default to `outcome_class`'s
+  `_ => Failure` in the same crate. `check_ai` forwards its nested kernel's `result` verbatim when
+  it has no finding of its own, so an inconclusive kernel verdict reached
+  that arm. It now derives the status from `outcome_class`. A differential
+  sweep of the pre- and post-change binaries over `examples/` + `specs/`
+  found no corpus input that reaches it, so this omission is latent, unlike
+  its `db check` sibling above. Unlike #594 and #600, which are each a single
+  missing value, this was the mechanism that loses them: with the default on
+  the success side, any failure value added to any specialized dialect exits
+  0 from the moment someone forgets to register it.
+- `fslc sweep`'s minimal-counterexample selection carried a hand-written
+  failure list that had silently lost `unknown_budget` (issue #594), so a
+  grid whose only failing scope reported it would collapse into
+  `sweep_passed`/exit 0. It now defers to `outcome_class`. The omission was
+  latent rather than a live false green: `sweep` restricts `--engine` to
+  `bmc|induction`, `unknown_budget` is produced only by the explicit engine,
+  `--engine auto` falls back to BMC before it escapes, and the verify-cache
+  key includes the engine — so the control for this one is at the classifier
+  (`outcome.rs`), not end-to-end.
+- `rust/fslc/tests/corpus_check_sweep.rs` no longer carries
+  `CHECK_SUCCESS_RESULTS`, its own two-value copy of the success class
+  (issue #596). `check_result_and_exit_status_never_contradict` now calls
+  `fslc_rust::outcome::outcome_class`, so the law is stated against
+  production code instead of against a list in the test — the stale-check
+  shape #577 retired 28 instances of. `chain_layer_passes`,
+  `verify_cache_store`, and `mutate_exit_status` were migrated to the same
+  definition; `chain` and `analyze` batch now each state their
+  empty-workset choice (reject vs allow) as a named local, with the
+  asymmetry recorded rather than removed.
 - `rust/fslc/tests/corpus_check_sweep.rs`'s module doc claimed (per issue
   #483) that "the gallery fixtures and `examples/refinement_liveness/*`"
   are refined by a test; only 6 of the 28 `refinement`-dialect corpus files

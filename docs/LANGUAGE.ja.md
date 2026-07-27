@@ -924,6 +924,14 @@ refinement_failed / sweep_failed / observed_mismatch、
 空の台帳行として描画してはならない — `docs/DESIGN-ledger.md`)でもフェイルクローズド
 に適用されます。
 
+`approval_check` と `approval_diff` がこの表に無いのは、exit code が `result` の
+関数ではないからです。`fslc approval check` はどの結果でも同じ `approval_check` を
+返し、判定は `status` が担います: `approved` と `drifted` が `0`、
+`signature-invalid` が `1`。drift が 0 で終わるのは、`diff` の findings と同じく
+分析出力だからです(§12)。理由と、`fslc document check` の `document_drifted` が
+異なる扱いになる理由は `docs/DESIGN-approval.md` にあります。exit code ではなく
+`status` でゲートしてください。
+
 ### 結果の種類
 
 | result | 意味 | 次の一手 |

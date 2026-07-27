@@ -1589,17 +1589,12 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
     if !valid_cache_key(key) || !valid_cache_key(xdepth) {
         return;
     }
-    if !matches!(
-        output.get("result").and_then(Value::as_str),
-        Some(
-            "verified"
-                | "proved"
-                | "violated"
-                | "reachable_failed"
-                | "unknown_cti"
-                | "unknown_budget"
-        )
-    ) {
+    // Cacheability, not success: `violated` and the three inconclusive
+    // verdicts are failure-class and still worth storing. The predicate lives
+    // beside `outcome_class` in `fslc_rust::outcome` so the vocabulary has one
+    // home, and stays a distinct function so that a new result value forces an
+    // explicit decision in both (issue #537 C2).
+    if !fslc_rust::outcome::verify_cache_admits(output) {
         return;
     }
     let Some(path) = verify_cache_path(key) else {

@@ -9,6 +9,14 @@ pub mod coverage;
 pub mod frontend_output;
 pub mod migration;
 pub mod origin_coverage;
+// The one definition of the success/failure classes (issue #537 C2). It is
+// declared on the library side rather than as a `main.rs` bin module so the
+// corpus conservation sweep under `tests/` can defer to it instead of carrying
+// its own copy of the vocabulary -- integration tests link the library, not
+// the binary. `fsl-lsp` and `fsl-wasm` both depend on this crate with
+// `default-features = false`, so the gate leaves their surface unchanged.
+#[cfg(feature = "native-cli")]
+pub mod outcome;
 pub mod replay_trace;
 pub mod source_diagnostic;
 pub mod spec_load;

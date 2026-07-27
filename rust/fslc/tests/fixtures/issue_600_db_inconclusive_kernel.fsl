@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// #600 negative control. The `dbsystem` compatibility rules below all hold, so
+// `check_db` reports no finding of its own and sets
+// `result:"verified_under_assumptions"`. The lowered kernel, however, is not
+// inductive: under `--engine induction` it comes back `unknown_cti`, exit 1.
+//
+// `run_db_check` used to fold only a `violated` kernel into the top-level
+// verdict, so this file produced `{"result":"verified_under_assumptions"}` with
+// exit 1 -- an envelope contradicting its own exit code. Its `domain check`
+// sibling has folded every non-passing kernel verdict since #515.
+dbsystem DbInconclusiveKernel {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+      column full_name: Text present backfilled nullable;
+      column first_name: Text absent;
+      column last_name: Text absent;
+    }
+  }
+
+  migration split_full_name from 0 to 1 {
+    split users.full_name into users.first_name, users.last_name;
+  }
+
+  artifact server_v2 {
+    reads users.id, users.first_name, users.last_name;
+  }
+
+  environment prod {
+    schema 0..1;
+    active server_v2 when schema 1..1;
+  }
+
+  // Deliberately does not select `preservation_transforms_annotated`: the
+  // unannotated `split` above is what makes the lowered kernel non-inductive,
+  // and this control needs the dbsystem layer itself to stay finding-free so
+  // the kernel verdict is the only thing left to fold.
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+  }
+}

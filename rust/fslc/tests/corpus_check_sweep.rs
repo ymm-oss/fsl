@@ -36,7 +36,8 @@
 //! status agree with the result class" is a closed law that every corpus
 //! file -- including deliberately-failing fixtures and the
 //! `refinement`/`examples/gallery/injected/` categories excluded above --
-//! must satisfy.
+//! must satisfy. Its class definition is production code
+//! (`fslc_rust::outcome::outcome_class`), not a list in this file.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -227,30 +228,21 @@ fn every_corpus_spec_checks_ok_or_declares_its_error() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// `result` values `fslc check` emits that belong to the success class
-/// (exit status must be 0).
-///
-/// `check`'s own family arms (`run_check_with_tags`, `agent_check_output`,
-/// `run_causal_check` in `rust/fslc/src/main.rs`/`causal.rs`) each set their
-/// exit code directly at the return site rather than deriving it from
-/// `result` through one shared function -- unlike, say, `mutate_exit_status`
-/// in `main.rs`, there is no existing single production-code enumeration of
-/// `check`'s result vocabulary this test could defer to instead. This is
-/// therefore deliberately an allowlist, not a denylist: issue #537 C2
-/// requires that aggregation "never default an unknown variant to
-/// success", so a `check` result value that is not (yet) listed here falls
-/// through to the failure class below and the test fails loudly instead of
-/// silently accepting a new false-green shape.
-const CHECK_SUCCESS_RESULTS: &[&str] = &[
-    "ok",                   // rust/fslc/src/main.rs: run_check_with_tags, agent_check_output
-    "causal_model_checked", // rust/fsl-tools/src/causal_analysis.rs
-];
-
 /// Verdict Conservation Law for `fslc check` (issue #537 C2), checked
 /// without any per-file oracle: a success-class `result` must exit 0, and
-/// every other `result` -- including a value not yet in
-/// `CHECK_SUCCESS_RESULTS` -- must exit non-zero. The envelope itself must
+/// every failure-class `result` must exit non-zero. The envelope itself must
 /// also be a JSON object carrying a string `result` field.
+///
+/// The class definition is `fslc_rust::outcome::outcome_class`, in production
+/// code. This test used to carry its own `CHECK_SUCCESS_RESULTS` allowlist,
+/// because `check`'s family arms each set their exit code at their own return
+/// point and there was no production enumeration to defer to. That is the
+/// shape #577 retired 28 instances of: a conservation check whose class
+/// definition lives in the test can only ever agree with itself, and the
+/// production code it is supposed to constrain is free to drift. The
+/// allowlist is gone. An unregistered value now falls to the failure class in
+/// `outcome.rs` -- never here -- so a new false-green shape fails loudly at
+/// the definition instead of being quietly re-declared in a test fixture.
 #[test]
 fn check_result_and_exit_status_never_contradict() {
     let root = root();
@@ -286,15 +278,16 @@ fn check_result_and_exit_status_never_contradict() {
         };
 
         observed_results.insert(result.to_owned());
-        let is_success = CHECK_SUCCESS_RESULTS.contains(&result);
+        let is_success = fslc_rust::outcome::outcome_class(&envelope).is_success();
         if is_success && exit != 0 {
             failures.push(format!(
                 "{rel}: result={result:?} is success-class but exit={exit} (false red)"
             ));
         } else if !is_success && exit == 0 {
             failures.push(format!(
-                "{rel}: result={result:?} is not a registered success-class result but \
-                 exit=0 (false green)"
+                "{rel}: result={result:?} is failure-class per \
+                 `fslc_rust::outcome::outcome_class` but exit=0 (false green). If this is a \
+                 new success-class result, register it there -- not here"
             ));
         }
     }
