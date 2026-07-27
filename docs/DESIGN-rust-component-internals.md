@@ -737,8 +737,8 @@ their exit code at their own return point, so there was no production enumeratio
 conservation check whose class definition lives in the test is the stale-check shape #577 retired
 28 instances of.
 
-`rust/fslc/src/outcome.rs` owns that definition, as a `lib.rs` module rather than a bin module
-beside `verification.rs`, and without a feature gate:
+`rust/fslc/src/outcome.rs` owns that definition, declared from `lib.rs` under
+`#[cfg(feature = "native-cli")]` rather than as a bin module beside `verification.rs`:
 
 ```text
 enum OutcomeClass { Success, Failure }
@@ -750,9 +750,14 @@ The lib placement is forced by the requirement it exists to serve. `approval`, `
 inline `#[cfg(test)] mod exit_status_tests`. `corpus_check_sweep.rs` is an integration test that
 runs the binary over the corpus, so a bin module would leave it unable to call the classifier and
 force it to keep its own copy of the success set — the exact stale-check shape the classifier
-removes. Nothing about the classifier needs `native-cli`: it reads `serde_json::Value` and returns
-an enum, touching none of that feature's optional dependencies. It sits beside
-`verification_output.rs`, which already constructs most of the vocabulary it classifies.
+removes. It sits beside `verification_output.rs`, which already constructs most of the vocabulary
+it classifies.
+
+The feature gate is about surface, not dependencies: the classifier reads `serde_json::Value` and
+returns an enum, needing none of `native-cli`'s optional crates. `fsl-lsp` and `fsl-wasm` both take
+`fslc-rust = { default-features = false }`, so gating keeps the classifier out of their public
+surface entirely while the integration tests, which run with default features, still reach it.
+Promote it out of the gate when a Worker or LSP consumer actually appears.
 
 Three properties are load-bearing:
 
