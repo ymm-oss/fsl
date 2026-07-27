@@ -219,6 +219,33 @@ Rebuild cost puts this in the product gate (`tools/check-native-integration.sh`)
 not the per-pull-request gate. Operators patch `rust/fslc` where possible, so
 the rebuild is that crate plus a relink rather than the workspace.
 
+The harness is `tools/run-fault-operators.sh`, reached as the
+`fault-operators` phase of `tools/check-native-integration.sh` and included in
+its `all` — deliberately not in its `rust` phase, which `.github/workflows/ci.yml`
+runs on every pull request. Operators are rows in
+`rust/fslc/tests/fault_operators/operators.txt`, each naming a patch file, a
+primary detector, and a blind detector; the two controls are
+`controls/no-op.patch` and `controls/stale-seam.patch`. Adding an operator is a
+patch file and a table row, both data.
+
+Detector naming is measured, not asserted. The first calibration moved two of
+the three intended primaries after the harness showed the named test could not
+fail under the fault: `exit_status`'s failure row is reachable only through
+`mutate_exit_status`, so `corpus_check_sweep`'s conservation law never sees it
+(`issue_554_mutate_exit_status::a_violated_baseline_exits_one` does), and #600's
+status-guard half (`!= 0 && != 1`) folds a status-1 kernel identically to
+`== 2`, so only its verdict-fold half is what
+`issue_600_db_check_folds_kernel_verdict` actually detects. Both are the kind of
+mis-attribution a matrix that never runs its own negative side would have kept.
+
+That second measurement also names an uncovered seam: reverting `run_db_check`'s
+status guard to `== 2` leaves all three tests in
+`issue_600_db_check_folds_kernel_verdict.rs` green, because the file's only
+verbatim-return case (`db_check_returns_a_spec_error_envelope_verbatim`) returns
+at `parse_surface_document` and never reaches the guard. A `kind:"internal"`
+(status 3) kernel envelope absorbed as a `dbsystem` verdict would therefore go
+unnoticed. That is a fourth operator waiting on a detector to calibrate.
+
 ## Coupled changes
 
 `CONTRIBUTING.md` "Adding a language feature" gains: register any new dialect's
@@ -226,9 +253,10 @@ construct and example corpus in `tests/dialect_registry.py` (and any new example
 directory is claimed automatically by the scan — the harness fails until its
 construct is registered).
 
-A fixed escaped defect gains an entry in `rust/fslc/tests/fault_operators/` when
-its defect class can recur at a sibling seam, so the regression test proves not
-only that the defect is gone but that the suite would notice its return.
+`CONTRIBUTING.md` "Guidelines for changes" gains: a fixed escaped defect gains
+an entry in `rust/fslc/tests/fault_operators/` when its defect class can recur
+at a sibling seam, so the regression test proves not only that the defect is
+gone but that the suite would notice its return.
 
 ## Non-goals
 

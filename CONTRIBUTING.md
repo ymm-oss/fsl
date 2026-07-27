@@ -74,6 +74,11 @@ inventory and explicitly optional Python surfaces.
   explicit compatibility reason and focused regression evidence.
 - **Generated artifacts:** never hand-edit compatibility snapshots or generated site output. Use the
   owning generator and review the diff.
+- **A fixed escaped defect:** when its defect class can recur at a sibling seam, add an operator to
+  `rust/fslc/tests/fault_operators/` — a patch file plus one row in `operators.txt` naming the primary
+  detector that must fail under it and a blind detector that must not. `tools/run-fault-operators.sh`
+  then proves not only that the defect is gone but that the suite would notice its return. Run it with
+  `./tools/check-native-integration.sh fault-operators`.
 
 Use repository-relative paths in committed text and examples. New source files require the Apache-2.0
 SPDX header used by neighboring files. Rust must remain formatted, Clippy-clean, and free of unsafe code.

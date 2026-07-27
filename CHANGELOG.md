@@ -21,6 +21,29 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   fails loudly instead of exiting 0, which is how #554 arose. Cacheability
   stays a separate predicate (`verify_cache_admits`), because `violated` is
   failure-class *and* cacheable.
+- `rust/fslc/tests/fault_operators/` and `tools/run-fault-operators.sh`:
+  implementation fault operators (issue #537 C5,
+  `docs/DESIGN-conformance-harness.md`). `injection_detector_matrix.rs`
+  calibrates detectors against defective *specs*; this answers the other
+  question — would the test suite notice if the *verifier* started lying?
+  Every escaped defect in the 2026-07 batch was of that kind (#601's
+  `_ => 0`, #600's `violated`-only fold, #496's dropped explicit input), and
+  none of them lives in a `.fsl` file. Each operator is a **patch file, not
+  code**: the harness copies the working tree to a scratch checkout, applies
+  one minimal diff, rebuilds `fslc` there, and requires that operator's
+  primary detector to fail while its blind detector still passes. No
+  fault-injection hook exists in the shipped binary, under a feature flag or
+  otherwise — a switch that makes a verifier lie about verdicts must not exist
+  in the codebase whose purpose is to prevent exactly that. Two controls make
+  the matrix readable rather than decorative: a no-op patch must leave every
+  named detector green, and a stale-seam patch must be *refused*, which keeps
+  "a patch that no longer applies is a loud failure, never a skip" verified
+  instead of merely intended. Wired into `tools/check-native-integration.sh`
+  as its own `fault-operators` phase, part of `all` and deliberately not part
+  of `rust`, which every pull request runs. Adding an operator is a patch file
+  plus one row in `operators.txt` — data, no harness code, and `CONTRIBUTING.md`
+  now asks for one whenever a fixed escaped defect's class can recur at a
+  sibling seam.
 - `rust/fslc/tests/issue_600_db_check_folds_kernel_verdict.rs` and
   `rust/fslc/tests/fixtures/issue_600_db_inconclusive_kernel.fsl`: the
   rejecting control for #600 below, plus a guard test that fails loudly if
