@@ -253,11 +253,22 @@ inconsistencies, not spec properties. The guard is defensive depth against a
 verifier fault, not a reachable behavior, so no fixture can calibrate it and an
 operator for it would only ever report "primary did not fail". An operator whose
 fault is unobservable is not a missing detector; it is a fault that does not
-exist yet. Recorded as #610 instead, in the shape #594 and #601 use.
+exist yet. No issue tracks it: an issue asserts there is work to do, and there
+is none — the guard is correct, defensive, and consistent with its
+`run_domain_check` sibling. This paragraph is the record.
 
 This is the distinction the harness has to keep making. "No test covers this
 line" and "no input can reach this line" look identical from a coverage report
 and are opposite conclusions.
+
+Tell them apart the way this one was told apart, before writing either an
+operator or the test you think is missing: patch the seam to its defective form
+and run the *whole* `fslc` suite, not the one test you expect to own it. A single
+test staying green says only that this test does not cover the seam. The whole
+suite staying green — with the pre-existing failures subtracted, since a suite
+that is already red proves nothing either way — says no input reaches it, and
+the honest output is a recorded measurement rather than a new operator or a
+fixture nobody can build.
 
 ## Coupled changes
 
