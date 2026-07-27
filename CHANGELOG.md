@@ -28,6 +28,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   field. `corpus_check_sweep.rs`'s existing sweep only ever inspected the
   JSON body, never the process exit status, so a `result:"error"` envelope
   that exited 0 would previously pass unnoticed.
+- `rust/fslc/tests/corpus_check_sweep.rs::ledger_exit_status_agrees_with_its_verify_baseline`:
+  extends the same Verdict Conservation Law (issue #537 C2) to `fslc ledger`.
+  Unlike `check`, `ledger`'s JSON envelope always reports
+  `result:"generated"` regardless of the verification baseline it embeds, so
+  there is no `result`-string vocabulary to allowlist; instead this runs
+  `fslc verify` at matching `--depth`/`--deadlock ignore`/`--engine bmc`
+  arguments as an independent process and requires the two commands'
+  exit-code class (0 vs non-zero) to agree for every corpus file.
 
 ### Fixed
 - `rust/fslc/tests/corpus_check_sweep.rs`'s module doc claimed (per issue
@@ -37,6 +45,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   covered files and their owning test, `refine_corpus_parity.rs` (issue
   #593; same "comment claims a contract the implementation does not back"
   shape as #585).
+- `fslc ledger` now exits non-zero when the verification baseline it embeds
+  is not itself success-class (`violated`, `reachable_failed`,
+  `unknown_cti`, `unknown_budget`, or `error`), instead of unconditionally
+  reporting `result:"generated"`/exit 0 regardless of the child verdict
+  (issue #592). The rendered ledger content is unaffected -- a violated spec
+  still produces a full audit ledger with the violation embedded -- only the
+  process exit code changes, reusing `mutate_exit_status`'s existing
+  `docs/LANGUAGE.md` exit-code mapping rather than adding a second one. This
+  only changes `fslc ledger`'s own direct exit code; `approval create`/
+  `check`'s internal reuse of the same rendering (`generate_unapproved_ledger_report`,
+  which exists purely to reproduce a target for a digest comparison) is
+  unaffected, since a verdict mismatch there is legitimate drift evidence,
+  not a hard error.
 - A CDP timeout in the browser parity gate now reports the call ordinal, the
   socket's `readyState`, how many other requests were outstanding, and Chrome's
   own stderr, instead of only the method and the elapsed budget. The stall it
