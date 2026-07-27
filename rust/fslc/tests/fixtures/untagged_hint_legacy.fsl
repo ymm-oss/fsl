@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The repair the hint used to ask for: the `"ID: text"` string slot.
+// `--strict-tags` accepts it as tagged; `fslc lint` rejects it as
+// `legacy_string_metadata`. This file is the negative control that keeps the
+// hint from drifting back to a form the next gate refuses.
+spec UntaggedHintLegacy {
+  state { n: 0..3 }
+  init { n = 0 }
+
+  invariant Bounded "REQ-COUNTER-001: the counter never leaves its bound" { n <= 3 }
+
+  action bump() "REQ-COUNTER-002: the counter can advance" {
+    requires n < 3
+    n = n + 1
+  }
+}

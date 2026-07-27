@@ -1329,8 +1329,11 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   ok/verified/proved success results. The targets are untagged
   action/invariant/trans/reachable/leadsTo, and IDs declared via
   `--requirements ids.txt` or a `requirement` block in the requirements dialect but
-  never referenced. A declaration with a tag such as `MODEL: ...` / `ASSUME-n: ...`
-  does not become a warning.
+  never referenced. A declaration linked by `@requirement("MODEL-SCOPE-001", ...)`
+  / `@requirement("ASSUME-SCOPE-001", ...)` does not become a warning. This gate
+  only asks whether a tag exists, not whether it is canonical: a legacy
+  `"REQ-1: text"` string counts as tagged here, and `fslc lint` is what reports
+  it (`legacy_string_metadata`, exit 1, machine-applicable), so run both.
 - `typestate`: determines how far a state machine (a struct field with enum values,
   scoped by field name **and** owning struct type so two structs with a same-named
   field stay independent machines / a state variable / an `Option<_>` slot) can be

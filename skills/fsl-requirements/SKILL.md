@@ -25,9 +25,14 @@ thin spec) and **inventing** a rule the source never stated. Hold both ends:
   transition / invariant / acceptance / forbidden, or is recorded in the memo as
   out-of-scope or needs-decision. The step-1 coverage map forces the hard
   requirements in instead of stopping at the happy path.
-- **Ground the spec.** Every declaration carries provenance — `covers REQ-n "..."`
-  to source text, or a `MODEL:` / `ASSUME-n:` tag for an explicit modeling choice.
-  An untagged declaration is an ungrounded guess, not a style nit.
+- **Ground the spec.** Every declaration carries provenance — process
+  `covers REQ-CHECKOUT-001 "..."` to source text, or the typed annotation
+  `@requirement("REQ-CHECKOUT-001", "...")` on a declaration that links to an ID
+  a `requirement` block owns, with a `MODEL-`/`ASSUME-`prefixed id for an
+  explicit modeling choice. Those two are the canonical forms
+  (`docs/DESIGN-id-policy.md`); the `"REQ-1: text"` string slot is non-canonical
+  migration input, so never write it. An untagged declaration is an ungrounded
+  guess, not a style nit.
 - **Do not invent to reach green.** If `check`/`verify` needs a guard, bound,
   state, actor, deadline, or exception the source does not state, that is a step-1
   question for the human — not a default you may pick to reach `verified`.
@@ -72,11 +77,14 @@ skill produced.
    - upper business contract, if any, and candidate `implements` mapping
    - assumptions and questions that affect behavior
 2. Preserve source fidelity. Requirement IDs and verbatim text belong in
-   `covers REQ-n "..."` on process transitions, or in
-   `requirement REQ-n "..."` for kernel-wrapper declarations, so diagnostics and
-   scenarios trace back to the PM document. Tag any declaration that is not a
-   direct source requirement `MODEL:` or `ASSUME-n:` so the strict-tags gate can
-   tell intended modeling from fabrication.
+   `covers REQ-CHECKOUT-001 "..."` on process transitions, or in a
+   `requirement REQ-CHECKOUT-001 "..."` block that owns the ID for kernel-wrapper
+   declarations, so diagnostics and scenarios trace back to the PM document. Any
+   other declaration links to an owned ID with the typed annotation
+   `@requirement("REQ-CHECKOUT-001", "...")` — and one carrying a
+   `MODEL-`/`ASSUME-`prefixed id when it is not a direct source requirement, so
+   the strict-tags gate can tell intended modeling from fabrication. Do not use
+   the non-canonical `"REQ-1: text"` string slot.
 3. Encode only externally observable product behavior. State names should describe
    product/system states, not engineering mechanisms.
 4. Use the process+data profile first for a single-entity lifecycle:
@@ -120,6 +128,10 @@ skill produced.
 9. Run `fslc check --strict-tags` as the faithfulness gate — not done until it
    reports zero `untagged` and zero `unreferenced_requirement` (add
    `--requirements <ids>` from the memo to also catch fully omitted requirements).
+   `--strict-tags` counts a legacy `"REQ-1: text"` string as tagged, so also run
+   `fslc lint <file>`: it exits 1 with `legacy_string_metadata` and a
+   machine-applicable `@requirement(...)` replacement for every non-canonical
+   form, and with `non_canonical_id` for an ID outside the active policy.
    Then `fslc verify`, and for stable requirements
    `fslc verify --engine induction`. Run `fslc scenarios` to hand development the
    acceptance/forbidden skeletons.

@@ -58,6 +58,29 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   exit-code class (0 vs non-zero) to agree for every corpus file.
 
 ### Fixed
+- `--strict-tags`' `untagged` hint proposed the non-canonical form. It read
+  `add a declaration tag such as "REQ-1: original requirement"; use "MODEL: ..."
+  or "ASSUME-1: ..."` — the `"ID: text"` string slot that
+  `docs/DESIGN-id-policy.md` classifies as migration input and that `fslc lint`
+  reports as `legacy_string_metadata` with a machine-applicable
+  `@requirement(...)` replacement. The diagnostic that fires at the exact moment
+  an author is choosing a tag was therefore teaching the form the next gate
+  rejects, which no amount of documentation elsewhere can outweigh. The hint now
+  names `@requirement("REQ-SCOPE-001", "original requirement")`, the
+  `MODEL-`/`ASSUME-`prefixed id for modeling intent, and process `covers` for the
+  business/requirements dialects. Native only; the frozen Python reference keeps
+  its wording, and no parity gate, test, or snapshot compares this string.
+- The agent skills now state that typed link as the only canonical form.
+  `skills/fsl/SKILL.md` had a worked example writing
+  `invariant OnePerUser "ASSUME-1: ..."`, `skills/fsl-design/SKILL.md` — the
+  design layer's own skill, where a design declaration links back to a
+  requirement ID the requirements spec owns — said nothing about requirement
+  links at all, and `@requirement` appeared nowhere outside the on-demand
+  `reference.md`. The skills' tagging gate was `--strict-tags` alone, which only
+  asks whether a tag exists: it counts a legacy string as tagged. `fslc lint`,
+  the command that actually rejects the non-canonical form, was named in no
+  skill; it is now part of the gate in `fsl/SKILL.md`, `fsl-design`,
+  `fsl-requirements`, and `fsl-delivery`.
 - `fslc db check` reported `result:"verified_under_assumptions"` alongside a
   non-zero exit whenever its nested kernel `verify` came back
   `unknown_cti`/`reachable_failed`/`unknown_budget` (issue #600).

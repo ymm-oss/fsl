@@ -5640,7 +5640,12 @@ fn strict_tag_warnings(
     requirements: Option<&Path>,
 ) -> Result<Vec<Value>, String> {
     let mut warnings = Vec::new();
-    let hint = "add a declaration tag such as \"REQ-1: original requirement\"; use \"MODEL: ...\" or \"ASSUME-1: ...\" when this is modeling intent";
+    // The hint names the canonical link form from `docs/DESIGN-id-policy.md`.
+    // It used to propose the `"REQ-1: original requirement"` string slot, which
+    // that policy classifies as non-canonical migration input and `fslc lint`
+    // reports as `legacy_string_metadata` — so the repair this diagnostic asked
+    // for was the one the next gate rejects.
+    let hint = "tag the declaration with a typed annotation such as @requirement(\"REQ-SCOPE-001\", \"original requirement\"); use a MODEL-/ASSUME-prefixed id for modeling intent, or process `covers` in the business/requirements dialects. The legacy \"REQ-1: text\" string slot is non-canonical (fslc lint reports it as legacy_string_metadata)";
     for (element, name, span, annotations) in model
         .actions
         .iter()
