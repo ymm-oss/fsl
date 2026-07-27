@@ -32,6 +32,15 @@ check_boundaries() {
   assert_dependency_absent fsl-wasm 'fsl-solver-z3 v' 'fsl-wasm must not depend on the native Z3 backend'
 }
 
+# Implementation fault operators (#537 C5): would the suite notice if the
+# verifier started lying? Deliberately kept out of `check_rust` — it patches a
+# scratch checkout and rebuilds `fslc` there once per operator, and
+# `docs/DESIGN-conformance-harness.md` puts that rebuild cost in the product
+# gate rather than in the phase every pull request runs.
+check_fault_operators() {
+  ./tools/run-fault-operators.sh
+}
+
 check_wasm() {
   npm --prefix rust/spikes/z3js-worker ci
   npm --prefix rust/spikes/z3js-worker run probe
@@ -51,12 +60,16 @@ case "${1:-all}" in
   boundaries)
     check_boundaries
     ;;
+  fault-operators)
+    check_fault_operators
+    ;;
   all)
     check_rust
     check_wasm
+    check_fault_operators
     ;;
   *)
-    echo "usage: $0 [all|rust|wasm|boundaries]" >&2
+    echo "usage: $0 [all|rust|wasm|boundaries|fault-operators]" >&2
     exit 2
     ;;
 esac

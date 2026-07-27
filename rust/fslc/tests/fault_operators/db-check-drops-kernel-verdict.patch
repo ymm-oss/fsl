@@ -1,0 +1,16 @@
+Restores the #600 defect: `db check` folds only a `violated` kernel into its
+top-level verdict, so a kernel that came back `unknown_cti` /
+`reachable_failed` / `unknown_budget` is reported as
+`verified_under_assumptions` beside exit 1 -- the envelope contradicts its own
+exit code, and a gate reading the JSON sees a pass.
+
+--- a/rust/fslc/src/main.rs
++++ b/rust/fslc/src/main.rs
+@@ -5943,6 +5943,6 @@
+         // `violated`. Reporting `verified_under_assumptions` over a kernel
+         // that came back `unknown_cti`/`reachable_failed`/`unknown_budget`
+         // made the envelope contradict its own exit code.
+-        let kernel_passed = outcome_class(&kernel).is_success();
++        let kernel_passed = kernel.get("result").and_then(Value::as_str) != Some("violated");
+         if let Value::Object(kernel) = kernel {
+             if !kernel_passed {

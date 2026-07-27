@@ -176,12 +176,121 @@ inputs.
   `fslc ai`/`db import`/domain replay) are out of scope by extension — the scan
   is `*.fsl` only.
 
+## Implementation fault operators (#537 C5)
+
+`injection_detector_matrix.rs` calibrates detectors against defective *specs*:
+`examples/gallery/injected/*.fsl` are hand-authored, and each names the detector
+that must catch it and one that must stay blind. It answers "can this detector
+see a bad spec?"
+
+C5 asks a different question — "would our test suite notice if the *verifier*
+started lying?" — and needs a different mechanism, because the defect lives in
+Rust, not in a `.fsl` file. Every escaped defect in the 2026-07 batch was of this
+kind: `wrap_specialized`'s `_ => 0` (#601), `run_db_check` folding only
+`violated` (#600), `analyze batch` dropping explicit non-`.fsl` input (#496).
+
+The operators are **patches, not code**. `rust/fslc/tests/fault_operators/` holds
+one minimal diff per operator; the harness applies it to a scratch checkout,
+rebuilds there, runs the test named as that operator's primary detector, and
+**requires that test to fail**. Then it reverts. Nothing is injected at runtime.
+
+No fault-injection hook may exist in the shipped binary, under a feature flag or
+otherwise. For a verifier that is the worst artifact imaginable: a switch that
+makes the product lie about verdicts, in the same codebase whose purpose is to
+prevent exactly that. The mechanism that proves we detect false greens must not
+itself be able to cause one. This is not a cost trade-off, and no build
+convenience overrides it.
+
+Each operator declares a primary detector and a blind detector, reusing
+`injection_detector_matrix.rs`'s discipline: the primary must fail under the
+patch, and the blind must still pass — an operator that breaks everything proves
+nothing about the detector it claims to calibrate.
+
+The harness needs its own negative control. A no-op patch must leave every named
+detector passing; if it does not, the harness reports failure whatever the
+operator does, and every cell in it is meaningless.
+
+A patch that no longer applies is a **loud failure, not a skip**. It means the
+seam it targeted moved, and someone must confirm the fault is still possible
+there and re-target the patch. Silently skipping a stale operator is how a
+detector matrix rots into decoration.
+
+Rebuild cost puts this in the product gate (`tools/check-native-integration.sh`),
+not the per-pull-request gate. Operators patch `rust/fslc` where possible, so
+the rebuild is that crate plus a relink rather than the workspace.
+
+The harness is `tools/run-fault-operators.sh`, reached as the
+`fault-operators` phase of `tools/check-native-integration.sh` and included in
+its `all` — deliberately not in its `rust` phase, which `.github/workflows/ci.yml`
+runs on every pull request. CI runs it as its own post-merge `fault operators`
+job, required by the `product gate` aggregator (`docs/DESIGN-ci.md` "Product
+gate contract"): a matrix that never runs is worse than one that skips, so
+"not on pull requests" must not become "nowhere". Operators are rows in
+`rust/fslc/tests/fault_operators/operators.txt`, each naming a patch file, a
+primary detector, and a blind detector; the two controls are
+`controls/no-op.patch` and `controls/stale-seam.patch`. Adding an operator is a
+patch file and a table row, both data.
+
+Detector naming is measured, not asserted. The first calibration moved two of
+the three intended primaries after the harness showed the named test could not
+fail under the fault: `exit_status`'s failure row is reachable only through
+`mutate_exit_status`, so `corpus_check_sweep`'s conservation law never sees it
+(`issue_554_mutate_exit_status::a_violated_baseline_exits_one` does), and #600's
+status-guard half (`!= 0 && != 1`) folds a status-1 kernel identically to
+`== 2`, so only its verdict-fold half is what
+`issue_600_db_check_folds_kernel_verdict` actually detects. Both are the kind of
+mis-attribution a matrix that never runs its own negative side would have kept.
+
+#600's status guard is deliberately **not** a fourth operator, and the reason is
+itself a measurement. Reverting `run_db_check`'s guard to `== 2` and running the
+whole `fslc` suite fails nothing: the two guards differ only for a kernel status
+outside {0,1,2}, and inside `run_db_check` no `.fsl` input can produce one.
+`check_db` calls `validate_db` first, so every input `run_verify` would reject
+with status 2 is already rejected before the kernel runs; `run_verify`'s
+remaining non-{0,1} exits are status 3 from `Z3Solver::new`, from
+`replay_bmc_witnesses`, and from `render_explicit_output` — internal
+inconsistencies, not spec properties. The guard is defensive depth against a
+verifier fault, not a reachable behavior, so no fixture can calibrate it and an
+operator for it would only ever report "primary did not fail". An operator whose
+fault is unobservable is not a missing detector; it is a fault that does not
+exist yet. The unreachability itself needs no issue: an issue asserts there is
+work to do, and for that there is none — the guard is correct, defensive, and
+consistent with its `run_domain_check` sibling. This paragraph is the record.
+
+The measurement did surface a separate obligation, tracked as #612:
+`run_db_check` and `run_domain_check` carry the *same* predicate in two places,
+and #600 exists because someone maintained one of them and not the other. That
+duplication is real work whatever the branch's reachability, and it belongs with
+the rest of the outcome vocabulary in `rust/fslc/src/outcome.rs`. Its
+justification is the duplication and the third site that will otherwise repeat
+#600 — not that extracting it would make a fourth operator possible. Building
+test machinery for a fault that cannot occur is the mistake this paragraph
+exists to prevent.
+
+This is the distinction the harness has to keep making. "No test covers this
+line" and "no input can reach this line" look identical from a coverage report
+and are opposite conclusions.
+
+Tell them apart the way this one was told apart, before writing either an
+operator or the test you think is missing: patch the seam to its defective form
+and run the *whole* `fslc` suite, not the one test you expect to own it. A single
+test staying green says only that this test does not cover the seam. The whole
+suite staying green — with the pre-existing failures subtracted, since a suite
+that is already red proves nothing either way — says no input reaches it, and
+the honest output is a recorded measurement rather than a new operator or a
+fixture nobody can build.
+
 ## Coupled changes
 
 `CONTRIBUTING.md` "Adding a language feature" gains: register any new dialect's
 construct and example corpus in `tests/dialect_registry.py` (and any new example
 directory is claimed automatically by the scan — the harness fails until its
 construct is registered).
+
+`CONTRIBUTING.md` "Guidelines for changes" gains: a fixed escaped defect gains
+an entry in `rust/fslc/tests/fault_operators/` when its defect class can recur
+at a sibling seam, so the regression test proves not only that the defect is
+gone but that the suite would notice its return.
 
 ## Non-goals
 

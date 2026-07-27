@@ -1,0 +1,15 @@
+The harness's negative control. It applies, it forces the same `fslc` rebuild
+every operator forces, and it changes no behavior -- so every detector named
+in `operators.txt` must stay green under it. Without this control a harness
+that fails for its own reasons would read as "the operator worked", and every
+cell in the matrix would be meaningless.
+
+--- a/rust/fslc/src/outcome.rs
++++ b/rust/fslc/src/outcome.rs
+@@ -219,5 +219,6 @@
+         // success. Falling through to zero is exactly how #554 arose, and a
+         // poisoned verify-cache entry must not be readable as a pass either.
+         _ => OutcomeClass::Failure,
++        // Fault-operator no-op control: this comment is the whole patch.
+     }
+ }
