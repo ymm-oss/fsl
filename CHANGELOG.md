@@ -5,6 +5,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- `tools/run-fault-operators.sh` no longer measures a *previous* run's fault.
+  The scratch checkout shares one `CARGO_TARGET_DIR` across steps, and `rsync -a`
+  restores the reverted sources with the worktree's mtimes -- which can be older
+  than rlibs that an operator step compiled *with its patch applied*. Cargo then
+  judged those crates fresh and linked the faulted rlib into the no-op control's
+  binary, so a warm run reported a detector red for a fault that was no longer
+  in the source. Every `sync_scratch` now touches the files any patch names
+  (taken from the diffs' `+++ b/` headers), which puts cargo's mtime comparison
+  on the side of rebuilding without discarding the rest of the warm cache.
+  Reproduced deterministically -- cold run green, every warm run red,
+  `cargo clean -p fsl-syntax` green again -- and verified by restoring clean
+  sources into a fault-built scratch: before the fix cargo recompiled nothing
+  and the rebuilt binary still aborted on the #620 witness (exit 134); after it,
+  `fsl-syntax` recompiles and the witness exits 0. This is the second
+  scratch-fidelity defect in this harness after the `.git` marker (#611), and
+  the first to be caught by the no-op control rather than by inspection --
+  a harness that trusted its cache would have called the operator calibrated
+  while measuring the fault itself.
 - Recursion over a spec's expression structure now grows the stack instead of
   aborting the process (#620). #617 made every platform agree on an 8 MiB
   stack; it did not make the recursion bounded, and a generated 160-stage

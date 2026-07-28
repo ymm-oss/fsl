@@ -39,6 +39,27 @@ scratch="$work/checkout"
 logs="$work/logs"
 export CARGO_TARGET_DIR="$work/target"
 
+# Third scratch-fidelity defect closed here (after the missing repo root and
+# the mtime-surviving faulted rlibs): two invocations sharing one scratch.
+# A second runner applying and reverting patches while the first one's no-op
+# control is measuring makes "primary failed without any fault applied" a lie
+# on both sides, and the interleaved cargo output ("Blocking waiting for file
+# lock") is the tell. `mkdir` is atomic on every platform this runs on, so it
+# is the lock; a stale lock from a crashed run names its holder and is removed
+# by hand, never automatically -- silently stealing a lock is how two runners
+# end up back in one scratch.
+lock="$work/lock"
+mkdir -p "$work"
+if ! mkdir "$lock" 2>/dev/null; then
+  echo "fault-operators: another invocation holds $lock ($(cat "$lock/holder" 2>/dev/null || echo unknown)).
+  If that run crashed, verify no cargo/fslc process is alive and remove the
+  directory by hand. Not proceeding: two runners in one scratch make every
+  verdict in the matrix meaningless." >&2
+  exit 1
+fi
+echo "pid $$ started $(date -u +%FT%TZ)" >"$lock/holder"
+trap 'rm -rf "$lock"' EXIT
+
 fail() {
   echo "fault-operators: $*" >&2
   exit 1
@@ -101,6 +122,34 @@ sync_scratch() {
   # rather than of the fault. `rsync --delete` leaves excluded paths alone, so
   # this survives the next sync.
   [ -e "$scratch/.git" ] || git -C "$scratch" init --quiet
+  # Second scratch-fidelity defect this harness has had to close (the .git
+  # marker above was the first): a *faulted* build can outlive the fault.
+  # `rsync -a` preserves the worktree's mtimes, and after an operator run the
+  # scratch target still holds rlibs compiled *with the fault applied*. When
+  # the next run syncs the reverted sources back, their preserved mtimes can be
+  # older than those rlibs' fingerprints, so cargo judges the crates fresh and
+  # links the faulted rlibs into the no-op control's binary. First observed
+  # with `unguarded-recursion`, the first operator to patch a library crate
+  # (`fsl-syntax`) rather than the `fslc` bin: cold run green, every warm run
+  # red, `cargo clean -p fsl-syntax` green again. Touching every file any
+  # patch references makes cargo's mtime comparison come out on the side of
+  # rebuilding, deterministically, without discarding the rest of the warm
+  # cache. The no-op control is what caught this -- a harness that trusted its
+  # cache would have reported the operator as calibrated while measuring the
+  # fault itself.
+  #
+  # A missing target is left for `apply_patch` to report: it names the seam and
+  # says what to do about it, where an abort here would say nothing. The `if`
+  # rather than `[ -f ... ] && touch ...` is load-bearing for that -- as the
+  # last command in the loop body the `&&` form yields a non-zero status when
+  # the file is absent, and `set -e` would end the run silently on it.
+  sed -n 's/^+++ b\///p' "$operators_dir"/*.patch "$operators_dir"/controls/*.patch \
+    | sort -u \
+    | while IFS= read -r patched; do
+        if [ -f "$scratch/$patched" ]; then
+          touch "$scratch/$patched"
+        fi
+      done
 }
 
 # Applies one patch to the scratch checkout. Exact context only: a seam that
