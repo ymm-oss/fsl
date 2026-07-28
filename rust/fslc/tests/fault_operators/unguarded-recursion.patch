@@ -1,0 +1,23 @@
+Restores the #620 defect: the stack guard becomes a direct call, so recursion
+whose depth tracks the *spec's* structure can abort the process again.
+
+This is the operator for the one failure mode the delivery layer cannot report.
+An abort returns neither the JSON envelope nor an exit code, so it does not
+produce a wrong verdict -- it produces no verdict at all, and every detector
+that reads stdout or `$?` sees nothing to disagree with. The primary detector
+therefore asserts on `Output::status.code()` being `Some`, not on a value.
+
+The patch is one line at the single place the guard lives, which is exactly
+why the guard was consolidated there: an operator that had to patch eight call
+sites would be calibrating the patch rather than the defect.
+
+--- a/rust/fsl-syntax/src/recursion.rs
++++ b/rust/fsl-syntax/src/recursion.rs
+@@ -53,5 +53,6 @@
+ /// directly, which is exactly today's behavior there. Browser-side depth stays
+ /// bounded by the host, as before.
+ pub fn guard<R>(body: impl FnOnce() -> R) -> R {
+-    stacker::maybe_grow(RED_ZONE, NEW_STACK_SIZE, body)
++    let _ = (RED_ZONE, NEW_STACK_SIZE);
++    body()
+ }

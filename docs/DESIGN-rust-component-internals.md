@@ -149,35 +149,62 @@ not be able to abort the process. An abort returns neither the JSON envelope nor
 it exits the outcome-projection contract entirely (#537 C2); it is not a false green, but it is the
 one failure mode the delivery layer cannot even report.
 
-Two such sites are measured, with a generator that scales them arbitrarily (a 2N-long right-nested
-`if` chain mapping a 2N-stage enum onto N stages):
+A generator scales such a site arbitrarily (a 2N-long right-nested `if` chain mapping a 2N-stage
+enum onto N stages). Debug-build thresholds on arm64: the parser overflows 1 MiB at chain ≈ 35 and
+8 MiB at chain ≈ 300; release moves the constants, not the unboundedness.
 
-- the recursive-descent expression parser in `fsl-syntax` (`SyntaxParser`), which every command
-  reaches — `check` and `fmt` abort on the same file `refine` aborts on;
-- the symbolic evaluator's mutual recursion in `fsl-verifier`
-  (`eval` / `eval_binary` / `eval_equality_operands` / `ite_value`), which `refine` reaches with
-  far higher per-level cost: the 19-stage `agentic_rag` chain overflows a 1 MiB stack there while
-  the parser survives the same file.
-
-Debug-build thresholds on arm64: the parser overflows 1 MiB at chain ≈ 35 and 8 MiB at chain
-≈ 300; release moves the constants, not the unboundedness.
-
-The accepted mechanism is **segmented stack growth (`stacker::maybe_grow`) at those two entry
-points**, not a depth limit. A limit would put an arbitrary constant into the language contract and
+The accepted mechanism is **segmented stack growth (`stacker::maybe_grow`) at each recursion cycle
+entry**, not a depth limit. A limit would put an arbitrary constant into the language contract and
 reject legitimate machine-generated specs — the corpus that found this class was itself the first
 input nobody had hand-written. `maybe_grow` preserves every current answer and adds none. The
 red-line from `docs/DESIGN-conformance-harness.md` applies unchanged: this is a growth mechanism
 inside ordinary evaluation, not a fault-injection hook, and no switch may exist that makes the
 binary lie.
 
-Two boundaries hold the mechanism in place:
+**Sites are enumerated by cycle, not by crash.** The measurement that opened #620 named two, because
+a debugger's innermost frame only ever shows the site that happened to run out first. Guarding it
+exposes the next. Implementing the fix found **eight** cycles the same witness reaches, in three
+crates:
+
+| Crate | Cycle entry | Reached by |
+|---|---|---|
+| `fsl-syntax` | `syntax_expr.rs` `SyntaxParser::expression` | every spec-reading command |
+| `fsl-syntax` | `syntax_expr.rs` `SyntaxExpr::into_kernel` | every spec-reading command |
+| `fsl-syntax` | `syntax_expr.rs` `SyntaxExpr::render_source` | `fmt`, diagnostics |
+| `fsl-syntax` | `ast.rs` `Expr::python_ast` | `analyze` |
+| `fsl-core` | `refinement.rs` `elaborate_enum_conversions` | `refine` |
+| `fsl-core` | `typecheck.rs` `infer_type` | every checked command |
+| `fsl-core` | `typecheck.rs` `validate_expression` | every checked command |
+| `fsl-verifier` | `eval.rs` `eval` | `verify`, `refine` |
+
+`fsl-syntax::recursion::guard` owns the red zone and segment size for all of them; `fsl-core`
+re-exports it so no crate needs a second copy of the constants, and `stacker` stays a dependency of
+one crate. The guard belongs on the *cycle entry* — the function every path around the cycle passes
+through — and nowhere else: guarding `SyntaxParser::expression` guards the whole grammar because
+`prefix`, `atom`, and `postfix` re-enter it, and a guard on each arm would cost a stack probe per
+node while proving nothing extra. `infer_type` and `validate_expression` are two cycles rather than
+one, because validation descends the same tree a second time.
+
+Per-level cost is not uniform across the table, which is why no single one of these sites was the
+whole defect: the evaluator is by far the most expensive, and the 19-stage `agentic_rag` mapping
+overflows a 1 MiB stack in `eval` while the parser survives the identical file.
+
+Three boundaries hold the mechanism in place:
 
 - `fsl-wasm` compiles `fsl-verifier` for the browser; on targets `stacker` cannot grow, it calls
   the closure directly, which is exactly today's behavior there. The WASM gate is the proof that
   the fallback compiles; browser-side depth remains bounded by the host, as before.
 - Guarding a *new* recursion over user-controlled structure is part of adding it. The witness
-  generator stays in the tree as the regression's fixture, and a #537 C5 fault operator patches the
-  guard out to prove the deep-spec test still detects its absence.
+  generator stays in the tree as the regression's fixture (`rust/fslc/tests/deep_nesting.rs`,
+  ported from the Python that found the class so the test carries its own fixture), and the
+  `unguarded-recursion` #537 C5 fault operator patches `guard` back into a direct call to prove the
+  deep-spec test still detects its absence.
+- A guard around a *third-party* recursion moves the threshold without removing the unboundedness,
+  so it is not a substitute for removing the recursion. One such site is open: `Expr::python_ast`
+  builds its result with `json!`, which calls `serde_json::to_value` on each already-built child and
+  therefore re-serializes the whole subtree — O(depth) stack and O(n²) time *per level*, inside our
+  guard rather than around it. `analyze` still aborts on a 400-stage witness for that reason.
+  The fix is to build `Value::Array` directly, not to widen the red zone.
 
 This section records current ownership and possible target directions. Any
 source movement described as a target, trigger, or experiment is a candidate,

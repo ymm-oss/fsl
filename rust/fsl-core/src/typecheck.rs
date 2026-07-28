@@ -9,6 +9,7 @@ use fsl_syntax::{
     AggregateKind, Binder, ConditionalSpans, Expr, LValue, Pattern, SourcePos, Span, Statement,
 };
 
+use crate::recursion;
 use crate::{ActionGuard, KernelModel, ParamDef, TypeDef, TypeRef};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -140,8 +141,19 @@ pub(crate) fn binder_type(
     }
 }
 
-#[allow(clippy::too_many_lines)]
+/// Cycle entry for type inference, and where `recursion::guard` belongs: every
+/// arm below recurses back through here for its operands.
 pub(crate) fn infer_type(
+    expr: &Expr,
+    env: &TypeEnv,
+    model: &KernelModel,
+    expected: Option<&TypeRef>,
+) -> Result<TypeRef, TypecheckError> {
+    recursion::guard(|| infer_type_inner(expr, env, model, expected))
+}
+
+#[allow(clippy::too_many_lines)]
+fn infer_type_inner(
     expr: &Expr,
     env: &TypeEnv,
     model: &KernelModel,
@@ -776,8 +788,22 @@ fn binder_name(binder: &Binder) -> &str {
     }
 }
 
-#[allow(clippy::too_many_lines)]
+/// Cycle entry for expression validation, and where `recursion::guard` belongs.
+/// Separate from [`infer_type`]'s cycle: this one descends the same tree again
+/// to check operand well-formedness, so guarding inference alone leaves it
+/// unguarded.
 fn validate_expression(
+    expr: &Expr,
+    env: &TypeEnv,
+    model: &KernelModel,
+    span: Span,
+    expected: Option<&TypeRef>,
+) -> Result<(), TypecheckError> {
+    recursion::guard(|| validate_expression_inner(expr, env, model, span, expected))
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_expression_inner(
     expr: &Expr,
     env: &TypeEnv,
     model: &KernelModel,

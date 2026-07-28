@@ -5,6 +5,29 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Recursion over a spec's expression structure now grows the stack instead of
+  aborting the process (#620). #617 made every platform agree on an 8 MiB
+  stack; it did not make the recursion bounded, and a generated 160-stage
+  refinement trio still killed `fslc` with `has overflowed its stack` — exit
+  134, no JSON envelope, no exit code the outcome contract could read. The
+  fix is `stacker::maybe_grow` at each recursion cycle entry, not a depth
+  limit: a limit would put an arbitrary constant into the language contract
+  and reject legitimate machine-generated specs, and this class was found by
+  exactly such a spec. Every current answer is preserved and none is added.
+  The measurement in #620 named two sites; a debugger's innermost frame only
+  shows whichever site ran out first, so guarding one exposed the next.
+  Eight cycles across three crates are now guarded — `SyntaxParser::expression`,
+  `SyntaxExpr::into_kernel`, `SyntaxExpr::render_source`, `Expr::python_ast`
+  (`fsl-syntax`), `elaborate_enum_conversions`, `infer_type`,
+  `validate_expression` (`fsl-core`), and `eval` (`fsl-verifier`) — behind one
+  `fsl_syntax::recursion::guard` that owns the red zone and segment size, so a
+  future site cannot pick its own constants. `refine` now proves a 1000-stage
+  trio (a 2000-long right-nested `if` chain) that previously aborted at 160,
+  and `check`/`fmt` return their ordinary envelopes on the same file.
+  `fslc analyze` remains unfixed above ~200 stages for a different reason: it
+  reaches `serde_json`'s own recursion through `json!`, which re-serializes
+  each already-built child subtree. See `docs/DESIGN-rust-component-internals.md`
+  4.4.
 - `fslc` now runs on an explicitly sized 8 MiB stack on every platform
   instead of whatever the OS gives the main thread (#617). Windows gives
   1 MiB where Linux and macOS give 8, and `fslc refine` needed more than 1
@@ -37,6 +60,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   error was absorbed as a `dbsystem` verdict. Behaviour is unchanged; the point
   is that a third dialect check cannot now be written without the rule.
 ### Added
+- `rust/fslc/tests/deep_nesting.rs`: the #620 witness as a Rust generator rather
+  than a checked-in fixture, so the regression carries its own scale knob and
+  needs no interpreter. `WITNESS_STAGES = 200` sits above the measured 140-160
+  crash threshold, and a `const _: () = assert!(WITNESS_STAGES > 160)` makes
+  lowering it to speed the test up a compile error rather than a silent
+  downgrade to a test that asserts nothing. The assertion is that `fslc` exited
+  at all — `Output::status.code()` is `None` exactly when a stack overflow kills
+  the process — alongside the verdicts, because a guard that changed an answer
+  would be worse than the crash.
+- `unguarded-recursion` #537 C5 fault operator: patches
+  `fsl_syntax::recursion::guard` back into a direct call and requires
+  `deep_nesting` to fail while the parse-diagnostic matrix stays green. The
+  guard was consolidated into one function partly so this operator is one line;
+  an operator that had to patch eight call sites would calibrate the patch
+  rather than the defect.
 - `rust/fslc/tests/refine_corpus_parity.rs`: a command-owned manifest binding
   every corpus refinement mapping to native `fslc refine` (issue #593, #537 C4,
   `docs/DESIGN-conformance-harness.md` "Refinement mapping manifest"). 22 of the

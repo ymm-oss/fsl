@@ -2,6 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 use crate::SymbolPath;
+use crate::recursion;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -221,9 +222,16 @@ impl Binder {
 }
 
 impl Expr {
+    /// Cycle entry for the JSON AST projection, and where `recursion::guard`
+    /// belongs: every arm below recurses back through here, as do the `Binder`
+    /// and `TypeExpr` projections above. `analyze` reaches it.
     #[must_use]
-    #[allow(clippy::too_many_lines)]
     pub fn python_ast(&self) -> Value {
+        recursion::guard(|| self.python_ast_inner())
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn python_ast_inner(&self) -> Value {
         match self {
             Self::Num(value) => json!(["num", value]),
             Self::Bool(value) => json!(["bool", value]),

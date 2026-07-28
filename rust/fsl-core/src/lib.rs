@@ -13,6 +13,9 @@ use fsl_syntax::{
 };
 use serde_json::Value;
 
+/// Re-exported so every crate that recurses over `KernelExpr` reaches the same
+/// stack guard without depending on `fsl-syntax` directly (#620).
+pub use fsl_syntax::recursion;
 pub use fsl_syntax::{
     AggregateKind as KernelAggregateKind, Annotation, AnnotationError,
     AnnotationRegistry as KernelAnnotationRegistry, AnnotationValue, Annotations,

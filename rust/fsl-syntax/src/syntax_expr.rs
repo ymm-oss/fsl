@@ -12,6 +12,7 @@
 use std::fmt;
 use std::ops::Deref;
 
+use crate::recursion;
 use crate::{
     AggregateKind, Binder, Expr, ParseError, Pattern, QualifiedName, Span, SymbolPath, Token,
     TokenKind,
@@ -201,12 +202,20 @@ pub(crate) enum ExpressionMode {
 impl SyntaxExpr {
     /// Render this parsed expression using canonical source spelling.
     ///
+    /// This is the cycle entry for source rendering -- every arm below recurses
+    /// back through here -- so it is where `recursion::guard` belongs. `fmt`
+    /// reaches it.
+    ///
     /// # Panics
     ///
     /// Panics if a manually constructed `sum` aggregate omits its required value.
     #[must_use]
-    #[allow(clippy::too_many_lines)]
     pub fn render_source(&self) -> String {
+        recursion::guard(|| self.render_source_inner())
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn render_source_inner(&self) -> String {
         match &self.kind {
             SyntaxExprKind::Num(value) => value.to_string(),
             SyntaxExprKind::Bool(value) => value.to_string(),
@@ -302,8 +311,15 @@ impl SyntaxExpr {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    /// Cycle entry for the surface-to-kernel conversion: every arm below
+    /// recurses back through here, so this is where `recursion::guard` belongs.
+    /// Every spec-reading command reaches it, `check` included.
     pub(crate) fn into_kernel(self) -> Result<Expr, ParseError> {
+        recursion::guard(|| self.into_kernel_inner())
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn into_kernel_inner(self) -> Result<Expr, ParseError> {
         let span = self.span;
         Ok(match self.kind {
             SyntaxExprKind::Num(value) => Expr::Num(value),
@@ -719,7 +735,16 @@ struct SyntaxParser<'a> {
 }
 
 impl SyntaxParser<'_> {
+    /// Recursive-descent entry for one expression, and the cycle entry this
+    /// parser's stack guard belongs on (`recursion::guard`): `prefix` re-enters
+    /// it for `if`/`forall` sub-expressions, `atom` for parenthesised and
+    /// listed ones, `postfix` for arguments and indices, and the infix loop for
+    /// a right operand, so guarding this one function guards the whole grammar.
     fn expression(&mut self, min_binding_power: u8) -> Result<SyntaxExpr, ParseError> {
+        recursion::guard(|| self.expression_inner(min_binding_power))
+    }
+
+    fn expression_inner(&mut self, min_binding_power: u8) -> Result<SyntaxExpr, ParseError> {
         let mut left = self.prefix()?;
         left = self.postfix(left)?;
 
