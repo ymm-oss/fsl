@@ -142,7 +142,42 @@ normalized path context, including independent spec and output-parent canonicali
 Move-only refactors must retain both a successful oracle and a rejecting oracle. A successful build
 or unchanged positive snapshot alone does not establish semantic preservation.
 
-## 5. Component internal designs
+### 4.4 Stack discipline over user-controlled structure (#617, #620)
+
+Recursion whose depth tracks the *spec's* structure — not a `--depth` bound the user chose — must
+not be able to abort the process. An abort returns neither the JSON envelope nor an exit code, so
+it exits the outcome-projection contract entirely (#537 C2); it is not a false green, but it is the
+one failure mode the delivery layer cannot even report.
+
+Two such sites are measured, with a generator that scales them arbitrarily (a 2N-long right-nested
+`if` chain mapping a 2N-stage enum onto N stages):
+
+- the recursive-descent expression parser in `fsl-syntax` (`SyntaxParser`), which every command
+  reaches — `check` and `fmt` abort on the same file `refine` aborts on;
+- the symbolic evaluator's mutual recursion in `fsl-verifier`
+  (`eval` / `eval_binary` / `eval_equality_operands` / `ite_value`), which `refine` reaches with
+  far higher per-level cost: the 19-stage `agentic_rag` chain overflows a 1 MiB stack there while
+  the parser survives the same file.
+
+Debug-build thresholds on arm64: the parser overflows 1 MiB at chain ≈ 35 and 8 MiB at chain
+≈ 300; release moves the constants, not the unboundedness.
+
+The accepted mechanism is **segmented stack growth (`stacker::maybe_grow`) at those two entry
+points**, not a depth limit. A limit would put an arbitrary constant into the language contract and
+reject legitimate machine-generated specs — the corpus that found this class was itself the first
+input nobody had hand-written. `maybe_grow` preserves every current answer and adds none. The
+red-line from `docs/DESIGN-conformance-harness.md` applies unchanged: this is a growth mechanism
+inside ordinary evaluation, not a fault-injection hook, and no switch may exist that makes the
+binary lie.
+
+Two boundaries hold the mechanism in place:
+
+- `fsl-wasm` compiles `fsl-verifier` for the browser; on targets `stacker` cannot grow, it calls
+  the closure directly, which is exactly today's behavior there. The WASM gate is the proof that
+  the fallback compiles; browser-side depth remains bounded by the host, as before.
+- Guarding a *new* recursion over user-controlled structure is part of adding it. The witness
+  generator stays in the tree as the regression's fixture, and a #537 C5 fault operator patches the
+  guard out to prove the deep-spec test still detects its absence.
 
 This section records current ownership and possible target directions. Any
 source movement described as a target, trigger, or experiment is a candidate,
