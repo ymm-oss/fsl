@@ -161,21 +161,37 @@ red-line from `docs/DESIGN-conformance-harness.md` applies unchanged: this is a 
 inside ordinary evaluation, not a fault-injection hook, and no switch may exist that makes the
 binary lie.
 
-**Sites are enumerated by cycle, not by crash.** The measurement that opened #620 named two, because
-a debugger's innermost frame only ever shows the site that happened to run out first. Guarding it
-exposes the next. Implementing the fix found **eight** cycles the same witness reaches, in three
-crates:
+**Sites are enumerated by cycle, not by crash — and a crash names only one site at a time.** This is
+the lesson the section is being rewritten for, twice over. #617 concluded "only `refine` aborts",
+which was a property of the corpus rather than the product. #620 then concluded "two sites are
+measured", which was a property of the *debugger*: the innermost frame shows whichever cycle
+happened to exhaust the stack first, so guarding it does not fix the file, it reveals the next site.
+Implementing the fix took six rounds of guard-rebuild-recrash before the witness completed. Neither
+earlier count was a bad measurement; both were single measurements read as a census.
 
-| Crate | Cycle entry | Reached by |
-|---|---|---|
-| `fsl-syntax` | `syntax_expr.rs` `SyntaxParser::expression` | every spec-reading command |
-| `fsl-syntax` | `syntax_expr.rs` `SyntaxExpr::into_kernel` | every spec-reading command |
-| `fsl-syntax` | `syntax_expr.rs` `SyntaxExpr::render_source` | `fmt`, diagnostics |
-| `fsl-syntax` | `ast.rs` `Expr::python_ast` | `analyze` |
-| `fsl-core` | `refinement.rs` `elaborate_enum_conversions` | `refine` |
-| `fsl-core` | `typecheck.rs` `infer_type` | every checked command |
-| `fsl-core` | `typecheck.rs` `validate_expression` | every checked command |
-| `fsl-verifier` | `eval.rs` `eval` | `verify`, `refine` |
+Eight cycles are guarded, in three crates. **Six are crash-witnessed; two are not**, and the table
+says which, because a reader who cannot tell them apart cannot tell this apart from the preventive
+spraying the design forbids:
+
+| Crate | Cycle entry | Exposed by | Reached by |
+|---|---|---|---|
+| `fsl-syntax` | `syntax_expr.rs` `SyntaxParser::expression` | #620, N=160, frame `ident_atom` | every spec-reading command |
+| `fsl-syntax` | `syntax_expr.rs` `SyntaxExpr::into_kernel` | `check` N=200 after guarding the parser | every spec-reading command |
+| `fsl-syntax` | `syntax_expr.rs` `SyntaxExpr::render_source` | **not crash-witnessed**; survives N=2000 | `fmt`, diagnostics |
+| `fsl-syntax` | `ast.rs` `Expr::python_ast` | `analyze` N=400 | `analyze`, both digests, document claims |
+| `fsl-core` | `refinement.rs` `elaborate_enum_conversions` | `refine` N=200 | `refine` |
+| `fsl-core` | `typecheck.rs` `infer_type` | **not crash-witnessed**; survives N=1000 | every checked command |
+| `fsl-core` | `typecheck.rs` `validate_expression` | `refine` N=400 | every checked command |
+| `fsl-verifier` | `eval.rs` `eval` | #620 sample, `agentic_rag` at 1 MiB | `verify`, `refine` |
+
+The two unwitnessed guards are kept, not because deep recursion there is hypothetical — both are
+genuinely unbounded over the same user-controlled tree — but because each is dominated by a guarded
+sibling that keeps its depth small in practice: `render_source` walks `&self` and builds `String`s,
+so its frame is a fraction of `into_kernel`'s, and `infer_type` rides inside `validate_expression`'s
+per-level guard. That makes them a constant factor away from the measured sites rather than a
+different phenomenon. Each carries the same note at its definition, including the N at which it was
+observed to survive unguarded, so the choice can be revisited with evidence rather than re-litigated
+from memory.
 
 `fsl-syntax::recursion::guard` owns the red zone and segment size for all of them; `fsl-core`
 re-exports it so no crate needs a second copy of the constants, and `stacker` stays a dependency of
@@ -200,11 +216,24 @@ Three boundaries hold the mechanism in place:
   `unguarded-recursion` #537 C5 fault operator patches `guard` back into a direct call to prove the
   deep-spec test still detects its absence.
 - A guard around a *third-party* recursion moves the threshold without removing the unboundedness,
-  so it is not a substitute for removing the recursion. One such site is open: `Expr::python_ast`
-  builds its result with `json!`, which calls `serde_json::to_value` on each already-built child and
-  therefore re-serializes the whole subtree — O(depth) stack and O(n²) time *per level*, inside our
-  guard rather than around it. `analyze` still aborts on a 400-stage witness for that reason.
-  The fix is to build `Value::Array` directly, not to widen the red zone.
+  so it is not a substitute for removing the recursion. One such site is open and tracked as
+  **#622**: `Expr::python_ast` builds its result with `json!`, which calls `serde_json::to_value` on
+  each already-built child and therefore re-serializes the whole subtree — O(depth) stack and O(n²)
+  time *per level*, inside our guard rather than around it. The fix is to build `Value::Array`
+  directly, not to widen the red zone.
+
+**The invariant at the top of this section is therefore not yet met.** It holds for the parse,
+lowering, typecheck, refinement, and evaluation paths; it does not hold wherever `python_ast` is
+projected, and that is wider than the command the witness happened to expose. `analyze` aborts on a
+400-stage witness, and the same projection feeds `fslc::approval::spec_digest`,
+`fsl_tools::document_digest::spec_digest_from_kernel`, the requirements document's claim
+projection, and testgen's `expect` — so an approval or document digest over a spec with a deep
+enough invariant is the same class. The witness reached only `analyze` because its deep expression
+lives in a refinement mapping rather than in a spec, which is a property of the witness, not of the
+defect. Treating "analyze only" as the scope would repeat the #617 and #620 errors a third time.
+Because that projection is digest input, its repair must prove byte-identical output against the
+existing digest tests and corpus snapshots, which is why it is a separate reviewable change (#622)
+rather than part of this one.
 
 This section records current ownership and possible target directions. Any
 source movement described as a target, trigger, or experiment is a candidate,

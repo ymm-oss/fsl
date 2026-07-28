@@ -206,6 +206,16 @@ impl SyntaxExpr {
     /// back through here -- so it is where `recursion::guard` belongs. `fmt`
     /// reaches it.
     ///
+    /// **Not crash-witnessed.** Unlike the other guarded cycles, no witness has
+    /// made this one abort: `fmt` survives N=2000 (a 4000-long chain, 10x the
+    /// regression witness) with the guard removed, because rendering walks
+    /// `&self` and builds `String`s rather than moving large owned nodes, so its
+    /// frame is small. It is guarded because it is the same unbounded recursion
+    /// over the same user-controlled tree and only differs by a constant. Treat
+    /// this note as the evidence a reader needs to tell a measured site from a
+    /// speculative one (#620); if the distinction is ever enforced by deletion,
+    /// this is one of the two to delete.
+    ///
     /// # Panics
     ///
     /// Panics if a manually constructed `sum` aggregate omits its required value.
@@ -314,6 +324,11 @@ impl SyntaxExpr {
     /// Cycle entry for the surface-to-kernel conversion: every arm below
     /// recurses back through here, so this is where `recursion::guard` belongs.
     /// Every spec-reading command reaches it, `check` included.
+    ///
+    /// Measured: `check` on the N=200 witness *after* `SyntaxParser::expression`
+    /// was guarded, with this function as the innermost frame at 471 levels and
+    /// ~24 KiB each. It is the reason guarding the parser alone left `check`,
+    /// `fmt`, and `refine` still aborting on the same file.
     pub(crate) fn into_kernel(self) -> Result<Expr, ParseError> {
         recursion::guard(|| self.into_kernel_inner())
     }
@@ -740,6 +755,9 @@ impl SyntaxParser<'_> {
     /// it for `if`/`forall` sub-expressions, `atom` for parenthesised and
     /// listed ones, `postfix` for arguments and indices, and the infix loop for
     /// a right operand, so guarding this one function guards the whole grammar.
+    ///
+    /// Measured: `check`, `fmt`, and `refine` on the #620 N=160 witness, with
+    /// `SyntaxParser::ident_atom` as the innermost frame.
     fn expression(&mut self, min_binding_power: u8) -> Result<SyntaxExpr, ParseError> {
         recursion::guard(|| self.expression_inner(min_binding_power))
     }

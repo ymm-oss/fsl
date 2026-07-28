@@ -224,7 +224,17 @@ impl Binder {
 impl Expr {
     /// Cycle entry for the JSON AST projection, and where `recursion::guard`
     /// belongs: every arm below recurses back through here, as do the `Binder`
-    /// and `TypeExpr` projections above. `analyze` reaches it.
+    /// and `TypeExpr` projections above.
+    ///
+    /// Measured: `analyze` on the N=400 witness, with this function as the
+    /// innermost frame. Its consumers are wider than `analyze` alone -- both
+    /// spec digests (`fslc::approval::spec_digest`,
+    /// `fsl_tools::document_digest::spec_digest_from_kernel`), the requirements
+    /// document's claim projection, and testgen's `expect` all project through
+    /// it -- so the residual `serde_json` recursion described in
+    /// `docs/DESIGN-rust-component-internals.md` 4.4 (#622) is not an
+    /// `analyze`-only problem. The witness only reaches it via `analyze`
+    /// because the deep expression lives in the mapping file, not in a spec.
     #[must_use]
     pub fn python_ast(&self) -> Value {
         recursion::guard(|| self.python_ast_inner())

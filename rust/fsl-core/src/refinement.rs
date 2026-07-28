@@ -476,7 +476,11 @@ fn enum_type_members(
 /// Cycle entry for enum-conversion elaboration over a mapping expression, and
 /// where `recursion::guard` belongs: every arm below recurses back through
 /// here, and a `map` written as a long right-nested `if` chain drives the depth
-/// directly. `refine` reaches it before the evaluator does.
+/// directly.
+///
+/// Measured: `refine` on the N=200 witness, with this function as the innermost
+/// frame at ~25 KiB per level. `refine` reaches it *before* the evaluator, so
+/// guarding `eval` alone does not help this path (#620).
 fn elaborate_enum_conversions(
     expr: Expr,
     conversions: &BTreeMap<String, EnumMapping>,

@@ -26,9 +26,13 @@ type SymbolicPair<T> = (SymbolicValue<T>, SymbolicValue<T>);
 ///
 /// Depth here follows the spec's structure -- a refinement `map` substituted
 /// into an obligation grows the ITE tree, and an equality multiplies it on both
-/// sides -- and costs far more per level than parsing the same expression: the
-/// 19-stage `agentic_rag` mapping overflows a 1 MiB stack here while the parser
-/// survives the identical file.
+/// sides -- and costs far more per level than parsing the same expression.
+///
+/// Measured in #620 by sampling `refine` on `examples/agentic_rag`: 491 `eval`
+/// frames under 101 `eval_binary`, 62 `eval_equality_operands`, and 59
+/// `ite_value`. That 19-stage mapping overflows a 1 MiB stack here while the
+/// parser survives the identical file, which is why per-level cost, not chain
+/// length alone, decides which site aborts first.
 pub(crate) fn eval<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,

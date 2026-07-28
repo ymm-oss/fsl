@@ -15,19 +15,33 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   and reject legitimate machine-generated specs, and this class was found by
   exactly such a spec. Every current answer is preserved and none is added.
   The measurement in #620 named two sites; a debugger's innermost frame only
-  shows whichever site ran out first, so guarding one exposed the next.
-  Eight cycles across three crates are now guarded — `SyntaxParser::expression`,
-  `SyntaxExpr::into_kernel`, `SyntaxExpr::render_source`, `Expr::python_ast`
-  (`fsl-syntax`), `elaborate_enum_conversions`, `infer_type`,
-  `validate_expression` (`fsl-core`), and `eval` (`fsl-verifier`) — behind one
+  shows whichever site ran out first, so guarding one exposed the next, six
+  rounds over. Eight cycles across three crates are now guarded —
+  `SyntaxParser::expression`, `SyntaxExpr::into_kernel`,
+  `SyntaxExpr::render_source`, `Expr::python_ast` (`fsl-syntax`),
+  `elaborate_enum_conversions`, `infer_type`, `validate_expression`
+  (`fsl-core`), and `eval` (`fsl-verifier`) — behind one
   `fsl_syntax::recursion::guard` that owns the red zone and segment size, so a
-  future site cannot pick its own constants. `refine` now proves a 1000-stage
-  trio (a 2000-long right-nested `if` chain) that previously aborted at 160,
-  and `check`/`fmt` return their ordinary envelopes on the same file.
-  `fslc analyze` remains unfixed above ~200 stages for a different reason: it
-  reaches `serde_json`'s own recursion through `json!`, which re-serializes
-  each already-built child subtree. See `docs/DESIGN-rust-component-internals.md`
-  4.4.
+  future site cannot pick its own constants. Six of the eight are
+  crash-witnessed; `render_source` and `infer_type` are not, and each says so at
+  its definition together with the N at which it was observed to survive
+  unguarded, so a reader can tell a measured guard from a speculative one.
+  `refine` now proves a 1000-stage trio (a 2000-long right-nested `if` chain)
+  that previously aborted at 160, and `check`/`fmt` return their ordinary
+  envelopes on the same file.
+
+  The invariant is **not** fully met, and #622 tracks the rest. `Expr::python_ast`
+  builds its result with `json!`, which calls `serde_json::to_value` on each
+  already-built child and re-serializes the whole subtree — O(depth) stack per
+  level, inside the guard rather than around it. `fslc analyze` still aborts
+  above ~200 stages. This is not analyze-only: the same projection feeds both
+  spec digests (`approval::spec_digest`,
+  `document_digest::spec_digest_from_kernel`), the requirements document's claim
+  projection, and testgen's `expect`, so a deep enough invariant in a spec
+  reaches them too. The witness exposed only `analyze` because its deep
+  expression lives in a refinement mapping. Because that projection is digest
+  input, the repair has to prove byte-identical output and is a separate
+  reviewable change. See `docs/DESIGN-rust-component-internals.md` 4.4.
 - `fslc` now runs on an explicitly sized 8 MiB stack on every platform
   instead of whatever the OS gives the main thread (#617). Windows gives
   1 MiB where Linux and macOS give 8, and `fslc refine` needed more than 1
