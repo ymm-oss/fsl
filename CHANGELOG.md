@@ -5,6 +5,61 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- `tools/run-fault-operators.sh` no longer measures a *previous* run's fault.
+  The scratch checkout shares one `CARGO_TARGET_DIR` across steps, and `rsync -a`
+  restores the reverted sources with the worktree's mtimes -- which can be older
+  than rlibs that an operator step compiled *with its patch applied*. Cargo then
+  judged those crates fresh and linked the faulted rlib into the no-op control's
+  binary, so a warm run reported a detector red for a fault that was no longer
+  in the source. Every `sync_scratch` now touches the files any patch names
+  (taken from the diffs' `+++ b/` headers), which puts cargo's mtime comparison
+  on the side of rebuilding without discarding the rest of the warm cache.
+  Reproduced deterministically -- cold run green, every warm run red,
+  `cargo clean -p fsl-syntax` green again -- and verified by restoring clean
+  sources into a fault-built scratch: before the fix cargo recompiled nothing
+  and the rebuilt binary still aborted on the #620 witness (exit 134); after it,
+  `fsl-syntax` recompiles and the witness exits 0. This is the second
+  scratch-fidelity defect in this harness after the `.git` marker (#611), and
+  the first to be caught by the no-op control rather than by inspection --
+  a harness that trusted its cache would have called the operator calibrated
+  while measuring the fault itself.
+- Recursion over a spec's expression structure now grows the stack instead of
+  aborting the process (#620). #617 made every platform agree on an 8 MiB
+  stack; it did not make the recursion bounded, and a generated 160-stage
+  refinement trio still killed `fslc` with `has overflowed its stack` — exit
+  134, no JSON envelope, no exit code the outcome contract could read. The
+  fix is `stacker::maybe_grow` at each recursion cycle entry, not a depth
+  limit: a limit would put an arbitrary constant into the language contract
+  and reject legitimate machine-generated specs, and this class was found by
+  exactly such a spec. Every current answer is preserved and none is added.
+  The measurement in #620 named two sites; a debugger's innermost frame only
+  shows whichever site ran out first, so guarding one exposed the next, six
+  rounds over. Eight cycles across three crates are now guarded —
+  `SyntaxParser::expression`, `SyntaxExpr::into_kernel`,
+  `SyntaxExpr::render_source`, `Expr::python_ast` (`fsl-syntax`),
+  `elaborate_enum_conversions`, `infer_type`, `validate_expression`
+  (`fsl-core`), and `eval` (`fsl-verifier`) — behind one
+  `fsl_syntax::recursion::guard` that owns the red zone and segment size, so a
+  future site cannot pick its own constants. Six of the eight are
+  crash-witnessed; `render_source` and `infer_type` are not, and each says so at
+  its definition together with the N at which it was observed to survive
+  unguarded, so a reader can tell a measured guard from a speculative one.
+  `refine` now proves a 1000-stage trio (a 2000-long right-nested `if` chain)
+  that previously aborted at 160, and `check`/`fmt` return their ordinary
+  envelopes on the same file.
+
+  The invariant is **not** fully met, and #622 tracks the rest. `Expr::python_ast`
+  builds its result with `json!`, which calls `serde_json::to_value` on each
+  already-built child and re-serializes the whole subtree — O(depth) stack per
+  level, inside the guard rather than around it. `fslc analyze` still aborts
+  above ~200 stages. This is not analyze-only: the same projection feeds both
+  spec digests (`approval::spec_digest`,
+  `document_digest::spec_digest_from_kernel`), the requirements document's claim
+  projection, and testgen's `expect`, so a deep enough invariant in a spec
+  reaches them too. The witness exposed only `analyze` because its deep
+  expression lives in a refinement mapping. Because that projection is digest
+  input, the repair has to prove byte-identical output and is a separate
+  reviewable change. See `docs/DESIGN-rust-component-internals.md` 4.4.
 - `fslc` now runs on an explicitly sized 8 MiB stack on every platform
   instead of whatever the OS gives the main thread (#617). Windows gives
   1 MiB where Linux and macOS give 8, and `fslc refine` needed more than 1
@@ -37,6 +92,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   error was absorbed as a `dbsystem` verdict. Behaviour is unchanged; the point
   is that a third dialect check cannot now be written without the rule.
 ### Added
+- `rust/fslc/tests/deep_nesting.rs`: the #620 witness as a Rust generator rather
+  than a checked-in fixture, so the regression carries its own scale knob and
+  needs no interpreter. `WITNESS_STAGES = 200` sits above the measured 140-160
+  crash threshold, and a `const _: () = assert!(WITNESS_STAGES > 160)` makes
+  lowering it to speed the test up a compile error rather than a silent
+  downgrade to a test that asserts nothing. The assertion is that `fslc` exited
+  at all — `Output::status.code()` is `None` exactly when a stack overflow kills
+  the process — alongside the verdicts, because a guard that changed an answer
+  would be worse than the crash.
+- `unguarded-recursion` #537 C5 fault operator: patches
+  `fsl_syntax::recursion::guard` back into a direct call and requires
+  `deep_nesting` to fail while the parse-diagnostic matrix stays green. The
+  guard was consolidated into one function partly so this operator is one line;
+  an operator that had to patch eight call sites would calibrate the patch
+  rather than the defect.
 - `rust/fslc/tests/refine_corpus_parity.rs`: a command-owned manifest binding
   every corpus refinement mapping to native `fslc refine` (issue #593, #537 C4,
   `docs/DESIGN-conformance-harness.md` "Refinement mapping manifest"). 22 of the

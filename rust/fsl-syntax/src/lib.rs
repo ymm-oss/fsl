@@ -21,6 +21,7 @@ mod lexer;
 mod literate;
 mod lossless;
 mod parser;
+pub mod recursion;
 mod surface;
 mod syntax_expr;
 

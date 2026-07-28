@@ -9,6 +9,7 @@ use fsl_syntax::{
     RequirementBlockItem, RequirementsItem, Span, SurfaceDocument, SurfaceRefinement,
 };
 
+use crate::recursion;
 use crate::{
     ActionDef, FileResolver, KernelModel, ParamDef, TypeDef, TypeRef, build_model,
     parse_kernel_source,
@@ -472,8 +473,23 @@ fn enum_type_members(
     }
 }
 
-#[allow(clippy::too_many_lines)]
+/// Cycle entry for enum-conversion elaboration over a mapping expression, and
+/// where `recursion::guard` belongs: every arm below recurses back through
+/// here, and a `map` written as a long right-nested `if` chain drives the depth
+/// directly.
+///
+/// Measured: `refine` on the N=200 witness, with this function as the innermost
+/// frame at ~25 KiB per level. `refine` reaches it *before* the evaluator, so
+/// guarding `eval` alone does not help this path (#620).
 fn elaborate_enum_conversions(
+    expr: Expr,
+    conversions: &BTreeMap<String, EnumMapping>,
+) -> Result<Expr, RefinementError> {
+    recursion::guard(|| elaborate_enum_conversions_inner(expr, conversions))
+}
+
+#[allow(clippy::too_many_lines)]
+fn elaborate_enum_conversions_inner(
     expr: Expr,
     conversions: &BTreeMap<String, EnumMapping>,
 ) -> Result<Expr, RefinementError> {
