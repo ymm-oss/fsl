@@ -636,6 +636,9 @@ bmc -> refinement progress
   model state remains behind `&mut S: SmtSolver`.
 - `value`, `eval`, and `transition` are the shared symbolic semantic kernel. `agreement` observes
   that kernel and does not become a production execution dependency on `fsl-runtime`.
+- `violation_kind` is a dependency-free leaf, sibling to `value`/`trace`: single-owned
+  `BmcViolation`/`InductionCti`/`RankFailure.kind` string constants that both `bmc` and `induction`
+  reference instead of duplicating literals (issue #646, `docs/DESIGN-assurance-matrix.md`).
 - `induction` currently imports `leadsto_bindings`, `leadsto_condition`, and `project_trace` from
   `bmc`. A candidate target moves those helpers to neutral `liveness` and `trace` owners before
   extending either engine.

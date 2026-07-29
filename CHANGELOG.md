@@ -5,6 +5,27 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- `rust/fslc/tests/assurance_matrix.rs` introduces the federated Semantic
+  Assurance Matrix skeleton (issue #537 C3 slice 1,
+  `docs/DESIGN-assurance-matrix.md`): axis modules under `tests/assurance/`
+  own their rows (read from existing single-owner registries, never copied)
+  and declared columns; every `(row, column)` cell carries a
+  machine-rechecked citation (path + anchor, re-read from the working tree
+  each run); blank required cells and stale/fabricated citations fail CI;
+  negative controls prove both checks can actually fail. Slice 1 axes:
+  `outcome_kind` (7 Monitor kinds × Monitor/CLI), `violation_kind` (12
+  engine kinds × BMC/induction, #646), and `properties` (5 KernelModel
+  property kinds × BMC/explicit/induction/replay).
+- `fsl-verifier`'s free-form `Violation.kind` strings (`BmcViolation`/
+  `InductionCti`/`RankFailure`) are now single-owned in
+  `rust/fsl-verifier/src/violation_kind.rs` instead of scattered string
+  literals (#646). Reading the emission sites directly (not transcribing
+  issue #646's own citation list) found 12 live values, not the 9 the issue
+  named — `pending_not_preserved`, `non_decreasing_helpful_action`, and
+  `non_helpful_action_increases_measure` had no exercising fixture anywhere
+  in the corpus before this change. No emitted JSON `violation_kind` value
+  changes by a single byte. Part of #537 C3 slice 1
+  (`docs/DESIGN-assurance-matrix.md`).
 - The kernel AST projection no longer re-serializes every subtree, and is named
   for what it is: `python_ast` is now `kernel_ast_v1` (#622). `json!` calls
   `serde_json::to_value` on each interpolated operand, and the operands were

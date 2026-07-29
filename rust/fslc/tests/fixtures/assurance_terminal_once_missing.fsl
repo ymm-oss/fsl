@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+// Negative control for assurance_terminal_once.fsl (issue #537 C3): the
+// same machine without the `terminal` declaration must report a deadlock
+// under --deadlock error, proving the sibling's green verdict is the
+// terminal exclusion at work and not deadlock-detection failure.
+
+spec AssuranceTerminalOnceMissing {
+  state { done: Bool }
+  init { done = false }
+
+  action finish() {
+    requires not done
+    done = true
+  }
+}

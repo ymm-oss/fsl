@@ -13,6 +13,7 @@ mod trace;
 mod transition;
 mod vacuity;
 mod value;
+pub mod violation_kind;
 
 use std::error::Error;
 use std::fmt;
