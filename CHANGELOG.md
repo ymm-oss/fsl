@@ -5,6 +5,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- `rust/fslc/tests/assurance_matrix.rs` introduces the federated Semantic
+  Assurance Matrix skeleton (issue #537 C3 slice 1,
+  `docs/DESIGN-assurance-matrix.md`): axis modules under `tests/assurance/`
+  own their rows (read from existing single-owner registries, never copied)
+  and declared columns; every `(row, column)` cell carries a
+  machine-rechecked citation (path + anchor, re-read from the working tree
+  each run); blank required cells and stale/fabricated citations fail CI;
+  negative controls prove both checks can actually fail. Slice 1 axes:
+  `outcome_kind` (7 Monitor kinds × Monitor/CLI), `violation_kind` (12
+  engine kinds × BMC/induction, #646), and `properties` (5 KernelModel
+  property kinds × BMC/explicit/induction/replay).
 - `fsl-verifier`'s free-form `Violation.kind` strings (`BmcViolation`/
   `InductionCti`/`RankFailure`) are now single-owned in
   `rust/fsl-verifier/src/violation_kind.rs` instead of scattered string

@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+// Assurance-matrix probe (issue #537 C3): after `finish()` fires, no action
+// is enabled; the `terminal` declaration excludes that state from deadlock
+// reporting. The sibling fixture assurance_terminal_once_missing.fsl is the
+// same machine without `terminal` -- the negative control that must report
+// a deadlock. See rust/fslc/tests/assurance/properties.rs.
+
+spec AssuranceTerminalOnce {
+  state { done: Bool }
+  init { done = false }
+
+  action finish() {
+    requires not done
+    done = true
+  }
+
+  terminal { done }
+}
