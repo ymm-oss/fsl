@@ -6,23 +6,36 @@
 //! can rot silently forever — this is exactly how the 18 files issue #485
 //! repaired (a `requirement` annotation text conflict) went undetected on
 //! `main`. This test closes that hole: every `.fsl` file must either
-//! succeed under `fslc check`, declare `// expected-result: error` for a
-//! header-less (or explicitly `check`-targeted) invocation — the
-//! `examples/gallery/{errors,adversarial}` convention — or be on the
-//! explicit, reasoned exclusion below. `refinement`-dialect files are
-//! excluded structurally, not because coverage is known to exist elsewhere:
-//! a mapping file has no `state` block to build a checked model from, so
-//! `fslc check` always reports `semantics`/"spec has no state block" for one
-//! regardless of whether the mapping itself is sound. Whether a given
-//! mapping is actually exercised by `fslc refine` is a separate, narrower
-//! claim this sweep does not make. That claim is owned by
-//! `refine_corpus_parity.rs`, whose manifest binds every one of these files
-//! to a `refine` run or to a self-retiring exclusion (issue #593, #537 C4),
-//! and which walks the same corpus rather than listing paths, so a mapping
-//! added here cannot escape both tests at once.
-//! `examples/gallery/injected/` (its own primary/blind detector matrix in
-//! `injection_detector_matrix.rs`) is a genuine verified-elsewhere category,
-//! not a silent skip.
+//! succeed under `fslc check`, declare `// expected-result: error` somewhere
+//! in its header, or be on the explicit, reasoned exclusion below.
+//! `refinement`-dialect files are excluded structurally, not because
+//! coverage is known to exist elsewhere: a mapping file has no `state` block
+//! to build a checked model from, so `fslc check` always reports
+//! `semantics`/"spec has no state block" for one regardless of whether the
+//! mapping itself is sound. Whether a given mapping is actually exercised by
+//! `fslc refine` is a separate, narrower claim this sweep does not make.
+//! That claim is owned by `refine_corpus_parity.rs`, whose manifest binds
+//! every one of these files to a `refine` run or to a self-retiring
+//! exclusion (issue #593, #537 C4), and which walks the same corpus rather
+//! than listing paths, so a mapping added here cannot escape both tests at
+//! once. `examples/gallery/injected/` (its own primary/blind detector matrix
+//! in `injection_detector_matrix.rs`) is a genuine verified-elsewhere
+//! category, not a silent skip.
+//!
+//! This sweep used to also assert the *positive* half of the
+//! `examples/gallery/{errors,adversarial}` header convention: that a file
+//! declaring `expected-result: error` **for `check` specifically** actually
+//! fails under `check`. That assertion now belongs to
+//! `corpus_expectation_manifest.rs`, which runs every header's declared
+//! command verbatim (not just `check`) and compares `result`/`kind`/exit
+//! against the declaration (issue #645, #537 C4 residual). This file keeps
+//! exactly two properties, deliberately narrower than a per-file oracle:
+//! (i) a file that declares no error anywhere must not fail `check`
+//! unexpectedly, and (ii) the Verdict Conservation Law below. Splitting the
+//! two prevents a gap, not a hole: `corpus_expectation_manifest.rs`'s roster
+//! is derived from the same header convention this sweep reads, so a
+//! `check`-targeted declared fixture cannot lose its owner by falling
+//! between the two files.
 //!
 //! `check_result_and_exit_status_never_contradict` below is a second,
 //! independent property over the same corpus sweep (issue #537 C2, Verdict
@@ -35,10 +48,14 @@
 //! (`fslc_rust::outcome::outcome_class`), not a list in this file.
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use serde_json::Value;
+
+#[path = "support/mod.rs"]
+mod support;
+use support::{corpus_files, repo_relative, root, top_level_keyword};
 
 /// Repo-relative path (forward slashes) -> reason a bare
 /// check-must-pass-or-declare-error rule does not apply. Each reason names
@@ -71,59 +88,6 @@ const GOVERNANCE_FIXTURE_EXCLUSIONS: &[(&str, &str)] = &[
     ),
 ];
 
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("workspace root")
-        .to_owned()
-}
-
-fn collect_fsl_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(dir).expect("read corpus directory") {
-        let path = entry.expect("read corpus entry").path();
-        if path.is_dir() {
-            collect_fsl_files(&path, out);
-        } else if path.extension().is_some_and(|extension| extension == "fsl") {
-            out.push(path);
-        }
-    }
-}
-
-fn repo_relative(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .expect("path under workspace root")
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
-/// The file's top-level dialect keyword (`spec`, `requirements`,
-/// `refinement`, `governance`, ...): the first token on the first
-/// non-blank, non-`//`-comment line.
-fn top_level_keyword(source: &str) -> Option<&str> {
-    source
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && !line.starts_with("//"))
-        .and_then(|line| line.split_whitespace().next())
-}
-
-/// Parse the `// key: value` header comments in the first 10 lines, the
-/// `expected-command`/`expected-result` convention
-/// `examples/gallery/{valid,errors,adversarial}` use.
-fn headers(source: &str) -> std::collections::BTreeMap<String, String> {
-    let mut out = std::collections::BTreeMap::new();
-    for line in source.lines().take(10) {
-        let Some(body) = line.trim().strip_prefix("//") else {
-            continue;
-        };
-        if let Some((key, value)) = body.trim().split_once(':') {
-            out.insert(key.trim().to_owned(), value.trim().to_owned());
-        }
-    }
-    out
-}
-
 /// Runs `fslc check` on `path` and returns the parsed stdout envelope
 /// together with the process exit status, so a single sweep of the corpus
 /// can serve both the per-file oracle below and the oracle-free
@@ -154,10 +118,7 @@ fn run_check(path: &Path) -> (Value, i32) {
 #[test]
 fn every_corpus_spec_checks_ok_or_declares_its_error() {
     let root = root();
-    let mut files = Vec::new();
-    collect_fsl_files(&root.join("specs"), &mut files);
-    collect_fsl_files(&root.join("examples"), &mut files);
-    files.sort();
+    let files = corpus_files(&root);
     assert!(
         files.len() > 150,
         "corpus scan floor: found only {} .fsl files under specs/+examples/, expected 150+ \
@@ -189,29 +150,18 @@ fn every_corpus_spec_checks_ok_or_declares_its_error() {
 
         let (result, _exit) = run_check(path);
 
-        let file_headers = headers(&source);
-        // `expected-command`/`expected-result` may target a *stricter* verb
-        // than `check` (`verify`, `refine`): a declared error there does not
-        // guarantee `check` itself fails (e.g. vacuity only surfaces under
-        // `verify --vacuity error`), so it only pins the "must fail" edge
-        // when the header targets `check` specifically. Any declared error
-        // (for any command) also makes a `check`-time failure unsurprising
-        // — a semantics-class defect (e.g. double assignment) often
-        // surfaces at both. Only a *completely undeclared* `check` failure
-        // is the structural hole this test exists to catch.
-        let declares_error = file_headers
+        // Whether a *declared* `check`-targeted error actually reproduces is
+        // `corpus_expectation_manifest.rs`'s claim, not this sweep's: it runs
+        // every header's `expected-command` verbatim and compares
+        // `result`/`kind`/exit against the declaration. This sweep keeps only
+        // the complementary half -- a file that declares no error anywhere
+        // must not fail `check` unexpectedly -- which needs no oracle beyond
+        // "does the header say `expected-result: error`".
+        let declares_error = support::headers(&source)
             .get("expected-result")
             .is_some_and(|r| r == "error");
-        let targets_check = file_headers
-            .get("expected-command")
-            .is_none_or(|command| command == "check" || command.starts_with("check "));
-
         let is_error = result["result"] == "error";
-        if targets_check && declares_error && !is_error {
-            failures.push(format!(
-                "{rel}: declares `expected-result: error` for `check` but got {result}"
-            ));
-        } else if !declares_error && is_error {
+        if !declares_error && is_error {
             failures.push(format!(
                 "{rel}: `fslc check` unexpectedly failed and the file does not declare \
                  `expected-result: error` anywhere (add the header, register a reasoned \
@@ -241,10 +191,7 @@ fn every_corpus_spec_checks_ok_or_declares_its_error() {
 #[test]
 fn check_result_and_exit_status_never_contradict() {
     let root = root();
-    let mut files = Vec::new();
-    collect_fsl_files(&root.join("specs"), &mut files);
-    collect_fsl_files(&root.join("examples"), &mut files);
-    files.sort();
+    let files = corpus_files(&root);
     assert!(
         files.len() > 150,
         "corpus scan floor: found only {} .fsl files under specs/+examples/, expected 150+ \
@@ -331,10 +278,7 @@ fn run_exit_status(args: &[&str]) -> i32 {
 #[test]
 fn ledger_exit_status_agrees_with_its_verify_baseline() {
     let root = root();
-    let mut files = Vec::new();
-    collect_fsl_files(&root.join("specs"), &mut files);
-    collect_fsl_files(&root.join("examples"), &mut files);
-    files.sort();
+    let files = corpus_files(&root);
     assert!(
         files.len() > 150,
         "corpus scan floor: found only {} .fsl files under specs/+examples/, expected 150+ \
