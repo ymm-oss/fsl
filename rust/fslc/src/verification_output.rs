@@ -12,7 +12,7 @@ use fsl_core::{
     state_json, trace_json,
 };
 use fsl_solver::VerificationStatistics;
-use fsl_verifier::{BmcResult, BmcViolation, VacuityFinding};
+use fsl_verifier::{BmcResult, BmcViolation, VacuityFinding, violation_kind};
 use serde_json::{Map, Value, json};
 
 /// Deadlock reporting policy shared by native and browser verification.
@@ -1425,7 +1425,7 @@ fn render_deadlock_failure(
 ) -> (Value, i32) {
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("result".to_owned(), json!("violated"));
-    output.insert("violation_kind".to_owned(), json!("deadlock"));
+    output.insert("violation_kind".to_owned(), json!(violation_kind::DEADLOCK));
     output.insert("invariant".to_owned(), json!("deadlock"));
     output.insert("violated_at_step".to_owned(), json!(step));
     if let Some(trace) = &result.deadlock_trace {
@@ -1461,7 +1461,7 @@ fn render_leadsto_failure(
         .find(|property| property.name == violation.name);
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("result".to_owned(), json!("violated"));
-    output.insert("violation_kind".to_owned(), json!("leadsTo"));
+    output.insert("violation_kind".to_owned(), json!(violation_kind::LEADS_TO));
     let name = origin_aware_property_name(&mut output, model, "leadsTo", &violation.name);
     output.insert("invariant".to_owned(), json!(name));
     output

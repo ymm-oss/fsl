@@ -18,6 +18,7 @@ use crate::value::{
     Bindings, SymbolicState, bool_term, bounds, concrete_value, i64_index, logical_equal,
     symbolic_state,
 };
+use crate::violation_kind;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BmcViolation {
@@ -656,7 +657,7 @@ async fn leadsto_violation<S: SmtSolver>(
     let mut details = details;
     details.bindings = binding.concrete.clone();
     Ok(BmcViolation {
-        kind: "leadsTo".to_owned(),
+        kind: violation_kind::LEADS_TO.to_owned(),
         name: property.name.clone(),
         step: upto,
         last_action,
