@@ -44,13 +44,17 @@
 //! one exists and otherwise chosen to exercise the mapping, because depth
 //! bounds the search rather than declaring the expected verdict.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::collections::BTreeSet;
+use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::Value;
+
+#[path = "support/mod.rs"]
+mod support;
+use support::{corpus_files, headers, repo_relative, root, top_level_keyword};
 
 /// One live manifest row: a corpus refinement mapping, the implementation
 /// and abstraction it is declared to be run against, and the verdict the
@@ -546,49 +550,9 @@ const EXCLUSIONS: &[Exclusion] = &[Exclusion {
     },
 }];
 
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("workspace root")
-        .to_owned()
-}
-
-fn collect_fsl_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(dir).expect("read corpus directory") {
-        let path = entry.expect("read corpus entry").path();
-        if path.is_dir() {
-            collect_fsl_files(&path, out);
-        } else if path.extension().is_some_and(|extension| extension == "fsl") {
-            out.push(path);
-        }
-    }
-}
-
-fn repo_relative(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .expect("path under workspace root")
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
-/// The file's top-level dialect keyword: the first token on the first
-/// non-blank, non-`//`-comment line. Same rule `corpus_check_sweep.rs` uses
-/// to identify (and structurally skip) the very files this manifest owns.
-fn top_level_keyword(source: &str) -> Option<&str> {
-    source
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && !line.starts_with("//"))
-        .and_then(|line| line.split_whitespace().next())
-}
-
 /// Every `refinement`-dialect file under `specs/` + `examples/`, repo-relative.
 fn corpus_refinement_mappings(root: &Path) -> BTreeSet<String> {
-    let mut files = Vec::new();
-    collect_fsl_files(&root.join("specs"), &mut files);
-    collect_fsl_files(&root.join("examples"), &mut files);
-    files
+    corpus_files(root)
         .into_iter()
         .filter(|path| {
             let source = std::fs::read_to_string(path).expect("read corpus source");
@@ -602,10 +566,7 @@ fn corpus_refinement_mappings(root: &Path) -> BTreeSet<String> {
 /// declaration is unindented and has the declared name as its second token
 /// (`spec Foo {`, `design Foo {`, ...).
 fn corpus_declares(root: &Path, name: &str) -> bool {
-    let mut files = Vec::new();
-    collect_fsl_files(&root.join("specs"), &mut files);
-    collect_fsl_files(&root.join("examples"), &mut files);
-    files.iter().any(|path| {
+    corpus_files(root).iter().any(|path| {
         let source = std::fs::read_to_string(path).expect("read corpus source");
         source.lines().any(|line| {
             if line.starts_with(char::is_whitespace) || line.trim_start().starts_with("//") {
@@ -615,20 +576,6 @@ fn corpus_declares(root: &Path, name: &str) -> bool {
             tokens.next().is_some() && tokens.next() == Some(name)
         })
     })
-}
-
-/// The `// key: value` header comments the
-/// `examples/gallery/{errors,adversarial}` fixtures use to declare their own
-/// expected command, result, and failure kind. Same convention
-/// `corpus_check_sweep.rs::headers` reads for `check`-targeted fixtures.
-fn headers(source: &str) -> BTreeMap<String, String> {
-    source
-        .lines()
-        .take(10)
-        .filter_map(|line| line.trim().strip_prefix("//"))
-        .filter_map(|body| body.trim().split_once(':'))
-        .map(|(key, value)| (key.trim().to_owned(), value.trim().to_owned()))
-        .collect()
 }
 
 /// Where a mapping declares its own expectation in the gallery header
