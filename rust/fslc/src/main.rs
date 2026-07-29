@@ -11490,7 +11490,7 @@ fn tagged_property(kind: &str, property: &fsl_core::PropertyDef) -> Option<Value
         "tags":tags,
         "loc":property.span.python_loc(),
         "formal_definition":{"expression":fslc_rust::expr_text(&property.expr)},
-        "formal_identifiers":expression_identifiers(&property.expr.python_ast()),
+        "formal_identifiers":expression_identifiers(&property.expr.kernel_ast_v1()),
     }))
 }
 
@@ -11504,10 +11504,10 @@ fn tag_review_output(model: &KernelModel) -> Value {
         };
         let mut identifiers = std::collections::BTreeSet::new();
         for expr in action.requires.iter().chain(&action.ensures) {
-            identifiers.extend(expression_identifiers(&expr.python_ast()));
+            identifiers.extend(expression_identifiers(&expr.kernel_ast_v1()));
         }
         for statement in &action.statements {
-            identifiers.extend(expression_identifiers(&statement.python_ast()));
+            identifiers.extend(expression_identifiers(&statement.kernel_ast_v1()));
         }
         identifiers.extend(action.params.iter().map(|param| param.name().to_owned()));
         let mut effects = Vec::new();
@@ -11551,10 +11551,10 @@ fn tag_review_output(model: &KernelModel) -> Value {
         let Some(tag) = tags.first().cloned() else {
             continue;
         };
-        let mut identifiers = expression_identifiers(&property.before.python_ast());
-        identifiers.extend(expression_identifiers(&property.after.python_ast()));
+        let mut identifiers = expression_identifiers(&property.before.kernel_ast_v1());
+        identifiers.extend(expression_identifiers(&property.after.kernel_ast_v1()));
         if let Some(decreases) = &property.decreases {
-            identifiers.extend(expression_identifiers(&decreases.python_ast()));
+            identifiers.extend(expression_identifiers(&decreases.kernel_ast_v1()));
         }
         let mut formal = Map::new();
         formal.insert(
@@ -11843,15 +11843,15 @@ fn ai_progressless_findings(model: &KernelModel, tsg: &Value) -> Vec<Value> {
         });
         if !attached {
             attached = model.leadstos.iter().any(|property| {
-                let mut reads = expression_identifiers(&property.before.python_ast());
-                reads.extend(expression_identifiers(&property.after.python_ast()));
+                let mut reads = expression_identifiers(&property.before.kernel_ast_v1());
+                reads.extend(expression_identifiers(&property.after.kernel_ast_v1()));
                 reads
                     .iter()
                     .any(|state| cycle_states.contains(&format!("state:{state}")))
             });
         }
         if !attached && let Some(terminal) = &model.terminal {
-            attached = expression_identifiers(&terminal.python_ast())
+            attached = expression_identifiers(&terminal.kernel_ast_v1())
                 .iter()
                 .any(|state| cycle_states.contains(&format!("state:{state}")));
         }
@@ -12750,7 +12750,7 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
                             &format!("{target}:state:{name}"),
                         ),
                     );
-                    let mut reads = expression_identifiers(&expr.python_ast());
+                    let mut reads = expression_identifiers(&expr.kernel_ast_v1());
                     reads.retain(|read| impl_states.contains(read));
                     if let Some(binder) = binder {
                         let binder = match binder {

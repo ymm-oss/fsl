@@ -724,25 +724,25 @@ impl MetaTag {
     }
 
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!({"id": self.id, "text": self.text})
     }
 }
 
 impl TypeExpr {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Int => json!(["int"]),
             Self::Bool => json!(["bool"]),
-            Self::Range(lo, hi) => json!(["range", lo.python_ast(), hi.python_ast()]),
-            Self::Map(key, value) => json!(["map", key.python_ast(), value.python_ast()]),
+            Self::Range(lo, hi) => json!(["range", lo.kernel_ast_v1(), hi.kernel_ast_v1()]),
+            Self::Map(key, value) => json!(["map", key.kernel_ast_v1(), value.kernel_ast_v1()]),
             Self::Relation(source, target) => {
-                json!(["relation", source.python_ast(), target.python_ast()])
+                json!(["relation", source.kernel_ast_v1(), target.kernel_ast_v1()])
             }
-            Self::Set(element) => json!(["set", element.python_ast()]),
-            Self::Seq(element, cap) => json!(["seq", element.python_ast(), cap.python_ast()]),
-            Self::Option(inner) => json!(["option", inner.python_ast()]),
+            Self::Set(element) => json!(["set", element.kernel_ast_v1()]),
+            Self::Seq(element, cap) => json!(["seq", element.kernel_ast_v1(), cap.kernel_ast_v1()]),
+            Self::Option(inner) => json!(["option", inner.kernel_ast_v1()]),
             Self::Name(name) => json!(["name", name]),
         }
     }
@@ -750,13 +750,13 @@ impl TypeExpr {
 
 impl Param {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Typed(name, type_name) => {
-                json!(["param_typed", name, type_name.python_ast()])
+                json!(["param_typed", name, type_name.kernel_ast_v1()])
             }
             Self::Range(name, lo, hi) => {
-                json!(["param_range", name, lo.python_ast(), hi.python_ast()])
+                json!(["param_range", name, lo.kernel_ast_v1(), hi.kernel_ast_v1()])
             }
         }
     }
@@ -764,14 +764,14 @@ impl Param {
 
 impl LValue {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Var(name) => json!(["var", name]),
-            Self::Index(name, index) => json!(["index", name, index.python_ast()]),
+            Self::Index(name, index) => json!(["index", name, index.kernel_ast_v1()]),
             Self::Field(base, field) => match base.as_ref() {
                 Self::Var(name) => json!(["field_lv", ["var", name], field]),
                 Self::Index(name, index) => {
-                    json!(["field_lv", ["index", name, index.python_ast()], field])
+                    json!(["field_lv", ["index", name, index.kernel_ast_v1()], field])
                 }
                 Self::Field(_, _) => unreachable!("grammar permits one lvalue field suffix"),
             },
@@ -781,7 +781,7 @@ impl LValue {
 
 impl Statement {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Assign {
                 target,
@@ -789,8 +789,8 @@ impl Statement {
                 span,
             } => json!([
                 "assign",
-                target.python_ast(),
-                value.python_ast(),
+                target.kernel_ast_v1(),
+                value.kernel_ast_v1(),
                 span.python_loc()
             ]),
             Self::If {
@@ -800,7 +800,7 @@ impl Statement {
                 span,
             } => json!([
                 "if",
-                condition.python_ast(),
+                condition.kernel_ast_v1(),
                 statements_ast(then_statements),
                 statements_ast(else_statements),
                 span.python_loc()
@@ -811,7 +811,7 @@ impl Statement {
                 span,
             } => json!([
                 "forall_stmt",
-                binder.python_ast(),
+                binder.kernel_ast_v1(),
                 statements_ast(statements),
                 span.python_loc()
             ]),
@@ -821,25 +821,25 @@ impl Statement {
 
 impl ActionItem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Requires(expr, span) => {
-                json!(["requires", expr.python_ast(), span.python_loc()])
+                json!(["requires", expr.kernel_ast_v1(), span.python_loc()])
             }
             Self::Ensures(expr, span) => {
-                json!(["ensures", expr.python_ast(), span.python_loc()])
+                json!(["ensures", expr.kernel_ast_v1(), span.python_loc()])
             }
             Self::Let(name, expr, span) => {
-                json!(["let", name, expr.python_ast(), span.python_loc()])
+                json!(["let", name, expr.kernel_ast_v1(), span.python_loc()])
             }
-            Self::Statement(statement) => statement.python_ast(),
+            Self::Statement(statement) => statement.kernel_ast_v1(),
         }
     }
 }
 
 impl VerifyItem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Instances(name, value, span) => {
                 json!(["verify_instances", name, value, span.python_loc()])
@@ -847,8 +847,8 @@ impl VerifyItem {
             Self::Values(name, lo, hi, span) => json!([
                 "verify_values",
                 name,
-                lo.python_ast(),
-                hi.python_ast(),
+                lo.kernel_ast_v1(),
+                hi.kernel_ast_v1(),
                 span.python_loc()
             ]),
         }
@@ -858,9 +858,9 @@ impl VerifyItem {
 impl SpecItem {
     #[must_use]
     #[allow(clippy::too_many_lines)]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
-            Self::Const { name, value } => json!(["const", name, value.python_ast()]),
+            Self::Const { name, value } => json!(["const", name, value.kernel_ast_v1()]),
             Self::Def {
                 name,
                 params,
@@ -871,9 +871,9 @@ impl SpecItem {
                 name,
                 params
                     .iter()
-                    .map(|(name, ty)| json!(["def_param", name, ty.python_ast()]))
+                    .map(|(name, ty)| json!(["def_param", name, ty.kernel_ast_v1()]))
                     .collect::<Vec<_>>(),
-                value.python_ast(),
+                value.kernel_ast_v1(),
                 span.python_loc()
             ]),
             Self::Type {
@@ -882,7 +882,12 @@ impl SpecItem {
                 hi,
                 symmetric,
             } => {
-                let mut values = vec![json!("type"), json!(name), lo.python_ast(), hi.python_ast()];
+                let mut values = vec![
+                    json!("type"),
+                    json!(name),
+                    lo.kernel_ast_v1(),
+                    hi.kernel_ast_v1(),
+                ];
                 if *symmetric {
                     values.push(json!({"symmetric": true}));
                 }
@@ -903,7 +908,7 @@ impl SpecItem {
             Self::Struct { name, fields, .. } => {
                 let fields = fields
                     .iter()
-                    .map(|(name, ty)| (name.clone(), ty.python_ast()))
+                    .map(|(name, ty)| (name.clone(), ty.kernel_ast_v1()))
                     .collect::<Map<_, _>>();
                 json!(["struct", name, fields])
             }
@@ -915,9 +920,9 @@ impl SpecItem {
                     .iter()
                     .map(|field| {
                         let mut declaration =
-                            vec![json!("decl"), json!(field.name), field.ty.python_ast()];
+                            vec![json!("decl"), json!(field.name), field.ty.kernel_ast_v1()];
                         if let Some(initializer) = &field.initializer {
-                            declaration.push(initializer.python_ast());
+                            declaration.push(initializer.kernel_ast_v1());
                             declaration.push(json!(field.initializer_span.map(Span::python_loc)));
                         }
                         Value::Array(declaration)
@@ -929,7 +934,7 @@ impl SpecItem {
             } => {
                 let mut values = vec![json!("init"), Value::Array(statements_ast(statements))];
                 if let Some(meta) = meta {
-                    values.push(meta.python_ast());
+                    values.push(meta.kernel_ast_v1());
                 }
                 Value::Array(values)
             }
@@ -946,11 +951,16 @@ impl SpecItem {
                 let mut values = vec![
                     json!("action"),
                     json!(name),
-                    json!(params.iter().map(Param::python_ast).collect::<Vec<_>>()),
-                    json!(items.iter().map(ActionItem::python_ast).collect::<Vec<_>>()),
+                    json!(params.iter().map(Param::kernel_ast_v1).collect::<Vec<_>>()),
+                    json!(
+                        items
+                            .iter()
+                            .map(ActionItem::kernel_ast_v1)
+                            .collect::<Vec<_>>()
+                    ),
                     span.python_loc(),
                     json!(fair),
-                    json!(meta.as_ref().map(MetaTag::python_ast)),
+                    json!(meta.as_ref().map(MetaTag::kernel_ast_v1)),
                 ];
                 if *sync {
                     values.push(json!(true));
@@ -979,7 +989,7 @@ impl SpecItem {
                 ..
             } => property_ast("reachable", name, expr, *span, meta.as_ref()),
             Self::Terminal { expr, span } => {
-                json!(["terminal", expr.python_ast(), span.python_loc()])
+                json!(["terminal", expr.kernel_ast_v1(), span.python_loc()])
             }
             Self::Until {
                 name,
@@ -991,10 +1001,10 @@ impl SpecItem {
             } => json!([
                 "until",
                 name,
-                before.python_ast(),
-                after.python_ast(),
+                before.kernel_ast_v1(),
+                after.kernel_ast_v1(),
                 span.python_loc(),
-                meta.as_ref().map(MetaTag::python_ast)
+                meta.as_ref().map(MetaTag::kernel_ast_v1)
             ]),
             Self::Unless {
                 name,
@@ -1006,10 +1016,10 @@ impl SpecItem {
             } => json!([
                 "unless",
                 name,
-                before.python_ast(),
-                after.python_ast(),
+                before.kernel_ast_v1(),
+                after.kernel_ast_v1(),
                 span.python_loc(),
-                meta.as_ref().map(MetaTag::python_ast)
+                meta.as_ref().map(MetaTag::kernel_ast_v1)
             ]),
             Self::LeadsTo {
                 name,
@@ -1025,25 +1035,31 @@ impl SpecItem {
             } => json!([
                 "leadsto",
                 name,
-                binders.iter().map(Binder::python_ast).collect::<Vec<_>>(),
-                before.python_ast(),
-                after.python_ast(),
+                binders
+                    .iter()
+                    .map(Binder::kernel_ast_v1)
+                    .collect::<Vec<_>>(),
+                before.kernel_ast_v1(),
+                after.kernel_ast_v1(),
                 span.python_loc(),
-                meta.as_ref().map(MetaTag::python_ast),
-                decreases.as_ref().map(|expr| expr.python_ast()),
-                within.as_ref().map(|expr| expr.python_ast()),
+                meta.as_ref().map(MetaTag::kernel_ast_v1),
+                decreases.as_ref().map(|expr| expr.kernel_ast_v1()),
+                within.as_ref().map(|expr| expr.kernel_ast_v1()),
                 helpful
                     .iter()
                     .map(|entry| json!({
                         "action": entry.action,
-                        "args": entry.args.iter().map(Expr::python_ast).collect::<Vec<_>>(),
+                        "args": entry.args.iter().map(Expr::kernel_ast_v1).collect::<Vec<_>>(),
                         "loc": entry.span.python_loc()
                     }))
                     .collect::<Vec<_>>()
             ]),
             Self::VerifyBounds { items, span } => json!([
                 "verify_bounds",
-                items.iter().map(VerifyItem::python_ast).collect::<Vec<_>>(),
+                items
+                    .iter()
+                    .map(VerifyItem::kernel_ast_v1)
+                    .collect::<Vec<_>>(),
                 span.python_loc()
             ]),
         }
@@ -1052,36 +1068,36 @@ impl SpecItem {
 
 impl SurfaceSpec {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         let mut items = Vec::new();
         if let Some(meta) = &self.meta {
-            items.push(json!(["__spec_meta", meta.python_ast()]));
+            items.push(json!(["__spec_meta", meta.kernel_ast_v1()]));
         }
-        items.extend(self.items.iter().map(SpecItem::python_ast));
+        items.extend(self.items.iter().map(SpecItem::kernel_ast_v1));
         json!(["spec", self.name, items])
     }
 }
 
 impl RefinementParam {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!([
             "refinement_param",
             self.name,
-            self.ty.as_ref().map(TypeExpr::python_ast)
+            self.ty.as_ref().map(TypeExpr::kernel_ast_v1)
         ])
     }
 }
 
 impl ActionTarget {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Stutter => json!(["stutter"]),
             Self::Action(name, args) => json!([
                 "action",
                 name,
-                args.iter().map(Expr::python_ast).collect::<Vec<_>>()
+                args.iter().map(Expr::kernel_ast_v1).collect::<Vec<_>>()
             ]),
         }
     }
@@ -1089,7 +1105,7 @@ impl ActionTarget {
 
 impl RefinementItem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Impl(name) => json!(["impl", name]),
             Self::Abs(name) => json!(["abs", name]),
@@ -1136,8 +1152,8 @@ impl RefinementItem {
             } => json!([
                 "map",
                 name,
-                binder.as_ref().map(Binder::python_ast),
-                expr.python_ast(),
+                binder.as_ref().map(Binder::kernel_ast_v1),
+                expr.kernel_ast_v1(),
                 span.python_loc()
             ]),
             Self::Action {
@@ -1151,9 +1167,9 @@ impl RefinementItem {
                 name,
                 params
                     .iter()
-                    .map(RefinementParam::python_ast)
+                    .map(RefinementParam::kernel_ast_v1)
                     .collect::<Vec<_>>(),
-                target.python_ast(),
+                target.kernel_ast_v1(),
                 span.python_loc()
             ]),
             Self::PreserveProgress { responses, span } => json!([
@@ -1172,13 +1188,13 @@ impl RefinementItem {
 
 impl SurfaceRefinement {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!([
             "refinement",
             self.name,
             self.items
                 .iter()
-                .map(RefinementItem::python_ast)
+                .map(RefinementItem::kernel_ast_v1)
                 .collect::<Vec<_>>()
         ])
     }
@@ -1186,24 +1202,24 @@ impl SurfaceRefinement {
 
 impl ProcessField {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!([
             "proc_field",
             self.name,
-            self.type_name.python_ast(),
-            self.initial.as_ref().map(Expr::python_ast)
+            self.type_name.kernel_ast_v1(),
+            self.initial.as_ref().map(Expr::kernel_ast_v1)
         ])
     }
 }
 
 impl ProcessFields {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!([
             "proc_fields",
             self.fields
                 .iter()
-                .map(ProcessField::python_ast)
+                .map(ProcessField::kernel_ast_v1)
                 .collect::<Vec<_>>(),
             self.span.python_loc()
         ])
@@ -1212,7 +1228,7 @@ impl ProcessFields {
 
 impl ProcessItem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Stages(names, span) => json!(["biz_stages", names, span.python_loc()]),
             Self::Initial(name, span) => json!(["biz_initial", name, span.python_loc()]),
@@ -1225,14 +1241,14 @@ impl ProcessItem {
                 if has_extra {
                     extra.insert(
                         "inputs".to_owned(),
-                        Value::Array(transition.inputs.iter().map(Param::python_ast).collect()),
+                        Value::Array(transition.inputs.iter().map(Param::kernel_ast_v1).collect()),
                     );
                     extra.insert(
                         "guard".to_owned(),
                         transition
                             .guard
                             .as_ref()
-                            .map_or(Value::Null, Expr::python_ast),
+                            .map_or(Value::Null, Expr::kernel_ast_v1),
                     );
                     extra.insert(
                         "sets".to_owned(),
@@ -1240,7 +1256,9 @@ impl ProcessItem {
                             transition
                                 .assignments
                                 .iter()
-                                .map(|(name, expr)| json!(["proc_assign", name, expr.python_ast()]))
+                                .map(|(name, expr)| {
+                                    json!(["proc_assign", name, expr.kernel_ast_v1()])
+                                })
                                 .collect(),
                         ),
                     );
@@ -1268,7 +1286,7 @@ impl ProcessItem {
 
 impl ControlAttribute {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Owner(name) => json!(["control_owner", name]),
             Self::Severity(name) => json!(["control_severity", name]),
@@ -1279,9 +1297,9 @@ impl ControlAttribute {
 
 impl BusinessPolicyBody {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
-            Self::Invariant(expr) => json!(["biz_policy_invariant", expr.python_ast()]),
+            Self::Invariant(expr) => json!(["biz_policy_invariant", expr.kernel_ast_v1()]),
             Self::Responds {
                 binders,
                 before,
@@ -1289,10 +1307,13 @@ impl BusinessPolicyBody {
                 within,
             } => json!([
                 "biz_policy_responds",
-                binders.iter().map(Binder::python_ast).collect::<Vec<_>>(),
-                before.python_ast(),
-                after.python_ast(),
-                within.as_deref().map(Expr::python_ast)
+                binders
+                    .iter()
+                    .map(Binder::kernel_ast_v1)
+                    .collect::<Vec<_>>(),
+                before.kernel_ast_v1(),
+                after.kernel_ast_v1(),
+                within.as_deref().map(Expr::kernel_ast_v1)
             ]),
             Self::Eventually {
                 case_name,
@@ -1315,9 +1336,9 @@ impl BusinessPolicyBody {
 
 impl BusinessGoalBody {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
-            Self::Expr(expr) => json!(["biz_goal_expr", expr.python_ast()]),
+            Self::Expr(expr) => json!(["biz_goal_expr", expr.kernel_ast_v1()]),
             Self::SomeStage { case_name, stage } => {
                 json!(["biz_goal_some_stage", case_name, stage])
             }
@@ -1330,7 +1351,7 @@ impl BusinessGoalBody {
 
 impl BusinessItem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Actor(names, span) => json!(["biz_actor", names, span.python_loc()]),
             Self::Entity(name, span) => json!(["entity", name, span.python_loc()]),
@@ -1342,10 +1363,10 @@ impl BusinessItem {
             } => json!([
                 "biz_process",
                 name.to_string(),
-                fields.as_ref().map(ProcessFields::python_ast),
+                fields.as_ref().map(ProcessFields::kernel_ast_v1),
                 items
                     .iter()
-                    .map(ProcessItem::python_ast)
+                    .map(ProcessItem::kernel_ast_v1)
                     .collect::<Vec<_>>(),
                 span.python_loc()
             ]),
@@ -1366,7 +1387,7 @@ impl BusinessItem {
                 text,
                 attributes
                     .iter()
-                    .map(ControlAttribute::python_ast)
+                    .map(ControlAttribute::kernel_ast_v1)
                     .collect::<Vec<_>>(),
                 span.python_loc()
             ]),
@@ -1381,7 +1402,7 @@ impl BusinessItem {
                 "biz_policy",
                 id,
                 text,
-                body.python_ast(),
+                body.kernel_ast_v1(),
                 span.python_loc(),
                 satisfies
             ]),
@@ -1396,13 +1417,16 @@ impl BusinessItem {
                 "biz_goal",
                 id,
                 text,
-                body.python_ast(),
+                body.kernel_ast_v1(),
                 span.python_loc(),
                 satisfies
             ]),
             Self::VerifyBounds { items, span } => json!([
                 "verify_bounds",
-                items.iter().map(VerifyItem::python_ast).collect::<Vec<_>>(),
+                items
+                    .iter()
+                    .map(VerifyItem::kernel_ast_v1)
+                    .collect::<Vec<_>>(),
                 span.python_loc()
             ]),
         }
@@ -1411,13 +1435,13 @@ impl BusinessItem {
 
 impl SurfaceBusiness {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!([
             "business",
             self.name,
             self.items
                 .iter()
-                .map(BusinessItem::python_ast)
+                .map(BusinessItem::kernel_ast_v1)
                 .collect::<Vec<_>>()
         ])
     }
@@ -1425,7 +1449,7 @@ impl SurfaceBusiness {
 
 impl GovernanceArtifactRef {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Policy(id, span) => json!(["policy", id, span.python_loc()]),
             Self::Goal(id, span) => json!(["goal", id, span.python_loc()]),
@@ -1435,7 +1459,7 @@ impl GovernanceArtifactRef {
 
 impl GovernanceDelegateItem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Require(id, span) => json!(["gov_require", id, span.python_loc()]),
             Self::Satisfaction {
@@ -1447,7 +1471,7 @@ impl GovernanceDelegateItem {
                 control_id,
                 artifacts
                     .iter()
-                    .map(GovernanceArtifactRef::python_ast)
+                    .map(GovernanceArtifactRef::kernel_ast_v1)
                     .collect::<Vec<_>>(),
                 span.python_loc()
             ]),
@@ -1457,7 +1481,7 @@ impl GovernanceDelegateItem {
 
 impl PreservationItem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Before {
                 spec_name,
@@ -1481,7 +1505,7 @@ impl PreservationItem {
 
 impl GovernanceItem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Authority {
                 authority,
@@ -1499,7 +1523,7 @@ impl GovernanceItem {
                 text,
                 attributes
                     .iter()
-                    .map(ControlAttribute::python_ast)
+                    .map(ControlAttribute::kernel_ast_v1)
                     .collect::<Vec<_>>(),
                 span.python_loc()
             ]),
@@ -1514,7 +1538,7 @@ impl GovernanceItem {
                 path,
                 items
                     .iter()
-                    .map(GovernanceDelegateItem::python_ast)
+                    .map(GovernanceDelegateItem::kernel_ast_v1)
                     .collect::<Vec<_>>(),
                 span.python_loc()
             ]),
@@ -1523,7 +1547,7 @@ impl GovernanceItem {
                 name,
                 items
                     .iter()
-                    .map(PreservationItem::python_ast)
+                    .map(PreservationItem::kernel_ast_v1)
                     .collect::<Vec<_>>(),
                 span.python_loc()
             ]),
@@ -1533,13 +1557,13 @@ impl GovernanceItem {
 
 impl SurfaceGovernance {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!([
             "governance",
             self.name,
             self.items
                 .iter()
-                .map(GovernanceItem::python_ast)
+                .map(GovernanceItem::kernel_ast_v1)
                 .collect::<Vec<_>>()
         ])
     }
@@ -1547,19 +1571,19 @@ impl SurfaceGovernance {
 
 impl MapsClause {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
-        json!(["maps", self.target.python_ast(), self.span.python_loc()])
+    pub fn kernel_ast_v1(&self) -> Value {
+        json!(["maps", self.target.kernel_ast_v1(), self.span.python_loc()])
     }
 }
 
 impl RequirementBranch {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!([
             "branch",
-            self.condition.python_ast(),
+            self.condition.kernel_ast_v1(),
             statements_ast(&self.statements),
-            self.maps.python_ast(),
+            self.maps.kernel_ast_v1(),
             self.span.python_loc()
         ])
     }
@@ -1567,14 +1591,14 @@ impl RequirementBranch {
 
 impl RequirementActionItem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
-            Self::Action(item) => item.python_ast(),
+            Self::Action(item) => item.kernel_ast_v1(),
             Self::Branches { branches, span } => json!([
                 "branches",
                 branches
                     .iter()
-                    .map(RequirementBranch::python_ast)
+                    .map(RequirementBranch::kernel_ast_v1)
                     .collect::<Vec<_>>(),
                 span.python_loc()
             ]),
@@ -1584,34 +1608,34 @@ impl RequirementActionItem {
 
 impl RequirementAction {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!([
             "req_action",
             self.name,
             self.params
                 .iter()
-                .map(Param::python_ast)
+                .map(Param::kernel_ast_v1)
                 .collect::<Vec<_>>(),
             self.items
                 .iter()
-                .map(RequirementActionItem::python_ast)
+                .map(RequirementActionItem::kernel_ast_v1)
                 .collect::<Vec<_>>(),
             self.span.python_loc(),
             self.fair,
-            self.meta.as_ref().map(MetaTag::python_ast),
-            self.maps.as_ref().map(MapsClause::python_ast)
+            self.meta.as_ref().map(MetaTag::kernel_ast_v1),
+            self.maps.as_ref().map(MapsClause::kernel_ast_v1)
         ])
     }
 }
 
 impl RequirementBlockItem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
-            Self::Action(action) => action.python_ast(),
-            Self::Property(item) => item.python_ast(),
+            Self::Action(action) => action.kernel_ast_v1(),
+            Self::Property(item) => item.kernel_ast_v1(),
             Self::Deadline { name, bound, span } => {
-                json!(["deadline", name, bound.python_ast(), span.python_loc()])
+                json!(["deadline", name, bound.kernel_ast_v1(), span.python_loc()])
             }
         }
     }
@@ -1619,11 +1643,14 @@ impl RequirementBlockItem {
 
 impl AcceptanceStep {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!([
             "acceptance_step",
             self.name,
-            self.args.iter().map(Expr::python_ast).collect::<Vec<_>>(),
+            self.args
+                .iter()
+                .map(Expr::kernel_ast_v1)
+                .collect::<Vec<_>>(),
             self.span.python_loc()
         ])
     }
@@ -1631,10 +1658,10 @@ impl AcceptanceStep {
 
 impl AcceptanceExpectation {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Expr(expr, span) => {
-                json!(["acceptance_expect", expr.python_ast(), span.python_loc()])
+                json!(["acceptance_expect", expr.kernel_ast_v1(), span.python_loc()])
             }
             Self::Stage {
                 entity,
@@ -1654,7 +1681,7 @@ impl AcceptanceExpectation {
 
 impl TimeItem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Urgent(names, span) => json!(["time_urgent", names, span.python_loc()]),
             Self::Age {
@@ -1665,8 +1692,8 @@ impl TimeItem {
             } => json!([
                 "time_age",
                 name,
-                binder.as_ref().map(Binder::python_ast),
-                condition.python_ast(),
+                binder.as_ref().map(Binder::kernel_ast_v1),
+                condition.kernel_ast_v1(),
                 span.python_loc()
             ]),
         }
@@ -1675,7 +1702,7 @@ impl TimeItem {
 
 impl RequirementsItem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Implements {
                 name,
@@ -1688,7 +1715,7 @@ impl RequirementsItem {
                 path,
                 items
                     .iter()
-                    .map(RefinementItem::python_ast)
+                    .map(RefinementItem::kernel_ast_v1)
                     .collect::<Vec<_>>(),
                 span.python_loc()
             ]),
@@ -1704,7 +1731,7 @@ impl RequirementsItem {
                 text,
                 items
                     .iter()
-                    .map(RequirementBlockItem::python_ast)
+                    .map(RequirementBlockItem::kernel_ast_v1)
                     .collect::<Vec<_>>(),
                 span.python_loc()
             ]),
@@ -1721,9 +1748,9 @@ impl RequirementsItem {
                 text,
                 steps
                     .iter()
-                    .map(AcceptanceStep::python_ast)
+                    .map(AcceptanceStep::kernel_ast_v1)
                     .collect::<Vec<_>>(),
-                expectation.python_ast(),
+                expectation.kernel_ast_v1(),
                 span.python_loc()
             ]),
             Self::Forbidden {
@@ -1738,31 +1765,34 @@ impl RequirementsItem {
                 text,
                 steps
                     .iter()
-                    .map(AcceptanceStep::python_ast)
+                    .map(AcceptanceStep::kernel_ast_v1)
                     .collect::<Vec<_>>(),
                 span.python_loc()
             ]),
-            Self::Process(item) | Self::Kpi(item) => item.python_ast(),
-            Self::Action(action) => action.python_ast(),
+            Self::Process(item) | Self::Kpi(item) => item.kernel_ast_v1(),
+            Self::Action(action) => action.kernel_ast_v1(),
             Self::Time { items, span } => json!([
                 "time",
-                items.iter().map(TimeItem::python_ast).collect::<Vec<_>>(),
+                items
+                    .iter()
+                    .map(TimeItem::kernel_ast_v1)
+                    .collect::<Vec<_>>(),
                 span.python_loc()
             ]),
-            Self::Common(item) => item.python_ast(),
+            Self::Common(item) => item.kernel_ast_v1(),
         }
     }
 }
 
 impl SurfaceRequirements {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!([
             "requirements",
             self.name,
             self.items
                 .iter()
-                .map(RequirementsItem::python_ast)
+                .map(RequirementsItem::kernel_ast_v1)
                 .collect::<Vec<_>>()
         ])
     }
@@ -1770,44 +1800,47 @@ impl SurfaceRequirements {
 
 impl SyncRef {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!([
             "sync_ref",
             self.alias,
             self.action,
-            self.args.iter().map(Expr::python_ast).collect::<Vec<_>>()
+            self.args
+                .iter()
+                .map(Expr::kernel_ast_v1)
+                .collect::<Vec<_>>()
         ])
     }
 }
 
 impl SyncAction {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!([
             "sync_action",
             self.name,
             self.params
                 .iter()
-                .map(Param::python_ast)
+                .map(Param::kernel_ast_v1)
                 .collect::<Vec<_>>(),
             self.refs
                 .iter()
-                .map(SyncRef::python_ast)
+                .map(SyncRef::kernel_ast_v1)
                 .collect::<Vec<_>>(),
             self.items
                 .iter()
-                .map(ActionItem::python_ast)
+                .map(ActionItem::kernel_ast_v1)
                 .collect::<Vec<_>>(),
             self.span.python_loc(),
             self.fair,
-            self.meta.as_ref().map(MetaTag::python_ast)
+            self.meta.as_ref().map(MetaTag::kernel_ast_v1)
         ])
     }
 }
 
 impl ComposeItem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Use {
                 spec_name,
@@ -1820,21 +1853,21 @@ impl ComposeItem {
                 action,
                 span,
             } => json!(["internal", alias, action, span.python_loc()]),
-            Self::SyncAction(action) => action.python_ast(),
-            Self::Common(item) => item.python_ast(),
+            Self::SyncAction(action) => action.kernel_ast_v1(),
+            Self::Common(item) => item.kernel_ast_v1(),
         }
     }
 }
 
 impl SurfaceCompose {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!([
             "compose",
             self.name,
             self.items
                 .iter()
-                .map(ComposeItem::python_ast)
+                .map(ComposeItem::kernel_ast_v1)
                 .collect::<Vec<_>>()
         ])
     }
@@ -1842,17 +1875,17 @@ impl SurfaceCompose {
 
 impl SurfaceDocument {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
-            Self::Spec(spec) => spec.python_ast(),
-            Self::Refinement(refinement) => refinement.python_ast(),
-            Self::Business(business) => business.python_ast(),
-            Self::Governance(governance) => governance.python_ast(),
-            Self::Requirements(requirements) => requirements.python_ast(),
-            Self::Compose(compose) => compose.python_ast(),
-            Self::Db(system) => system.python_ast(),
-            Self::Domain(domain) => domain.python_ast(),
-            Self::AiComponent(component) => component.python_ast(),
+            Self::Spec(spec) => spec.kernel_ast_v1(),
+            Self::Refinement(refinement) => refinement.kernel_ast_v1(),
+            Self::Business(business) => business.kernel_ast_v1(),
+            Self::Governance(governance) => governance.kernel_ast_v1(),
+            Self::Requirements(requirements) => requirements.kernel_ast_v1(),
+            Self::Compose(compose) => compose.kernel_ast_v1(),
+            Self::Db(system) => system.kernel_ast_v1(),
+            Self::Domain(domain) => domain.kernel_ast_v1(),
+            Self::AiComponent(component) => component.kernel_ast_v1(),
             Self::Agent(agent) => json!({
                 "$type": "Agent", "name": agent.name, "loc": agent.span.python_loc(),
             }),
@@ -1861,15 +1894,15 @@ impl SurfaceDocument {
 }
 
 fn statements_ast(statements: &[Statement]) -> Vec<Value> {
-    statements.iter().map(Statement::python_ast).collect()
+    statements.iter().map(Statement::kernel_ast_v1).collect()
 }
 
 fn property_ast(kind: &str, name: &str, expr: &Expr, span: Span, meta: Option<&MetaTag>) -> Value {
     json!([
         kind,
         name,
-        expr.python_ast(),
+        expr.kernel_ast_v1(),
         span.python_loc(),
-        meta.map(MetaTag::python_ast)
+        meta.map(MetaTag::kernel_ast_v1)
     ])
 }

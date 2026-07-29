@@ -54,7 +54,7 @@ fn expression_vars(expr: &Expr) -> BTreeSet<String> {
         }
     }
     let mut names = BTreeSet::new();
-    visit(&expr.python_ast(), &mut names);
+    visit(&expr.kernel_ast_v1(), &mut names);
     names
 }
 
@@ -164,7 +164,7 @@ pub fn analyze_refinement(refinement: &SurfaceRefinement) -> Value {
                     if let Some(binder) = binder {
                         object.insert("binder".to_owned(), json!(binder));
                     }
-                    object.insert("expr".to_owned(), expr.python_ast());
+                    object.insert("expr".to_owned(), expr.kernel_ast_v1());
                 }
                 insert_node(&mut nodes, value);
                 insert_edge(&mut edges, edge(&ref_id, "declares", &id));

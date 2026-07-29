@@ -1824,7 +1824,7 @@ migration/互換性ルールのアノテーションが、損失のあるレガ�
 #### 13.1.2 ツール・AI 消費のための根拠(rationale)
 
 `//` コメントは字句解析上の trivia(`rust/fsl-syntax/src/lexer.rs`)であり、
-AST にも `KernelModel` にも `python_ast()` にも JSON の result envelope にも
+AST にも `KernelModel` にも `kernel_ast_v1()` にも JSON の result envelope にも
 LSP のインデックスにも監査台帳にも到達しません。補助不変条件が k-induction の
 CTI を閉じるために存在する、あるいは実装のガードが抽象側より意図的に強い、と
 いった、下流のツールや AI エージェントが失ってはならない事実は、散文だけに

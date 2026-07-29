@@ -415,22 +415,22 @@ fn push_action_claim(
         .iter()
         .map(|guard| match guard {
             ActionGuard::Requires(expr) => {
-                json!({"role": "requires", "name": null, "ast": normalize(expr.python_ast())})
+                json!({"role": "requires", "name": null, "ast": normalize(expr.kernel_ast_v1())})
             }
             ActionGuard::Let(name, expr) => {
-                json!({"role": "let", "name": name, "ast": normalize(expr.python_ast())})
+                json!({"role": "let", "name": name, "ast": normalize(expr.kernel_ast_v1())})
             }
         })
         .collect();
     let statements: Vec<Value> = action
         .statements
         .iter()
-        .map(|statement| normalize(statement.python_ast()))
+        .map(|statement| normalize(statement.kernel_ast_v1()))
         .collect();
     let postconditions: Vec<Value> = action
         .ensures
         .iter()
-        .map(|expr| normalize(expr.python_ast()))
+        .map(|expr| normalize(expr.kernel_ast_v1()))
         .collect();
     let fairness = if action.fair { "weak" } else { "none" };
 
@@ -555,7 +555,7 @@ fn push_terminal_claim(
     let links = model.requirements_for(&target);
     let kind_ids = kind_ids_from(model.annotations_for(&target));
     let requirement_ids = record_links(&links, &kind_ids, &claim_id, source_path, agg);
-    let condition = normalize(expr.python_ast());
+    let condition = normalize(expr.kernel_ast_v1());
 
     let core = json!({
         "id": claim_id,
@@ -628,7 +628,7 @@ fn push_trace_claims(
             .map(|step| {
                 json!({
                     "action": step.name,
-                    "args": step.args.iter().map(|arg| normalize(arg.python_ast())).collect::<Vec<_>>(),
+                    "args": step.args.iter().map(|arg| normalize(arg.kernel_ast_v1())).collect::<Vec<_>>(),
                 })
             })
             .collect();
@@ -637,7 +637,7 @@ fn push_trace_claims(
             .as_ref()
             .map(|expectation| match expectation {
                 RequirementsTraceExpectation::Expr(expr) => {
-                    json!({"kind": "expr", "ast": normalize(expr.python_ast())})
+                    json!({"kind": "expr", "ast": normalize(expr.kernel_ast_v1())})
                 }
                 RequirementsTraceExpectation::Stage {
                     entity,
@@ -856,7 +856,7 @@ fn project_requirement_claims_with_trace(
             "invariant",
             &property.name,
             property.span,
-            property.expr.python_ast(),
+            property.expr.kernel_ast_v1(),
             claim_kind,
             model,
             source_path,
@@ -870,7 +870,7 @@ fn project_requirement_claims_with_trace(
             "trans",
             &property.name,
             property.span,
-            property.expr.python_ast(),
+            property.expr.kernel_ast_v1(),
             ClaimKind::TransitionRule,
             model,
             source_path,
@@ -884,7 +884,7 @@ fn project_requirement_claims_with_trace(
             "reachable",
             &property.name,
             property.span,
-            property.expr.python_ast(),
+            property.expr.kernel_ast_v1(),
             ClaimKind::ReachabilityGoal,
             model,
             source_path,
@@ -904,14 +904,14 @@ fn project_requirement_claims_with_trace(
         let binders: Vec<Value> = property
             .binders
             .iter()
-            .map(|binder| normalize(binder.python_ast()))
+            .map(|binder| normalize(binder.kernel_ast_v1()))
             .collect();
-        let before = normalize(property.before.python_ast());
-        let after = normalize(property.after.python_ast());
+        let before = normalize(property.before.kernel_ast_v1());
+        let after = normalize(property.after.kernel_ast_v1());
         let decreases = property
             .decreases
             .as_ref()
-            .map(|expr| normalize(expr.python_ast()));
+            .map(|expr| normalize(expr.kernel_ast_v1()));
         let progress = json!({
             "binders": binders,
             "before": &before,

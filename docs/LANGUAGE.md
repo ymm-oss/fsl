@@ -1876,7 +1876,7 @@ construction.
 #### 13.1.2 Rationale for tooling and AI consumption
 
 A `//` comment is lexer trivia (`rust/fsl-syntax/src/lexer.rs`): it never
-reaches the AST, `KernelModel`, `python_ast()`, the JSON result envelope, the
+reaches the AST, `KernelModel`, `kernel_ast_v1()`, the JSON result envelope, the
 LSP index, or the audit ledger. A fact a downstream tool or an AI agent must
 not lose — that an auxiliary invariant exists to close a k-induction CTI, or
 that an implementation guard is deliberately stronger than its abstract

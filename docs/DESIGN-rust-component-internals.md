@@ -169,7 +169,7 @@ happened to exhaust the stack first, so guarding it does not fix the file, it re
 Implementing the fix took six rounds of guard-rebuild-recrash before the witness completed. Neither
 earlier count was a bad measurement; both were single measurements read as a census.
 
-Eight cycles are guarded, in three crates. **Six are crash-witnessed; two are not**, and the table
+Ten cycles are guarded, in three crates. **Eight are crash-witnessed; two are not**, and the table
 says which, because a reader who cannot tell them apart cannot tell this apart from the preventive
 spraying the design forbids:
 
@@ -178,11 +178,23 @@ spraying the design forbids:
 | `fsl-syntax` | `syntax_expr.rs` `SyntaxParser::expression` | #620, N=160, frame `ident_atom` | every spec-reading command |
 | `fsl-syntax` | `syntax_expr.rs` `SyntaxExpr::into_kernel` | `check` N=200 after guarding the parser | every spec-reading command |
 | `fsl-syntax` | `syntax_expr.rs` `SyntaxExpr::render_source` | **not crash-witnessed**; survives N=2000 | `fmt`, diagnostics |
-| `fsl-syntax` | `ast.rs` `Expr::python_ast` | `analyze` N=400 | `analyze`, both digests, document claims |
+| `fsl-syntax` | `ast.rs` `Expr::kernel_ast_v1` | `analyze` N=400 | `analyze`, both digests, document claims |
 | `fsl-core` | `refinement.rs` `elaborate_enum_conversions` | `refine` N=200 | `refine` |
 | `fsl-core` | `typecheck.rs` `infer_type` | **not crash-witnessed**; survives N=1000 | every checked command |
 | `fsl-core` | `typecheck.rs` `validate_expression` | `refine` N=400 | every checked command |
+| `fsl-core` | `lib.rs` `PredicateExpander::expand_expr` | `check` on a 400-deep *invariant* (#622) | every checked command |
+| `fsl-core` | `public_kernel.rs` `expr_json` | `document claims` on the same spec (#622) | Kernel v2, document claims, digests |
 | `fsl-verifier` | `eval.rs` `eval` | #620 sample, `agentic_rag` at 1 MiB | `verify`, `refine` |
+
+The last two were found by changing the *witness*, not the code, and they are the clearest evidence
+for this section's thesis. #620's witness put its depth in a refinement mapping, so no amount of
+re-running it could reach predicate expansion or the Kernel v2 projection. Writing a second
+generator that puts the same depth inside an `invariant` — the shape the digests actually project —
+exposed both immediately. `expr_json` also shows that a guard on a *called* function is not a
+substitute for a guard on the *calling* cycle: it invoked the already-guarded `infer_type` once per
+level, so the guard ran every level, yet the innermost crash frame was `stacker::_grow` itself. The
+check happens on entry, and this frame is large enough that the stack could fall from above the red
+zone to below what growing the stack needs.
 
 The two unwitnessed guards are kept, not because deep recursion there is hypothetical — both are
 genuinely unbounded over the same user-controlled tree — but because each is dominated by a guarded
@@ -216,24 +228,37 @@ Three boundaries hold the mechanism in place:
   `unguarded-recursion` #537 C5 fault operator patches `guard` back into a direct call to prove the
   deep-spec test still detects its absence.
 - A guard around a *third-party* recursion moves the threshold without removing the unboundedness,
-  so it is not a substitute for removing the recursion. One such site is open and tracked as
-  **#622**: `Expr::python_ast` builds its result with `json!`, which calls `serde_json::to_value` on
-  each already-built child and therefore re-serializes the whole subtree — O(depth) stack and O(n²)
-  time *per level*, inside our guard rather than around it. The fix is to build `Value::Array`
-  directly, not to widen the red zone.
+  so it is not a substitute for removing the recursion. `Expr::kernel_ast_v1` used to build its
+  result with `json!`, which calls `serde_json::to_value` on each already-built child and therefore
+  re-serialized the whole subtree — O(depth) stack and O(n²) time *per level*, spent inside our
+  guard rather than around it, which is why the guard could not see it. #622 removed the recursion
+  by building `Value::Array` directly rather than widening the red zone.
 
-**The invariant at the top of this section is therefore not yet met.** It holds for the parse,
-lowering, typecheck, refinement, and evaluation paths; it does not hold wherever `python_ast` is
-projected, and that is wider than the command the witness happened to expose. `analyze` aborts on a
-400-stage witness, and the same projection feeds `fslc::approval::spec_digest`,
-`fsl_tools::document_digest::spec_digest_from_kernel`, the requirements document's claim
-projection, and testgen's `expect` — so an approval or document digest over a spec with a deep
-enough invariant is the same class. The witness reached only `analyze` because its deep expression
-lives in a refinement mapping rather than in a spec, which is a property of the witness, not of the
-defect. Treating "analyze only" as the scope would repeat the #617 and #620 errors a third time.
-Because that projection is digest input, its repair must prove byte-identical output against the
-existing digest tests and corpus snapshots, which is why it is a separate reviewable change (#622)
-rather than part of this one.
+**The invariant holds across the measured surface, and the measurement is stated so it can be
+falsified.** Two witness shapes — depth in a refinement mapping, depth in an `invariant` — were run
+at N up to 2000 through `check`, `lint`, `fmt`, `kernel`, `analyze`, `typestate`, `conformance`,
+`refine`, and `document claims`. None aborts; each returns its ordinary envelope and exit code.
+`explain`, `html`, `testgen`, and `scenarios` are excluded from that claim on purpose: they time out
+on these witnesses under bounded verification, identically before and after, which is solver cost
+rather than stack, and a timeout is not evidence either way.
+
+That is a statement about shapes that have been tried, not a proof over all specs. The honest
+falsifier is the one that has now worked three times: **write a witness with a different shape.**
+#617's corpus said "only `refine`", #620's debugger said "two sites", and #620's mapping-shaped
+witness said "analyze only" — each was a property of the instrument. A spec shape that reaches a
+cycle none of these witnesses reach would extend the table again, and adding the guard is part of
+adding that shape.
+
+Because the projection is digest input for two separate digests
+(`fslc::approval::spec_digest`, `fsl_tools::document_digest::spec_digest_from_kernel`), #622's
+repair was held to byte-identical output, proven by differential sweep between the pre- and
+post-change binaries over the whole corpus rather than by self-consistency inside one binary.
+
+One consumer-side limit is worth recording because it is not ours to fix and will surprise someone:
+`serde_json`'s *deserializer* has a 128-deep nesting limit, so a Rust consumer reading a
+200-deep projection back with `serde_json::from_slice` fails with "recursion limit exceeded" even
+though `fslc` emitted the envelope correctly. The regression test asserts on the exit code and the
+envelope's first byte for exactly this reason.
 
 This section records current ownership and possible target directions. Any
 source movement described as a target, trigger, or experiment is a candidate,

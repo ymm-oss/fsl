@@ -629,7 +629,7 @@ pub fn validate_requirement_trace_source(
         if value != FslValue::Bool(true) {
             let mut output = requirement_failure_base(envelope, "acceptance", case);
             output.insert("failed_step".to_owned(), json!(case.steps.len()));
-            output.insert("expect".to_owned(), expression.python_ast());
+            output.insert("expect".to_owned(), expression.kernel_ast_v1());
             output.insert("state".to_owned(), state_json(&monitor.state));
             output.insert(
                 "loc".to_owned(),

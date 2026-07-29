@@ -50,10 +50,16 @@ pub struct ConditionalSpans {
 
 impl QualifiedName {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         self.namespace.as_ref().map_or_else(
             || Value::String(self.name.clone()),
-            |namespace| json!(["qname", namespace, self.name]),
+            |namespace| {
+                Value::Array(vec![
+                    Value::from("qname"),
+                    Value::from(namespace.as_str()),
+                    Value::from(self.name.as_str()),
+                ])
+            },
         )
     }
 }
@@ -168,27 +174,29 @@ pub enum Expr {
 
 impl Pattern {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
-            Self::None => json!(["pat_none"]),
-            Self::Some(name) => json!(["pat_some", name]),
+            Self::None => Value::Array(vec![Value::from("pat_none")]),
+            Self::Some(name) => {
+                Value::Array(vec![Value::from("pat_some"), Value::from(name.as_str())])
+            }
         }
     }
 }
 
 impl Binder {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         match self {
             Self::Typed {
                 name,
                 type_name,
                 where_expr,
-            } => json!([
-                "binder_typed",
-                name,
-                type_name.python_ast(),
-                where_expr.as_deref().map(Expr::python_ast)
+            } => Value::Array(vec![
+                Value::from("binder_typed"),
+                Value::from(name.as_str()),
+                type_name.kernel_ast_v1(),
+                optional(where_expr.as_deref().map(Expr::kernel_ast_v1)),
             ]),
             Self::Range {
                 name,
@@ -196,14 +204,21 @@ impl Binder {
                 hi,
                 where_expr,
             } => where_expr.as_deref().map_or_else(
-                || json!(["binder_range", name, lo.python_ast(), hi.python_ast()]),
+                || {
+                    Value::Array(vec![
+                        Value::from("binder_range"),
+                        Value::from(name.as_str()),
+                        lo.kernel_ast_v1(),
+                        hi.kernel_ast_v1(),
+                    ])
+                },
                 |where_expr| {
-                    json!([
-                        "binder_range",
-                        name,
-                        lo.python_ast(),
-                        hi.python_ast(),
-                        where_expr.python_ast()
+                    Value::Array(vec![
+                        Value::from("binder_range"),
+                        Value::from(name.as_str()),
+                        lo.kernel_ast_v1(),
+                        hi.kernel_ast_v1(),
+                        where_expr.kernel_ast_v1(),
                     ])
                 },
             ),
@@ -211,11 +226,11 @@ impl Binder {
                 name,
                 collection,
                 where_expr,
-            } => json!([
-                "binder_collection",
-                name,
-                collection.python_ast(),
-                where_expr.as_deref().map(Expr::python_ast)
+            } => Value::Array(vec![
+                Value::from("binder_collection"),
+                Value::from(name.as_str()),
+                collection.kernel_ast_v1(),
+                optional(where_expr.as_deref().map(Expr::kernel_ast_v1)),
             ]),
         }
     }
@@ -236,64 +251,99 @@ impl Expr {
     /// `analyze`-only problem. The witness only reaches it via `analyze`
     /// because the deep expression lives in the mapping file, not in a spec.
     #[must_use]
-    pub fn python_ast(&self) -> Value {
-        recursion::guard(|| self.python_ast_inner())
+    pub fn kernel_ast_v1(&self) -> Value {
+        recursion::guard(|| self.kernel_ast_v1_inner())
     }
 
     #[allow(clippy::too_many_lines)]
-    fn python_ast_inner(&self) -> Value {
+    fn kernel_ast_v1_inner(&self) -> Value {
         match self {
-            Self::Num(value) => json!(["num", value]),
-            Self::Bool(value) => json!(["bool", value]),
-            Self::None => json!(["none"]),
-            Self::Some(expr) => json!(["some", expr.python_ast()]),
-            Self::Set(items) => json!(["set_lit", ast_list(items)]),
-            Self::Seq(items) => json!(["seq_lit", ast_list(items)]),
+            Self::Num(value) => Value::Array(vec![Value::from("num"), Value::from(*value)]),
+            Self::Bool(value) => Value::Array(vec![Value::from("bool"), Value::from(*value)]),
+            Self::None => Value::Array(vec![Value::from("none")]),
+            Self::Some(expr) => Value::Array(vec![Value::from("some"), expr.kernel_ast_v1()]),
+            Self::Set(items) => {
+                Value::Array(vec![Value::from("set_lit"), Value::Array(ast_list(items))])
+            }
+            Self::Seq(items) => {
+                Value::Array(vec![Value::from("seq_lit"), Value::Array(ast_list(items))])
+            }
             Self::Struct { name, fields } => {
                 let object = fields
                     .iter()
-                    .map(|(key, value)| (key.clone(), value.python_ast()))
+                    .map(|(key, value)| (key.clone(), value.kernel_ast_v1()))
                     .collect::<serde_json::Map<_, _>>();
-                json!(["struct_lit", name, object])
+                Value::Array(vec![
+                    Value::from("struct_lit"),
+                    Value::from(name.as_str()),
+                    Value::Object(object),
+                ])
             }
-            Self::Var(name) => json!(["var", name]),
-            Self::EnumMember { type_name, member } => {
-                json!(["enum_member", type_name, member])
-            }
-            Self::Call { name, args, span } => {
-                json!(["call", name, ast_list(args), span.python_loc()])
-            }
-            Self::Index(base, index) => json!(["index", base.python_ast(), index.python_ast()]),
-            Self::Field(base, name) => json!(["field", base.python_ast(), name]),
+            Self::Var(name) => Value::Array(vec![Value::from("var"), Value::from(name.as_str())]),
+            Self::EnumMember { type_name, member } => Value::Array(vec![
+                Value::from("enum_member"),
+                Value::from(type_name.as_str()),
+                Value::from(member.as_str()),
+            ]),
+            Self::Call { name, args, span } => Value::Array(vec![
+                Value::from("call"),
+                Value::from(name.as_str()),
+                Value::Array(ast_list(args)),
+                span.python_loc(),
+            ]),
+            Self::Index(base, index) => Value::Array(vec![
+                Value::from("index"),
+                base.kernel_ast_v1(),
+                index.kernel_ast_v1(),
+            ]),
+            Self::Field(base, name) => Value::Array(vec![
+                Value::from("field"),
+                base.kernel_ast_v1(),
+                Value::from(name.as_str()),
+            ]),
             Self::Method {
                 receiver,
                 name,
                 args,
-            } => json!(["method", receiver.python_ast(), name, ast_list(args)]),
-            Self::Binary { op, left, right } => {
-                json!(["bin", op, left.python_ast(), right.python_ast()])
-            }
-            Self::Neg(expr) => json!(["neg", expr.python_ast()]),
-            Self::Not(expr) => json!(["not", expr.python_ast()]),
+            } => Value::Array(vec![
+                Value::from("method"),
+                receiver.kernel_ast_v1(),
+                Value::from(name.as_str()),
+                Value::Array(ast_list(args)),
+            ]),
+            Self::Binary { op, left, right } => Value::Array(vec![
+                Value::from("bin"),
+                Value::from(op.as_str()),
+                left.kernel_ast_v1(),
+                right.kernel_ast_v1(),
+            ]),
+            Self::Neg(expr) => Value::Array(vec![Value::from("neg"), expr.kernel_ast_v1()]),
+            Self::Not(expr) => Value::Array(vec![Value::from("not"), expr.kernel_ast_v1()]),
             Self::Conditional {
                 condition,
                 then_expr,
                 else_expr,
                 ..
-            } => json!([
-                "ite",
-                condition.python_ast(),
-                then_expr.python_ast(),
-                else_expr.python_ast()
+            } => Value::Array(vec![
+                Value::from("ite"),
+                condition.kernel_ast_v1(),
+                then_expr.kernel_ast_v1(),
+                else_expr.kernel_ast_v1(),
             ]),
-            Self::Is { expr, pattern } => {
-                json!(["is", expr.python_ast(), pattern.python_ast()])
-            }
+            Self::Is { expr, pattern } => Value::Array(vec![
+                Value::from("is"),
+                expr.kernel_ast_v1(),
+                pattern.kernel_ast_v1(),
+            ]),
             Self::Quantified {
                 quantifier,
                 binder,
                 body,
-            } => json!([quantifier, binder.python_ast(), body.python_ast()]),
+            } => Value::Array(vec![
+                Value::from(quantifier.as_str()),
+                binder.kernel_ast_v1(),
+                body.kernel_ast_v1(),
+            ]),
             Self::Aggregate {
                 kind,
                 binder,
@@ -307,11 +357,11 @@ impl Expr {
                         where_expr: Some(condition),
                     },
                     None,
-                ) => json!([
-                    "count",
-                    name,
-                    type_name.python_ast(),
-                    condition.python_ast()
+                ) => Value::Array(vec![
+                    Value::from("count"),
+                    Value::from(name.as_str()),
+                    type_name.kernel_ast_v1(),
+                    condition.kernel_ast_v1(),
                 ]),
                 (
                     AggregateKind::Sum,
@@ -321,27 +371,29 @@ impl Expr {
                         where_expr,
                     },
                     Some(body),
-                ) => json!([
-                    "sum",
-                    name,
-                    type_name.python_ast(),
-                    body.python_ast(),
-                    where_expr.as_deref().map(Expr::python_ast)
+                ) => Value::Array(vec![
+                    Value::from("sum"),
+                    Value::from(name.as_str()),
+                    type_name.kernel_ast_v1(),
+                    body.kernel_ast_v1(),
+                    optional(where_expr.as_deref().map(Expr::kernel_ast_v1)),
                 ]),
-                (AggregateKind::Unique, binder, None) => json!(["unique", binder.python_ast()]),
-                (AggregateKind::ExactlyOne, binder, None) => {
-                    json!(["exactly_one", binder.python_ast()])
+                (AggregateKind::Unique, binder, None) => {
+                    Value::Array(vec![Value::from("unique"), binder.kernel_ast_v1()])
                 }
-                _ => json!([
-                    "aggregate",
-                    match kind {
+                (AggregateKind::ExactlyOne, binder, None) => {
+                    Value::Array(vec![Value::from("exactly_one"), binder.kernel_ast_v1()])
+                }
+                _ => Value::Array(vec![
+                    Value::from("aggregate"),
+                    Value::from(match kind {
                         AggregateKind::Count => "count",
                         AggregateKind::Sum => "sum",
                         AggregateKind::Unique => "unique",
                         AggregateKind::ExactlyOne => "exactly_one",
-                    },
-                    binder.python_ast(),
-                    value.as_deref().map(Expr::python_ast)
+                    }),
+                    binder.kernel_ast_v1(),
+                    optional(value.as_deref().map(Expr::kernel_ast_v1)),
                 ]),
             },
             Self::Stage {
@@ -350,13 +402,19 @@ impl Expr {
                 span,
                 ..
             } => process.as_ref().map_or_else(
-                || json!(["stage", entity.python_ast(), span.python_loc()]),
+                || {
+                    Value::Array(vec![
+                        Value::from("stage"),
+                        entity.kernel_ast_v1(),
+                        span.python_loc(),
+                    ])
+                },
                 |process| {
-                    json!([
-                        "qualified_stage",
-                        process.to_string(),
-                        entity.python_ast(),
-                        span.python_loc()
+                    Value::Array(vec![
+                        Value::from("qualified_stage"),
+                        Value::from(process.to_string()),
+                        entity.kernel_ast_v1(),
+                        span.python_loc(),
                     ])
                 },
             ),
@@ -365,32 +423,50 @@ impl Expr {
                 expr,
                 span: _,
             } => match name.as_str() {
-                "old" | "abs" => json!([name, expr.python_ast()]),
-                "rel_acyclic" | "rel_functional" | "rel_injective" | "rel_domain" | "rel_range" => {
-                    json!([name, expr.python_ast()])
+                // Two families -- the value/temporal `old`/`abs` and the
+                // relation predicates -- project identically, as `[name, arg]`.
+                // They were separate arms with the same body until the longer
+                // method name made rustfmt render both as blocks and
+                // `clippy::match_same_arms` saw the duplication it had been
+                // hiding. The list stays exhaustive so an unvalidated name
+                // still reaches `unreachable!` rather than a silent projection.
+                "old" | "abs" | "rel_acyclic" | "rel_functional" | "rel_injective"
+                | "rel_domain" | "rel_range" => {
+                    Value::Array(vec![Value::from(name.as_str()), expr.kernel_ast_v1()])
                 }
                 _ => unreachable!("validated named unary expression"),
             },
-            Self::BinaryNamed { name, left, right } => {
-                json!([name, left.python_ast(), right.python_ast()])
-            }
+            Self::BinaryNamed { name, left, right } => Value::Array(vec![
+                Value::from(name.as_str()),
+                left.kernel_ast_v1(),
+                right.kernel_ast_v1(),
+            ]),
             Self::TernaryNamed {
                 name,
                 first,
                 second,
                 third,
-            } => json!([
-                name,
-                first.python_ast(),
-                second.python_ast(),
-                third.python_ast()
+            } => Value::Array(vec![
+                Value::from(name.as_str()),
+                first.kernel_ast_v1(),
+                second.kernel_ast_v1(),
+                third.kernel_ast_v1(),
             ]),
         }
     }
 }
 
 fn ast_list(items: &[Expr]) -> Vec<Value> {
-    items.iter().map(Expr::python_ast).collect()
+    items.iter().map(Expr::kernel_ast_v1).collect()
+}
+
+/// A missing optional child projects as JSON `null`.
+///
+/// `json!` produced this from an interpolated `Option<Value>`; direct
+/// construction has to say it, and saying it in one place keeps the four
+/// optional-child sites from drifting apart.
+fn optional(child: Option<Value>) -> Value {
+    child.unwrap_or(Value::Null)
 }
 
 #[cfg(test)]

@@ -124,42 +124,42 @@ pub struct DbSystem {
 
 impl DbSystem {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type": "DbSystem",
             "name": self.name,
-            "database": self.database.python_ast(),
-            "migrations": self.migrations.iter().map(DbMigration::python_ast).collect::<Vec<_>>(),
-            "artifacts": self.artifacts.iter().map(DbArtifact::python_ast).collect::<Vec<_>>(),
-            "environments": self.environments.iter().map(DbEnvironment::python_ast).collect::<Vec<_>>(),
-            "check": self.check.python_ast(),
+            "database": self.database.kernel_ast_v1(),
+            "migrations": self.migrations.iter().map(DbMigration::kernel_ast_v1).collect::<Vec<_>>(),
+            "artifacts": self.artifacts.iter().map(DbArtifact::kernel_ast_v1).collect::<Vec<_>>(),
+            "environments": self.environments.iter().map(DbEnvironment::kernel_ast_v1).collect::<Vec<_>>(),
+            "check": self.check.kernel_ast_v1(),
             "loc": self.span.python_loc(),
         })
     }
 }
 
 impl DbDatabase {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type": "DbDatabase", "name": self.name, "initial_schema": self.initial_schema,
-            "tables": self.tables.iter().map(DbTable::python_ast).collect::<Vec<_>>(),
+            "tables": self.tables.iter().map(DbTable::kernel_ast_v1).collect::<Vec<_>>(),
             "loc": self.span.python_loc(),
         })
     }
 }
 
 impl DbTable {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type": "DbTable", "name": self.name,
-            "columns": self.columns.iter().map(DbColumn::python_ast).collect::<Vec<_>>(),
+            "columns": self.columns.iter().map(DbColumn::kernel_ast_v1).collect::<Vec<_>>(),
             "loc": self.span.python_loc(),
         })
     }
 }
 
 impl DbColumn {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type": "DbColumn", "table": self.table, "name": self.name,
             "db_type": self.db_type, "present": self.present, "backfilled": self.backfilled,
@@ -169,18 +169,18 @@ impl DbColumn {
 }
 
 impl DbMigration {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type": "DbMigration", "name": self.name, "from_schema": self.from_schema,
             "to_schema": self.to_schema,
-            "ops": self.ops.iter().map(DbMigrationOp::python_ast).collect::<Vec<_>>(),
+            "ops": self.ops.iter().map(DbMigrationOp::kernel_ast_v1).collect::<Vec<_>>(),
             "annotations": self.annotations, "loc": self.span.python_loc(),
         })
     }
 }
 
 impl DbMigrationOp {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type": "DbMigrationOp", "op": self.op, "column": self.column,
             "nullability": self.nullability, "columns": self.columns,
@@ -190,7 +190,7 @@ impl DbMigrationOp {
 }
 
 impl DbArtifact {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         let capability = |name: &str| self.capabilities.get(name).cloned().unwrap_or_default();
         let offline_ttls = self
             .offline_ttls
@@ -210,7 +210,7 @@ impl DbArtifact {
 }
 
 impl DbFlag {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type": "DbFlag", "name": self.name, "variants": self.variants,
             "default": self.default, "loc": self.span.python_loc(),
@@ -219,7 +219,7 @@ impl DbFlag {
 }
 
 impl DbFlagCondition {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type": "DbFlagCondition", "flag": self.flag, "variant": self.variant,
             "loc": self.span.python_loc(),
@@ -228,29 +228,29 @@ impl DbFlagCondition {
 }
 
 impl DbEnvironmentArtifact {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type": "DbEnvironmentArtifact", "role": self.role, "artifact": self.artifact,
             "schema_window": self.schema_window,
-            "flag_conditions": self.flag_conditions.iter().map(DbFlagCondition::python_ast).collect::<Vec<_>>(),
+            "flag_conditions": self.flag_conditions.iter().map(DbFlagCondition::kernel_ast_v1).collect::<Vec<_>>(),
             "loc": self.span.python_loc(),
         })
     }
 }
 
 impl DbEnvironment {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type": "DbEnvironment", "name": self.name, "schema_window": self.schema_window,
-            "artifacts": self.artifacts.iter().map(DbEnvironmentArtifact::python_ast).collect::<Vec<_>>(),
-            "flags": self.flags.iter().map(DbFlag::python_ast).collect::<Vec<_>>(),
+            "artifacts": self.artifacts.iter().map(DbEnvironmentArtifact::kernel_ast_v1).collect::<Vec<_>>(),
+            "flags": self.flags.iter().map(DbFlag::kernel_ast_v1).collect::<Vec<_>>(),
             "loc": self.span.python_loc(),
         })
     }
 }
 
 impl DbCheck {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type": "DbCheck",
             "rules": self.rules.iter().map(|rule| rule.name.as_str()).collect::<Vec<_>>(),

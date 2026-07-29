@@ -268,6 +268,97 @@ fn fmt_formats_a_deeply_nested_mapping_instead_of_overflowing_the_stack() {
     );
 }
 
+/// `analyze` reaches `Expr::kernel_ast_v1`, which is where #622 lived: the
+/// projection built each node with `json!`, and `json!` re-serialized every
+/// already-built child subtree, spending O(depth) stack *inside*
+/// `recursion::guard` rather than around it. This aborted (exit 138) until the
+/// projection switched to `Value::Array`.
+#[test]
+fn analyze_projects_a_deeply_nested_mapping_instead_of_overflowing_the_stack() {
+    let directory = scratch_dir("analyze");
+    let trio = refinement_trio(&directory, WITNESS_STAGES);
+
+    let output = run(&["analyze", trio.mapping.to_str().expect("map path")]);
+    let status = exit_code("analyze", &output);
+
+    assert_eq!(
+        status,
+        0,
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // Deliberately not parsed. `serde_json`'s *deserializer* has its own
+    // 128-deep nesting limit, so `from_slice` on a 200-deep tagged array fails
+    // with "recursion limit exceeded" even though `fslc` produced the envelope
+    // correctly. That is a property of this test's reader, not of the output,
+    // and asserting on the exit code plus non-empty stdout tests what this file
+    // is about -- that the process finished at all.
+    assert!(
+        output.stdout.starts_with(b"{"),
+        "`analyze` produced no JSON envelope for a {WITNESS_STAGES}-stage witness"
+    );
+}
+
+/// The same projection, reached the way the *digests* reach it.
+///
+/// This is the lane the #620 witness could not open. Its depth lives in a
+/// refinement mapping, so it reached the projection only through `analyze` --
+/// a property of the witness, not of the defect. Both spec digests
+/// (`fslc::approval::spec_digest`,
+/// `fsl_tools::document_digest::spec_digest_from_kernel`) project a *spec*, so
+/// proving anything about them needs the depth inside one. Written as a
+/// separate generator rather than by deepening the trio, because the two
+/// shapes reach different cycles: this one found
+/// `PredicateExpander::expand_expr` and `public_kernel::expr_json` still
+/// unguarded after #620 shipped.
+#[test]
+fn a_deeply_nested_invariant_reaches_the_digest_projection_without_aborting() {
+    let directory = scratch_dir("invariant");
+    let spec = deep_invariant_spec(&directory, WITNESS_STAGES);
+    // Repository-relative on purpose: Public Kernel v2 refuses an absolute
+    // `spec.source.file` ("must be repository-relative or a portable URI"), and
+    // `document claims` carries that identity. The scratch directory lives
+    // under `rust/target/`, so a relative path always exists.
+    let relative = spec
+        .strip_prefix(root())
+        .expect("scratch path is inside the repository");
+    let path = relative.to_str().expect("spec path");
+
+    for command in [
+        vec!["check", path],
+        vec!["document", "claims", path],
+        vec!["kernel", path],
+    ] {
+        let label = command.join(" ");
+        let output = run(&command);
+        let status = exit_code(&label, &output);
+        assert_eq!(
+            status,
+            0,
+            "`fslc {label}` on a {WITNESS_STAGES}-deep invariant; stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+/// Writes a spec whose *invariant* carries a right-nested `if` chain of length
+/// `n`, so the depth is inside the spec rather than in a mapping.
+fn deep_invariant_spec(directory: &Path, n: usize) -> PathBuf {
+    assert!(n >= 2, "a chain needs at least two arms");
+    let mut chain = String::from("0");
+    for k in (0..n).rev() {
+        chain = format!("if x == {k} then {k}\n      else {chain}");
+    }
+    let spec = format!(
+        "spec DeepInvariant{n} {{\n  state {{ x: Int, seen: Int }}\n  init {{ x = 0  seen = 0 }}\n  \
+         action bump() {{\n    requires x < {n}\n    x = x + 1\n    seen = seen + 1\n  }}\n  \
+         invariant DeepChain {{\n    ({chain}) >= 0\n  }}\n}}\n"
+    );
+    let path = directory.join(format!("deep_invariant_{n}.fsl"));
+    std::fs::write(&path, spec).expect("write deep invariant spec");
+    path
+}
+
 /// The generator has to keep producing a *deep* file for any of the above to
 /// mean anything.
 ///
@@ -285,5 +376,13 @@ fn the_generated_witness_is_still_deeper_than_the_unguarded_crash_threshold() {
         nesting,
         2 * WITNESS_STAGES - 1,
         "the mapping's if-chain is the deep structure under test"
+    );
+
+    let spec = std::fs::read_to_string(deep_invariant_spec(&directory, WITNESS_STAGES))
+        .expect("read deep invariant spec");
+    assert_eq!(
+        spec.matches("if x ==").count(),
+        WITNESS_STAGES,
+        "the invariant's if-chain is the deep structure under test"
     );
 }

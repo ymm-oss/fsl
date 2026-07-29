@@ -23,7 +23,7 @@ impl From<Span> for AiLoc {
 }
 
 impl AiLoc {
-    fn python_ast(self) -> Value {
+    fn kernel_ast_v1(self) -> Value {
         json!({"line":self.line,"column":self.column})
     }
 }
@@ -96,25 +96,25 @@ pub struct AiComponent {
 
 impl AiComponent {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type":"AiComponent","name":self.name,"model":self.model,"prompt":self.prompt,
             "retriever":self.retriever,"temperature":self.temperature,
             "input_schema":self.input_schema,"output_schema":self.output_schema,
-            "tools":self.tools.iter().map(AiTool::python_ast).collect::<Vec<_>>(),
-            "authority":self.authority.python_ast(),
-            "fallback":self.fallback.iter().map(AiFallback::python_ast).collect::<Vec<_>>(),
-            "check":self.check.python_ast(),"loc":self.loc.python_ast(),
+            "tools":self.tools.iter().map(AiTool::kernel_ast_v1).collect::<Vec<_>>(),
+            "authority":self.authority.kernel_ast_v1(),
+            "fallback":self.fallback.iter().map(AiFallback::kernel_ast_v1).collect::<Vec<_>>(),
+            "check":self.check.kernel_ast_v1(),"loc":self.loc.kernel_ast_v1(),
         })
     }
 }
 
 impl AiTool {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type":"AiTool","name":self.name,"schema":self.schema,
             "irreversible":self.irreversible,"preconditions":self.preconditions,
-            "effect":self.effect,"loc":self.loc.map(AiLoc::python_ast),
+            "effect":self.effect,"loc":self.loc.map(AiLoc::kernel_ast_v1),
         })
     }
 }
@@ -126,12 +126,12 @@ impl AiAuthorityRule {
 }
 
 impl AiAuthority {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type":"AiAuthority","may_suggest":AiAuthorityRule::names(&self.may_suggest),
             "may_execute":AiAuthorityRule::names(&self.may_execute),
             "requires_human_approval":AiAuthorityRule::names(&self.requires_human_approval),
-            "forbidden":AiAuthorityRule::names(&self.forbidden),"loc":self.loc.map(AiLoc::python_ast),
+            "forbidden":AiAuthorityRule::names(&self.forbidden),"loc":self.loc.map(AiLoc::kernel_ast_v1),
         })
     }
 }
@@ -183,17 +183,17 @@ pub struct AiAgentContract {
 }
 
 impl AiFallback {
-    fn python_ast(&self) -> Value {
-        json!({"$type":"AiFallback","reason":self.reason,"target":self.target,"loc":self.loc.python_ast()})
+    fn kernel_ast_v1(&self) -> Value {
+        json!({"$type":"AiFallback","reason":self.reason,"target":self.target,"loc":self.loc.kernel_ast_v1()})
     }
 }
 
 impl AiHardCheck {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type":"AiHardCheck",
             "rules":self.rules.iter().map(|rule| rule.name.as_str()).collect::<Vec<_>>(),
-            "loc":self.loc.map(AiLoc::python_ast),
+            "loc":self.loc.map(AiLoc::kernel_ast_v1),
         })
     }
 }
