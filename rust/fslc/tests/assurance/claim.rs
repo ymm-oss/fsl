@@ -129,27 +129,52 @@ pub struct Axis {
 
 impl Axis {
     /// Every `(row, column)` pair over this axis's declared rows/columns
-    /// must have a `Claim`. A blank cell is a hard failure, never a silent
-    /// N/A -- N/A is itself a `Claim` variant that must cite its basis.
+    /// must have a `Claim` (a blank cell is a hard failure, never a silent
+    /// N/A -- N/A is itself a `Claim` variant that must cite its basis), and
+    /// conversely `cells` must not carry a key outside `rows`x`columns` --
+    /// a row or column removed/renamed from the axis's declared scope must
+    /// take its cells with it, or the stale cell is dead, unverified
+    /// registry state hiding behind a scope that no longer claims it. This
+    /// is the same both-directions discipline as the corpus/refinement
+    /// manifests (`refine_corpus_parity.rs`'s registered-vs-declared check,
+    /// `coverage.rs`'s unrecognized-outcome-kind rejection): unregistered
+    /// fails, and stale-registered fails too.
     ///
     /// # Errors
     ///
-    /// Returns `Err` naming every missing cell.
+    /// Returns `Err` naming every missing cell and every stale cell.
     pub fn check_complete(&self) -> Result<(), String> {
+        let rows = self
+            .rows
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        let columns = self
+            .columns
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
         let missing = self
             .rows
             .iter()
             .flat_map(|row| self.columns.iter().map(move |column| (*row, *column)))
             .filter(|key| !self.cells.contains_key(key))
-            .map(|(row, column)| format!("{}::{row}x{column}", self.name))
-            .collect::<Vec<_>>();
-        if missing.is_empty() {
+            .map(|(row, column)| format!("{}::{row}x{column} (missing)", self.name));
+        let stale = self
+            .cells
+            .keys()
+            .filter(|&&(row, column)| !rows.contains(row) || !columns.contains(column))
+            .map(|(row, column)| {
+                format!(
+                    "{}::{row}x{column} (stale, outside declared rows/columns)",
+                    self.name
+                )
+            });
+        let errors = missing.chain(stale).collect::<Vec<_>>();
+        if errors.is_empty() {
             Ok(())
         } else {
-            Err(format!(
-                "required cells with no Claim: {}",
-                missing.join(", ")
-            ))
+            Err(format!("cell errors: {}", errors.join(", ")))
         }
     }
 

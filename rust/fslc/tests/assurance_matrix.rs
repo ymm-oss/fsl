@@ -132,6 +132,46 @@ mod negative_controls {
         );
     }
 
+    /// A cell keyed by a row that was removed/renamed from the axis's
+    /// declared `rows` must fail `Axis::check_complete` too -- the reverse
+    /// direction from [`an_unclaimed_required_cell_fails_the_completeness_check`].
+    /// Without this, narrowing `rows`/`columns` after building `cells` would
+    /// leave a stale, unverified `Claim` sitting outside the axis's own
+    /// declared scope with nothing to catch it.
+    #[test]
+    fn a_cell_keyed_by_an_undeclared_row_fails_the_completeness_check() {
+        let mut cells = BTreeMap::new();
+        cells.insert(
+            ("row-a", "col-1"),
+            Claim::Exercised {
+                by: Citation {
+                    path: "rust/Cargo.toml",
+                    anchor: "[workspace]",
+                },
+            },
+        );
+        // "row-stale" was removed from `rows` below but its cell was not.
+        cells.insert(
+            ("row-stale", "col-1"),
+            Claim::Exercised {
+                by: Citation {
+                    path: "rust/Cargo.toml",
+                    anchor: "[workspace]",
+                },
+            },
+        );
+        let toy = Axis {
+            name: "negative_control_toy_axis_stale_row",
+            rows: vec!["row-a"],
+            columns: vec!["col-1"],
+            cells,
+        };
+        assert!(
+            toy.check_complete().is_err(),
+            "an axis with a cell keyed by an undeclared row must fail check_complete"
+        );
+    }
+
     /// A fully-claimed toy axis with real citations must pass both checks --
     /// the positive control for the two negative controls above, proving the
     /// checkers are not simply always-`Err`.
