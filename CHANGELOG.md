@@ -5,6 +5,25 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- `rust/fslc/tests/typed_agreement.rs` introduces the C6 typed generative /
+  metamorphic cross-engine agreement suite (issue #537 C6 slice 1, issue
+  #648, `docs/DESIGN-conformance-harness.md` "Typed generative / metamorphic
+  agreement"): a deterministic structural generator (15 domain-axis models
+  + 4 operation-axis models, no randomness) builds checked `KernelModel`s
+  and compares Monitor BFS / explicit / BMC verdicts, replay, and successor
+  admission, plus seven metamorphic relations (alpha rename, BOM/trivia,
+  inline-vs-explicit init, disjoint assignment reorder, domain-size
+  boundary, short-circuit/partial/Euclidean duality, entity/number sugar vs
+  lowered type) each with a positive test and a negative control. Two
+  confirmed cross-engine findings are recorded as re-measured, self-retiring
+  exclusions rather than normalized away: `verify_bounded`'s symbolic Seq
+  encoding treats an out-of-range `head()` read in property context as
+  *defined* with an out-of-bound value instead of undefined (a spurious
+  `violated`/`invariant`, disagreeing with the concrete engines' correct
+  error); and `verify_bounded` alone never performs LANGUAGE.md's automatic
+  "Partial operations" check in action context at all (the CLI's
+  `--engine bmc` classification comes from a separate concrete pre-scan,
+  `find_boundary_violation`, not the solver).
 - `corpus_expectation_manifest.rs` and `evidence_corpus_manifest.rs` give every
   declared `examples/gallery/{valid,errors,adversarial}` fixture and every
   `causal`/`agent`/`ai_component` evidence-only document exactly one native
