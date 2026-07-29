@@ -369,6 +369,130 @@ that is already red proves nothing either way — says no input reaches it, and
 the honest output is a recorded measurement rather than a new operator or a
 fixture nobody can build.
 
+## Typed generative / metamorphic agreement (#537 C6)
+
+`rust/fsl-verifier/tests/expression_agreement.rs` and `explicit_engine.rs`'s
+corpus sweep proved agreement on hand-written fixtures and the existing
+`specs/` corpus. Neither swept a *generated* model family, and nothing
+executably anchored a dialect construct's semantics against its documented
+desugaring. C6 slice 1
+(`rust/fslc/tests/typed_agreement.rs` + `rust/fslc/tests/typed_agreement/`)
+closes both gaps: a deterministic structural generator produces checked
+`KernelModel`s (never string fuzz — every model goes through
+`parse_kernel_source` + `build_model`, the same on-ramp `fslc` itself uses),
+compared across the three engines that do not depend on Z3js
+(`fsl_runtime::bfs` "Monitor BFS", `fsl_runtime::verify_explicit`, and
+`fsl_verifier::verify_bounded` "BMC", native Z3), plus seven metamorphic
+relations each with a positive test and a negative control.
+
+### Generation space
+
+`generator.rs::domain_sweep` crosses `docs/LANGUAGE.md` S2's four scalar
+domain kinds (`range`/`entity`/`number`/`enum`) at fifteen `(kind, size)`
+pairs against a structural variant selected by index (state-variable count
+1-2, action count 1-3, guard present/absent, fairness, and one of the five
+checkable property kinds — invariant/reachable/leadsTo/trans/terminal —
+so each kind is exercised at least once). `generator.rs::operation_sweep`
+covers `divide`/`remainder` in both property and (guarded, safe) action
+context; `head`/`pop`/`at`/index and the unguarded `divide`/`remainder`
+boundary live as dedicated `relations.rs` R6 tests instead (see "Two
+confirmed findings" below for why). Both floors are asserted in
+`typed_agreement.rs` (`DOMAIN_SWEEP_FLOOR = 15`, `OPERATION_SWEEP_FLOOR = 4`).
+The whole suite — generation, all engines, replay, successor sampling, and
+all R1-R7 relations — runs in well under a second; the ~2-minute budget
+the C6 brief set was never approached, so the generation space was not
+narrowed to fit it.
+
+### Metamorphic relations
+
+Each relation cites the `docs/LANGUAGE.md` contract sentence it tests, not
+observed CLI output:
+
+| # | Relation | Contract citation | Negative control |
+|---|---|---|---|
+| R1 | Alpha rename (whole-token substitution over every position `reserved.rs::check_reserved_names` walks) leaves the verdict unchanged | Pure syntactic substitution over an already-typechecked program (no direct citation needed; the rename fixture cross-checks its own position coverage against `check_reserved_names`'s source text) | Renaming onto an existing name is a duplicate declaration, rejected by `build_model` |
+| R2 | Leading BOM + trivia leaves the verdict unchanged | `lexer.rs::skip_trivia`: a BOM is trivia only at `offset == 0` | A BOM inside an identifier is a parse error |
+| R3 | Inline `state { x: T = e }` init reaches the same states as an equivalent explicit `init` block | LANGUAGE.md S2:499-508 ("normalized to an ordinary root assignment...same semantics as an equivalent `init` block") | Assigning the same root both inline and in `init` is `build_model`'s named semantic error |
+| R4 | Disjoint simultaneous assignments reach the same states regardless of source order | LANGUAGE.md S5:644-661 ("all right-hand sides...read the old state...frame condition is automatic") | Assigning the same variable twice on one path is the named semantic error |
+| R5 | A domain-bound-coincident invariant (`x <= hi`, textually equal to the type's own `hi`) holds at every declared size by construction | LANGUAGE.md S6 "Type bounds" (automatic, so a variable can never leave its own declared bound) | Widening the domain past the invariant's stale literal bound changes the verdict to `violated`; also reproduced mechanically via `enumerate_builtin_mutants`'s `type_bound_hi_plus1` |
+| R6 | `/`/`%` are total in property context but `partial_op` in action context | LANGUAGE.md S3:557-570 | The same expression in action context; see "Two confirmed findings" for what raw `verify_bounded` actually checks here |
+| R7 | `entity`/`number` + `verify` reaches the same states as the hand-written lowered `type` | LANGUAGE.md S2:485-486 ("desugars to `type`") | Shifting the lowered bound by +1 past the declared size is detected |
+
+`R4`'s `assignment_remove` and `R6`'s `equality_operator_flip` reuse of
+`fsl_tools::enumerate_builtin_mutants` follow the same discipline as
+`injection_detector_matrix.rs`: each candidate mutant's non-equivalence was
+measured (it must change the BMC verdict or fail to build) before the
+"must be a kill" assertion was written, and the first `type_bound_hi_plus1`
+candidate tried against R5's own fixture turned out equivalent — the
+mutation left the action's independently-derived wraparound modulus
+unchanged, so the widened domain was never actually reachable. That
+equivalent candidate is why R5's mutate-reuse test uses a separate,
+dedicated fixture instead of R5's own; see `relations.rs`'s
+`r5_mutate_kill_fixture` doc comment for the full account.
+
+### Two confirmed findings
+
+Both are recorded as re-measured facts, not silently normalized away or
+excluded:
+
+1. **A partial Seq read (`head()`) evaluated in property context on an
+   empty sequence disagrees across engines.** `fsl_runtime::verify_explicit`
+   and `fsl_runtime::bfs` both raise a raw `RuntimeError`
+   ("`head()` on empty sequence") instead of returning a verdict, because
+   `Monitor::current_violation[_selected]` — unlike
+   `Monitor::execute_selected`'s post-step invariant check — does not catch
+   `is_partial_operation_error` and convert it to a `partial_op` `Violation`.
+   `fsl_verifier::verify_bounded` instead returns a *verdict*: `violated`,
+   `kind: "invariant"` (not `partial_op`), naming the user's own invariant,
+   at step 0 — its symbolic Seq encoding treats an out-of-range read as
+   *defined* with some solver-chosen value outside the element type's own
+   declared bound, rather than as undefined the way the concrete engines
+   (and LANGUAGE.md's own account of `/`/`%`, by contrast) treat it. Root
+   cause in the symbolic encoding is not diagnosed here; that is for the
+   tracking issue. Self-retiring exclusion:
+   `relations.rs::r6_property_context_seq_head_disagrees_across_engines_self_retiring_exclusion`
+   re-measures the exact `(kind, name, step)` and both error messages on
+   every run.
+
+2. **`fsl_verifier::verify_bounded` does not perform LANGUAGE.md S6's
+   automatic "Partial operations" check at all**, for any of the six named
+   operations, in action context. `rust/fsl-verifier/src/bmc.rs` has no
+   `partial_op` handling anywhere in it; the CLI's `--engine bmc`
+   `partial_op` classification comes from `rust/fslc/src/verification.rs`'s
+   `run_bmc_filtered` merging in a *concrete* pre-scan
+   (`fsl_runtime::find_boundary_violation`), not from the solver. This is a
+   scope boundary this suite documents rather than a bug: raw
+   `verify_bounded`'s outcome for these six fixtures ranges from a clean
+   verdict (`divide`/`remainder`) to a spurious `type_bound` on the
+   assigned scalar (`head`/`at`/index — the same symbolic-Seq gap as
+   finding 1, surfacing differently) to `Err("model sequence length is
+   negative")` (`pop`) — all recorded, none asserted, in
+   `relations.rs::r6_action_context_partial_operations_are_caught_only_by_the_concrete_engines`.
+   The three concrete-family engines (Monitor BFS / explicit /
+   `find_boundary_violation`) agree with each other on `partial_op` for
+   all six.
+
+### Z3js / Worker parity ownership
+
+`fsl-solver-z3js` is `wasm-bindgen`-only and structurally unreachable from
+native `cargo test` — there is no native code path that links it. That
+column is not silently skipped: it is owned by `test-browser.mjs`'s Worker
+parity suite, which this C6 slice does not duplicate. C6 compares the
+three engines native tests *can* reach; a browser-side C6 sweep, if ever
+needed, is a Worker-suite concern, not a gap in this one.
+
+### Slice 2 plan
+
+`sweep_summary.rs` aggregates `(domain kind, domain size, property kind,
+state-variable count, action count, guarded, fair, operation/context)`
+counts and prints them at the end of `domain_sweep_agrees_across_all_three_engines`
+and `operation_sweep_agrees_across_all_three_engines` — a machine-readable,
+re-runnable count slice 2's C3 `expr` axis can cite instead of a prose
+claim. Slice 1 does not register an axis with `assurance_matrix.rs`; that
+registration, plus sweeping the full 22-variant `Expr` enum (this slice's
+generator covers arithmetic, comparison, logical, and the six partial
+operations, not aggregates/binders/relations), is slice 2's scope.
+
 ## Coupled changes
 
 `CONTRIBUTING.md` "Adding a language feature" gains: register any new dialect's
