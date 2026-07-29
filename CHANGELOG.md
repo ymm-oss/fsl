@@ -5,6 +5,20 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- `corpus_expectation_manifest.rs` and `evidence_corpus_manifest.rs` give every
+  declared `examples/gallery/{valid,errors,adversarial}` fixture and every
+  `causal`/`agent`/`ai_component` evidence-only document exactly one native
+  owner (issue #645, #537 C4 residual). 12 of ~38 declared gallery fixtures had
+  never been run by any native test — `tests/test_gallery.py` was the only
+  oracle, and it is frozen-Python, outside `tools/check-native-
+  integration.sh` — and nothing walked the corpus for an unregistered
+  `causal`/`fsl-ai` document. All reproduce their declared `result`/`kind`/exit
+  natively; no defect surfaced. `corpus_check_sweep.rs`'s
+  `every_corpus_spec_checks_ok_or_declares_its_error` no longer duplicates the
+  `check`-targeted half of that claim, now owned by the new manifest instead.
+  A shared `rust/fslc/tests/support/mod.rs` replaces the corpus-walk helpers
+  `corpus_check_sweep.rs` and `refine_corpus_parity.rs` each carried their own
+  copy of.
 - `rust/fslc/tests/assurance_matrix.rs` introduces the federated Semantic
   Assurance Matrix skeleton (issue #537 C3 slice 1,
   `docs/DESIGN-assurance-matrix.md`): axis modules under `tests/assurance/`

@@ -254,6 +254,73 @@ Cost: ~2m15s wall, the rows being run on a worker pool. Two `agentic_rag` rows a
 ~100s and ~126s on their own in a debug build, so the sweep is bounded by its
 slowest row rather than by their sum.
 
+## Corpus expectation ownership (#537 C4)
+
+C4 requires every `specs/`+`examples/` artifact bound to the command that
+actually evaluates it. Slice 1 (above) closed the refinement-mapping column;
+issue #645 closes the two categories a comment in `corpus_check_sweep.rs` used
+to document as an open gap. Each corpus category now has exactly one owning
+test:
+
+| Category | Owning test |
+|---|---|
+| kernel/dialect spec, bare `check` | `corpus_check_sweep.rs::every_corpus_spec_checks_ok_or_declares_its_error` |
+| `check`/`verify`/exit conservation law | `corpus_check_sweep.rs::check_result_and_exit_status_never_contradict` |
+| `ledger` vs its `verify` baseline | `corpus_check_sweep.rs::ledger_exit_status_agrees_with_its_verify_baseline` |
+| refinement mapping | `refine_corpus_parity.rs` (this section, above) |
+| declared `examples/gallery/{valid,errors,adversarial}` fixture | `corpus_expectation_manifest.rs` |
+| `examples/gallery/injected/` (calibrated detectors) | `injection_detector_matrix.rs` |
+| evidence-only document (`causal`, `agent`/`ai_component`/ai project) | `evidence_corpus_manifest.rs` |
+| Worker column (native/Worker parity) | `rust/fsl-wasm/test-browser.mjs` (already C4-complete; see below) |
+
+`corpus_expectation_manifest.rs` reads `examples/gallery/{valid,errors,
+adversarial}`'s `expected-command`/`expected-result`/`expected-kind` header
+convention and runs each declared command verbatim, comparing `result`,
+`kind`, and the exit code the production `fslc_rust::outcome` module binds to
+that result — the same three-channel discipline the refinement manifest uses,
+reused here rather than re-derived. It found that 12 of the corpus's ~38
+declared fixtures (three of which need a non-default flag —
+`--vacuity error` / `--deadlock error` — to reproduce their own declared
+verdict at all) had never been run by any native test; `tests/test_gallery.py`
+was the only oracle, and it is frozen-Python, so `tools/check-native-
+integration.sh` never executed it. All 38 reproduce their declaration
+natively; no exclusion was needed. Every file in the three directories that
+carries no header (a refine-mapping operand, or a governance fixture already
+owned by `corpus_check_sweep.rs::GOVERNANCE_FIXTURE_EXCLUSIONS`) is a
+self-retiring `StructuralExclusion`, re-checked against the file that actually
+owns it.
+
+`evidence_corpus_manifest.rs` classifies the corpus the same way
+`fslc ai check`'s own dispatch does — `fsl_syntax::is_causal_source`,
+`fslc_rust::frontend_output::is_ai_project`, `fsl_syntax::dialect_keyword` —
+rather than re-deriving a fourth string sniff, and requires every classified
+document to carry a manifest row or a reasoned exclusion in both directions.
+The corpus holds exactly 6 live evidence-only documents today (3 `causal`
+sidecars, 3 `fsl-ai` documents split `agent`/plain `ai_component`/project) and
+one exclusion (`examples/annotations/annotated_ai_component.fsl`, an issue
+#281 annotation-syntax sample whose own doc comment declares plain `check`,
+not `ai check`).
+
+`corpus_check_sweep.rs`'s `every_corpus_spec_checks_ok_or_declares_its_error`
+no longer asserts that a `check`-targeted declared-error fixture actually
+fails under `check` — that positive assertion moved to
+`corpus_expectation_manifest.rs`, which runs the exact declared command
+(including non-`check` ones) rather than a hard-coded `command == "check"`
+comparison. The sweep keeps its complementary half: a file declaring no error
+anywhere must not fail `check` unexpectedly.
+
+**Worker column, already satisfied.** `rust/fsl-wasm/test-browser.mjs` walks
+all corpus `.fsl` files and compares native/Worker `check`/`verify` envelopes
+for every one of them except a self-retiring `agent`/`causal` exclusion set
+(the Worker has no verb for either document type at all). No change was
+needed for C4's Worker column.
+
+**Residual.** `span` location fidelity has no header-declared expectation
+anywhere in the corpus (no fixture states "the location must be exactly
+`L:C`"), so nothing in this ownership map cross-checks it. That is a real gap,
+not a silent one: C4's span column is future slice work, not claimed done
+here.
+
 ## Implementation fault operators (#537 C5)
 
 `injection_detector_matrix.rs` calibrates detectors against defective *specs*:
