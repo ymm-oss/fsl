@@ -5,6 +5,39 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- The kernel AST projection no longer re-serializes every subtree, and is named
+  for what it is: `python_ast` is now `kernel_ast_v1` (#622). `json!` calls
+  `serde_json::to_value` on each interpolated operand, and the operands were
+  already-built `Value` children, so every level deep-copied the subtree below
+  it — O(depth) stack and O(n²) time per level, spent *inside*
+  `recursion::guard` rather than around it, which is why #620's guard could not
+  see it. Nodes are now built with `Value::Array(vec![...])`. The name was
+  history, not contract: the tagged-array shape came from the frozen Python
+  reference, but the shape is now the input to `fsl-kernel-ast-v1+sha256`, which
+  **two** digests hash (`approval::spec_digest`,
+  `document_digest::spec_digest_from_kernel`). Deleting or reshaping it would
+  drift every approval record already in a user's repository; renaming the
+  function changes nothing a user can observe.
+- `PredicateExpander::expand_expr` and `public_kernel::expr_json` are now
+  guarded too, bringing the #620 table to ten cycles (#622). Neither was
+  reachable by the #620 witness, whose depth lived in a refinement mapping; a
+  second generator that puts the same depth inside an `invariant` — the shape
+  the digests actually project — aborted both immediately. `expr_json` is the
+  more interesting of the two: it called the already-guarded `infer_type` once
+  per level, so the guard ran every level, and the crash still landed in
+  `stacker::_grow` itself, because the check happens on entry and this frame is
+  large enough that the stack could fall from above the red zone to below what
+  growing it costs. A guard on a called function is not a guard on the calling
+  cycle. `fslc check`, `document claims`, and `kernel` now complete on a
+  2000-deep invariant.
+- Byte-identity was proven by differential sweep, not self-consistency: the
+  pre-change and post-change binaries were run over all 211 corpus specs under
+  `document claims`, `analyze`, and `testgen`, comparing stdout byte for byte —
+  633 comparisons, 0 mismatches. The sweep's own control came first and mattered:
+  run against itself the old binary disagreed with itself on 14 files, because
+  `testgen` stamps wall-clock `elapsed_s`/`check_elapsed_s` into its envelope.
+  Those two keys are blanked; nothing else is normalized.
+
 - `tools/run-fault-operators.sh` no longer measures a *previous* run's fault.
   The scratch checkout shares one `CARGO_TARGET_DIR` across steps, and `rsync -a`
   restores the reverted sources with the worktree's mtimes -- which can be older
@@ -36,7 +69,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   shows whichever site ran out first, so guarding one exposed the next, six
   rounds over. Eight cycles across three crates are now guarded —
   `SyntaxParser::expression`, `SyntaxExpr::into_kernel`,
-  `SyntaxExpr::render_source`, `Expr::python_ast` (`fsl-syntax`),
+  `SyntaxExpr::render_source`, `Expr::kernel_ast_v1` (`fsl-syntax`),
   `elaborate_enum_conversions`, `infer_type`, `validate_expression`
   (`fsl-core`), and `eval` (`fsl-verifier`) — behind one
   `fsl_syntax::recursion::guard` that owns the red zone and segment size, so a
@@ -48,7 +81,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   that previously aborted at 160, and `check`/`fmt` return their ordinary
   envelopes on the same file.
 
-  The invariant is **not** fully met, and #622 tracks the rest. `Expr::python_ast`
+  The invariant is **not** fully met, and #622 tracks the rest. `Expr::kernel_ast_v1`
   builds its result with `json!`, which calls `serde_json::to_value` on each
   already-built child and re-serializes the whole subtree — O(depth) stack per
   level, inside the guard rather than around it. `fslc analyze` still aborts

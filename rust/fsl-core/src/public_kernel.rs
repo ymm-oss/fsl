@@ -19,6 +19,7 @@ use crate::typecheck::{
     validate_public_expression,
 };
 
+use crate::recursion;
 use crate::{
     ActionGuard, KernelModel, KernelSpec, OriginChain, OriginSite, ParamDef, TypeDef, TypeRef,
     action_target, property_target, state_target, type_target,
@@ -235,8 +236,31 @@ fn binder_json(
     Ok(output)
 }
 
+/// Cycle entry for the public Kernel expression projection, and where
+/// `recursion::guard` belongs: all 46 recursive call sites below re-enter here.
+///
+/// Measured: `document claims` on a 400-deep `if` chain inside an invariant.
+/// Guarding `infer_type` alone was not enough and the reason is worth keeping:
+/// this walk called it once per level, so the guard *did* run every level, but
+/// the check happens on entry and this frame is large. Between two checks the
+/// stack could fall from above the red zone to below what `stacker::_grow`
+/// itself needs, so the innermost frame was `_grow` rather than a projection
+/// function -- growth failing for want of stack to grow with. Guarding the
+/// cycle that actually consumes the stack fixes it at the source (#622).
 #[allow(clippy::too_many_lines)]
 fn expr_json(
+    expr: &Expr,
+    env: &TypeEnv,
+    model: &KernelModel,
+    path: &str,
+    span: Span,
+    expected: Option<&TypeRef>,
+) -> Result<Value, PublicKernelError> {
+    recursion::guard(|| expr_json_inner(expr, env, model, path, span, expected))
+}
+
+#[allow(clippy::too_many_lines)]
+fn expr_json_inner(
     expr: &Expr,
     env: &TypeEnv,
     model: &KernelModel,

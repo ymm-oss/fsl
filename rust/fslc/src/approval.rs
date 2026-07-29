@@ -463,13 +463,13 @@ fn normalize_number_key(source: &str, quote: &str, key: &str, replacement: &str)
 ///
 /// Comments, whitespace, source paths, and line movement do not invalidate an
 /// approval. Imported/composed specifications are covered because the resolver
-/// expands them before `python_ast` is projected.
+/// expands them before `kernel_ast_v1` is projected.
 pub fn spec_digest(path: &Path) -> Result<String, String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
     let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
     let kernel =
         fsl_core::parse_kernel_source(&source, &resolver).map_err(|error| error.to_string())?;
-    let ast = normalized_ast(&kernel.python_ast())
+    let ast = normalized_ast(&kernel.kernel_ast_v1())
         .ok_or_else(|| "normalized kernel AST is empty".to_owned())?;
     let encoded = serde_json::to_vec(&ast).map_err(|error| error.to_string())?;
     let mut framed = SPEC_DIGEST_ALGORITHM.as_bytes().to_vec();

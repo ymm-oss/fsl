@@ -4,7 +4,7 @@
 //! Syntax layer for the Rust fslc port.
 //!
 //! Phase 0 starts with the expression grammar because it is shared by every
-//! declaration dialect.  The public `python_ast` projection deliberately emits
+//! declaration dialect.  The public `kernel_ast_v1` projection deliberately emits
 //! the tuple/list JSON shape of the Python reference implementation, allowing
 //! differential tests without making that legacy representation the Rust AST.
 

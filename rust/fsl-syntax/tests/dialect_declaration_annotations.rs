@@ -89,7 +89,7 @@ fn stray_annotation_before_closing_brace_in_aggregate_is_a_target_error() {
 }
 
 #[test]
-fn ai_authority_rules_accept_annotations_and_expose_plain_name_python_ast() {
+fn ai_authority_rules_accept_annotations_and_expose_plain_name_kernel_ast_v1() {
     let component = parse_ai_component(
         r#"
 ai_component Assistant {
@@ -114,7 +114,7 @@ ai_component Assistant {
         1
     );
     assert_eq!(component.authority.may_execute[0].name, "Execute");
-    let ast = component.python_ast();
+    let ast = component.kernel_ast_v1();
     assert_eq!(
         ast["authority"]["may_suggest"],
         serde_json::json!(["Search"])
@@ -240,7 +240,7 @@ ai_component Assistant {
             .source_order()
             .is_empty()
     );
-    let ast = component.python_ast();
+    let ast = component.kernel_ast_v1();
     assert_eq!(
         ast["check"]["rules"],
         serde_json::json!(["tool_authority", "tool_schema_declared"])

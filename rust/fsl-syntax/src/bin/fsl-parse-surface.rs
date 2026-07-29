@@ -18,7 +18,7 @@ fn main() {
     match fsl_syntax::parse_surface_document(&source) {
         Ok(document) => println!(
             "{}",
-            serde_json::to_string(&document.python_ast()).expect("serialize AST")
+            serde_json::to_string(&document.kernel_ast_v1()).expect("serialize AST")
         ),
         Err(error) => {
             eprintln!("{error}");

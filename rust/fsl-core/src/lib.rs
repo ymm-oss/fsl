@@ -212,8 +212,8 @@ pub fn build_surface_model(spec: SurfaceSpec) -> Result<KernelModel, ModelError>
 
 impl KernelSpec {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
-        self.spec.python_ast()
+    pub fn kernel_ast_v1(&self) -> Value {
+        self.spec.kernel_ast_v1()
     }
 
     #[must_use]
@@ -1052,8 +1052,22 @@ impl PredicateExpander {
         })
     }
 
-    #[allow(clippy::too_many_lines)]
+    /// Cycle entry for `def` predicate expansion, and where `recursion::guard`
+    /// belongs: every arm below recurses back through here, and the binder
+    /// expansion above re-enters it too.
+    ///
+    /// Measured: `check` and `document claims` on a 400-deep `if` chain written
+    /// inside an *invariant*, with this function as the innermost frame at
+    /// ~22 KiB per level. The #620 witness never reached it because that
+    /// witness put its depth in a refinement mapping, which is not expanded
+    /// here -- the ninth site of the same class, found by changing the witness
+    /// rather than the code (#622).
     fn expand_expr(&self, expr: Expr, stack: &mut Vec<String>) -> Result<Expr, CoreError> {
+        recursion::guard(|| self.expand_expr_inner(expr, stack))
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn expand_expr_inner(&self, expr: Expr, stack: &mut Vec<String>) -> Result<Expr, CoreError> {
         if let Expr::Call { name, args, span } = expr {
             let Some(definition) = self.definitions.get(&name) else {
                 return Err(core_error(format!("undefined predicate '{name}'"), span)

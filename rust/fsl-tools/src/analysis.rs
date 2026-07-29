@@ -1006,7 +1006,7 @@ impl<'a> Builder<'a> {
                     "label".to_owned(),
                     json!(format!("{} requires {index}", display(name))),
                 );
-                value.insert("expr".to_owned(), requirement.python_ast());
+                value.insert("expr".to_owned(), requirement.kernel_ast_v1());
                 value.insert("action".to_owned(), json!(action_id));
                 self.add_node(value, false);
                 self.add_edge(edge(&action_id, "has_guard", &id));
@@ -1029,7 +1029,7 @@ impl<'a> Builder<'a> {
                     "label".to_owned(),
                     json!(format!("{} effect {index}", display(name))),
                 );
-                value.insert("expr".to_owned(), expr.python_ast());
+                value.insert("expr".to_owned(), expr.kernel_ast_v1());
                 value.insert("action".to_owned(), json!(action_id));
                 value.insert("target".to_owned(), json!(root));
                 self.add_node(value, false);
@@ -1051,7 +1051,7 @@ impl<'a> Builder<'a> {
                     "label".to_owned(),
                     json!(format!("{} ensures {index}", display(name))),
                 );
-                value.insert("expr".to_owned(), ensures.python_ast());
+                value.insert("expr".to_owned(), ensures.kernel_ast_v1());
                 value.insert("action".to_owned(), json!(action_id));
                 self.add_node(value, false);
                 self.add_edge(edge(&action_id, "has_ensures", &id));
@@ -1074,7 +1074,7 @@ impl<'a> Builder<'a> {
                     Some(property.name.clone()),
                     Some(property.span.python_loc()),
                 );
-                value.insert("expr".to_owned(), property.expr.python_ast());
+                value.insert("expr".to_owned(), property.expr.kernel_ast_v1());
                 add_requirement_metadata(&mut value, &property.annotations, property.meta.as_ref());
                 self.add_node(value, true);
                 let reads = expr_reads(&property.expr, &self.state);
@@ -1090,14 +1090,14 @@ impl<'a> Builder<'a> {
                 Some(property.name.clone()),
                 Some(property.span.python_loc()),
             );
-            value.insert("P".to_owned(), property.before.python_ast());
-            value.insert("Q".to_owned(), property.after.python_ast());
+            value.insert("P".to_owned(), property.before.kernel_ast_v1());
+            value.insert("Q".to_owned(), property.after.kernel_ast_v1());
             add_requirement_metadata(&mut value, &property.annotations, property.meta.as_ref());
             if let Some(within) = property.within {
                 value.insert("within".to_owned(), json!(within));
             }
             if let Some(decreases) = &property.decreases {
-                value.insert("decreases".to_owned(), decreases.python_ast());
+                value.insert("decreases".to_owned(), decreases.kernel_ast_v1());
             }
             self.add_node(value, true);
             let mut reads = expr_reads(&property.before, &self.state);

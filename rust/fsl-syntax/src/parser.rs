@@ -2238,7 +2238,7 @@ mod tests {
     use super::*;
 
     fn ast(source: &str) -> serde_json::Value {
-        parse_expr(source).unwrap().python_ast()
+        parse_expr(source).unwrap().kernel_ast_v1()
     }
 
     #[test]
@@ -2344,7 +2344,7 @@ mod tests {
 }
 verify { values Id = 0..2 }
 "#;
-        let ast = parse_surface_spec(source).unwrap().python_ast();
+        let ast = parse_surface_spec(source).unwrap().kernel_ast_v1();
         assert_eq!(ast[0], "spec");
         assert_eq!(ast[1], "Demo");
         assert_eq!(
