@@ -495,9 +495,18 @@ for (let index = 0; index < parityCases.length; index += 1) {
 // comparison needed. See the comment on that earlier assertion for why it
 // would be unsound to skip.
 const staleExclusions = [];
+function assertAgentWorkerProbeFailsClosed(probe, envelope) {
+  if (probe.documentType === "agent" && envelope?.result !== "error") {
+    throw new Error(
+      `${probe.path}: the Worker now returns ${JSON.stringify(envelope?.result)} for the agent `
+      + "document, so the agent fail-closed assurance cell and unsupportedDocuments entry are stale.",
+    );
+  }
+}
 for (let index = 0; index < exclusionProbes.length; index += 1) {
   const probe = exclusionProbes[index];
   const envelope = browser.parityEnvelopes[parityCases.length + index];
+  assertAgentWorkerProbeFailsClosed(probe, envelope);
   if (envelope?.result !== "error") {
     staleExclusions.push(
       `${probe.path}: the Worker now returns ${JSON.stringify(envelope?.result)} for this `

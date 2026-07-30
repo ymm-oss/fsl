@@ -2,12 +2,11 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! Machine-readable sweep summary: counts of (domain kind, domain size,
-//! property kind, operation/context) this run actually exercised, printed
+//! property kind, expression variant, aggregate kind, type row, and
+//! operation/context) this run actually exercised, printed
 //! at the end of each sweep test so a future #537 C3 slice-2 `expr` axis
 //! citation can point at a specific, re-runnable count instead of a prose
-//! claim. Slice 1 only aggregates; it does not register an axis with the C3
-//! matrix (`assurance_matrix.rs`) -- that is slice 2's job, per
-//! `docs/DESIGN-conformance-harness.md`'s C6 section.
+//! claim. Slice 2 registers that citation with the C3 matrix.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -21,6 +20,9 @@ pub struct SweepSummary {
     action_counts: BTreeMap<usize, usize>,
     guarded_count: usize,
     fair_count: usize,
+    expression_variant_counts: BTreeMap<String, usize>,
+    aggregate_kind_counts: BTreeMap<String, usize>,
+    type_row_counts: BTreeMap<String, usize>,
     operation_counts: BTreeMap<String, usize>,
     total_models: usize,
 }
@@ -64,6 +66,28 @@ impl SweepSummary {
             .or_insert(0) += 1;
         self.total_models += 1;
     }
+
+    pub fn record_expression_model(
+        &mut self,
+        expr_variant: &str,
+        aggregate_kind: Option<&str>,
+        type_rows: impl IntoIterator<Item = &'static str>,
+    ) {
+        *self
+            .expression_variant_counts
+            .entry(expr_variant.to_owned())
+            .or_insert(0) += 1;
+        if let Some(kind) = aggregate_kind {
+            *self
+                .aggregate_kind_counts
+                .entry(kind.to_owned())
+                .or_insert(0) += 1;
+        }
+        for row in type_rows {
+            *self.type_row_counts.entry(row.to_owned()).or_insert(0) += 1;
+        }
+        self.total_models += 1;
+    }
 }
 
 impl fmt::Display for SweepSummary {
@@ -71,7 +95,8 @@ impl fmt::Display for SweepSummary {
         write!(
             formatter,
             "total_models={} domain_kinds={:?} domain_sizes={:?} property_kinds={:?} \
-             state_vars={:?} action_counts={:?} guarded={} fair={} operations={:?}",
+             state_vars={:?} action_counts={:?} guarded={} fair={} \
+             expression_variants={:?} aggregate_kinds={:?} type_rows={:?} operations={:?}",
             self.total_models,
             self.domain_kind_counts,
             self.domain_size_counts,
@@ -80,6 +105,9 @@ impl fmt::Display for SweepSummary {
             self.action_counts,
             self.guarded_count,
             self.fair_count,
+            self.expression_variant_counts,
+            self.aggregate_kind_counts,
+            self.type_row_counts,
             self.operation_counts
         )
     }
