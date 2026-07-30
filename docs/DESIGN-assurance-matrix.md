@@ -9,9 +9,10 @@ generalized across every semantic/product surface: rows are semantic
 features, columns are verification/rendering surfaces, and every cell is one
 of `exercised` / `rejecting-control` / `unsupported-fail-closed` /
 `not-applicable` (with a reason), never blank. This document is the accepted
-design for slice 1: the mechanism (`Claim`/`Citation`/aggregator/negative
-controls) plus two fully-registered axes (`outcome_kind`, `violation_kind`)
-and one axis pending citation completion (`properties`).
+design for slices 1–3: the mechanism
+(`Claim`/`Citation`/aggregator/negative controls) and the fully registered
+`outcome_kind`, `violation_kind`, `properties`, `expr`, `types`, and
+`dialects` axes.
 
 This is not the assurance-*class* vocabulary in
 [`DESIGN-assurance-classes.md`](DESIGN-assurance-classes.md) (`proved` /
@@ -54,7 +55,10 @@ No new crate, no central hand-written table.
   types and their `recheck`/`check_complete`/`check_citations` methods.
 - `rust/fslc/tests/assurance/outcome_kind.rs`,
   `rust/fslc/tests/assurance/violation_kind.rs`,
-  `rust/fslc/tests/assurance/properties.rs` — one module per semantic-surface
+  `rust/fslc/tests/assurance/properties.rs`,
+  `rust/fslc/tests/assurance/expr.rs`,
+  `rust/fslc/tests/assurance/types.rs`, and
+  `rust/fslc/tests/assurance/dialects.rs` — one module per semantic-surface
   axis. Each module owns its own `axis()` constructor and any small targeted
   test it needed to write because no existing test cleanly covered a cell.
 
@@ -300,15 +304,101 @@ property group, the anchor is the kernel schema's `properties.required`
 list plus `kernel_schema_property_groups_match_the_axis_rows` (see the
 `properties` axis section above).
 
-## Slice 2 / slice 3 plan
+## Slices 2 and 3: expressions, types, and dialects (implemented)
 
-- **Slice 2** (`expr` axis): `fsl_syntax::Expr`'s 22 variants +
-  `AggregateKind`'s 4, connecting to C6's typed generative/metamorphic
-  agreement sweep once that lands.
-- **Slice 3**: `types` axis (`TypeRef`'s 9 variants, `TypeDef`'s 3),
-  `dialects` axis (`dispatch.rs`'s `DIALECT_KEYWORDS`, single-sourced from
-  the `frontends!` macro). Also: extend the specs-only BMC/explicit
-  agreement sweep (`explicit_engine.rs`'s largest existing cell,
-  `explicit_and_bmc_agree_on_every_accepted_top_level_corpus_spec`) to cover
-  `examples/`, and add an `induction` column to that sweep once a
-  representative induction-provable subset of the corpus is identified.
+### `expr` axis (slice 2)
+
+`assurance/enum_rows.rs` derives 24 `Expr` rows and four `AggregateKind` rows
+through declarations that generate both an exhaustive match on the real enum
+and the witnesses used to enumerate it. The earlier plan's count of 22 was
+stale: `Call` and `Stage` are live syntax variants, although neither is
+allowed to reach a checked Kernel evaluator. The axis and the C6 sweep consume
+this shared source-coupled inventory, so adding a variant cannot be repaired by
+updating a label match while forgetting its row or generated-model posture.
+
+Declared columns are `Monitor` and `BMC` (28 × 2 = 56 cells). The explicit
+engine is deliberately not a third expression column: it drives the same
+concrete evaluator as Monitor. It remains present in the C6 agreement sweep
+as an independent exploration/verdict/replay control, but does not constitute
+a third expression implementation.
+
+- 52 cells are `Exercised`: the 22 evaluator-reachable `Expr` variants and
+  four `AggregateKind` rows on both columns.
+- Four cells are `UnsupportedFailClosed`: `Expr::Call` and `Expr::Stage` on
+  both columns. `PredicateExpander` eliminates valid direct-spec calls and
+  `StageResolver` eliminates valid business/requirements stage access during
+  lowering. `typecheck.rs::infer_type_inner` rejects either form if it leaks
+  into the public Kernel. The targeted control
+  `unlowered_call_and_stage_fail_closed_before_evaluator_entry` injects each
+  into a parsed typed surface tree, re-runs the ordinary semantic build gate,
+  and observes the named rejection before either evaluator can run.
+
+The exercising citation is executable, not prose:
+`typed_agreement.rs::expression_variant_sweep_agrees_across_all_three_engines_and_covers_all_types`.
+`generator.rs::expression_sweep` supplies 25 deterministic, in-process models:
+one for each non-aggregate checked variant and one for each of the four
+aggregate kinds (so `Expr::Aggregate` is observed four times). Each model is
+parsed and checked, its designated variant is confirmed in the resulting
+expression tree, and then Monitor BFS / explicit / BMC verdict, replay, and
+sampled-successor admission are compared. Every positive model must be clean;
+the test then negates its known-true `Variant` expression and requires all
+three engines to report the same step-zero invariant violation. The
+`unique`/`exactlyOne` models additionally exercise zero, one, and two matching
+bindings. `Expr::EnumMember`, which ordinary
+enum tokens do not retain as a direct-spec node, uses the documented
+`build_surface_model` typed-AST mutation gate and is re-typechecked before the
+same comparison. `sweep_summary.rs` records a per-row
+`expression_variants={...}` / `aggregate_kinds={...}` summary; this is the
+explicit C6 `sweep_summary` → C3 `Citation` connection planned in slice 1.
+
+### `types` axis (slice 3)
+
+The shared source-coupled declarations in `assurance/enum_rows.rs` likewise
+derive all nine `TypeRef` rows and all three `TypeDef` rows through exhaustive
+matches plus generated witnesses. Declared columns are `Monitor` and `BMC`
+(12 × 2 = 24 cells), all `Exercised`.
+
+The expression family deliberately carries `Int`, `Bool`, `Named`, inline
+`Range`, `Map`, `Relation`, `Set`, `Seq`, and `Option` state/type positions,
+plus `Domain`, `Enum`, and `Struct` definitions. The C6 test recursively reads
+the checked `KernelModel` type inventory, requires all 12 rows, then passes the
+same models through concrete and symbolic evaluation. The type cells therefore
+cite observed value construction/comparison rather than a parser-only mention.
+
+### `dialects` axis (slice 3)
+
+`assurance/dialects.rs` reads its ten rows directly from
+`fsl_syntax::DIALECT_KEYWORDS`, which the `frontends!` macro emits from the
+same invocation that builds the dispatch table. No second ten-string row list
+exists. `every_registered_dialect_has_a_corpus_representative_and_reviewed_posture`
+also derives the observed corpus set with `dialect_keyword`; a frontend
+addition fails an explicit rejecting default in each posture mapping until its
+CLI, Worker, and corpus ownership are adjudicated.
+
+Declared columns are `CLI check`, `Worker`, and `corpus` (10 × 3 = 30 cells):
+
+- 27 cells are `Exercised`. Ordinary dialect checks cite the native bare-check
+  sweep; Worker cells cite the all-corpus normalized-envelope parity harness;
+  corpus ownership cites the C4 bare-check/gallery, refinement, or evidence
+  manifest appropriate to the dialect.
+- Three cells are `UnsupportedFailClosed`. Two are `refinement`: a mapping has
+  no standalone Kernel `state`, so native bare `check` refuses it and the
+  Worker parity corpus confirms the same refusal. Its actual semantics remain
+  owned and exercised by `refine_corpus_parity.rs` under `fslc refine`. The
+  third is `agent` × Worker: native runs its lenient agent analysis while the
+  Worker has no agent path and stops at the Kernel lowering gate.
+  `test-browser.mjs::assertAgentWorkerProbeFailsClosed` is the agent-specific,
+  self-retiring error assertion. The harness's other three unsupported probes
+  are causal documents, but causal intentionally bypasses `frontends!` and is
+  therefore not a dialect-axis row.
+
+### Deferred corpus/induction expansion
+
+The earlier “also” item is not implemented in slices 2/3: the specs-only
+BMC/explicit corpus sweep is not extended to `examples/`, and no induction
+column is added. That work first needs execution-cost measurement and a
+declared representative subset whose properties are genuinely
+induction-provable; adding the whole corpus would conflate unsupported or
+bounded-only properties with missing assurance. A later independent slice
+should measure the expanded sweep, publish the subset rule, and only then
+register those columns.

@@ -465,6 +465,25 @@ context; `head`/`pop`/`at`/index and the unguarded `divide`/`remainder`
 boundary live as dedicated `relations.rs` R6 tests instead (see "Two
 confirmed findings" below for why). Both floors are asserted in
 `typed_agreement.rs` (`DOMAIN_SWEEP_FLOOR = 15`, `OPERATION_SWEEP_FLOOR = 4`).
+
+Slice 2 adds `generator.rs::expression_sweep`: 25 deterministic models
+designate every evaluator-reachable `Expr` variant, with separate models for
+all four `AggregateKind` values. Each model carries the same finite schema
+containing all nine `TypeRef` and all three `TypeDef` rows. The test confirms
+the designated expression node in the checked model, derives and checks the
+12-row type inventory, then runs the same Monitor BFS / explicit / BMC
+agreement, replay, and successor-admission path as the earlier families.
+The source-coupled row declarations generate both their exhaustive enum match
+and enumeration witnesses; the generated-model labels must equal those row
+sets exactly. Each positive model must return a clean verdict, after which its
+known-true invariant is negated and all three engines must detect the same
+step-zero violation. The `unique` and `exactlyOne` representatives cover zero,
+one, and multiple matching bindings rather than only their empty case.
+`Expr::EnumMember` is a typed generated form rather than a retained
+direct-spec token, so its family starts from a parsed model, replaces the
+token in the typed surface tree, and re-runs `build_surface_model` before any
+evaluator sees it.
+
 The whole suite — generation, all engines, replay, successor sampling, and
 all R1-R7 relations — runs in well under a second; the ~2-minute budget
 the C6 brief set was never approached, so the generation space was not
@@ -548,17 +567,28 @@ parity suite, which this C6 slice does not duplicate. C6 compares the
 three engines native tests *can* reach; a browser-side C6 sweep, if ever
 needed, is a Worker-suite concern, not a gap in this one.
 
-### Slice 2 plan
+### Slice 2 implementation
 
-`sweep_summary.rs` aggregates `(domain kind, domain size, property kind,
-state-variable count, action count, guarded, fair, operation/context)`
-counts and prints them at the end of `domain_sweep_agrees_across_all_three_engines`
-and `operation_sweep_agrees_across_all_three_engines` — a machine-readable,
-re-runnable count slice 2's C3 `expr` axis can cite instead of a prose
-claim. Slice 1 does not register an axis with `assurance_matrix.rs`; that
-registration, plus sweeping the full 22-variant `Expr` enum (this slice's
-generator covers arithmetic, comparison, logical, and the six partial
-operations, not aggregates/binders/relations), is slice 2's scope.
+`sweep_summary.rs` now aggregates `(domain kind, domain size, property kind,
+state-variable count, action count, guarded, fair, expression variant,
+aggregate kind, type row, operation/context)` counts. The
+`expression_variant_sweep_agrees_across_all_three_engines_and_covers_all_types`
+test prints a machine-readable `expression_variants={...}`,
+`aggregate_kinds={...}`, and `type_rows={...}` slice after the generated run.
+`assurance/expr.rs` and `assurance/types.rs` cite that exact test, completing
+the planned `sweep_summary` → C3 matrix connection.
+
+The live syntax enum has 24 variants, correcting slice 1's stale count of 22.
+The 22 checked-kernel variants are swept. `Call` is expanded by
+`PredicateExpander` and `Stage` by `StageResolver`; the C3 axis records both as
+fail-closed unsupported on evaluator columns and owns a typed-AST injection
+control proving a leaked form is rejected by the semantic build gate. Each
+checked variant/type model also owns its paired invariant-negation control, so
+the new agreement anchor proves it can reject a known semantic violation. No
+new cross-engine disagreement was found by this family. The two existing R6/Seq
+findings remain the only self-retiring exclusions and are not weakened or
+reclassified by the safe Map-index / collection-method representatives used
+for the variant rows.
 
 ## Coupled changes
 
