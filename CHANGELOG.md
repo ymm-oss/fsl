@@ -5,6 +5,463 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-07-30
+
+- Semantic Assurance Matrix slices 2/3 add source-derived `expr` (24
+  `Expr` + 4 `AggregateKind` rows), `types` (9 `TypeRef` + 3 `TypeDef`
+  rows), and `dialects` (all 10 `frontends!` keywords) axes for issue #537
+  C3. A 25-model deterministic C6 family now checks all evaluator-reachable
+  expression variants and all type rows across Monitor BFS / explicit / BMC,
+  with a known-violating paired control for every model, while `Call`/`Stage`,
+  standalone refinement checks, and the Worker's missing agent path are
+  recorded with fail-closed evidence.
+- `rust/fslc/tests/typed_agreement.rs` introduces the C6 typed generative /
+  metamorphic cross-engine agreement suite (issue #537 C6 slice 1, issue
+  #648, `docs/DESIGN-conformance-harness.md` "Typed generative / metamorphic
+  agreement"): a deterministic structural generator (15 domain-axis models
+  + 4 operation-axis models, no randomness) builds checked `KernelModel`s
+  and compares Monitor BFS / explicit / BMC verdicts, replay, and successor
+  admission, plus seven metamorphic relations (alpha rename, BOM/trivia,
+  inline-vs-explicit init, disjoint assignment reorder, domain-size
+  boundary, short-circuit/partial/Euclidean duality, entity/number sugar vs
+  lowered type) each with a positive test and a negative control. Two
+  confirmed cross-engine findings are recorded as re-measured, self-retiring
+  exclusions rather than normalized away: `verify_bounded`'s symbolic Seq
+  encoding treats an out-of-range `head()` read in property context as
+  *defined* with an out-of-bound value instead of undefined (a spurious
+  `violated`/`invariant`, disagreeing with the concrete engines' correct
+  error); and `verify_bounded` alone never performs LANGUAGE.md's automatic
+  "Partial operations" check in action context at all (the CLI's
+  `--engine bmc` classification comes from a separate concrete pre-scan,
+  `find_boundary_violation`, not the solver).
+- `corpus_expectation_manifest.rs` and `evidence_corpus_manifest.rs` give every
+  declared `examples/gallery/{valid,errors,adversarial}` fixture and every
+  `causal`/`agent`/`ai_component` evidence-only document exactly one native
+  owner (issue #645, #537 C4 residual). 12 of ~38 declared gallery fixtures had
+  never been run by any native test — `tests/test_gallery.py` was the only
+  oracle, and it is frozen-Python, outside `tools/check-native-
+  integration.sh` — and nothing walked the corpus for an unregistered
+  `causal`/`fsl-ai` document. All reproduce their declared `result`/`kind`/exit
+  natively; no defect surfaced. `corpus_check_sweep.rs`'s
+  `every_corpus_spec_checks_ok_or_declares_its_error` no longer duplicates the
+  `check`-targeted half of that claim, now owned by the new manifest instead.
+  A shared `rust/fslc/tests/support/mod.rs` replaces the corpus-walk helpers
+  `corpus_check_sweep.rs` and `refine_corpus_parity.rs` each carried their own
+  copy of.
+- `rust/fslc/tests/assurance_matrix.rs` introduces the federated Semantic
+  Assurance Matrix skeleton (issue #537 C3 slice 1,
+  `docs/DESIGN-assurance-matrix.md`): axis modules under `tests/assurance/`
+  own their rows (read from existing single-owner registries, never copied)
+  and declared columns; every `(row, column)` cell carries a
+  machine-rechecked citation (path + anchor, re-read from the working tree
+  each run); blank required cells and stale/fabricated citations fail CI;
+  negative controls prove both checks can actually fail. Slice 1 axes:
+  `outcome_kind` (7 Monitor kinds × Monitor/CLI), `violation_kind` (12
+  engine kinds × BMC/induction, #646), and `properties` (5 KernelModel
+  property kinds × BMC/explicit/induction/replay).
+- `fsl-verifier`'s free-form `Violation.kind` strings (`BmcViolation`/
+  `InductionCti`/`RankFailure`) are now single-owned in
+  `rust/fsl-verifier/src/violation_kind.rs` instead of scattered string
+  literals (#646). Reading the emission sites directly (not transcribing
+  issue #646's own citation list) found 12 live values, not the 9 the issue
+  named — `pending_not_preserved`, `non_decreasing_helpful_action`, and
+  `non_helpful_action_increases_measure` had no exercising fixture anywhere
+  in the corpus before this change. No emitted JSON `violation_kind` value
+  changes by a single byte. Part of #537 C3 slice 1
+  (`docs/DESIGN-assurance-matrix.md`).
+- The kernel AST projection no longer re-serializes every subtree, and is named
+  for what it is: `python_ast` is now `kernel_ast_v1` (#622). `json!` calls
+  `serde_json::to_value` on each interpolated operand, and the operands were
+  already-built `Value` children, so every level deep-copied the subtree below
+  it — O(depth) stack and O(n²) time per level, spent *inside*
+  `recursion::guard` rather than around it, which is why #620's guard could not
+  see it. Nodes are now built with `Value::Array(vec![...])`. The name was
+  history, not contract: the tagged-array shape came from the frozen Python
+  reference, but the shape is now the input to `fsl-kernel-ast-v1+sha256`, which
+  **two** digests hash (`approval::spec_digest`,
+  `document_digest::spec_digest_from_kernel`). Deleting or reshaping it would
+  drift every approval record already in a user's repository; renaming the
+  function changes nothing a user can observe.
+- `PredicateExpander::expand_expr` and `public_kernel::expr_json` are now
+  guarded too, bringing the #620 table to ten cycles (#622). Neither was
+  reachable by the #620 witness, whose depth lived in a refinement mapping; a
+  second generator that puts the same depth inside an `invariant` — the shape
+  the digests actually project — aborted both immediately. `expr_json` is the
+  more interesting of the two: it called the already-guarded `infer_type` once
+  per level, so the guard ran every level, and the crash still landed in
+  `stacker::_grow` itself, because the check happens on entry and this frame is
+  large enough that the stack could fall from above the red zone to below what
+  growing it costs. A guard on a called function is not a guard on the calling
+  cycle. `fslc check`, `document claims`, and `kernel` now complete on a
+  2000-deep invariant.
+- Byte-identity was proven by differential sweep, not self-consistency: the
+  pre-change and post-change binaries were run over all 211 corpus specs under
+  `document claims`, `analyze`, and `testgen`, comparing stdout byte for byte —
+  633 comparisons, 0 mismatches. The sweep's own control came first and mattered:
+  run against itself the old binary disagreed with itself on 14 files, because
+  `testgen` stamps wall-clock `elapsed_s`/`check_elapsed_s` into its envelope.
+  Those two keys are blanked; nothing else is normalized.
+
+- `tools/run-fault-operators.sh` no longer measures a *previous* run's fault.
+  The scratch checkout shares one `CARGO_TARGET_DIR` across steps, and `rsync -a`
+  restores the reverted sources with the worktree's mtimes -- which can be older
+  than rlibs that an operator step compiled *with its patch applied*. Cargo then
+  judged those crates fresh and linked the faulted rlib into the no-op control's
+  binary, so a warm run reported a detector red for a fault that was no longer
+  in the source. Every `sync_scratch` now touches the files any patch names
+  (taken from the diffs' `+++ b/` headers), which puts cargo's mtime comparison
+  on the side of rebuilding without discarding the rest of the warm cache.
+  Reproduced deterministically -- cold run green, every warm run red,
+  `cargo clean -p fsl-syntax` green again -- and verified by restoring clean
+  sources into a fault-built scratch: before the fix cargo recompiled nothing
+  and the rebuilt binary still aborted on the #620 witness (exit 134); after it,
+  `fsl-syntax` recompiles and the witness exits 0. This is the second
+  scratch-fidelity defect in this harness after the `.git` marker (#611), and
+  the first to be caught by the no-op control rather than by inspection --
+  a harness that trusted its cache would have called the operator calibrated
+  while measuring the fault itself.
+- Recursion over a spec's expression structure now grows the stack instead of
+  aborting the process (#620). #617 made every platform agree on an 8 MiB
+  stack; it did not make the recursion bounded, and a generated 160-stage
+  refinement trio still killed `fslc` with `has overflowed its stack` — exit
+  134, no JSON envelope, no exit code the outcome contract could read. The
+  fix is `stacker::maybe_grow` at each recursion cycle entry, not a depth
+  limit: a limit would put an arbitrary constant into the language contract
+  and reject legitimate machine-generated specs, and this class was found by
+  exactly such a spec. Every current answer is preserved and none is added.
+  The measurement in #620 named two sites; a debugger's innermost frame only
+  shows whichever site ran out first, so guarding one exposed the next, six
+  rounds over. Eight cycles across three crates are now guarded —
+  `SyntaxParser::expression`, `SyntaxExpr::into_kernel`,
+  `SyntaxExpr::render_source`, `Expr::kernel_ast_v1` (`fsl-syntax`),
+  `elaborate_enum_conversions`, `infer_type`, `validate_expression`
+  (`fsl-core`), and `eval` (`fsl-verifier`) — behind one
+  `fsl_syntax::recursion::guard` that owns the red zone and segment size, so a
+  future site cannot pick its own constants. Six of the eight are
+  crash-witnessed; `render_source` and `infer_type` are not, and each says so at
+  its definition together with the N at which it was observed to survive
+  unguarded, so a reader can tell a measured guard from a speculative one.
+  `refine` now proves a 1000-stage trio (a 2000-long right-nested `if` chain)
+  that previously aborted at 160, and `check`/`fmt` return their ordinary
+  envelopes on the same file.
+
+  The invariant is **not** fully met, and #622 tracks the rest. `Expr::kernel_ast_v1`
+  builds its result with `json!`, which calls `serde_json::to_value` on each
+  already-built child and re-serializes the whole subtree — O(depth) stack per
+  level, inside the guard rather than around it. `fslc analyze` still aborts
+  above ~200 stages. This is not analyze-only: the same projection feeds both
+  spec digests (`approval::spec_digest`,
+  `document_digest::spec_digest_from_kernel`), the requirements document's claim
+  projection, and testgen's `expect`, so a deep enough invariant in a spec
+  reaches them too. The witness exposed only `analyze` because its deep
+  expression lives in a refinement mapping. Because that projection is digest
+  input, the repair has to prove byte-identical output and is a separate
+  reviewable change. See `docs/DESIGN-rust-component-internals.md` 4.4.
+- `fslc` now runs on an explicitly sized 8 MiB stack on every platform
+  instead of whatever the OS gives the main thread (#617). Windows gives
+  1 MiB where Linux and macOS give 8, and `fslc refine` needed more than 1
+  on `examples/agentic_rag` and `examples/multi_agent_system`: the same
+  command on the same bytes answered `refines` on Linux and aborted with
+  `has overflowed its stack` on Windows, returning neither a JSON envelope
+  nor an exit code. Those two mappings are among the 22 that #593 counted as
+  never executed, so #616's manifest ran them for the first time and the
+  crash surfaced on its first post-merge Windows run. The recursion is still
+  unbounded — it grows with the spec's structure, not with `--depth` — which
+  is #620; this makes the platforms agree, it does not add a limit.
+- `examples/layers/return_impl_refines.fsl` now declares an `enum abstraction`
+  instead of a bare-member if-chain, so the command `examples/layers/README.md`
+  documents answers `refines` again rather than `error`/`kind:"type"` (#615).
+  `da003eb` began rejecting members that name a position in more than one enum,
+  which is correct -- `New`, `AutoApproved`, `MgrQueue`, `MgrApproved`, and
+  `MgrRejected` each belong to both `DSt` and `SSt`, so the chain read as an
+  identity while the compiler had to guess. The corpus was never migrated to
+  the `convert`/`abstract` requirement that change introduced. `DSt`'s
+  `PaySubmitted` and `PayConfirmed` both collapse to `SSt`'s `Paid`, making this
+  many-to-one and `enum abstraction` rather than `enum conversion` the right
+  form. The mapping's #616 exclusion went stale on the fix and is replaced by a
+  live manifest row, which is the self-retirement working on a real repair
+  rather than a rehearsed one.
+- `run_db_check` and `run_domain_check` now share one
+  `outcome::is_definitive_kernel_verdict` instead of each carrying the rule
+  that only a kernel status of 0 or 1 may be folded into a dialect verdict
+  (#612). #600 existed because they did not: `run_domain_check` had folded
+  correctly since #515 while `run_db_check` tested only `== 2`, so an internal
+  error was absorbed as a `dbsystem` verdict. Behaviour is unchanged; the point
+  is that a third dialect check cannot now be written without the rule.
+### Added
+- `rust/fslc/tests/deep_nesting.rs`: the #620 witness as a Rust generator rather
+  than a checked-in fixture, so the regression carries its own scale knob and
+  needs no interpreter. `WITNESS_STAGES = 200` sits above the measured 140-160
+  crash threshold, and a `const _: () = assert!(WITNESS_STAGES > 160)` makes
+  lowering it to speed the test up a compile error rather than a silent
+  downgrade to a test that asserts nothing. The assertion is that `fslc` exited
+  at all — `Output::status.code()` is `None` exactly when a stack overflow kills
+  the process — alongside the verdicts, because a guard that changed an answer
+  would be worse than the crash.
+- `unguarded-recursion` #537 C5 fault operator: patches
+  `fsl_syntax::recursion::guard` back into a direct call and requires
+  `deep_nesting` to fail while the parse-diagnostic matrix stays green. The
+  guard was consolidated into one function partly so this operator is one line;
+  an operator that had to patch eight call sites would calibrate the patch
+  rather than the defect.
+- `rust/fslc/tests/refine_corpus_parity.rs`: a command-owned manifest binding
+  every corpus refinement mapping to native `fslc refine` (issue #593, #537 C4,
+  `docs/DESIGN-conformance-harness.md` "Refinement mapping manifest"). 22 of the
+  28 mappings had never been executed by any test, and the script covering the
+  other 6 (`tools/check_rust_refinement_parity.py`) was invoked by no workflow and
+  no `tools/check-native-integration.sh` lane. `corpus_check_sweep.rs` cannot
+  close this: a mapping has no `state` block, so `fslc check` answers
+  `semantics`/"spec has no state block" for one whether or not the mapping is
+  sound — a green corpus said nothing about `refine`. The roster is walked from
+  `specs/` + `examples/` rather than listed, so an unregistered mapping fails
+  instead of silently joining the 22, and a registered path that no longer exists
+  fails as a stale entry; a hard-coded list is the shape #577 retired 28 stale
+  instances of. Each of the 26 live rows carries `declared_by`, the `path:line` of
+  the README row or fixture header that **declares** its verdict, and compares
+  `result`, `kind`, **and** the process exit code. Expectations are transcribed
+  from those declarations, never from observed output: pinning a measurement would
+  make a future defect look like the contract, which is exactly the state
+  `examples/layers/return_impl_refines.fsl` is in. Where a mapping declares its
+  own expectation in the gallery `expected-command`/`expected-result`/
+  `expected-kind` header convention, the row is checked against it rather than
+  trusted, `--depth` included — that caught a row running at depth 4 against a
+  header declaring `--depth 3`. 22 of the 26 rows additionally anchor their
+  `declared_by` to the cited file, and the harness requires that file to still
+  contain a line stating the row's verdict, so a citation cannot outlive the
+  declaration it names. That keeps each declaration single-owner:
+  `governance_semantic_mapping.fsl` is declared by the broken implementation it
+  maps, and the citation is checked there rather than copied onto the mapping as
+  a second header to keep in sync. The two exclusions are self-retiring in the #568
+  sense: the harness re-measures each recorded premise and fails, naming the row
+  that must replace it, once the premise stops holding.
+- `specs/bank.fsl` and `specs/seat_booking.fsl`: the `fslc refine` command line
+  each header already implied. Both headers asserted that the paired
+  implementation "refines this" but documented no way to run it, so the manifest
+  row above had no depth to inherit. This promotes an existing assertion to a
+  runnable claim; it introduces no new expectation and deliberately uses prose
+  rather than the `expected-command:` key, which `tests/test_corpus_snapshot.py`
+  and `tools/check_rust_cli_snapshot.py` consume.
+- `rust/fslc/src/outcome.rs`: one definition of the success and failure
+  classes over the CLI's `result` vocabulary (issue #537 C2,
+  `docs/DESIGN-rust-component-internals.md` "Outcome classification"). The
+  crate previously had none — each command arm compared `result` against
+  literals at its own return point, so the class was re-derived, and
+  re-forgotten, once per family. `outcome_class` takes the whole envelope
+  rather than the `result` string because five values carry their verdict in
+  a sibling field (`approval check`'s `status`, `fmt --check`'s `changed`,
+  `lint`'s `finding_count`, `diff`'s `violations` and `gate.passed`) — the
+  same reason `docs/LANGUAGE.md`'s exit-code table excludes
+  `approval_check`/`approval_diff`. Unknown values classify as `Failure`,
+  following `mutate_exit_status`'s `_ => 3`: a result nobody registered now
+  fails loudly instead of exiting 0, which is how #554 arose. Cacheability
+  stays a separate predicate (`verify_cache_admits`), because `violated` is
+  failure-class *and* cacheable.
+- `rust/fslc/tests/fault_operators/` and `tools/run-fault-operators.sh`:
+  implementation fault operators (issue #537 C5,
+  `docs/DESIGN-conformance-harness.md`). `injection_detector_matrix.rs`
+  calibrates detectors against defective *specs*; this answers the other
+  question — would the test suite notice if the *verifier* started lying?
+  Every escaped defect in the 2026-07 batch was of that kind (#601's
+  `_ => 0`, #600's `violated`-only fold, #496's dropped explicit input), and
+  none of them lives in a `.fsl` file. Each operator is a **patch file, not
+  code**: the harness copies the working tree to a scratch checkout, applies
+  one minimal diff, rebuilds `fslc` there, and requires that operator's
+  primary detector to fail while its blind detector still passes. No
+  fault-injection hook exists in the shipped binary, under a feature flag or
+  otherwise — a switch that makes a verifier lie about verdicts must not exist
+  in the codebase whose purpose is to prevent exactly that. Two controls make
+  the matrix readable rather than decorative: a no-op patch must leave every
+  named detector green, and a stale-seam patch must be *refused*, which keeps
+  "a patch that no longer applies is a loud failure, never a skip" verified
+  instead of merely intended. Wired into `tools/check-native-integration.sh`
+  as its own `fault-operators` phase, part of `all` and deliberately not part
+  of `rust`, which every pull request runs. CI runs it as its own post-merge
+  `fault operators` job, required by the `product gate` aggregator: a matrix
+  that never runs is worse than one that skips, because it rots into decoration
+  while reporting green. Adding an operator is a patch file plus one row in
+  `operators.txt` — data, no harness code, and `CONTRIBUTING.md` now asks for
+  one whenever a fixed escaped defect's class can recur at a sibling seam.
+  One blind detector is the public Kernel v2 golden contract, whose
+  `spec.source.file` is repository-relative; naming it makes the no-op control
+  prove the scratch checkout is a *faithful* copy, not merely a compiling one.
+  It caught the first such infidelity immediately: `portable_cli_source_path`
+  finds the repository root by walking ancestors for a `.git`, and a scratch
+  tree without one escaped upward into the enclosing worktree, prefixing every
+  such path with `rust/target/fault-operators/checkout/`. The harness now gives
+  the scratch tree a repository root of its own.
+- `rust/fslc/tests/issue_600_db_check_folds_kernel_verdict.rs` and
+  `rust/fslc/tests/fixtures/issue_600_db_inconclusive_kernel.fsl`: the
+  rejecting control for #600 below, plus a guard test that fails loudly if
+  the fixture stops producing an inconclusive kernel — otherwise the control
+  would start passing vacuously.
+- `rust/fslc/tests/refine_corpus_parity.rs`: a native port of
+  `tools/check_rust_refinement_parity.py`'s 6 corpus refinement-mapping
+  regressions (`specs/cart_refines.fsl`, `specs/seat_refines.fsl`,
+  `examples/gallery/errors/refinement_failed_map.fsl`,
+  `examples/gallery/adversarial/refine_mapping_boundary_map.fsl`, and 2
+  `examples/refinement_liveness/*_progress_refines.fsl` files). The Python
+  script checked both the `fslc refine` stdout envelope and the process
+  exit code, but was never called from any CI workflow or
+  `tools/check-native-integration.sh`, so the native `refine` path's corpus
+  coverage ran nowhere — a structural gap that let #466, #483, #493, #494,
+  and #512 escape as false greens on this path (issue #593). The new test
+  is picked up automatically by `cargo test --workspace`, which both
+  `tools/check-native-integration.sh` and CI already run.
+- `rust/fslc/tests/corpus_check_sweep.rs::check_result_and_exit_status_never_contradict`:
+  an oracle-free Verdict Conservation Law check (issue #537 C2) over every
+  `.fsl` file under `specs/` + `examples/`. It holds no per-file expectation;
+  it only requires that a success-class `fslc check` result exit 0, that
+  every other (including any future, unlisted) result exit non-zero, and
+  that the stdout envelope is a JSON object carrying a string `result`
+  field. `corpus_check_sweep.rs`'s existing sweep only ever inspected the
+  JSON body, never the process exit status, so a `result:"error"` envelope
+  that exited 0 would previously pass unnoticed.
+- `rust/fslc/tests/corpus_check_sweep.rs::ledger_exit_status_agrees_with_its_verify_baseline`:
+  extends the same Verdict Conservation Law (issue #537 C2) to `fslc ledger`.
+  Unlike `check`, `ledger`'s JSON envelope always reports
+  `result:"generated"` regardless of the verification baseline it embeds, so
+  there is no `result`-string vocabulary to allowlist; instead this runs
+  `fslc verify` at matching `--depth`/`--deadlock ignore`/`--engine bmc`
+  arguments as an independent process and requires the two commands'
+  exit-code class (0 vs non-zero) to agree for every corpus file.
+
+### Fixed
+- `--strict-tags`' `untagged` hint proposed the non-canonical form. It read
+  `add a declaration tag such as "REQ-1: original requirement"; use "MODEL: ..."
+  or "ASSUME-1: ..."` — the `"ID: text"` string slot that
+  `docs/DESIGN-id-policy.md` classifies as migration input and that `fslc lint`
+  reports as `legacy_string_metadata` with a machine-applicable
+  `@requirement(...)` replacement. The diagnostic that fires at the exact moment
+  an author is choosing a tag was therefore teaching the form the next gate
+  rejects, which no amount of documentation elsewhere can outweigh. The hint now
+  names `@requirement("REQ-SCOPE-001", "original requirement")`, the
+  `MODEL-`/`ASSUME-`prefixed id for modeling intent, and process `covers` for the
+  business/requirements dialects. Native only; the frozen Python reference keeps
+  its wording, and no parity gate, test, or snapshot compares this string.
+- `tools/run-fault-operators.sh` applies operator patches with `git apply`
+  instead of the system `patch`. The matrix's first CI run failed (#613):
+  BSD `patch` on macOS accepted the no-op control's end-of-file hunk while
+  GNU `patch` on `ubuntu-latest` rejected the identical hunk against
+  identical bytes, so the calibration was green locally and red on the
+  runner. A harness whose verdict depends on where it runs calibrates
+  nothing; `git apply` is one implementation wherever git is.
+- The agent skills now state that typed link as the only canonical form.
+  `skills/fsl/SKILL.md` had a worked example writing
+  `invariant OnePerUser "ASSUME-1: ..."`, `skills/fsl-design/SKILL.md` — the
+  design layer's own skill, where a design declaration links back to a
+  requirement ID the requirements spec owns — said nothing about requirement
+  links at all, and `@requirement` appeared nowhere outside the on-demand
+  `reference.md`. The skills' tagging gate was `--strict-tags` alone, which only
+  asks whether a tag exists: it counts a legacy string as tagged. `fslc lint`,
+  the command that actually rejects the non-canonical form, was named in no
+  skill; it is now part of the gate in `fsl/SKILL.md`, `fsl-design`,
+  `fsl-requirements`, and `fsl-delivery`.
+- `fslc db check` reported `result:"verified_under_assumptions"` alongside a
+  non-zero exit whenever its nested kernel `verify` came back
+  `unknown_cti`/`reachable_failed`/`unknown_budget` (issue #600).
+  `run_db_check` folded only `violated` into the top-level verdict, so the
+  exit code was right and the envelope contradicted it — the half of the
+  Verdict Conservation Law a gate reading the JSON sees. Its
+  `run_domain_check` sibling has folded every non-passing kernel verdict
+  since #515; `db` now matches it, and its status guard admits both
+  definitive codes (`status != 0 && status != 1`) instead of testing `== 2`,
+  which had let a `kind:"internal"` kernel envelope be absorbed as a
+  `dbsystem` verdict.
+- `wrap_specialized` (the `ai`/`domain`/`db`/`agent` aggregation, 15 call
+  sites) ended its status match in `_ => 0`, so every specialized-dialect
+  result nobody had added to its failure list exited 0 (issue #601) — the
+  shape #554 arose from, and the opposite default to `outcome_class`'s
+  `_ => Failure` in the same crate. `check_ai` forwards its nested kernel's `result` verbatim when
+  it has no finding of its own, so an inconclusive kernel verdict reached
+  that arm. It now derives the status from `outcome_class`. A differential
+  sweep of the pre- and post-change binaries over `examples/` + `specs/`
+  found no corpus input that reaches it, so this omission is latent, unlike
+  its `db check` sibling above. Unlike #594 and #600, which are each a single
+  missing value, this was the mechanism that loses them: with the default on
+  the success side, any failure value added to any specialized dialect exits
+  0 from the moment someone forgets to register it.
+- `fslc sweep`'s minimal-counterexample selection carried a hand-written
+  failure list that had silently lost `unknown_budget` (issue #594), so a
+  grid whose only failing scope reported it would collapse into
+  `sweep_passed`/exit 0. It now defers to `outcome_class`. The omission was
+  latent rather than a live false green: `sweep` restricts `--engine` to
+  `bmc|induction`, `unknown_budget` is produced only by the explicit engine,
+  `--engine auto` falls back to BMC before it escapes, and the verify-cache
+  key includes the engine — so the control for this one is at the classifier
+  (`outcome.rs`), not end-to-end.
+- `rust/fslc/tests/corpus_check_sweep.rs` no longer carries
+  `CHECK_SUCCESS_RESULTS`, its own two-value copy of the success class
+  (issue #596). `check_result_and_exit_status_never_contradict` now calls
+  `fslc_rust::outcome::outcome_class`, so the law is stated against
+  production code instead of against a list in the test — the stale-check
+  shape #577 retired 28 instances of. `chain_layer_passes`,
+  `verify_cache_store`, and `mutate_exit_status` were migrated to the same
+  definition; `chain` and `analyze` batch now each state their
+  empty-workset choice (reject vs allow) as a named local, with the
+  asymmetry recorded rather than removed.
+- The agent skills now state that a requirements spec's inline
+  `implements Abs from "business.fsl"` seam is the one exception to the
+  exit-code contract: `check`/`verify` run the refinement to the business
+  layer but report the verdict only in the `implements` field, so a
+  `refinement_failed` / `impl_violated` seam still returns `result: "ok"` /
+  `"verified"` and exit 0, while the same failure is exit 1 through
+  standalone `fslc refine` and through `fslc chain`. `skills/fsl/SKILL.md`
+  previously stated the exit contract with no exception, and its diagnostic
+  table keyed the row on `implements.result: violated` — a value the verdict
+  vocabulary never produces (`refines` / `refinement_failed` /
+  `impl_violated`), so an agent searching the JSON for `violated` would miss
+  a broken seam entirely. `skills/fsl-delivery`'s Requirements stage gate and
+  both skills' "green `implements`" claim-discipline lines now say to assert
+  `implements.result == "refines"` rather than relying on the exit code. Only
+  `docs/DESIGN-design-family.md` ("treat `implements.result != refines` as
+  failure even when the top-level process exits zero") had carried this, and
+  it never reached the skills or `docs/LANGUAGE.md`. `docs/LANGUAGE.md` and
+  `docs/LANGUAGE.ja.md` now state it too, beside the `implements` description
+  and naming it the one exception to their exit-code table: the skills derive
+  from the language contract, so recording it only in the skills would leave
+  the canonical source still claiming the contract holds without exception.
+- `rust/fslc/tests/corpus_check_sweep.rs`'s module doc claimed (per issue
+  #483) that "the gallery fixtures and `examples/refinement_liveness/*`"
+  are refined by a test; only 6 of the 28 `refinement`-dialect corpus files
+  are, and that exercise was never wired into CI. Reworded to name the 6
+  covered files and their owning test, `refine_corpus_parity.rs` (issue
+  #593; same "comment claims a contract the implementation does not back"
+  shape as #585).
+- `fslc ledger` now exits non-zero when the verification baseline it embeds
+  is not itself success-class (`violated`, `reachable_failed`,
+  `unknown_cti`, `unknown_budget`, or `error`), instead of unconditionally
+  reporting `result:"generated"`/exit 0 regardless of the child verdict
+  (issue #592). The rendered ledger content is unaffected -- a violated spec
+  still produces a full audit ledger with the violation embedded -- only the
+  process exit code changes, reusing `mutate_exit_status`'s existing
+  `docs/LANGUAGE.md` exit-code mapping rather than adding a second one. This
+  only changes `fslc ledger`'s own direct exit code; `approval create`/
+  `check`'s internal reuse of the same rendering (`generate_unapproved_ledger_report`,
+  which exists purely to reproduce a target for a digest comparison) is
+  unaffected, since a verdict mismatch there is legitimate drift evidence,
+  not a hard error.
+- A CDP timeout in the browser parity gate now reports the call ordinal, the
+  socket's `readyState`, how many other requests were outstanding, and Chrome's
+  own stderr, instead of only the method and the elapsed budget. The stall it
+  catches is intermittent — one failure in five full local runs, none in CI —
+  and is not reproducible on demand, so the single message an occurrence prints
+  is all the evidence there will ever be, and the previous message could not
+  separate "Chrome never became usable" from "the page stopped answering
+  mid-poll". Call id 1 is `Runtime.enable`, so an id-1 timeout indicts startup
+  while a later id indicts the page; an `OPEN` socket means nobody answered
+  while `CLOSING`/`CLOSED` means the transport went away and the close handler
+  lost the race. No retry was added: retrying an unexplained stall would
+  suppress the event this exists to capture, and a genuine hang would return as
+  a slow pass rather than a failure (#587).
+- `test: add native FSL self-conformance anchors` (#537 C7) connects real
+  native CLI JSON and process exits to the `fslc_session` and `fslc_monitor`
+  replay models, and adds `fslc_fold.fsl` for sticky compound-verdict
+  aggregation across sweep, chain, and analyze batch. Independent,
+  fail-closed mapping tables never import `outcome.rs`; real passing/failing
+  observations, synthetic contract violations, mutation/vacuity evidence, and
+  an issue #554 exit-status sensitivity assertion provide both positive and
+  negative controls.
+
 ## [4.0.0] - 2026-07-27
 
 ### Changed
@@ -3703,7 +4160,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.0.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.1.0...HEAD
+[4.1.0]: https://github.com/ymm-oss/fsl/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/ymm-oss/fsl/compare/v3.1.0...v4.0.0
 [3.1.0]: https://github.com/ymm-oss/fsl/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/ymm-oss/fsl/compare/v2.7.0...v3.0.0

@@ -142,7 +142,123 @@ normalized path context, including independent spec and output-parent canonicali
 Move-only refactors must retain both a successful oracle and a rejecting oracle. A successful build
 or unchanged positive snapshot alone does not establish semantic preservation.
 
-## 5. Component internal designs
+### 4.4 Stack discipline over user-controlled structure (#617, #620)
+
+Recursion whose depth tracks the *spec's* structure — not a `--depth` bound the user chose — must
+not be able to abort the process. An abort returns neither the JSON envelope nor an exit code, so
+it exits the outcome-projection contract entirely (#537 C2); it is not a false green, but it is the
+one failure mode the delivery layer cannot even report.
+
+A generator scales such a site arbitrarily (a 2N-long right-nested `if` chain mapping a 2N-stage
+enum onto N stages). Debug-build thresholds on arm64: the parser overflows 1 MiB at chain ≈ 35 and
+8 MiB at chain ≈ 300; release moves the constants, not the unboundedness.
+
+The accepted mechanism is **segmented stack growth (`stacker::maybe_grow`) at each recursion cycle
+entry**, not a depth limit. A limit would put an arbitrary constant into the language contract and
+reject legitimate machine-generated specs — the corpus that found this class was itself the first
+input nobody had hand-written. `maybe_grow` preserves every current answer and adds none. The
+red-line from `docs/DESIGN-conformance-harness.md` applies unchanged: this is a growth mechanism
+inside ordinary evaluation, not a fault-injection hook, and no switch may exist that makes the
+binary lie.
+
+**Sites are enumerated by cycle, not by crash — and a crash names only one site at a time.** This is
+the lesson the section is being rewritten for, twice over. #617 concluded "only `refine` aborts",
+which was a property of the corpus rather than the product. #620 then concluded "two sites are
+measured", which was a property of the *debugger*: the innermost frame shows whichever cycle
+happened to exhaust the stack first, so guarding it does not fix the file, it reveals the next site.
+Implementing the fix took six rounds of guard-rebuild-recrash before the witness completed. Neither
+earlier count was a bad measurement; both were single measurements read as a census.
+
+Ten cycles are guarded, in three crates. **Eight are crash-witnessed; two are not**, and the table
+says which, because a reader who cannot tell them apart cannot tell this apart from the preventive
+spraying the design forbids:
+
+| Crate | Cycle entry | Exposed by | Reached by |
+|---|---|---|---|
+| `fsl-syntax` | `syntax_expr.rs` `SyntaxParser::expression` | #620, N=160, frame `ident_atom` | every spec-reading command |
+| `fsl-syntax` | `syntax_expr.rs` `SyntaxExpr::into_kernel` | `check` N=200 after guarding the parser | every spec-reading command |
+| `fsl-syntax` | `syntax_expr.rs` `SyntaxExpr::render_source` | **not crash-witnessed**; survives N=2000 | `fmt`, diagnostics |
+| `fsl-syntax` | `ast.rs` `Expr::kernel_ast_v1` | `analyze` N=400 | `analyze`, both digests, document claims |
+| `fsl-core` | `refinement.rs` `elaborate_enum_conversions` | `refine` N=200 | `refine` |
+| `fsl-core` | `typecheck.rs` `infer_type` | **not crash-witnessed**; survives N=1000 | every checked command |
+| `fsl-core` | `typecheck.rs` `validate_expression` | `refine` N=400 | every checked command |
+| `fsl-core` | `lib.rs` `PredicateExpander::expand_expr` | `check` on a 400-deep *invariant* (#622) | every checked command |
+| `fsl-core` | `public_kernel.rs` `expr_json` | `document claims` on the same spec (#622) | Kernel v2, document claims, digests |
+| `fsl-verifier` | `eval.rs` `eval` | #620 sample, `agentic_rag` at 1 MiB | `verify`, `refine` |
+
+The last two were found by changing the *witness*, not the code, and they are the clearest evidence
+for this section's thesis. #620's witness put its depth in a refinement mapping, so no amount of
+re-running it could reach predicate expansion or the Kernel v2 projection. Writing a second
+generator that puts the same depth inside an `invariant` — the shape the digests actually project —
+exposed both immediately. `expr_json` also shows that a guard on a *called* function is not a
+substitute for a guard on the *calling* cycle: it invoked the already-guarded `infer_type` once per
+level, so the guard ran every level, yet the innermost crash frame was `stacker::_grow` itself. The
+check happens on entry, and this frame is large enough that the stack could fall from above the red
+zone to below what growing the stack needs.
+
+The two unwitnessed guards are kept, not because deep recursion there is hypothetical — both are
+genuinely unbounded over the same user-controlled tree — but because each is dominated by a guarded
+sibling that keeps its depth small in practice: `render_source` walks `&self` and builds `String`s,
+so its frame is a fraction of `into_kernel`'s, and `infer_type` rides inside `validate_expression`'s
+per-level guard. That makes them a constant factor away from the measured sites rather than a
+different phenomenon. Each carries the same note at its definition, including the N at which it was
+observed to survive unguarded, so the choice can be revisited with evidence rather than re-litigated
+from memory.
+
+`fsl-syntax::recursion::guard` owns the red zone and segment size for all of them; `fsl-core`
+re-exports it so no crate needs a second copy of the constants, and `stacker` stays a dependency of
+one crate. The guard belongs on the *cycle entry* — the function every path around the cycle passes
+through — and nowhere else: guarding `SyntaxParser::expression` guards the whole grammar because
+`prefix`, `atom`, and `postfix` re-enter it, and a guard on each arm would cost a stack probe per
+node while proving nothing extra. `infer_type` and `validate_expression` are two cycles rather than
+one, because validation descends the same tree a second time.
+
+Per-level cost is not uniform across the table, which is why no single one of these sites was the
+whole defect: the evaluator is by far the most expensive, and the 19-stage `agentic_rag` mapping
+overflows a 1 MiB stack in `eval` while the parser survives the identical file.
+
+Three boundaries hold the mechanism in place:
+
+- `fsl-wasm` compiles `fsl-verifier` for the browser; on targets `stacker` cannot grow, it calls
+  the closure directly, which is exactly today's behavior there. The WASM gate is the proof that
+  the fallback compiles; browser-side depth remains bounded by the host, as before.
+- Guarding a *new* recursion over user-controlled structure is part of adding it. The witness
+  generator stays in the tree as the regression's fixture (`rust/fslc/tests/deep_nesting.rs`,
+  ported from the Python that found the class so the test carries its own fixture), and the
+  `unguarded-recursion` #537 C5 fault operator patches `guard` back into a direct call to prove the
+  deep-spec test still detects its absence.
+- A guard around a *third-party* recursion moves the threshold without removing the unboundedness,
+  so it is not a substitute for removing the recursion. `Expr::kernel_ast_v1` used to build its
+  result with `json!`, which calls `serde_json::to_value` on each already-built child and therefore
+  re-serialized the whole subtree — O(depth) stack and O(n²) time *per level*, spent inside our
+  guard rather than around it, which is why the guard could not see it. #622 removed the recursion
+  by building `Value::Array` directly rather than widening the red zone.
+
+**The invariant holds across the measured surface, and the measurement is stated so it can be
+falsified.** Two witness shapes — depth in a refinement mapping, depth in an `invariant` — were run
+at N up to 2000 through `check`, `lint`, `fmt`, `kernel`, `analyze`, `typestate`, `conformance`,
+`refine`, and `document claims`. None aborts; each returns its ordinary envelope and exit code.
+`explain`, `html`, `testgen`, and `scenarios` are excluded from that claim on purpose: they time out
+on these witnesses under bounded verification, identically before and after, which is solver cost
+rather than stack, and a timeout is not evidence either way.
+
+That is a statement about shapes that have been tried, not a proof over all specs. The honest
+falsifier is the one that has now worked three times: **write a witness with a different shape.**
+#617's corpus said "only `refine`", #620's debugger said "two sites", and #620's mapping-shaped
+witness said "analyze only" — each was a property of the instrument. A spec shape that reaches a
+cycle none of these witnesses reach would extend the table again, and adding the guard is part of
+adding that shape.
+
+Because the projection is digest input for two separate digests
+(`fslc::approval::spec_digest`, `fsl_tools::document_digest::spec_digest_from_kernel`), #622's
+repair was held to byte-identical output, proven by differential sweep between the pre- and
+post-change binaries over the whole corpus rather than by self-consistency inside one binary.
+
+One consumer-side limit is worth recording because it is not ours to fix and will surprise someone:
+`serde_json`'s *deserializer* has a 128-deep nesting limit, so a Rust consumer reading a
+200-deep projection back with `serde_json::from_slice` fails with "recursion limit exceeded" even
+though `fslc` emitted the envelope correctly. The regression test asserts on the exit code and the
+envelope's first byte for exactly this reason.
 
 This section records current ownership and possible target directions. Any
 source movement described as a target, trigger, or experiment is a candidate,
@@ -520,6 +636,9 @@ bmc -> refinement progress
   model state remains behind `&mut S: SmtSolver`.
 - `value`, `eval`, and `transition` are the shared symbolic semantic kernel. `agreement` observes
   that kernel and does not become a production execution dependency on `fsl-runtime`.
+- `violation_kind` is a dependency-free leaf, sibling to `value`/`trace`: single-owned
+  `BmcViolation`/`InductionCti`/`RankFailure.kind` string constants that both `bmc` and `induction`
+  reference instead of duplicating literals (issue #646, `docs/DESIGN-assurance-matrix.md`).
 - `induction` currently imports `leadsto_bindings`, `leadsto_condition`, and `project_trace` from
   `bmc`. A candidate target moves those helpers to neutral `liveness` and `trace` owners before
   extending either engine.
@@ -726,6 +845,84 @@ and native metadata tests are useful anchors, but the implementation issue must 
 control for each newly centralized branch rather than treating green positive output as sufficient.
 Re-evaluate the decision if #441 touches family producers, cannot preserve a stream contract without
 a third delivery concern, or a real production follow-up contradicts the expected edit reduction.
+
+#### Outcome classification (#537 C2)
+
+The Verdict Conservation Law — a failure-class `result` must not exit zero, and a success-class
+`result` must not exit non-zero — needs one definition of those two classes. The crate has 65
+distinct registered top-level `result` values: 5 sibling-field cases, 39 unconditional successes,
+and 21 unconditional failures, counted by deduplicating `rust/fslc/src/outcome.rs`'s match-arm
+literals as of 2026-07-30 at `9d7e623`. #596 recorded the consequence from inside: its
+corpus sweep had to carry `CHECK_SUCCESS_RESULTS` in test code because `check`'s arms each set
+their exit code at their own return point, so there was no production enumeration to defer to. A
+conservation check whose class definition lives in the test is the stale-check shape #577 retired
+28 instances of.
+
+`rust/fslc/src/outcome.rs` owns that definition, declared from `lib.rs` under
+`#[cfg(feature = "native-cli")]` rather than as a bin module beside `verification.rs`:
+
+```text
+enum OutcomeClass { Success, Failure }
+fn outcome_class(output: &Value) -> OutcomeClass
+```
+
+The lib placement is forced by the requirement it exists to serve. `approval`, `causal`,
+`code_audit`, and `verification` are bin modules declared in `main.rs`, reachable only from the
+inline `#[cfg(test)] mod exit_status_tests`. `corpus_check_sweep.rs` is an integration test that
+runs the binary over the corpus, so a bin module would leave it unable to call the classifier and
+force it to keep its own copy of the success set — the exact stale-check shape the classifier
+removes. It sits beside `verification_output.rs`, which already constructs most of the vocabulary
+it classifies.
+
+The feature gate is about surface, not dependencies: the classifier reads `serde_json::Value` and
+returns an enum, needing none of `native-cli`'s optional crates. `fsl-lsp` and `fsl-wasm` both take
+`fslc-rust = { default-features = false }`, so gating keeps the classifier out of their public
+surface entirely while the integration tests, which run with default features, still reach it.
+Promote it out of the gate when a Worker or LSP consumer actually appears.
+
+Three properties are load-bearing:
+
+- **It takes the envelope, not the result string.** `approval check` derives its exit from
+  `status == "signature-invalid"` (`main.rs:11134`), not from `result:"approval_check"`, which is
+  the same value for `approved`, `drifted`, and `signature-invalid`. A `&str` signature cannot
+  express that family and would force a second classifier beside the first — the defect being
+  removed.
+- **It is flat, not per-family.** Classification asks only for the class, and the class does not
+  collide even where meaning does: `"generated"` names different artifacts in `ledger`, `testgen`,
+  and `document`, and is success-class in all three. Six or seven family classifiers would be six or
+  seven places to forget a new value, which is the present defect at smaller scale.
+- **Unknown values classify as `Failure`,** following `mutate_exit_status`'s `_ => 3`. A new result
+  value that nobody registered then fails loudly at its first corpus run instead of exiting zero.
+  This is the direction #554 established: falling through to zero is how that defect arose.
+
+Cacheability is a separate predicate and does not collapse into the classifier. `verify_cache_store`
+admits `violated`, `reachable_failed`, `unknown_cti`, and `unknown_budget` — failure-class results
+that are nonetheless settled verdicts worth storing. It moves next to `outcome_class` so the
+vocabulary has one home, and stays a distinct function so a new value forces an explicit decision in
+both.
+
+Producer signatures do not change. `(Value, i32)` producers keep their contract; what changes is
+that the last line computing `.1` calls the shared classifier instead of comparing literals locally.
+#599 already demonstrated this shape in production by extending `mutate_exit_status` to `ledger`
+without touching a signature. C2 stays rejected and none of its re-evaluation triggers above is
+tripped: no family producer changes, no third delivery concern appears, and the edit count falls.
+
+The nine raw-success sites currently split four ways: five guard on `result` and exit `result.1`,
+two exit `result.1` with no guard (`main.rs:1231`, `1241`), one guards and exits a hard-coded zero
+(`2981`), and one does neither (`3183`, `domain expand`). `3183` is not a live defect — every error
+path in `run_domain_expand` returns before setting `kernel_source`, so the extraction guard implies
+success — but it depends on an unstated invariant, and raw delivery replaces the JSON envelope that
+would otherwise carry the failure. All nine gain the classifier guard. For the three sites that lack
+one, the implementation must measure whether a failure path can reach the extraction rather than
+assert it cannot; if one can, that site is a defect to fix with a rejecting control, not an
+invariant to record.
+
+`empty_allowed` is made explicit, not uniform. #537 C2 asks that a command treating an empty workset
+as success say so in its contract; it does not ask that `chain` (which rejects an empty manifest with
+exit 2) and `analyze` batch (which reports `analyzed` for zero files) agree. They address different
+inputs — a fixed pipeline versus a directory glob — and no accepted decision calls the asymmetry a
+defect. Each aggregation records its choice as a stated constant reproducing today's behavior. If
+`analyze` batch's zero-file success is itself wrong, that is a separate issue with its own evidence.
 
 ### `fsl-wasm`
 

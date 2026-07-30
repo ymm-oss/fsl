@@ -44,19 +44,30 @@ for a contract decision.
 2. Write the design spec as kernel FSL. It may include internal states, queues,
    outboxes, two-phase operations, retries, and decomposition that are absent from
    requirements, as long as they map back to the upper contract.
-3. Verify the design itself with `fslc check`, `fslc verify`, and usually
-   `fslc verify --engine induction`.
-4. Write the mapping file:
+3. Link every design declaration back to the requirement it serves with the
+   canonical typed annotation, on the line before the declaration:
+   `@requirement("REQ-CHECKOUT-001", "one-sentence intent")` before
+   `invariant PaidLedger { ... }` / `action submit(...) { ... }`. The
+   requirements spec owns the ID (`requirement REQ-CHECKOUT-001`); the design
+   spec only links to it. Use a `MODEL-`/`ASSUME-`prefixed id for a design
+   choice the requirements do not state. **Never use the `"REQ-1: text"` string
+   slot** — `docs/DESIGN-id-policy.md` classifies it as non-canonical migration
+   input and `fslc lint` reports it as `legacy_string_metadata`.
+4. Verify the design itself with `fslc check`, `fslc verify`, and usually
+   `fslc verify --engine induction`. Run `fslc lint <file>` as the tagging
+   gate: it exits 1 on any non-canonical ID form, which `--strict-tags` accepts
+   silently.
+5. Write the mapping file:
    - `map abs_var = expr` or `map abs_var[x: T] = expr`
    - `action impl_action(...) -> abs_action(...)` for visible effects
    - `action impl_action(...) -> stutter` only when the action is confirmed not to
      change abstract observable state
    - `preserve progress { respond AbsLeadsTo by impl_action, ... }` when an
      upper `leadsTo` must be checked through the mapping at refine time
-5. Run `fslc refine design.fsl requirements.fsl mapping.fsl`. Repair by deciding
+6. Run `fslc refine design.fsl requirements.fsl mapping.fsl`. Repair by deciding
    whether the design is wrong, the mapping is wrong, or the upper contract needs
    human revision.
-6. If implementation anchoring is required, run `fslc testgen` and wire the
+7. If implementation anchoring is required, run `fslc testgen` and wire the
    Adapter, or use `fslc replay` against execution logs.
 
 ## Guardrails

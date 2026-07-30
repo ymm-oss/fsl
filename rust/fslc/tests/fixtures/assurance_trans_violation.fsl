@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+// Assurance-matrix probe (issue #537 C3): `dec` violates the `trans`
+// property at its first firing, on every engine that checks transition
+// properties. See rust/fslc/tests/assurance/properties.rs.
+
+spec AssuranceTransViolation {
+  type Count = 0..2
+  state { x: Count }
+  init { x = 1 }
+
+  action dec() {
+    requires x > 0
+    x = x - 1
+  }
+
+  trans NeverDecrease { x >= old(x) }
+}

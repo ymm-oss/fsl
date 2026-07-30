@@ -9,6 +9,7 @@ use fsl_syntax::{
     AggregateKind, Binder, ConditionalSpans, Expr, LValue, Pattern, SourcePos, Span, Statement,
 };
 
+use crate::recursion;
 use crate::{ActionGuard, KernelModel, ParamDef, TypeDef, TypeRef};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -140,8 +141,30 @@ pub(crate) fn binder_type(
     }
 }
 
-#[allow(clippy::too_many_lines)]
+/// Cycle entry for type inference, and where `recursion::guard` belongs: every
+/// arm below recurses back through here for its operands.
+///
+/// **Not crash-witnessed.** No witness has made this one abort: `check` and
+/// `refine` both survive N=1000 (a 2000-long chain, 5x the regression witness)
+/// with the guard removed, because [`validate_expression`] is guarded per level
+/// and this inference walk rides inside that guarded region. It is guarded
+/// because at the deepest validated level it still descends the remaining
+/// subtree on its own, which is the same second-order shape as the `serde_json`
+/// residual in 4.4 (#622) and differs from the measured sites only by a
+/// constant. Treat this note as the evidence a reader needs to tell a measured
+/// site from a speculative one (#620); if the distinction is ever enforced by
+/// deletion, this is one of the two to delete.
 pub(crate) fn infer_type(
+    expr: &Expr,
+    env: &TypeEnv,
+    model: &KernelModel,
+    expected: Option<&TypeRef>,
+) -> Result<TypeRef, TypecheckError> {
+    recursion::guard(|| infer_type_inner(expr, env, model, expected))
+}
+
+#[allow(clippy::too_many_lines)]
+fn infer_type_inner(
     expr: &Expr,
     env: &TypeEnv,
     model: &KernelModel,
@@ -776,8 +799,25 @@ fn binder_name(binder: &Binder) -> &str {
     }
 }
 
-#[allow(clippy::too_many_lines)]
+/// Cycle entry for expression validation, and where `recursion::guard` belongs.
+/// Separate from [`infer_type`]'s cycle: this one descends the same tree again
+/// to check operand well-formedness, so guarding inference alone leaves it
+/// unguarded.
+///
+/// Measured: `refine` on the N=400 witness, with this function as the innermost
+/// frame at ~26 KiB per level.
 fn validate_expression(
+    expr: &Expr,
+    env: &TypeEnv,
+    model: &KernelModel,
+    span: Span,
+    expected: Option<&TypeRef>,
+) -> Result<(), TypecheckError> {
+    recursion::guard(|| validate_expression_inner(expr, env, model, span, expected))
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_expression_inner(
     expr: &Expr,
     env: &TypeEnv,
     model: &KernelModel,

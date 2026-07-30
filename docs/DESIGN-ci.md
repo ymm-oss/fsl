@@ -85,11 +85,22 @@ parallel:
 - the complete Rust-native integration phase from `tools/check-native-integration.sh rust`
   (`rust workspace`);
 - the production WASM/browser phase from `tools/check-native-integration.sh wasm` (`WASM`);
-- focused native-Z3 tests on macOS and Windows (`native Z3 4.16`).
+- focused native-Z3 tests on macOS and Windows (`native Z3 4.16`);
+- the implementation fault operators from `tools/check-native-integration.sh fault-operators`
+  (`fault operators`).
 
 **The first two carry no event condition and therefore also run on every pull request**, which is
 what makes the Linux evidence pre-merge. Only `native Z3 4.16` and the aggregate `product gate`
 context honour `FSL_OPTIMISTIC_CI` and skip on pull requests into `main`.
+
+`fault operators` is the one job that never runs on a pull request, under any variable: it patches a
+scratch checkout and rebuilds `fslc` there once per operator, and
+[`DESIGN-conformance-harness.md`](DESIGN-conformance-harness.md) puts that rebuild cost outside the
+per-pull-request phase. It is still required evidence everywhere else. The aggregator keys its
+requirement on the same `github.event_name != 'pull_request'` condition the job carries, so a
+`fault operators` job that stopped running for any other reason fails the gate instead of reading as
+a deliberate skip — a detector matrix that never runs is worse than one that skips, because it rots
+into decoration while reporting green.
 
 Scheduled and manual runs use the same evidence. Pull requests into `production` also run the
 complete product gate and emit the Linux native-Z3 compatibility context expected by the production

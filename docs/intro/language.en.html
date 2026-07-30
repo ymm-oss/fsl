@@ -588,7 +588,20 @@ scalar | <code>Option&lt;scalar&gt;</code> | struct (scalar / <code>Option&lt;sc
   it contains no symmetric identity type. This is intended for models such as
   <code>Map&lt;TaskId, Status&gt;</code> where no task identity is special.</li>
 </ul></div></details>
-<details id="3-expressions"><summary>3. Expressions<span class="tree-blurb"> — Expression grammar — operators, quantifiers, calls.</span></summary><div class="tree-body"><p>Named predicates factor repeated or business-significant expressions:</p>
+<details id="3-expressions"><summary>3. Expressions<span class="tree-blurb"> — Expression grammar — operators, quantifiers, calls.</span></summary><div class="tree-body"><p><code>true</code>, <code>false</code>, and <code>none</code> are <strong>reserved</strong>: they always resolve to the literal,
+so they cannot name a declaration anywhere — specification, const, <code>def</code> and its
+parameters, type, enum and its members, struct and its fields, state variable,
+action and its parameters, property, or a quantifier/aggregate binder or <code>is
+some(x)</code> pattern binding. A declaration with one of those names would be
+unreadable from every expression, and the misreading is silent: before this was
+checked, <code>state { true: Bool }</code> with <code>invariant AlwaysHolds { true }</code> returned
+<code>proved</code> while <code>init { true = false }</code> assigned a variable nothing could read.
+No other word is reserved. <code>count</code>, <code>sum</code>, <code>stage</code>, <code>in</code>, <code>is</code>, <code>where</code>, <code>old</code>,
+<code>abs</code>, <code>and</code>, and <code>or</code> are contextual and remain valid names; <code>some</code>, <code>Set</code>,
+<code>Seq</code>, <code>unique</code>, <code>exactlyOne</code>, <code>forall</code>, and <code>exists</code> are only recognized before
+further syntax, so misusing one as a name is a parse error rather than a silent
+literal.</p>
+<p>Named predicates factor repeated or business-significant expressions:</p>
 <pre><code class="language-fsl">def eligible(c: Claim) = submitted[c] and amount[c] &lt;= AUTO_LIMIT
 invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
 </code></pre>
@@ -601,7 +614,18 @@ variable capture instead of inventing internal binder names. See
 <ul>
 <li>Arithmetic: <code>+ - * / %</code>, unary <code>-</code>, <code>min(a, b)</code> / <code>max(a, b)</code> / <code>abs(a)</code>
   (since <code>a//b</code> would turn everything after <code>//</code> into a comment, write division
-  as <code>a / b</code> with whitespace)</li>
+  as <code>a / b</code> with whitespace). <code>/</code> and <code>%</code> are Euclidean for <code>b != 0</code>
+  (<code>a == b * (a / b) + (a % b)</code> and <code>0 &lt;= a % b &lt; |b|</code>, so <code>-7 / 2 == -4</code> and
+  <code>-7 % 2 == 1</code>). Division by zero is <strong>totally defined</strong>: <code>a / 0 == 0</code> and
+  <code>a % 0 == 0</code> always evaluate, so an invariant/trans/reachable/leadsTo/refinement
+  state-map expression that reads <code>a / 0</code> never fails to evaluate. Inside an
+  action's <code>requires</code>/body/<code>ensures</code>, an unguarded <code>/</code>/<code>%</code> whose divisor can
+  reach zero is still reported as <code>partial_op</code> (see §6) even though the value
+  is defined — guard it with <code>y != 0 =&gt; P(x / y)</code> or <code>requires y != 0</code>. A
+  refinement action-correspondence <em>argument</em> expression (§10,
+  <code>impl_action(a) -&gt; abs_action(a / c)</code>) is action context, not a property-context
+  mapping expression, since it constructs an abstract action call: it gets the
+  same <code>partial_op</code> treatment, surfaced as <code>kind: "map_partial_op"</code>.</li>
 <li>Comparison: <code>== != &lt; &lt;= &gt; &gt;=</code></li>
 <li>Logical: <code>and or not =&gt;</code></li>
 <li>Conditional: <code>if condition then when_true else when_false</code>. The condition is
@@ -641,7 +665,13 @@ variable capture instead of inventing internal binder names. See
 <li>Relation: <code>r.contains(a, b)</code>, <code>r.add(a, b)</code>, <code>r.remove(a, b)</code>,
   <code>reachable(r, a, b)</code>, <code>acyclic(r)</code>, <code>functional(r)</code>, <code>injective(r)</code>,
   <code>domain(r)</code>, <code>range(r)</code>. <code>reachable</code> and <code>acyclic</code> require a self-relation
-  (<code>relation T -&gt; T</code>); endpoint type/arity errors include repair hints.</li>
+  (<code>relation T -&gt; T</code>); endpoint type/arity errors include repair hints.
+  <code>reachable(r, a, a)</code> is <strong>not</strong> reflexive by construction: it is true only
+  if a real path of one or more edges leads from <code>a</code> back to <code>a</code> (so an empty
+  or acyclic relation gives <code>reachable(r, a, a) == false</code> for every <code>a</code>). A
+  reflexive reading would make <code>not reachable(r, a, a)</code> unsatisfiable by
+  construction for any inhabited domain, draining the predicate of meaning;
+  use <code>acyclic(r)</code> to state "no self-loops or cycles anywhere in <code>r</code>".</li>
 <li>Inside ensures / trans only: read the pre-transition state with <code>old(expr)</code></li>
 <li>Inside a leadsTo block only: <code>P ~&gt; Q</code> (response property. not part of the operator hierarchy of general expressions);
   optional <code>within K</code> before Q for a bounded deadline, and optional
@@ -717,7 +747,7 @@ variable.</p></div></details>
 <td><code>violated</code> / <code>type_bound</code> / <code>_bounds_&lt;var&gt;</code></td>
 </tr>
 <tr>
-<td>Partial operations</td>
+<td>Partial operations (action context: <code>requires</code>/body/<code>ensures</code> only, see §3)</td>
 <td>At the time of <code>pop()</code>/<code>head()</code>/<code>at(i)</code>, the sequence is non-empty and the index is in range, and the divisor of <code>/</code> <code>%</code> is non-zero</td>
 <td><code>violated</code> / <code>partial_op</code> / <code>_partial_&lt;action&gt;</code></td>
 </tr>
@@ -825,7 +855,9 @@ fslc document check &lt;file.fsl&gt; &lt;document.md&gt; [--glossary glossary.js
 fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios|requirements_document --artifact &lt;reviewed&gt; --approver &lt;name&gt;
                [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
                                                   # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
-fslc approval check  &lt;file.fsl&gt; --record &lt;record.json&gt; [--trust-key public.pem] # approved | drifted | signature-invalid
+fslc approval check  &lt;file.fsl&gt; --record &lt;record.json&gt; [--trust-key public.pem]
+                                                  # approved (exit 0) | drifted (exit 0, analysis output)
+                                                  # | signature-invalid (exit 1); see DESIGN-approval.md
 fslc approval diff   &lt;file.fsl&gt; --record &lt;record.json&gt; [--depth K] [--trust-key public.pem]
 fslc typestate &lt;file.fsl&gt; [--ts]                 # decide applicability of state machine → ghost type (§16)
 fslc domain check &lt;file.fsl&gt; [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
@@ -884,8 +916,13 @@ See <code>DESIGN-from-state.md</code>.</p>
 <code>leadsTo P ~&gt; Q</code>, a <code>respond_&lt;Name&gt;[_&lt;binding&gt;]</code> scenario. Each scenario has
 <code>kind: "leadsTo"</code>, <code>pending_at</code>, <code>satisfied_at</code>, <code>bindings</code>, <code>steps</code>,
 <code>initial_state</code>, and <code>expected_states</code>, representing the shortest trace from P
-holding to Q holding within depth K. Bindings for which P never holds are not
-turned into scenarios and appear in <code>warnings</code>.</p>
+holding to Q holding within depth K. A quantified property is tracked
+per binding, not per property name: one binding's response scenario never
+suppresses the completeness warning for a sibling binding with none. A
+binding for which P never holds within depth K gets its own warning worded
+"antecedent never holds within depth K"; a binding for which P held but no
+response ever closed gets "has no response scenario within depth K" — the
+two are never conflated.</p>
 <p><code>verify --property Name</code> resolves across invariant, <code>trans</code>, <code>leadsTo</code>, and
 <code>reachable</code> declarations and checks only the named property kind in isolation.
 <code>--exclude-property Name</code> is repeatable and acts as the cross-kind inverse:
@@ -913,7 +950,11 @@ verification. It evaluates a deterministic grid of <code>--instances NAME=lo..hi
 verification result under <code>sweep.results</code>, and returns the first failing scope
 under <code>sweep.minimal_counterexample</code>. For <code>--values</code>, the sweep fixes the lower
 bound and expands the upper bound (<code>lo..lo</code>, <code>lo..lo+1</code>, ..., <code>lo..hi</code>). A
-passing sweep means "no counterexample in this grid", not an unbounded proof.</p>
+passing sweep means "no counterexample in this grid", not an unbounded proof.
+A spec <code>error</code> (parse / type / semantics / io / vacuous / …) from any scope in
+the grid is not a counterexample: <code>sweep</code> returns that underlying error
+envelope verbatim (<code>result</code>, <code>kind</code>, <code>message</code>, <code>loc</code>, exit code unchanged)
+instead of folding it into <code>sweep_passed</code>/<code>sweep_failed</code>.</p>
 <p><code>diff</code> compares state-machine meaning instead of source text. It runs bounded
 refinement in both directions: NEW→OLD failure is <code>behavior_added</code>, while
 OLD→NEW failure is <code>behavior_removed</code>. It separately checks implication between
@@ -967,7 +1008,19 @@ imported / imported_with_warnings,
 refinement_failed / sweep_failed / observed_mismatch,
 <code>2</code> = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 <code>--vacuity error</code>), <code>3</code> = internal error. <code>observed_*</code> is <code>fslc db observe</code>'s
-result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc db import</code>'s.</p>
+result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc db import</code>'s. The same
+<code>2</code> mapping is fail-closed for <code>chain</code>'s project-manifest reader (unrecognized
+section, zero recognized sections, or an unparseable <code>depth</code>/<code>refine_depth</code> —
+<code>docs/DESIGN-layers.md</code> §7) and for <code>ledger --impl-log</code>'s replay input (a
+replay error is not implementation-log evidence and must not be rendered as
+an empty ledger row — <code>docs/DESIGN-ledger.md</code>).</p>
+<p><code>approval_check</code> and <code>approval_diff</code> are absent from this table because their
+exit code is not a function of <code>result</code>. <code>fslc approval check</code> reports the same
+<code>approval_check</code> for every outcome and carries the verdict in <code>status</code>: <code>0</code> for
+<code>approved</code> and for <code>drifted</code>, <code>1</code> for <code>signature-invalid</code>. Drift exits 0 because
+it is analysis output, as <code>diff</code> findings are (§12); <code>docs/DESIGN-approval.md</code>
+records why, and why <code>fslc document check</code>'s <code>document_drifted</code> differs. Gate on
+<code>status</code>, not on the exit code.</p>
 <h3 id="kinds-of-result">Kinds of result</h3>
 <table>
 <thead>
@@ -1292,7 +1345,15 @@ not depart from the behavior of abs (see <code>DESIGN-refinement.md</code>).</p>
   variables with no explicit <code>map</code>, it synthesizes <code>map x = x</code>; for same-named
   compatible actions with no explicit correspondence, it synthesizes
   <code>action f(params...) -&gt; f(params...)</code>. Explicit entries override the defaults.
-  Incompatible same-name candidates are reported as <code>kind: "type"</code> errors.</li>
+  Action parameters are matched <strong>by name, never by position</strong>: each abstract
+  parameter binds to the impl parameter sharing its exact name (so a pure
+  reorder still auto-maps), in the abstract action's parameter order. Auto
+  never guesses — a same-name action pair with a different arity, a surplus
+  impl parameter, a renamed parameter, or any abstract parameter with no
+  same-named impl counterpart is a located <code>kind: "type"</code> error; write an
+  explicit <code>action ... -&gt; ...</code> correspondence for that pair instead.
+  Incompatible same-name state candidates are likewise reported as
+  <code>kind: "type"</code> errors.</li>
 <li><code>action &lt;impl&gt;(&lt;formal params&gt;) -&gt; &lt;abs&gt;(&lt;expr&gt;) | stutter</code> — required for every impl action.
   Formal params may be bare names or <code>name: Type</code> annotations matching the impl action declaration.
   <code>stutter</code> is an internal step in which the abstract state does not change.</li>
@@ -1354,9 +1415,45 @@ design_exists[convert(column_key, c)]</code> with <code>column_key Column -&gt; 
 </code></pre>
 <p>Success: <code>result: "refines"</code> (exit 0). Violation: <code>refinement_failed</code> (exit 1)
 with <code>kind</code> (<code>abs_requires_failed</code> / <code>abs_state_mismatch</code> / <code>stutter_changed_abs</code> /
-<code>map_out_of_bounds</code>), <code>impl_trace</code>, and the post-mapping <code>abs_before</code> /
-<code>abs_after_*</code>. A static error (a missing map, an unknown action, etc.) is
-<code>kind: "type"</code> (exit 2).</p>
+<code>map_out_of_bounds</code> / <code>map_partial_op</code>), <code>impl_trace</code>, and the post-mapping
+<code>abs_before</code> / <code>abs_after_*</code>. A static error (a missing map, an unknown action,
+etc.) is <code>kind: "type"</code> (exit 2). <code>map_partial_op</code> is an action-correspondence
+argument expression (<code>impl_action(a) -&gt; abs_action(a / c)</code>) dividing by an impl
+state variable that can be zero — action context (§3/§6's <code>partial_op</code> rule),
+not the "no check" property context a refinement <em>state</em> map gets.</p>
+<p>Before any correspondence is checked, <code>refine</code> first verifies that the impl
+spec is internally consistent on its own — does not violate its own type
+bounds or invariants — within <code>--depth</code>. A refinement mapping cannot make a
+broken impl meaningful, so this is checked independently of the abstraction
+and the mapping: <code>result: "violated"</code> (exit 1) with <code>violation_kind</code> and a
+<code>note</code> explaining this is a property of the refinement <em>input</em>, not a
+fidelity failure. It is never reported <code>refines</code>, and never folded into
+<code>refinement_failed</code> (whose <code>kind</code>s above describe a mismatch <em>between</em> impl
+and abs, not a defect in the impl alone). <code>fslc diff</code> surfaces the same
+condition as an <code>impl_violated</code> finding and fails its gate unconditionally
+(not subject to <code>--forbid</code>), since a self-violating side makes the
+comparison itself untrustworthy.</p>
+<p>A state variable <code>init</code> never assigns on any path (an <code>init if</code> reading an
+unassigned <code>Bool</code>, for example) is a genuinely free initial value across its
+full type domain, not a value silently defaulted — <code>refine</code> checks it that
+way on both the impl and abs side. The self-consistency precondition above
+and the init correspondence it feeds both reason over <strong>every</strong> concrete
+initial valuation <code>init</code> permits, not one arbitrarily chosen default: an
+impl-side initial valuation must not violate the impl's own semantics, and
+its mapped state must be a member of the abs's own set of valid initial
+valuations, for every such valuation on both sides. A same-named state
+variable init leaves unassigned on <em>some</em> but not all paths (e.g. only
+inside an <code>if</code> with no <code>else</code>) is not enumerated this way and keeps the
+prior single-valuation behavior.</p>
+<p>This closed two opposite defects and is a <strong>breaking change</strong> to <code>refine</code>'s
+verdicts for a mapping where either side's <code>init</code> leaves a state variable
+fully unassigned: a refinement that previously reported <code>refines</code> because
+only the impl's default initial branch was ever checked may now report
+<code>refinement_failed</code> (an initial-correspondence violation on another impl
+branch was missed before); a refinement that previously reported
+<code>refinement_failed</code> solely because the abs's default initial branch did not
+equal the mapped impl state may now report <code>refines</code> (the impl state
+matches a different, still-valid, abs initial branch).</p>
 <p>Give impl and abs <strong>distinct enum/struct type names</strong>, even when a state
 variable pair is mapped 1:1. Type metadata is merged by name for refinement
 checking; a same-named enum (or struct) declared with a different member
@@ -1798,7 +1895,7 @@ it, so specs that use it are outside the Python-parity corpus by
 construction.</p>
 <h4 id="1312-rationale-for-tooling-and-ai-consumption">13.1.2 Rationale for tooling and AI consumption</h4>
 <p>A <code>//</code> comment is lexer trivia (<code>rust/fsl-syntax/src/lexer.rs</code>): it never
-reaches the AST, <code>KernelModel</code>, <code>python_ast()</code>, the JSON result envelope, the
+reaches the AST, <code>KernelModel</code>, <code>kernel_ast_v1()</code>, the JSON result envelope, the
 LSP index, or the audit ledger. A fact a downstream tool or an AI agent must
 not lose — that an auxiliary invariant exists to close a k-induction CTI, or
 that an implementation guard is deliberately stronger than its abstract
@@ -1879,7 +1976,16 @@ verify {
   business and requirements. It does not create a ghost counter or an automatic
   <code>_kpi_*</code> invariant.</li>
 <li>With <code>implements</code>, <code>fslc verify</code> <strong>also runs the refine to the upper layer
-  simultaneously</strong>, and the result carries <code>implements: {abs, result}</code>. An empty
+  simultaneously</strong>, and the result carries <code>implements: {abs, result}</code>, whose
+  values are <code>refines</code> / <code>refinement_failed</code> / <code>impl_violated</code>. <strong>That verdict is
+  reported only in this field. It is not folded into the top-level <code>result</code> or
+  the exit code</strong>, so a broken seam still returns <code>result:"ok"</code>/<code>"verified"</code> and
+  exit 0 — the one exception to the exit-code table above, and the reason
+  <code>implements</code> has no row in it. Gate on <code>implements.result == "refines"</code>, or run
+  <code>fslc chain</code>, which applies exactly that gate to the layer and exits 1
+  (<code>docs/DESIGN-design-family.md</code> states the same rule for orchestrators).
+  Standalone <code>fslc refine</code> does exit 1 on <code>refinement_failed</code>; only the inline
+  seam is silent. An empty
   body (<code>implements X from "..." { }</code>) auto-generates identity refinement when
   process/action/stage names match. Inside the <code>implements { }</code> block you write
   state <code>map</code> entries, <code>maps auto</code>, <code>preserve progress</code>, and — since #73 —
@@ -2178,7 +2284,10 @@ probability, and full production-data completeness are outside the formal model.
 <p>If <code>check compatibility</code> is omitted, default rules cover read/write lifecycle,
 destructive annotations, preservation-transform annotations, and API/offline
 compatibility. <code>data_preserved</code> and <code>rollback_equivalent</code> are opt-in bounded
-checks and report <code>DB-ASSUME-BOUNDED-ROW-MODEL</code>.</p>
+checks and report <code>DB-ASSUME-BOUNDED-ROW-MODEL</code>. A <code>rule</code> name outside the
+closed vocabulary above, or an <code>environment schema lo..hi</code> that the declared,
+strictly sequential migration plan never reaches, fails validation with exit 2
+instead of silently checking nothing.</p>
 <p>Feature flags are finite environment dimensions. <code>fslc db check</code> enumerates the
 declared variants with schema snapshots and reports
 <code>DB-ASSUME-FINITE-FLAG-STATE</code>; this is a rollout/kill-switch compatibility
@@ -2213,6 +2322,11 @@ candidates. Runtime observation returns <code>observed_mismatch</code> with
 <code>formal_result: "not_run"</code>; absence from logs is not proof of unused behavior.
 Use ordinary <code>fslc verify</code> when you want to inspect the generated kernel
 counterexample directly.</p>
+<p><code>fslc db observe</code> validates the observation envelope/events against
+<code>schemas/fslc/db/observation.v0.schema.json</code> (typed required fields, a closed
+<code>capability</code> vocabulary, exit 2 on a malformed record) before evaluating them,
+and matches each event's optional <code>flags</code> snapshot against artifact windows the
+same way <code>fslc db check</code> does.</p>
 <p>Generic <code>requires</code> / <code>provides</code> capabilities let AI model/prompt/retriever/tool
 schema and output schema profiles share the same compatibility check as
 DB/API/mobile/server artifacts. A <code>requires tool.RefundPaymentV2</code> declaration is
@@ -2334,14 +2448,30 @@ graph analysis, not kernel proof. <code>fslc ai replay</code> accepts JSONL or
 </ul>
 <p>Project-level fsl-ai evidence declarations can combine <code>ai_component</code>,
 <code>dataset</code>, <code>evaluator</code>, <code>failure_mode</code>, <code>statistical_property</code>,
-<code>ai_migration</code>, and <code>observed_property</code>. <code>fslc ai check</code> parses these files and
-returns <code>ai_project_analyzed</code>; <code>fslc ai eval</code> checks Bernoulli/proportion
-metrics from precomputed JSONL with Wilson intervals; <code>fslc ai regress</code> checks
-aggregate <code>no_regression</code> metric drop/increase clauses; <code>fslc ai compare</code>
-reports metric deltas without a threshold claim; <code>fslc ai drift</code> checks runtime
-telemetry thresholds and drift; and <code>fslc ai compat</code> emits a finite
-<code>dbsystem artifact</code> capability profile. All of these use
-<code>formal_result:"not_run"</code>.</p>
+<code>ai_migration</code>, and <code>observed_property</code>. <code>fslc ai check</code> parses these files with
+the same parser the evidence commands run and returns <code>ai_project_analyzed</code>;
+<code>fslc ai eval</code> checks the selected
+<code>statistical_property</code>'s declared <code>slice</code>/<code>min_samples</code>/<code>ci_lower</code>/<code>ci_upper</code>
+requirements against precomputed JSONL (<code>--records</code>, or the declared
+<code>dataset</code>'s <code>source</code> file) with Wilson intervals; <code>fslc ai regress</code> checks the
+selected <code>ai_migration</code>'s declared aggregate <code>no_regression</code> metric
+drop/increase clauses; <code>fslc ai compare</code> reports metric deltas without a
+threshold claim; <code>fslc ai drift</code> checks the selected <code>observed_property</code>'s
+declared <code>observed</code>/<code>drift</code> requirements over runtime telemetry
+(<code>observed_supported</code> / <code>observed_mismatch</code>); and <code>fslc ai compat</code> emits a
+finite <code>dbsystem artifact</code> capability profile for one <code>ai_component</code> or every
+<code>ai_component</code> a project declares, rejecting non-AI input and an AI project
+with no <code>ai_component</code> at all (exit 2). All of these use
+<code>formal_result:"not_run"</code>. A <code>require</code> clause matching none of the known
+evidence-clause grammars (<code>min_samples</code>, <code>ci_lower</code>, <code>ci_upper</code>, a point
+estimate, <code>observed</code>, <code>drift</code>) is a spec error (exit 2) at <code>check</code> time, in
+both <code>fslc ai check</code> and the <code>fslc check</code> dispatch: the check stage must not
+report an analyzed project that <code>eval</code>/<code>drift</code> cannot execute. An unknown
+<code>--property</code>/<code>--migration</code> selection is
+a check-time error (exit 2); a selected <code>statistical_property</code>'s gate status
+(<code>dataset_invalid</code>, <code>evaluator_untrusted</code>, <code>slice_missing</code>,
+<code>insufficient_samples</code>, <code>inconclusive</code>, or <code>statistically_unsupported</code>) exits
+1, matching <code>statistically_supported</code>'s exit 0 as the only success case.</p>
 <p>Recursive <code>agent</code> shape:</p>
 <pre><code class="language-fsl">agent SupportOrchestrator {
   context [CustomerTicket, ApprovedSupportDocs];
@@ -2486,7 +2616,11 @@ DESIGN-*.md).</p>
   action enables/conflict edges; <code>--projection impact_graph --focus NODE</code> emits
   the upstream/downstream slice around a TSG node. It accepts multiple files or
   directories in batch mode;
-  directories are expanded recursively for <code>*.fsl</code> and sorted deterministically.
+  directories are expanded recursively for <code>*.fsl</code> and sorted deterministically —
+  an explicitly named file is always kept regardless of extension (a <code>.toml</code>
+  project manifest routes the same way it does in single-file mode; anything
+  else that cannot be analyzed is a real error in <code>files[]</code>/<code>errors[]</code>, never
+  a silent drop).
   Standalone refinement mappings can be viewed with <code>--projection
   refinement_graph</code>; this is an unresolved structural view because the command
   has no impl/abs model paths. Project manifests can be viewed with <code>--projection
@@ -2533,10 +2667,16 @@ lookup, recommended practices) is in the AI-agent skills under <code>skills/</co
 the shared language reference in <code>skills/fsl/SKILL.md</code>. A maintained worked example
 is under <a href="https://github.com/ymm-oss/fsl/tree/main/examples/validation"><code>examples/validation/</code></a>.</p></div></details>
 <details id="16-promotion-judgment-to-ghost-types-typestate"><summary>16. Promotion judgment to ghost types (typestate)<span class="tree-blurb"> — Deciding when a state machine promotes to a ghost type / typestate.</span></summary><div class="tree-body"><p><code>fslc typestate &lt;file.fsl&gt; [--ts]</code> decides how soundly the state machine of a
-design spec (enum-valued struct fields / state variables / <code>Option&lt;_&gt;</code> slots)
-can be mapped to the host language's typestate (ghost types). It classifies each
+design spec (enum-valued struct fields, scoped by field name <strong>and</strong> owning
+struct type so two structs with a same-named field remain independent
+machines / state variables / <code>Option&lt;_&gt;</code> slots) can be mapped to the host
+language's typestate (ghost types). It classifies each
 <code>(entity, action)</code> as <code>derivable</code> (the from-state is the entity's own local
-guard) / <code>branching</code> (data-dependent inside an <code>if</code>) / <code>relational</code> (no local
+guard — a compound guard's from-state is what the <strong>whole</strong> formula implies:
+<code>or</code> is a union of what each disjunct implies, but only when every disjunct
+constrains the entity; a disjunct silent about the entity, e.g. an unrelated
+flag, drops the guard entirely rather than narrowing it) /
+<code>branching</code> (data-dependent inside an <code>if</code>) / <code>relational</code> (no local
 guard, and the precondition lives in an external structure — cannot be expressed
 in the type and remains as a runtime/verification obligation). An entity's
 <code>applicability</code> is <code>full</code> only when all transitions are derivable/branching.

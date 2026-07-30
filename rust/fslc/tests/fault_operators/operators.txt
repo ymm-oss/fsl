@@ -1,0 +1,35 @@
+# Implementation fault operators (#537 C5).
+# Read `docs/DESIGN-conformance-harness.md` "Implementation fault operators"
+# before adding a row. Run with `tools/run-fault-operators.sh`.
+#
+# Adding an operator is two data edits and no code:
+#   1. write `<name>.patch` in this directory -- a unified diff against the
+#      repository root, minimal, reproducing one escaped defect class;
+#   2. add one row below.
+#
+# Columns, `|`-separated (surrounding whitespace is trimmed):
+#
+#   operator | patch file | primary target | primary test | blind target | blind test
+#
+# The *primary* detector must FAIL under the patch: it is the test that owns
+# the property the fault violates. The *blind* detector must still PASS: an
+# operator that breaks everything calibrates nothing, so each row names a
+# syntax/diagnostic test the fault has no business reaching. Targets are cargo
+# test-target selectors within `-p fslc-rust` (`--lib`, `--test <name>`).
+#
+# One blind detector is deliberately a golden-contract test
+# (`native_cli_kernel_v2_output_matches_the_origin_golden_contract`). It is
+# blind to all three faults, and it is also the most location-sensitive test in
+# the crate: its golden embeds a repository-relative `spec.source.file`. Naming
+# it here makes the no-op control prove that the scratch checkout is a faithful
+# copy of the working tree, not merely that it compiles -- an infidelity there
+# would make every verdict in this matrix a property of the harness rather than
+# of the fault.
+#
+# A patch that no longer applies is a loud failure, never a skip. It means the
+# seam moved; confirm the fault is still possible there and re-target the diff.
+
+unknown-result-to-success   | unknown-result-to-success.patch   | --lib                                          | outcome::tests::an_unregistered_result_is_failure_class      | --test issue_484_parse_diagnostic_matrix | every_spec_reading_command_reports_a_syntax_error_as_parse_with_a_location
+failure-verdict-exits-zero  | failure-verdict-exits-zero.patch  | --test issue_554_mutate_exit_status            | a_violated_baseline_exits_one                                | --test issue_484_parse_diagnostic_matrix | every_spec_reading_command_reports_a_syntax_error_as_parse_with_a_location
+db-check-drops-kernel-verdict | db-check-drops-kernel-verdict.patch | --test issue_600_db_check_folds_kernel_verdict | db_check_folds_an_inconclusive_kernel_into_its_top_level_verdict | --test kernel_contract | native_cli_kernel_v2_output_matches_the_origin_golden_contract
+unguarded-recursion         | unguarded-recursion.patch         | --test deep_nesting                            | refine_proves_a_deeply_nested_mapping_instead_of_overflowing_the_stack | --test issue_484_parse_diagnostic_matrix | every_spec_reading_command_reports_a_syntax_error_as_parse_with_a_location

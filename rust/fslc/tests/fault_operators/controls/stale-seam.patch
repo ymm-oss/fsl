@@ -1,0 +1,15 @@
+A patch that targets a seam which does not exist and never will. The harness
+requires it to be *refused*, which is how the "a stale operator fails loudly,
+it does not skip" property stays verified rather than merely intended. If this
+patch ever applies, the harness has lost the ability to tell a moved seam from
+a live one and every operator below it is decoration.
+
+--- a/rust/fslc/src/outcome.rs
++++ b/rust/fslc/src/outcome.rs
+@@ -1,5 +1,5 @@
+ // A seam this repository has never contained, so that no future edit to
+ // outcome.rs can make this hunk apply by accident.
+-fn a_fault_seam_that_moved_long_ago() -> OutcomeClass {
++fn a_fault_seam_that_moved_long_ago() -> OutcomeClass { unreachable!() }
+     OutcomeClass::Failure
+ }

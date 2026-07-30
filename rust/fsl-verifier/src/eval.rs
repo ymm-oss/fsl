@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use fsl_core::recursion;
 use fsl_core::{
     FslValue, KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
     KernelModel, Pattern, TypeDef, TypeRef,
@@ -17,8 +18,34 @@ use crate::value::{
 type BinderCandidates<T> = Vec<(String, SymbolicValue<T>)>;
 type SymbolicPair<T> = (SymbolicValue<T>, SymbolicValue<T>);
 
-#[allow(clippy::too_many_lines)]
+/// Symbolic evaluation of one kernel expression, and the cycle entry this
+/// module's stack guard belongs on (`recursion::guard`): `eval_binary`,
+/// `eval_equality_operands`, `eval_method`, `eval_quantified`, and
+/// `eval_aggregate` all re-enter `eval` for their operands, so guarding this
+/// one function guards the cycle.
+///
+/// Depth here follows the spec's structure -- a refinement `map` substituted
+/// into an obligation grows the ITE tree, and an equality multiplies it on both
+/// sides -- and costs far more per level than parsing the same expression.
+///
+/// Measured in #620 by sampling `refine` on `examples/agentic_rag`: 491 `eval`
+/// frames under 101 `eval_binary`, 62 `eval_equality_operands`, and 59
+/// `ite_value`. That 19-stage mapping overflows a 1 MiB stack here while the
+/// parser survives the identical file, which is why per-level cost, not chain
+/// length alone, decides which site aborts first.
 pub(crate) fn eval<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    recursion::guard(|| eval_inner(solver, model, expr, state, bindings, old_state))
+}
+
+#[allow(clippy::too_many_lines)]
+fn eval_inner<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     expr: &Expr,

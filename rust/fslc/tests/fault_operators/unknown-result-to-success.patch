@@ -1,0 +1,15 @@
+Reinstates the `_ => OutcomeClass::Success` fallthrough `outcome.rs` forbids
+in its module comment. Every unregistered `result` value -- a typo, a value a
+new command forgot to register, a poisoned verify-cache entry -- becomes a
+pass. This is the shape of #554.
+
+--- a/rust/fslc/src/outcome.rs
++++ b/rust/fslc/src/outcome.rs
+@@ -218,6 +218,6 @@
+         // An unregistered value is an internal inconsistency, never a silent
+         // success. Falling through to zero is exactly how #554 arose, and a
+         // poisoned verify-cache entry must not be readable as a pass either.
+-        _ => OutcomeClass::Failure,
++        _ => OutcomeClass::Success,
+     }
+ }

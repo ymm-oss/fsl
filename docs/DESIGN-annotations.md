@@ -126,9 +126,9 @@ contained action/property target exactly the way the block's own
 extend the trace case's own `Requirement{id,text}` relation
 (`dialect.rs::trace_case_annotations`).
 
-`python_ast()` never projects the new `annotations` field (destructured with
+`kernel_ast_v1()` never projects the new `annotations` field (destructured with
 `..` in every projection match arm) — the frozen Python oracle has no
-annotation concept, `fslc::approval::spec_digest` hashes `python_ast`, and
+annotation concept, `fslc::approval::spec_digest` hashes `kernel_ast_v1`, and
 Public Kernel v1/v2 stay closed contracts. A file that uses `@...` on a
 nested declaration is therefore unparseable by the frozen Python reference by
 construction (confirmed native-only via `tests/dialect_registry.py`'s
@@ -219,13 +219,13 @@ by more than one surface declaration" pattern issue #241 established for
   `lower_domain_surface` never reads `domain.projections`, and
   `lower_ai_component` is a catalog-sentinel stub with no per-declaration
   content). Their annotations are preserved on the frontend AST and reachable
-  through `python_ast()`/direct AST inspection, with no `AnnotationRegistry`
+  through `kernel_ast_v1()`/direct AST inspection, with no `AnnotationRegistry`
   binding to reach — there is no Kernel target for one to attach to.
 
 `ai_component`'s `AiAuthority` restructuring: `may_suggest`/`may_execute`/
 `requires_human_approval`/`forbidden` change from `Vec<String>` to
 `Vec<AiAuthorityRule>`, where `AiAuthorityRule { name, annotations, loc }`.
-`AiAuthority::python_ast()` reconstructs the original plain `Vec<String>` JSON
+`AiAuthority::kernel_ast_v1()` reconstructs the original plain `Vec<String>` JSON
 shape (`rule.name` only) so the public JSON projection is unchanged; the
 typed carrier is additive. Every Rust call site that used to compare a
 `&String` name directly (`rust/fslc/src/main.rs`'s specialized-document
@@ -235,12 +235,12 @@ to compare `rule.name` instead.
 `dbsystem`'s existing `DbMigration`/`DbMigrationOp` already declare a field
 named `annotations: Vec<String>` — a pre-#281, unrelated legacy mechanism
 (the `destructive`/`irreversible`/`rollbackable`/`lossy`/`lossless` migration
-keyword flags, still projected into `python_ast()` under the same JSON key).
+keyword flags, still projected into `kernel_ast_v1()` under the same JSON key).
 The new typed carrier could not reuse that name, so `DbMigration` gained a
 second, distinctly named field: `decl_annotations: Annotations`. Compatibility
 rules changed shape instead of gaining a same-named field:
 `DbCheck.rules: Vec<String>` became `Vec<DbCheckRule>`, where
-`DbCheckRule { name, annotations, span }`; `DbCheck::python_ast()`
+`DbCheckRule { name, annotations, span }`; `DbCheck::kernel_ast_v1()`
 reconstructs the original plain `Vec<String>` rule-name list.
 
 Issue #410 supersedes the temporary text-transport detail from #281.
@@ -262,7 +262,7 @@ artifact/environment entry, and column declarations that caused it.
 
 `tools/check_rust_surface_parity.py`'s `SUPPORTED_SPECIALIZED_FRONTENDS`
 already includes `ai-component`/`db`/`domain`; since no new field was
-projected into any of these three dialects' `python_ast()`, corpus parity is
+projected into any of these three dialects' `kernel_ast_v1()`, corpus parity is
 unaffected by construction (the tool is not CI-wired — see the Python
 compatibility gate note in the repository's CLAUDE.md — but was still run
 manually against the corpus to confirm).
@@ -285,7 +285,7 @@ manually against the corpus to confirm).
 ## Rationale convention for tooling and AI consumption
 
 Editorial convention, not a new checked behavior: a `//` comment is lexer
-trivia and never reaches `KernelModel`, `python_ast()`, the JSON result
+trivia and never reaches `KernelModel`, `kernel_ast_v1()`, the JSON result
 envelope, the LSP index, or the audit ledger (confirmed by
 `comments_are_trivia_and_locations_are_one_based` in
 `rust/fsl-syntax/src/lexer.rs`). A fact a downstream tool or an AI agent must

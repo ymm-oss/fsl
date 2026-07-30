@@ -14,7 +14,7 @@ fn main() {
     match fsl_syntax::parse_expr(&source) {
         Ok(expr) => println!(
             "{}",
-            serde_json::to_string(&expr.python_ast()).expect("serialize AST")
+            serde_json::to_string(&expr.kernel_ast_v1()).expect("serialize AST")
         ),
         Err(error) => {
             eprintln!("{error}");

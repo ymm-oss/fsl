@@ -361,6 +361,24 @@ const cdpTimeoutMs = 30_000;
 // below turn that hang into a loud, named failure, which lets the
 // surrounding `finally` still run and clean up the child process and
 // profile directory.
+// A CDP timeout is rare and not reproducible on demand (#587: one failure in
+// five full local runs, none in CI), so the single message it prints is all
+// the evidence anyone gets. Report what separates the candidate causes rather
+// than only that time ran out:
+//
+//   - `call id` is the ordinal. id 1 is `Runtime.enable`, so a timeout there
+//     means the connection never became usable, while a later id means the
+//     page stopped answering mid-poll. That is the difference between
+//     suspecting Chrome startup and suspecting the page's main thread.
+//   - `socket` separates a transport still OPEN -- nobody is answering -- from
+//     one already CLOSING/CLOSED, where the close handler lost the race.
+//   - Chrome's stderr is already accumulated but is otherwise printed only on
+//     a startup failure. A crash or renderer message in it names the cause.
+//
+// Deliberately no retry: retrying an unexplained stall would hide the event
+// this diagnostic exists to capture, and a real hang would return as a slow
+// pass instead of a failure.
+const READY_STATE = ["CONNECTING", "OPEN", "CLOSING", "CLOSED"];
 function cdp(socket, method, params = {}) {
   const id = nextId;
   nextId += 1;
@@ -368,7 +386,14 @@ function cdp(socket, method, params = {}) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       pending.delete(id);
-      reject(new Error(`CDP method "${method}" timed out after ${cdpTimeoutMs}ms`));
+      const state = READY_STATE[socket.readyState] ?? `unknown(${socket.readyState})`;
+      const chromeStderr = stderr.trim();
+      reject(new Error(
+        `CDP method "${method}" timed out after ${cdpTimeoutMs}ms `
+        + `(call id ${id}, socket ${state}, ${pending.size} other request(s) outstanding); `
+        + `see issue 587. Chrome stderr: `
+        + `${chromeStderr === "" ? "<empty>" : `\n${chromeStderr}`}`,
+      ));
     }, cdpTimeoutMs);
     pending.set(id, {
       resolve: (value) => { clearTimeout(timeout); resolve(value); },
@@ -470,9 +495,18 @@ for (let index = 0; index < parityCases.length; index += 1) {
 // comparison needed. See the comment on that earlier assertion for why it
 // would be unsound to skip.
 const staleExclusions = [];
+function assertAgentWorkerProbeFailsClosed(probe, envelope) {
+  if (probe.documentType === "agent" && envelope?.result !== "error") {
+    throw new Error(
+      `${probe.path}: the Worker now returns ${JSON.stringify(envelope?.result)} for the agent `
+      + "document, so the agent fail-closed assurance cell and unsupportedDocuments entry are stale.",
+    );
+  }
+}
 for (let index = 0; index < exclusionProbes.length; index += 1) {
   const probe = exclusionProbes[index];
   const envelope = browser.parityEnvelopes[parityCases.length + index];
+  assertAgentWorkerProbeFailsClosed(probe, envelope);
   if (envelope?.result !== "error") {
     staleExclusions.push(
       `${probe.path}: the Worker now returns ${JSON.stringify(envelope?.result)} for this `

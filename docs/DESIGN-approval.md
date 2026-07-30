@@ -101,7 +101,15 @@ fslc ledger specs/order.fsl --approval order.approval.json \
 The direct result is `approval_check` with `status:"approved"` or
 `status:"drifted"`. A signed record can instead report
 `status:"signature-invalid"`, which exits 1 and never grants approval. Drift
-remains an analysis result and exits 0. A malformed,
+remains an analysis result and exits 0, for the same reason `diff` findings do
+(`docs/LANGUAGE.md` §12): drift is the expected state during development — you
+approved at one commit and kept working — and the command's job is to report
+what changed and hand you `fslc approval diff`, not to fail a build. The ledger
+renders it `⚠` accordingly, distinct from the `❌` it gives
+`signature-invalid`. This differs deliberately from `fslc document check`,
+whose `document_drifted` exits 1: there, drift means a document contradicts the
+spec it documents, which is a state to correct, not a normal step in the loop.
+Gate on drift by reading `status` from the JSON, not the exit code. A malformed,
 unsupported, wrong-spec, or locally unavailable Git-baseline record is an error
 and exits 2. A signed record without its matching trust key is also a
 configuration error and exits 2. Unknown sidecar fields are rejected so schema

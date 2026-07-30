@@ -13,6 +13,7 @@ use crate::transition::{ActionInstance, action_instances, transition_constraint}
 use crate::value::{
     Bindings, SymbolicState, bool_term, bounds, i64_index, int_term, symbolic_state_with_suffix,
 };
+use crate::violation_kind;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InductionCti {
@@ -217,7 +218,7 @@ pub async fn prove_induction<S: SmtSolver>(
                 SatResult::Sat => {
                     let trace = project_trace(solver, model, &states, &choices, &instances, k)?;
                     last_cti = Some(InductionCti {
-                        kind: "invariant".to_owned(),
+                        kind: violation_kind::INVARIANT.to_owned(),
                         name: property.name(model),
                         k,
                         trace,
@@ -253,7 +254,7 @@ pub async fn prove_induction<S: SmtSolver>(
                         return Ok(InductionResult {
                             k_used,
                             cti: Some(InductionCti {
-                                kind: "trans".to_owned(),
+                                kind: violation_kind::TRANS.to_owned(),
                                 name: transition.name.clone(),
                                 k: 1,
                                 trace,
@@ -486,7 +487,7 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
                             name: property.name.clone(),
                             bindings: binding.concrete,
                             measure: measure_expr.clone(),
-                            kind: "unbounded_below".to_owned(),
+                            kind: violation_kind::UNBOUNDED_BELOW.to_owned(),
                             measure_value: Some(measure_value),
                             measure_before: None,
                             measure_after: None,
@@ -535,7 +536,7 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
                                     name: property.name.clone(),
                                     bindings: binding.concrete,
                                     measure: measure_expr.clone(),
-                                    kind: "progress_action_not_fair".to_owned(),
+                                    kind: violation_kind::PROGRESS_ACTION_NOT_FAIR.to_owned(),
                                     measure_value: Some(measure_value),
                                     measure_before: None,
                                     measure_after: None,
@@ -644,7 +645,8 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
                                     name: property.name.clone(),
                                     bindings: binding.concrete,
                                     measure: measure_expr.clone(),
-                                    kind: "helpful_action_enabledness_not_sticky".to_owned(),
+                                    kind: violation_kind::HELPFUL_ACTION_ENABLEDNESS_NOT_STICKY
+                                        .to_owned(),
                                     measure_value: None,
                                     measure_before: None,
                                     measure_after: None,
@@ -707,7 +709,7 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
                                 name: property.name.clone(),
                                 bindings: binding.concrete,
                                 measure: measure_expr.clone(),
-                                kind: "helpful_action_not_enabled".to_owned(),
+                                kind: violation_kind::HELPFUL_ACTION_NOT_ENABLED.to_owned(),
                                 measure_value: Some(measure_value),
                                 measure_before: None,
                                 measure_after: None,
@@ -757,7 +759,7 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
                                     name: property.name.clone(),
                                     bindings: binding.concrete,
                                     measure: measure_expr.clone(),
-                                    kind: "non_decreasing_action".to_owned(),
+                                    kind: violation_kind::NON_DECREASING_ACTION.to_owned(),
                                     measure_value: None,
                                     measure_before: Some(before),
                                     measure_after: Some(after),
@@ -805,24 +807,24 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
                             let q_next_holds = model_bool(solver, &q1)?;
                             let p_next_holds = model_bool(solver, &p1)?;
                             let kind = if !q_next_holds && !p_next_holds {
-                                "pending_not_preserved"
+                                violation_kind::PENDING_NOT_PRESERVED
                             } else if is_helpful && after >= before {
-                                "non_decreasing_helpful_action"
+                                violation_kind::NON_DECREASING_HELPFUL_ACTION
                             } else if !is_helpful && after > before {
-                                "non_helpful_action_increases_measure"
+                                violation_kind::NON_HELPFUL_ACTION_INCREASES_MEASURE
                             } else {
-                                "non_decreasing_action"
+                                violation_kind::NON_DECREASING_ACTION
                             };
                             let message = match kind {
-                                "pending_not_preserved" => format!(
+                                violation_kind::PENDING_NOT_PRESERVED => format!(
                                     "enabled action '{}' can make leadsTo '{}' no longer pending without making Q true",
                                     instance.action, property.name
                                 ),
-                                "non_decreasing_helpful_action" => format!(
+                                violation_kind::NON_DECREASING_HELPFUL_ACTION => format!(
                                     "helpful action '{}' can leave leadsTo '{}' pending without strictly decreasing the measure",
                                     instance.action, property.name
                                 ),
-                                "non_helpful_action_increases_measure" => format!(
+                                violation_kind::NON_HELPFUL_ACTION_INCREASES_MEASURE => format!(
                                     "non-helpful action '{}' can increase the measure while leadsTo '{}' is still pending, which could outpace the helpful action's guaranteed decrease",
                                     instance.action, property.name
                                 ),

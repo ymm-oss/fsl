@@ -214,10 +214,10 @@ fn semantic_model(model: &KernelModel) -> Value {
             json!({
                 "name":action.name,
                 "parameters":action.params.iter().map(param_json).collect::<Vec<_>>(),
-                "requires":action.requires.iter().map(|expr|erase_locations(expr.python_ast())).collect::<Vec<_>>(),
-                "lets":action.lets.iter().map(|(name,expr)|json!([name,erase_locations(expr.python_ast())])).collect::<Vec<_>>(),
-                "updates":action.statements.iter().map(|statement|erase_locations(statement.python_ast())).collect::<Vec<_>>(),
-                "ensures":action.ensures.iter().map(|expr|erase_locations(expr.python_ast())).collect::<Vec<_>>(),
+                "requires":action.requires.iter().map(|expr|erase_locations(expr.kernel_ast_v1())).collect::<Vec<_>>(),
+                "lets":action.lets.iter().map(|(name,expr)|json!([name,erase_locations(expr.kernel_ast_v1())])).collect::<Vec<_>>(),
+                "updates":action.statements.iter().map(|statement|erase_locations(statement.kernel_ast_v1())).collect::<Vec<_>>(),
+                "ensures":action.ensures.iter().map(|expr|erase_locations(expr.kernel_ast_v1())).collect::<Vec<_>>(),
                 "fair":action.fair
             })
         })
@@ -227,7 +227,7 @@ fn semantic_model(model: &KernelModel) -> Value {
         .invariants
         .iter()
         .map(|property| {
-            json!({"name":property.name,"expression":erase_locations(property.expr.python_ast())})
+            json!({"name":property.name,"expression":erase_locations(property.expr.kernel_ast_v1())})
         })
         .collect::<Vec<_>>();
     invariants.sort_by(|left, right| left["name"].as_str().cmp(&right["name"].as_str()));
@@ -238,7 +238,7 @@ fn semantic_model(model: &KernelModel) -> Value {
         "initial_state":value_map(&initial.state),
         "actions":actions,
         "invariants":invariants,
-        "terminal":model.terminal.as_ref().map(|expr|erase_locations(expr.python_ast()))
+        "terminal":model.terminal.as_ref().map(|expr|erase_locations(expr.kernel_ast_v1()))
     })
 }
 

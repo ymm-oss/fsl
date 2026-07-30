@@ -756,7 +756,9 @@ fslc document check <file.fsl> <document.md> [--glossary glossary.json] [--evide
 fslc approval create <file.fsl> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
                [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
                                                   # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
-fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem] # approved | drifted | signature-invalid
+fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem]
+                                                  # approved (exit 0) | drifted (exit 0、分析結果)
+                                                  # | signature-invalid (exit 1); DESIGN-approval.md 参照
 fslc approval diff   <file.fsl> --record <record.json> [--depth K] [--trust-key public.pem]
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
 fslc domain check <file.fsl> [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
@@ -921,6 +923,14 @@ refinement_failed / sweep_failed / observed_mismatch、
 と、`ledger --impl-log` の replay 入力(replay エラーは実装ログの証跡ではなく、
 空の台帳行として描画してはならない — `docs/DESIGN-ledger.md`)でもフェイルクローズド
 に適用されます。
+
+`approval_check` と `approval_diff` がこの表に無いのは、exit code が `result` の
+関数ではないからです。`fslc approval check` はどの結果でも同じ `approval_check` を
+返し、判定は `status` が担います: `approved` と `drifted` が `0`、
+`signature-invalid` が `1`。drift が 0 で終わるのは、`diff` の findings と同じく
+分析出力だからです(§12)。理由と、`fslc document check` の `document_drifted` が
+異なる扱いになる理由は `docs/DESIGN-approval.md` にあります。exit code ではなく
+`status` でゲートしてください。
 
 ### 結果の種類
 
@@ -1814,7 +1824,7 @@ migration/互換性ルールのアノテーションが、損失のあるレガ�
 #### 13.1.2 ツール・AI 消費のための根拠(rationale)
 
 `//` コメントは字句解析上の trivia(`rust/fsl-syntax/src/lexer.rs`)であり、
-AST にも `KernelModel` にも `python_ast()` にも JSON の result envelope にも
+AST にも `KernelModel` にも `kernel_ast_v1()` にも JSON の result envelope にも
 LSP のインデックスにも監査台帳にも到達しません。補助不変条件が k-induction の
 CTI を閉じるために存在する、あるいは実装のガードが抽象側より意図的に強い、と
 いった、下流のツールや AI エージェントが失ってはならない事実は、散文だけに
@@ -1894,7 +1904,16 @@ verify {
   宣言的な射影です。ghost のカウンターや自動の `_kpi_*` invariant を作ることは
   ありません。
 - `implements` があると、`fslc verify` は**上位レイヤーへの refine も同時に実行**
-  し、結果は `implements: {abs, result}` を運びます。空のボディ
+  し、結果は `implements: {abs, result}` を運びます。値は
+  `refines` / `refinement_failed` / `impl_violated` のいずれかです。**この判定は
+  このフィールドにしか現れません。トップレベルの `result` にも exit code にも
+  畳み込まれない**ため、seam が壊れていても `result:"ok"`/`"verified"` と exit 0 を
+  返します — 上の exit code 表の唯一の例外であり、`implements` が表に無い理由です。
+  `implements.result == "refines"` でゲートするか、`fslc chain` を使ってください
+  (chain はまさにこのゲートをレイヤーに適用し exit 1 します。
+  `docs/DESIGN-design-family.md` がオーケストレータ向けに同じ規則を述べています)。
+  スタンドアロンの `fslc refine` は `refinement_failed` で exit 1 します。
+  黙るのはインラインの seam だけです。空のボディ
   (`implements X from "..." { }`)は、process/action/stage の名前が一致するとき、
   恒等の refinement を自動生成します。`implements { }` ブロックの内側には、状態の
   `map` エントリ、`maps auto`、`preserve progress`、そして — #73 以降 —

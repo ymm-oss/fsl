@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Self-spec: compound CLI verdict folding.
+//
+// Models the aggregation shared by rust/fslc/src/main.rs run_sweep,
+// chain_layer_passes, and run_analyze_batch: per-item success may
+// accumulate, skipped items are neutral, and one observed failure permanently
+// disables a successful final verdict.
+//
+// probe: removing `requires not any_failure_seen` from finalize_pass yields
+//        violated/FailureIsSticky after fold_sub_failure; finalize_pass.
+spec FslcFold {
+  enum FoldStatus { Folding, FinalizedPass, FinalizedFail }
+
+  state {
+    status: FoldStatus,
+    any_failure_seen: Bool, // ghost: at least one folded item was failure-class
+    success_seen: Bool,     // ghost: a legitimate non-skipped success was folded
+    skipped_epoch: Bool     // ghost: toggled only by fold_skipped
+  }
+
+  init {
+    status = Folding
+    any_failure_seen = false
+    success_seen = false
+    skipped_epoch = false
+  }
+
+  action fold_sub_success() {
+    requires status == Folding
+    success_seen = true
+  }
+
+  action fold_sub_failure() {
+    requires status == Folding
+    any_failure_seen = true
+  }
+
+  action fold_skipped() {
+    requires status == Folding
+    skipped_epoch = not skipped_epoch
+  }
+
+  action finalize_pass() {
+    requires status == Folding
+    requires not any_failure_seen
+    status = FinalizedPass
+  }
+
+  action finalize_fail() {
+    requires status == Folding
+    requires any_failure_seen
+    status = FinalizedFail
+  }
+
+  invariant FailureIsSticky {
+    any_failure_seen => status != FinalizedPass
+  }
+
+  trans FoldedFailureNeverClears {
+    old(any_failure_seen) => any_failure_seen
+  }
+
+  invariant FinalizeAgreesWithFolded {
+    (status == FinalizedPass => not any_failure_seen)
+      and (status == FinalizedFail => any_failure_seen)
+  }
+
+  trans SkippedIsNeitherPassNorFail {
+    skipped_epoch != old(skipped_epoch) =>
+      (status == old(status) and any_failure_seen == old(any_failure_seen))
+  }
+
+  reachable ReachLegitimateSuccessPath {
+    status == FinalizedPass and success_seen
+  }
+
+  reachable ReachFailurePath {
+    status == FinalizedFail and any_failure_seen
+  }
+
+  reachable ReachSkippedNeutralPath {
+    status == Folding and skipped_epoch and not any_failure_seen
+  }
+
+  terminal { status == FinalizedPass or status == FinalizedFail }
+}

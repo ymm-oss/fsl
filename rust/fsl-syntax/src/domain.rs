@@ -262,117 +262,117 @@ macro_rules! ast_list {
 
 impl DomainSpec {
     #[must_use]
-    pub fn python_ast(&self) -> Value {
+    pub fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type":"DomainSpec", "name":self.name,
             "implementation_profile":self.implementation_profile,
-            "types":ast_list!(self.types, python_ast),
-            "aggregates":ast_list!(self.aggregates, python_ast),
-            "effects":ast_list!(self.effects, python_ast),
-            "awaits":ast_list!(self.awaits, python_ast),
-            "sagas":ast_list!(self.sagas, python_ast),
-            "projections":ast_list!(self.projections, python_ast), "loc":self.loc,
+            "types":ast_list!(self.types, kernel_ast_v1),
+            "aggregates":ast_list!(self.aggregates, kernel_ast_v1),
+            "effects":ast_list!(self.effects, kernel_ast_v1),
+            "awaits":ast_list!(self.awaits, kernel_ast_v1),
+            "sagas":ast_list!(self.sagas, kernel_ast_v1),
+            "projections":ast_list!(self.projections, kernel_ast_v1), "loc":self.loc,
         })
     }
 }
 
 impl DomainField {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({"$type":"DomainField","name":self.name.text,"type_name":self.type_name.render_source(),"default":render_optional_expr(self.default.as_ref()),"loc":self.loc})
     }
 }
 
 impl DomainInvariant {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({"$type":"DomainInvariant","name":self.name.text,"expr":self.expr.render_source(),"loc":self.loc})
     }
 }
 
 impl DomainType {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type":"DomainType","name":self.name,"kind":self.kind,"members":self.members,
-            "lo":render_optional_expr(self.lo.as_ref()),"hi":render_optional_expr(self.hi.as_ref()),"fields":ast_list!(self.fields, python_ast),
-            "invariants":ast_list!(self.invariants, python_ast),"loc":self.loc,
+            "lo":render_optional_expr(self.lo.as_ref()),"hi":render_optional_expr(self.hi.as_ref()),"fields":ast_list!(self.fields, kernel_ast_v1),
+            "invariants":ast_list!(self.invariants, kernel_ast_v1),"loc":self.loc,
         })
     }
 }
 
 impl DomainCommand {
-    fn python_ast(&self) -> Value {
-        json!({"$type":"DomainCommand","name":self.name,"inputs":ast_list!(self.inputs, python_ast),"loc":self.loc})
+    fn kernel_ast_v1(&self) -> Value {
+        json!({"$type":"DomainCommand","name":self.name,"inputs":ast_list!(self.inputs, kernel_ast_v1),"loc":self.loc})
     }
 }
 
 impl DomainEvent {
-    fn python_ast(&self) -> Value {
-        json!({"$type":"DomainEvent","name":self.name,"fields":ast_list!(self.fields, python_ast),"loc":self.loc})
+    fn kernel_ast_v1(&self) -> Value {
+        json!({"$type":"DomainEvent","name":self.name,"fields":ast_list!(self.fields, kernel_ast_v1),"loc":self.loc})
     }
 }
 
 impl DomainError {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({"$type":"DomainError","name":self.name,"loc":self.loc})
     }
 }
 
 impl DomainReject {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({"$type":"DomainReject","error":self.error,"condition":self.condition.render_source(),"loc":self.loc})
     }
 }
 
 impl DomainDecide {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type":"DomainDecide","command":self.command,"requires":render_exprs(&self.requires),
-            "rejects":ast_list!(self.rejects, python_ast),"emits":self.emits,"loc":self.loc,
+            "rejects":ast_list!(self.rejects, kernel_ast_v1),"emits":self.emits,"loc":self.loc,
         })
     }
 }
 
 impl DomainAssignment {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({"$type":"DomainAssignment","target":self.target.render_source(),"expr":self.value.render_source(),"loc":self.loc})
     }
 }
 
 impl DomainEvolve {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type":"DomainEvolve","event":self.event,"requires":render_exprs(&self.requires),
-            "assignments":ast_list!(self.assignments, python_ast),"loc":self.loc,
+            "assignments":ast_list!(self.assignments, kernel_ast_v1),"loc":self.loc,
         })
     }
 }
 
 impl DomainProjection {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({"$type":"DomainProjection","name":self.name,"source":self.source,"fields":self.fields,"loc":self.loc})
     }
 }
 
 impl DomainStalePolicy {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({"$type":"DomainStalePolicy","event":self.event,"condition":self.condition.render_source(),"emits":self.emits,"loc":self.loc})
     }
 }
 
 impl DomainAggregate {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type":"DomainAggregate","name":self.name,"id_type":self.id_type,
-            "state":ast_list!(self.state, python_ast),"commands":ast_list!(self.commands, python_ast),
-            "events":ast_list!(self.events, python_ast),"errors":ast_list!(self.errors, python_ast),
-            "decides":ast_list!(self.decides, python_ast),"evolves":ast_list!(self.evolves, python_ast),
-            "invariants":ast_list!(self.invariants, python_ast),
-            "stale_policies":ast_list!(self.stale_policies, python_ast),"loc":self.loc,
+            "state":ast_list!(self.state, kernel_ast_v1),"commands":ast_list!(self.commands, kernel_ast_v1),
+            "events":ast_list!(self.events, kernel_ast_v1),"errors":ast_list!(self.errors, kernel_ast_v1),
+            "decides":ast_list!(self.decides, kernel_ast_v1),"evolves":ast_list!(self.evolves, kernel_ast_v1),
+            "invariants":ast_list!(self.invariants, kernel_ast_v1),
+            "stale_policies":ast_list!(self.stale_policies, kernel_ast_v1),"loc":self.loc,
         })
     }
 }
 
 impl DomainRetry {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({"$type":"DomainRetry","max_attempts":self.max_attempts,"backoff":self.backoff,"loc":self.loc})
     }
 }
@@ -453,14 +453,14 @@ impl DomainEffect {
         events
     }
 
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type":"DomainEffect","name":self.name,"async_effect":self.async_effect,
             "reliable":self.reliable,"irreversible":self.irreversible,
             "idempotency_key":render_optional_expr(self.idempotency_key.as_ref()),"correlation_id":render_optional_expr(self.correlation_id.as_ref()),
             "handles":self.handles,"outcomes":self.outcomes,"request_event":self.request_event,
             "success_event":self.success_event,"failure_event":self.failure_event,
-            "timeout_event":self.timeout_event,"retry":self.retry.python_ast(),
+            "timeout_event":self.timeout_event,"retry":self.retry.kernel_ast_v1(),
             "timeout_after":self.timeout_after,"compensation_events":self.compensation_events,
             "outbox":self.outbox,"inbox":self.inbox,"loc":self.loc,
         })
@@ -468,13 +468,13 @@ impl DomainEffect {
 }
 
 impl DomainAwait {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({"$type":"DomainAwait","name":self.name,"mode":self.mode,"events":self.events,"branches":self.branches,"loc":self.loc})
     }
 }
 
 impl DomainSagaStep {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type":"DomainSagaStep","name":self.name,"async_step":self.async_step,
             "requires":render_exprs(&self.requires),"emits":self.emits,"awaits_mode":self.awaits_mode,
@@ -485,7 +485,7 @@ impl DomainSagaStep {
 }
 
 impl DomainSagaCompensation {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type":"DomainSagaCompensation","trigger_event":self.trigger_event,
             "after_event":self.after_event,"emits":self.emits,"loc":self.loc,
@@ -494,12 +494,12 @@ impl DomainSagaCompensation {
 }
 
 impl DomainSaga {
-    fn python_ast(&self) -> Value {
+    fn kernel_ast_v1(&self) -> Value {
         json!({
             "$type":"DomainSaga","name":self.name,"starts_on":self.starts_on,
-            "steps":ast_list!(self.steps, python_ast),
-            "compensations":ast_list!(self.compensations, python_ast),
-            "invariants":ast_list!(self.invariants, python_ast),
+            "steps":ast_list!(self.steps, kernel_ast_v1),
+            "compensations":ast_list!(self.compensations, kernel_ast_v1),
+            "invariants":ast_list!(self.invariants, kernel_ast_v1),
             "outboxes":self.outboxes,"inboxes":self.inboxes,"loc":self.loc,
         })
     }

@@ -1329,8 +1329,11 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   ok/verified/proved success results. The targets are untagged
   action/invariant/trans/reachable/leadsTo, and IDs declared via
   `--requirements ids.txt` or a `requirement` block in the requirements dialect but
-  never referenced. A declaration with a tag such as `MODEL: ...` / `ASSUME-n: ...`
-  does not become a warning.
+  never referenced. A declaration linked by `@requirement("MODEL-SCOPE-001", ...)`
+  / `@requirement("ASSUME-SCOPE-001", ...)` does not become a warning. This gate
+  only asks whether a tag exists, not whether it is canonical: a legacy
+  `"REQ-1: text"` string counts as tagged here, and `fslc lint` is what reports
+  it (`legacy_string_metadata`, exit 1, machine-applicable), so run both.
 - `typestate`: determines how far a state machine (a struct field with enum values,
   scoped by field name **and** owning struct type so two structs with a same-named
   field stay independent machines / a state variable / an `Option<_>` slot) can be
@@ -1793,7 +1796,16 @@ verify {
   with both origin kinds and locations). An inline `action` item cannot target
   a `branches`-split action by its pre-split name — reference the generated
   `name__b<N>` alias. Auto-mapped process transitions are statically
-  actor-checked; an actor mismatch is a check-time type error.
+  actor-checked; an actor mismatch is a check-time type error. The seam's
+  verdict is reported as `implements: {abs, result}` with `result` one of
+  `refines` / `refinement_failed` / `impl_violated` (the last one meaning the
+  requirements spec breaks its own bounds/invariants, so no refinement verdict
+  was reached), plus `violation` on the two failing values. It is **not** folded
+  into the top-level `result` or the exit code — unlike standalone `fslc refine`,
+  where `refinement_failed` is exit 1 — so a broken seam returns
+  `result: "ok"` / `"verified"` and exit 0. Gate on
+  `implements.result == "refines"`, or use `fslc chain`, which applies exactly
+  that gate to the layer and exits 1.
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
   `kind: "acceptance"`). It supports the readable stage form
   `expect <Entity> <id> in <Stage>` alongside `expect <expr>`, is output to

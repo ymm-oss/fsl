@@ -15,7 +15,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "4.0.0"
+version = "4.1.0"
 edition = "2024"
 license = "Apache-2.0"
 rust-version = "1.88"
@@ -30,6 +30,7 @@ lsp-server = "0.7"
 lsp-types = "0.95"
 crossbeam-channel = "0.5"
 sha2 = "0.10"
+stacker = "0.1"
 z3 = { version = "=0.20.2", default-features = false, features = ["vendored", "z3_4_16"] }
 js-sys = "0.3.82"
 wasm-bindgen = "0.2.105"

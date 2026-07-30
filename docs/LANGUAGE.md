@@ -778,7 +778,9 @@ fslc document check <file.fsl> <document.md> [--glossary glossary.json] [--evide
 fslc approval create <file.fsl> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
                [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
                                                   # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
-fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem] # approved | drifted | signature-invalid
+fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem]
+                                                  # approved (exit 0) | drifted (exit 0, analysis output)
+                                                  # | signature-invalid (exit 1); see DESIGN-approval.md
 fslc approval diff   <file.fsl> --record <record.json> [--depth K] [--trust-key public.pem]
 fslc typestate <file.fsl> [--ts]                 # decide applicability of state machine → ghost type (§16)
 fslc domain check <file.fsl> [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
@@ -949,6 +951,14 @@ section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
 `docs/DESIGN-layers.md` §7) and for `ledger --impl-log`'s replay input (a
 replay error is not implementation-log evidence and must not be rendered as
 an empty ledger row — `docs/DESIGN-ledger.md`).
+
+`approval_check` and `approval_diff` are absent from this table because their
+exit code is not a function of `result`. `fslc approval check` reports the same
+`approval_check` for every outcome and carries the verdict in `status`: `0` for
+`approved` and for `drifted`, `1` for `signature-invalid`. Drift exits 0 because
+it is analysis output, as `diff` findings are (§12); `docs/DESIGN-approval.md`
+records why, and why `fslc document check`'s `document_drifted` differs. Gate on
+`status`, not on the exit code.
 
 ### Kinds of result
 
@@ -1866,7 +1876,7 @@ construction.
 #### 13.1.2 Rationale for tooling and AI consumption
 
 A `//` comment is lexer trivia (`rust/fsl-syntax/src/lexer.rs`): it never
-reaches the AST, `KernelModel`, `python_ast()`, the JSON result envelope, the
+reaches the AST, `KernelModel`, `kernel_ast_v1()`, the JSON result envelope, the
 LSP index, or the audit ledger. A fact a downstream tool or an AI agent must
 not lose — that an auxiliary invariant exists to close a k-induction CTI, or
 that an implementation guard is deliberately stronger than its abstract
@@ -1949,7 +1959,16 @@ verify {
   business and requirements. It does not create a ghost counter or an automatic
   `_kpi_*` invariant.
 - With `implements`, `fslc verify` **also runs the refine to the upper layer
-  simultaneously**, and the result carries `implements: {abs, result}`. An empty
+  simultaneously**, and the result carries `implements: {abs, result}`, whose
+  values are `refines` / `refinement_failed` / `impl_violated`. **That verdict is
+  reported only in this field. It is not folded into the top-level `result` or
+  the exit code**, so a broken seam still returns `result:"ok"`/`"verified"` and
+  exit 0 — the one exception to the exit-code table above, and the reason
+  `implements` has no row in it. Gate on `implements.result == "refines"`, or run
+  `fslc chain`, which applies exactly that gate to the layer and exits 1
+  (`docs/DESIGN-design-family.md` states the same rule for orchestrators).
+  Standalone `fslc refine` does exit 1 on `refinement_failed`; only the inline
+  seam is silent. An empty
   body (`implements X from "..." { }`) auto-generates identity refinement when
   process/action/stage names match. Inside the `implements { }` block you write
   state `map` entries, `maps auto`, `preserve progress`, and — since #73 —

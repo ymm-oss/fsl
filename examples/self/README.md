@@ -9,6 +9,7 @@ as FSL state machines, making the verifier a subject of the verifier itself.
 |---|---|
 | `fslc_session.fsl` | CLI result classification and the ordering of exit-code severity. Only advance to a success result after a successful check; `proved` includes `verified`; an internal error is unrecoverable. |
 | `fslc_monitor.fsl` | The reject-stickiness of the replay runtime. Once a log becomes nonconformant it does not revert, and it is conformant only when every step is ok. |
+| `fslc_fold.fsl` | Compound verdict aggregation for sweep, chain, and batch gates. A folded failure permanently disables a passing final verdict, while skipped items remain neutral. |
 | `monitor_action_boundary.fsl` | A two-stage API model makes fresh selection, stale reuse, legal bounds, and raw out-of-domain input explicit requirements. |
 | `refinement_algebra.fsl` | Through refinement layers, safety propagates and liveness does not. A change that breaks safety is not a valid refinement link. |
 
@@ -26,6 +27,13 @@ cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/f
 cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- check  $E/fslc_monitor.fsl
 cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/fslc_monitor.fsl
 cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/fslc_monitor.fsl --engine induction
+
+# fslc_fold: exercise both legitimate pass and sticky-failure paths
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- check  $E/fslc_fold.fsl
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/fslc_fold.fsl --depth 8
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/fslc_fold.fsl --depth 8 --engine induction
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/fslc_fold.fsl --depth 8 --vacuity error
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- mutate $E/fslc_fold.fsl --depth 8
 
 # monitor_action_boundary: the Rust agreement test reads this source directly
 cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- check  $E/monitor_action_boundary.fsl
@@ -76,6 +84,18 @@ diverse outcomes, it runs `check` → (if ok) `verify` → (if verified) `verify
    transitions conform to the model state machine),
 4. that a hand-written trace violating a contract becomes `nonconformant` (a
    negative control).
+
+`rust/fslc/tests/self_conformance.rs` is the native product anchor. It invokes
+`env!("CARGO_BIN_EXE_fslc")` directly, reads the process status from
+`std::process::Command`, and independently maps real JSON observations onto the
+`fslc_session`, `fslc_monitor`, and `fslc_fold` action vocabularies. The mapping
+does not import the production `outcome.rs` classifier, and any unregistered
+result/kind/exit tuple fails closed. Its compound controls execute clean and
+failing sweep, full chain, and analyze-batch runs (including the empty-batch
+success boundary); every observed failure fold is also replayed with a
+deliberately incorrect `finalize_pass` and must become `nonconformant`. The
+same native test product-gates bounded verification, induction, vacuity, and
+targeted mutation sensitivity for `fslc_fold.fsl`.
 
 The required product gate is Rust-native. `monitor_action_boundary.fsl` models
 selection and execution as distinct actions and deliberately gives the raw API

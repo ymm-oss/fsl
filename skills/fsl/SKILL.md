@@ -163,6 +163,15 @@ Output is always a single JSON document on stdout. exit: 0=success
 (violated/reachable_failed/unknown_cti/nonconformant), 2=spec error
 (parse/type/semantics/io), 3=internal error.
 
+**The one exception is the inline `implements` seam.** A requirements spec with
+`implements Abs from "business.fsl" { ... }` has its refinement to the upper
+layer checked during `check`/`verify`, but that verdict is reported *only* in the
+`implements` field — it is not folded into the top-level `result` or the exit
+code. A broken business seam still returns `result: "ok"` / `"verified"` and
+exit 0. Gate it explicitly on `implements.result == "refines"` (the only passing
+value; the failing ones are `refinement_failed` and `impl_violated`), or run
+`fslc chain`, which applies that gate for you and does exit 1.
+
 ## Before writing a spec: source fidelity and the formalization memo
 
 FSL is a specification language, not a requirements generator. Encode only facts
@@ -220,8 +229,10 @@ confirmed assumptions in the `.fsl` itself as comments / tags**:
 
 - Global assumptions → a ledger block at the top of the spec:
   `// ASSUME-1: stock is reserved by only one user at a time`
-- An assumption justifying a specific guard / invariant → tag that declaration:
-  `invariant OnePerUser "ASSUME-1: only one user reserves at a time" { ... }`
+- An assumption justifying a specific guard / invariant → tag that declaration
+  with the canonical typed annotation:
+  `@requirement("ASSUME-STOCK-001", "only one user reserves at a time")` on the
+  line before `invariant OnePerUser { ... }`
 
 This way assumptions travel with the spec, are visible in PRs, and a future
 `--strict-tags` check can distinguish "intended assumptions (tagged)" from
@@ -295,6 +306,15 @@ the formalization memo.**
    (and `--requirements ids.txt` if needed). Only when the result is
    ok/verified/proved do untagged declarations and unreferenced requirement IDs
    become warnings.
+   **The one canonical way to link a declaration to a requirement ID** is the
+   typed annotation on the line before it —
+   `@requirement("REQ-SCOPE-001", "one-sentence intent")` — with process
+   `covers REQ-SCOPE-001 "..."` as the equivalent dialect sugar, and a
+   `MODEL-`/`ASSUME-`prefixed id for modeling intent rather than a source
+   requirement. The `invariant X "REQ-1: text" { ... }` string slot is
+   non-canonical migration input (`docs/DESIGN-id-policy.md`); `--strict-tags`
+   still counts it as tagged, so add `fslc lint file.fsl`, which exits 1 with
+   `legacy_string_metadata` plus a machine-applicable replacement.
 2. `fslc verify file.fsl --depth 8` → see the table below for what each result means
    To ask a bounded operational what-if from a complete `Monitor.state` JSON,
    use `fslc verify file.fsl --from-state state.json --depth 8`; this replaces
@@ -392,7 +412,9 @@ authoring through the role skills.)
    - requirements → business: put `implements BusinessName from "business.fsl" { }`
      in the requirements spec; `verify` then also runs the refine and reports it under
      the `implements` field of the result JSON (an empty body auto-generates identity
-     refinement when names match).
+     refinement when names match). This seam is the exception to the exit-code
+     contract: assert `implements.result == "refines"` yourself — a failed seam
+     still exits 0.
    - design → requirements: a mapping file + `fslc refine design.fsl requirements.fsl
      mapping.fsl`.
    - when an upper response must survive the seam, add
@@ -457,7 +479,7 @@ existing result/kind fields:
 | `refinement_failed` / `abs_requires_failed` | A detailed-layer transition breaks an upper-layer guard (e.g. a shortcut skipping approval) | Read `impl_action` and `impl_trace`. Add a guard to the detailed layer, or review the interpretation of the correspondence (`maps` / mapping) |
 | `refinement_failed` / `abs_state_mismatch` / `stutter_changed_abs` / `map_out_of_bounds` | Mapping inconsistency (an update has no correspondence / a stutter nonetheless changes upper-layer state / a mapped value is out of the type's range) | Compare the `mismatch` path with `abs_before/after`. Fix the mapping expression or the action correspondence |
 | `refinement_failed` / `progress_lost` | A `preserve progress` mapping pulled an upper `leadsTo` into the lower layer and found a lasso/stall | Read `progress_failure`, `impl_trace`, `pending_since`, `loop_start`/`stutter`, and the `progress.actions`. Add/restore lower-layer `fair action` on the progress action, add a lower-layer ranked `leadsTo`, or revise the progress mapping |
-| `implements.result: violated` within verify | The requirements layer deviates from the upper (business) layer | The contents of `implements.violation` have the same shape as refinement_failed. Same procedure as above + check the `requirement` on the requirements side |
+| `implements.result: refinement_failed` / `impl_violated` within check/verify | The requirements layer deviates from the upper (business) layer (`impl_violated` = the requirements spec breaks its own bounds/invariants, so no refinement verdict was reached) | **The top-level `result` is still `ok`/`verified` and the exit code is still 0 — read this field, never the exit code.** The contents of `implements.violation` have the same shape as refinement_failed. Same procedure as above + check the `requirement` on the requirements side |
 | `error` / `acceptance` | Replay of an acceptance criterion failed | The ID and step of the failed AC are returned. Decide whether the procedure's precondition (state) or the expect is correct, and fix accordingly |
 | `error` / `forbidden` | An operation sequence that should be rejected was accepted (under-constraint; the kind that a safety invariant stays silent about) | `accepted_trace` is the accepting path. The requires enabling the last operation is too loose → add a guard or review the spec |
 | `error` / `forbidden_setup` | A precondition (non-final) step of the forbidden is not enabled (invalid trace) | Review the setup procedure. The non-final steps are there to reach that point and are not treated as success |

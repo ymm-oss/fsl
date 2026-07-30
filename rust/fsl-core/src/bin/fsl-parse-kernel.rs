@@ -24,7 +24,7 @@ fn main() {
     match fsl_core::parse_kernel_source(&source, &resolver) {
         Ok(spec) => println!(
             "{}",
-            serde_json::to_string(&spec.python_ast()).expect("serialize kernel AST")
+            serde_json::to_string(&spec.kernel_ast_v1()).expect("serialize kernel AST")
         ),
         Err(error) => {
             eprintln!("{error}");

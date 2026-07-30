@@ -114,7 +114,7 @@ pub fn framed_text_digest(algorithm: &str, text: &str) -> String {
 ///
 /// Returns an error string when the normalized kernel AST is empty.
 pub fn spec_digest_from_kernel(kernel: &KernelSpec) -> Result<String, String> {
-    let ast = normalized_kernel_ast(&kernel.python_ast())
+    let ast = normalized_kernel_ast(&kernel.kernel_ast_v1())
         .ok_or_else(|| "normalized kernel AST is empty".to_owned())?;
     Ok(framed_digest(SPEC_DIGEST_ALGORITHM, &ast))
 }
