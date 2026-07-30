@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-07-30
+
 - Semantic Assurance Matrix slices 2/3 add source-derived `expr` (24
   `Expr` + 4 `AggregateKind` rows), `types` (9 `TypeRef` + 3 `TypeDef`
   rows), and `dialects` (all 10 `frontends!` keywords) axes for issue #537
@@ -4158,7 +4160,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.0.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.1.0...HEAD
+[4.1.0]: https://github.com/ymm-oss/fsl/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/ymm-oss/fsl/compare/v3.1.0...v4.0.0
 [3.1.0]: https://github.com/ymm-oss/fsl/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/ymm-oss/fsl/compare/v2.7.0...v3.0.0
