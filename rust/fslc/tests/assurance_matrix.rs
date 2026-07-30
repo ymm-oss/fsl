@@ -26,10 +26,20 @@
 
 #[path = "assurance/claim.rs"]
 mod claim;
+#[path = "assurance/dialects.rs"]
+mod dialects;
+#[path = "assurance/enum_rows.rs"]
+mod enum_rows;
+#[path = "assurance/expr.rs"]
+mod expr;
 #[path = "assurance/outcome_kind.rs"]
 mod outcome_kind;
 #[path = "assurance/properties.rs"]
 mod properties;
+#[path = "support/mod.rs"]
+mod support;
+#[path = "assurance/types.rs"]
+mod types;
 #[path = "assurance/violation_kind.rs"]
 mod violation_kind;
 
@@ -40,6 +50,9 @@ fn axes() -> Vec<Axis> {
         outcome_kind::axis(),
         violation_kind::axis(),
         properties::axis(),
+        expr::axis(),
+        types::axis(),
+        dialects::axis(),
     ]
 }
 

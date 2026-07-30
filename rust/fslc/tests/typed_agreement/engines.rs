@@ -16,8 +16,11 @@ use std::future::Future;
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
-use fsl_core::{FsResolver, KernelModel, build_model, parse_kernel_source};
+use fsl_core::{FsResolver, KernelModel, build_model, build_surface_model, parse_kernel_source};
 use fsl_runtime::{Monitor, State, Violation};
+use fsl_syntax::{Expr, SpecItem};
+
+use crate::generator::ExpressionBuild;
 
 pub fn block_on<F: Future>(future: F) -> F::Output {
     let mut future = pin!(future);
@@ -43,6 +46,46 @@ pub fn build(id: &str, source: &str) -> KernelModel {
         .unwrap_or_else(|error| panic!("generator bug: '{id}' did not parse: {error}\n{source}"));
     build_model(kernel).unwrap_or_else(|error| {
         panic!("generator bug: '{id}' did not typecheck: {error}\n{source}")
+    })
+}
+
+/// Build one expression-axis model through the ordinary parse/lower/typecheck
+/// path. `EnumMemberTypedAst` additionally replaces the parsed enum token
+/// with the typed `Expr::EnumMember` form before re-running
+/// `build_surface_model`, the public semantic gate specifically provided for
+/// typed AST mutations.
+#[must_use]
+pub fn build_expression(id: &str, source: &str, build_kind: ExpressionBuild) -> KernelModel {
+    if build_kind == ExpressionBuild::ParsedSource {
+        return build(id, source);
+    }
+
+    let resolver = FsResolver::new(".");
+    let kernel = parse_kernel_source(source, &resolver)
+        .unwrap_or_else(|error| panic!("generator bug: '{id}' did not parse: {error}\n{source}"));
+    let mut syntax = kernel.into_syntax();
+    let expression = syntax
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            SpecItem::Invariant { name, expr, .. } if name == "Variant" => Some(expr.as_mut()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("generator bug: '{id}' has no Variant invariant"));
+    let Expr::Binary { right, .. } = expression else {
+        panic!("generator bug: '{id}' EnumMember probe is not a binary expression");
+    };
+    assert!(
+        matches!(right.as_ref(), Expr::Var(name) if name == "Pending"),
+        "generator bug: '{id}' EnumMember probe no longer has Pending on the right: {right:?}"
+    );
+    **right = Expr::EnumMember {
+        type_name: "Status".to_owned(),
+        member: "Pending".to_owned(),
+    };
+
+    build_surface_model(syntax).unwrap_or_else(|error| {
+        panic!("generator bug: '{id}' typed AST did not typecheck: {error}\n{source}")
     })
 }
 

@@ -19,6 +19,10 @@
 //!   names (`head`/`pop`/`at`/index/`divide`/`remainder`), each placed at
 //!   its documented boundary. See the module doc on `relations.rs` R6 for
 //!   why `head`/`pop`/`at`/index are generated only in action context.
+//! - [`expression_sweep`]: one checked model per executable `Expr` variant,
+//!   with four models for the four `AggregateKind` values. `Call` and
+//!   `Stage` are deliberately absent because direct/dialect lowering must
+//!   eliminate them before a checked Kernel model reaches an evaluator.
 //!
 //! `type Domain = 1..0` is this codebase's existing idiom for an empty
 //! finite domain (`rust/fsl-verifier/tests/expression_agreement.rs`,
@@ -377,6 +381,239 @@ fn render_enum_model(
     }
     source.push_str("}\n");
     source
+}
+
+/// How an expression model enters the checked Kernel.
+///
+/// Ordinary enum tokens remain `Expr::Var` in parsed direct specs.
+/// `Expr::EnumMember` is synthesized by typed lowering paths such as enum
+/// conversion and aggregate normalization, so its deterministic C6 model
+/// mutates the already-parsed typed surface tree and then re-runs
+/// `build_surface_model` (the public semantic gate for typed AST mutations).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExpressionBuild {
+    ParsedSource,
+    EnumMemberTypedAst,
+}
+
+/// One deterministic expression-variant model and the matrix row(s) it
+/// exercises. `aggregate_kind` is populated only for the four aggregate
+/// models; all other models exercise one `Expr` row.
+#[derive(Clone, Debug)]
+pub struct ExpressionModel {
+    pub id: String,
+    pub source: String,
+    pub expr_variant: &'static str,
+    pub aggregate_kind: Option<&'static str>,
+    pub build: ExpressionBuild,
+    pub depth: usize,
+}
+
+fn expression_model(
+    index: usize,
+    expr_variant: &'static str,
+    aggregate_kind: Option<&'static str>,
+    expression: &str,
+    build: ExpressionBuild,
+) -> ExpressionModel {
+    let source = format!(
+        r"
+spec ExpressionVariant{index} {{
+  type Item = 0..2
+  enum Status {{ Pending, Done }}
+  struct Payload {{ value: Item, ready: Bool }}
+  state {{
+    raw: Int,
+    bounded: 0..1,
+    x: Item,
+    flag: Bool,
+    optional: Option<Item>,
+    selected: Set<Item>,
+    queue: Seq<Item, 3>,
+    payload: Payload,
+    lookup: Map<Item, Item>,
+    edges: relation Item -> Item,
+    status: Status
+  }}
+  init {{
+    raw = 0
+    bounded = 0
+    x = 0
+    flag = true
+    optional = none
+    selected = Set {{}}
+    queue = Seq {{}}
+    payload = Payload {{ value: 0, ready: true }}
+    forall i: Item {{ lookup[i] = 0 }}
+    edges = Set {{}}
+    status = Pending
+  }}
+  action stay() {{ x = x }}
+  invariant Variant {{ {expression} }}
+}}
+"
+    );
+    ExpressionModel {
+        id: format!("expr_variant_{index}_{expr_variant}"),
+        source,
+        expr_variant,
+        aggregate_kind,
+        build,
+        depth: 2,
+    }
+}
+
+/// Deterministic C6 family for every checked-kernel `Expr` variant.
+///
+/// There are 25 models: 21 non-aggregate executable variants and four
+/// aggregate-kind models. The `Expr::Aggregate` row is therefore observed
+/// four times. The two remaining live syntax variants (`Call`, `Stage`) are
+/// exercised by fail-closed controls in `assurance/expr.rs`, not by an
+/// evaluator agreement model, because allowing either into a checked
+/// Kernel would itself violate the lowering contract.
+#[must_use]
+#[allow(clippy::too_many_lines)]
+pub fn expression_sweep() -> Vec<ExpressionModel> {
+    [
+        ("Expr::Num", None, "0 == 0", ExpressionBuild::ParsedSource),
+        ("Expr::Bool", None, "true", ExpressionBuild::ParsedSource),
+        (
+            "Expr::None",
+            None,
+            "optional == none",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Some",
+            None,
+            "some(0) != optional",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Set",
+            None,
+            "selected == Set {}",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Seq",
+            None,
+            "queue == Seq {}",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Struct",
+            None,
+            "payload == Payload { value: 0, ready: true }",
+            ExpressionBuild::ParsedSource,
+        ),
+        ("Expr::Var", None, "x == x", ExpressionBuild::ParsedSource),
+        (
+            "Expr::EnumMember",
+            None,
+            "status == Pending",
+            ExpressionBuild::EnumMemberTypedAst,
+        ),
+        (
+            "Expr::Index",
+            None,
+            "lookup[0] == 0",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Field",
+            None,
+            "payload.value == 0",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Method",
+            None,
+            "selected.size() == 0",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Binary",
+            None,
+            "x + 1 >= 1 and flag",
+            ExpressionBuild::ParsedSource,
+        ),
+        ("Expr::Neg", None, "-x <= 0", ExpressionBuild::ParsedSource),
+        (
+            "Expr::Not",
+            None,
+            "not false",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Conditional",
+            None,
+            "if flag then x == 0 else x != 0",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Is",
+            None,
+            "not (optional is some(value))",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Quantified",
+            None,
+            "forall i: Item { lookup[i] >= 0 }",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Aggregate",
+            Some("AggregateKind::Count"),
+            "count(i: Item where i >= 0) == 3",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Aggregate",
+            Some("AggregateKind::Sum"),
+            "sum(i in 0..2 of i) == 3",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Aggregate",
+            Some("AggregateKind::Unique"),
+            "unique(i: Item where false) and unique(i: Item where i == 0) and not unique(i: Item where true)",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::Aggregate",
+            Some("AggregateKind::ExactlyOne"),
+            "not exactlyOne(i: Item where false) and exactlyOne(i: Item where i == 0) and not exactlyOne(i: Item where true)",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::UnaryNamed",
+            None,
+            "abs(raw) == 0",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::BinaryNamed",
+            None,
+            "min(raw, 1) == 0",
+            ExpressionBuild::ParsedSource,
+        ),
+        (
+            "Expr::TernaryNamed",
+            None,
+            "not reachable(edges, 0, 0)",
+            ExpressionBuild::ParsedSource,
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(
+        |(index, (expr_variant, aggregate_kind, expression, build))| {
+            expression_model(index, expr_variant, aggregate_kind, expression, build)
+        },
+    )
+    .collect()
 }
 
 /// `divide`/`remainder`, each in action context (guarded, so no partial-op
