@@ -125,7 +125,16 @@ jobs:
     name: native Z3 4.16 (ubuntu-latest)
     if: github.event_name == 'pull_request' && github.base_ref == 'production'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Promotion-only, and always a cold build: this job runs on so few commits
+    # that `Swatinem/rust-cache` reports "No cache found" every time, so the
+    # budget must cover vendored Z3 plus the whole `fslc-rust` suite from
+    # scratch. Measured cold: 32m43s at the v4.0.0 promotion, over 40m at the
+    # v4.1.0 promotion once issue #537's suites landed -- the job was killed
+    # mid-suite with every test that had run passing. Raised rather than
+    # narrowed: the same `cargo test --locked` must still pass in full, and a
+    # gate that runs out of wall clock reports a failure it did not observe.
+    # Splitting or caching this job is tracked in issue #655.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
