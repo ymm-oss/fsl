@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// #641 warning fixture: `TouchDoc` remains enabled while `ArchiveDoc` is
+// structurally unreachable because no event can move status to Archived.
+domain UnreachableDecisionDomain {
+  implementation_profile functional_ddd
+
+  enum Status { Open, Archived }
+
+  aggregate Doc {
+    id DocId
+
+    state {
+      status: Status = Open;
+    }
+
+    command TouchDoc {}
+    command ArchiveDoc {}
+    event DocTouched {}
+    event DocArchived {}
+
+    decide TouchDoc {
+      emits DocTouched
+    }
+
+    decide ArchiveDoc {
+      requires status == Archived
+      emits DocArchived
+    }
+
+    evolve DocTouched {
+      status = Open
+    }
+    evolve DocArchived {}
+
+    invariant knownStatus { status == Open || status == Archived }
+  }
+}

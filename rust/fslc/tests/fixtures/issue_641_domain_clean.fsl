@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// #641 negative control: both decisions are reachable and the aggregate never
+// deadlocks, so no kernel warning should be projected by `domain check`.
+domain CleanDiagnosticDomain {
+  implementation_profile functional_ddd
+
+  enum Status { Open, Closed }
+
+  aggregate Doc {
+    id DocId
+
+    state {
+      status: Status = Open;
+    }
+
+    command CloseDoc {}
+    command ReopenDoc {}
+    event DocClosed {}
+    event DocReopened {}
+
+    decide CloseDoc {
+      requires status == Open
+      emits DocClosed
+    }
+
+    decide ReopenDoc {
+      requires status == Closed
+      emits DocReopened
+    }
+
+    evolve DocClosed {
+      status = Closed
+    }
+
+    evolve DocReopened {
+      status = Open
+    }
+
+    invariant openOrClosed { status == Open || status == Closed }
+  }
+}
