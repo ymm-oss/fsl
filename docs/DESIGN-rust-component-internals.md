@@ -849,8 +849,10 @@ a third delivery concern, or a real production follow-up contradicts the expecte
 #### Outcome classification (#537 C2)
 
 The Verdict Conservation Law — a failure-class `result` must not exit zero, and a success-class
-`result` must not exit non-zero — needs one definition of those two classes. The crate has 43
-distinct `result` values and no such definition. #596 recorded the consequence from inside: its
+`result` must not exit non-zero — needs one definition of those two classes. The crate has 65
+distinct registered top-level `result` values: 5 sibling-field cases, 39 unconditional successes,
+and 21 unconditional failures, counted by deduplicating `rust/fslc/src/outcome.rs`'s match-arm
+literals as of 2026-07-30 at `9d7e623`. #596 recorded the consequence from inside: its
 corpus sweep had to carry `CHECK_SUCCESS_RESULTS` in test code because `check`'s arms each set
 their exit code at their own return point, so there was no production enumeration to defer to. A
 conservation check whose class definition lives in the test is the stale-check shape #577 retired

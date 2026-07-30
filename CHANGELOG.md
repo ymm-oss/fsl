@@ -451,6 +451,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   lost the race. No retry was added: retrying an unexplained stall would
   suppress the event this exists to capture, and a genuine hang would return as
   a slow pass rather than a failure (#587).
+- `test: add native FSL self-conformance anchors` (#537 C7) connects real
+  native CLI JSON and process exits to the `fslc_session` and `fslc_monitor`
+  replay models, and adds `fslc_fold.fsl` for sticky compound-verdict
+  aggregation across sweep, chain, and analyze batch. Independent,
+  fail-closed mapping tables never import `outcome.rs`; real passing/failing
+  observations, synthetic contract violations, mutation/vacuity evidence, and
+  an issue #554 exit-status sensitivity assertion provide both positive and
+  negative controls.
 
 ## [4.0.0] - 2026-07-27
 
