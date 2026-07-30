@@ -5,6 +5,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Semantic Assurance Matrix slices 2/3 add source-derived `expr` (24
+  `Expr` + 4 `AggregateKind` rows), `types` (9 `TypeRef` + 3 `TypeDef`
+  rows), and `dialects` (all 10 `frontends!` keywords) axes for issue #537
+  C3. A 25-model deterministic C6 family now checks all evaluator-reachable
+  expression variants and all type rows across Monitor BFS / explicit / BMC,
+  with a known-violating paired control for every model, while `Call`/`Stage`,
+  standalone refinement checks, and the Worker's missing agent path are
+  recorded with fail-closed evidence.
 - `rust/fslc/tests/typed_agreement.rs` introduces the C6 typed generative /
   metamorphic cross-engine agreement suite (issue #537 C6 slice 1, issue
   #648, `docs/DESIGN-conformance-harness.md` "Typed generative / metamorphic
