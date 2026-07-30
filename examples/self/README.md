@@ -32,6 +32,7 @@ cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/f
 cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- check  $E/fslc_fold.fsl
 cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/fslc_fold.fsl --depth 8
 cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/fslc_fold.fsl --depth 8 --engine induction
+cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify $E/fslc_fold.fsl --depth 8 --vacuity error
 cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- mutate $E/fslc_fold.fsl --depth 8
 
 # monitor_action_boundary: the Rust agreement test reads this source directly
@@ -90,9 +91,11 @@ diverse outcomes, it runs `check` → (if ok) `verify` → (if verified) `verify
 `fslc_session`, `fslc_monitor`, and `fslc_fold` action vocabularies. The mapping
 does not import the production `outcome.rs` classifier, and any unregistered
 result/kind/exit tuple fails closed. Its compound controls execute clean and
-failing sweep, chain, and analyze-batch runs; every observed failure fold is
-also replayed with a deliberately incorrect `finalize_pass` and must become
-`nonconformant`.
+failing sweep, full chain, and analyze-batch runs (including the empty-batch
+success boundary); every observed failure fold is also replayed with a
+deliberately incorrect `finalize_pass` and must become `nonconformant`. The
+same native test product-gates bounded verification, induction, vacuity, and
+targeted mutation sensitivity for `fslc_fold.fsl`.
 
 The required product gate is Rust-native. `monitor_action_boundary.fsl` models
 selection and execution as distinct actions and deliberately gives the raw API

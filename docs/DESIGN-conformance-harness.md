@@ -603,7 +603,11 @@ frozen session corpus and mapping from
 come from `docs/LANGUAGE.md:940-961`. The compound table independently
 enumerates the 65 result values registered by
 `rust/fslc/src/outcome.rs:82-216`; unknown values and incomplete sibling-field
-envelopes are errors, never default successes or failures.
+envelopes are errors, never default successes or failures. Chain uses a
+command-specific adapter because a layer additionally depends on its integer
+`exit_code`, nested `detail.implements.result`, and the implementation-command
+`passed` / `failed` vocabulary. Compound finalization separately enumerates
+each command's exact top-level result/exit pair.
 
 Three self-specs separate the contracts:
 
@@ -611,16 +615,16 @@ Three self-specs separate the contracts:
 |---|---|
 | `examples/self/fslc_session.fsl` | Real check/verify/induction and extended subcommand observations map to session actions, then replay conformantly. |
 | `examples/self/fslc_monitor.fsl` | Real cart replay observations map to `step_ok` / `step_reject` / `finish`, then replay conformantly. |
-| `examples/self/fslc_fold.fsl` | Real sweep, chain, and analyze-batch item verdicts map to success/failure/skipped folds; the real top-level result and process exit select the final action. |
+| `examples/self/fslc_fold.fsl` | Real sweep, full five-layer chain (including nested implements and implementation-command results), and analyze-batch item verdicts map to success/failure/skipped folds; the real top-level result and exact process exit select the final action. `fold_spec_has_native_proof_vacuity_and_mutation_evidence` product-gates bounded verification, induction, vacuity, and the failure-sticky finalize-guard mutants. |
 
 The C7 properties have both an accepting observation and a rejecting control:
 
 | C7 property | Executable evidence in `self_conformance.rs` |
 |---|---|
 | Failure cannot be promoted to success | `session_contract_violations_are_rejected` rejects `check_ok; verify_violated; verify_ok`; the three compound tests replace a real failing run's `finalize_fail` with `finalize_pass` and require nonconformance. |
-| Result and exit status cannot contradict | `session_mapping_rejects_result_exit_contradictions` rejects synthetic `violated`/exit 0 while accepting the real `violated`/exit 1 tuple; `mutate_failure_verdict_cannot_exit_zero` covers issue #554's exact baseline path. |
-| Required trace/location/evidence cannot disappear | `native_monitor_observations_replay_conformantly` requires `failed_at_event`, bounds-checks it against the input, and proves the later cart event was not folded after first rejection; missing evidence fails the mapping. |
-| Every legitimate success path remains reachable | `native_session_corpus_observations_replay_conformantly`, `native_monitor_observations_replay_conformantly`, and each compound test execute real passing paths; `fslc_fold.fsl::ReachLegitimateSuccessPath` witnesses fold-success then finalize-pass. |
+| Result and exit status cannot contradict | `session_mapping_rejects_result_exit_contradictions` rejects synthetic `violated`/exit 0 while accepting the real `violated`/exit 1 tuple; `mutate_failure_verdict_cannot_exit_zero` covers issue #554's exact baseline path. `fold_classifier_is_fail_closed` rejects wrong nonzero exits for sweep, chain, and analyze batch, while the compound tests require their real exact exits. |
+| Required trace/location/evidence cannot disappear | `session_mapping_rejects_result_exit_contradictions` accepts a real failure only with a nonempty counterexample trace, source line/column, and first violated step, then rejects synthetic omissions/corruption of each. The monitor mapping likewise requires `failed_at_event`, violation, and pre-failure state, rejects missing/noninteger/out-of-range evidence, and proves the later cart event was not folded after first rejection. |
+| Every legitimate success path remains reachable | `native_session_corpus_observations_replay_conformantly`, `native_monitor_observations_replay_conformantly`, and each compound test execute real passing paths, including the intentional empty analyze batch; `fslc_fold.fsl::ReachLegitimateSuccessPath` witnesses fold-success then finalize-pass. |
 | Empty/error/unknown input cannot generate `verified` | `semantics_error_input_never_maps_to_verified` drives `examples/self/no_actions.fsl` through real check and verify, requires `error`/`semantics`/exit 2, maps it to `verify_user_error`, and replays that path conformantly; the two inherited session traces reject success without the prerequisite check/verify. |
 
 The rejecting traces are the in-repository detection-power proof. The manual C5

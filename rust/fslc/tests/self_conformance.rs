@@ -33,6 +33,13 @@ struct RawCliOutput {
     exit_code: i32,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum CompoundCommand {
+    Sweep,
+    Chain,
+    AnalyzeBatch,
+}
+
 #[derive(Clone, Copy)]
 struct CorpusCase {
     id: &'static str,
@@ -215,7 +222,7 @@ fn scratch_dir(name: &str) -> PathBuf {
     directory
 }
 
-fn parse_cli_output(arguments: &[String], output: Output) -> RawCliOutput {
+fn parse_cli_output(arguments: &[String], output: &Output) -> RawCliOutput {
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
             "native fslc emitted invalid JSON: {error}; args={arguments:?}; stderr={}",
@@ -240,7 +247,7 @@ fn run_cli_at(cwd: &Path, arguments: &[String]) -> RawCliOutput {
         .current_dir(cwd)
         .output()
         .expect("run native fslc");
-    parse_cli_output(arguments, output)
+    parse_cli_output(arguments, &output)
 }
 
 fn run_cli(arguments: &[String]) -> RawCliOutput {
@@ -265,8 +272,8 @@ fn write_json_fixture(name: &str, value: &Value) -> PathBuf {
     path
 }
 
-fn observe(subcommand: &'static str, arguments: Vec<String>) -> CliObservation {
-    let observed = run_cli(&arguments);
+fn observe(subcommand: &'static str, arguments: &[String]) -> CliObservation {
+    let observed = run_cli(arguments);
     CliObservation {
         subcommand,
         output: observed.output,
@@ -304,6 +311,35 @@ fn mapped_session_action(
     Ok(action)
 }
 
+fn mapped_violated_session_action(observation: &CliObservation) -> Result<&'static str, String> {
+    let action = mapped_session_action(observation, "verify_violated", 1)?;
+    if observation
+        .output
+        .get("trace")
+        .and_then(Value::as_array)
+        .is_none_or(Vec::is_empty)
+    {
+        return Err(format!(
+            "violated result missing nonempty trace: {}",
+            observation.output
+        ));
+    }
+    if !observation.output["loc"]["line"].is_u64() || !observation.output["loc"]["column"].is_u64()
+    {
+        return Err(format!(
+            "violated result missing source location: {}",
+            observation.output
+        ));
+    }
+    if !observation.output["violated_at_step"].is_u64() {
+        return Err(format!(
+            "violated result missing first violated step: {}",
+            observation.output
+        ));
+    }
+    Ok(action)
+}
+
 /// Independent native port of
 /// `tests/test_self_conformance.py:314-395::cli_result_to_session_action`.
 ///
@@ -323,7 +359,7 @@ fn cli_result_to_session_action(observation: &CliObservation) -> Result<&'static
         },
         "verify" => match (result, kind) {
             ("verified", _) => mapped_session_action(observation, "verify_ok", 0),
-            ("violated", _) => mapped_session_action(observation, "verify_violated", 1),
+            ("violated", _) => mapped_violated_session_action(observation),
             ("reachable_failed", _) => {
                 mapped_session_action(observation, "verify_reachable_failed", 1)
             }
@@ -387,7 +423,7 @@ fn unmapped_session_tuple(observation: &CliObservation) -> String {
 
 fn run_model_pipeline(case: CorpusCase) -> Vec<CliObservation> {
     let mut observations = Vec::new();
-    observations.push(observe("check", strings(&["check", case.path])));
+    observations.push(observe("check", &strings(&["check", case.path])));
     if observations[0].output["result"] != "ok" {
         return observations;
     }
@@ -403,7 +439,7 @@ fn run_model_pipeline(case: CorpusCase) -> Vec<CliObservation> {
             .iter()
             .map(|argument| (*argument).to_owned()),
     );
-    observations.push(observe("verify", verify));
+    observations.push(observe("verify", &verify));
     if observations[1].output["result"] != "verified" || !case.run_induction {
         return observations;
     }
@@ -414,7 +450,7 @@ fn run_model_pipeline(case: CorpusCase) -> Vec<CliObservation> {
             .iter()
             .map(|argument| (*argument).to_owned()),
     );
-    observations.push(observe("induction", induction));
+    observations.push(observe("induction", &induction));
     observations
 }
 
@@ -434,7 +470,7 @@ fn cart_events(fixture: ReplayFixture) -> Vec<Value> {
 }
 
 fn run_subcommand_anchor(case: SubcommandAnchorCase) -> Vec<CliObservation> {
-    let check = observe("check", strings(&["check", case.check_path]));
+    let check = observe("check", &strings(&["check", case.check_path]));
     assert_eq!(
         check.output["result"], "ok",
         "{} prerequisite check failed: {}",
@@ -463,7 +499,7 @@ fn run_subcommand_anchor(case: SubcommandAnchorCase) -> Vec<CliObservation> {
         arguments.extend(case.argv.iter().map(|argument| (*argument).to_owned()));
         arguments
     };
-    observations.push(observe(case.subcommand, arguments));
+    observations.push(observe(case.subcommand, &arguments));
     observations
 }
 
@@ -565,20 +601,56 @@ fn session_mapping_rejects_result_exit_contradictions() {
         "unexpected error: {error}"
     );
 
-    let actual = observe(
+    let actual_arguments = strings(&[
         "verify",
-        strings(&[
-            "verify",
-            "examples/gallery/errors/violated_invariant_counter.fsl",
-            "--depth",
-            "2",
-        ]),
-    );
+        "examples/gallery/errors/violated_invariant_counter.fsl",
+        "--depth",
+        "2",
+    ]);
+    let actual = observe("verify", &actual_arguments);
     assert_eq!(actual.output["result"], "violated", "{}", actual.output);
+    assert!(
+        actual.output["trace"]
+            .as_array()
+            .is_some_and(|trace| !trace.is_empty()),
+        "failure lost its replayable trace: {}",
+        actual.output
+    );
+    assert!(
+        actual.output["loc"]["line"].is_u64() && actual.output["loc"]["column"].is_u64(),
+        "failure lost its source location: {}",
+        actual.output
+    );
+    assert!(
+        actual.output["violated_at_step"].is_u64(),
+        "failure lost its first-divergence evidence: {}",
+        actual.output
+    );
     assert_eq!(
         cli_result_to_session_action(&actual).expect("real failure tuple"),
         "verify_violated"
     );
+
+    for (field, replacement) in [
+        ("trace", Value::Array(Vec::new())),
+        ("loc", json!({"line":8,"column":"missing"})),
+        ("violated_at_step", Value::Null),
+    ] {
+        let mut missing = actual.output.clone();
+        missing
+            .as_object_mut()
+            .expect("CLI output object")
+            .insert(field.to_owned(), replacement);
+        let missing = CliObservation {
+            subcommand: "verify",
+            output: missing,
+            exit_code: 1,
+        };
+        assert!(
+            cli_result_to_session_action(&missing).is_err(),
+            "missing/corrupt {field} must fail closed"
+        );
+    }
 }
 
 #[test]
@@ -602,11 +674,14 @@ fn mutate_failure_verdict_cannot_exit_zero() {
 
 #[test]
 fn semantics_error_input_never_maps_to_verified() {
-    let check = observe("check", strings(&["check", "examples/self/no_actions.fsl"]));
+    let check = observe(
+        "check",
+        &strings(&["check", "examples/self/no_actions.fsl"]),
+    );
     assert_eq!(check.output["result"], "ok", "{}", check.output);
     let verification = observe(
         "verify",
-        strings(&["verify", "examples/self/no_actions.fsl", "--depth", "1"]),
+        &strings(&["verify", "examples/self/no_actions.fsl", "--depth", "1"]),
     );
     assert_eq!(
         verification.output["result"], "error",
@@ -665,6 +740,13 @@ fn replay_out_to_monitor_actions(
                     replay.exit_code, replay.output
                 ));
             }
+            if !replay.output["violation"].is_object() || !replay.output["state_before"].is_object()
+            {
+                return Err(format!(
+                    "nonconformant replay is missing violation/state evidence: {}",
+                    replay.output
+                ));
+            }
             let failed_at = replay
                 .output
                 .get("failed_at_event")
@@ -674,7 +756,13 @@ fn replay_out_to_monitor_actions(
                         "nonconformant replay has no failed_at_event: {}",
                         replay.output
                     )
-                })? as usize;
+                })?;
+            let failed_at = usize::try_from(failed_at).map_err(|_| {
+                format!(
+                    "failed_at_event does not fit usize: {}",
+                    replay.output["failed_at_event"]
+                )
+            })?;
             if failed_at >= events.len() {
                 return Err(format!(
                     "failed_at_event={failed_at} outside {} events: {}",
@@ -705,6 +793,12 @@ fn native_monitor_observations_replay_conformantly() {
             .unwrap_or_else(|error| panic!("{name}: {error}"));
         if name == "first_reject" {
             assert_eq!(observed.output["failed_at_event"], 1, "{}", observed.output);
+            assert!(
+                observed.output["violation"].is_object()
+                    && observed.output["state_before"].is_object(),
+                "replay failure lost its violation/state evidence: {}",
+                observed.output
+            );
             assert_eq!(
                 trace,
                 vec![json!({"action":"step_ok"}), json!({"action":"step_reject"})]
@@ -734,6 +828,39 @@ fn monitor_contract_violations_are_rejected() {
     for (name, trace) in negative_traces {
         assert_nonconformant(MONITOR_SPEC, &trace, name);
     }
+
+    let events = cart_events(ReplayFixture::Nonconformant);
+    for (name, output) in [
+        (
+            "missing_failed_at",
+            json!({"result":"nonconformant","violation":{},"state_before":{}}),
+        ),
+        (
+            "noninteger_failed_at",
+            json!({"result":"nonconformant","failed_at_event":"1","violation":{},"state_before":{}}),
+        ),
+        (
+            "out_of_range_failed_at",
+            json!({"result":"nonconformant","failed_at_event":events.len(),"violation":{},"state_before":{}}),
+        ),
+        (
+            "missing_violation",
+            json!({"result":"nonconformant","failed_at_event":1,"state_before":{}}),
+        ),
+        (
+            "missing_state",
+            json!({"result":"nonconformant","failed_at_event":1,"violation":{}}),
+        ),
+    ] {
+        let synthetic = RawCliOutput {
+            output,
+            exit_code: 1,
+        };
+        assert!(
+            replay_out_to_monitor_actions(&synthetic, &events).is_err(),
+            "{name} must fail closed"
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -747,6 +874,7 @@ enum FoldClass {
 /// transcribed from `rust/fslc/src/outcome.rs:82-216`; sibling-field semantics
 /// are documented at `docs/LANGUAGE.md:940-961`. This function deliberately
 /// does not call the production classifier.
+#[allow(clippy::too_many_lines)]
 fn fold_result_class(output: &Value) -> Result<FoldClass, String> {
     let result = output
         .get("result")
@@ -862,27 +990,41 @@ fn fold_action(output: &Value) -> Result<Value, String> {
     })
 }
 
-fn finalize_action(top: &RawCliOutput) -> Result<Value, String> {
-    match fold_result_class(&top.output)? {
-        FoldClass::Success if top.exit_code == 0 => Ok(json!({"action":"finalize_pass"})),
-        FoldClass::Failure if top.exit_code != 0 => Ok(json!({"action":"finalize_fail"})),
-        FoldClass::Skipped => Err(format!(
-            "compound top-level result cannot be skipped: {}",
-            top.output
-        )),
-        class => Err(format!(
-            "compound result/exit contradiction: class={class:?} exit={} output={}",
-            top.exit_code, top.output
-        )),
-    }
+/// Exact compound result/exit pairs follow `docs/LANGUAGE.md:940-961` and the
+/// command contracts at `main.rs:3533-3589,4000-4051,13309-13338`.
+fn finalize_action(command: CompoundCommand, top: &RawCliOutput) -> Result<Value, String> {
+    let result = top
+        .output
+        .get("result")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{command:?} result is not a string: {}", top.output))?;
+    let action = match (command, result, top.exit_code) {
+        (CompoundCommand::Sweep, "sweep_passed", 0)
+        | (CompoundCommand::Chain, "verified", 0)
+        | (CompoundCommand::AnalyzeBatch, "analyzed", 0) => "finalize_pass",
+        (CompoundCommand::Sweep, "sweep_failed", 1)
+        | (CompoundCommand::Chain, "violated", 1)
+        | (CompoundCommand::Chain | CompoundCommand::AnalyzeBatch, "error", 2) => "finalize_fail",
+        _ => {
+            return Err(format!(
+                "{command:?} result/exit contradiction: result={result:?} exit={} output={}",
+                top.exit_code, top.output
+            ));
+        }
+    };
+    Ok(json!({"action":action}))
 }
 
-fn fold_trace(items: &[Value], top: &RawCliOutput) -> Result<Vec<Value>, String> {
+fn fold_trace(
+    command: CompoundCommand,
+    items: &[Value],
+    top: &RawCliOutput,
+) -> Result<Vec<Value>, String> {
     let mut trace = items
         .iter()
         .map(fold_action)
         .collect::<Result<Vec<_>, _>>()?;
-    trace.push(finalize_action(top)?);
+    trace.push(finalize_action(command, top)?);
     Ok(trace)
 }
 
@@ -891,6 +1033,90 @@ fn rejected_finalize_pass(trace: &[Value]) -> Vec<Value> {
     let last = invalid.last_mut().expect("fold trace has finalize action");
     *last = json!({"action":"finalize_pass"});
     invalid
+}
+
+#[test]
+fn fold_spec_has_native_proof_vacuity_and_mutation_evidence() {
+    let check = run_cli(&strings(&["check", FOLD_SPEC]));
+    assert_eq!(
+        (check.output["result"].as_str(), check.exit_code),
+        (Some("ok"), 0)
+    );
+
+    let bounded = run_cli(&strings(&["verify", FOLD_SPEC, "--depth", "8"]));
+    assert_eq!(
+        (bounded.output["result"].as_str(), bounded.exit_code),
+        (Some("verified"), 0)
+    );
+
+    let induction = run_cli(&strings(&[
+        "verify",
+        FOLD_SPEC,
+        "--depth",
+        "8",
+        "--engine",
+        "induction",
+    ]));
+    assert_eq!(
+        (induction.output["result"].as_str(), induction.exit_code),
+        (Some("proved"), 0)
+    );
+
+    let vacuity = run_cli(&strings(&[
+        "verify",
+        FOLD_SPEC,
+        "--depth",
+        "8",
+        "--vacuity",
+        "error",
+    ]));
+    assert_eq!(
+        (vacuity.output["result"].as_str(), vacuity.exit_code),
+        (Some("verified"), 0)
+    );
+    assert!(
+        vacuity
+            .output
+            .get("warnings")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty),
+        "fold spec has vacuity warnings: {}",
+        vacuity.output
+    );
+
+    let mutation = run_cli(&strings(&["mutate", FOLD_SPEC, "--depth", "8"]));
+    assert_eq!(
+        (mutation.output["result"].as_str(), mutation.exit_code),
+        (Some("mutated"), 0)
+    );
+    assert_eq!(
+        mutation.output["summary"]["invalid"], 0,
+        "{}",
+        mutation.output
+    );
+    assert!(
+        mutation.output["summary"]["kill_rate"]
+            .as_f64()
+            .is_some_and(|rate| rate >= 0.65),
+        "fold mutation kill rate is too weak: {}",
+        mutation.output
+    );
+    for operator in ["requires_remove", "requires_negate"] {
+        assert!(
+            mutation.output["mutants"]
+                .as_array()
+                .expect("mutation rows")
+                .iter()
+                .any(|mutant| {
+                    mutant["op"] == operator
+                        && mutant["target"] == "finalize_pass requires #2"
+                        && mutant["status"] == "killed"
+                        && mutant["killed_by"] == "FailureIsSticky"
+                }),
+            "{operator} of the failure-sticky finalize guard survived: {}",
+            mutation.output
+        );
+    }
 }
 
 #[test]
@@ -908,6 +1134,21 @@ fn fold_classifier_is_fail_closed() {
             .expect_err("unknown result must fail closed")
             .contains("unmapped fold result")
     );
+
+    for (command, result, wrong_exit) in [
+        (CompoundCommand::Sweep, "sweep_failed", 2),
+        (CompoundCommand::Chain, "violated", 3),
+        (CompoundCommand::AnalyzeBatch, "error", 1),
+    ] {
+        let contradictory = RawCliOutput {
+            output: json!({"result":result}),
+            exit_code: wrong_exit,
+        };
+        assert!(
+            finalize_action(command, &contradictory).is_err(),
+            "{command:?} {result}/exit-{wrong_exit} must fail closed"
+        );
+    }
 }
 
 #[test]
@@ -924,7 +1165,8 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         .iter()
         .map(|entry| entry["summary"].clone())
         .collect::<Vec<_>>();
-    let passed_trace = fold_trace(&passed_items, &passed).expect("map clean sweep");
+    let passed_trace =
+        fold_trace(CompoundCommand::Sweep, &passed_items, &passed).expect("map clean sweep");
     assert_conformant(FOLD_SPEC, &passed_trace, "clean sweep fold");
 
     let failed = run_cli(&strings(&[
@@ -947,7 +1189,8 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         "failed sweep must expose a failure item: {}",
         failed.output
     );
-    let failed_trace = fold_trace(&failed_items, &failed).expect("map failed sweep");
+    let failed_trace =
+        fold_trace(CompoundCommand::Sweep, &failed_items, &failed).expect("map failed sweep");
     assert_conformant(FOLD_SPEC, &failed_trace, "failed sweep fold");
     assert_nonconformant(
         FOLD_SPEC,
@@ -956,40 +1199,227 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
     );
 }
 
-fn copy_chain_fixture(name: &str, destination: &Path) {
-    fs::copy(
-        root().join("tests/fixtures/chain").join(name),
-        destination.join(name),
-    )
-    .unwrap_or_else(|error| panic!("copy chain fixture {name}: {error}"));
+const CHAIN_PYTHON_COMMAND: &str = "command = \"python -c \\\"print('impl ok')\\\"\"";
+
+fn portable_chain_command(arguments: &str) -> String {
+    let binary = env!("CARGO_BIN_EXE_fslc").replace('\\', "\\\\");
+    format!("command = \"{binary} {arguments}\"")
+}
+
+fn copy_chain_fixtures(destination: &Path) {
+    let fixture_directory = root().join("tests/fixtures/chain");
+    for entry in fs::read_dir(&fixture_directory).expect("read chain fixture directory") {
+        let entry = entry.expect("chain fixture entry");
+        let source = entry.path();
+        if !source.is_file() {
+            continue;
+        }
+        let target = destination.join(source.file_name().expect("chain fixture name"));
+        if source
+            .extension()
+            .is_some_and(|extension| extension == "toml")
+        {
+            let manifest = fs::read_to_string(&source)
+                .unwrap_or_else(|error| panic!("read {}: {error}", source.display()))
+                .replace("\r\n", "\n");
+            assert!(
+                manifest.contains(CHAIN_PYTHON_COMMAND),
+                "{} has an unexpected impl command",
+                source.display()
+            );
+            fs::write(
+                target,
+                manifest.replace(
+                    CHAIN_PYTHON_COMMAND,
+                    &portable_chain_command("check business.fsl"),
+                ),
+            )
+            .expect("write portable chain manifest");
+        } else {
+            fs::copy(&source, target)
+                .unwrap_or_else(|error| panic!("copy {}: {error}", source.display()));
+        }
+    }
+}
+
+/// Independent adapter for `main.rs:3638-3657::chain_layer_passes` and the
+/// layer envelopes produced at `main.rs:3812-3968`. It deliberately does not
+/// call that function or the production outcome classifier.
+fn chain_layer_fold_class(layer: &Value) -> Result<FoldClass, String> {
+    let status = layer
+        .get("status")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("chain layer missing status: {layer}"))?;
+    let result = layer
+        .get("result")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("chain layer missing result: {layer}"))?;
+    let exit_code = layer
+        .get("exit_code")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| format!("chain layer missing integer exit_code: {layer}"))?;
+    let kind = layer
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("chain layer missing string kind: {layer}"))?;
+
+    if status == "skipped" {
+        return if result == "skipped"
+            && exit_code == 0
+            && matches!(kind, "spec" | "refine" | "impl")
+        {
+            Ok(FoldClass::Skipped)
+        } else {
+            Err(format!("contradictory skipped chain layer: {layer}"))
+        };
+    }
+
+    let detail = layer
+        .get("detail")
+        .ok_or_else(|| format!("non-skipped chain layer missing detail: {layer}"))?;
+    if kind == "command" {
+        let return_code = detail
+            .get("returncode")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| format!("command layer missing returncode: {layer}"))?;
+        return match (status, result, exit_code, detail["result"].as_str()) {
+            ("passed", "passed", 0, Some("passed")) if return_code == 0 => Ok(FoldClass::Success),
+            ("failed", "failed", 1, Some("failed")) if return_code != 0 => Ok(FoldClass::Failure),
+            _ => Err(format!("contradictory command chain layer: {layer}")),
+        };
+    }
+    if !matches!(kind, "verify" | "check" | "refine") {
+        return Err(format!(
+            "unmapped non-command chain layer kind {kind:?}: {layer}"
+        ));
+    }
+
+    if layer.get("result") != detail.get("result") {
+        return Err(format!("chain layer/detail results disagree: {layer}"));
+    }
+    let detail_class = fold_result_class(detail)?;
+    let implements_failed = match detail.get("implements") {
+        None => false,
+        Some(Value::Object(implements)) => match implements.get("result").and_then(Value::as_str) {
+            Some("refines") => false,
+            Some("refinement_failed" | "impl_violated") => true,
+            _ => {
+                return Err(format!(
+                    "unmapped implements result in chain layer: {layer}"
+                ));
+            }
+        },
+        Some(_) => return Err(format!("chain layer implements is not an object: {layer}")),
+    };
+    let expected_exit = if implements_failed {
+        1
+    } else {
+        match detail_class {
+            FoldClass::Success => 0,
+            FoldClass::Failure if result == "error" && detail["kind"] == "internal" => 3,
+            FoldClass::Failure if result == "error" => 2,
+            FoldClass::Failure => 1,
+            FoldClass::Skipped => {
+                return Err(format!("non-skipped layer has skipped detail: {layer}"));
+            }
+        }
+    };
+    let expected_status =
+        if detail_class == FoldClass::Success && !implements_failed && expected_exit == 0 {
+            "passed"
+        } else {
+            "failed"
+        };
+    if status != expected_status || exit_code != expected_exit {
+        return Err(format!(
+            "chain layer status/exit contradiction: expected {expected_status}/exit-{expected_exit}: {layer}"
+        ));
+    }
+    Ok(if expected_status == "passed" {
+        FoldClass::Success
+    } else {
+        FoldClass::Failure
+    })
+}
+
+fn chain_fold_trace(items: &[Value], top: &RawCliOutput) -> Result<Vec<Value>, String> {
+    let mut trace = items
+        .iter()
+        .map(|item| {
+            Ok(match chain_layer_fold_class(item)? {
+                FoldClass::Success => json!({"action":"fold_sub_success"}),
+                FoldClass::Failure => json!({"action":"fold_sub_failure"}),
+                FoldClass::Skipped => json!({"action":"fold_skipped"}),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    trace.push(finalize_action(CompoundCommand::Chain, top)?);
+    Ok(trace)
+}
+
+#[test]
+fn chain_layer_adapter_is_fail_closed() {
+    let valid = json!({
+        "layer":"requirements",
+        "kind":"check",
+        "status":"passed",
+        "result":"ok",
+        "exit_code":0,
+        "detail":{"result":"ok"}
+    });
+    assert_eq!(
+        chain_layer_fold_class(&valid).expect("valid chain layer"),
+        FoldClass::Success
+    );
+
+    for implements in [
+        json!("not-an-object"),
+        json!({}),
+        json!({"result":7}),
+        json!({"result":"maybe"}),
+    ] {
+        let mut malformed = valid.clone();
+        malformed["detail"]["implements"] = implements;
+        assert!(
+            chain_layer_fold_class(&malformed).is_err(),
+            "malformed/unknown implements must fail closed: {malformed}"
+        );
+    }
+
+    let mut missing_kind = valid;
+    missing_kind
+        .as_object_mut()
+        .expect("chain layer object")
+        .remove("kind");
+    assert!(
+        chain_layer_fold_class(&missing_kind).is_err(),
+        "missing layer kind must fail closed"
+    );
 }
 
 #[test]
 fn chain_layer_verdicts_conform_to_the_fold_model() {
     let directory = scratch_dir("chain");
-    copy_chain_fixture("business.fsl", &directory);
-    copy_chain_fixture("business_broken.fsl", &directory);
-    copy_chain_fixture("requirements.fsl", &directory);
-    fs::write(
-        directory.join("clean.toml"),
-        "[business]\nfile = \"business.fsl\"\ndepth = 1\n\n[requirements]\nfile = \"requirements.fsl\"\n",
-    )
-    .expect("write clean chain manifest");
-    fs::write(
-        directory.join("failed.toml"),
-        "[business]\nfile = \"business_broken.fsl\"\ndepth = 1\n\n[requirements]\nfile = \"requirements.fsl\"\n",
-    )
-    .expect("write failed chain manifest");
+    copy_chain_fixtures(&directory);
 
-    let passed = run_cli_at(&directory, &strings(&["chain", "clean.toml"]));
+    let passed = run_cli_at(&directory, &strings(&["chain", "fsl-project.toml"]));
     let passed_items = passed.output["layers"]
         .as_array()
         .expect("clean chain layers")
         .clone();
-    let passed_trace = fold_trace(&passed_items, &passed).expect("map clean chain");
+    assert!(
+        passed_items.iter().any(|item| item["kind"] == "command"
+            && chain_layer_fold_class(item) == Ok(FoldClass::Success)),
+        "clean chain must execute its implementation command: {}",
+        passed.output
+    );
+    let passed_trace = chain_fold_trace(&passed_items, &passed).expect("map clean chain");
     assert_conformant(FOLD_SPEC, &passed_trace, "clean chain fold");
 
-    let failed = run_cli_at(&directory, &strings(&["chain", "failed.toml"]));
+    let failed = run_cli_at(
+        &directory,
+        &strings(&["chain", "fsl-project-broken-implements.toml"]),
+    );
     assert_eq!(failed.output["result"], "violated", "{}", failed.output);
     let failed_items = failed.output["layers"]
         .as_array()
@@ -998,28 +1428,79 @@ fn chain_layer_verdicts_conform_to_the_fold_model() {
     assert!(
         failed_items
             .iter()
-            .any(|item| fold_result_class(item) == Ok(FoldClass::Failure)),
-        "failed chain must expose a failure layer: {}",
+            .any(
+                |item| item["detail"]["implements"]["result"] == "refinement_failed"
+                    && chain_layer_fold_class(item) == Ok(FoldClass::Failure)
+            ),
+        "failed chain must expose the nested implements failure: {}",
         failed.output
     );
     assert!(
         failed_items
             .iter()
-            .any(|item| fold_result_class(item) == Ok(FoldClass::Skipped)),
+            .any(|item| chain_layer_fold_class(item) == Ok(FoldClass::Skipped)),
         "stop-on-failure chain must expose a skipped layer: {}",
         failed.output
     );
-    let failed_trace = fold_trace(&failed_items, &failed).expect("map failed chain");
+    let failed_trace = chain_fold_trace(&failed_items, &failed).expect("map failed chain");
     assert_conformant(FOLD_SPEC, &failed_trace, "failed chain fold");
     assert_nonconformant(
         FOLD_SPEC,
         &rejected_finalize_pass(&failed_trace),
         "failed chain cannot finalize pass",
     );
+
+    let manifest_path = directory.join("fsl-project-command-fails.toml");
+    let manifest = fs::read_to_string(directory.join("fsl-project.toml"))
+        .expect("read portable clean manifest")
+        .replace(
+            &portable_chain_command("check business.fsl"),
+            &portable_chain_command("check missing.fsl"),
+        );
+    fs::write(&manifest_path, manifest).expect("write failing command manifest");
+    let command_failed = run_cli_at(
+        &directory,
+        &strings(&["chain", "fsl-project-command-fails.toml"]),
+    );
+    let command_failed_items = command_failed.output["layers"]
+        .as_array()
+        .expect("command-failed chain layers")
+        .clone();
+    assert!(
+        command_failed_items
+            .iter()
+            .any(|item| item["kind"] == "command"
+                && chain_layer_fold_class(item) == Ok(FoldClass::Failure)),
+        "failing implementation command must fold as failure: {}",
+        command_failed.output
+    );
+    let command_failed_trace =
+        chain_fold_trace(&command_failed_items, &command_failed).expect("map command-failed chain");
+    assert_conformant(
+        FOLD_SPEC,
+        &command_failed_trace,
+        "command-failed chain fold",
+    );
 }
 
 #[test]
 fn analyze_batch_items_conform_to_the_fold_model() {
+    let empty_directory = scratch_dir("analyze-empty");
+    let empty = run_cli(&[
+        "analyze".to_owned(),
+        empty_directory.to_string_lossy().into_owned(),
+    ]);
+    assert_eq!(empty.output["result"], "analyzed", "{}", empty.output);
+    assert_eq!(empty.exit_code, 0, "{}", empty.output);
+    let empty_items = empty.output["files"]
+        .as_array()
+        .expect("empty analyze files");
+    assert!(empty_items.is_empty(), "{}", empty.output);
+    let empty_trace = fold_trace(CompoundCommand::AnalyzeBatch, empty_items, &empty)
+        .expect("map empty analyze batch");
+    assert_eq!(empty_trace, vec![json!({"action":"finalize_pass"})]);
+    assert_conformant(FOLD_SPEC, &empty_trace, "empty analyze batch fold");
+
     let directory = scratch_dir("analyze-batch");
     fs::write(
         directory.join("valid-a.fsl"),
@@ -1032,7 +1513,7 @@ fn analyze_batch_items_conform_to_the_fold_model() {
     )
     .expect("write second valid analysis fixture");
 
-    let passed = run_cli(&vec![
+    let passed = run_cli(&[
         "analyze".to_owned(),
         directory.join("valid-a.fsl").to_string_lossy().into_owned(),
         directory.join("valid-b.fsl").to_string_lossy().into_owned(),
@@ -1042,7 +1523,8 @@ fn analyze_batch_items_conform_to_the_fold_model() {
         .as_array()
         .expect("clean analyze files")
         .clone();
-    let passed_trace = fold_trace(&passed_items, &passed).expect("map clean analyze batch");
+    let passed_trace = fold_trace(CompoundCommand::AnalyzeBatch, &passed_items, &passed)
+        .expect("map clean analyze batch");
     assert_conformant(FOLD_SPEC, &passed_trace, "clean analyze batch fold");
 
     fs::write(
@@ -1050,7 +1532,7 @@ fn analyze_batch_items_conform_to_the_fold_model() {
         "spec Invalid { state { x: } }\n",
     )
     .expect("write invalid analysis fixture");
-    let failed = run_cli(&vec![
+    let failed = run_cli(&[
         "analyze".to_owned(),
         directory.join("valid-a.fsl").to_string_lossy().into_owned(),
         directory.join("invalid.fsl").to_string_lossy().into_owned(),
@@ -1074,7 +1556,8 @@ fn analyze_batch_items_conform_to_the_fold_model() {
         "failed analyze batch must preserve its successful item: {}",
         failed.output
     );
-    let failed_trace = fold_trace(&failed_items, &failed).expect("map failed analyze batch");
+    let failed_trace = fold_trace(CompoundCommand::AnalyzeBatch, &failed_items, &failed)
+        .expect("map failed analyze batch");
     assert_conformant(FOLD_SPEC, &failed_trace, "failed analyze batch fold");
     assert_nonconformant(
         FOLD_SPEC,

@@ -3,7 +3,7 @@
 // Self-spec: compound CLI verdict folding.
 //
 // Models the aggregation shared by rust/fslc/src/main.rs run_sweep,
-// chain_layer_passes, and semantic_diff_batch's gate: per-item success may
+// chain_layer_passes, and run_analyze_batch: per-item success may
 // accumulate, skipped items are neutral, and one observed failure permanently
 // disables a successful final verdict.
 //
