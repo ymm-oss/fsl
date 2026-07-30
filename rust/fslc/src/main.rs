@@ -6108,6 +6108,11 @@ fn stable_kernel_projection(kernel: Value) -> Value {
             "blame",
             "last_action",
             "trace",
+            // Issue #641. Vacuity/coverage diagnostics are quality signals on
+            // the generated kernel itself: an unreachable generated action can
+            // signal a lowering bug, so these channels fold with the verdict.
+            "warnings",
+            "action_coverage",
         ]
         .into_iter()
         .filter_map(|key| {

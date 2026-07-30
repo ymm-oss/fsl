@@ -5,6 +5,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- `fslc domain check` now preserves the nested kernel's `warnings` and
+  `action_coverage`, so vacuity and generated-action coverage diagnostics remain
+  visible to domain users instead of being dropped by the stable projection
+  (#641).
+
 ## [4.1.0] - 2026-07-30
 
 - Semantic Assurance Matrix slices 2/3 add source-derived `expr` (24
