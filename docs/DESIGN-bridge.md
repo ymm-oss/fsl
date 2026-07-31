@@ -100,8 +100,10 @@ Concrete execution requires a deterministic initial state. Static check at
   engine's own construction check (`explicit::check_deterministic_init`, which
   `Monitor::new` now reuses) — every caller that asks `Monitor::new` to compute
   the concrete initial state from `init` gets it, including `replay`'s witness
-  reconstruction and BMC's concrete pre-scan (`find_boundary_violation`).
-  A caller that already has its own complete concrete initial state — an
+  reconstruction and concrete boundary/conformance tooling.
+  Symbolic BMC performs its action-context partial-operation check within
+  `verify_bounded*` and does not construct a Monitor first (#651). A caller
+  that already has its own complete concrete initial state — an
   observed replay trace's own step 0, an explicit `--from-state`/
   `--initial-state` snapshot, or a BMC witness's first state — is not asking
   `init` to compute anything, so it builds through `Monitor::from_state`

@@ -5,6 +5,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed raw `fsl_verifier::verify_bounded*` calls bypassing the automatic
+  action-context partial-operation check. Symbolic BMC now reports replayable
+  `partial_op` evidence for ordered guards, reached action bodies, and
+  `ensures`, including selected-property, supplied-state, and nondeterministic
+  init paths; native CLI and Worker no longer source `partial_op` from their
+  separate concrete boundary pre-scan (#651).
 - Fixed `domain` saga lowering so effect-owned outcome events cannot bypass the
   effect correlation guard through weaker generated observation actions. Three
   observation actions disappear from generated kernels (#640).

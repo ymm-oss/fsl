@@ -159,7 +159,7 @@ pub fn eval(
                     .cloned()
                     .ok_or_else(|| runtime_error("map index outside finite key domain")),
                 Value::Seq(values) => values
-                    .get(as_usize(index)?)
+                    .get(as_usize(index, "sequence index out of range")?)
                     .cloned()
                     .ok_or_else(|| runtime_error("sequence index out of range")),
                 _ => Err(runtime_error("indexing requires a map or sequence")),
@@ -429,7 +429,7 @@ fn eval_method(
                 .cloned()
                 .ok_or_else(|| runtime_error("head() on empty sequence")),
             ("at", [index]) => sequence
-                .get(as_usize(index.clone())?)
+                .get(as_usize(index.clone(), "at() index out of range")?)
                 .cloned()
                 .ok_or_else(|| runtime_error("at() index out of range")),
             ("size", []) => Ok(Value::Int(i64_len(sequence.len())?)),
@@ -718,8 +718,8 @@ fn as_int(value: Value) -> Result<i64, RuntimeError> {
     }
 }
 
-fn as_usize(value: Value) -> Result<usize, RuntimeError> {
-    usize::try_from(as_int(value)?).map_err(|_| runtime_error("index must be non-negative"))
+fn as_usize(value: Value, message: &str) -> Result<usize, RuntimeError> {
+    usize::try_from(as_int(value)?).map_err(|_| runtime_error(message))
 }
 
 fn i64_len(value: usize) -> Result<i64, RuntimeError> {
@@ -2354,18 +2354,41 @@ fn replay_trace_with_initial(
             .action
             .as_ref()
             .ok_or_else(|| runtime_error(format!("trace step {expected_step} has no action")))?;
-        let enabled = monitor.enabled()?;
-        let instance = enabled
-            .iter()
-            .find(|instance| instance.action == action.name && instance.params == action.params)
-            .ok_or_else(|| {
-                runtime_error(format!(
-                    "trace action '{}' is not enabled at step {expected_step}",
-                    action.name
-                ))
-            })?;
         let before = monitor.state.clone();
-        let stepped = monitor.step(instance)?;
+        let stepped = match monitor.enabled() {
+            Ok(enabled) => {
+                let instance = enabled
+                    .iter()
+                    .find(|instance| {
+                        instance.action == action.name && instance.params == action.params
+                    })
+                    .ok_or_else(|| {
+                        runtime_error(format!(
+                            "trace action '{}' is not enabled at step {expected_step}",
+                            action.name
+                        ))
+                    })?;
+                monitor.step(instance)?
+            }
+            Err(error)
+                if expected_step + 1 == trace.len()
+                    && is_partial_operation_error(&error.message) =>
+            {
+                let attempted = monitor.attempt(&action.name, &action.params)?;
+                if attempted
+                    .violation
+                    .as_ref()
+                    .is_none_or(|violation| violation.kind != "partial_op")
+                {
+                    return Err(runtime_error(format!(
+                        "trace action '{}' does not reproduce a partial operation at step {expected_step}",
+                        action.name
+                    )));
+                }
+                attempted
+            }
+            Err(error) => return Err(error),
+        };
         let observed_state = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
         if observed_state != &entry.state {
             return Err(runtime_error(format!(
@@ -3027,7 +3050,7 @@ fn assign(
                     values.insert(index, value);
                 }
                 Value::Seq(values) => {
-                    let index = as_usize(index)?;
+                    let index = as_usize(index, "sequence index out of range")?;
                     let slot = values
                         .get_mut(index)
                         .ok_or_else(|| runtime_error("sequence assignment index out of range"))?;

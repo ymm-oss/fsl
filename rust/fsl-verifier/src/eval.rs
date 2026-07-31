@@ -391,7 +391,6 @@ fn relation_reachability_table<S: SmtSolver>(
 /// without a partial operation, checked integer overflow, or invalid finite
 /// lookup. Unlike [`eval`], this preserves native short-circuit and conditional
 /// evaluation paths.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(crate) fn definedness<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
@@ -400,13 +399,160 @@ pub(crate) fn definedness<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<S::Term, VerifyError> {
+    Ok(evaluation_status(solver, model, expr, state, bindings, old_state)?.fully_defined)
+}
+
+#[derive(Clone)]
+pub(crate) struct EvaluationStatus<T> {
+    pub fully_defined: T,
+    pub first_partial: T,
+    pub has_partial_operation: bool,
+}
+
+pub(crate) fn expression_has_partial_operation_candidate(expr: &Expr) -> bool {
+    match expr {
+        Expr::Index(_, _) => true,
+        Expr::Method {
+            receiver,
+            name,
+            args,
+        } => {
+            matches!(name.as_str(), "head" | "pop" | "at")
+                || expression_has_partial_operation_candidate(receiver)
+                || args.iter().any(expression_has_partial_operation_candidate)
+        }
+        Expr::Binary { op, left, right } => {
+            matches!(op.as_str(), "/" | "%")
+                || expression_has_partial_operation_candidate(left)
+                || expression_has_partial_operation_candidate(right)
+        }
+        Expr::Some(inner)
+        | Expr::Neg(inner)
+        | Expr::Not(inner)
+        | Expr::Field(inner, _)
+        | Expr::Stage { entity: inner, .. }
+        | Expr::UnaryNamed { expr: inner, .. }
+        | Expr::Is { expr: inner, .. } => expression_has_partial_operation_candidate(inner),
+        Expr::Set(items) | Expr::Seq(items) | Expr::Call { args: items, .. } => {
+            items.iter().any(expression_has_partial_operation_candidate)
+        }
+        Expr::Struct { fields, .. } => fields
+            .iter()
+            .any(|(_, value)| expression_has_partial_operation_candidate(value)),
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expression_has_partial_operation_candidate(condition)
+                || expression_has_partial_operation_candidate(then_expr)
+                || expression_has_partial_operation_candidate(else_expr)
+        }
+        Expr::Quantified { binder, body, .. } => {
+            binder_has_partial_operation_candidate(binder)
+                || expression_has_partial_operation_candidate(body)
+        }
+        Expr::Aggregate { binder, value, .. } => {
+            binder_has_partial_operation_candidate(binder)
+                || value
+                    .as_deref()
+                    .is_some_and(expression_has_partial_operation_candidate)
+        }
+        Expr::BinaryNamed { left, right, .. } => {
+            expression_has_partial_operation_candidate(left)
+                || expression_has_partial_operation_candidate(right)
+        }
+        Expr::TernaryNamed {
+            first,
+            second,
+            third,
+            ..
+        } => {
+            expression_has_partial_operation_candidate(first)
+                || expression_has_partial_operation_candidate(second)
+                || expression_has_partial_operation_candidate(third)
+        }
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => false,
+    }
+}
+
+pub(crate) fn binder_has_partial_operation_candidate(binder: &Binder) -> bool {
+    match binder {
+        Binder::Typed { where_expr, .. } => where_expr
+            .as_deref()
+            .is_some_and(expression_has_partial_operation_candidate),
+        Binder::Range {
+            lo, hi, where_expr, ..
+        } => {
+            expression_has_partial_operation_candidate(lo)
+                || expression_has_partial_operation_candidate(hi)
+                || where_expr
+                    .as_deref()
+                    .is_some_and(expression_has_partial_operation_candidate)
+        }
+        Binder::Collection {
+            collection,
+            where_expr,
+            ..
+        } => {
+            expression_has_partial_operation_candidate(collection)
+                || where_expr
+                    .as_deref()
+                    .is_some_and(expression_has_partial_operation_candidate)
+        }
+    }
+}
+
+fn safe_status<S: SmtSolver>(solver: &S) -> EvaluationStatus<S::Term> {
+    EvaluationStatus {
+        fully_defined: solver.bool_value(true),
+        first_partial: solver.bool_value(false),
+        has_partial_operation: false,
+    }
+}
+
+pub(crate) fn sequence_statuses<S: SmtSolver>(
+    solver: &S,
+    statuses: impl IntoIterator<Item = EvaluationStatus<S::Term>>,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    let mut fully_defined = solver.bool_value(true);
+    let mut first_partial = solver.bool_value(false);
+    let mut has_partial_operation = false;
+    for status in statuses {
+        has_partial_operation |= status.has_partial_operation;
+        first_partial = solver.or(&[
+            first_partial,
+            solver.and(&[fully_defined.clone(), status.first_partial])?,
+        ])?;
+        fully_defined = solver.and(&[fully_defined, status.fully_defined])?;
+    }
+    Ok(EvaluationStatus {
+        fully_defined,
+        first_partial,
+        has_partial_operation,
+    })
+}
+
+/// Build the path-sensitive conditions that concrete evaluation completes and
+/// that its first reached failure is one of LANGUAGE.md §6's six classified
+/// partial operations.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub(crate) fn evaluation_status<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     match expr {
         Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {
-            Ok(solver.bool_value(true))
+            Ok(safe_status(solver))
         }
         Expr::UnaryNamed {
             name, expr: inner, ..
-        } if name == "old" => definedness(
+        } if name == "old" => evaluation_status(
             solver,
             model,
             inner,
@@ -416,23 +562,39 @@ pub(crate) fn definedness<S: SmtSolver>(
         ),
         Expr::Neg(inner) => {
             let mut local = bindings.clone();
-            let inner_defined = definedness(solver, model, inner, state, &local, old_state)?;
+            let inner_status = evaluation_status(solver, model, inner, state, &local, old_state)?;
             let inner = eval(solver, model, inner, state, &mut local, old_state)?;
-            Ok(solver.and(&[
-                inner_defined,
-                solver.not(&solver.equal(int_term(&inner)?, &solver.int_value(i64::MIN))?)?,
-            ])?)
+            sequence_statuses(
+                solver,
+                [
+                    inner_status,
+                    EvaluationStatus {
+                        fully_defined: solver
+                            .not(&solver.equal(int_term(&inner)?, &solver.int_value(i64::MIN))?)?,
+                        first_partial: solver.bool_value(false),
+                        has_partial_operation: false,
+                    },
+                ],
+            )
         }
         Expr::UnaryNamed {
             name, expr: inner, ..
         } if name == "abs" => {
             let mut local = bindings.clone();
-            let inner_defined = definedness(solver, model, inner, state, &local, old_state)?;
+            let inner_status = evaluation_status(solver, model, inner, state, &local, old_state)?;
             let inner = eval(solver, model, inner, state, &mut local, old_state)?;
-            Ok(solver.and(&[
-                inner_defined,
-                solver.not(&solver.equal(int_term(&inner)?, &solver.int_value(i64::MIN))?)?,
-            ])?)
+            sequence_statuses(
+                solver,
+                [
+                    inner_status,
+                    EvaluationStatus {
+                        fully_defined: solver
+                            .not(&solver.equal(int_term(&inner)?, &solver.int_value(i64::MIN))?)?,
+                        first_partial: solver.bool_value(false),
+                        has_partial_operation: false,
+                    },
+                ],
+            )
         }
         Expr::Some(inner)
         | Expr::Not(inner)
@@ -440,10 +602,10 @@ pub(crate) fn definedness<S: SmtSolver>(
         | Expr::Is { expr: inner, .. }
         | Expr::Stage { entity: inner, .. }
         | Expr::UnaryNamed { expr: inner, .. } => {
-            definedness(solver, model, inner, state, bindings, old_state)
+            evaluation_status(solver, model, inner, state, bindings, old_state)
         }
         Expr::Set(items) | Expr::Seq(items) | Expr::Call { args: items, .. } => {
-            ordered_definedness(solver, model, items, state, bindings, old_state)
+            ordered_evaluation_status(solver, model, items, state, bindings, old_state)
         }
         Expr::Struct { name, fields } => {
             let TypeDef::Struct {
@@ -473,16 +635,29 @@ pub(crate) fn definedness<S: SmtSolver>(
                     "struct '{name}' has the wrong number of fields"
                 )));
             }
-            ordered_definedness_refs(solver, model, &items, state, bindings, old_state)
+            ordered_evaluation_status_refs(solver, model, &items, state, bindings, old_state)
         }
         Expr::Index(base, index) => {
             let mut local = bindings.clone();
-            let base_defined = definedness(solver, model, base, state, &local, old_state)?;
+            let base_status = evaluation_status(solver, model, base, state, &local, old_state)?;
             let base_value = eval(solver, model, base, state, &mut local, old_state)?;
-            let index_defined = definedness(solver, model, index, state, &local, old_state)?;
+            let index_status = evaluation_status(solver, model, index, state, &local, old_state)?;
             let index_value = eval(solver, model, index, state, &mut local, old_state)?;
-            let accessible = index_accessible(solver, model, &base_value, &index_value)?;
-            Ok(solver.and(&[base_defined, index_defined, accessible])?)
+            let fully_accessible = index_accessible(solver, model, &base_value, &index_value)?;
+            let partial_accessible =
+                partial_operation_index_accessible(solver, &base_value, &index_value)?;
+            sequence_statuses(
+                solver,
+                [
+                    base_status,
+                    index_status,
+                    EvaluationStatus {
+                        fully_defined: fully_accessible,
+                        first_partial: solver.not(&partial_accessible)?,
+                        has_partial_operation: matches!(base_value, SymbolicValue::Seq { .. }),
+                    },
+                ],
+            )
         }
         Expr::Method {
             receiver,
@@ -490,42 +665,68 @@ pub(crate) fn definedness<S: SmtSolver>(
             args,
         } => {
             let mut local = bindings.clone();
-            let receiver_defined = definedness(solver, model, receiver, state, &local, old_state)?;
+            let receiver_status =
+                evaluation_status(solver, model, receiver, state, &local, old_state)?;
             let receiver_value = eval(solver, model, receiver, state, &mut local, old_state)?;
-            let arguments_defined =
-                ordered_definedness(solver, model, args, state, &local, old_state)?;
+            let arguments_status =
+                ordered_evaluation_status(solver, model, args, state, &local, old_state)?;
             let argument_values = args
                 .iter()
                 .map(|argument| eval(solver, model, argument, state, &mut local, old_state))
                 .collect::<Result<Vec<_>, _>>()?;
             let operation_defined =
                 method_definedness(solver, name, &receiver_value, argument_values.as_slice())?;
-            Ok(solver.and(&[receiver_defined, arguments_defined, operation_defined])?)
+            sequence_statuses(
+                solver,
+                [
+                    receiver_status,
+                    arguments_status,
+                    EvaluationStatus {
+                        fully_defined: operation_defined.clone(),
+                        first_partial: solver.not(&operation_defined)?,
+                        has_partial_operation: matches!(
+                            (&receiver_value, name.as_str(), argument_values.as_slice()),
+                            (SymbolicValue::Seq { .. }, "head" | "pop", [])
+                                | (SymbolicValue::Seq { .. }, "at", [_])
+                        ),
+                    },
+                ],
+            )
         }
         Expr::Binary { op, left, right } => {
             let mut local = bindings.clone();
-            let left_defined = definedness(solver, model, left, state, &local, old_state)?;
+            let left_status = evaluation_status(solver, model, left, state, &local, old_state)?;
             let left_value = eval(solver, model, left, state, &mut local, old_state)?;
-            let right_defined = definedness(solver, model, right, state, &local, old_state)?;
+            let right_status = evaluation_status(solver, model, right, state, &local, old_state)?;
             let right_value = eval(solver, model, right, state, &mut local, old_state)?;
             let reached_right = match op.as_str() {
                 "and" | "=>" => bool_term(&left_value)?.clone(),
                 "or" => solver.not(bool_term(&left_value)?)?,
                 _ => solver.bool_value(true),
             };
-            let mut parts = vec![
-                left_defined,
-                solver.implies(&reached_right, &right_defined)?,
-            ];
+            let first_partial = solver.or(&[
+                left_status.first_partial,
+                solver.and(&[
+                    left_status.fully_defined.clone(),
+                    reached_right.clone(),
+                    right_status.first_partial,
+                ])?,
+            ])?;
+            let operands_defined = solver.and(&[
+                left_status.fully_defined,
+                solver.implies(&reached_right, &right_status.fully_defined)?,
+            ])?;
+            let mut parts = vec![operands_defined.clone()];
+            let mut operation_partial = solver.bool_value(false);
             if matches!(op.as_str(), "/" | "%") {
-                parts.push(
-                    solver.not(&solver.equal(int_term(&right_value)?, &solver.int_value(0))?)?,
-                );
+                let zero = solver.equal(int_term(&right_value)?, &solver.int_value(0))?;
+                parts.push(solver.not(&zero)?);
                 let overflow = solver.and(&[
                     solver.equal(int_term(&left_value)?, &solver.int_value(i64::MIN))?,
                     solver.equal(int_term(&right_value)?, &solver.int_value(-1))?,
                 ])?;
                 parts.push(solver.not(&overflow)?);
+                operation_partial = solver.and(&[operands_defined, zero])?;
             } else if matches!(op.as_str(), "+" | "-" | "*") {
                 let result = match op.as_str() {
                     "+" => solver.add(int_term(&left_value)?, int_term(&right_value)?)?,
@@ -535,7 +736,13 @@ pub(crate) fn definedness<S: SmtSolver>(
                 };
                 parts.push(i64_term_is_in_range(solver, &result)?);
             }
-            Ok(solver.and(&parts)?)
+            Ok(EvaluationStatus {
+                fully_defined: solver.and(&parts)?,
+                first_partial: solver.or(&[first_partial, operation_partial])?,
+                has_partial_operation: left_status.has_partial_operation
+                    || right_status.has_partial_operation
+                    || matches!(op.as_str(), "/" | "%"),
+            })
         }
         Expr::Conditional {
             condition,
@@ -544,28 +751,47 @@ pub(crate) fn definedness<S: SmtSolver>(
             ..
         } => {
             let mut local = bindings.clone();
-            let condition_defined =
-                definedness(solver, model, condition, state, &local, old_state)?;
+            let condition_status =
+                evaluation_status(solver, model, condition, state, &local, old_state)?;
             let condition_value = eval(solver, model, condition, state, &mut local, old_state)?;
-            let then_defined = definedness(solver, model, then_expr, state, &local, old_state)?;
-            let else_defined = definedness(solver, model, else_expr, state, &local, old_state)?;
-            Ok(solver.and(&[
-                condition_defined,
-                solver.ite(bool_term(&condition_value)?, &then_defined, &else_defined)?,
-            ])?)
+            let then_status =
+                evaluation_status(solver, model, then_expr, state, &local, old_state)?;
+            let else_status =
+                evaluation_status(solver, model, else_expr, state, &local, old_state)?;
+            let branch_defined = solver.ite(
+                bool_term(&condition_value)?,
+                &then_status.fully_defined,
+                &else_status.fully_defined,
+            )?;
+            let branch_partial = solver.ite(
+                bool_term(&condition_value)?,
+                &then_status.first_partial,
+                &else_status.first_partial,
+            )?;
+            Ok(EvaluationStatus {
+                fully_defined: solver
+                    .and(&[condition_status.fully_defined.clone(), branch_defined])?,
+                first_partial: solver.or(&[
+                    condition_status.first_partial,
+                    solver.and(&[condition_status.fully_defined, branch_partial])?,
+                ])?,
+                has_partial_operation: condition_status.has_partial_operation
+                    || then_status.has_partial_operation
+                    || else_status.has_partial_operation,
+            })
         }
         Expr::Quantified {
             quantifier,
             binder,
             body,
-        } => quantified_definedness(
+        } => quantified_evaluation_status(
             solver, model, quantifier, binder, body, state, bindings, old_state,
         ),
         Expr::Aggregate {
             kind,
             binder,
             value,
-        } => aggregate_definedness(
+        } => aggregate_evaluation_status(
             solver,
             model,
             *kind,
@@ -575,7 +801,7 @@ pub(crate) fn definedness<S: SmtSolver>(
             bindings,
             old_state,
         ),
-        Expr::BinaryNamed { left, right, .. } => ordered_definedness_refs(
+        Expr::BinaryNamed { left, right, .. } => ordered_evaluation_status_refs(
             solver,
             model,
             &[left.as_ref(), right.as_ref()],
@@ -588,7 +814,7 @@ pub(crate) fn definedness<S: SmtSolver>(
             second,
             third,
             ..
-        } => ordered_definedness_refs(
+        } => ordered_evaluation_status_refs(
             solver,
             model,
             &[first.as_ref(), second.as_ref(), third.as_ref()],
@@ -599,35 +825,49 @@ pub(crate) fn definedness<S: SmtSolver>(
     }
 }
 
-fn ordered_definedness<S: SmtSolver>(
+fn ordered_evaluation_status<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     expressions: &[Expr],
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
-) -> Result<S::Term, VerifyError> {
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     let expressions = expressions.iter().collect::<Vec<_>>();
-    ordered_definedness_refs(solver, model, &expressions, state, bindings, old_state)
+    ordered_evaluation_status_refs(solver, model, &expressions, state, bindings, old_state)
 }
 
-fn ordered_definedness_refs<S: SmtSolver>(
+fn ordered_evaluation_status_refs<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     expressions: &[&Expr],
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
-) -> Result<S::Term, VerifyError> {
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     let mut local = bindings.clone();
-    let mut terms = Vec::new();
+    let mut statuses = Vec::new();
     for expression in expressions {
-        terms.push(definedness(
+        statuses.push(evaluation_status(
             solver, model, expression, state, &local, old_state,
         )?);
         let _ = eval(solver, model, expression, state, &mut local, old_state)?;
     }
-    Ok(solver.and(&terms)?)
+    sequence_statuses(solver, statuses)
+}
+
+pub(crate) fn partial_operation_index_accessible<S: SmtSolver>(
+    solver: &S,
+    base: &SymbolicValue<S::Term>,
+    index: &SymbolicValue<S::Term>,
+) -> Result<S::Term, VerifyError> {
+    match base {
+        SymbolicValue::Seq { len, .. } => Ok(solver.and(&[
+            solver.ge(int_term(index)?, &solver.int_value(0))?,
+            solver.lt(int_term(index)?, len)?,
+        ])?),
+        _ => Ok(solver.bool_value(true)),
+    }
 }
 
 pub(crate) fn index_accessible<S: SmtSolver>(
@@ -679,8 +919,8 @@ fn method_definedness<S: SmtSolver>(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn quantified_definedness<S: SmtSolver>(
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn quantified_evaluation_status<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     quantifier: &str,
@@ -689,46 +929,73 @@ fn quantified_definedness<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
-) -> Result<S::Term, VerifyError> {
-    let mut terms = vec![binder_source_definedness(
-        solver, model, binder, state, bindings, old_state,
-    )?];
-    let mut reaches_candidate = solver.bool_value(true);
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    let source_status =
+        binder_source_evaluation_status(solver, model, binder, state, bindings, old_state)?;
+    let mut fully_defined = source_status.fully_defined.clone();
+    let mut first_partial = source_status.first_partial;
+    let mut has_partial_operation = source_status.has_partial_operation;
+    let mut active = source_status.fully_defined;
     for (name, value, membership) in
         binder_candidates(solver, model, binder, state, bindings, old_state)?
     {
         let mut local = bindings.clone();
         local.insert(name, value);
         let membership = membership.unwrap_or_else(|| solver.bool_value(true));
-        let where_defined = binder_where_expression(binder).map_or_else(
-            || Ok(solver.bool_value(true)),
-            |where_expr| definedness(solver, model, where_expr, state, &local, old_state),
+        let where_status = binder_where_expression(binder).map_or_else(
+            || Ok(safe_status(solver)),
+            |where_expr| evaluation_status(solver, model, where_expr, state, &local, old_state),
         )?;
-        terms.push(solver.implies(
-            &solver.and(&[reaches_candidate.clone(), membership.clone()])?,
-            &where_defined,
-        )?);
+        let where_reached = solver.and(&[active.clone(), membership.clone()])?;
+        has_partial_operation |= where_status.has_partial_operation;
+        first_partial = solver.or(&[
+            first_partial,
+            solver.and(&[where_reached.clone(), where_status.first_partial])?,
+        ])?;
         let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?
             .unwrap_or_else(|| solver.bool_value(true));
-        let selected = solver.and(&[membership, where_term])?;
-        let body_defined = definedness(solver, model, body, state, &local, old_state)?;
-        terms.push(solver.implies(
-            &solver.and(&[reaches_candidate.clone(), selected.clone()])?,
-            &body_defined,
-        )?);
+        let body_reached = solver.and(&[
+            where_reached.clone(),
+            where_status.fully_defined.clone(),
+            where_term.clone(),
+        ])?;
+        let body_status = evaluation_status(solver, model, body, state, &local, old_state)?;
+        has_partial_operation |= body_status.has_partial_operation;
+        first_partial = solver.or(&[
+            first_partial,
+            solver.and(&[body_reached.clone(), body_status.first_partial])?,
+        ])?;
+        let where_ok = solver.implies(&where_reached, &where_status.fully_defined)?;
+        let body_ok = solver.implies(&body_reached, &body_status.fully_defined)?;
+        fully_defined = solver.and(&[fully_defined, where_ok, body_ok])?;
+
         let body_value = eval(solver, model, body, state, &mut local, old_state)?;
-        let continues = if quantifier == "forall" {
-            solver.or(&[solver.not(&selected)?, bool_term(&body_value)?.clone()])?
+        let body_continues = if quantifier == "forall" {
+            bool_term(&body_value)?.clone()
         } else {
-            solver.or(&[solver.not(&selected)?, solver.not(bool_term(&body_value)?)?])?
+            solver.not(bool_term(&body_value)?)?
         };
-        reaches_candidate = solver.and(&[reaches_candidate, continues])?;
+        let candidate_continues = solver.or(&[
+            solver.not(&membership)?,
+            solver.and(&[
+                where_status.fully_defined,
+                solver.or(&[
+                    solver.not(&where_term)?,
+                    solver.and(&[body_status.fully_defined, body_continues])?,
+                ])?,
+            ])?,
+        ])?;
+        active = solver.and(&[active, candidate_continues])?;
     }
-    Ok(solver.and(&terms)?)
+    Ok(EvaluationStatus {
+        fully_defined,
+        first_partial,
+        has_partial_operation,
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn aggregate_definedness<S: SmtSolver>(
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn aggregate_evaluation_status<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     kind: AggregateKind,
@@ -737,10 +1004,13 @@ fn aggregate_definedness<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
-) -> Result<S::Term, VerifyError> {
-    let mut terms = vec![binder_source_definedness(
-        solver, model, binder, state, bindings, old_state,
-    )?];
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    let source_status =
+        binder_source_evaluation_status(solver, model, binder, state, bindings, old_state)?;
+    let mut fully_defined = source_status.fully_defined.clone();
+    let mut first_partial = source_status.first_partial;
+    let mut has_partial_operation = source_status.has_partial_operation;
+    let mut active = source_status.fully_defined;
     let mut sum = solver.int_value(0);
     for (name, candidate, membership) in
         binder_candidates(solver, model, binder, state, bindings, old_state)?
@@ -748,26 +1018,52 @@ fn aggregate_definedness<S: SmtSolver>(
         let mut local = bindings.clone();
         local.insert(name, candidate);
         let membership = membership.unwrap_or_else(|| solver.bool_value(true));
-        let where_defined = binder_where_expression(binder).map_or_else(
-            || Ok(solver.bool_value(true)),
-            |where_expr| definedness(solver, model, where_expr, state, &local, old_state),
+        let where_status = binder_where_expression(binder).map_or_else(
+            || Ok(safe_status(solver)),
+            |where_expr| evaluation_status(solver, model, where_expr, state, &local, old_state),
         )?;
-        terms.push(solver.implies(&membership, &where_defined)?);
+        let where_reached = solver.and(&[active.clone(), membership])?;
+        has_partial_operation |= where_status.has_partial_operation;
+        first_partial = solver.or(&[
+            first_partial,
+            solver.and(&[where_reached.clone(), where_status.first_partial])?,
+        ])?;
         let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?
             .unwrap_or_else(|| solver.bool_value(true));
+        let mut iteration_ok = solver.implies(&where_reached, &where_status.fully_defined)?;
         if let Some(value) = value {
-            let value_defined = definedness(solver, model, value, state, &local, old_state)?;
-            let selected = solver.and(&[membership, where_term])?;
-            terms.push(solver.implies(&selected, &value_defined)?);
+            let value_reached =
+                solver.and(&[where_reached, where_status.fully_defined, where_term])?;
+            let value_status = evaluation_status(solver, model, value, state, &local, old_state)?;
+            has_partial_operation |= value_status.has_partial_operation;
+            first_partial = solver.or(&[
+                first_partial,
+                solver.and(&[value_reached.clone(), value_status.first_partial])?,
+            ])?;
+            iteration_ok = solver.and(&[
+                iteration_ok,
+                solver.implies(&value_reached, &value_status.fully_defined)?,
+            ])?;
             if kind == AggregateKind::Sum {
                 let value = eval(solver, model, value, state, &mut local, old_state)?;
                 let next_sum = solver.add(&sum, int_term(&value)?)?;
-                terms.push(solver.implies(&selected, &i64_term_is_in_range(solver, &next_sum)?)?);
-                sum = solver.ite(&selected, &next_sum, &sum)?;
+                let sum_reached =
+                    solver.and(&[value_reached.clone(), value_status.fully_defined])?;
+                iteration_ok = solver.and(&[
+                    iteration_ok,
+                    solver.implies(&sum_reached, &i64_term_is_in_range(solver, &next_sum)?)?,
+                ])?;
+                sum = solver.ite(&value_reached, &next_sum, &sum)?;
             }
         }
+        fully_defined = solver.and(&[fully_defined, iteration_ok.clone()])?;
+        active = solver.and(&[active, iteration_ok])?;
     }
-    Ok(solver.and(&terms)?)
+    Ok(EvaluationStatus {
+        fully_defined,
+        first_partial,
+        has_partial_operation,
+    })
 }
 
 fn i64_term_is_in_range<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<S::Term, VerifyError> {
@@ -778,17 +1074,17 @@ fn i64_term_is_in_range<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<S::T
 }
 
 #[allow(clippy::too_many_arguments)]
-fn binder_source_definedness<S: SmtSolver>(
+fn binder_source_evaluation_status<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     binder: &Binder,
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
-) -> Result<S::Term, VerifyError> {
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     match binder {
-        Binder::Typed { .. } => Ok(solver.bool_value(true)),
-        Binder::Range { lo, hi, .. } => ordered_definedness_refs(
+        Binder::Typed { .. } => Ok(safe_status(solver)),
+        Binder::Range { lo, hi, .. } => ordered_evaluation_status_refs(
             solver,
             model,
             &[lo.as_ref(), hi.as_ref()],
@@ -797,7 +1093,7 @@ fn binder_source_definedness<S: SmtSolver>(
             old_state,
         ),
         Binder::Collection { collection, .. } => {
-            definedness(solver, model, collection, state, bindings, old_state)
+            evaluation_status(solver, model, collection, state, bindings, old_state)
         }
     }
 }

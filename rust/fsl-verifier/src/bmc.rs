@@ -2,16 +2,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fsl_core::{FslValue, KernelModel, LeadsToDef, TraceStep};
+use fsl_core::{FslValue, KernelModel, LeadsToDef, TraceAction, TraceStep};
 use fsl_solver::{SatResult, SmtSolver};
 
 use crate::VerifyError;
-use crate::eval::eval;
+use crate::eval::{eval, evaluation_status};
 use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
 use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
 use crate::transition::{
-    ActionInstance, action_guards, action_instances, init_constraints, transition_constraint,
+    ActionInstance, action_guard_definedness, action_guards,
+    action_has_partial_operation_candidate, action_instances, action_statements_evaluation_status,
+    init_constraints, transition_constraint,
 };
 use crate::vacuity::{VacuityFinding, retain_covered, static_findings};
 use crate::value::{
@@ -182,6 +184,10 @@ async fn verify_bounded_config<S: SmtSolver>(
         .collect::<BTreeSet<_>>();
     let mut states = vec![initial];
     let mut choices = Vec::new();
+    let has_action_partial_operation_candidates = model
+        .actions
+        .iter()
+        .any(action_has_partial_operation_candidate);
 
     for step in 0..=depth {
         if let Some(violation) = check_state_properties(
@@ -194,6 +200,16 @@ async fn verify_bounded_config<S: SmtSolver>(
             checked_bounds,
         )
         .await?
+        {
+            result.violation = Some(violation);
+            return Ok(result);
+        }
+
+        if step < depth
+            && has_action_partial_operation_candidates
+            && let Some(violation) =
+                check_action_partial_operations(solver, model, &states, &choices, &instances, step)
+                    .await?
         {
             result.violation = Some(violation);
             return Ok(result);
@@ -399,14 +415,57 @@ async fn check_state_properties<S: SmtSolver>(
         if action.ensures.is_empty() {
             continue;
         }
-        let (guards, mut bindings) =
-            action_guards(solver, model, action, &states[step - 1], &instance.params)?;
+        let guard_status =
+            action_guard_definedness(solver, model, action, &states[step - 1], &instance.params)?;
+        let mut bindings = guard_status.bindings;
+        let body_status = action_statements_evaluation_status(
+            solver,
+            model,
+            action,
+            &states[step - 1],
+            &bindings,
+        )?;
         let selected = solver.equal(
             &choices[step - 1],
             &solver.int_value(i64_index(instance_index)?),
         )?;
+        let mut reached =
+            solver.and(&[selected, guard_status.enabled, body_status.fully_defined])?;
         for ensure in &action.ensures {
             solver.set_query_context("ensures", &action.name);
+            let ensure_status = evaluation_status(
+                solver,
+                model,
+                ensure,
+                &states[step],
+                &bindings,
+                Some(&states[step - 1]),
+            )?;
+            let partial = solver.and(&[reached.clone(), ensure_status.first_partial])?;
+            if probe(solver, &partial).await? {
+                return Ok(Some(
+                    make_violation(
+                        solver,
+                        model,
+                        "partial_op",
+                        format!("_partial_{}", action.name),
+                        &partial,
+                        states,
+                        choices,
+                        instances,
+                        step,
+                    )
+                    .await?,
+                ));
+            }
+            let undefined =
+                solver.and(&[reached.clone(), solver.not(&ensure_status.fully_defined)?])?;
+            if probe(solver, &undefined).await? {
+                return Err(VerifyError::new(format!(
+                    "action '{}' ensures evaluation has a non-partial failure",
+                    action.name
+                )));
+            }
             let value = eval(
                 solver,
                 model,
@@ -415,9 +474,11 @@ async fn check_state_properties<S: SmtSolver>(
                 &mut bindings,
                 Some(&states[step - 1]),
             )?;
-            let mut violation = vec![selected.clone(), solver.not(bool_term(&value)?)?];
-            violation.extend(guards.clone());
-            let failure = solver.and(&violation)?;
+            let failure = solver.and(&[
+                reached.clone(),
+                ensure_status.fully_defined.clone(),
+                solver.not(bool_term(&value)?)?,
+            ])?;
             if probe(solver, &failure).await? {
                 return Ok(Some(
                     make_violation(
@@ -434,9 +495,148 @@ async fn check_state_properties<S: SmtSolver>(
                     .await?,
                 ));
             }
+            reached = solver.and(&[
+                reached,
+                ensure_status.fully_defined,
+                bool_term(&value)?.clone(),
+            ])?;
         }
     }
     Ok(None)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn check_action_partial_operations<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    states: &[SymbolicState<S::Term>],
+    choices: &[S::Term],
+    instances: &[ActionInstance<S::Term>],
+    step: usize,
+) -> Result<Option<BmcViolation>, VerifyError> {
+    for instance in instances {
+        let action = &model.actions[instance.action_index];
+        let guard_evaluation =
+            action_guard_definedness(solver, model, action, &states[step], &instance.params)?;
+        let body_status = action_statements_evaluation_status(
+            solver,
+            model,
+            action,
+            &states[step],
+            &guard_evaluation.bindings,
+        )?;
+        let mut ensures_have_partial_operation = false;
+        for ensure in &action.ensures {
+            ensures_have_partial_operation |= evaluation_status(
+                solver,
+                model,
+                ensure,
+                &states[step],
+                &guard_evaluation.bindings,
+                Some(&states[step]),
+            )?
+            .has_partial_operation;
+        }
+        if !guard_evaluation.has_partial_operation
+            && !body_status.has_partial_operation
+            && !ensures_have_partial_operation
+        {
+            continue;
+        }
+        let guard_failure = guard_evaluation.first_partial;
+        solver.set_query_context("partial_op", &action.name);
+        if probe(solver, &guard_failure).await? {
+            return Ok(Some(
+                make_action_partial_operation_violation(
+                    solver,
+                    model,
+                    action,
+                    instance,
+                    &guard_failure,
+                    states,
+                    choices,
+                    instances,
+                    step,
+                )
+                .await?,
+            ));
+        }
+        let guard_undefined = solver.not(&guard_evaluation.defined)?;
+        if probe(solver, &guard_undefined).await? {
+            return Err(VerifyError::new(format!(
+                "action '{}' guard evaluation has a non-partial failure",
+                action.name
+            )));
+        }
+
+        let body_failure =
+            solver.and(&[guard_evaluation.enabled.clone(), body_status.first_partial])?;
+        if probe(solver, &body_failure).await? {
+            return Ok(Some(
+                make_action_partial_operation_violation(
+                    solver,
+                    model,
+                    action,
+                    instance,
+                    &body_failure,
+                    states,
+                    choices,
+                    instances,
+                    step,
+                )
+                .await?,
+            ));
+        }
+        let body_undefined = solver.and(&[
+            guard_evaluation.enabled.clone(),
+            solver.not(&body_status.fully_defined)?,
+        ])?;
+        if probe(solver, &body_undefined).await? {
+            return Err(VerifyError::new(format!(
+                "action '{}' body evaluation has a non-partial failure",
+                action.name
+            )));
+        }
+    }
+    Ok(None)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn make_action_partial_operation_violation<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    action: &fsl_core::ActionDef,
+    instance: &ActionInstance<S::Term>,
+    condition: &S::Term,
+    states: &[SymbolicState<S::Term>],
+    choices: &[S::Term],
+    instances: &[ActionInstance<S::Term>],
+    step: usize,
+) -> Result<BmcViolation, VerifyError> {
+    let mut trace =
+        build_witness(solver, model, condition, states, choices, instances, step).await?;
+    let state = trace
+        .last()
+        .ok_or_else(|| VerifyError::new("partial-operation witness is empty"))?
+        .state
+        .clone();
+    trace.push(TraceStep {
+        step: step + 1,
+        state,
+        action: Some(TraceAction {
+            name: action.name.clone(),
+            params: instance.concrete_params.clone(),
+        }),
+        changes: BTreeMap::new(),
+    });
+    Ok(BmcViolation {
+        kind: "partial_op".to_owned(),
+        name: format!("_partial_{}", action.name),
+        step: step + 1,
+        last_action: Some(action.name.clone()),
+        trace,
+        leads_to: None,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

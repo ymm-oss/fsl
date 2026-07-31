@@ -619,11 +619,10 @@ pub fn expression_sweep() -> Vec<ExpressionModel> {
 /// `divide`/`remainder`, each in action context (guarded, so no partial-op
 /// boundary is ever crossed here -- that boundary is exercised by the
 /// dedicated, unguarded action-context tests in `relations.rs`'s R6 section
-/// instead, because `fsl_verifier::verify_bounded` does not perform the
-/// automatic "Partial operations" check on its own; see that section's
-/// module doc) and in property context, where S3:561-563 guarantees
-/// totalization. `head`/`pop`/`at`/index are exercised only in
-/// `relations.rs` for the same reason, not swept here.
+/// instead, where all four native engines must agree) and in property context,
+/// where S3:561-563 guarantees totalization. `head`/`pop`/`at`/index are
+/// exercised only in `relations.rs`, which owns the full automatic-boundary
+/// matrix rather than duplicating it in this successful-transition sweep.
 #[derive(Clone, Debug)]
 pub struct OperationModel {
     pub id: String,
