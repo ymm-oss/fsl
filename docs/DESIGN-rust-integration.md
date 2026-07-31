@@ -24,6 +24,7 @@ part of the Rust product gate.
 | Public Kernel, testgen, and code generation | `kernel_contract.rs`, `public_kernel_v2.rs`, `testgen_contract.rs`, `domain_codegen_contract.rs` |
 | Registered FSL corpus formatting and semantics | `formatter_cli.rs` |
 | Symbolic, Monitor, and explicit-state agreement | `fsl-verifier/tests/*agreement.rs`, `explicit_engine.rs`, `issue_226_auto_engine.rs` |
+| Soundness-critical triangulated claims | `triangulated_assurance.rs`, `self_conformance.rs`, P2 witness replay, P3 syntax/CLI/LSP manifest, and the `shared-observer-lineage` fault operator |
 | Replayable evidence | `replay_trace_contract.rs` and native/WASM corpus replay tests |
 | LSP features and corpus/index coverage | `fsl-lsp` unit, stdio, and corpus tests |
 | Native and browser envelope parity | `fsl-wasm/test-browser.mjs` |

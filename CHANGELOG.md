@@ -5,6 +5,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Added CI-internal Triangulated Assurance (#670): a federated, fail-closed
+  registry now requires one raw observation, two explicitly independent
+  semantic lineages, all three executable agreement edges, positive/negative
+  calibration, and honest scope. Initial pilots cover compound native outcome
+  conservation, symbolic-witness/concrete-replay identity (including
+  state/step/kind/location corruption controls), and token-based dialect
+  dispatch across the syntax library, CLI, and LSP. A calibrated common-mode
+  fault executes a production-classifier substitution for the registered P1
+  independent observer and declares its shared model lineage; no public
+  assurance class, JSON field, or exit code changes.
 - Fixed raw `fsl_verifier::verify_bounded*` calls bypassing the automatic
   action-context partial-operation check. Symbolic BMC now reports replayable
   `partial_op` evidence for ordered guards, reached action bodies, and

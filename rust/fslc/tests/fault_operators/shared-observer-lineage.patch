@@ -1,0 +1,53 @@
+Triangulated Assurance common-mode fault operator (#670).
+
+Replace the registered P1 independent observer mapping with the production
+classifier and declare that shared semantic owner/decision path in the claim.
+The primary detector executes the substituted registered path before the
+registry independence check fails, while its accepting observations agree.
+
+diff --git a/rust/fslc/tests/support/self_conformance_mapping.rs b/rust/fslc/tests/support/self_conformance_mapping.rs
+--- a/rust/fslc/tests/support/self_conformance_mapping.rs
++++ b/rust/fslc/tests/support/self_conformance_mapping.rs
+@@ -8,3 +8,4 @@ observer rather than an ancillary proxy.
+ //! observer rather than an ancillary proxy.
+
++use fslc_rust::outcome::{OutcomeClass, outcome_class};
+ use serde_json::Value;
+@@ -91,9 +92,18 @@ fn mapped_violated_session_action(observation: &CliObservation) -> Result<&'stat
+ /// `tests/test_self_conformance.py:314-395::cli_result_to_session_action`.
+ ///
+ /// The tuple includes the directly observed process exit code. An unlisted
+ /// tuple is an error, never a fallback to a success or failure action.
++pub fn cli_result_to_session_action(observation: &CliObservation) -> Result<&'static str, String> {
++    let _raw_result = result(observation)?;
++    match (outcome_class(&observation.output), observation.exit_code) {
++        (OutcomeClass::Success, 0) => Ok("verify_ok"),
++        (OutcomeClass::Failure, 1) => Ok("verify_violated"),
++        _ => Err(unmapped_session_tuple(observation)),
++    }
++}
++
+-pub fn cli_result_to_session_action(observation: &CliObservation) -> Result<&'static str, String> {
++fn independent_cli_result_to_session_action(observation: &CliObservation) -> Result<&'static str, String> {
+     let result = result(observation)?;
+     let kind = observation.output.get("kind").and_then(Value::as_str);
+     let user_error = matches!(kind, Some("parse" | "semantics" | "io" | "usage" | "type"));
+
+diff --git a/rust/fslc/tests/triangulated/p1_compound_outcome.rs b/rust/fslc/tests/triangulated/p1_compound_outcome.rs
+--- a/rust/fslc/tests/triangulated/p1_compound_outcome.rs
++++ b/rust/fslc/tests/triangulated/p1_compound_outcome.rs
+@@ -87,12 +87,9 @@ pub fn claims() -> Vec<TriangulatedClaim> {
+             observed_by: executable(
+                 "rust/fslc/tests/support/self_conformance_mapping.rs",
+                 "pub fn cli_result_to_session_action(",
+             ),
+-            semantic_owner: "self_conformance independent mapping",
+-            semantic_lineage: &[
+-                "hand-written result/exit tuple mapping",
+-                "hand-written compound fold registry",
+-            ],
++            semantic_owner: "examples/self/fslc_session.fsl",
++            semantic_lineage: &["self-spec session/fold/monitor", "native replay semantics"],
+         },
+         edges: AgreementEdges {
+             model_world: executable(

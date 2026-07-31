@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: Apache-2.0
+// Self-spec for issue #670 P3's significant-token dispatch state order.
+spec DialectDispatch {
+  enum Stage { Start, Prefix, Annotation, Declaration, Dispatched, Rejected }
+
+  state { stage: Stage }
+  init { stage = Start }
+
+  action consume_bom() {
+    requires stage == Start
+    stage = Prefix
+  }
+
+  action consume_trivia() {
+    requires stage == Start or stage == Prefix
+    stage = Prefix
+  }
+
+  action consume_annotation() {
+    requires stage == Start or stage == Prefix
+    stage = Annotation
+  }
+
+  action declaration_keyword() {
+    requires stage == Start or stage == Prefix or stage == Annotation
+    stage = Declaration
+  }
+
+  action dispatch() {
+    requires stage == Declaration
+    stage = Dispatched
+  }
+
+  action reject_unknown() {
+    requires stage == Declaration
+    stage = Rejected
+  }
+
+  invariant FinalRequiresDeclaration {
+    stage == Dispatched or stage == Rejected => stage != Start
+  }
+
+  reachable ReachDispatched { stage == Dispatched }
+  reachable ReachRejected { stage == Rejected }
+  terminal { stage == Dispatched or stage == Rejected }
+}

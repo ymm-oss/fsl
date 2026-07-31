@@ -660,3 +660,28 @@ operator row or shipped injection hook.
 `tools/check-native-integration.sh rust` runs the workspace Rust tests and
 therefore owns this native anchor. The frozen Python test is outside that gate
 and remains a compatibility reference only.
+
+## Triangulated Assurance (#670)
+
+`rust/fslc/tests/triangulated_assurance.rs` generalizes the strongest C7 shape
+without weakening C3/C5/C7. Semantic owners register CI-internal claims under
+`tests/triangulated/`; the aggregator rejects missing/stale claims, non-raw
+observations, missing fields or edges, skipped/unknown evidence, stale
+citations, shared semantic owners/decision lineage, and missing calibration.
+The complete contract is `docs/DESIGN-triangulated-assurance.md`.
+
+The initial federation registers P1 compound outcome conservation, P2 native
+symbolic-witness versus solver-free explicit/Monitor replay identity, and P3
+token-based dialect dispatch. P1 now retains raw stdout/stderr bytes, process
+exit, parsed JSON, and the native build fingerprint before its independent
+mapping classifies the observation. P2 recomputes violation identity and source
+span and rejects state/step/kind/location mutants. P3 uses one checked-in raw
+source manifest across syntax-library, CLI, and LSP consumers while a manual
+fixture oracle remains independent of the production registry.
+
+`shared-observer-lineage.patch` is the calibrated common-mode fault: it selects
+the production outcome classifier in place of the registered independent P1
+mapping and declares the self-spec's owner/lineage. The primary test executes
+that substituted registered path before the triangulated independence detector
+fails, while the blind parser detector stays green. Consumer parity is never
+counted as observer independence.

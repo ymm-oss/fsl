@@ -63,6 +63,7 @@
 | [`DESIGN-precedence-policy.md`](DESIGN-precedence-policy.md) | The business-layer no-bypass precedence policy (#75) — why `business` keeps users from writing `state`/`invariant` directly |
 | [`DESIGN-ledger.md`](DESIGN-ledger.md) | `fslc ledger` (turning verifier evidence into a per-requirement-id Markdown audit ledger for PM/audit) |
 | [`DESIGN-assurance-classes.md`](DESIGN-assurance-classes.md) | Assurance-class vocabulary (`proved`/`bounded`/`replay-observed`/`statistical`/`not_run`) shared by `fslc ledger` and `fslc html`, and what each class does/does not guarantee |
+| [`DESIGN-triangulated-assurance.md`](DESIGN-triangulated-assurance.md) | CI-internal Triangulated Assurance: raw common observations, explicit observer lineages, executable three-edge agreement, calibration, federated ownership, and P1/P2/P3 pilots |
 | [`DESIGN-document-requirement-claim-ir.md`](DESIGN-document-requirement-claim-ir.md) | `fslc document` foundation (issue #325): the versioned Requirement Claim IR (RCIR) v1 public contract and the deterministic requirement-claim projector |
 | [`DESIGN-document-controlled-language-renderer.md`](DESIGN-document-controlled-language-renderer.md) | ja/en controlled-language renderer (issue #326): converts an RCIR v1 claim set into `fsl_tools::render_requirements_document` prose |
 | [`DESIGN-document-cli.md`](DESIGN-document-cli.md) | `fslc document generate` / `fslc document claims` (issue #327): wires the RCIR projector and controlled-language renderer into the two CLI entry points |
