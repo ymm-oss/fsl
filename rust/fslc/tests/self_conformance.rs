@@ -13,6 +13,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
 
+#[path = "support/self_conformance_mapping.rs"]
+mod self_conformance_mapping;
+
+use self_conformance_mapping::{CliObservation, cli_result_to_session_action};
+
 static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
 
 const SESSION_SPEC: &str = "examples/self/fslc_session.fsl";
@@ -21,16 +26,12 @@ const FOLD_SPEC: &str = "examples/self/fslc_fold.fsl";
 const CART_SPEC: &str = "specs/cart_v1.fsl";
 
 #[derive(Debug)]
-struct CliObservation {
-    subcommand: &'static str,
-    output: Value,
-    exit_code: i32,
-}
-
-#[derive(Debug)]
 struct RawCliOutput {
+    stdout_bytes: Vec<u8>,
+    stderr_bytes: Vec<u8>,
     output: Value,
     exit_code: i32,
+    binary_revision: &'static str,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -236,8 +237,11 @@ fn parse_cli_output(arguments: &[String], output: &Output) -> RawCliOutput {
         )
     });
     RawCliOutput {
+        stdout_bytes: output.stdout.clone(),
+        stderr_bytes: output.stderr.clone(),
         output: value,
         exit_code,
+        binary_revision: env!("FSLC_IMPLEMENTATION_FINGERPRINT"),
     }
 }
 
@@ -274,151 +278,22 @@ fn write_json_fixture(name: &str, value: &Value) -> PathBuf {
 
 fn observe(subcommand: &'static str, arguments: &[String]) -> CliObservation {
     let observed = run_cli(arguments);
+    assert!(
+        !observed.stdout_bytes.is_empty(),
+        "native stdout is raw evidence"
+    );
+    assert!(
+        !observed.binary_revision.is_empty(),
+        "native binary revision is raw evidence"
+    );
     CliObservation {
         subcommand,
+        stdout_bytes: observed.stdout_bytes,
+        stderr_bytes: observed.stderr_bytes,
         output: observed.output,
         exit_code: observed.exit_code,
+        binary_revision: observed.binary_revision,
     }
-}
-
-fn result(observation: &CliObservation) -> Result<&str, String> {
-    observation
-        .output
-        .get("result")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            format!(
-                "missing string result: subcommand={} output={}",
-                observation.subcommand, observation.output
-            )
-        })
-}
-
-fn mapped_session_action(
-    observation: &CliObservation,
-    action: &'static str,
-    expected_exit: i32,
-) -> Result<&'static str, String> {
-    if observation.exit_code != expected_exit {
-        return Err(format!(
-            "result/exit contradiction: subcommand={} result={:?} kind={:?} exit={} expected={expected_exit}",
-            observation.subcommand,
-            observation.output.get("result"),
-            observation.output.get("kind"),
-            observation.exit_code,
-        ));
-    }
-    Ok(action)
-}
-
-fn mapped_violated_session_action(observation: &CliObservation) -> Result<&'static str, String> {
-    let action = mapped_session_action(observation, "verify_violated", 1)?;
-    if observation
-        .output
-        .get("trace")
-        .and_then(Value::as_array)
-        .is_none_or(Vec::is_empty)
-    {
-        return Err(format!(
-            "violated result missing nonempty trace: {}",
-            observation.output
-        ));
-    }
-    if !observation.output["loc"]["line"].is_u64() || !observation.output["loc"]["column"].is_u64()
-    {
-        return Err(format!(
-            "violated result missing source location: {}",
-            observation.output
-        ));
-    }
-    if !observation.output["violated_at_step"].is_u64() {
-        return Err(format!(
-            "violated result missing first violated step: {}",
-            observation.output
-        ));
-    }
-    Ok(action)
-}
-
-/// Independent native port of
-/// `tests/test_self_conformance.py:314-395::cli_result_to_session_action`.
-///
-/// The tuple includes the directly observed process exit code. An unlisted
-/// tuple is an error, never a fallback to a success or failure action.
-fn cli_result_to_session_action(observation: &CliObservation) -> Result<&'static str, String> {
-    let result = result(observation)?;
-    let kind = observation.output.get("kind").and_then(Value::as_str);
-    let user_error = matches!(kind, Some("parse" | "semantics" | "io" | "usage" | "type"));
-
-    match observation.subcommand {
-        "check" => match (result, kind) {
-            ("ok", _) => mapped_session_action(observation, "check_ok", 0),
-            ("error", _) if user_error => mapped_session_action(observation, "check_err", 2),
-            ("error", Some("internal")) => mapped_session_action(observation, "tool_fault", 3),
-            _ => Err(unmapped_session_tuple(observation)),
-        },
-        "verify" => match (result, kind) {
-            ("verified", _) => mapped_session_action(observation, "verify_ok", 0),
-            ("violated", _) => mapped_violated_session_action(observation),
-            ("reachable_failed", _) => {
-                mapped_session_action(observation, "verify_reachable_failed", 1)
-            }
-            ("error", _) if user_error => {
-                mapped_session_action(observation, "verify_user_error", 2)
-            }
-            ("error", Some("internal")) => mapped_session_action(observation, "tool_fault", 3),
-            _ => Err(unmapped_session_tuple(observation)),
-        },
-        "induction" => match (result, kind) {
-            ("proved", _) => mapped_session_action(observation, "induction_proved", 0),
-            ("unknown_cti", _) => mapped_session_action(observation, "induction_cti", 1),
-            ("error", Some("internal")) => mapped_session_action(observation, "tool_fault", 3),
-            _ => Err(unmapped_session_tuple(observation)),
-        },
-        "scenarios" => match (result, kind) {
-            ("scenarios", _) => mapped_session_action(observation, "scenarios_ok", 0),
-            ("error", Some("internal")) => mapped_session_action(observation, "tool_fault", 3),
-            _ => Err(unmapped_session_tuple(observation)),
-        },
-        "explain" => match (result, kind) {
-            ("explained", _) => mapped_session_action(observation, "explained_ok", 0),
-            ("error", Some("internal")) => mapped_session_action(observation, "tool_fault", 3),
-            _ => Err(unmapped_session_tuple(observation)),
-        },
-        "mutate" => match (result, kind) {
-            ("mutated", _) => mapped_session_action(observation, "mutated_ok", 0),
-            ("error", Some("internal")) => mapped_session_action(observation, "tool_fault", 3),
-            _ => Err(unmapped_session_tuple(observation)),
-        },
-        "typestate" => match (result, kind) {
-            ("typestate", _) => mapped_session_action(observation, "typestate_ok", 0),
-            ("error", Some("internal")) => mapped_session_action(observation, "tool_fault", 3),
-            _ => Err(unmapped_session_tuple(observation)),
-        },
-        "refine" => match (result, kind) {
-            ("refines", _) => mapped_session_action(observation, "refines_ok", 0),
-            ("refinement_failed", _) => mapped_session_action(observation, "refine_failed", 1),
-            ("error", Some("internal")) => mapped_session_action(observation, "tool_fault", 3),
-            _ => Err(unmapped_session_tuple(observation)),
-        },
-        "replay" => match (result, kind) {
-            ("conformant", _) => mapped_session_action(observation, "replay_conformant", 0),
-            ("nonconformant", _) => mapped_session_action(observation, "replay_nonconformant", 1),
-            ("error", Some("internal")) => mapped_session_action(observation, "tool_fault", 3),
-            _ => Err(unmapped_session_tuple(observation)),
-        },
-        _ => Err(unmapped_session_tuple(observation)),
-    }
-}
-
-fn unmapped_session_tuple(observation: &CliObservation) -> String {
-    format!(
-        "unmapped CLI observation: subcommand={} result={:?} kind={:?} exit={}",
-        observation.subcommand,
-        observation.output.get("result"),
-        observation.output.get("kind"),
-        observation.exit_code
-    )
 }
 
 fn run_model_pipeline(case: CorpusCase) -> Vec<CliObservation> {
@@ -589,10 +464,15 @@ fn session_contract_violations_are_rejected() {
 
 #[test]
 fn session_mapping_rejects_result_exit_contradictions() {
+    let contradictory_output = json!({"result":"violated","kind":"invariant"});
     let contradictory = CliObservation {
         subcommand: "verify",
-        output: json!({"result":"violated","kind":"invariant"}),
+        stdout_bytes: serde_json::to_vec(&contradictory_output)
+            .expect("serialize contradictory observation"),
+        stderr_bytes: Vec::new(),
+        output: contradictory_output,
         exit_code: 0,
+        binary_revision: env!("FSLC_IMPLEMENTATION_FINGERPRINT"),
     };
     let error =
         cli_result_to_session_action(&contradictory).expect_err("violated/exit-0 must fail closed");
@@ -643,8 +523,11 @@ fn session_mapping_rejects_result_exit_contradictions() {
             .insert(field.to_owned(), replacement);
         let missing = CliObservation {
             subcommand: "verify",
+            stdout_bytes: serde_json::to_vec(&missing).expect("serialize missing evidence"),
+            stderr_bytes: Vec::new(),
             output: missing,
             exit_code: 1,
+            binary_revision: env!("FSLC_IMPLEMENTATION_FINGERPRINT"),
         };
         assert!(
             cli_result_to_session_action(&missing).is_err(),
@@ -853,8 +736,11 @@ fn monitor_contract_violations_are_rejected() {
         ),
     ] {
         let synthetic = RawCliOutput {
+            stdout_bytes: serde_json::to_vec(&output).expect("serialize synthetic replay"),
+            stderr_bytes: Vec::new(),
             output,
             exit_code: 1,
+            binary_revision: env!("FSLC_IMPLEMENTATION_FINGERPRINT"),
         };
         assert!(
             replay_out_to_monitor_actions(&synthetic, &events).is_err(),
@@ -1140,9 +1026,13 @@ fn fold_classifier_is_fail_closed() {
         (CompoundCommand::Chain, "violated", 3),
         (CompoundCommand::AnalyzeBatch, "error", 1),
     ] {
+        let output = json!({"result":result});
         let contradictory = RawCliOutput {
-            output: json!({"result":result}),
+            stdout_bytes: serde_json::to_vec(&output).expect("serialize contradictory fold"),
+            stderr_bytes: Vec::new(),
+            output,
             exit_code: wrong_exit,
+            binary_revision: env!("FSLC_IMPLEMENTATION_FINGERPRINT"),
         };
         assert!(
             finalize_action(command, &contradictory).is_err(),

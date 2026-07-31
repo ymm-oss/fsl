@@ -79,6 +79,11 @@ inventory and explicitly optional Python surfaces.
   detector that must fail under it and a blind detector that must not. `tools/run-fault-operators.sh`
   then proves not only that the defect is gone but that the suite would notice its return. Run it with
   `./tools/check-native-integration.sh fault-operators`.
+- **Triangulated claims:** use `docs/DESIGN-triangulated-assurance.md` only for selected
+  soundness-critical seams. Register the semantic owner's claim with a raw common observation,
+  distinct owner/decision lineages, three executable edges, accepting/rejecting controls, and scope.
+  Multiple consumers of one parser/classifier provide parity, not independent observation, and the
+  internal method must not change a user-facing assurance class or exit code.
 
 Use repository-relative paths in committed text and examples. New source files require the Apache-2.0
 SPDX header used by neighboring files. Rust must remain formatted, Clippy-clean, and free of unsafe code.

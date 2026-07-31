@@ -90,6 +90,11 @@ the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests.
 - Every formal-to-implementation conformance anchor must include a negative control that rejects a
   known contract-violating trace, transition, or mutation. A green positive path alone does not
   establish that the anchor can detect drift.
+- A soundness-critical claim marked triangulated must follow
+  `docs/DESIGN-triangulated-assurance.md`: preserve the pre-classification raw observation, declare
+  two reviewably independent semantic lineages, execute all three agreement edges, and calibrate
+  accepting/rejecting controls. Consumer parity through one parser/classifier is not independence,
+  and triangulation never promotes the public assurance class or process exit.
 - Do not hand-edit generated compatibility snapshots. Regenerate them only when the corresponding
   contract change is intentional and review the resulting diff.
 
