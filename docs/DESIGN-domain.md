@@ -285,7 +285,9 @@ ordering mismatch. This is runtime observation evidence, not a formal proof.
 Saga `await` and compensation `after` clauses use per-step event observations in
 the kernel model and add `DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`. Durable process
 history is checked through replay evidence rather than treated as an unbounded
-kernel proof.
+kernel proof. Outcome events owned by an effect are observed only through that
+effect's correlation-guarded completion action, so the modeled lifecycle retains
+completion-requires-request without a weaker saga observation writer.
 
 ## Guarantee Boundary
 

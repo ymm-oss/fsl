@@ -177,7 +177,7 @@ fn all_five_public_kernel_domain_targets_match_pre_migration_goldens() {
 fn domain_testgen_adapter_and_effects_match_the_pre_migration_golden() {
     assert_eq!(
         domain_testgen_digest(),
-        "14f8a1466b9140875d288fb083e58401acf5f511b0089571098e7f148a841cf8"
+        "5984f5535c088363bba8812d7b783fc369ea9808fb3096d8f5c30623d99df81d"
     );
 }
 

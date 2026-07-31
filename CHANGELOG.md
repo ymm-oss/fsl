@@ -5,6 +5,9 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed `domain` saga lowering so effect-owned outcome events cannot bypass the
+  effect correlation guard through weaker generated observation actions. Three
+  observation actions disappear from generated kernels (#640).
 - `fslc domain check` now preserves the nested kernel's `warnings` and
   `action_coverage`, so vacuity and generated-action coverage diagnostics remain
   visible to domain users instead of being dropped by the stable projection

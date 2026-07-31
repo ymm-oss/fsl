@@ -10,7 +10,9 @@ use fsl_syntax::{
 
 use crate::{
     CoreError,
-    domain_lowering::{effect_outcome_member, validate_effect_outcome_roles},
+    domain_lowering::{
+        domain_effect_owns_event, effect_outcome_member, validate_effect_outcome_roles,
+    },
 };
 
 fn synthetic_num(value: i64, loc: DomainLoc) -> SyntaxExpr {
@@ -640,6 +642,9 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
         observed.insert(compensation.after_event.clone());
     }
     for event_name in observed {
+        if domain_effect_owns_event(context.domain, &event_name) {
+            continue;
+        }
         let Some((aggregate, event)) = context.event(&event_name) else {
             continue;
         };
