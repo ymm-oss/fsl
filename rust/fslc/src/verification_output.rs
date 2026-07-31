@@ -916,6 +916,14 @@ pub fn render_bmc_output(
     options: BmcOutputOptions<'_>,
 ) -> (Value, i32) {
     if let Some(violation) = &result.violation {
+        if violation.kind == "partial_op" {
+            let boundary = fsl_runtime::Violation {
+                kind: violation.kind.clone(),
+                name: violation.name.clone(),
+                step: violation.step,
+            };
+            return render_boundary_output(envelope, model, &boundary, &violation.trace, &options);
+        }
         return render_violation(envelope, model, violation, &options);
     }
     let unreached = result

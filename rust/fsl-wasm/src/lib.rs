@@ -392,15 +392,12 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             Ok(deadlock) => deadlock,
             Err(message) => return error(solver_version, "usage", message),
         };
-    // Mirrors the native CLI's `prepare_bmc` (`fslc/src/verification.rs`):
-    // this pre-scan is an optional shortcut ahead of the full solve below
-    // and needs a deterministic concrete initial state to run at all
-    // (#519). Skip it rather than failing the whole command when a model's
-    // init legitimately leaves some state free — the full solve below
-    // still explores every admissible initial value symbolically.
+    // Preserve exact concrete evidence for boundary outcomes the bounded
+    // symbolic value cannot represent. `partial_op` is intentionally left to
+    // the public symbolic verifier boundary itself (#651).
     if fsl_runtime::deterministic_initial_state(&model).is_ok() {
         match fsl_runtime::find_boundary_violation(model.clone(), request.options.depth) {
-            Ok(Some((violation, trace))) => {
+            Ok(Some((violation, trace))) if violation.kind != "partial_op" => {
                 let statistics = fsl_solver::VerificationStatistics::default();
                 return fslc_rust::verification_output::render_boundary_output(
                     envelope(solver_version),
@@ -417,7 +414,7 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
                 )
                 .0;
             }
-            Ok(None) => {}
+            Ok(Some(_) | None) => {}
             Err(failure) => {
                 return verifier_error(solver_version, &failure);
             }

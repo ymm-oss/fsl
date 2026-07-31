@@ -258,13 +258,19 @@ unbounded integer terms, agreement uses a separate typed definedness predicate
 that follows native short-circuit, statement-branch, guard, post-property, and
 checked-i64 evaluation order. A non-partial claim is rejected when its reached
 path is undefined; an untaken partial expression does not make a valid outcome
-unsupported. Agreement-only fallback values let zero-capacity sequence terms
-be constructed under those predicates; ordinary BMC and induction retain their
-existing fail-closed evaluation. Exact `partial_op` classification and concrete
-evidence that the bounded symbolic representation cannot retain, such as an
-over-capacity sequence suffix, return an error rather than green until an exact
-partial-evidence oracle is available. Concrete conformance vectors remain
-authoritative for `partial_op` rollback meanwhile.
+unsupported. The same backend-neutral traversal returns both full definedness
+and the first reached partial operation for ordinary BMC. Ordered guards,
+reached body expressions, and `ensures` classify only the six LANGUAGE.md
+partial operations, while an earlier checked integer overflow or invalid finite
+Map lookup remains a fail-closed evaluation error instead of being relabeled by
+a later partial operation.
+This keeps action-context `partial_op` classification inside the public
+`verify_bounded*` boundary without adding a production dependency on
+`fsl-runtime`. Agreement-only fallback values still let zero-capacity sequence
+terms be constructed under the broader conformance predicates. Concrete
+conformance vectors remain authoritative for exact rollback evidence that a
+bounded symbolic representation cannot retain, such as an over-capacity
+sequence suffix. Property-context totalization is unchanged.
 The solver-free `fsl-runtime` dependency boundary remains intact.
 
 ## CLI and API

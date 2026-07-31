@@ -972,19 +972,16 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
         request.selection.property,
         request.selection.excluded,
     );
-    // `find_boundary_violation` is a concrete pre-scan: an optional
-    // shortcut ahead of the full Z3-backed solve below, not the source of
-    // verify's soundness. It needs a deterministic concrete initial state
-    // to run at all (#519); a model whose init leaves some state free is
-    // still fully supported by `solve_bmc`, which explores every
-    // admissible initial value symbolically, so skip the shortcut rather
-    // than failing the whole command when it does not apply.
+    // Some concrete boundary outcomes (notably an over-capacity Seq successor)
+    // cannot be represented by the bounded symbolic value and must retain the
+    // exact Monitor evidence. Action-context `partial_op` is deliberately not
+    // consumed here: it belongs to `verify_bounded*` itself (#651).
     if checked_bounds.is_none()
         && request.initial_state.is_none()
         && fsl_runtime::deterministic_initial_state(&model).is_ok()
     {
         match fsl_runtime::find_boundary_violation(model.clone(), request.depth) {
-            Ok(Some((violation, trace))) => {
+            Ok(Some((violation, trace))) if violation.kind != "partial_op" => {
                 let statistics = fsl_solver::VerificationStatistics::default();
                 return Err(fslc_rust::verification_output::render_boundary_output(
                     envelope(),
@@ -1000,7 +997,7 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
                     },
                 ));
             }
-            Ok(None) => {}
+            Ok(Some(_) | None) => {}
             Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
         }
     }

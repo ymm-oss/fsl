@@ -501,7 +501,7 @@ observed CLI output:
 | R3 | Inline `state { x: T = e }` init reaches the same states as an equivalent explicit `init` block | LANGUAGE.md S2:499-508 ("normalized to an ordinary root assignment...same semantics as an equivalent `init` block") | Assigning the same root both inline and in `init` is `build_model`'s named semantic error |
 | R4 | Disjoint simultaneous assignments reach the same states regardless of source order | LANGUAGE.md S5:644-661 ("all right-hand sides...read the old state...frame condition is automatic") | Assigning the same variable twice on one path is the named semantic error |
 | R5 | A domain-bound-coincident invariant (`x <= hi`, textually equal to the type's own `hi`) holds at every declared size by construction | LANGUAGE.md S6 "Type bounds" (automatic, so a variable can never leave its own declared bound) | Widening the domain past the invariant's stale literal bound changes the verdict to `violated`; also reproduced mechanically via `enumerate_builtin_mutants`'s `type_bound_hi_plus1` |
-| R6 | `/`/`%` are total in property context but `partial_op` in action context | LANGUAGE.md S3:557-570 | The same expression in action context; see "Two confirmed findings" for what raw `verify_bounded` actually checks here |
+| R6 | `/`/`%` are total in property context but `partial_op` in action context | LANGUAGE.md S3:557-570 | The same expression in action context is checked directly by raw `verify_bounded`; the six operation fixtures must agree across all four native engines |
 | R7 | `entity`/`number` + `verify` reaches the same states as the hand-written lowered `type` | LANGUAGE.md S2:485-486 ("desugars to `type`") | Shifting the lowered bound by +1 past the declared size is detected |
 
 `R4`'s `assignment_remove` and `R6`'s `equality_operator_flip` reuse of
@@ -516,47 +516,40 @@ equivalent candidate is why R5's mutate-reuse test uses a separate,
 dedicated fixture instead of R5's own; see `relations.rs`'s
 `r5_mutate_kill_fixture` doc comment for the full account.
 
-### Two confirmed findings
+### Confirmed finding
 
-Both are recorded as re-measured facts, not silently normalized away or
-excluded:
+The remaining finding is recorded as a re-measured fact, not silently
+normalized away or excluded:
 
-1. **A partial Seq read (`head()`) evaluated in property context on an
-   empty sequence disagrees across engines.** `fsl_runtime::verify_explicit`
-   and `fsl_runtime::bfs` both raise a raw `RuntimeError`
-   ("`head()` on empty sequence") instead of returning a verdict, because
-   `Monitor::current_violation[_selected]` — unlike
-   `Monitor::execute_selected`'s post-step invariant check — does not catch
-   `is_partial_operation_error` and convert it to a `partial_op` `Violation`.
-   `fsl_verifier::verify_bounded` instead returns a *verdict*: `violated`,
-   `kind: "invariant"` (not `partial_op`), naming the user's own invariant,
-   at step 0 — its symbolic Seq encoding treats an out-of-range read as
-   *defined* with some solver-chosen value outside the element type's own
-   declared bound, rather than as undefined the way the concrete engines
-   (and LANGUAGE.md's own account of `/`/`%`, by contrast) treat it. Root
-   cause in the symbolic encoding is not diagnosed here; that is for the
-   tracking issue. Self-retiring exclusion:
-   `relations.rs::r6_property_context_seq_head_disagrees_across_engines_self_retiring_exclusion`
-   re-measures the exact `(kind, name, step)` and both error messages on
-   every run.
+**A partial Seq read (`head()`) evaluated in property context on an
+empty sequence disagrees across engines.** `fsl_runtime::verify_explicit`
+and `fsl_runtime::bfs` both raise a raw `RuntimeError`
+("`head()` on empty sequence") instead of returning a verdict, because
+`Monitor::current_violation[_selected]` — unlike
+`Monitor::execute_selected`'s post-step invariant check — does not catch
+`is_partial_operation_error` and convert it to a `partial_op` `Violation`.
+`fsl_verifier::verify_bounded` instead returns a *verdict*: `violated`,
+`kind: "invariant"` (not `partial_op`), naming the user's own invariant,
+at step 0 — its symbolic Seq encoding treats an out-of-range read as
+*defined* with some solver-chosen value outside the element type's own
+declared bound, rather than as undefined the way the concrete engines
+(and LANGUAGE.md's own account of `/`/`%`, by contrast) treat it. Root
+cause in the symbolic encoding is not diagnosed here; that is for the
+tracking issue. Self-retiring exclusion:
+`relations.rs::r6_property_context_seq_head_disagrees_across_engines_self_retiring_exclusion`
+re-measures the exact `(kind, name, step)` and both error messages on
+every run.
 
-2. **`fsl_verifier::verify_bounded` does not perform LANGUAGE.md S6's
-   automatic "Partial operations" check at all**, for any of the six named
-   operations, in action context. `rust/fsl-verifier/src/bmc.rs` has no
-   `partial_op` handling anywhere in it; the CLI's `--engine bmc`
-   `partial_op` classification comes from `rust/fslc/src/verification.rs`'s
-   `run_bmc_filtered` merging in a *concrete* pre-scan
-   (`fsl_runtime::find_boundary_violation`), not from the solver. This is a
-   scope boundary this suite documents rather than a bug: raw
-   `verify_bounded`'s outcome for these six fixtures ranges from a clean
-   verdict (`divide`/`remainder`) to a spurious `type_bound` on the
-   assigned scalar (`head`/`at`/index — the same symbolic-Seq gap as
-   finding 1, surfacing differently) to `Err("model sequence length is
-   negative")` (`pop`) — all recorded, none asserted, in
-   `relations.rs::r6_action_context_partial_operations_are_caught_only_by_the_concrete_engines`.
-   The three concrete-family engines (Monitor BFS / explicit /
-   `find_boundary_violation`) agree with each other on `partial_op` for
-   all six.
+The former raw-API gap for action-context partial operations was resolved by
+#651. `fsl_verifier::verify_bounded` now applies backend-neutral symbolic
+definedness at the public verifier boundary for ordered guards, reached body
+expressions, and `ensures`. The CLI and Worker no longer consume `partial_op`
+from their concrete boundary pre-scan; non-partial outcomes that the bounded
+symbolic value cannot represent still retain that exact concrete evidence. The
+R6 fixtures assert Monitor BFS, explicit,
+`find_boundary_violation`, and raw BMC agree on `partial_op` for all six named
+operations. Property-context totalization remains outside that action-context
+classification and is still covered by the finding above.
 
 ### Z3js / Worker parity ownership
 
