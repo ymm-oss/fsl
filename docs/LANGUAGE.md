@@ -688,7 +688,8 @@ variable.
 | Check | Content | On violation |
 |---|---|---|
 | Type bounds | Every bounded-type state variable (including Map values, struct fields, and Seq elements) is within range | `violated` / `type_bound` / `_bounds_<var>` |
-| Partial operations (action context: `requires`/body/`ensures` only, see §3) | At the time of `pop()`/`head()`/`at(i)`, the sequence is non-empty and the index is in range, and the divisor of `/` `%` is non-zero | `violated` / `partial_op` / `_partial_<action>` |
+| Partial Seq operations (action and property contexts) | At the time of `pop()`/`head()`/`at(i)`/index, the sequence is non-empty and the index is in range | `violated` / `partial_op` / `_partial_<action>`, `_partial_property_<property>`, or `_partial_property_terminal` |
+| Partial arithmetic (action context: `requires`/body/`ensures` only, see §3) | The divisor of `/` `%` is non-zero | `violated` / `partial_op` / `_partial_<action>` |
 | action coverage | Each action is enabled at least once within depth K | diagnosis of the blocking requires in `action_coverage` |
 | Deadlock | Reaching a state where all actions become disabled | warning (`violated` with `--deadlock error`) |
 | trans | Whether the two-state predicate holds across all reachable transitions | `violated` / `trans` / `trans` + trace |
@@ -1170,8 +1171,10 @@ invariant QueuedAreQueued {
 }
 ```
 
-`at()` is total in property contexts (out-of-range yields an unspecified value),
-so always guard it with `i < q.size()`.
+An out-of-range `at()`/index (or `head()`/`pop()` on an empty sequence) is a
+`partial_op` violation in property context. Guarding with `i < q.size() => ...`
+short-circuits the read and keeps the property defined. Unlike `/` and `%`, Seq
+reads never totalize to an unspecified symbolic value.
 
 ### Aggregating over a Seq: the index / domain-type idiom
 
@@ -2197,8 +2200,10 @@ requirement NFR-1 "complete within 4 ticks of acceptance" {
   `requires age >= K`)**. To confirm non-vacuity, lower it to `K-1` and check
   that it becomes violated. `fslc verify --vacuity` emits
   `kind:"urgency_freeze"` for the provable form of this trap (the urgent
-  condition is initial and inductive); absence of the warning is not a proof of
-  non-vacuity.
+  condition is initial and inductive). It emits `kind:"vacuous_deadline"` when
+  the stronger per-deadline check proves that every relevant age value remains
+  zero across all transitions even though `tick` may run while the age
+  condition is false. Absence of either warning is not a proof of non-vacuity.
 - The BMC check works immediately. An inductive proof often needs a time-budget
   auxiliary invariant (the `age + remaining work <= K` form) (derived from the
   CTI; real examples in `examples/nfr/`).
@@ -2592,8 +2597,9 @@ DESIGN-*.md).
   `vacuous_leadsto` (the trigger is unreachable), `always_true_requires`
   (a guard that is always true under the context of preceding clauses),
   `tautology_over_frozen` (a dynamically tautological invariant over state no
-  action changes), and `urgency_freeze` (a generated deadline `tick` proven dead
-  because urgency freezes time). `error` exits 2. →
+  action changes), `urgency_freeze` (a generated deadline `tick` proven dead
+  because urgency freezes time), and `vacuous_deadline` (a generated deadline
+  whose age is proven to remain zero across every transition). `error` exits 2. →
   [`DESIGN-vacuity.md`](DESIGN-vacuity.md)
 - **`--strict-tags`** — warns on success results about untagged declarations
   (fabrication candidates) and unreferenced requirements (omission candidates,

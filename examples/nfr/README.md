@@ -19,8 +19,9 @@ refinement.
   stutter observations.
 
 The modeled SLA is: once a request is submitted, it is finished within 4 discrete
-ticks. `urgent start, finish` means `tick` is disabled whenever work can start or
-finish, so the model includes the scheduling assumption needed to avoid starvation.
+ticks. `start` becomes urgent at age 3 and `finish` at age 4, so time advances
+before the due handlers become mandatory and the deadline consumes real slack.
+Lowering the deadline to 3 produces a violation at the age-4 boundary.
 
 Useful checks:
 
@@ -35,7 +36,7 @@ fslc replay examples/nfr/bounded_response.fsl \
              --trace examples/nfr/bounded_response.overdue.v1.json  # => bounded liveness failure
 ```
 
-Removing `urgent start, finish` leaves `tick` unconstrained by runnable work and
+Removing `urgent start, finish` leaves `tick` unconstrained by due work and
 should produce a deadline violation with repeated `tick` steps.
 
 ## Cross-layer SLA: the clock must be shared (issue #56)

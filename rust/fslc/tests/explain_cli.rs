@@ -46,7 +46,81 @@ fn run_cli_text(args: &[&str]) -> String {
     String::from_utf8(output.stdout).expect("UTF-8 readable output")
 }
 
+fn run_explain_source(source: &str) -> (serde_json::Value, i32) {
+    let path = std::env::temp_dir().join(format!(
+        "fslc-explain-counterfactual-scope-{}-{:?}.fsl",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::write(&path, source).expect("write explain fixture");
+    let result = run_cli(&[
+        "explain",
+        path.to_str().expect("UTF-8 fixture path"),
+        "--depth",
+        "3",
+    ]);
+    std::fs::remove_file(path).expect("remove explain fixture");
+    result
+}
+
 const BRANCHED_SPEC: &str = "examples/layers/return_system.fsl";
+
+#[test]
+fn explain_counterfactuals_declare_that_liveness_is_skipped() {
+    let (value, status) = run_cli(&["explain", "specs/cart_v1.fsl", "--depth", "3"]);
+    assert_eq!(status, 0, "{value}");
+    assert_eq!(
+        value["counterfactual_scope"]["properties"],
+        serde_json::json!(["invariant", "reachable"])
+    );
+    assert_eq!(value["counterfactual_scope"]["liveness"], "skipped");
+
+    let readable = run_cli_text(&["explain", "specs/cart_v1.fsl", "--depth", "3", "--readable"]);
+    assert!(readable.contains("leadsTo liveness skipped"), "{readable}");
+}
+
+#[test]
+fn quantified_liveness_with_mixed_fairness_does_not_block_safety_counterfactuals() {
+    let source = r"
+spec ExplainLivenessIsolation {
+  type P = 0..1
+  state { safe: Bool, ready: Bool, done: Map<P, Bool> }
+  init {
+    safe = true
+    ready = false
+    forall p: P { done[p] = false }
+  }
+  action corrupt() {
+    requires ready
+    safe = false
+  }
+  fair action complete(p: P) {
+    requires not done[p]
+    done[p] = true
+  }
+  action idle() { safe = safe }
+  invariant Safe { safe }
+  leadsTo EventuallyDone {
+    forall p: P { not done[p] ~> done[p] }
+  }
+}
+";
+    let (value, status) = run_explain_source(source);
+    assert_eq!(status, 0, "{value}");
+    assert_eq!(value["counterfactual_scope"]["liveness"], "skipped");
+    let safe = value["counterfactuals"]
+        .as_array()
+        .expect("counterfactuals")
+        .iter()
+        .find(|item| item["invariant"] == "Safe")
+        .expect("Safe counterfactual");
+    assert_ne!(safe["weakening"], serde_json::Value::Null, "{value}");
+    assert!(
+        safe["trace"]
+            .as_array()
+            .is_some_and(|trace| !trace.is_empty())
+    );
+}
 
 // ---------------------------------------------------------------------
 // #528 — readable branch/refinement detail restored, no internal-name leak.

@@ -4,12 +4,10 @@ clean bounded result.
 
 --- a/rust/fsl-verifier/src/bmc.rs
 +++ b/rust/fsl-verifier/src/bmc.rs
-@@ -192,7 +192,7 @@ async fn verify_bounded_config<S: SmtSolver>(
+@@ -319,5 +319,5 @@ async fn verify_bounded_config<S: SmtSolver>(
 -    for step in 0..=depth {
 +    for step in 0..depth {
-         if let Some(violation) = check_state_properties(
-             solver,
-             model,
-             &states,
-             &choices,
-             &instances,
+         let property_checks = StatePropertyChecks {
+             checked_bounds,
+             pending_reachables: &pending_reachables,
+         };

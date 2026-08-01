@@ -316,6 +316,9 @@ findings, `fslc domain expand` to inspect the generated kernel, and
 `DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`. The v0 implementation does not prove
 real gateway behavior, queue delivery, wall-clock timeouts, or production
 exactly-once semantics.
+The accepted #662 design keeps `event_*` flags one-hot/current-step and will add
+a dedicated `Map<Correlation,SagaPhase>` in a follow-up; do not make global
+event flags sticky or treat one effect's status map as a general saga history.
 Native domain generation is grounded in Public Kernel v1. A closed
 `domain-scaffold-metadata.v1` companion retains source grouping/spelling that
 lowering cannot publish. Versions, dialect, duplicate Kernel members, and
@@ -801,11 +804,13 @@ could read (#570). No other word is reserved — `count`, `sum`, `stage`, `in`,
    action update(k: K) { m[k].f1 = 1  m[k].f2 = 2 }
    ```
 4. enabled when all requires hold. ensures is checked after the transition.
-5. For Seq `pop/head/at` and a nonzero divisor of `/` `%`, **well-definedness is
-   checked automatically** in action context (`requires`/body/`ensures`; partial_op).
-   A requires guard or an if guard both work (path conditions are considered). An
-   out-of-range at() inside an invariant/reachable is an undefined value — always
-   guard with `i < q.size() =>`. `/`/`%` are the one exception: division by zero is
+5. For Seq `pop/head/at/index`, **well-definedness is checked automatically** in
+   both action and state-property context (`partial_op`). A requires, if, or
+   implication guard works because path conditions and short-circuiting are
+   considered. An out-of-range read inside a property is
+   `_partial_property_<property>` (or `_partial_property_terminal`) — always
+   guard with `i < q.size() =>`.
+   `/`/`%` are the one exception: division by zero is
    *totally defined* as `0` (Euclidean for `b != 0`: `-7 / 2 == -4`, `-7 % 2 == 1`),
    so `a / 0` inside an invariant/trans/reachable/leadsTo/mapping expression always
    evaluates to `0` rather than being undefined — only the unguarded-in-action-context
@@ -1324,7 +1329,10 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   KPI projections, branch lowering (one `branch:` line per split action),
   and a synthesized `Implements:` refinement mapping when the source
   declares one. Invariants for which none is found are explicitly marked
-  `no counterfactual within depth K`.
+  `no counterfactual within depth K`. Counterfactual weakening checks
+  invariants and reachability only; `counterfactual_scope.liveness:"skipped"`
+  and the readable header make explicit that `leadsTo` remains the normal
+  `verify` command's responsibility.
 - `--strict-tags` on `check` / `verify` adds traceability warnings only to
   ok/verified/proved success results. The targets are untagged
   action/invariant/trans/reachable/leadsTo, and IDs declared via
@@ -1346,6 +1354,9 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `branching` (data-dependent inside an `if`) /
   `relational` (no local guard, the premise lives in an external structure — cannot
   be expressed in the type and remains a runtime/verification obligation).
+  A locally guarded action that leaves the entity state unchanged is reported
+  as an explicit self-loop and emitted with a generic TypeScript return state
+  (`S → S`); an action unrelated to that entity is not part of its machine.
   An entity's `applicability` is `full` only when all transitions are
   derivable/branching. `relational` ones carry a reason (diagnostics) and a
   requirement ID. `--ts` outputs only the TypeScript for the derivable portion.
@@ -1383,7 +1394,10 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
 - `reachable_failed`: each `unreached[]` has `classification`:
   `insufficient_depth` (target satisfiable as a state predicate, no witness by K)
   or `over_constrained` (target unsat under type bounds/invariants, with
-  `blocking_requires` naming the blocking core).
+  `blocking_requires` naming an irreducible blocking core). Native and browser
+  frontends compute this in a solver session independent of BMC witness
+  projection; path or deadlock UNSAT state never participates in the
+  classification, and diagnostic query history cannot perturb witnesses.
 - faithfulness diagnostics may add `faithfulness_class` and
   `recommended_action`: `partial_op_unguarded`, `frozen_only_invariant`,
   `intent_unexercised`, or `liveness_not_refined`.
@@ -1893,7 +1907,8 @@ If you make an action that can be enabled at all times (e.g. the response itself
 `urgent`, **time never advances at all and the deadline is vacuously verified for
 any K** (even `deadline <= 0` is green). `fslc verify --vacuity` emits
 `kind:"urgency_freeze"` when this freeze is proven by the generated `tick` guard
-being initial and inductive. The correct form is to **make only a guarded action
+being initial and inductive, and `kind:"vacuous_deadline"` when each relevant
+age value is instead proven to remain zero across every transition. The correct form is to **make only a guarded action
 that becomes enabled only at the deadline `urgent`**:
 
 ```fsl

@@ -477,15 +477,19 @@ fn explicit_reachable_failure_classifies_unreachable_only_at_closure() {
         hint.contains("explicit state-space closure proves that the requested reachable goal cannot be reached")
     }));
 
-    // At a depth too small to reach closure, explicit must not claim
-    // definitive unreachability — it should classify the same way BMC
-    // does when it also cannot witness the goal within that depth.
+    // Before closure, explicit must not claim exploration-level
+    // `unreachable`, but the shared isolated state-predicate diagnosis can
+    // still prove that HitSix contradicts its declared type bound.
     let (bounded, bounded_status) = verify(&path, "explicit", 2, &[]);
     assert_eq!(bounded_status, 1);
     assert_eq!(bounded["result"], "reachable_failed");
     assert_eq!(bounded["closure"], false);
     let bounded_unreached = bounded["unreached"].as_array().expect("unreached array");
-    assert_eq!(bounded_unreached[0]["classification"], "insufficient_depth");
+    assert_eq!(bounded_unreached[0]["classification"], "over_constrained");
+    assert_eq!(
+        bounded_unreached[0]["blocking_requires"][0]["kind"],
+        "type_bound"
+    );
 
     let (bmc_bounded, bmc_bounded_status) = verify(&path, "bmc", 2, &[]);
     assert_eq!(bmc_bounded_status, 1);

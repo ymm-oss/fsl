@@ -29,11 +29,13 @@ requirements SlaWorker {
   fair action start(r: Req) {
     requires pending[r]
     requires serving == none
+    requires age[r] >= 3
     serving = some(r)
   }
 
   fair action finish() {
     requires serving is some(r)
+    requires age[r] >= 4
     pending[r] = false
     served[r] = true
     serving = none

@@ -120,6 +120,7 @@ export async function installZ3Bridge() {
   };
   globalThis.fslZ3Push = () => solver.push();
   globalThis.fslZ3Pop = (levels) => solver.pop(Number(levels));
+  globalThis.fslZ3Reset = () => solver.reset();
   globalThis.fslZ3Assert = (handle) => solver.add(term(handle));
   globalThis.fslZ3AssertAndTrack = (handle, tracker) =>
     solver.addAndTrack(term(handle), term(tracker));
