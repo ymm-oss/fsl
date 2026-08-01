@@ -5,6 +5,26 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Added the M13 FSL Logic Test (#673): deterministic valid finite models now
+  carry stable seed/case IDs, a single-case replay command, machine-coupled
+  generation/dialect/metamorphic inventory, and named concrete-versus-symbolic
+  agreement edges over verdicts, clean-run reachables/action coverage, exact
+  witnesses, replay, and successor admission. PR and scheduled tiers emit a
+  fail-closed completeness report; scheduled evidence spans three seeds and
+  three depths (1,152 cases), delayed violations carry nontrivial actions, and
+  a comparator corruption control exercises structural shrinking and minimized replay, while a deduplicated corpus owns
+  future real disagreements. Generation volume does not promote public
+  assurance or change product output.
+- Added the M13 soundness-critical semantic mutation gate (#672). A pinned
+  `cargo-mutants 27.1.0` pilot now mutates exact P2 bounded-verification,
+  witness projection/replay, identity/location, and result-fold decisions;
+  reviewed semantic operators cover unknown/backend failures, inclusive
+  depth, witness omissions, replay bypass, and false-success folds that
+  generic token mutation cannot express. Pull requests run changed-scope
+  mutants plus every curated control, while product events run the complete
+  accepted scope. Survivors, timeouts, stale seams, missing output, and stale
+  equivalence records fail closed; this calibrates detection power without
+  promoting any public assurance class or changing product output.
 - Added CI-internal Triangulated Assurance (#670): a federated, fail-closed
   registry now requires one raw observation, two explicitly independent
   semantic lineages, all three executable agreement edges, positive/negative

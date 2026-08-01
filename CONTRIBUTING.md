@@ -78,7 +78,11 @@ inventory and explicitly optional Python surfaces.
   `rust/fslc/tests/fault_operators/` — a patch file plus one row in `operators.txt` naming the primary
   detector that must fail under it and a blind detector that must not. `tools/run-fault-operators.sh`
   then proves not only that the defect is gone but that the suite would notice its return. Run it with
-  `./tools/check-native-integration.sh fault-operators`.
+  `./tools/check-native-integration.sh semantic-mutation complete` (or the
+  legacy curated-only `fault-operators` phase while developing an operator).
+- Changes to runtime or verifier semantics should run
+  `./tools/check-native-integration.sh fsl-logic pr`; use `scheduled` when
+  changing the generator, comparator, inventory, or release evidence.
 - **Triangulated claims:** use `docs/DESIGN-triangulated-assurance.md` only for selected
   soundness-critical seams. Register the semantic owner's claim with a raw common observation,
   distinct owner/decision lineages, three executable edges, accepting/rejecting controls, and scope.

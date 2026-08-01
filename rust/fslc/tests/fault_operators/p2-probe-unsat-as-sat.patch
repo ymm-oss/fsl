@@ -1,0 +1,15 @@
+P2 SAT/UNSAT substitution: classify an unsatisfiable violation probe as
+satisfiable. A known-safe type-bound probe becomes a false violation before
+the real invariant witness, cutting model↔oracle identity.
+
+--- a/rust/fsl-verifier/src/bmc.rs
++++ b/rust/fsl-verifier/src/bmc.rs
+@@ -1127,7 +1127,7 @@ async fn probe<S: SmtSolver>(solver: &mut S, condition: &S::Term) -> Result<bool
+     popped?;
+     match result {
+         SatResult::Sat => Ok(true),
+-        SatResult::Unsat => Ok(false),
++        SatResult::Unsat => Ok(true),
+         SatResult::Unknown => Err(VerifyError::new("solver returned unknown")),
+     }
+ }

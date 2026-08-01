@@ -1,0 +1,126 @@
+{
+  "$comment": "SPDX-License-Identifier: Apache-2.0",
+  "schema": "fslc.implementation-mutation-scope.v1",
+  "schema_version": 1,
+  "runner": {
+    "name": "cargo-mutants",
+    "version": "27.1.0",
+    "config": "rust/.cargo/mutants.toml"
+  },
+  "pilot": "p2.symbolic_concrete_witness",
+  "generic_functions": [
+    "verify_bounded_config",
+    "check_state_properties",
+    "make_violation",
+    "probe",
+    "project_trace",
+    "project_action",
+    "replay_bmc_witnesses",
+    "render_violation"
+  ],
+  "generic_exclusions": [
+    {
+      "id": "p2.exclude.leadsto-stagnation",
+      "path": "rust/fsl-verifier/src/bmc.rs",
+      "function": "verify_bounded_config",
+      "anchor": "if result.leadsto_violation.is_none() && !model.leadstos.is_empty() {",
+      "occurrence": 1,
+      "reason": "Leadsto/liveness semantics are outside the initial P2 symbolic-witness pilot."
+    },
+    {
+      "id": "p2.exclude.leadsto-deadlines",
+      "path": "rust/fsl-verifier/src/bmc.rs",
+      "function": "verify_bounded_config",
+      "anchor": "if result.leadsto_violation.is_none() && !model.leadstos.is_empty() {",
+      "occurrence": 2,
+      "reason": "Leadsto/liveness semantics are outside the initial P2 symbolic-witness pilot."
+    },
+    {
+      "id": "p2.exclude.leadsto-final-depth",
+      "path": "rust/fsl-verifier/src/bmc.rs",
+      "function": "verify_bounded_config",
+      "anchor": "let unrolled_depth = states.len() - 1;",
+      "occurrence": 1,
+      "reason": "Leadsto/liveness semantics are outside the initial P2 symbolic-witness pilot."
+    }
+  ],
+  "decisions": [
+    {
+      "id": "p2.bmc.result-classification",
+      "path": "rust/fsl-verifier/src/bmc.rs",
+      "function": "verify_bounded_config",
+      "anchor": "SatResult::Unknown => return Err(VerifyError::new(\"solver returned unknown for init\"))",
+      "fault_classes": ["sat_unsat_unknown_substitution", "backend_failure_as_success"]
+    },
+    {
+      "id": "p2.bmc.depth-inclusion",
+      "path": "rust/fsl-verifier/src/bmc.rs",
+      "function": "verify_bounded_config",
+      "anchor": "for step in 0..=depth {",
+      "fault_classes": ["depth_step_off_by_one"]
+    },
+    {
+      "id": "p2.bmc.probe-classification",
+      "path": "rust/fsl-verifier/src/bmc.rs",
+      "function": "probe",
+      "anchor": "SatResult::Unknown => Err(VerifyError::new(\"solver returned unknown\"))",
+      "fault_classes": ["sat_unsat_unknown_substitution"]
+    },
+    {
+      "id": "p2.bmc.state-property-evaluation",
+      "path": "rust/fsl-verifier/src/bmc.rs",
+      "function": "check_state_properties",
+      "anchor": "for property in &model.invariants {",
+      "fault_classes": ["violation_kind_name_substitution", "failure_result_fold_to_success"]
+    },
+    {
+      "id": "p2.bmc.violation-identity",
+      "path": "rust/fsl-verifier/src/bmc.rs",
+      "function": "make_violation",
+      "anchor": "let trace = build_witness(solver, model, condition, states, choices, instances, step).await?;",
+      "fault_classes": ["violation_kind_name_substitution", "witness_omission"]
+    },
+    {
+      "id": "p2.trace.state-action-projection",
+      "path": "rust/fsl-verifier/src/trace.rs",
+      "function": "project_trace",
+      "anchor": "let state = project_state(solver, model, &states[step])?;",
+      "fault_classes": ["witness_state_omission", "witness_action_omission"]
+    },
+    {
+      "id": "p2.trace.action-identity-projection",
+      "path": "rust/fsl-verifier/src/trace.rs",
+      "function": "project_action",
+      "anchor": "let index = match solver.model_eval(choice)? {",
+      "fault_classes": ["witness_action_omission", "violation_action_substitution"]
+    },
+    {
+      "id": "p2.replay.acceptance",
+      "path": "rust/fslc/src/verification_output.rs",
+      "function": "replay_bmc_witnesses",
+      "anchor": "if let Some(violation) = &result.violation {\n        replay(&violation.trace).map_err(|error| error.to_string())?;\n    }",
+      "fault_classes": ["replay_acceptance_bypass"]
+    },
+    {
+      "id": "p2.output.identity-location-fold",
+      "path": "rust/fslc/src/verification_output.rs",
+      "function": "render_violation",
+      "anchor": "property.map_or(Value::Null, |property| property.span.python_loc()),",
+      "fault_classes": ["violation_location_omission", "failure_result_fold_to_success"]
+    }
+  ],
+  "out_of_scope": [
+    {
+      "path": "rust/fsl-verifier/src/induction.rs",
+      "reason": "P2 pilot is bounded symbolic witness and concrete replay; induction expands only after pilot cost is measured."
+    },
+    {
+      "path": "rust/fsl-solver-z3js/src/lib.rs",
+      "reason": "Browser backend parity is a consumer/backend boundary, not the initial native P2 mutation scope."
+    },
+    {
+      "path": "src/fslc",
+      "reason": "Frozen Python compatibility reference is not product evidence."
+    }
+  ]
+}

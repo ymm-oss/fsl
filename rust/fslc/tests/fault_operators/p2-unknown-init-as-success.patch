@@ -1,0 +1,13 @@
+P2 unknown-as-success substitution: accept an unknown initial satisfiability
+query and continue as though initialization were satisfiable. The injected
+unknown solver detector must reject this fail-open branch.
+
+--- a/rust/fsl-verifier/src/bmc.rs
++++ b/rust/fsl-verifier/src/bmc.rs
+@@ -154,5 +154,5 @@ async fn verify_bounded_config<S: SmtSolver>(
+     match solver.check().await? {
+         SatResult::Sat => {}
+         SatResult::Unsat => return Err(VerifyError::new("init constraints are unsatisfiable")),
+-        SatResult::Unknown => return Err(VerifyError::new("solver returned unknown for init")),
++        SatResult::Unknown => {}
+     }

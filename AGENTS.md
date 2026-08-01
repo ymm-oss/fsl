@@ -65,6 +65,9 @@ post-merge product-gate failure or treat its automatically created issue as a wa
 Python is optional and is used only for changes explicitly scoped to the frozen compatibility
 reference or Python-based repository hooks. Native solver changes should also run
 the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests.
+Changes to concrete/symbolic semantics additionally run
+`./tools/check-native-integration.sh fsl-logic pr`; generator, comparator,
+inventory, and promotion changes run the `scheduled` tier.
 
 ## Correctness invariants
 

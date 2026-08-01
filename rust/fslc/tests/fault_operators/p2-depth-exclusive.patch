@@ -1,0 +1,15 @@
+P2 depth off-by-one: stop before evaluating the requested final depth. The
+pilot witness occurs at step 1 under depth 1 and must not disappear behind a
+clean bounded result.
+
+--- a/rust/fsl-verifier/src/bmc.rs
++++ b/rust/fsl-verifier/src/bmc.rs
+@@ -192,7 +192,7 @@ async fn verify_bounded_config<S: SmtSolver>(
+-    for step in 0..=depth {
++    for step in 0..depth {
+         if let Some(violation) = check_state_properties(
+             solver,
+             model,
+             &states,
+             &choices,
+             &instances,

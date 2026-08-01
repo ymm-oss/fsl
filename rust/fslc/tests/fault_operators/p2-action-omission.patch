@@ -1,0 +1,23 @@
+P2 action omission: omit every projected witness action. The full public
+witness detector must reject the corrupted trace while parsing remains blind.
+
+--- a/rust/fsl-verifier/src/trace.rs
++++ b/rust/fsl-verifier/src/trace.rs
+@@ -22,16 +22,7 @@ pub(crate) fn project_trace<S: SmtSolver>(
+     let mut trace = Vec::new();
+     for step in 0..=upto {
+         let state = project_state(solver, model, &states[step])?;
+-        let action = if step == 0 {
+-            None
+-        } else {
+-            Some(project_action(
+-                solver,
+-                model,
+-                &choices[step - 1],
+-                instances,
+-            )?)
+-        };
++        let action = None;
+         let changes = trace
+             .last()
+             .map_or_else(BTreeMap::new, |previous: &TraceStep| {

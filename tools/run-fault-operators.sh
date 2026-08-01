@@ -77,23 +77,48 @@ primary_targets=()
 primary_tests=()
 blind_targets=()
 blind_tests=()
+contracts=()
+seam_paths=()
+seam_anchors=()
+expected_changes=()
+calibrated_edges=()
+source_scopes=()
 
 read_table() {
-  local name patch_file primary_target primary_test blind_target blind_test extra
-  while IFS='|' read -r name patch_file primary_target primary_test blind_target blind_test extra; do
+  local name patch_file contract seam_path seam_anchor primary_target primary_test
+  local blind_target blind_test expected_change calibrated_edge source_scope extra
+  while IFS='^' read -r name patch_file contract seam_path seam_anchor primary_target primary_test blind_target blind_test expected_change calibrated_edge source_scope extra; do
     name="$(trim "${name:-}")"
     [ -n "$name" ] || continue
     case "$name" in \#*) continue ;; esac
-    [ -z "$(trim "${extra:-}")" ] || fail "$table: row '$name' has more than six columns"
+    [ -z "$(trim "${extra:-}")" ] || fail "$table: row '$name' has more than twelve columns"
     patch_file="$(trim "${patch_file:-}")"
     [ -n "$patch_file" ] || fail "$table: row '$name' names no patch file"
     [ -f "$operators_dir/$patch_file" ] || fail "$table: row '$name' names a missing patch file '$patch_file'"
+    contract="$(trim "${contract:-}")"
+    seam_path="$(trim "${seam_path:-}")"
+    seam_anchor="$(trim "${seam_anchor:-}")"
+    expected_change="$(trim "${expected_change:-}")"
+    calibrated_edge="$(trim "${calibrated_edge:-}")"
+    source_scope="$(trim "${source_scope:-}")"
+    [ -n "$contract" ] || fail "$table: row '$name' names no violated contract"
+    [ -n "$seam_path" ] || fail "$table: row '$name' names no seam path"
+    [ -n "$seam_anchor" ] || fail "$table: row '$name' names no exact seam anchor"
+    [ -n "$expected_change" ] || fail "$table: row '$name' names no expected semantic change"
+    [ -n "$calibrated_edge" ] || fail "$table: row '$name' names no calibrated edge"
+    [ -n "$source_scope" ] || fail "$table: row '$name' names no source scope"
     names+=("$name")
     patch_files+=("$operators_dir/$patch_file")
+    contracts+=("$contract")
+    seam_paths+=("$seam_path")
+    seam_anchors+=("$seam_anchor")
     primary_targets+=("$(trim "${primary_target:-}")")
     primary_tests+=("$(trim "${primary_test:-}")")
     blind_targets+=("$(trim "${blind_target:-}")")
     blind_tests+=("$(trim "${blind_test:-}")")
+    expected_changes+=("$expected_change")
+    calibrated_edges+=("$calibrated_edge")
+    source_scopes+=("$source_scope")
   done <"$table"
   [ "${#names[@]}" -gt 0 ] || fail "$table declares no operators"
 
@@ -102,7 +127,7 @@ read_table() {
   # prevent. Controls live in `controls/` and are named directly below.
   local file
   for file in "$operators_dir"/*.patch; do
-    grep -q "|[[:space:]]*$(basename "$file")[[:space:]]*|" "$table" ||
+    grep -q "\^[[:space:]]*$(basename "$file")[[:space:]]*\^" "$table" ||
       fail "$file is not referenced by any row in $table. Either add its row or
   delete the patch -- an operator that runs nowhere is not an operator."
   done

@@ -3,6 +3,7 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
+use std::process::Command;
 use std::task::{Context, Poll, Waker};
 
 use fsl_core::{FsResolver, FslValue, KernelModel, Span, TraceStep};
@@ -188,7 +189,7 @@ fn symbolic_witness_agrees_with_concrete_replay_and_identity() {
 }
 
 #[test]
-fn corrupting_state_step_kind_or_location_cuts_a_p2_edge() {
+fn corrupting_each_witness_identity_field_cuts_a_p2_edge() {
     let model = load_model();
     let observed = symbolic_observation(&model);
 
@@ -203,6 +204,16 @@ fn corrupting_state_step_kind_or_location_cuts_a_p2_edge() {
     let mut kind = observed.clone();
     kind.kind = "trans".to_owned();
 
+    let mut name = observed.clone();
+    name.name = "MutatedName".to_owned();
+
+    let mut action = observed.clone();
+    action.trace[1]
+        .action
+        .as_mut()
+        .expect("step-one witness action")
+        .name = "mutated_action".to_owned();
+
     let mut location = observed.clone();
     location.failed_location.start.line += 1;
 
@@ -210,6 +221,8 @@ fn corrupting_state_step_kind_or_location_cuts_a_p2_edge() {
         ("state", state),
         ("step", step),
         ("kind", kind),
+        ("name", name),
+        ("action", action),
         ("location", location),
     ] {
         assert!(
@@ -217,4 +230,77 @@ fn corrupting_state_step_kind_or_location_cuts_a_p2_edge() {
             "corrupt {field} must cut replay or identity agreement"
         );
     }
+}
+
+/// Primary detector shared by the P2 semantic fault operators. It checks the
+/// public projection rather than merely observing that some violation exists:
+/// result, exit, kind/name, step, property location, final state, action and
+/// bounded completeness must remain bound to the replayed witness.
+#[test]
+fn p2_cli_observation_preserves_full_witness_identity() {
+    let fixture = repository_root().join("rust/fslc/tests/fixtures/issue_502_reachable_empty.fsl");
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args([
+            "verify",
+            fixture.to_str().expect("UTF-8 path"),
+            "--depth",
+            "1",
+        ])
+        .output()
+        .expect("run native P2 verifier");
+    assert_eq!(output.status.code(), Some(1), "P2 violation exit");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("parse P2 JSON report");
+    assert_eq!(report["result"], "violated");
+    assert_eq!(report["violation_kind"], "invariant");
+    assert_eq!(report["invariant"], "NoTrivialSelfReach");
+    assert_eq!(report["violated_at_step"], 1);
+    assert_eq!(report["loc"], serde_json::json!({"line": 17, "column": 3}));
+    assert_eq!(report["checked_to_depth"], 1);
+    assert_eq!(report["completeness"], "bounded");
+    assert_eq!(report["trace"][0]["step"], 0);
+    assert_eq!(report["trace"][0]["state"]["r"], serde_json::json!([]));
+    assert_eq!(report["trace"][1]["step"], 1);
+    assert_eq!(
+        report["trace"][1]["state"]["r"],
+        serde_json::json!([[0, 0]])
+    );
+    assert_eq!(report["trace"][1]["action"]["name"], "link");
+    assert_eq!(
+        report["trace"][1]["action"]["params"],
+        serde_json::json!({"a": 0, "b": 0})
+    );
+    assert_eq!(report["last_action"]["name"], "link");
+    assert_eq!(
+        report["last_action"]["loc"],
+        serde_json::json!({"line": 13, "column": 3})
+    );
+}
+
+#[test]
+fn p2_cli_transition_identity_resolves_the_matching_property() {
+    let fixture = repository_root().join("rust/fslc/tests/fixtures/assurance_trans_violation.fsl");
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args([
+            "verify",
+            fixture.to_str().expect("UTF-8 path"),
+            "--depth",
+            "1",
+        ])
+        .output()
+        .expect("run native P2 transition verifier");
+    assert_eq!(output.status.code(), Some(1), "transition violation exit");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("parse transition JSON report");
+    assert_eq!(report["result"], "violated");
+    assert_eq!(report["violation_kind"], "trans");
+    assert_eq!(report["trans"], "NeverDecrease");
+    assert_eq!(report["invariant"], "NeverDecrease");
+    assert_eq!(report["loc"], serde_json::json!({"line": 16, "column": 3}));
+    assert_eq!(report["violated_at_step"], 1);
+    assert_eq!(report["last_action"]["name"], "dec");
+    assert_eq!(
+        report["last_action"]["loc"],
+        serde_json::json!({"line": 11, "column": 3})
+    );
 }

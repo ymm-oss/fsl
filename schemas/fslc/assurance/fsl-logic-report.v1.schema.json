@@ -1,0 +1,97 @@
+{
+  "$comment": "SPDX-License-Identifier: Apache-2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/assurance/fsl-logic-report.v1.schema.json",
+  "title": "FSL Logic Test report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schema_version", "tier", "seeds", "depths", "expected", "executed", "complete", "semantic_lineages", "required_edges", "excluded_observation_fields", "axis_counts", "cases"],
+  "properties": {
+    "schema": {"const": "fslc.fsl-logic-report.v1"},
+    "schema_version": {"const": 1},
+    "tier": {"enum": ["pr", "scheduled"]},
+    "seeds": {"type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 1, "uniqueItems": true},
+    "depths": {"type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 1, "uniqueItems": true},
+    "expected": {"type": "integer", "minimum": 1},
+    "executed": {"type": "integer", "minimum": 0},
+    "complete": {"type": "boolean"},
+    "semantic_lineages": {"type": "object"},
+    "required_edges": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+    "excluded_observation_fields": {"type": "object"},
+    "axis_counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}},
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["case_id", "seed", "index", "status", "expected_violation", "expected_violation_step", "verdict", "property_location", "completeness", "replay_command"],
+            "properties": {
+              "case_id": {"type": "string", "pattern": "^fsl-logic-v1-s[0-9]+-c[0-9]+-d[0-9]+$"},
+              "seed": {"type": "integer", "minimum": 0},
+              "index": {"type": "integer", "minimum": 0},
+              "status": {"const": "agreed"},
+              "expected_violation": {"type": "boolean"},
+              "expected_violation_step": {"type": ["integer", "null"], "minimum": 0},
+              "verdict": {"type": "string", "minLength": 1},
+              "property_location": {"type": ["string", "null"]},
+              "completeness": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["requested_depth", "monitor_depth_reached", "explicit_depth_reached", "monitor_closure", "explicit_closure", "bmc_frontier_progress"],
+                "properties": {
+                  "requested_depth": {"type": "integer", "minimum": 0},
+                  "monitor_depth_reached": {"type": "integer", "minimum": 0},
+                  "explicit_depth_reached": {"type": ["integer", "null"], "minimum": 0},
+                  "monitor_closure": {"type": "boolean"},
+                  "explicit_closure": {"type": ["boolean", "null"]},
+                  "bmc_frontier_progress": {"type": "boolean"}
+                }
+              },
+              "replay_command": {"type": "string", "minLength": 1}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["case_id", "seed", "index", "coordinates", "status", "failure_signature", "replay_command", "source", "minimized"],
+            "properties": {
+              "case_id": {"type": "string", "pattern": "^fsl-logic-v1-s[0-9]+-c[0-9]+-d[0-9]+$"},
+              "seed": {"type": "integer", "minimum": 0},
+              "index": {"type": "integer", "minimum": 0},
+              "coordinates": {"type": "object"},
+              "status": {"const": "disagreement"},
+              "failure_signature": {"type": "string", "minLength": 1},
+              "replay_command": {"type": "string", "minLength": 1},
+              "source": {"type": "string", "minLength": 1},
+              "minimized": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["case_id", "seed", "index", "depth", "domain_kind", "domain_size", "property_kind", "state_vars", "action_count", "guarded", "fair", "expected_violation", "expected_violation_step", "replay_command", "source"],
+                "properties": {
+                  "case_id": {"type": "string", "pattern": "^fsl-logic-v1-s[0-9]+-c[0-9]+-d[0-9]+$"},
+                  "seed": {"type": "integer", "minimum": 0},
+                  "index": {"type": "integer", "minimum": 0},
+                  "depth": {"type": "integer", "minimum": 0},
+                  "domain_kind": {"type": "string", "minLength": 1},
+                  "domain_size": {"type": "integer", "minimum": 1},
+                  "property_kind": {"type": "string", "minLength": 1},
+                  "state_vars": {"type": "integer", "minimum": 1},
+                  "action_count": {"type": "integer", "minimum": 1},
+                  "guarded": {"type": "boolean"},
+                  "fair": {"type": "boolean"},
+                  "expected_violation": {"type": "boolean"},
+                  "expected_violation_step": {"type": ["integer", "null"], "minimum": 0},
+                  "replay_command": {"type": "string", "minLength": 1},
+                  "source": {"type": "string", "minLength": 1}
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

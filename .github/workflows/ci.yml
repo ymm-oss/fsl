@@ -148,18 +148,65 @@ jobs:
         working-directory: rust
         run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
 
-  # Implementation fault operators (#537 C5,
-  # `docs/DESIGN-conformance-harness.md`). Post-merge only: the harness patches
-  # a scratch checkout and rebuilds `fslc` there once per operator, and the
-  # design puts that rebuild cost outside the phase every pull request runs.
-  # It is still required evidence — `product gate` below fails when this job
-  # does, because a detector matrix that never runs is worse than one that
-  # skips: it rots into decoration while reading green.
-  fault-operators:
-    name: fault operators
-    if: github.event_name != 'pull_request'
+  # M13 semantic mutation gate (#672). Pull requests run the complete curated
+  # control matrix plus generic mutants intersecting their diff. Push,
+  # schedule, and manual runs execute the complete accepted P2 pilot scope.
+  semantic-mutation:
+    name: semantic mutation (${{ github.event_name == 'pull_request' && github.base_ref != 'production' && 'changed' || 'complete' }})
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      - name: Install pinned semantic mutation runner
+        run: cargo install cargo-mutants --version 27.1.0 --locked
+
+      - name: Build pull-request diff
+        if: github.event_name == 'pull_request' && github.base_ref != 'production'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # cargo-mutants runs at rust/ and matches patch paths relative to that
+        # workspace; --relative prevents a silent rust/ prefix mismatch.
+        run: git diff --relative=rust --binary "$BASE_SHA...$HEAD_SHA" -- rust >"$RUNNER_TEMP/semantic-mutation.diff"
+
+      - name: Calibrate changed implementation semantics
+        if: github.event_name == 'pull_request' && github.base_ref != 'production'
+        env:
+          FSL_MUTATION_DIFF: ${{ runner.temp }}/semantic-mutation.diff
+          FSL_MUTATION_BASE: ${{ github.event.pull_request.base.sha }}
+        run: ./tools/check-native-integration.sh semantic-mutation changed
+
+      - name: Calibrate complete accepted implementation scope
+        if: github.event_name != 'pull_request' || github.base_ref == 'production'
+        run: ./tools/check-native-integration.sh semantic-mutation complete
+
+      - name: Preserve mutation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semantic-mutation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            rust/target/semantic-mutation.*/**
+            rust/target/fault-operators/logs/**
+          if-no-files-found: error
+          retention-days: 14
+
+  # M13 deterministic finite-model agreement (#673). The report begins
+  # incomplete and becomes complete only after every selected case and edge
+  # executes, so a truncated shard cannot read green.
+  fsl-logic:
+    name: FSL Logic Test (${{ github.event_name == 'pull_request' && github.base_ref != 'production' && 'pr' || 'scheduled' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -169,8 +216,22 @@ jobs:
         with:
           workspaces: rust -> target
 
-      - name: Calibrate implementation fault operators
-        run: ./tools/check-native-integration.sh fault-operators
+      - name: Run bounded pull-request generation
+        if: github.event_name == 'pull_request' && github.base_ref != 'production'
+        run: ./tools/check-native-integration.sh fsl-logic pr
+
+      - name: Run scheduled-volume generation
+        if: github.event_name != 'pull_request' || github.base_ref == 'production'
+        run: ./tools/check-native-integration.sh fsl-logic scheduled
+
+      - name: Preserve FSL Logic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsl-logic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: rust/target/fsl-logic/*.json
+          if-no-files-found: error
+          retention-days: 14
 
   product-gate:
     name: product gate
@@ -186,7 +247,8 @@ jobs:
       - wasm
       - rust-native-z3
       - production-native-z3-linux
-      - fault-operators
+      - semantic-mutation
+      - fsl-logic
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -196,7 +258,8 @@ jobs:
           WASM: ${{ needs.wasm.result }}
           NATIVE_Z3: ${{ needs.rust-native-z3.result }}
           PRODUCTION_NATIVE_Z3_LINUX: ${{ needs.production-native-z3-linux.result }}
-          FAULT_OPERATORS: ${{ needs.fault-operators.result }}
+          SEMANTIC_MUTATION: ${{ needs.semantic-mutation.result }}
+          FSL_LOGIC: ${{ needs.fsl-logic.result }}
           BASE_REF: ${{ github.base_ref }}
           EVENT_NAME: ${{ github.event_name }}
         shell: bash
@@ -210,14 +273,16 @@ jobs:
           if [ "$BASE_REF" = "production" ] && [ "$PRODUCTION_NATIVE_Z3_LINUX" != "success" ]; then
             failures=1
           fi
-          # `fault-operators` is post-merge only, so it is legitimately skipped
-          # on pull requests and required everywhere else. Keyed on the same
-          # condition the job carries, so a job that silently stopped running
-          # cannot pass as "skipped on purpose".
-          if [ "$EVENT_NAME" != "pull_request" ] && [ "$FAULT_OPERATORS" != "success" ]; then
+          # Both tiers are required. On pull requests the job runs changed
+          # generic mutants plus all curated controls; every other event runs
+          # the complete accepted P2 scope.
+          if [ "$SEMANTIC_MUTATION" != "success" ]; then
+            failures=1
+          fi
+          if [ "$FSL_LOGIC" != "success" ]; then
             failures=1
           fi
           if [ "$failures" -ne 0 ]; then
-            echo "product gate failed: rust=$RUST_WORKSPACE wasm=$WASM native-z3=$NATIVE_Z3 production-linux=$PRODUCTION_NATIVE_Z3_LINUX fault-operators=$FAULT_OPERATORS" >&2
+            echo "product gate failed: rust=$RUST_WORKSPACE wasm=$WASM native-z3=$NATIVE_Z3 production-linux=$PRODUCTION_NATIVE_Z3_LINUX semantic-mutation=$SEMANTIC_MUTATION fsl-logic=$FSL_LOGIC" >&2
             exit 1
           fi
