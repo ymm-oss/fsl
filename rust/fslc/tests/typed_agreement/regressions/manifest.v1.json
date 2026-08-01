@@ -1,0 +1,15 @@
+{
+  "$comment": "SPDX-License-Identifier: Apache-2.0",
+  "schema": "fslc.fsl-logic-regression-corpus.v1",
+  "schema_version": 1,
+  "entries": [
+    {
+      "failure_signature": "bfs_explicit:reachables:after-initial-violation-observation-order",
+      "case_id": "fsl-logic-v1-s77323576357171-c24-minimized",
+      "source": "rust/fslc/tests/typed_agreement/regressions/reachable_after_initial_violation.fsl",
+      "depth": 6,
+      "raw_observation": "Before scope correction, BFS recorded ReachedAtInit at step 0 while explicit and BMC stopped auxiliary observation at the step-0 invariant violation.",
+      "replay_command": "cargo test --manifest-path rust/Cargo.toml -p fslc-rust --test typed_agreement --locked regression_corpus::minimized_regression_corpus_is_valid_and_deduplicated_by_failure_signature -- --exact"
+    }
+  ]
+}

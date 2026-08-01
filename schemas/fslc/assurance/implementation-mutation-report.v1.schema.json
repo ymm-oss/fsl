@@ -1,0 +1,93 @@
+{
+  "$comment": "SPDX-License-Identifier: Apache-2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/assurance/implementation-mutation-report.v1.schema.json",
+  "title": "FSL implementation semantic mutation report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "base_revision",
+    "diff_scope",
+    "runner",
+    "configuration",
+    "complete",
+    "mutants"
+  ],
+  "properties": {
+    "schema": {"const": "fslc.implementation-mutation-report.v1"},
+    "schema_version": {"const": 1},
+    "base_revision": {"type": "string", "minLength": 1},
+    "diff_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "base", "paths"],
+      "properties": {
+        "mode": {"enum": ["changed", "complete"]},
+        "base": {"type": ["string", "null"]},
+        "paths": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      }
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"enum": ["curated-patch-runner", "cargo-mutants"]},
+        "version": {"type": "string", "minLength": 1}
+      }
+    },
+    "configuration": {"type": "string", "minLength": 1},
+    "complete": {"type": "boolean"},
+    "mutants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "source_decision_anchor",
+          "mutation",
+          "test_command",
+          "classification",
+          "elapsed_ms",
+          "primary_failing_test",
+          "reproducer"
+        ],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "source_decision_anchor": {"type": "string", "minLength": 1},
+          "mutation": {"type": "string", "minLength": 1},
+          "test_command": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "classification": {"enum": ["killed", "survived", "timeout", "unbuildable", "reviewed_equivalent"]},
+          "elapsed_ms": {"type": "integer", "minimum": 0},
+          "primary_failing_test": {"type": ["string", "null"]},
+          "reproducer": {"type": "string", "minLength": 1},
+          "reviewed_rationale": {"type": ["string", "null"]}
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {"classification": {"const": "killed"}},
+              "required": ["classification"]
+            },
+            "then": {
+              "properties": {"primary_failing_test": {"type": "string", "minLength": 1}}
+            }
+          },
+          {
+            "if": {
+              "properties": {"classification": {"const": "reviewed_equivalent"}},
+              "required": ["classification"]
+            },
+            "then": {
+              "required": ["reviewed_rationale"],
+              "properties": {"reviewed_rationale": {"type": "string", "minLength": 1}}
+            }
+          }
+        ]
+      }
+    }
+  }
+}

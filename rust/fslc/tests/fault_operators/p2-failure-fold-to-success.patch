@@ -1,0 +1,14 @@
+P2 result-fold mutation: render a real invariant counterexample as verified
+while retaining exit 1 and the witness. The compound public observation must
+not accept this contradiction.
+
+--- a/rust/fslc/src/verification_output.rs
++++ b/rust/fslc/src/verification_output.rs
+@@ -1238,6 +1238,6 @@ fn render_violation(
+ ) -> (Value, i32) {
+     output.insert("spec".to_owned(), json!(model.name));
+-    output.insert("result".to_owned(), json!("violated"));
++    output.insert("result".to_owned(), json!("verified"));
+     output.insert("violation_kind".to_owned(), json!(violation.kind));
+     let (property_kind, property) = if violation.kind == "trans" {
+         (

@@ -360,9 +360,10 @@ seam it targeted moved, and someone must confirm the fault is still possible
 there and re-target the patch. Silently skipping a stale operator is how a
 detector matrix rots into decoration.
 
-Rebuild cost puts this in the product gate (`tools/check-native-integration.sh`),
-not the per-pull-request gate. Operators patch `rust/fslc` where possible, so
-the rebuild is that crate plus a relink rather than the workspace.
+Rebuild cost keeps this out of the ordinary Rust workspace lane, but M13 makes
+it part of the dedicated semantic-mutation lane on every pull request and
+product-gate run. Operators patch `rust/fslc` where possible, so the rebuild is
+that crate plus a relink rather than the workspace.
 
 Patches are applied with `git apply`, never the system `patch`. The first CI run
 of this matrix failed (#613) because BSD `patch` on macOS accepted the no-op
@@ -375,17 +376,21 @@ exist: a calibration harness whose result depends on where it runs calibrates
 nothing. `git apply` is one implementation wherever git is, applies zero fuzz by
 default, and tolerates the prose preamble each patch file carries.
 
-The harness is `tools/run-fault-operators.sh`, reached as the
-`fault-operators` phase of `tools/check-native-integration.sh` and included in
-its `all` — deliberately not in its `rust` phase, which `.github/workflows/ci.yml`
-runs on every pull request. CI runs it as its own post-merge `fault operators`
-job, required by the `product gate` aggregator (`docs/DESIGN-ci.md` "Product
-gate contract"): a matrix that never runs is worse than one that skips, so
-"not on pull requests" must not become "nowhere". Operators are rows in
+The harness is `tools/run-fault-operators.sh`, reached directly as the legacy
+`fault-operators` phase and, together with pinned generic implementation
+mutants, through `tools/check-native-integration.sh semantic-mutation`. It is
+deliberately not in the ordinary `rust` phase. CI requires the dedicated
+semantic-mutation job on every event: pull requests run the curated matrix and
+generic mutants intersecting the PR diff, while other events run the complete
+accepted P2 pilot scope. Operators are rows in
 `rust/fslc/tests/fault_operators/operators.txt`, each naming a patch file, a
 primary detector, and a blind detector; the two controls are
 `controls/no-op.patch` and `controls/stale-seam.patch`. Adding an operator is a
 patch file and a table row, both data.
+
+The generic half, its fail-closed classifications, exact decision anchors,
+reviewed-equivalence rules, and raw evidence contract are accepted in
+[`DESIGN-semantic-mutation-gate.md`](DESIGN-semantic-mutation-gate.md).
 
 Detector naming is measured, not asserted. The first calibration moved two of
 the three intended primaries after the harness showed the named test could not
@@ -437,6 +442,13 @@ the honest output is a recorded measurement rather than a new operator or a
 fixture nobody can build.
 
 ## Typed generative / metamorphic agreement (#537 C6)
+
+M13 issue #673 promotes this fixed C6 foundation into the continuously seeded
+FSL Logic Test. [`DESIGN-fsl-logic-test.md`](DESIGN-fsl-logic-test.md) owns its
+machine-readable inventory, stable seed/case replay, named concrete/symbolic
+edges, report completeness, structural shrinking, regression corpus, and
+PR/scheduled tiers. The original sweeps and R1-R7 below remain executable
+members of that larger gate.
 
 `rust/fsl-verifier/tests/expression_agreement.rs` and `explicit_engine.rs`'s
 corpus sweep proved agreement on hand-written fixtures and the existing

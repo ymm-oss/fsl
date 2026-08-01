@@ -1,0 +1,93 @@
+{
+  "$comment": "SPDX-License-Identifier: Apache-2.0",
+  "schema": "fslc.fsl-logic-inventory.v1",
+  "schema_version": 1,
+  "generator": {
+    "id": "fsl-logic-v1",
+    "validity_gate": ["parse_kernel_source", "build_model"],
+    "axes": {
+      "domain_kind": ["range", "entity", "number", "enum"],
+      "domain_size": [1, 2, 3, 4],
+      "state_vars": [1, 2],
+      "action_count": [1, 2, 3],
+      "guarded": [false, true],
+      "fair": [false, true],
+      "expected_violation": [false, true],
+      "expected_violation_step": ["none", "0", "1"],
+      "property_kind": ["invariant", "reachable", "trans", "terminal"],
+      "depth": [4, 6, 8]
+    },
+    "excluded_property_kinds": {
+      "leadsTo": "Monitor BFS does not evaluate leadsTo and the explicit engine rejects it; BMC-only cases are not cross-engine agreement."
+    }
+  },
+  "companion_axes": {
+    "expression_and_type_variants": {
+      "registry_coupling": "checked_expr_variant_rows/type_rows/aggregate_kind_rows",
+      "evidence_test": "expression_variant_sweep_agrees_across_all_three_engines_and_covers_all_types"
+    },
+    "partial_operations": {
+      "values": ["head", "pop", "at", "index", "divide", "remainder"],
+      "evidence_test": "operation_sweep_agrees_across_all_three_engines",
+      "boundary_evidence_test": "r6_action_context_partial_operations_agree_across_all_engines"
+    },
+    "dialect_lowering": {
+      "registry_coupling": "dialects",
+      "posture": "Every registered dialect has an explicit generated or excluded lowering posture below."
+    }
+  },
+  "semantic_lineages": {
+    "concrete": ["Monitor", "Monitor BFS", "explicit"],
+    "symbolic": ["BMC/native Z3"]
+  },
+  "required_edges": [
+    "monitor_bfs",
+    "bfs_explicit",
+    "explicit_bmc",
+    "generated_expectation",
+    "depth_completeness",
+    "trace_explicit_bmc",
+    "property_location",
+    "replay",
+    "successor_admission"
+  ],
+  "excluded_observation_fields": {
+    "deadlock_step": "Terminal-state handling makes BFS deadlock_step and explicit deadlock_step intentionally non-identical; terminal verdict and action coverage remain required.",
+    "auxiliary_observations_after_violation": "Engines intentionally stop at different points after the first violation; reachable steps and action coverage are equated only for clean bounded runs.",
+    "states_explored": "Symbolic BMC has no concrete state-count analogue.",
+    "symbolic_frontier_vs_concrete_closure": "Monitor and explicit concrete closure are equated. BMC frontier progress uses a different bounded symbolic proof domain, so both values are reported without pretending they are identical."
+  },
+  "dialects": {
+    "spec": "generated_direct",
+    "refinement": "excluded: mapping is checked by fslc refine",
+    "compose": "excluded: lowering is owned by its conformance suite",
+    "business": "excluded: lowering is owned by its conformance suite",
+    "governance": "excluded: lowering is owned by its conformance suite",
+    "requirements": "excluded: lowering is owned by its conformance suite",
+    "domain": "excluded: lowering is owned by its conformance suite",
+    "dbsystem": "excluded: lowering is owned by its conformance suite",
+    "ai_component": "excluded: lowering is owned by its conformance suite",
+    "agent": "excluded: lowering is owned by its conformance suite"
+  },
+  "metamorphic_relations": [
+    {"id": "R1", "positive": "r1_alpha_rename_preserves_verdict_across_all_engines", "negative": "r1_negative_control_rejects_a_colliding_rename"},
+    {"id": "R2", "positive": "r2_leading_bom_and_trivia_preserve_verdict", "negative": "r2_negative_control_rejects_bom_inside_an_identifier"},
+    {"id": "R3", "positive": "r3_inline_init_matches_explicit_init_block_verdict_and_reachable_states", "negative": "r3_negative_control_rejects_the_same_root_assigned_inline_and_in_init"},
+    {"id": "R4", "positive": "r4_disjoint_assignment_reorder_matches_verdict_and_reachable_states", "negative": "mutate_reuse_kill_controls_are_measured_non_equivalent_and_detected"},
+    {"id": "R5", "positive": "r5_domain_size_boundary_verdict_change_matches_the_declared_structural_expectation", "negative": "mutate_reuse_kill_controls_are_measured_non_equivalent_and_detected"},
+    {"id": "R6", "positive": "r6_euclidean_identity_is_proved_and_totalized_in_property_context", "negative": "mutate_reuse_kill_controls_are_measured_non_equivalent_and_detected"},
+    {"id": "R7", "positive": "r7_entity_desugar_matches_hand_written_lowered_type", "negative": "r7_negative_control_detects_a_mis_lowered_bound"}
+  ],
+  "tiers": {
+    "pr": {
+      "cases_per_configuration": 16,
+      "seeds": [77323576357171],
+      "depths": [6]
+    },
+    "scheduled": {
+      "cases_per_configuration": 128,
+      "seeds": [672673, 77323576357171, 11400714819323198485],
+      "depths": [4, 6, 8]
+    }
+  }
+}

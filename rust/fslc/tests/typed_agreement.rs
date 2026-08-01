@@ -22,8 +22,16 @@ mod engines;
 mod enum_rows;
 #[path = "typed_agreement/generator.rs"]
 mod generator;
+#[path = "typed_agreement/inventory.rs"]
+mod inventory;
+#[path = "typed_agreement/logic_test.rs"]
+mod logic_test;
+#[path = "typed_agreement/regression_corpus.rs"]
+mod regression_corpus;
 #[path = "typed_agreement/relations.rs"]
 mod relations;
+#[path = "typed_agreement/shrink.rs"]
+mod shrink;
 #[path = "typed_agreement/sweep_summary.rs"]
 mod sweep_summary;
 

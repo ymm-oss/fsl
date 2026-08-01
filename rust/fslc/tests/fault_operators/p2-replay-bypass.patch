@@ -1,0 +1,15 @@
+P2 replay bypass: bypass the public concrete replay gate for a violation. The
+full witness detector must still reject corrupted evidence; parsing is blind.
+
+--- a/rust/fslc/src/verification_output.rs
++++ b/rust/fslc/src/verification_output.rs
+@@ -742,9 +742,6 @@ pub fn replay_bmc_witnesses(
+                 |state| fsl_runtime::replay_trace_from_state(model.clone(), trace, state),
+             )
+     };
+-    if let Some(violation) = &result.violation {
+-        replay(&violation.trace).map_err(|error| error.to_string())?;
+-    }
+     if let Some(violation) = &result.leadsto_violation {
+         replay(&violation.trace).map_err(|error| error.to_string())?;
+     }

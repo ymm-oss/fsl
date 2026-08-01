@@ -1,0 +1,14 @@
+P2 violation-name substitution: replace only the name after witness
+construction. Kind and replay remain healthy so name detection is independent.
+
+--- a/rust/fsl-verifier/src/bmc.rs
++++ b/rust/fsl-verifier/src/bmc.rs
+@@ -633,7 +633,7 @@ async fn make_violation<S: SmtSolver>(
+         .and_then(|entry| entry.action.as_ref().map(|action| action.name.clone()));
+     Ok(BmcViolation {
+         kind: kind.to_owned(),
+-        name,
++        name: format!("mutated_{name}"),
+         step,
+         last_action,
+         trace,

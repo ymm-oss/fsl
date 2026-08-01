@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec ReachableAfterInitialViolation {
+  type Bit = 0..1
+  state { x: Bit }
+  init { x = 0 }
+
+  action stay() { x = x }
+
+  reachable ReachedAtInit { x == 0 }
+  invariant InitialFailure { false }
+}

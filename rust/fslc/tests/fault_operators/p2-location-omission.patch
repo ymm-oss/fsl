@@ -1,0 +1,15 @@
+P2 failed-location omission: retain the symbolic violation and trace while
+dropping its public property location. The P2 public observation detector must
+reject the incomplete identity.
+
+--- a/rust/fslc/src/verification_output.rs
++++ b/rust/fslc/src/verification_output.rs
+@@ -1282,7 +1282,7 @@ fn render_violation(
+     }
+     output.insert(
+         "loc".to_owned(),
+-        property.map_or(Value::Null, |property| property.span.python_loc()),
++        Value::Null,
+     );
+     output.insert("violated_at_step".to_owned(), json!(violation.step));
+     let violating = violation_bindings_json(
