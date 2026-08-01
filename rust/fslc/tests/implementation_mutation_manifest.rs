@@ -143,13 +143,11 @@ fn validate_generic_functions(manifest: &Value, config: &str) -> Result<(), Stri
 
 fn validate_detector_selection(config: &str) -> Result<(), String> {
     let lines = config.lines().map(str::trim).collect::<BTreeSet<_>>();
-    if !lines.contains("test_workspace = true") {
-        return Err(
-            "mutation detector tests must resolve from the workspace in changed mode".to_owned(),
-        );
+    if !lines.contains(r#"test_package = ["fslc-rust"]"#) {
+        return Err("mutation detector package selection drifted".to_owned());
     }
     if !lines.contains(
-        r#"additional_cargo_test_args = ["--test", "solver_fail_closed", "--test", "triangulated_assurance"]"#,
+        r#"additional_cargo_test_args = ["--package", "fslc-rust", "--test", "solver_fail_closed", "--test", "triangulated_assurance"]"#,
     ) {
         return Err("mutation detector target selection drifted".to_owned());
     }
@@ -448,16 +446,13 @@ fn stale_ambiguous_or_unreasoned_exclusions_fail_closed() {
 }
 
 #[test]
-fn mutation_detector_selection_requires_workspace_resolution() {
+fn mutation_detector_selection_requires_explicit_package() {
     let root = repository_root();
     let config = std::fs::read_to_string(root.join("rust/.cargo/mutants.toml"))
         .expect("read mutation runner config");
     validate_detector_selection(&config).expect("valid detector selection");
     assert!(
-        validate_detector_selection(
-            &config.replace("test_workspace = true", "test_workspace = false")
-        )
-        .is_err()
+        validate_detector_selection(&config.replace(r#""--package", "fslc-rust", "#, "")).is_err()
     );
 }
 

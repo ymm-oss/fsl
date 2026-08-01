@@ -28,10 +28,11 @@ exclude_re = [
 ]
 
 # Changed-mode diff filtering may select only fsl-verifier as the mutated
-# package. Select the workspace explicitly so the named detector targets are
-# still resolved from fslc-rust instead of being applied to fsl-verifier.
-test_workspace = true
-additional_cargo_test_args = ["--test", "solver_fail_closed", "--test", "triangulated_assurance"]
+# package. cargo-mutants still prefixes that package to its cargo invocation,
+# so name fslc-rust again in the appended arguments to resolve these detector
+# targets from both packages instead of applying them only to fsl-verifier.
+test_package = ["fslc-rust"]
+additional_cargo_test_args = ["--package", "fslc-rust", "--test", "solver_fail_closed", "--test", "triangulated_assurance"]
 timeout_multiplier = 3.0
 build_timeout_multiplier = 3.0
 minimum_test_timeout = 30.0
