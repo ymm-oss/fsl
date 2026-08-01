@@ -607,18 +607,37 @@ fn workspace_references(
 
 fn workspace_uris(state: &ServerState, current: &Url) -> Vec<Url> {
     let mut uris = state.documents.keys().cloned().collect::<HashSet<_>>();
-    let mut roots = state.roots.clone();
+    for root in &state.roots {
+        collect_fsl_files(root, &mut uris);
+    }
+
     if let Ok(path) = current.to_file_path()
         && let Some(parent) = path.parent()
+        && !state.roots.iter().any(|root| parent.starts_with(root))
     {
-        roots.push(parent.to_path_buf());
-    }
-    for root in roots {
-        collect_fsl_files(&root, &mut uris);
+        // An explicitly opened file outside every workspace root may still
+        // refer to an unimported sibling, but it must not turn its arbitrary
+        // parent (for example `/tmp`) into a recursive workspace scan.
+        collect_direct_fsl_files(parent, &mut uris);
     }
     let mut uris = uris.into_iter().collect::<Vec<_>>();
     uris.sort_by(|left, right| left.as_str().cmp(right.as_str()));
     uris
+}
+
+fn collect_direct_fsl_files(path: &Path, uris: &mut HashSet<Url>) {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file()
+            && path.extension().and_then(|extension| extension.to_str()) == Some("fsl")
+            && let Ok(uri) = Url::from_file_path(path)
+        {
+            uris.insert(uri);
+        }
+    }
 }
 
 fn collect_fsl_files(path: &Path, uris: &mut HashSet<Url>) {
@@ -994,6 +1013,53 @@ mod tests {
                 .iter()
                 .any(|(name, _)| *name == "bump")
         );
+    }
+
+    #[test]
+    fn external_document_scans_siblings_but_not_the_parent_tree() {
+        let root = std::env::temp_dir().join(format!(
+            "fsl-lsp-bounded-workspace-scan-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        let nested = root.join("unrelated");
+        std::fs::create_dir_all(&nested).expect("create scan fixture");
+        let current_path = root.join("current.fsl");
+        let sibling_path = root.join("sibling.fsl");
+        let nested_path = nested.join("must-not-index.fsl");
+        std::fs::write(&current_path, "spec Current {}").expect("write current fixture");
+        std::fs::write(&sibling_path, "spec Sibling {}").expect("write sibling fixture");
+        std::fs::write(&nested_path, "spec Nested {}").expect("write nested fixture");
+
+        let current = Url::from_file_path(&current_path).expect("current URI");
+        let sibling = Url::from_file_path(&sibling_path).expect("sibling URI");
+        let nested_uri = Url::from_file_path(&nested_path).expect("nested URI");
+        let state = ServerState {
+            documents: HashMap::from([(
+                current.clone(),
+                OpenDocument {
+                    text: "spec Current {}".to_owned(),
+                    version: 1,
+                },
+            )]),
+            roots: Vec::new(),
+        };
+
+        let external_uris = workspace_uris(&state, &current);
+        assert!(external_uris.contains(&current));
+        assert!(external_uris.contains(&sibling));
+        assert!(!external_uris.contains(&nested_uri));
+
+        let workspace_state = ServerState {
+            roots: vec![root.clone()],
+            ..state
+        };
+        assert!(workspace_uris(&workspace_state, &current).contains(&nested_uri));
+
+        std::fs::remove_dir_all(root).expect("remove scan fixture");
     }
 
     #[test]

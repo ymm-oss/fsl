@@ -6,7 +6,7 @@ use fsl_core::{FslValue, KernelModel, LeadsToDef, TraceAction, TraceStep};
 use fsl_solver::{SatResult, SmtSolver};
 
 use crate::VerifyError;
-use crate::eval::{eval, evaluation_status};
+use crate::eval::{eval, evaluation_status, property_evaluation_status};
 use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
 use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
@@ -18,7 +18,7 @@ use crate::transition::{
 use crate::vacuity::{VacuityFinding, retain_covered, static_findings};
 use crate::value::{
     Bindings, SymbolicState, bool_term, bounds, concrete_value, i64_index, logical_equal,
-    symbolic_state,
+    symbolic_state, symbolic_state_with_suffix,
 };
 use crate::violation_kind;
 
@@ -49,6 +49,21 @@ pub struct ReachableWitness {
     pub trace: Vec<TraceStep>,
 }
 
+/// One static constraint in an irreducible explanation for an unreachable
+/// state predicate.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReachableBlocker {
+    pub kind: String,
+    pub name: String,
+}
+
+/// A depth-independent diagnosis for a reachable target that is
+/// unsatisfiable under the model's type bounds and invariants.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReachableDiagnosis {
+    pub blocking: Vec<ReachableBlocker>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BmcResult {
     pub spec: String,
@@ -56,13 +71,124 @@ pub struct BmcResult {
     pub violation: Option<BmcViolation>,
     pub leadsto_violation: Option<BmcViolation>,
     pub reachables: BTreeMap<String, Option<ReachableWitness>>,
+    /// Entries exist only for targets proved statically unsatisfiable. An
+    /// unreached target absent from this map is classified as depth-limited.
+    pub reachable_diagnostics: BTreeMap<String, ReachableDiagnosis>,
     pub deadlock_step: Option<usize>,
     pub deadlock_trace: Option<Vec<TraceStep>>,
     pub action_coverage: BTreeMap<String, bool>,
     pub frontier_progress: bool,
-    /// Solver-dependent vacuity facts (`docs/DESIGN-vacuity.md` §2 lanes 3–5).
+    /// Solver-dependent vacuity facts (`docs/DESIGN-vacuity.md` §2 lanes 3–6).
     /// Depth-independent by construction; see [`crate::vacuity`].
     pub vacuity: Vec<VacuityFinding>,
+}
+
+#[derive(Clone)]
+struct StaticReachableConstraint<T> {
+    blocker: ReachableBlocker,
+    term: T,
+}
+
+/// Classify reachable predicates against a fresh symbolic state, without any
+/// init or transition constraints. A target that is satisfiable here may only
+/// be depth-limited; an UNSAT target is over-constrained by the returned
+/// irreducible set of type bounds/invariants.
+///
+/// # Errors
+///
+/// Returns [`VerifyError`] when symbolic-state construction, expression
+/// evaluation, or a solver query fails.
+pub async fn diagnose_reachables<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+) -> Result<BTreeMap<String, ReachableDiagnosis>, VerifyError> {
+    if model.reachables.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let state = symbolic_state_with_suffix(solver, model, "reachable_diagnosis")?;
+    let mut constraints = Vec::new();
+    for (name, _) in &model.state {
+        constraints.push(StaticReachableConstraint {
+            blocker: ReachableBlocker {
+                kind: "type_bound".to_owned(),
+                name: format!("_bounds_{name}"),
+            },
+            term: bounds(
+                solver,
+                model,
+                state
+                    .get(name)
+                    .ok_or_else(|| VerifyError::new(format!("missing state '{name}'")))?,
+            )?,
+        });
+    }
+    for invariant in &model.invariants {
+        let mut bindings = Bindings::new();
+        let value = eval(solver, model, &invariant.expr, &state, &mut bindings, None)?;
+        constraints.push(StaticReachableConstraint {
+            blocker: ReachableBlocker {
+                kind: "invariant".to_owned(),
+                name: invariant.name.clone(),
+            },
+            term: bool_term(&value)?.clone(),
+        });
+    }
+
+    let mut diagnoses = BTreeMap::new();
+    for reachable in &model.reachables {
+        let mut bindings = Bindings::new();
+        let target = eval(solver, model, &reachable.expr, &state, &mut bindings, None)?;
+        let target = bool_term(&target)?.clone();
+        solver.set_query_context("reachable_diagnosis", &reachable.name);
+        let mut active = (0..constraints.len()).collect::<Vec<_>>();
+        if !terms_are_unsat(solver, &constraints, &active, &target).await? {
+            continue;
+        }
+
+        // A deterministic deletion pass turns the full contradiction into an
+        // irreducible core without relying on backend-specific term identity.
+        let mut cursor = 0;
+        while cursor < active.len() {
+            let mut without = active.clone();
+            without.remove(cursor);
+            if terms_are_unsat(solver, &constraints, &without, &target).await? {
+                active = without;
+            } else {
+                cursor += 1;
+            }
+        }
+        diagnoses.insert(
+            reachable.name.clone(),
+            ReachableDiagnosis {
+                blocking: active
+                    .into_iter()
+                    .map(|index| constraints[index].blocker.clone())
+                    .collect(),
+            },
+        );
+    }
+    Ok(diagnoses)
+}
+
+async fn terms_are_unsat<S: SmtSolver>(
+    solver: &mut S,
+    constraints: &[StaticReachableConstraint<S::Term>],
+    active: &[usize],
+    target: &S::Term,
+) -> Result<bool, VerifyError> {
+    solver.push();
+    let outcome = async {
+        for index in active {
+            solver.assert(&constraints[*index].term)?;
+        }
+        solver.assert(target)?;
+        solver.check().await.map_err(VerifyError::from)
+    }
+    .await;
+    let pop = solver.pop(1).map_err(VerifyError::from);
+    let result = outcome?;
+    pop?;
+    Ok(result == SatResult::Unsat)
 }
 
 /// Explore all symbolic executions up to `depth` using a backend-neutral SMT solver.
@@ -167,6 +293,7 @@ async fn verify_bounded_config<S: SmtSolver>(
             .iter()
             .map(|property| (property.name.clone(), None))
             .collect(),
+        reachable_diagnostics: BTreeMap::new(),
         deadlock_step: None,
         deadlock_trace: None,
         action_coverage: model
@@ -190,6 +317,10 @@ async fn verify_bounded_config<S: SmtSolver>(
         .any(action_has_partial_operation_candidate);
 
     for step in 0..=depth {
+        let property_checks = StatePropertyChecks {
+            checked_bounds,
+            pending_reachables: &pending_reachables,
+        };
         if let Some(violation) = check_state_properties(
             solver,
             model,
@@ -197,7 +328,7 @@ async fn verify_bounded_config<S: SmtSolver>(
             &choices,
             &instances,
             step,
-            checked_bounds,
+            property_checks,
         )
         .await?
         {
@@ -234,8 +365,46 @@ async fn verify_bounded_config<S: SmtSolver>(
             let mut deadlock = solver.not(&solver.or(&enabled)?)?;
             if let Some(terminal) = &model.terminal {
                 let mut bindings = Bindings::new();
+                let evaluation = property_evaluation_status(
+                    solver,
+                    model,
+                    terminal,
+                    &states[step],
+                    &bindings,
+                    None,
+                )?;
+                let partial = solver.and(&[deadlock.clone(), evaluation.first_partial.clone()])?;
+                solver.set_query_context("partial_op", "terminal");
+                if evaluation.has_partial_operation && probe(solver, &partial).await? {
+                    result.violation = Some(
+                        make_violation(
+                            solver,
+                            model,
+                            "partial_op",
+                            "_partial_property_terminal".to_owned(),
+                            &partial,
+                            &states,
+                            &choices,
+                            &instances,
+                            step,
+                        )
+                        .await?,
+                    );
+                    return Ok(result);
+                }
+                let undefined =
+                    solver.and(&[deadlock.clone(), solver.not(&evaluation.fully_defined)?])?;
+                if probe(solver, &undefined).await? {
+                    return Err(VerifyError::new(
+                        "terminal property is undefined for a reachable deadlock state",
+                    ));
+                }
                 let terminal = eval(solver, model, terminal, &states[step], &mut bindings, None)?;
-                deadlock = solver.and(&[deadlock, solver.not(bool_term(&terminal)?)?])?;
+                deadlock = solver.and(&[
+                    deadlock,
+                    evaluation.fully_defined,
+                    solver.not(bool_term(&terminal)?)?,
+                ])?;
             }
             if probe(solver, &deadlock).await? {
                 result.deadlock_step = Some(step);
@@ -303,6 +472,11 @@ async fn verify_bounded_config<S: SmtSolver>(
     Ok(result)
 }
 
+struct StatePropertyChecks<'a> {
+    checked_bounds: Option<&'a BTreeSet<String>>,
+    pending_reachables: &'a BTreeSet<String>,
+}
+
 #[allow(clippy::too_many_lines)]
 async fn check_state_properties<S: SmtSolver>(
     solver: &mut S,
@@ -311,11 +485,14 @@ async fn check_state_properties<S: SmtSolver>(
     choices: &[S::Term],
     instances: &[ActionInstance<S::Term>],
     step: usize,
-    checked_bounds: Option<&BTreeSet<String>>,
+    checks: StatePropertyChecks<'_>,
 ) -> Result<Option<BmcViolation>, VerifyError> {
     for (name, _) in &model.state {
         let property_name = format!("_bounds_{name}");
-        if checked_bounds.is_some_and(|selected| !selected.contains(&property_name)) {
+        if checks
+            .checked_bounds
+            .is_some_and(|selected| !selected.contains(&property_name))
+        {
             continue;
         }
         let valid = bounds(
@@ -347,6 +524,38 @@ async fn check_state_properties<S: SmtSolver>(
     }
     for property in &model.invariants {
         let mut bindings = Bindings::new();
+        let evaluation = property_evaluation_status(
+            solver,
+            model,
+            &property.expr,
+            &states[step],
+            &bindings,
+            None,
+        )?;
+        solver.set_query_context("partial_op", &property.name);
+        if evaluation.has_partial_operation && probe(solver, &evaluation.first_partial).await? {
+            return Ok(Some(
+                make_violation(
+                    solver,
+                    model,
+                    "partial_op",
+                    format!("_partial_property_{}", property.name),
+                    &evaluation.first_partial,
+                    states,
+                    choices,
+                    instances,
+                    step,
+                )
+                .await?,
+            ));
+        }
+        if probe_not(solver, &evaluation.fully_defined).await? {
+            return Err(VerifyError::new(format!(
+                "invariant '{}' is undefined for a reachable state",
+                property.name
+            )));
+        }
+        solver.assert(&evaluation.fully_defined)?;
         let value = eval(
             solver,
             model,
@@ -376,11 +585,121 @@ async fn check_state_properties<S: SmtSolver>(
         }
         solver.assert(&condition)?;
     }
+    for property in &model.reachables {
+        if !checks.pending_reachables.contains(&property.name) {
+            continue;
+        }
+        let bindings = Bindings::new();
+        let evaluation = property_evaluation_status(
+            solver,
+            model,
+            &property.expr,
+            &states[step],
+            &bindings,
+            None,
+        )?;
+        solver.set_query_context("partial_op", &property.name);
+        if evaluation.has_partial_operation && probe(solver, &evaluation.first_partial).await? {
+            return Ok(Some(
+                make_violation(
+                    solver,
+                    model,
+                    "partial_op",
+                    format!("_partial_property_{}", property.name),
+                    &evaluation.first_partial,
+                    states,
+                    choices,
+                    instances,
+                    step,
+                )
+                .await?,
+            ));
+        }
+        if probe_not(solver, &evaluation.fully_defined).await? {
+            return Err(VerifyError::new(format!(
+                "reachable property '{}' is undefined for a reachable state",
+                property.name
+            )));
+        }
+        solver.assert(&evaluation.fully_defined)?;
+    }
+    for property in &model.leadstos {
+        for binding in leadsto_bindings(solver, model, property)? {
+            for expression in [&property.before, &property.after] {
+                let evaluation = property_evaluation_status(
+                    solver,
+                    model,
+                    expression,
+                    &states[step],
+                    &binding.symbolic,
+                    None,
+                )?;
+                solver.set_query_context("partial_op", &property.name);
+                if evaluation.has_partial_operation
+                    && probe(solver, &evaluation.first_partial).await?
+                {
+                    return Ok(Some(
+                        make_violation(
+                            solver,
+                            model,
+                            "partial_op",
+                            format!("_partial_property_{}", property.name),
+                            &evaluation.first_partial,
+                            states,
+                            choices,
+                            instances,
+                            step,
+                        )
+                        .await?,
+                    ));
+                }
+                if probe_not(solver, &evaluation.fully_defined).await? {
+                    return Err(VerifyError::new(format!(
+                        "leadsTo property '{}' is undefined for a reachable state",
+                        property.name
+                    )));
+                }
+                solver.assert(&evaluation.fully_defined)?;
+            }
+        }
+    }
     if step == 0 {
         return Ok(None);
     }
     for property in &model.transitions {
         let mut bindings = Bindings::new();
+        let evaluation = property_evaluation_status(
+            solver,
+            model,
+            &property.expr,
+            &states[step],
+            &bindings,
+            Some(&states[step - 1]),
+        )?;
+        solver.set_query_context("partial_op", &property.name);
+        if evaluation.has_partial_operation && probe(solver, &evaluation.first_partial).await? {
+            return Ok(Some(
+                make_violation(
+                    solver,
+                    model,
+                    "partial_op",
+                    format!("_partial_property_{}", property.name),
+                    &evaluation.first_partial,
+                    states,
+                    choices,
+                    instances,
+                    step,
+                )
+                .await?,
+            ));
+        }
+        if probe_not(solver, &evaluation.fully_defined).await? {
+            return Err(VerifyError::new(format!(
+                "transition property '{}' is undefined for a reachable state",
+                property.name
+            )));
+        }
+        solver.assert(&evaluation.fully_defined)?;
         let value = eval(
             solver,
             model,

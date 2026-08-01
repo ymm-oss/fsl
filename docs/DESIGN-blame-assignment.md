@@ -192,3 +192,24 @@ Repair proposals (weaken guard / drop conjunct) — excluded by design; blame ou
 descriptive. Deferred, not shipped in this cut: the effect-level "necessary" refinement (§3), the
 `always_true_requires` `implied_by`/`classification` fields (§4), per-map-key effect necessity,
 CTI blame, and conjunct blame for ensures/trans/leadsTo.
+
+## 9. Native reachable classification (#634)
+
+The Rust frontends implement the same state-predicate classification in an
+independent solver session, separate from the BMC session that owns init, path,
+forced-transition, deadlock, and witness projection. For every `reachable`,
+the diagnostic session evaluates the target against a freshly named symbolic
+state plus all declared type bounds and invariants. A satisfiable query remains
+`insufficient_depth`. An unsatisfiable query is
+`over_constrained`; a deterministic deletion pass returns an irreducible
+`blocking_requires` set without depending on backend-specific unsat-core term
+identity.
+
+Every diagnostic probe is isolated with solver `push`/`pop`, and the entire
+diagnostic solver is independent of the BMC solver. Sharing a session would be
+unsound in either order: running after a forced transition makes every target
+look unsatisfiable, while running before evidence perturbs underdetermined
+witnesses across solver backends. Browser and native frontends both enforce the
+session split. Bounded explicit exploration uses the same static diagnosis;
+explicit-state closure upgrades remaining targets to the stronger
+`unreachable` classification.

@@ -71,6 +71,8 @@ fn warning_kinds(output: &Value) -> Vec<String> {
 const FROZEN_GHOST: &str = "rust/fslc/tests/fixtures/vacuity_frozen_ghost.fsl";
 const FROZEN_PLUS_DYNAMIC: &str = "rust/fslc/tests/fixtures/vacuity_frozen_plus_dynamic.fsl";
 const URGENCY_FREEZE: &str = "rust/fslc/tests/fixtures/vacuity_urgency_freeze.fsl";
+const STATE_CHANGING_DEADLINE: &str =
+    "rust/fslc/tests/fixtures/vacuity_state_changing_deadline.fsl";
 const DEADLINE_PATTERN: &str = "rust/fslc/tests/fixtures/vacuity_deadline_urgency_pattern.fsl";
 const REDUNDANT_REQUIRES: &str = "rust/fslc/tests/fixtures/vacuity_redundant_requires.fsl";
 const CAPACITY_GUARD: &str = "rust/fslc/tests/fixtures/vacuity_capacity_guard.fsl";
@@ -166,6 +168,21 @@ fn urgency_freeze_routes_through_warn_and_ignore() {
     );
 }
 
+#[test]
+fn state_changing_urgency_cannot_hide_a_deadline_that_never_advances() {
+    let (output, status) = verify(STATE_CHANGING_DEADLINE, "4", "error");
+    assert_eq!(status, 2, "{output:#}");
+    assert_eq!(output["kind"], "vacuous_deadline");
+    let finding = &output["findings"][0];
+    assert_eq!(finding["requirement"]["id"], "NFR-STATEFUL");
+    assert!(
+        finding["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("every transition preserves zero")),
+        "{output:#}"
+    );
+}
+
 /// Non-firing control: the documented deadline-urgency pattern must stay
 /// clean, otherwise the lane punishes the shape `docs/LANGUAGE.md` recommends.
 #[test]
@@ -174,6 +191,40 @@ fn the_deadline_urgency_pattern_is_not_reported_as_a_freeze() {
     assert_eq!(status, 0, "{output:#}");
     assert_eq!(output["result"], "verified");
     assert_eq!(output["action_coverage"]["tick"], true);
+}
+
+#[test]
+fn worked_sla_consumes_slack_and_its_lowered_boundary_bites() {
+    let (output, status) = verify("examples/nfr/sla_worker.fsl", "10", "error");
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(output["action_coverage"]["tick"], true);
+    assert!(!warning_kinds(&output).contains(&"vacuous_deadline".to_owned()));
+
+    let source = std::fs::read_to_string(repository_root().join("examples/nfr/sla_worker.fsl"))
+        .expect("read worked SLA")
+        .replace("deadline age <= 4", "deadline age <= 3");
+    let path = std::env::temp_dir().join(format!(
+        "fslc-sla-boundary-{}-{:?}.fsl",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::write(&path, source).expect("write lowered deadline fixture");
+    let (lowered, status) = run_cli(&[
+        "verify",
+        path.to_str().expect("UTF-8 fixture path"),
+        "--depth",
+        "10",
+        "--deadlock",
+        "ignore",
+        "--vacuity",
+        "error",
+        "--no-cache",
+    ]);
+    std::fs::remove_file(path).expect("remove lowered deadline fixture");
+    assert_eq!(status, 1, "{lowered:#}");
+    assert_eq!(lowered["result"], "violated");
+    assert_eq!(lowered["invariant"], "_deadline_NFR_1_age_1");
+    assert_eq!(lowered["requirement"]["id"], "NFR-1");
 }
 
 #[test]
@@ -295,6 +346,7 @@ fn every_engine_reports_the_same_vacuity_kind() {
     for (fixture, depth, kind) in [
         (FROZEN_GHOST, "3", "tautology_over_frozen"),
         (URGENCY_FREEZE, "3", "urgency_freeze"),
+        (STATE_CHANGING_DEADLINE, "4", "vacuous_deadline"),
         (REDUNDANT_REQUIRES, "2", "always_true_requires"),
     ] {
         for engine in ["bmc", "explicit", "induction"] {

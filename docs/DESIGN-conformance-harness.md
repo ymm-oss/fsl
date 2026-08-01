@@ -533,24 +533,14 @@ dedicated fixture instead of R5's own; see `relations.rs`'s
 The remaining finding is recorded as a re-measured fact, not silently
 normalized away or excluded:
 
-**A partial Seq read (`head()`) evaluated in property context on an
-empty sequence disagrees across engines.** `fsl_runtime::verify_explicit`
-and `fsl_runtime::bfs` both raise a raw `RuntimeError`
-("`head()` on empty sequence") instead of returning a verdict, because
-`Monitor::current_violation[_selected]` — unlike
-`Monitor::execute_selected`'s post-step invariant check — does not catch
-`is_partial_operation_error` and convert it to a `partial_op` `Violation`.
-`fsl_verifier::verify_bounded` instead returns a *verdict*: `violated`,
-`kind: "invariant"` (not `partial_op`), naming the user's own invariant,
-at step 0 — its symbolic Seq encoding treats an out-of-range read as
-*defined* with some solver-chosen value outside the element type's own
-declared bound, rather than as undefined the way the concrete engines
-(and LANGUAGE.md's own account of `/`/`%`, by contrast) treat it. Root
-cause in the symbolic encoding is not diagnosed here; that is for the
-tracking issue. Self-retiring exclusion:
-`relations.rs::r6_property_context_seq_head_disagrees_across_engines_self_retiring_exclusion`
-re-measures the exact `(kind, name, step)` and both error messages on
-every run.
+The former property-context Seq exclusion was resolved by #650. Reached
+`pop`/`head`/`at`/index operations now use the same path-sensitive definedness
+conditions in concrete and symbolic state-property evaluation. Monitor BFS,
+explicit verification, and BMC return `partial_op` at the same step with
+`_partial_property_<property>`; no solver-selected inactive slot can become a
+property value or reachable witness. The former self-retiring exclusion is now
+the positive agreement control
+`relations.rs::r6_property_context_seq_head_is_uniformly_partial`.
 
 The former raw-API gap for action-context partial operations was resolved by
 #651. `fsl_verifier::verify_bounded` now applies backend-neutral symbolic
@@ -560,8 +550,8 @@ from their concrete boundary pre-scan; non-partial outcomes that the bounded
 symbolic value cannot represent still retain that exact concrete evidence. The
 R6 fixtures assert Monitor BFS, explicit,
 `find_boundary_violation`, and raw BMC agree on `partial_op` for all six named
-operations. Property-context totalization remains outside that action-context
-classification and is still covered by the finding above.
+operations. Property-context `/` and `%` totalization remains the deliberate
+exception and has a dedicated negative control in the #650 regression test.
 
 ### Z3js / Worker parity ownership
 

@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+
+spec ReachableClassification {
+  type N = 0..5
+  state { x: N }
+  init { x = 0 }
+
+  action bump() {
+    requires x < 2
+    x = x + 1
+  }
+
+  invariant Cap "REQ-CAP: x never exceeds two" { x <= 2 }
+  reachable Impossible { x == 5 }
+  reachable Later { x == 2 }
+}

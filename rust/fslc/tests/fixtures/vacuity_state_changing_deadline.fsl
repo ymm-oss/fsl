@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Both urgent actions change state and disable their own guards, so the
+// original urgency_freeze induction does not apply. Nevertheless, whenever
+// `pending` is true either start or finish blocks tick, and age remains zero.
+requirements StateChangingDeadlineFreeze {
+  state { pending: Bool, serving: Bool }
+  init { pending = false serving = false }
+
+  action submit() {
+    requires not pending
+    pending = true
+  }
+  action start() {
+    requires pending
+    requires not serving
+    serving = true
+  }
+  action finish() {
+    requires serving
+    pending = false
+    serving = false
+  }
+  time {
+    urgent start, finish
+    age age while pending
+  }
+  requirement NFR-STATEFUL "deadline must consume slack" {
+    deadline age <= 0
+  }
+}

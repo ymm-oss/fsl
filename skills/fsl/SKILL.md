@@ -782,5 +782,7 @@ the relevant role skill directs it.
 - **Ghost types (typestate)**: `fslc typestate file.fsl [--ts]` — determines how
   far a state machine (a struct field with enum values / a state variable /
   an `Option<_>` slot) can be mapped onto the host language's typestate (derivable /
-  branching / relational). If all transitions are typeable, applicability=full.
+  branching / relational). Locally guarded read/query actions are explicit
+  state-preserving self-loops (`S → S`) rather than silent omissions. If all
+  transitions are typeable, applicability=full.
   `--ts` outputs a TypeScript skeleton for the derivable portion (reference.md §7)

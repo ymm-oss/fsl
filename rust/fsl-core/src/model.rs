@@ -11,8 +11,8 @@ use fsl_syntax::{
 
 use crate::{
     INIT_TARGET, KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite,
-    ProjectionDef, SPEC_TARGET, TraceabilityRegistry, action_target, property_target, state_target,
-    type_target,
+    ProjectionDef, SPEC_TARGET, TERMINAL_TARGET, TraceabilityRegistry, action_target,
+    property_target, state_target, type_target,
 };
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -146,6 +146,7 @@ pub struct KernelModel {
     pub reachables: Vec<PropertyDef>,
     pub leadstos: Vec<LeadsToDef>,
     pub terminal: Option<Expr>,
+    pub terminal_span: Option<Span>,
     pub projections: Vec<ProjectionDef>,
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
@@ -321,6 +322,11 @@ impl KernelModel {
     #[must_use]
     pub fn property_origin(&self, kind: &str, name: &str) -> Option<&crate::OriginChain> {
         self.origins.primary_for(&property_target(kind, name))
+    }
+
+    #[must_use]
+    pub fn terminal_origin(&self) -> Option<&crate::OriginChain> {
+        self.origins.primary_for(TERMINAL_TARGET)
     }
 
     #[must_use]
@@ -577,6 +583,7 @@ impl ModelBuilder {
         let mut reachables = Vec::new();
         let mut leadstos = Vec::new();
         let mut terminal = None;
+        let mut terminal_span = None;
         let mut traceability = TraceabilityRegistry::default();
         for (target, annotations) in self.annotations.targets() {
             for requirement in annotations
@@ -761,7 +768,10 @@ impl ModelBuilder {
                             .clone(),
                     });
                 }
-                SpecItem::Terminal { expr, .. } => terminal = Some(expr.as_ref().clone()),
+                SpecItem::Terminal { expr, span } => {
+                    terminal = Some(expr.as_ref().clone());
+                    terminal_span = Some(*span);
+                }
                 SpecItem::Unless {
                     name,
                     before,
@@ -875,6 +885,7 @@ impl ModelBuilder {
             reachables,
             leadstos,
             terminal,
+            terminal_span,
             projections: self.projections,
             origins: self.origins,
             annotations: self.annotations,

@@ -94,7 +94,10 @@ The `time` block (at most one inside `requirements`):
   provably true in all reachable states, `tick` is never enabled, time freezes, and
   deadline invariants are hollow. `fslc verify --vacuity` reports
   `kind:"urgency_freeze"` only for the sound case where Z3 proves that condition
-  initially and inductively.
+  initially and inductively. It separately reports `kind:"vacuous_deadline"`
+  when a deadline's age is initialized at zero and every transition is proven
+  to preserve zero; this catches state-changing urgent actions that disable
+  their own guards while still preventing slack consumption.
 - The counterexample trace of a deadline violation lines up ticks (the waiting time is
   visible).
 - The inductive proof often needs time-budget auxiliary invariants (of the

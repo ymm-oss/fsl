@@ -25,6 +25,12 @@ TypeScript for derivable entities. The output uses the same JSON envelope as the
   satisfiable at *any* state, so the whole disjunction does not pin the entity at all and the
   transition cannot be `derivable` through that guard — `status == A or bypass` is not derivable,
   even though `status == A or status == B` is.
+  A locally guarded action with no assignment to the entity is an explicit
+  state-preserving self-loop. For one allowed state it reports `B → B`; for
+  multiple allowed states it reports one self-loop per state. The TypeScript
+  skeleton preserves the caller's exact phantom state with `S extends A | B`
+  and returns `S`, rather than widening `A` to `A | B`. Actions that neither
+  guard nor assign the entity are not operations of that entity's state machine.
 - **`branching`** — the to-state is assigned only inside an `if` (data-dependent). It is exposed
   in the type, but the implementation bears a proof obligation of exhaustiveness (flagged).
 - **`relational`** — there is **no local guard on the same entity** for the status assignment.
@@ -45,8 +51,10 @@ TypeScript for derivable entities. The output uses the same JSON envelope as the
 
 ## 4. applicability (per entity)
 
-`full` only when all transitions are `derivable` (or `branching`). **It does not claim full by
-dropping a transition it could not understand** (it errs on the sound side). If only some,
+`full` only when all transitions, including locally guarded state-preserving
+self-loops, are `derivable` (or `branching`). **It does not claim full by
+dropping a transition it could not understand or a locally guarded operation
+that happens to preserve state** (it errs on the sound side). If only some,
 `partial`; if none, `none`.
 
 ## 5. Ripple / implementation

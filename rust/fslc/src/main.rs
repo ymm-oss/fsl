@@ -8325,9 +8325,14 @@ fn reachable_counterfactuals(path: &Path, depth: usize) -> Value {
     let lines = source.lines().collect::<Vec<_>>();
     let mut output = Vec::new();
     for candidate in weakening_candidates(&document) {
-        let Ok(model) = fsl_core::build_surface_model(candidate.spec) else {
+        let Ok(mut model) = fsl_core::build_surface_model(candidate.spec) else {
             continue;
         };
+        // Counterfactuals below consume only invariant/reachable outcomes.
+        // Re-running every leadsTo lasso for every weakening multiplies the
+        // cost while discarding its result, especially for quantified
+        // liveness with mixed fair/non-fair actions (issue #633).
+        model.leadstos.clear();
         if fsl_runtime::find_boundary_violation(model.clone(), depth)
             .ok()
             .flatten()
@@ -8838,9 +8843,10 @@ fn invariant_counterfactuals(path: &Path, depth: usize) -> Value {
             continue;
         }
         let started = Instant::now();
-        let Ok(model) = fsl_core::build_surface_model(candidate.spec) else {
+        let Ok(mut model) = fsl_core::build_surface_model(candidate.spec) else {
             continue;
         };
+        model.leadstos.clear();
         let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
             continue;
         };
@@ -8978,6 +8984,14 @@ fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
     output.insert("result".to_owned(), json!("explained"));
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("depth".to_owned(), json!(depth));
+    output.insert(
+        "counterfactual_scope".to_owned(),
+        json!({
+            "properties":["invariant", "reachable"],
+            "liveness":"skipped",
+            "reason":"counterfactual weakening is safety/reachability analysis; leadsTo remains verified by the normal verify command",
+        }),
+    );
     output.insert("skeleton".to_owned(), skeleton);
     output.insert(
         "witnesses".to_owned(),
@@ -9010,6 +9024,9 @@ fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
     }
     if readable {
         let mut text = format!("Spec: {} (depth {depth})\n", model.name);
+        text.push_str(
+            "Counterfactual scope: invariant/reachable (leadsTo liveness skipped; use verify)\n",
+        );
         let domains = model_skeleton(&model, spec_kind)
             .get("domains")
             .and_then(Value::as_array)
@@ -15970,10 +15987,11 @@ mod exit_status_tests {
 
     /// Negative control for #465: before the fix, `apply_vacuity_mode`
     /// selected findings with `kind.starts_with("vacuous_")`, which matches
-    /// only 2 of the 5 documented vacuity kinds
+    /// only 2 of the documented vacuity kinds
     /// (`docs/LANGUAGE.md` §15, `fsl_core::VACUITY_KINDS`).
-    /// `always_true_requires`, `tautology_over_frozen`, and `urgency_freeze`
-    /// do not share that prefix, so `--vacuity error` silently let a hollow
+    /// `always_true_requires`, `tautology_over_frozen`, `urgency_freeze`, and
+    /// `vacuous_deadline` do not share that prefix, so `--vacuity error`
+    /// silently let a hollow
     /// spec carrying only one of those three pass, and `--vacuity ignore`
     /// silently left it in `warnings`. If this regresses to a prefix check,
     /// these assertions fail.

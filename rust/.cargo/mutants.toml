@@ -22,9 +22,9 @@ examine_re = [
 # implementation_mutation_manifest.rs. Liveness is deliberately outside the
 # initial P2 symbolic-witness pilot rather than being treated as equivalent.
 exclude_re = [
-  "^fsl-verifier/src/bmc\\.rs:251:.* in verify_bounded_config$",
-  "^fsl-verifier/src/bmc\\.rs:258:.* in verify_bounded_config$",
-  "^fsl-verifier/src/bmc\\.rs:282:.* in verify_bounded_config$",
+  "^fsl-verifier/src/bmc\\.rs:420:.* in verify_bounded_config$",
+  "^fsl-verifier/src/bmc\\.rs:427:.* in verify_bounded_config$",
+  "^fsl-verifier/src/bmc\\.rs:451:.* in verify_bounded_config$",
 ]
 
 test_package = ["fslc-rust"]
