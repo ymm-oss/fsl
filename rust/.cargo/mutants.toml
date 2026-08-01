@@ -27,7 +27,10 @@ exclude_re = [
   "^fsl-verifier/src/bmc\\.rs:451:.* in verify_bounded_config$",
 ]
 
-test_package = ["fslc-rust"]
+# Changed-mode diff filtering may select only fsl-verifier as the mutated
+# package. Select the workspace explicitly so the named detector targets are
+# still resolved from fslc-rust instead of being applied to fsl-verifier.
+test_workspace = true
 additional_cargo_test_args = ["--test", "solver_fail_closed", "--test", "triangulated_assurance"]
 timeout_multiplier = 3.0
 build_timeout_multiplier = 3.0

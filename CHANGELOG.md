@@ -57,10 +57,12 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   reviewed semantic operators cover unknown/backend failures, inclusive
   depth, witness omissions, replay bypass, and false-success folds that
   generic token mutation cannot express. Pull requests run changed-scope
-  mutants plus every curated control, while product events run the complete
-  accepted scope. Survivors, timeouts, stale seams, missing output, and stale
-  equivalence records fail closed; this calibrates detection power without
-  promoting any public assurance class or changing product output.
+  mutants plus every curated control, with detector targets resolved across
+  the workspace even when a diff selects only `fsl-verifier`; product events
+  run the complete accepted scope. Survivors, timeouts, stale seams, missing
+  output, and stale equivalence records fail closed; this calibrates detection
+  power without promoting any public assurance class or changing product
+  output.
 - Added CI-internal Triangulated Assurance (#670): a federated, fail-closed
   registry now requires one raw observation, two explicitly independent
   semantic lineages, all three executable agreement edges, positive/negative

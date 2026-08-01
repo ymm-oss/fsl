@@ -141,6 +141,21 @@ fn validate_generic_functions(manifest: &Value, config: &str) -> Result<(), Stri
     Ok(())
 }
 
+fn validate_detector_selection(config: &str) -> Result<(), String> {
+    let lines = config.lines().map(str::trim).collect::<BTreeSet<_>>();
+    if !lines.contains("test_workspace = true") {
+        return Err(
+            "mutation detector tests must resolve from the workspace in changed mode".to_owned(),
+        );
+    }
+    if !lines.contains(
+        r#"additional_cargo_test_args = ["--test", "solver_fail_closed", "--test", "triangulated_assurance"]"#,
+    ) {
+        return Err("mutation detector target selection drifted".to_owned());
+    }
+    Ok(())
+}
+
 fn validate_scope(root: &Path, manifest: &Value) -> Result<(), String> {
     if manifest.get("schema").and_then(Value::as_str)
         != Some("fslc.implementation-mutation-scope.v1")
@@ -166,6 +181,7 @@ fn validate_scope(root: &Path, manifest: &Value) -> Result<(), String> {
         .map_err(|error| format!("cannot read mutation runner config '{config_path}': {error}"))?;
     validate_generic_functions(manifest, &config)?;
     validate_generic_exclusions(root, manifest, &config)?;
+    validate_detector_selection(&config)?;
 
     let decisions = manifest
         .get("decisions")
@@ -429,6 +445,20 @@ fn stale_ambiguous_or_unreasoned_exclusions_fail_closed() {
         }]
     });
     assert!(validate_equivalents(&root, &ambiguous).is_err());
+}
+
+#[test]
+fn mutation_detector_selection_requires_workspace_resolution() {
+    let root = repository_root();
+    let config = std::fs::read_to_string(root.join("rust/.cargo/mutants.toml"))
+        .expect("read mutation runner config");
+    validate_detector_selection(&config).expect("valid detector selection");
+    assert!(
+        validate_detector_selection(
+            &config.replace("test_workspace = true", "test_workspace = false")
+        )
+        .is_err()
+    );
 }
 
 #[test]
