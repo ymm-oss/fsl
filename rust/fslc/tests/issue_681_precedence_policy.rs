@@ -69,6 +69,62 @@ verify {
 }
 "#;
 
+const POLICY_VARIANT_NEGATIVE_CONTROLS: &str = r#"business PolicyVariantControls {
+  actor Worker
+  entity Item
+
+  process Item {
+    stages Open, Reviewed, Closed
+    initial Open
+    transition review Open -> Reviewed by Worker
+    transition close Reviewed -> Closed by Worker
+    transition bypass Open -> Closed by Worker
+    transition stayClosed Closed -> Closed by Worker
+  }
+
+  policy CTRL-INVARIANT "closed is forbidden" invariant {
+    forall item: Item { stage(item) != Closed }
+  }
+  policy CTRL-RESPONDS "open responds immediately with review" responds {
+    forall item: Item {
+      stage(item) == Open ~> within 0 stage(item) == Reviewed
+    }
+  }
+  policy CTRL-EVENTUALLY "open items are reviewed"
+    every Item in Open must eventually be Reviewed
+  policy CTRL-PRECEDENCE "closing requires review"
+    every Item reaching Closed must have passed through Reviewed
+}
+verify { instances Item = 1 }
+"#;
+
+#[test]
+fn every_business_policy_variant_has_a_native_rejecting_control() {
+    let fixture = Fixture::new("policy-variant-controls", POLICY_VARIANT_NEGATIVE_CONTROLS);
+    for (property, kind) in [
+        ("CTRL-INVARIANT", "invariant"),
+        ("CTRL-RESPONDS", "leadsTo"),
+        ("CTRL-EVENTUALLY", "leadsTo"),
+        ("CTRL-PRECEDENCE", "invariant"),
+    ] {
+        let (output, status) = run(&[
+            "verify",
+            fixture.text(),
+            "--depth",
+            "2",
+            "--property",
+            property,
+            "--deadlock",
+            "ignore",
+            "--no-cache",
+        ]);
+        assert_eq!(status, 1, "{property}: {output:#}");
+        assert_eq!(output["result"], "violated", "{property}: {output:#}");
+        assert_eq!(output["violation_kind"], kind, "{property}: {output:#}");
+        assert_eq!(output["invariant"], property, "{property}: {output:#}");
+    }
+}
+
 #[test]
 fn native_bmc_rejects_a_bypass_with_policy_attribution_and_replay() {
     let fixture = Fixture::new("bypass", BYPASS);

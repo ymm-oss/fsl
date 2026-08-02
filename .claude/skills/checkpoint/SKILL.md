@@ -23,8 +23,13 @@ Verify the current conversation's claims against:
 - exact observed command output for verification claims
 
 Preserve the goal, authority surface, invariants, decisions with reasons, exact evidence, changed files,
-completed work, failed approaches, exact test outcomes, remaining work, and one next action. Remove
-superseded hypotheses, raw logs, conversational narration, completed plans, and machine-specific paths.
+completed work, failed approaches, exact test outcomes, discovered follow-ups, remaining work, and one
+next action. Remove superseded hypotheses, raw logs, conversational narration, completed plans, and
+machine-specific paths.
+
+Reconcile every discovered soundness defect: it must be fixed in scope, linked to an existing or newly
+created issue, or marked `authorization required` with an explicit user request. Do not mark the task
+complete while such a finding exists only in chat, review output, or agent memory.
 
 Do not claim a test passed because it was planned, started, or passed in an earlier tree state. Do not use
 the checkpoint to introduce a new design decision or expand scope silently.

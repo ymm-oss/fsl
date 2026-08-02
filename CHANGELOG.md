@@ -10,6 +10,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   state, transition updates, the attributed no-bypass invariant, and its
   dominated-set stability invariant. Native BMC, induction, and explicit-state
   regressions now fail if the lowering is hollowed back into a no-op (#681).
+- Hardened semantic migrations against another hollow accepted construct:
+  behavior-bearing variants now require executable or fail-closed controls,
+  the precedence bypass gallery and a curated implementation fault operator
+  calibrate native detection, all four business policy variants have native
+  rejecting controls, and both agent harnesses retain soundness findings until
+  they are fixed or linked to an issue; the merge-readiness automation lane
+  executes that harness contract on every pull request (#681).
 - Added the M13 FSL Logic Test (#673): deterministic valid finite models now
   carry stable seed/case IDs, a single-case replay command, machine-coupled
   generation/dialect/metamorphic inventory, and named concrete-versus-symbolic

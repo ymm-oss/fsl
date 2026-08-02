@@ -12,7 +12,9 @@ Use this skill before substantial implementation, debugging, review, or design w
 3. Identify the authority surface: relevant contracts, design documents, tests, native Rust paths, and user constraints.
 4. Inspect only the narrow evidence needed to establish the current state. Delegate broad, read-heavy exploration to `evidence_explorer` when it reduces the main context.
 5. Create or replace `tasks/active.md` from `tasks/active.template.md`.
-6. Record invariants, evidence, scope, sibling paths, verification commands, remaining uncertainty, and one concrete next action.
+6. Record invariants, evidence, scope, sibling paths, verification commands, remaining uncertainty,
+   the discovered-follow-up ledger, and one concrete next action. For migration or parity work,
+   inventory behavior-bearing AST/enum variants; top-level corpus counts are not semantic completeness.
 7. Remove stale or speculative content from a previous task.
 8. Stop before implementation so the task packet can be checked independently.
 

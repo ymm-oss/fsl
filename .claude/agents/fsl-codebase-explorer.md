@@ -31,3 +31,7 @@ Anything not established by available evidence.
 
 Start from accepted contracts and the native Rust implementation. Treat Python as a frozen reference,
 not the presumed product path. Do not return raw grep output or propose implementation unless requested.
+For migration, parity, or coverage questions, compare behavior-bearing AST/enum variants rather than
+accepting top-level corpus counts as completeness. Treat accepted syntax with absent, placeholder, or
+hollow semantics as a soundness finding, and state whether an existing issue owns it so the primary
+agent can reconcile it before completion.

@@ -1,0 +1,18 @@
+Restores the #681 defect class: the native business frontend accepts and lowers
+a precedence policy's helper state, but omits its executable policy invariant
+from the Kernel. The bypass is therefore reported as verified even though the
+source policy rejects it.
+
+--- a/rust/fsl-core/src/dialect.rs
++++ b/rust/fsl-core/src/dialect.rs
+@@ -1362,7 +1362,9 @@
+                 }
+             }
+         };
+-        items.push(lowered_policy);
++        if !matches!(body.as_ref(), BusinessPolicyBody::Precedence { .. }) {
++            items.push(lowered_policy);
++        }
+     }
+     for history in &precedence.histories {
+         let process = &processes[history.process_index];

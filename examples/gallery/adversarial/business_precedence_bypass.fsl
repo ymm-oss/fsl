@@ -1,0 +1,22 @@
+// expected-command: verify --depth 2 --deadlock ignore --no-cache
+// expected-result: violated
+// expected-kind: invariant
+business GalleryBusinessPrecedenceBypass {
+  actor Reviewer
+  entity Change
+
+  process Change {
+    stages Draft, Reviewed, Applied
+    initial Draft
+    transition review Draft -> Reviewed by Reviewer
+    transition apply Reviewed -> Applied by Reviewer
+    transition bypass Draft -> Applied by Reviewer
+  }
+
+  policy CTRL-REVIEW "review must not be bypassed"
+    every Change reaching Applied must have passed through Reviewed
+}
+
+verify {
+  instances Change = 1
+}

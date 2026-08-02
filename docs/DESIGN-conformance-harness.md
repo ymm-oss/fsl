@@ -19,6 +19,45 @@ scans only `specs/*.fsl` + `examples/gallery/{valid,errors}`, and
 `can_monitor()` fails. So an entire dialect corpus sat outside the core
 correctness invariant and nothing said so. Skips are the bug this design removes.
 
+## Nested semantic constructs are a separate coverage unit (#681)
+
+Top-level dialect coverage does not establish that every accepted construct inside
+that dialect has executable semantics. The native migration in #207 demonstrated
+the distinction:
+
+- the phase-0 inventory reported 7 business files and exact surface-AST parity,
+  but the measured corpus contained `biz_policy_eventually` and no
+  `biz_policy_precedence` node;
+- full-corpus `check`/`verify` parity therefore exercised business dispatch while
+  never entering `BusinessPolicyBody::Precedence`;
+- the Python reference's dedicated precedence tests remained green independently,
+  but were not native product evidence and were not ported into the Rust workspace;
+- Rust accepted the syntax while `lower_business` matched it with an empty arm, so
+  parser, corpus-count, and bare-`check` gates all stayed green as the policy was
+  discarded.
+
+The coverage unit for a semantic sum type is consequently each behavior-bearing
+variant, not merely its enclosing frontend. A migration or new variant must bind
+every accepted variant to one of two observable postures:
+
+1. executable native semantics with an accepting control and a rejecting control;
+2. an explicit fail-closed diagnostic with a rejecting test.
+
+Where all variants lower to the same output category, the lowering should be
+structured as a total expression returning that category. This makes an empty
+unit arm a compile error rather than a silent feature omission. For business
+policies, `lower_business` now returns one `SpecItem` from every
+`BusinessPolicyBody` arm before appending it.
+
+`examples/gallery/adversarial/business_precedence_bypass.fsl` is the maintained
+rejecting control for precedence. Its own header declares the expected native
+command, `violated` result, and `invariant` kind, so
+`corpus_expectation_manifest.rs` executes the claim instead of inferring a
+contract from current output. The focused Rust tests additionally establish the
+history state/update and induction-positive structure, and select every current
+`BusinessPolicyBody` variant against its own native rejecting control. Removing
+the lowering can no longer leave the native corpus green.
+
 ## Registry — `tests/dialect_registry.py`
 
 Declarative, no logic. The harness scans `SCAN_ROOTS = ("specs", "examples")`

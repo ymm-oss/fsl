@@ -1261,20 +1261,23 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
         else {
             unreachable!();
         };
-        match body.as_ref() {
-            BusinessPolicyBody::Invariant(expr) => items.push(SpecItem::Invariant {
+        // Keep this match expression total over executable properties. If a
+        // surface policy variant is added or ported as `{}`, the type mismatch
+        // fails compilation instead of accepting syntax with hollow semantics.
+        let lowered_policy = match body.as_ref() {
+            BusinessPolicyBody::Invariant(expr) => SpecItem::Invariant {
                 name: id.clone(),
                 expr: Box::new(expr.clone()),
                 span: *span,
                 meta: meta(id, text),
                 annotations: policy_annotations.clone(),
-            }),
+            },
             BusinessPolicyBody::Responds {
                 binders,
                 before,
                 after,
                 within,
-            } => items.push(SpecItem::LeadsTo {
+            } => SpecItem::LeadsTo {
                 name: id.clone(),
                 binders: binders.clone(),
                 before: before.clone(),
@@ -1285,7 +1288,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                 within: within.clone(),
                 helpful: Vec::new(),
                 annotations: policy_annotations.clone(),
-            }),
+            },
             BusinessPolicyBody::Eventually {
                 case_name,
                 source_stage,
@@ -1294,7 +1297,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                 let process = by_name.get(case_name.as_str()).ok_or_else(|| {
                     core_error(format!("entity '{case_name}' has no process"), *span)
                 })?;
-                items.push(SpecItem::LeadsTo {
+                SpecItem::LeadsTo {
                     name: id.clone(),
                     binders: vec![typed_binder("c", case_name)],
                     before: Box::new(stage_is(process, "c", source_stage)),
@@ -1310,7 +1313,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                     within: None,
                     helpful: Vec::new(),
                     annotations: policy_annotations.clone(),
-                });
+                }
             }
             BusinessPolicyBody::Precedence {
                 case_name,
@@ -1334,7 +1337,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                     )
                 })?;
                 let process = &processes[history.process_index];
-                items.push(SpecItem::Invariant {
+                SpecItem::Invariant {
                     name: id.clone(),
                     expr: Box::new(Expr::Quantified {
                         quantifier: "forall".to_owned(),
@@ -1356,9 +1359,10 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                     span: *span,
                     meta: meta(id, text),
                     annotations: policy_annotations.clone(),
-                });
+                }
             }
-        }
+        };
+        items.push(lowered_policy);
     }
     for history in &precedence.histories {
         let process = &processes[history.process_index];
