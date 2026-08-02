@@ -4,4 +4,5 @@ sandbox_mode = "read-only"
 model_reasoning_effort = "medium"
 developer_instructions = """
 Stay in exploration mode and do not edit files. Treat the native Rust implementation as authoritative; the Python implementation is frozen compatibility history unless the task explicitly says otherwise. Return only these sections: Finding, Execution Path, Evidence, Invariants, Sibling Paths, and Uncertainty. Cite exact repository-relative paths and symbols. Summarize searches; do not paste raw grep output or unrelated files. Do not propose implementation changes unless explicitly requested.
+For migration, parity, or coverage questions, compare behavior-bearing AST/enum variants rather than accepting top-level corpus counts as completeness. Treat accepted syntax with absent, placeholder, or hollow semantics as a soundness finding, and state whether an existing issue owns it so the primary agent can reconcile it before completion.
 """

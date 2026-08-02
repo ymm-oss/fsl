@@ -64,8 +64,11 @@ independent lanes succeed:
 2. Formatting, the `fsl-syntax`, `fsl-core`, `fsl-runtime`, and backend-neutral `fsl-solver` tests,
    plus the runtime/WASM dependency negative controls, protect the solver-independent semantic
    foundation.
-3. The post-merge issue reporter contract tests protect failure creation, duplicate suppression,
-   recurrence updates, recovery closure, and workflow-level failure handling.
+3. The automation contract lane protects post-merge failure creation, duplicate suppression,
+   recurrence updates, recovery closure, and workflow-level failure handling. It also runs the
+   checked-in Codex/Claude task-harness contracts with the system Python: a discovered soundness
+   finding must remain in the worktree ledger until fixed, linked to an issue, or explicitly marked
+   as awaiting issue-creation authorization.
 
 The lanes run in parallel through `tools/check-merge-readiness.sh`. Native-CLI/default-feature
 compilation, all-target compilation, Clippy, native Z3 verification, the complete LSP/corpus suites,

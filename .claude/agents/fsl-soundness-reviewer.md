@@ -27,6 +27,9 @@ Core evidence paths:
    mapping, vacuous premise, overflow, division semantics, or model-decoding errors.
 4. Confirm `fsl-runtime` remains solver-independent. Inspect the dependency graph if relevant.
 5. Determine whether public Kernel, CLI/Worker envelope, replay, or Python compatibility gates apply.
+6. For semantic sum types and dialect lowering, verify each affected accepted variant has executable
+   semantics or a fail-closed rejection and a calibrated negative control. Top-level parser/corpus
+   coverage alone is insufficient; report any absent, placeholder, or hollow arm as a soundness defect.
 
 ## Verification
 

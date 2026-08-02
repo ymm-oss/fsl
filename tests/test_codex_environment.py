@@ -111,5 +111,28 @@ def test_active_task_is_worktree_local() -> None:
     assert proc.returncode == 0
 
 
+def test_semantic_findings_cannot_disappear_between_agents_and_checkpoint() -> None:
+    template = (ROOT / "tasks" / "active.template.md").read_text(encoding="utf-8")
+    task_start = (AGENT_SKILLS / "task-start" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    checkpoint = (AGENT_SKILLS / "checkpoint" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    explorer = (CODEX / "agents" / "evidence-explorer.toml").read_text(
+        encoding="utf-8"
+    )
+    reviewer = (CODEX / "agents" / "independent-reviewer.toml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "## Discovered follow-ups" in template
+    assert "authorization required" in template
+    assert "behavior-bearing AST/enum variants" in task_start
+    assert "Reconcile every discovered soundness defect" in checkpoint
+    assert "hollow semantics" in explorer
+    assert "calibrated negative control" in reviewer
+
+
 def test_agents_instructions_fit_the_configured_budget() -> None:
     assert (ROOT / "AGENTS.md").stat().st_size <= 32_768

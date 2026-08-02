@@ -5,6 +5,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed native Rust business-dialect precedence policies so `every <Entity>
+  reaching ... must have passed through ...` lowers to deduplicated history
+  state, transition updates, the attributed no-bypass invariant, and its
+  dominated-set stability invariant. Native BMC, induction, and explicit-state
+  regressions now fail if the lowering is hollowed back into a no-op (#681).
+- Hardened semantic migrations against another hollow accepted construct:
+  behavior-bearing variants now require executable or fail-closed controls,
+  the precedence bypass gallery and a curated implementation fault operator
+  calibrate native detection, all four business policy variants have native
+  rejecting controls, and both agent harnesses retain soundness findings until
+  they are fixed or linked to an issue; the merge-readiness automation lane
+  executes that harness contract on every pull request (#681).
 - Accepted the measured correlated-saga-history design: retain one-hot event
   flags as current-transition observations and add a dedicated
   correlation-indexed six-phase saga map in a follow-up. The maintained

@@ -35,6 +35,10 @@ check_core_contracts() {
 
 check_automation() {
   node --test .github/scripts/report-post-merge-ci.test.mjs
+  # The agent environment is repository-hook infrastructure, not frozen Python
+  # product behavior. These zero-argument contract tests use only the standard
+  # library, so run them directly without adding pytest to the fail-fast lane.
+  python3 -c 'from tests.test_codex_environment import test_semantic_findings_cannot_disappear_between_agents_and_checkpoint as codex_contract; from tests.test_claude_environment import test_semantic_findings_cannot_disappear_between_agents_and_checkpoint as claude_contract; codex_contract(); claude_contract()'
 }
 
 case "${1:-all}" in
