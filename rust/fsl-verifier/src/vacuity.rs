@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Solver-dependent vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes 3–5).
+//! Solver-dependent vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes 3–6).
 //!
 //! The two reachability lanes (`vacuous_implication`, `vacuous_leadsto`) are
-//! solver-independent and live in `fsl-runtime`. The three lanes here need Z3,
+//! solver-independent and live in `fsl-runtime`. The four lanes here need Z3,
 //! so they must stay on this side of the `fsl-runtime`/`fsl-solver` boundary
 //! (`AGENTS.md`: `fsl-runtime` must remain independent of `fsl-solver`).
 //!
@@ -54,6 +54,13 @@ pub enum VacuityFinding {
         /// The first one carries the requirement metadata for the warning.
         deadlines: Vec<String>,
     },
+    /// A generated deadline whose age state is initialized at zero and proven
+    /// to remain zero across every transition, so no execution consumes slack.
+    DeadlineNeverAdvances {
+        span: Span,
+        deadline: String,
+        age_vars: Vec<String>,
+    },
     /// A `requires` clause that cannot be false in any type-valid state once
     /// its preceding clauses hold, for every instance of the action.
     AlwaysTrueRequires {
@@ -69,6 +76,7 @@ impl VacuityFinding {
         match self {
             Self::TautologyOverFrozen { .. } => "tautology_over_frozen",
             Self::UrgencyFreeze { .. } => "urgency_freeze",
+            Self::DeadlineNeverAdvances { .. } => "vacuous_deadline",
             Self::AlwaysTrueRequires { .. } => "always_true_requires",
         }
     }
@@ -79,6 +87,7 @@ impl VacuityFinding {
         match self {
             Self::TautologyOverFrozen { invariant, .. } => invariant,
             Self::UrgencyFreeze { .. } => "tick",
+            Self::DeadlineNeverAdvances { deadline, .. } => deadline,
             Self::AlwaysTrueRequires { action, .. } => action,
         }
     }
@@ -88,6 +97,7 @@ impl VacuityFinding {
         match self {
             Self::TautologyOverFrozen { span, .. }
             | Self::UrgencyFreeze { span, .. }
+            | Self::DeadlineNeverAdvances { span, .. }
             | Self::AlwaysTrueRequires { span, .. } => *span,
         }
     }
@@ -140,6 +150,8 @@ pub(crate) async fn static_findings<S: SmtSolver>(
     let mut findings = frozen_tautologies(model, solver).await?;
     if let Some(finding) = urgency_freeze(model, solver, instances).await? {
         findings.push(finding);
+    } else {
+        findings.extend(deadlines_never_advance(model, solver, instances).await?);
     }
     findings.extend(always_true_requires(model, solver, instances).await?);
     Ok(findings)
@@ -494,6 +506,98 @@ fn non_tick_assigns_any(model: &KernelModel, roots: &BTreeSet<String>) -> bool {
         collect_assigned_roots(&action.statements, &mut assigned);
         !assigned.is_disjoint(roots)
     })
+}
+
+fn deadline_zero_expr(expr: &Expr) -> Option<Expr> {
+    match expr {
+        Expr::Quantified {
+            quantifier,
+            binder,
+            body,
+        } if quantifier == "forall" => Some(Expr::Quantified {
+            quantifier: quantifier.clone(),
+            binder: binder.clone(),
+            body: Box::new(deadline_zero_expr(body)?),
+        }),
+        Expr::Binary { op, left, .. } if op == "<=" => Some(Expr::Binary {
+            op: "==".to_owned(),
+            left: left.clone(),
+            right: Box::new(Expr::Num(0)),
+        }),
+        _ => None,
+    }
+}
+
+fn strengthened_deadline_zero<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    property: &PropertyDef,
+    state: &SymbolicState<S::Term>,
+) -> Result<S::Term, VerifyError> {
+    let zero = deadline_zero_expr(&property.expr)
+        .ok_or_else(|| VerifyError::new("generated deadline has an unexpected shape"))?;
+    let mut bindings = Bindings::new();
+    let value = eval(solver, model, &zero, state, &mut bindings, None)?;
+    let mut terms = all_bounds(solver, model, state)?;
+    terms.push(bool_term(&value)?.clone());
+    Ok(solver.and(&terms)?)
+}
+
+/// Detect a deadline that consumes no slack even though `tick` may be enabled
+/// in states where its age condition is false. This is distinct from
+/// `urgency_freeze`, which proves the whole generated tick action dead.
+async fn deadlines_never_advance<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    instances: &[ActionInstance<S::Term>],
+) -> Result<Vec<VacuityFinding>, VerifyError> {
+    let deadlines = deadline_invariants(model);
+    if deadlines.is_empty() || instances.is_empty() || generated_tick(model).is_none() {
+        return Ok(Vec::new());
+    }
+
+    let mut findings = Vec::new();
+    for (index, property) in deadlines.into_iter().enumerate() {
+        let Some(age_vars) = deadline_age_refs(&[property]) else {
+            continue;
+        };
+        if age_vars.is_empty() {
+            continue;
+        }
+
+        solver.set_query_context("vacuity", &property.name);
+        let init =
+            symbolic_state_with_suffix(solver, model, &format!("vac_deadline_init_{index}"))?;
+        let mut base = init_constraints(solver, model, &init)?;
+        base.push(solver.not(&strengthened_deadline_zero(solver, model, property, &init)?)?);
+        if !proven_unsat(solver, &base).await? {
+            continue;
+        }
+
+        let current =
+            symbolic_state_with_suffix(solver, model, &format!("vac_deadline_cur_{index}"))?;
+        let next =
+            symbolic_state_with_suffix(solver, model, &format!("vac_deadline_next_{index}"))?;
+        let choice = solver.constant(
+            &format!("__vac_deadline_choice_{index}"),
+            &fsl_solver::Sort::Int,
+        )?;
+        let mut step = vec![
+            solver.ge(&choice, &solver.int_value(0))?,
+            solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?,
+            strengthened_deadline_zero(solver, model, property, &current)?,
+            transition_constraint(solver, model, instances, &current, &next, &choice)?,
+        ];
+        step.push(solver.not(&strengthened_deadline_zero(solver, model, property, &next)?)?);
+        if proven_unsat(solver, &step).await? {
+            findings.push(VacuityFinding::DeadlineNeverAdvances {
+                span: property.span,
+                deadline: property.name.clone(),
+                age_vars: age_vars.into_iter().collect(),
+            });
+        }
+    }
+    Ok(findings)
 }
 
 /// Lane 5 — `urgency_freeze`.

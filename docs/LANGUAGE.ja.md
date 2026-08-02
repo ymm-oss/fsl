@@ -666,7 +666,8 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 | 検査 | 内容 | 違反時 |
 |---|---|---|
 | 型境界 | すべての有界型の状態変数(Map の値、struct のフィールド、Seq の要素を含む)が範囲内にある | `violated` / `type_bound` / `_bounds_<var>` |
-| 部分演算(action 文脈限定: `requires`/本体/`ensures` のみ、§3 参照) | `pop()`/`head()`/`at(i)` の時点で列が非空かつインデックスが範囲内であり、`/` `%` の除数が非ゼロ | `violated` / `partial_op` / `_partial_<action>` |
+| Seq の部分演算(action および property 文脈) | `pop()`/`head()`/`at(i)`/index の時点で列が非空かつインデックスが範囲内である | `violated` / `partial_op` / `_partial_<action>`、`_partial_property_<property>`、または `_partial_property_terminal` |
+| 算術の部分演算(action 文脈限定: `requires`/本体/`ensures` のみ、§3 参照) | `/` `%` の除数が非ゼロである | `violated` / `partial_op` / `_partial_<action>` |
 | action カバレッジ | 各 action が深さ K 以内に少なくとも 1 回 enabled になる | `action_coverage` にブロックしている requires の診断 |
 | デッドロック | すべての action が disabled になる状態への到達 | 警告(`--deadlock error` で `violated`) |
 | trans | 2 状態の述語が到達可能なすべての遷移で成立するか | `violated` / `trans` / `trans` + トレース |
@@ -1141,8 +1142,10 @@ invariant QueuedAreQueued {
 }
 ```
 
-`at()` はプロパティの文脈では全域です(範囲外は不特定の値を生みます)ので、常に
-`i < q.size()` でガードしてください。
+プロパティ文脈で範囲外の `at()`/index を読むこと(または空の Seq に対する
+`head()`/`pop()`)は `partial_op` 違反です。`i < q.size() => ...` でガードすると
+read は短絡評価され、プロパティは定義されたままになります。`/` と `%` とは異なり、
+Seq read が不特定のシンボリック値へ全域化されることはありません。
 
 ### Seq 上の集約: インデックス / ドメイン型のイディオム
 
@@ -2142,8 +2145,10 @@ requirement NFR-1 "complete within 4 ticks of acceptance" {
   urgent にすること(`requires age >= K` を持つ respond_due 形式)**です。
   非空虚性を確認するには、`K-1` へ下げて violated になることを確認します。
   `fslc verify --vacuity` は、この罠の証明可能な形式(urgent の条件が初期かつ
-  帰納的)に対して `kind:"urgency_freeze"` を出します。警告の不在は非空虚性の証明
-  ではありません。
+  帰納的)に対して `kind:"urgency_freeze"` を出します。さらに、`tick` が age 条件の
+  偽の間には動ける場合でも、対象 deadline の全 age が全遷移で 0 のままと証明された
+  ときは `kind:"vacuous_deadline"` を出します。どちらの警告も不在であることは
+  非空虚性の証明ではありません。
 - BMC の検査はすぐに機能します。帰納的な証明はしばしば、時間予算の補助 invariant
   (`age + remaining work <= K` の形)を必要とします(CTI から導出します。実例は
   `examples/nfr/`)。
@@ -2541,7 +2546,9 @@ DESIGN-*.md があります)。
   (先行する節の文脈の下で常に真であるガード)、
   `tautology_over_frozen`(どの action も変えない状態の上の、動的に
   トートロジーである invariant)、`urgency_freeze`(urgency が時間を凍結するために
-  死んでいると証明された、生成された deadline の `tick`)を警告します。
+  死んでいると証明された、生成された deadline の `tick`)、
+  `vacuous_deadline`(生成 deadline の age が全遷移で 0 のままと証明される)を
+  警告します。
   `error` は exit 2 です。→
   [`DESIGN-vacuity.md`](DESIGN-vacuity.md)
 - **`--strict-tags`** — 成功の結果の上で、タグのない宣言(捏造の候補)と、参照

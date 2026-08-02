@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! Negative controls for #465: native `--vacuity` must select over the full
-//! documented 5-kind lane set (`docs/LANGUAGE.md` §15,
+//! documented 6-kind lane set (`docs/LANGUAGE.md` §15,
 //! `fsl_core::VACUITY_KINDS`), not just the two kinds spelled `vacuous_*`.
 //! This file exercises the `vacuous_leadsto` lane end to end through the CLI
 //! (`warn`/`error`/`ignore`) — the lane that was entirely missing from

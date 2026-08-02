@@ -290,6 +290,91 @@ spec DelayedPartialBoundary {
 }
 
 #[test]
+fn terminal_partial_operations_are_checked_only_at_deadlock() {
+    let source = r"
+spec ShortCircuitedPropertyBoundaries {
+  type Item = 0..1
+  state { queue: Seq<Item, 1> }
+  init { queue = Seq {} }
+  action stay() { queue = queue }
+  invariant SafeInvariant { true or queue.head() >= 0 }
+  reachable SafeReachable { true or queue.head() >= 0 }
+  leadsTo SafeLiveness {
+    true or queue.head() >= 0 ~> true or queue.head() >= 0
+  }
+  trans SafeTransition { true or queue.head() >= 0 }
+  terminal { queue.head() >= 0 }
+}
+";
+    let kernel =
+        parse_kernel_source(source, &FsResolver::new(".")).expect("parse live terminal fixture");
+    let model = build_model(kernel).expect("build live terminal fixture");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let result = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 1))
+        .expect("verify an always-enabled transition");
+    assert!(
+        result.violation.is_none(),
+        "a terminal expression is not evaluated while an action remains enabled: {result:?}"
+    );
+    assert!(result.leadsto_violation.is_none(), "{result:?}");
+    assert!(
+        result.reachables["SafeReachable"].is_some(),
+        "the short-circuited reachable must still be witnessed: {result:?}"
+    );
+}
+
+#[test]
+fn pending_reachable_partial_operation_is_not_skipped() {
+    let source = r"
+spec PendingReachableBoundary {
+  type Item = 0..1
+  state { queue: Seq<Item, 1> }
+  init { queue = Seq {} }
+  action stay() { queue = queue }
+  reachable PartialReachable { queue.head() >= 0 }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new("."))
+        .expect("parse pending reachable fixture");
+    let model = build_model(kernel).expect("build pending reachable fixture");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let result = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 1))
+        .expect("verify pending reachable definedness");
+    let violation = result
+        .violation
+        .expect("a pending reachable must be checked for partial operations");
+    assert_eq!(violation.kind, "partial_op");
+    assert_eq!(violation.name, "_partial_property_PartialReachable");
+    assert_eq!(
+        violation.step, 0,
+        "definedness must be checked while the target is pending, before raw witness recording"
+    );
+}
+
+#[test]
+fn transition_definedness_reads_the_previous_state() {
+    let source = r"
+spec TransitionOldStateBoundary {
+  type Item = 0..1
+  state { queue: Seq<Item, 1> }
+  init { queue = Seq { 0 } }
+  action clear() { queue = queue.pop() }
+  trans OldHeadWasDefined { old(queue).head() >= 0 }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new("."))
+        .expect("parse transition old-state fixture");
+    let model = build_model(kernel).expect("build transition old-state fixture");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let result = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 1))
+        .expect("verify transition old-state definedness");
+    assert!(
+        result.violation.is_none(),
+        "old(queue) was non-empty even though the current queue is empty: {result:?}"
+    );
+}
+
+#[test]
 fn selected_empty_bounds_really_skips_implicit_bound_properties() {
     let source = r"
 spec SelectedBounds {

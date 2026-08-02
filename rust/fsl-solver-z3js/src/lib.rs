@@ -46,6 +46,8 @@ extern "C" {
     fn js_push();
     #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3Pop)]
     fn js_pop(levels: u32);
+    #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3Reset)]
+    fn js_reset();
     #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3Assert)]
     fn js_assert(term: u32);
     #[wasm_bindgen(js_namespace = globalThis, js_name = fslZ3AssertAndTrack)]
@@ -66,6 +68,12 @@ extern "C" {
 #[must_use]
 pub fn version() -> String {
     js_version()
+}
+
+/// Remove every assertion from the browser bridge's shared solver while
+/// retaining registered term handles.
+pub fn reset() {
+    js_reset();
 }
 
 #[derive(Clone, Debug)]

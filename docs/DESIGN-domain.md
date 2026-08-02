@@ -300,7 +300,8 @@ tests, or external evidence.
 
 ## Future Work
 
-Remaining work is production hardening rather than dialect absence: richer
-history-aware saga state, stronger cross-aggregate routing proofs, production
+Remaining work is production hardening rather than dialect absence: the
+accepted correlation-indexed saga-history design in
+[`DESIGN-saga-history.md`](DESIGN-saga-history.md), stronger cross-aggregate routing proofs, production
 outbox/inbox adapters, and fuller non-TypeScript generators should consume the
 public Kernel boundary rather than adding a second semantics.

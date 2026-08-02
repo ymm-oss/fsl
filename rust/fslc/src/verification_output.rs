@@ -787,6 +787,26 @@ pub fn render_boundary_output(
             .iter()
             .find(|definition| definition.name == action.name)
     });
+    let partial_property_name = (violation.kind == "partial_op")
+        .then(|| violation.name.strip_prefix("_partial_property_"))
+        .flatten();
+    let partial_property = partial_property_name.and_then(|name| {
+        model
+            .invariants
+            .iter()
+            .map(|property| ("invariant", property))
+            .chain(model.transitions.iter().map(|property| ("trans", property)))
+            .chain(
+                model
+                    .reachables
+                    .iter()
+                    .map(|property| ("reachable", property)),
+            )
+            .find(|(_, property)| property.name == name)
+    });
+    let partial_leadsto = partial_property_name
+        .and_then(|name| model.leadstos.iter().find(|property| property.name == name));
+    let partial_terminal = partial_property_name == Some("terminal");
     let origin = match violation.kind.as_str() {
         "invariant" => model.property_origin("invariant", &violation.name),
         "trans" => model.property_origin("trans", &violation.name),
@@ -794,6 +814,14 @@ pub fn render_boundary_output(
             .name
             .strip_prefix("_bounds_")
             .and_then(|name| model.state_origin(name)),
+        "partial_op" => partial_property
+            .and_then(|(kind, property)| model.property_origin(kind, &property.name))
+            .or_else(|| {
+                partial_leadsto
+                    .and_then(|property| model.property_origin("leadsTo", &property.name))
+            })
+            .or_else(|| partial_terminal.then(|| model.terminal_origin()).flatten())
+            .or_else(|| action.and_then(|action| model.action_origin(&action.name))),
         _ => action.and_then(|action| model.action_origin(&action.name)),
     };
     output.insert(
@@ -811,6 +839,12 @@ pub fn render_boundary_output(
         );
         output.insert("origin".to_owned(), internal_origin_json(origin));
     }
+    if let Some((_, property)) = partial_property {
+        insert_requirement_metadata(&mut output, &property.annotations, property.meta.as_ref());
+    }
+    if let Some(property) = partial_leadsto {
+        insert_requirement_metadata(&mut output, &property.annotations, property.meta.as_ref());
+    }
     output.insert(
         "loc".to_owned(),
         origin
@@ -819,8 +853,25 @@ pub fn render_boundary_output(
             .map_or_else(
                 || {
                     if violation.kind == "partial_op" {
-                        definition
-                            .map_or(Value::Null, |action| statement_location(&action.statements))
+                        partial_property.map_or_else(
+                            || {
+                                partial_leadsto.map_or_else(
+                                    || {
+                                        if partial_terminal {
+                                            model
+                                                .terminal_span
+                                                .map_or(Value::Null, fsl_syntax::Span::python_loc)
+                                        } else {
+                                            definition.map_or(Value::Null, |action| {
+                                                statement_location(&action.statements)
+                                            })
+                                        }
+                                    },
+                                    |property| property.span.python_loc(),
+                                )
+                            },
+                            |(_, property)| property.span.python_loc(),
+                        )
                     } else {
                         Value::Null
                     }
@@ -831,7 +882,13 @@ pub fn render_boundary_output(
     if violation.kind == "partial_op" {
         output.insert(
             "hint".to_owned(),
-            json!("guard the action with requires q.size() > 0 (or bound the index)"),
+            json!(
+                if partial_property.is_some() || partial_leadsto.is_some() || partial_terminal {
+                    "guard the property expression with q.size() > 0 (or bound the index)"
+                } else {
+                    "guard the action with requires q.size() > 0 (or bound the index)"
+                }
+            ),
         );
     }
     output.insert("violated_at_step".to_owned(), json!(violation.step));
@@ -958,6 +1015,7 @@ pub fn render_bmc_output(
 /// # Errors
 ///
 /// Returns a diagnostic when any explicit witness fails Monitor replay.
+#[allow(clippy::too_many_arguments)]
 pub fn render_explicit_output(
     envelope: Map<String, Value>,
     model: &KernelModel,
@@ -966,8 +1024,9 @@ pub fn render_explicit_output(
     deadlock: DeadlockMode,
     elapsed_s: f64,
     vacuity: &[VacuityFinding],
+    reachable_diagnostics: &std::collections::BTreeMap<String, fsl_verifier::ReachableDiagnosis>,
 ) -> Result<(Value, i32), String> {
-    let compatible = explicit_as_bmc(result, vacuity);
+    let compatible = explicit_as_bmc(result, vacuity, reachable_diagnostics);
     replay_bmc_witnesses(model, &compatible, None)?;
     let statistics = VerificationStatistics::default();
 
@@ -979,7 +1038,16 @@ pub fn render_explicit_output(
             elapsed_s,
             statistics: &statistics,
         };
-        let (mut output, status) = render_violation(envelope, model, violation, &options);
+        let (mut output, status) = if violation.kind == "partial_op" {
+            let boundary = fsl_runtime::Violation {
+                kind: violation.kind.clone(),
+                name: violation.name.clone(),
+                step: violation.step,
+            };
+            render_boundary_output(envelope, model, &boundary, &violation.trace, &options)
+        } else {
+            render_violation(envelope, model, violation, &options)
+        };
         add_explicit_metadata(&mut output, result);
         return Ok((output, status));
     }
@@ -1057,7 +1125,11 @@ pub fn render_explicit_output(
 /// shape. `vacuity` carries the solver-decided lanes proved separately by the
 /// caller: the explicit engine has no solver, but the lanes are properties of
 /// the model rather than of the exploration, so the same findings apply.
-fn explicit_as_bmc(result: &fsl_runtime::ExplicitResult, vacuity: &[VacuityFinding]) -> BmcResult {
+fn explicit_as_bmc(
+    result: &fsl_runtime::ExplicitResult,
+    vacuity: &[VacuityFinding],
+    reachable_diagnostics: &std::collections::BTreeMap<String, fsl_verifier::ReachableDiagnosis>,
+) -> BmcResult {
     BmcResult {
         spec: result.spec.clone(),
         depth: result.depth,
@@ -1089,6 +1161,7 @@ fn explicit_as_bmc(result: &fsl_runtime::ExplicitResult, vacuity: &[VacuityFindi
                 )
             })
             .collect(),
+        reachable_diagnostics: reachable_diagnostics.clone(),
         deadlock_step: result.deadlock_step,
         deadlock_trace: result.deadlock_trace.clone(),
         action_coverage: result.action_coverage.clone(),
@@ -1375,17 +1448,49 @@ fn render_reachable_failure(
                 .iter()
                 .map(|property| {
                     let origin = model.property_origin("reachable", &property.name);
+                    let diagnosis = result.reachable_diagnostics.get(&property.name);
                     let mut item = json!({
                         "name": origin
                             .and_then(origin_display_name)
                             .map_or_else(|| display_name(&property.name), str::to_owned),
                         "loc": property.span.python_loc(),
-                        "classification": "insufficient_depth",
-                        "hint": format!("not witnessed within depth {}; try a larger --depth", options.depth),
+                        "classification": if diagnosis.is_some() { "over_constrained" } else { "insufficient_depth" },
+                        "hint": if let Some(diagnosis) = diagnosis {
+                            let names = diagnosis.blocking.iter()
+                                .map(|blocker| display_name(&blocker.name))
+                                .collect::<Vec<_>>();
+                            let names = if names.is_empty() {
+                                display_name(&property.name)
+                            } else {
+                                names.join(", ")
+                            };
+                            format!("target predicate is unsatisfiable under type bounds/invariants ({names}); fix the blocking constraint")
+                        } else {
+                            format!("not witnessed within depth {}; try a larger --depth", options.depth)
+                        },
                         "faithfulness_class": "intent_unexercised",
-                        "recommended_action": "add a single-shot reachable for the action / raise --depth",
+                        "recommended_action": if diagnosis.is_some() {
+                            "fix the blocking type bound/invariant and rerun verification"
+                        } else {
+                            "add a single-shot reachable for the action / raise --depth"
+                        },
                     });
                     if let Value::Object(item) = &mut item {
+                        if let Some(diagnosis) = diagnosis {
+                            let mut blocking = diagnosis
+                                .blocking
+                                .iter()
+                                .map(|blocker| reachable_blocker_json(model, blocker))
+                                .collect::<Vec<_>>();
+                            if blocking.is_empty() {
+                                blocking.push(json!({
+                                    "kind": "reachable",
+                                    "name": display_name(&property.name),
+                                    "loc": property.span.python_loc(),
+                                }));
+                            }
+                            item.insert("blocking_requires".to_owned(), Value::Array(blocking));
+                        }
                         insert_requirement_metadata(
                             item,
                             &property.annotations,
@@ -1407,21 +1512,50 @@ fn render_reachable_failure(
     add_common(&mut output, model, result, options);
     output.remove("reachables");
     output.remove("deadlock");
+    let has_over_constrained = unreached
+        .iter()
+        .any(|property| result.reachable_diagnostics.contains_key(&property.name));
     output.insert(
         "hint".to_owned(),
-        json!(format!(
-            "within depth {} no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth",
-            options.depth
-        )),
+        json!(if has_over_constrained {
+            "one or more target predicates contradict type bounds/invariants; fix each blocking constraint before increasing --depth".to_owned()
+        } else {
+            format!(
+                "within depth {} no trace satisfies the property; guards may be too strong (see action_coverage), or increase --depth",
+                options.depth
+            )
+        }),
     );
     output.insert("faithfulness_class".to_owned(), json!("intent_unexercised"));
     output.insert(
         "recommended_action".to_owned(),
-        json!("add a single-shot reachable for the action / raise --depth"),
+        json!(if has_over_constrained {
+            "fix over-constrained blockers first; then rerun or raise --depth only for remaining depth-limited targets"
+        } else {
+            "add a single-shot reachable for the action / raise --depth"
+        }),
     );
     finish(&mut output, options.depth, options);
     output.insert("trace_type".to_owned(), json!("reachable"));
     (Value::Object(output), 1)
+}
+
+fn reachable_blocker_json(model: &KernelModel, blocker: &fsl_verifier::ReachableBlocker) -> Value {
+    let mut rendered = json!({
+        "kind": blocker.kind,
+        "name": display_name(&blocker.name),
+    });
+    if blocker.kind == "invariant"
+        && let Some(property) = model
+            .invariants
+            .iter()
+            .find(|property| property.name == blocker.name)
+        && let Value::Object(rendered) = &mut rendered
+    {
+        rendered.insert("loc".to_owned(), property.span.python_loc());
+        insert_requirement_metadata(rendered, &property.annotations, property.meta.as_ref());
+    }
+    rendered
 }
 
 fn render_deadlock_failure(
@@ -1744,6 +1878,19 @@ fn vacuity_warning(model: &KernelModel, finding: &VacuityFinding) -> Value {
                 "use the deadline-urgency pattern: make only the action guarded by deadline arrival (for example, requires age >= K) urgent".to_owned(),
             )
         }
+        VacuityFinding::DeadlineNeverAdvances { age_vars, .. } => {
+            let names = age_vars
+                .iter()
+                .map(|name| display_name(name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            (
+                format!(
+                    "deadline invariant '{label}' is vacuous because its age state ({names}) is initialized at zero and every transition preserves zero; no execution consumes any deadline slack"
+                ),
+                "allow tick to advance age while the timed condition holds, or guard urgent handlers by deadline arrival; then lower the deadline by one to confirm the boundary is violated".to_owned(),
+            )
+        }
         VacuityFinding::AlwaysTrueRequires { .. } => (
             format!(
                 "action '{label}' has a requires clause that is always true when the preceding clauses hold — no value the declared types allow can falsify it"
@@ -1794,6 +1941,15 @@ fn insert_vacuity_requirement(
             if let Some(property) = deadlines
                 .first()
                 .and_then(|name| model.invariants.iter().find(|entry| entry.name == *name))
+            {
+                insert_requirement_metadata(entry, &property.annotations, property.meta.as_ref());
+            }
+        }
+        VacuityFinding::DeadlineNeverAdvances { deadline, .. } => {
+            if let Some(property) = model
+                .invariants
+                .iter()
+                .find(|entry| entry.name == *deadline)
             {
                 insert_requirement_metadata(entry, &property.annotations, property.meta.as_ref());
             }
@@ -2026,6 +2182,7 @@ mod tests {
             DeadlockMode::Ignore,
             0.0,
             &[],
+            &std::collections::BTreeMap::new(),
         );
         assert!(rendered.is_err());
     }
@@ -2043,7 +2200,7 @@ mod tests {
         let explicit =
             fsl_runtime::verify_explicit(model.clone(), 0, 100).expect("run explicit verification");
         assert!(!explicit.closure);
-        let compatible = explicit_as_bmc(&explicit, &[]);
+        let compatible = explicit_as_bmc(&explicit, &[], &std::collections::BTreeMap::new());
         let statistics = VerificationStatistics::default();
         let (bmc, bmc_status) = render_bmc_output(
             test_envelope(),
@@ -2065,6 +2222,7 @@ mod tests {
             DeadlockMode::Ignore,
             0.0,
             &[],
+            &std::collections::BTreeMap::new(),
         )
         .expect("explicit evidence replays");
         let explicit_envelope = explicit_output.as_object_mut().expect("explicit envelope");

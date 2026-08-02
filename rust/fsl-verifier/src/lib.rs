@@ -26,8 +26,9 @@ pub use agreement::{
     transition_outcome_matches_step,
 };
 pub use bmc::{
-    BmcResult, BmcViolation, LeadsToViolation, ReachableWitness, verify_bounded,
-    verify_bounded_from_state, verify_bounded_selected,
+    BmcResult, BmcViolation, LeadsToViolation, ReachableBlocker, ReachableDiagnosis,
+    ReachableWitness, diagnose_reachables, verify_bounded, verify_bounded_from_state,
+    verify_bounded_selected,
 };
 pub use induction::{
     InductionCti, InductionResult, RankFailure, RankProof, RankedLeadstoResult, prove_induction,

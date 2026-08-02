@@ -45,18 +45,17 @@ def test_nfr_sla_worker_without_urgent_is_violated(tmp_path):
     assert [step.get("action", {}).get("name") for step in result["trace"]].count("tick") >= 5
 
 
-def test_nfr_sla_worker_auxiliary_invariant_induction_proved(tmp_path):
+def test_nfr_sla_worker_deadline_boundary_bites(tmp_path):
     src = SLA_WORKER.read_text(encoding="utf-8").replace(
-        "  requirement NFR-1",
-        "  invariant AgeZeroUnderUrgency { forall r: Req { age[r] == 0 } }\n\n"
-        "  requirement NFR-1",
+        "deadline age <= 4", "deadline age <= 3"
     )
-    path = _write(tmp_path, src, "sla_worker_aux.fsl")
+    path = _write(tmp_path, src, "sla_worker_tight_deadline.fsl")
 
-    result = run_verify(str(path), 10, "ignore", engine="induction")
+    result = run_verify(str(path), 10, "ignore")
 
-    assert result["result"] == "proved"
-    assert "AgeZeroUnderUrgency" in result["invariants_checked"]
+    assert result["result"] == "violated"
+    assert result["invariant"] == "_deadline_NFR_1_age_1"
+    assert result["requirement"]["id"] == "NFR-1"
 
 
 # --- cross-layer SLA refinement (issue #56) --------------------------------

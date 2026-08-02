@@ -91,18 +91,20 @@ pub fn insert_requirement_metadata(
 }
 
 /// The complete, closed set of warning `kind` values `--vacuity` selects
-/// over (`warn`/`error`/`ignore`). Mirrors the frozen Python reference's
-/// `diagnostics._VACUITY_KINDS`. Kept as an explicit enumeration rather than
+/// over (`warn`/`error`/`ignore`). Extends the frozen Python compatibility
+/// reference's set with native product lanes. Kept as an explicit enumeration rather than
 /// a `"vacuous_"` name-prefix check: `always_true_requires`,
-/// `tautology_over_frozen`, and `urgency_freeze` are vacuity findings but do
+/// `tautology_over_frozen`, `urgency_freeze`, and `vacuous_deadline` are
+/// vacuity findings but do
 /// not share that prefix, so a prefix check silently exempts them from both
 /// `--vacuity ignore` (they would stay in `warnings`) and `--vacuity error`
-/// (a hollow spec carrying only one of these three would never fail closed).
-pub const VACUITY_KINDS: [&str; 5] = [
+/// (a hollow spec carrying only one of these kinds would never fail closed).
+pub const VACUITY_KINDS: [&str; 6] = [
     "vacuous_implication",
     "vacuous_leadsto",
     "tautology_over_frozen",
     "urgency_freeze",
+    "vacuous_deadline",
     "always_true_requires",
 ];
 

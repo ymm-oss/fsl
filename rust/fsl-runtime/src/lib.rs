@@ -1956,7 +1956,9 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
             .map(|action| (action.name.clone(), false))
             .collect(),
     };
-    record_reachables(&initial, 0, &mut result)?;
+    if let Some(violation) = record_reachables(&initial, 0, &mut result)? {
+        result.violation = Some(violation);
+    }
     let mut queue = VecDeque::from([(initial.clone(), 0_usize)]);
     let mut visited = BTreeSet::from([initial.state.clone()]);
     while let Some((monitor, step)) = queue.pop_front() {
@@ -1984,7 +1986,16 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
                 }
                 continue;
             }
-            record_reachables(&child, step + 1, &mut result)?;
+            if let Some(violation) = record_reachables(&child, step + 1, &mut result)? {
+                if result
+                    .violation
+                    .as_ref()
+                    .is_none_or(|old| violation.step < old.step)
+                {
+                    result.violation = Some(violation);
+                }
+                continue;
+            }
             if visited.insert(child.state.clone()) {
                 queue.push_back((child, step + 1));
             }
@@ -2173,7 +2184,7 @@ fn exists_wrap(binders: &[Binder], expr: Expr) -> Expr {
 ///
 /// The two reachability vacuity lanes are computed here and stay
 /// solver-independent. `solver_vacuity` carries the already-rendered
-/// `docs/DESIGN-vacuity.md` §2 lanes 3–5 that only `fsl-verifier` can decide;
+/// `docs/DESIGN-vacuity.md` §2 lanes 3–6 that only `fsl-verifier` can decide;
 /// passing them in keeps the documented warning order (model → vacuity →
 /// deadlock → action coverage) owned by one function without giving
 /// `fsl-runtime` a solver dependency.
@@ -2715,26 +2726,37 @@ fn record_reachables(
     monitor: &Monitor,
     step: usize,
     result: &mut BfsResult,
-) -> Result<(), RuntimeError> {
+) -> Result<Option<Violation>, RuntimeError> {
     with_total_division(|| {
         for property in &monitor.model.reachables {
             if result.reachables[&property.name].is_some() {
                 continue;
             }
             let mut bindings = Bindings::new();
-            if as_bool(eval(
+            let value = match eval(
                 &property.expr,
                 &monitor.state,
                 &mut bindings,
                 &monitor.model,
                 None,
-            )?)? {
+            ) {
+                Ok(value) => value,
+                Err(error) if is_partial_operation_error(&error.message) => {
+                    return Ok(Some(Violation {
+                        kind: "partial_op".to_owned(),
+                        name: format!("_partial_property_{}", property.name),
+                        step,
+                    }));
+                }
+                Err(error) => return Err(error),
+            };
+            if as_bool(value)? {
                 result
                     .reachables
                     .insert(property.name.clone(), Some(ReachableWitness { step }));
             }
         }
-        Ok(())
+        Ok(None)
     })
 }
 
@@ -2787,13 +2809,18 @@ fn check_state_selected_inner(
     }
     for property in &model.invariants {
         let mut bindings = Bindings::new();
-        if !as_bool(eval(
-            &property.expr,
-            state,
-            &mut bindings,
-            model,
-            old_state,
-        )?)? {
+        let value = match eval(&property.expr, state, &mut bindings, model, old_state) {
+            Ok(value) => value,
+            Err(error) if is_partial_operation_error(&error.message) => {
+                return Ok(Some(Violation {
+                    kind: "partial_op".to_owned(),
+                    name: format!("_partial_property_{}", property.name),
+                    step,
+                }));
+            }
+            Err(error) => return Err(error),
+        };
+        if !as_bool(value)? {
             return Ok(Some(Violation {
                 kind: "invariant".to_owned(),
                 name: property.name.clone(),
@@ -2804,13 +2831,18 @@ fn check_state_selected_inner(
     if let Some(old_state) = old_state {
         for property in &model.transitions {
             let mut bindings = Bindings::new();
-            if !as_bool(eval(
-                &property.expr,
-                state,
-                &mut bindings,
-                model,
-                Some(old_state),
-            )?)? {
+            let value = match eval(&property.expr, state, &mut bindings, model, Some(old_state)) {
+                Ok(value) => value,
+                Err(error) if is_partial_operation_error(&error.message) => {
+                    return Ok(Some(Violation {
+                        kind: "partial_op".to_owned(),
+                        name: format!("_partial_property_{}", property.name),
+                        step,
+                    }));
+                }
+                Err(error) => return Err(error),
+            };
+            if !as_bool(value)? {
                 return Ok(Some(Violation {
                     kind: "trans".to_owned(),
                     name: property.name.clone(),

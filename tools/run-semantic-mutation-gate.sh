@@ -279,7 +279,7 @@ jq \
           elapsed_ms: ([.phase_results[].duration] | add * 1000 | floor),
           primary_failing_test: null,
           reproducer: ("cargo mutants --config .cargo/mutants.toml --in-place --no-shuffle --re " + ($mutant.name | @sh)),
-          reviewed_rationale: ($equivalents[0].entries[]? | select(.mutant_id == $mutant.name) | .rationale) // null
+          reviewed_rationale: (($equivalents[0].entries[]? | select(.mutant_id == $mutant.name) | .rationale) // null)
         }
     ]
   }' "$raw/outcomes.json" >"$output/implementation-mutation-report.v1.json"

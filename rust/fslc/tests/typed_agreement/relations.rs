@@ -683,42 +683,11 @@ spec R6ActionNegativeIndex {
     );
 }
 
-/// #537 C6 slice 1 finding, recorded as a self-retiring exclusion rather
-/// than silently normalized away: a partial Seq read (`head`) evaluated in
-/// *property* context on a sequence that is empty at the initial state
-/// disagrees across engines instead of being caught uniformly.
-///
-/// Observed (this test re-measures every value below on every run):
-///
-/// - `fsl_runtime::verify_explicit` / `fsl_runtime::bfs` ("Monitor BFS"):
-///   both raise a raw `RuntimeError` ("`head()` on empty sequence") instead of
-///   returning a verdict. Both call `Monitor::current_violation[_selected]`,
-///   which -- unlike `Monitor::execute_selected`'s post-step invariant check
-///   -- does not catch `is_partial_operation_error` and convert it to a
-///   `partial_op` `Violation`; the CLI surfaces this as
-///   `result:"error"`/`kind:"semantics"` rather than a verdict at all.
-/// - BMC (`verify_bounded`): returns a *verdict*, not an error --
-///   `violated`, `kind:"invariant"` (the plain property-failure
-///   classification, not `partial_op`), `name:"HeadRead"` (the invariant's
-///   own declared name), at `step:0` (the initial state itself, before any
-///   action runs). The witness trace's projected state shows `queue` as the
-///   empty sequence it actually is at init. This means BMC's symbolic
-///   encoding treats `queue.head()` on an empty sequence as *defined* with
-///   some value the solver is free to pick outside `Item`'s `0..2` bound,
-///   rather than as undefined the way the concrete engines (and this
-///   suite's own `Monitor`-direct walk) treat it -- a distinct, and
-///   arguably more concerning, discrepancy than "differing labels for the
-///   same undefinedness": BMC is not applying LANGUAGE.md's action-context
-///   `partial_op` treatment here at all, and property-context totalization
-///   is only documented for `/`/`%` (S3:561-563), not for `head`. Root
-///   cause in the symbolic Seq encoding is not diagnosed here; that is a
-///   question for the tracking issue, not this suite.
-///
-/// A fix that makes the two engine families agree turns the `expect_err`
-/// calls or the `kind`/`name`/`step` assertions below into failures, so the
-/// exclusion cannot go stale silently.
+/// #650 regression: a reached partial Seq read in state-property context is a
+/// `partial_op` violation in every engine, never a raw concrete error or a
+/// solver-chosen phantom value.
 #[test]
-fn r6_property_context_seq_head_disagrees_across_engines_self_retiring_exclusion() {
+fn r6_property_context_seq_head_is_uniformly_partial() {
     let source = r"
 spec R6HeadPropertyDisagreement {
   type Item = 0..2
@@ -730,39 +699,39 @@ spec R6HeadPropertyDisagreement {
 ";
     let model = build("r6_head_property_disagreement", source);
 
-    let bfs_error = fsl_runtime::bfs(model.clone(), 2).expect_err(
-        "premise re-measurement: Monitor BFS must still error on an empty-sequence head() \
-         read in property context; if this now returns Ok, the engines agree and this \
-         exclusion (and the R6 doc note) must be retired",
-    );
-    assert!(
-        bfs_error.message.contains("head() on empty sequence"),
-        "bfs error message changed shape, re-check the exclusion: {bfs_error}"
-    );
-
-    let explicit_error = fsl_runtime::verify_explicit(model.clone(), 2, 100).expect_err(
-        "premise re-measurement: explicit must still error the same way as Monitor BFS",
-    );
-    assert!(
-        explicit_error.message.contains("head() on empty sequence"),
-        "explicit error message changed shape, re-check the exclusion: {explicit_error}"
-    );
+    let bfs = fsl_runtime::bfs(model.clone(), 2).expect("Monitor BFS verdict");
+    let bfs_violation = bfs.violation.expect("Monitor BFS partial violation");
+    let explicit =
+        fsl_runtime::verify_explicit(model.clone(), 2, 100).expect("explicit verification verdict");
+    let explicit_violation = explicit.violation.expect("explicit partial violation");
 
     let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
     let bmc_result = engines::block_on(fsl_verifier::verify_bounded(&model, &mut solver, 2))
-        .expect("premise re-measurement: BMC must still return a clean Result, not error");
-    let violation = bmc_result
-        .violation
-        .expect("premise re-measurement: BMC must still report a violation, not a clean verdict");
+        .expect("BMC verdict");
+    let violation = bmc_result.violation.expect("BMC partial violation");
+    assert_eq!(
+        (
+            bfs_violation.kind.as_str(),
+            bfs_violation.name.as_str(),
+            bfs_violation.step,
+        ),
+        ("partial_op", "_partial_property_HeadRead", 0)
+    );
+    assert_eq!(
+        (
+            explicit_violation.violation.kind.as_str(),
+            explicit_violation.violation.name.as_str(),
+            explicit_violation.violation.step,
+        ),
+        ("partial_op", "_partial_property_HeadRead", 0)
+    );
     assert_eq!(
         (
             violation.kind.as_str(),
             violation.name.as_str(),
-            violation.step
+            violation.step,
         ),
-        ("invariant", "HeadRead", 0),
-        "BMC's classification of the same condition changed shape, re-check the exclusion: \
-         {violation:?}"
+        ("partial_op", "_partial_property_HeadRead", 0)
     );
 }
 

@@ -409,6 +409,18 @@ pub(crate) struct EvaluationStatus<T> {
     pub has_partial_operation: bool,
 }
 
+#[derive(Clone, Copy)]
+struct EvaluationPolicy {
+    total_division: bool,
+}
+
+const ACTION_EVALUATION: EvaluationPolicy = EvaluationPolicy {
+    total_division: false,
+};
+const PROPERTY_EVALUATION: EvaluationPolicy = EvaluationPolicy {
+    total_division: true,
+};
+
 pub(crate) fn expression_has_partial_operation_candidate(expr: &Expr) -> bool {
     match expr {
         Expr::Index(_, _) => true,
@@ -546,23 +558,66 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    evaluation_status_with_policy(
+        solver,
+        model,
+        expr,
+        state,
+        bindings,
+        old_state,
+        ACTION_EVALUATION,
+    )
+}
+
+pub(crate) fn property_evaluation_status<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    evaluation_status_with_policy(
+        solver,
+        model,
+        expr,
+        state,
+        bindings,
+        old_state,
+        PROPERTY_EVALUATION,
+    )
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn evaluation_status_with_policy<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    policy: EvaluationPolicy,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     match expr {
         Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {
             Ok(safe_status(solver))
         }
         Expr::UnaryNamed {
             name, expr: inner, ..
-        } if name == "old" => evaluation_status(
+        } if name == "old" => evaluation_status_with_policy(
             solver,
             model,
             inner,
             old_state.ok_or_else(|| VerifyError::new("old() used without old state"))?,
             bindings,
             None,
+            policy,
         ),
         Expr::Neg(inner) => {
             let mut local = bindings.clone();
-            let inner_status = evaluation_status(solver, model, inner, state, &local, old_state)?;
+            let inner_status = evaluation_status_with_policy(
+                solver, model, inner, state, &local, old_state, policy,
+            )?;
             let inner = eval(solver, model, inner, state, &mut local, old_state)?;
             sequence_statuses(
                 solver,
@@ -581,7 +636,9 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
             name, expr: inner, ..
         } if name == "abs" => {
             let mut local = bindings.clone();
-            let inner_status = evaluation_status(solver, model, inner, state, &local, old_state)?;
+            let inner_status = evaluation_status_with_policy(
+                solver, model, inner, state, &local, old_state, policy,
+            )?;
             let inner = eval(solver, model, inner, state, &mut local, old_state)?;
             sequence_statuses(
                 solver,
@@ -602,10 +659,10 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
         | Expr::Is { expr: inner, .. }
         | Expr::Stage { entity: inner, .. }
         | Expr::UnaryNamed { expr: inner, .. } => {
-            evaluation_status(solver, model, inner, state, bindings, old_state)
+            evaluation_status_with_policy(solver, model, inner, state, bindings, old_state, policy)
         }
         Expr::Set(items) | Expr::Seq(items) | Expr::Call { args: items, .. } => {
-            ordered_evaluation_status(solver, model, items, state, bindings, old_state)
+            ordered_evaluation_status(solver, model, items, state, bindings, old_state, policy)
         }
         Expr::Struct { name, fields } => {
             let TypeDef::Struct {
@@ -635,13 +692,19 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
                     "struct '{name}' has the wrong number of fields"
                 )));
             }
-            ordered_evaluation_status_refs(solver, model, &items, state, bindings, old_state)
+            ordered_evaluation_status_refs(
+                solver, model, &items, state, bindings, old_state, policy,
+            )
         }
         Expr::Index(base, index) => {
             let mut local = bindings.clone();
-            let base_status = evaluation_status(solver, model, base, state, &local, old_state)?;
+            let base_status = evaluation_status_with_policy(
+                solver, model, base, state, &local, old_state, policy,
+            )?;
             let base_value = eval(solver, model, base, state, &mut local, old_state)?;
-            let index_status = evaluation_status(solver, model, index, state, &local, old_state)?;
+            let index_status = evaluation_status_with_policy(
+                solver, model, index, state, &local, old_state, policy,
+            )?;
             let index_value = eval(solver, model, index, state, &mut local, old_state)?;
             let fully_accessible = index_accessible(solver, model, &base_value, &index_value)?;
             let partial_accessible =
@@ -665,11 +728,12 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
             args,
         } => {
             let mut local = bindings.clone();
-            let receiver_status =
-                evaluation_status(solver, model, receiver, state, &local, old_state)?;
+            let receiver_status = evaluation_status_with_policy(
+                solver, model, receiver, state, &local, old_state, policy,
+            )?;
             let receiver_value = eval(solver, model, receiver, state, &mut local, old_state)?;
             let arguments_status =
-                ordered_evaluation_status(solver, model, args, state, &local, old_state)?;
+                ordered_evaluation_status(solver, model, args, state, &local, old_state, policy)?;
             let argument_values = args
                 .iter()
                 .map(|argument| eval(solver, model, argument, state, &mut local, old_state))
@@ -695,15 +759,23 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
         }
         Expr::Binary { op, left, right } => {
             let mut local = bindings.clone();
-            let left_status = evaluation_status(solver, model, left, state, &local, old_state)?;
-            let left_value = eval(solver, model, left, state, &mut local, old_state)?;
-            let right_status = evaluation_status(solver, model, right, state, &local, old_state)?;
-            let right_value = eval(solver, model, right, state, &mut local, old_state)?;
+            let left_status = evaluation_status_with_policy(
+                solver, model, left, state, &local, old_state, policy,
+            )?;
             let reached_right = match op.as_str() {
-                "and" | "=>" => bool_term(&left_value)?.clone(),
-                "or" => solver.not(bool_term(&left_value)?)?,
+                "and" | "=>" => {
+                    let left_value = eval(solver, model, left, state, &mut local, old_state)?;
+                    bool_term(&left_value)?.clone()
+                }
+                "or" => {
+                    let left_value = eval(solver, model, left, state, &mut local, old_state)?;
+                    solver.not(bool_term(&left_value)?)?
+                }
                 _ => solver.bool_value(true),
             };
+            let right_status = evaluation_status_with_policy(
+                solver, model, right, state, &local, old_state, policy,
+            )?;
             let first_partial = solver.or(&[
                 left_status.first_partial,
                 solver.and(&[
@@ -719,15 +791,21 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
             let mut parts = vec![operands_defined.clone()];
             let mut operation_partial = solver.bool_value(false);
             if matches!(op.as_str(), "/" | "%") {
+                let left_value = eval(solver, model, left, state, &mut local, old_state)?;
+                let right_value = eval(solver, model, right, state, &mut local, old_state)?;
                 let zero = solver.equal(int_term(&right_value)?, &solver.int_value(0))?;
-                parts.push(solver.not(&zero)?);
+                if !policy.total_division {
+                    parts.push(solver.not(&zero)?);
+                    operation_partial = solver.and(&[operands_defined.clone(), zero])?;
+                }
                 let overflow = solver.and(&[
                     solver.equal(int_term(&left_value)?, &solver.int_value(i64::MIN))?,
                     solver.equal(int_term(&right_value)?, &solver.int_value(-1))?,
                 ])?;
                 parts.push(solver.not(&overflow)?);
-                operation_partial = solver.and(&[operands_defined, zero])?;
             } else if matches!(op.as_str(), "+" | "-" | "*") {
+                let left_value = eval(solver, model, left, state, &mut local, old_state)?;
+                let right_value = eval(solver, model, right, state, &mut local, old_state)?;
                 let result = match op.as_str() {
                     "+" => solver.add(int_term(&left_value)?, int_term(&right_value)?)?,
                     "-" => solver.sub(int_term(&left_value)?, int_term(&right_value)?)?,
@@ -741,7 +819,7 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
                 first_partial: solver.or(&[first_partial, operation_partial])?,
                 has_partial_operation: left_status.has_partial_operation
                     || right_status.has_partial_operation
-                    || matches!(op.as_str(), "/" | "%"),
+                    || (matches!(op.as_str(), "/" | "%") && !policy.total_division),
             })
         }
         Expr::Conditional {
@@ -751,13 +829,16 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
             ..
         } => {
             let mut local = bindings.clone();
-            let condition_status =
-                evaluation_status(solver, model, condition, state, &local, old_state)?;
+            let condition_status = evaluation_status_with_policy(
+                solver, model, condition, state, &local, old_state, policy,
+            )?;
             let condition_value = eval(solver, model, condition, state, &mut local, old_state)?;
-            let then_status =
-                evaluation_status(solver, model, then_expr, state, &local, old_state)?;
-            let else_status =
-                evaluation_status(solver, model, else_expr, state, &local, old_state)?;
+            let then_status = evaluation_status_with_policy(
+                solver, model, then_expr, state, &local, old_state, policy,
+            )?;
+            let else_status = evaluation_status_with_policy(
+                solver, model, else_expr, state, &local, old_state, policy,
+            )?;
             let branch_defined = solver.ite(
                 bool_term(&condition_value)?,
                 &then_status.fully_defined,
@@ -785,7 +866,7 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
             binder,
             body,
         } => quantified_evaluation_status(
-            solver, model, quantifier, binder, body, state, bindings, old_state,
+            solver, model, quantifier, binder, body, state, bindings, old_state, policy,
         ),
         Expr::Aggregate {
             kind,
@@ -800,6 +881,7 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
             state,
             bindings,
             old_state,
+            policy,
         ),
         Expr::BinaryNamed { left, right, .. } => ordered_evaluation_status_refs(
             solver,
@@ -808,6 +890,7 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
             state,
             bindings,
             old_state,
+            policy,
         ),
         Expr::TernaryNamed {
             first,
@@ -821,6 +904,7 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
             state,
             bindings,
             old_state,
+            policy,
         ),
     }
 }
@@ -832,9 +916,18 @@ fn ordered_evaluation_status<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    policy: EvaluationPolicy,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     let expressions = expressions.iter().collect::<Vec<_>>();
-    ordered_evaluation_status_refs(solver, model, &expressions, state, bindings, old_state)
+    ordered_evaluation_status_refs(
+        solver,
+        model,
+        &expressions,
+        state,
+        bindings,
+        old_state,
+        policy,
+    )
 }
 
 fn ordered_evaluation_status_refs<S: SmtSolver>(
@@ -844,12 +937,13 @@ fn ordered_evaluation_status_refs<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    policy: EvaluationPolicy,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     let mut local = bindings.clone();
     let mut statuses = Vec::new();
     for expression in expressions {
-        statuses.push(evaluation_status(
-            solver, model, expression, state, &local, old_state,
+        statuses.push(evaluation_status_with_policy(
+            solver, model, expression, state, &local, old_state, policy,
         )?);
         let _ = eval(solver, model, expression, state, &mut local, old_state)?;
     }
@@ -929,9 +1023,10 @@ fn quantified_evaluation_status<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    policy: EvaluationPolicy,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     let source_status =
-        binder_source_evaluation_status(solver, model, binder, state, bindings, old_state)?;
+        binder_source_evaluation_status(solver, model, binder, state, bindings, old_state, policy)?;
     let mut fully_defined = source_status.fully_defined.clone();
     let mut first_partial = source_status.first_partial;
     let mut has_partial_operation = source_status.has_partial_operation;
@@ -944,7 +1039,11 @@ fn quantified_evaluation_status<S: SmtSolver>(
         let membership = membership.unwrap_or_else(|| solver.bool_value(true));
         let where_status = binder_where_expression(binder).map_or_else(
             || Ok(safe_status(solver)),
-            |where_expr| evaluation_status(solver, model, where_expr, state, &local, old_state),
+            |where_expr| {
+                evaluation_status_with_policy(
+                    solver, model, where_expr, state, &local, old_state, policy,
+                )
+            },
         )?;
         let where_reached = solver.and(&[active.clone(), membership.clone()])?;
         has_partial_operation |= where_status.has_partial_operation;
@@ -959,7 +1058,8 @@ fn quantified_evaluation_status<S: SmtSolver>(
             where_status.fully_defined.clone(),
             where_term.clone(),
         ])?;
-        let body_status = evaluation_status(solver, model, body, state, &local, old_state)?;
+        let body_status =
+            evaluation_status_with_policy(solver, model, body, state, &local, old_state, policy)?;
         has_partial_operation |= body_status.has_partial_operation;
         first_partial = solver.or(&[
             first_partial,
@@ -1004,9 +1104,10 @@ fn aggregate_evaluation_status<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    policy: EvaluationPolicy,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     let source_status =
-        binder_source_evaluation_status(solver, model, binder, state, bindings, old_state)?;
+        binder_source_evaluation_status(solver, model, binder, state, bindings, old_state, policy)?;
     let mut fully_defined = source_status.fully_defined.clone();
     let mut first_partial = source_status.first_partial;
     let mut has_partial_operation = source_status.has_partial_operation;
@@ -1020,7 +1121,11 @@ fn aggregate_evaluation_status<S: SmtSolver>(
         let membership = membership.unwrap_or_else(|| solver.bool_value(true));
         let where_status = binder_where_expression(binder).map_or_else(
             || Ok(safe_status(solver)),
-            |where_expr| evaluation_status(solver, model, where_expr, state, &local, old_state),
+            |where_expr| {
+                evaluation_status_with_policy(
+                    solver, model, where_expr, state, &local, old_state, policy,
+                )
+            },
         )?;
         let where_reached = solver.and(&[active.clone(), membership])?;
         has_partial_operation |= where_status.has_partial_operation;
@@ -1034,7 +1139,9 @@ fn aggregate_evaluation_status<S: SmtSolver>(
         if let Some(value) = value {
             let value_reached =
                 solver.and(&[where_reached, where_status.fully_defined, where_term])?;
-            let value_status = evaluation_status(solver, model, value, state, &local, old_state)?;
+            let value_status = evaluation_status_with_policy(
+                solver, model, value, state, &local, old_state, policy,
+            )?;
             has_partial_operation |= value_status.has_partial_operation;
             first_partial = solver.or(&[
                 first_partial,
@@ -1081,6 +1188,7 @@ fn binder_source_evaluation_status<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    policy: EvaluationPolicy,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     match binder {
         Binder::Typed { .. } => Ok(safe_status(solver)),
@@ -1091,10 +1199,11 @@ fn binder_source_evaluation_status<S: SmtSolver>(
             state,
             bindings,
             old_state,
+            policy,
         ),
-        Binder::Collection { collection, .. } => {
-            evaluation_status(solver, model, collection, state, bindings, old_state)
-        }
+        Binder::Collection { collection, .. } => evaluation_status_with_policy(
+            solver, model, collection, state, bindings, old_state, policy,
+        ),
     }
 }
 

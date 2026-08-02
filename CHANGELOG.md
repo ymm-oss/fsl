@@ -17,6 +17,42 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   rejecting controls, and both agent harnesses retain soundness findings until
   they are fixed or linked to an issue; the merge-readiness automation lane
   executes that harness contract on every pull request (#681).
+- Accepted the measured correlated-saga-history design: retain one-hot event
+  flags as current-transition observations and add a dedicated
+  correlation-indexed six-phase saga map in a follow-up. The maintained
+  two-correlation fixture measures the three candidates as ×1 reused effect
+  state, 32 sticky-event valuations versus 6 one-hot valuations, and 36
+  dedicated saga-progress valuations; a negative control proves global sticky
+  flags alias correlations (#662).
+- Reached `Seq` `pop`/`head`/`at`/index operations are now uniformly
+  `partial_op` violations in property context across Monitor BFS, explicit
+  verification, native/browser symbolic BMC, and CLI rendering. The contract
+  includes `terminal` and `leadsTo`, so neither can turn an undefined Seq read
+  into a solver-selected deadlock decision or vacuously false antecedent.
+  Symbolic phantom slots can no longer fabricate a property verdict or
+  reachable witness; property-context `/` and `%` zero totalization is
+  unchanged (#650).
+- Native BMC now distinguishes structurally impossible `reachable` targets
+  from depth-limited ones. `over_constrained` entries carry an irreducible
+  `blocking_requires` set computed in an independent solver session, so path
+  UNSAT cannot poison the classification and diagnostic queries cannot perturb
+  native/browser witness projection (#634).
+- Fixed `fslc typestate` silently omitting locally guarded read/query actions.
+  They now appear as explicit state-preserving self-loops, and generated
+  TypeScript preserves the caller's exact phantom state instead of widening a
+  multi-state guard (#635).
+- Bounded LSP workspace discovery now scans only direct siblings for a document
+  opened outside every registered workspace root, preventing an arbitrary
+  parent such as `/tmp` from becoming an unbounded recursive index while
+  preserving explicit workspace and sibling cross-file behavior (#623).
+- `fslc explain` counterfactual weakening now evaluates only the invariant and
+  reachable outcomes it actually reports, and explicitly marks liveness as
+  skipped. Quantified `leadsTo` checks no longer multiply every safety mutant's
+  runtime while their results are discarded (#633).
+- Added a calibrated `vacuous_deadline` lane that proves a generated deadline's
+  age remains zero across every transition, catching state-changing urgent
+  handlers that evade the narrower global `urgency_freeze` proof. The SLA worker
+  example now consumes slack and fails when its deadline is tightened (#632).
 - Added the M13 FSL Logic Test (#673): deterministic valid finite models now
   carry stable seed/case IDs, a single-case replay command, machine-coupled
   generation/dialect/metamorphic inventory, and named concrete-versus-symbolic
@@ -33,10 +69,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   reviewed semantic operators cover unknown/backend failures, inclusive
   depth, witness omissions, replay bypass, and false-success folds that
   generic token mutation cannot express. Pull requests run changed-scope
-  mutants plus every curated control, while product events run the complete
-  accepted scope. Survivors, timeouts, stale seams, missing output, and stale
-  equivalence records fail closed; this calibrates detection power without
-  promoting any public assurance class or changing product output.
+  mutants plus every curated control, with the detector package named
+  explicitly even when a diff selects only `fsl-verifier`; product events run
+  the complete accepted scope. Survivors, timeouts, stale seams, missing output,
+  and stale equivalence records fail closed; this calibrates detection power
+  without promoting any public assurance class or changing product output.
 - Added CI-internal Triangulated Assurance (#670): a federated, fail-closed
   registry now requires one raw observation, two explicitly independent
   semantic lineages, all three executable agreement edges, positive/negative
