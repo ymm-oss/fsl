@@ -34,6 +34,14 @@ fn read_json(path: &Path) -> Value {
     .unwrap_or_else(|error| panic!("parse {}: {error}", path.display()))
 }
 
+fn read_source(path: &Path) -> Result<String, std::io::Error> {
+    std::fs::read_to_string(path).map(|source| normalize_line_endings(&source))
+}
+
+fn normalize_line_endings(source: &str) -> String {
+    source.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 fn required_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
     value
         .get(key)
@@ -79,7 +87,7 @@ fn validate_generic_exclusions(root: &Path, manifest: &Value, config: &str) -> R
             .filter(|occurrence| *occurrence > 0)
             .ok_or_else(|| format!("generic exclusion '{id}' has no positive occurrence"))?;
         required_string(exclusion, "reason")?;
-        let source = std::fs::read_to_string(root.join(path))
+        let source = read_source(&root.join(path))
             .map_err(|error| format!("generic exclusion '{id}' cannot read '{path}': {error}"))?;
         let matching_lines = source
             .lines()
@@ -208,7 +216,7 @@ fn validate_scope(root: &Path, manifest: &Value) -> Result<(), String> {
         {
             return Err(format!("decision '{id}' has an empty fault class"));
         }
-        let source = std::fs::read_to_string(root.join(path))
+        let source = read_source(&root.join(path))
             .map_err(|error| format!("decision '{id}' cannot read '{path}': {error}"))?;
         let occurrences = source.matches(anchor).count();
         if occurrences != 1 {
@@ -275,7 +283,7 @@ fn validate_equivalents(root: &Path, manifest: &Value) -> Result<(), String> {
         required_string(entry, "rationale")?;
         required_string(entry, "reviewer")?;
         required_string(entry, "review_issue")?;
-        let source = std::fs::read_to_string(root.join(path))
+        let source = read_source(&root.join(path))
             .map_err(|error| format!("equivalent '{mutant_id}' cannot read '{path}': {error}"))?;
         let occurrences = source.matches(anchor).count();
         if occurrences != 1 {
@@ -333,7 +341,7 @@ fn validate_operator_inventory(root: &Path, inventory: &str) -> Result<(), Strin
         {
             return Err(format!("operator '{name}' patch '{patch}' is missing"));
         }
-        let source = std::fs::read_to_string(root.join(seam_path))
+        let source = read_source(&root.join(seam_path))
             .map_err(|error| format!("operator '{name}' seam path is unreadable: {error}"))?;
         if source.matches(seam_anchor).count() != 1 {
             return Err(format!(
@@ -380,6 +388,18 @@ fn gate_classification(outcome: &str, reviewed_equivalent: bool) -> Result<&'sta
         ("missed", false) => Err("non-equivalent survivor".to_owned()),
         ("timeout", _) => Err("incomplete mutation evidence: timeout".to_owned()),
         (other, _) => Err(format!("unknown mutation outcome '{other}'")),
+    }
+}
+
+#[test]
+fn multiline_anchor_matching_is_line_ending_independent() {
+    let anchor = "if let Some(violation) = &result.violation {\n    replay(&violation.trace)?;\n}";
+    let lf = format!("before\n{anchor}\nafter");
+    let crlf = lf.replace('\n', "\r\n");
+    let cr = lf.replace('\n', "\r");
+
+    for source in [&lf, &crlf, &cr] {
+        assert_eq!(normalize_line_endings(source).matches(anchor).count(), 1);
     }
 }
 
