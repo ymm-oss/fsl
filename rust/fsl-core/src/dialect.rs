@@ -32,6 +32,22 @@ struct Process {
     span: fsl_syntax::Span,
 }
 
+#[derive(Clone)]
+struct PrecedenceHistory {
+    process_index: usize,
+    name: String,
+    waypoints: Vec<String>,
+    dominated: Vec<String>,
+    stability_name: String,
+    stability_text: String,
+}
+
+struct PrecedenceLowering {
+    history_by_policy: Vec<Option<usize>>,
+    histories: Vec<PrecedenceHistory>,
+    histories_by_destination: BTreeMap<(String, String), Vec<String>>,
+}
+
 fn kpi_projection(item: &BusinessItem, processes: &[Process]) -> Result<ProjectionDef, CoreError> {
     let BusinessItem::Kpi {
         name,
@@ -808,6 +824,154 @@ fn and_all(mut expressions: Vec<Expr>) -> Expr {
     expression
 }
 
+fn precedence_dominated_stages(process: &Process, waypoints: &[String]) -> Vec<String> {
+    let waypoint_set = waypoints
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let mut adjacency = BTreeMap::<&str, Vec<&str>>::new();
+    for transition in &process.transitions {
+        if waypoint_set.contains(transition.source.as_str())
+            || waypoint_set.contains(transition.target.as_str())
+        {
+            continue;
+        }
+        adjacency
+            .entry(transition.source.as_str())
+            .or_default()
+            .push(transition.target.as_str());
+    }
+
+    let mut reachable = BTreeSet::new();
+    let mut pending = Vec::new();
+    if !waypoint_set.contains(process.initial.as_str()) {
+        reachable.insert(process.initial.as_str());
+        pending.push(process.initial.as_str());
+    }
+    while let Some(stage) = pending.pop() {
+        for next in adjacency.get(stage).into_iter().flatten() {
+            if reachable.insert(next) {
+                pending.push(next);
+            }
+        }
+    }
+
+    process
+        .stages
+        .iter()
+        .filter(|stage| {
+            waypoint_set.contains(stage.as_str()) || !reachable.contains(stage.as_str())
+        })
+        .cloned()
+        .collect()
+}
+
+fn collect_precedence_policies(
+    policies: &[&BusinessItem],
+    processes: &[Process],
+) -> Result<PrecedenceLowering, CoreError> {
+    let mut history_by_policy = vec![None; policies.len()];
+    let mut history_by_key = BTreeMap::<(String, Vec<String>), usize>::new();
+    let mut histories = Vec::<PrecedenceHistory>::new();
+
+    for (policy_index, policy) in policies.iter().enumerate() {
+        let BusinessItem::Policy {
+            id,
+            text,
+            body,
+            span,
+            ..
+        } = policy
+        else {
+            unreachable!();
+        };
+        let BusinessPolicyBody::Precedence {
+            case_name,
+            target_stages,
+            waypoints,
+        } = body.as_ref()
+        else {
+            continue;
+        };
+
+        let matching = processes
+            .iter()
+            .enumerate()
+            .filter(|(_, process)| process.entity == *case_name)
+            .collect::<Vec<_>>();
+        let [(process_index, process)] = matching.as_slice() else {
+            let message = if matching.is_empty() {
+                format!("policy '{id}': entity '{case_name}' has no process")
+            } else {
+                format!(
+                    "policy '{id}': entity '{case_name}' has multiple processes; precedence policy is ambiguous"
+                )
+            };
+            return Err(core_error(message, *span));
+        };
+
+        for stage in target_stages.iter().chain(waypoints) {
+            if !process.stages.contains(stage) {
+                return Err(core_error(
+                    format!(
+                        "policy '{id}': stage '{stage}' is not declared for process '{case_name}'"
+                    ),
+                    *span,
+                ));
+            }
+        }
+
+        let waypoint_set = waypoints.iter().collect::<BTreeSet<_>>();
+        let canonical_waypoints = process
+            .stages
+            .iter()
+            .filter(|stage| waypoint_set.contains(stage))
+            .cloned()
+            .collect::<Vec<_>>();
+        let key = (process.name.clone(), canonical_waypoints.clone());
+        let history_index = if let Some(existing) = history_by_key.get(&key) {
+            *existing
+        } else {
+            let history_index = histories.len();
+            let name = std::iter::once(process_state(&process.name))
+                .chain(std::iter::once("via".to_owned()))
+                .chain(canonical_waypoints.iter().cloned())
+                .collect::<Vec<_>>()
+                .join("_");
+            histories.push(PrecedenceHistory {
+                process_index: *process_index,
+                name,
+                dominated: precedence_dominated_stages(process, &canonical_waypoints),
+                waypoints: canonical_waypoints,
+                stability_name: format!("{id}_stability"),
+                stability_text: format!(
+                    "stability: {text} (auto-synthesized, dominated-set invariant for k-induction)"
+                ),
+            });
+            history_by_key.insert(key, history_index);
+            history_index
+        };
+        history_by_policy[policy_index] = Some(history_index);
+    }
+
+    let mut histories_by_destination = BTreeMap::new();
+    for history in &histories {
+        let process = &processes[history.process_index];
+        for waypoint in &history.waypoints {
+            histories_by_destination
+                .entry((process.name.clone(), waypoint.clone()))
+                .or_insert_with(Vec::new)
+                .push(history.name.clone());
+        }
+    }
+
+    Ok(PrecedenceLowering {
+        history_by_policy,
+        histories,
+        histories_by_destination,
+    })
+}
+
 #[allow(clippy::unnecessary_wraps)]
 fn meta(id: &str, text: impl Into<String>) -> Option<MetaTag> {
     Some(MetaTag {
@@ -944,38 +1108,60 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             symmetric: false,
         });
     }
+    let precedence = collect_precedence_policies(&policies, &processes)?;
     if !processes.is_empty() {
-        items.push(SpecItem::State(
-            processes
-                .iter()
-                .map(|process| {
-                    StateField::generated(
-                        process_state(&process.name),
-                        TypeExpr::Map(
-                            Box::new(TypeExpr::Name(process.entity.clone())),
-                            Box::new(TypeExpr::Name(process_enum(&process.name))),
-                        ),
-                        process.span,
-                    )
-                })
-                .collect(),
-        ));
-        items.push(SpecItem::Init {
-            statements: processes
-                .iter()
-                .map(|process| Statement::ForAll {
-                    binder: typed_binder("c", &process.entity),
-                    statements: vec![Statement::Assign {
-                        target: LValue::Index(
-                            process_state(&process.name),
-                            Expr::Var("c".to_owned()),
-                        ),
-                        value: Expr::Var(process.initial.clone()),
-                        span: process.span,
-                    }],
+        let mut state = processes
+            .iter()
+            .map(|process| {
+                StateField::generated(
+                    process_state(&process.name),
+                    TypeExpr::Map(
+                        Box::new(TypeExpr::Name(process.entity.clone())),
+                        Box::new(TypeExpr::Name(process_enum(&process.name))),
+                    ),
+                    process.span,
+                )
+            })
+            .collect::<Vec<_>>();
+        state.extend(precedence.histories.iter().map(|history| {
+            let process = &processes[history.process_index];
+            StateField::generated(
+                history.name.clone(),
+                TypeExpr::Map(
+                    Box::new(TypeExpr::Name(process.entity.clone())),
+                    Box::new(TypeExpr::Bool),
+                ),
+                process.span,
+            )
+        }));
+        items.push(SpecItem::State(state));
+
+        let mut init = processes
+            .iter()
+            .map(|process| Statement::ForAll {
+                binder: typed_binder("c", &process.entity),
+                statements: vec![Statement::Assign {
+                    target: LValue::Index(process_state(&process.name), Expr::Var("c".to_owned())),
+                    value: Expr::Var(process.initial.clone()),
                     span: process.span,
-                })
-                .collect(),
+                }],
+                span: process.span,
+            })
+            .collect::<Vec<_>>();
+        init.extend(precedence.histories.iter().map(|history| {
+            let process = &processes[history.process_index];
+            Statement::ForAll {
+                binder: typed_binder("c", &process.entity),
+                statements: vec![Statement::Assign {
+                    target: LValue::Index(history.name.clone(), Expr::Var("c".to_owned())),
+                    value: Expr::Bool(history.waypoints.contains(&process.initial)),
+                    span: process.span,
+                }],
+                span: process.span,
+            }
+        }));
+        items.push(SpecItem::Init {
+            statements: init,
             meta: None,
             annotations: Annotations::default(),
         });
@@ -1000,23 +1186,30 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                     })
                 },
             );
+            let mut action_items = vec![
+                ActionItem::Requires(stage_is(process, "c", &transition.source), transition.span),
+                ActionItem::Statement(Statement::Assign {
+                    target: LValue::Index(process_state(&process.name), Expr::Var("c".to_owned())),
+                    value: Expr::Var(transition.target.clone()),
+                    span: transition.span,
+                }),
+            ];
+            if let Some(histories) = precedence
+                .histories_by_destination
+                .get(&(process.name.clone(), transition.target.clone()))
+            {
+                action_items.extend(histories.iter().map(|history| {
+                    ActionItem::Statement(Statement::Assign {
+                        target: LValue::Index(history.clone(), Expr::Var("c".to_owned())),
+                        value: Expr::Bool(true),
+                        span: transition.span,
+                    })
+                }));
+            }
             items.push(SpecItem::Action {
                 name: transition.name.clone(),
                 params: vec![Param::Typed("c".to_owned(), qualified(&process.entity))],
-                items: vec![
-                    ActionItem::Requires(
-                        stage_is(process, "c", &transition.source),
-                        transition.span,
-                    ),
-                    ActionItem::Statement(Statement::Assign {
-                        target: LValue::Index(
-                            process_state(&process.name),
-                            Expr::Var("c".to_owned()),
-                        ),
-                        value: Expr::Var(transition.target.clone()),
-                        span: transition.span,
-                    }),
-                ],
+                items: action_items,
                 span: transition.span,
                 fair: true,
                 meta: metadata,
@@ -1056,7 +1249,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
         .iter()
         .map(|process| (process.entity.as_str(), process))
         .collect::<BTreeMap<_, _>>();
-    for policy in policies {
+    for (policy_index, policy) in policies.iter().enumerate() {
         let BusinessItem::Policy {
             id,
             text,
@@ -1119,8 +1312,80 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                     annotations: policy_annotations.clone(),
                 });
             }
-            BusinessPolicyBody::Precedence { .. } => {}
+            BusinessPolicyBody::Precedence {
+                case_name,
+                target_stages,
+                ..
+            } => {
+                let history_index = precedence
+                    .history_by_policy
+                    .get(policy_index)
+                    .and_then(|history| *history)
+                    .ok_or_else(|| {
+                        core_error(
+                            format!("policy '{id}': precedence lowering was not collected"),
+                            *span,
+                        )
+                    })?;
+                let history = precedence.histories.get(history_index).ok_or_else(|| {
+                    core_error(
+                        format!("policy '{id}': precedence history is unavailable"),
+                        *span,
+                    )
+                })?;
+                let process = &processes[history.process_index];
+                items.push(SpecItem::Invariant {
+                    name: id.clone(),
+                    expr: Box::new(Expr::Quantified {
+                        quantifier: "forall".to_owned(),
+                        binder: typed_binder("c", case_name),
+                        body: Box::new(Expr::Binary {
+                            op: "=>".to_owned(),
+                            left: Box::new(or_all(
+                                target_stages
+                                    .iter()
+                                    .map(|stage| stage_is(process, "c", stage))
+                                    .collect(),
+                            )),
+                            right: Box::new(Expr::Index(
+                                Box::new(Expr::Var(history.name.clone())),
+                                Box::new(Expr::Var("c".to_owned())),
+                            )),
+                        }),
+                    }),
+                    span: *span,
+                    meta: meta(id, text),
+                    annotations: policy_annotations.clone(),
+                });
+            }
         }
+    }
+    for history in &precedence.histories {
+        let process = &processes[history.process_index];
+        items.push(SpecItem::Invariant {
+            name: history.stability_name.clone(),
+            expr: Box::new(Expr::Quantified {
+                quantifier: "forall".to_owned(),
+                binder: typed_binder("c", &process.entity),
+                body: Box::new(Expr::Binary {
+                    op: "=>".to_owned(),
+                    left: Box::new(or_all(
+                        history
+                            .dominated
+                            .iter()
+                            .map(|stage| stage_is(process, "c", stage))
+                            .collect(),
+                    )),
+                    right: Box::new(Expr::Index(
+                        Box::new(Expr::Var(history.name.clone())),
+                        Box::new(Expr::Var("c".to_owned())),
+                    )),
+                }),
+            }),
+            span: process.span,
+            meta: meta(&history.stability_name, &history.stability_text),
+            annotations: Annotations::default(),
+        });
     }
     for goal in goals {
         let BusinessItem::Goal {

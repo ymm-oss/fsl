@@ -5,6 +5,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed native Rust business-dialect precedence policies so `every <Entity>
+  reaching ... must have passed through ...` lowers to deduplicated history
+  state, transition updates, the attributed no-bypass invariant, and its
+  dominated-set stability invariant. Native BMC, induction, and explicit-state
+  regressions now fail if the lowering is hollowed back into a no-op (#681).
 - Added the M13 FSL Logic Test (#673): deterministic valid finite models now
   carry stable seed/case IDs, a single-case replay command, machine-coupled
   generation/dialect/metamorphic inventory, and named concrete-versus-symbolic
