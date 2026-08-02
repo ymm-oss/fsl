@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-08-03
+
 - Fixed native Rust business-dialect precedence policies so `every <Entity>
   reaching ... must have passed through ...` lowers to deduplicated history
   state, transition updates, the attributed no-bypass invariant, and its
@@ -4253,7 +4255,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.1.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.2.0...HEAD
+[4.2.0]: https://github.com/ymm-oss/fsl/compare/v4.1.0...v4.2.0
 [4.1.0]: https://github.com/ymm-oss/fsl/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/ymm-oss/fsl/compare/v3.1.0...v4.0.0
 [3.1.0]: https://github.com/ymm-oss/fsl/compare/v3.0.0...v3.1.0
