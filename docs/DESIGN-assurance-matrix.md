@@ -24,6 +24,13 @@ semantic feature X is exercised (or correctly rejected, or fail-closed
 unsupported, or structurally inapplicable) on surface Y? It never appears in
 product output.
 
+`DESIGN-triangulated-assurance.md` builds a narrower, stronger method on top of
+this citation discipline for selected soundness-critical claims. A C3 cell says
+that one evidence item exists; a triangulated claim additionally requires a raw
+common observation, two reviewably independent semantic lineages, all three
+executable agreement edges, and calibrated positive/negative controls. It does
+not replace this matrix or turn every cell into a triangulated claim.
+
 ## Relationship to #479 and #537's other contracts
 
 #537 is the umbrella issue; C3 is one of its seven contracts (C1 false-green,

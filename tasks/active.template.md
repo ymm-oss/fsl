@@ -58,6 +58,12 @@ State the observable outcome, not the implementation idea.
 
 - Attempt — observed failure and why it should not be repeated.
 
+## Discovered follow-ups
+
+- `None`, or one row per out-of-scope finding with severity, evidence, and disposition:
+  `fixed in scope` / `existing issue #...` / `created issue #...` /
+  `authorization required`. A soundness defect may not disappear into prose.
+
 ## Next action
 
 - One concrete action from which a fresh session can resume.

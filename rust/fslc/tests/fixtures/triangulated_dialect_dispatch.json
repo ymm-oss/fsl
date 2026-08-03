@@ -1,0 +1,23 @@
+[
+  {
+    "id": "plain_spec",
+    "source": "spec Demo { state { ready: Bool } init { ready = true } }",
+    "keyword": "spec",
+    "accepted": true
+  },
+  {
+    "id": "bom_trivia_annotation_domain",
+    "source": "﻿// leading comment\n@acme.route(domain, requirements)\nspec Orders { state { ready: Bool } init { ready = true } }",
+    "keyword": "spec",
+    "accepted": true
+  },
+  {
+    "id": "unknown_after_trivia",
+    "source": "// leading comment\nmystery X {}",
+    "keyword": "mystery",
+    "accepted": false,
+    "error_code": "FSL-DIALECT-UNKNOWN",
+    "line": 2,
+    "column": 1
+  }
+]

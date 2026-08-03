@@ -943,10 +943,6 @@ fn classify_action(
     assignments: Vec<Assignment>,
     is_state_only: impl Fn(&Expr) -> bool,
 ) -> Option<Value> {
-    if assignments.is_empty() {
-        return None;
-    }
-
     let mut guards = StateMap::new();
     for expr in &action.requires {
         merge_states(&mut guards, guard_states(expr));
@@ -955,37 +951,54 @@ fn classify_action(
     let mut transitions = Vec::new();
     let mut verdict = "derivable";
     let mut diagnostics = Vec::new();
-    for assignment in assignments {
-        let require_from = guards.get(&assignment.entity).cloned().unwrap_or_default();
-        let branch_from = assignment
-            .branch_states
-            .get(&assignment.entity)
-            .cloned()
-            .unwrap_or_default();
-        let from: BTreeSet<_> = if !require_from.is_empty() && !branch_from.is_empty() {
-            require_from.intersection(&branch_from).cloned().collect()
-        } else {
-            require_from.union(&branch_from).cloned().collect()
-        };
-        if from.is_empty() {
-            verdict = "relational";
-            diagnostics.push(format!(
-                "assigns `{} → {}` but no local `requires` pins its from-state; the precondition is relational (it lives outside the entity), so it cannot be carried by a phantom type and remains a runtime/verification obligation.",
-                assignment.entity, assignment.to
-            ));
-        } else if assignment.conditional && verdict != "relational" {
-            verdict = "branching";
-            diagnostics.push(format!(
-                "`{} → {}` is inside an `if` (data-dependent target).",
-                assignment.entity, assignment.to
-            ));
+    let state_preserving = assignments.is_empty();
+    if state_preserving {
+        for (entity, states) in &guards {
+            for state in states {
+                transitions.push(json!({
+                    "entity": entity,
+                    "from": [state],
+                    "to": state,
+                    "conditional": false,
+                }));
+            }
         }
-        transitions.push(json!({
-            "entity": assignment.entity,
-            "from": from,
-            "to": assignment.to,
-            "conditional": assignment.conditional,
-        }));
+        if transitions.is_empty() {
+            return None;
+        }
+    } else {
+        for assignment in assignments {
+            let require_from = guards.get(&assignment.entity).cloned().unwrap_or_default();
+            let branch_from = assignment
+                .branch_states
+                .get(&assignment.entity)
+                .cloned()
+                .unwrap_or_default();
+            let from: BTreeSet<_> = if !require_from.is_empty() && !branch_from.is_empty() {
+                require_from.intersection(&branch_from).cloned().collect()
+            } else {
+                require_from.union(&branch_from).cloned().collect()
+            };
+            if from.is_empty() {
+                verdict = "relational";
+                diagnostics.push(format!(
+                    "assigns `{} → {}` but no local `requires` pins its from-state; the precondition is relational (it lives outside the entity), so it cannot be carried by a phantom type and remains a runtime/verification obligation.",
+                    assignment.entity, assignment.to
+                ));
+            } else if assignment.conditional && verdict != "relational" {
+                verdict = "branching";
+                diagnostics.push(format!(
+                    "`{} → {}` is inside an `if` (data-dependent target).",
+                    assignment.entity, assignment.to
+                ));
+            }
+            transitions.push(json!({
+                "entity": assignment.entity,
+                "from": from,
+                "to": assignment.to,
+                "conditional": assignment.conditional,
+            }));
+        }
     }
 
     let mut output = Map::new();
@@ -993,6 +1006,9 @@ fn classify_action(
     output.insert("verdict".to_owned(), json!(verdict));
     output.insert("params".to_owned(), json!(action.params));
     output.insert("transitions".to_owned(), Value::Array(transitions));
+    if state_preserving {
+        output.insert("state_preserving".to_owned(), Value::Bool(true));
+    }
     output.insert(
         "value_preconditions".to_owned(),
         json!(
@@ -1154,10 +1170,17 @@ fn emit_typescript(
         } else {
             format!(", {}", params.join(", "))
         };
-        lines.push(format!(
-            "export function {function_name}(self: {}<{from_type}>{extra}): {}<{to_type}>;",
-            entity.type_name, entity.type_name
-        ));
+        if action["state_preserving"] == true {
+            lines.push(format!(
+                "export function {function_name}<S extends {from_type}>(self: {}<S>{extra}): {}<S>;",
+                entity.type_name, entity.type_name
+            ));
+        } else {
+            lines.push(format!(
+                "export function {function_name}(self: {}<{from_type}>{extra}): {}<{to_type}>;",
+                entity.type_name, entity.type_name
+            ));
+        }
     }
     lines.join("\n")
 }

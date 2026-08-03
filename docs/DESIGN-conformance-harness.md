@@ -19,6 +19,45 @@ scans only `specs/*.fsl` + `examples/gallery/{valid,errors}`, and
 `can_monitor()` fails. So an entire dialect corpus sat outside the core
 correctness invariant and nothing said so. Skips are the bug this design removes.
 
+## Nested semantic constructs are a separate coverage unit (#681)
+
+Top-level dialect coverage does not establish that every accepted construct inside
+that dialect has executable semantics. The native migration in #207 demonstrated
+the distinction:
+
+- the phase-0 inventory reported 7 business files and exact surface-AST parity,
+  but the measured corpus contained `biz_policy_eventually` and no
+  `biz_policy_precedence` node;
+- full-corpus `check`/`verify` parity therefore exercised business dispatch while
+  never entering `BusinessPolicyBody::Precedence`;
+- the Python reference's dedicated precedence tests remained green independently,
+  but were not native product evidence and were not ported into the Rust workspace;
+- Rust accepted the syntax while `lower_business` matched it with an empty arm, so
+  parser, corpus-count, and bare-`check` gates all stayed green as the policy was
+  discarded.
+
+The coverage unit for a semantic sum type is consequently each behavior-bearing
+variant, not merely its enclosing frontend. A migration or new variant must bind
+every accepted variant to one of two observable postures:
+
+1. executable native semantics with an accepting control and a rejecting control;
+2. an explicit fail-closed diagnostic with a rejecting test.
+
+Where all variants lower to the same output category, the lowering should be
+structured as a total expression returning that category. This makes an empty
+unit arm a compile error rather than a silent feature omission. For business
+policies, `lower_business` now returns one `SpecItem` from every
+`BusinessPolicyBody` arm before appending it.
+
+`examples/gallery/adversarial/business_precedence_bypass.fsl` is the maintained
+rejecting control for precedence. Its own header declares the expected native
+command, `violated` result, and `invariant` kind, so
+`corpus_expectation_manifest.rs` executes the claim instead of inferring a
+contract from current output. The focused Rust tests additionally establish the
+history state/update and induction-positive structure, and select every current
+`BusinessPolicyBody` variant against its own native rejecting control. Removing
+the lowering can no longer leave the native corpus green.
+
 ## Registry — `tests/dialect_registry.py`
 
 Declarative, no logic. The harness scans `SCAN_ROOTS = ("specs", "examples")`
@@ -360,9 +399,10 @@ seam it targeted moved, and someone must confirm the fault is still possible
 there and re-target the patch. Silently skipping a stale operator is how a
 detector matrix rots into decoration.
 
-Rebuild cost puts this in the product gate (`tools/check-native-integration.sh`),
-not the per-pull-request gate. Operators patch `rust/fslc` where possible, so
-the rebuild is that crate plus a relink rather than the workspace.
+Rebuild cost keeps this out of the ordinary Rust workspace lane, but M13 makes
+it part of the dedicated semantic-mutation lane on every pull request and
+product-gate run. Operators patch `rust/fslc` where possible, so the rebuild is
+that crate plus a relink rather than the workspace.
 
 Patches are applied with `git apply`, never the system `patch`. The first CI run
 of this matrix failed (#613) because BSD `patch` on macOS accepted the no-op
@@ -375,17 +415,21 @@ exist: a calibration harness whose result depends on where it runs calibrates
 nothing. `git apply` is one implementation wherever git is, applies zero fuzz by
 default, and tolerates the prose preamble each patch file carries.
 
-The harness is `tools/run-fault-operators.sh`, reached as the
-`fault-operators` phase of `tools/check-native-integration.sh` and included in
-its `all` — deliberately not in its `rust` phase, which `.github/workflows/ci.yml`
-runs on every pull request. CI runs it as its own post-merge `fault operators`
-job, required by the `product gate` aggregator (`docs/DESIGN-ci.md` "Product
-gate contract"): a matrix that never runs is worse than one that skips, so
-"not on pull requests" must not become "nowhere". Operators are rows in
+The harness is `tools/run-fault-operators.sh`, reached directly as the legacy
+`fault-operators` phase and, together with pinned generic implementation
+mutants, through `tools/check-native-integration.sh semantic-mutation`. It is
+deliberately not in the ordinary `rust` phase. CI requires the dedicated
+semantic-mutation job on every event: pull requests run the curated matrix and
+generic mutants intersecting the PR diff, while other events run the complete
+accepted P2 pilot scope. Operators are rows in
 `rust/fslc/tests/fault_operators/operators.txt`, each naming a patch file, a
 primary detector, and a blind detector; the two controls are
 `controls/no-op.patch` and `controls/stale-seam.patch`. Adding an operator is a
 patch file and a table row, both data.
+
+The generic half, its fail-closed classifications, exact decision anchors,
+reviewed-equivalence rules, and raw evidence contract are accepted in
+[`DESIGN-semantic-mutation-gate.md`](DESIGN-semantic-mutation-gate.md).
 
 Detector naming is measured, not asserted. The first calibration moved two of
 the three intended primaries after the harness showed the named test could not
@@ -437,6 +481,13 @@ the honest output is a recorded measurement rather than a new operator or a
 fixture nobody can build.
 
 ## Typed generative / metamorphic agreement (#537 C6)
+
+M13 issue #673 promotes this fixed C6 foundation into the continuously seeded
+FSL Logic Test. [`DESIGN-fsl-logic-test.md`](DESIGN-fsl-logic-test.md) owns its
+machine-readable inventory, stable seed/case replay, named concrete/symbolic
+edges, report completeness, structural shrinking, regression corpus, and
+PR/scheduled tiers. The original sweeps and R1-R7 below remain executable
+members of that larger gate.
 
 `rust/fsl-verifier/tests/expression_agreement.rs` and `explicit_engine.rs`'s
 corpus sweep proved agreement on hand-written fixtures and the existing
@@ -501,7 +552,7 @@ observed CLI output:
 | R3 | Inline `state { x: T = e }` init reaches the same states as an equivalent explicit `init` block | LANGUAGE.md S2:499-508 ("normalized to an ordinary root assignment...same semantics as an equivalent `init` block") | Assigning the same root both inline and in `init` is `build_model`'s named semantic error |
 | R4 | Disjoint simultaneous assignments reach the same states regardless of source order | LANGUAGE.md S5:644-661 ("all right-hand sides...read the old state...frame condition is automatic") | Assigning the same variable twice on one path is the named semantic error |
 | R5 | A domain-bound-coincident invariant (`x <= hi`, textually equal to the type's own `hi`) holds at every declared size by construction | LANGUAGE.md S6 "Type bounds" (automatic, so a variable can never leave its own declared bound) | Widening the domain past the invariant's stale literal bound changes the verdict to `violated`; also reproduced mechanically via `enumerate_builtin_mutants`'s `type_bound_hi_plus1` |
-| R6 | `/`/`%` are total in property context but `partial_op` in action context | LANGUAGE.md S3:557-570 | The same expression in action context; see "Two confirmed findings" for what raw `verify_bounded` actually checks here |
+| R6 | `/`/`%` are total in property context but `partial_op` in action context | LANGUAGE.md S3:557-570 | The same expression in action context is checked directly by raw `verify_bounded`; the six operation fixtures must agree across all four native engines |
 | R7 | `entity`/`number` + `verify` reaches the same states as the hand-written lowered `type` | LANGUAGE.md S2:485-486 ("desugars to `type`") | Shifting the lowered bound by +1 past the declared size is detected |
 
 `R4`'s `assignment_remove` and `R6`'s `equality_operator_flip` reuse of
@@ -516,47 +567,30 @@ equivalent candidate is why R5's mutate-reuse test uses a separate,
 dedicated fixture instead of R5's own; see `relations.rs`'s
 `r5_mutate_kill_fixture` doc comment for the full account.
 
-### Two confirmed findings
+### Confirmed finding
 
-Both are recorded as re-measured facts, not silently normalized away or
-excluded:
+The remaining finding is recorded as a re-measured fact, not silently
+normalized away or excluded:
 
-1. **A partial Seq read (`head()`) evaluated in property context on an
-   empty sequence disagrees across engines.** `fsl_runtime::verify_explicit`
-   and `fsl_runtime::bfs` both raise a raw `RuntimeError`
-   ("`head()` on empty sequence") instead of returning a verdict, because
-   `Monitor::current_violation[_selected]` — unlike
-   `Monitor::execute_selected`'s post-step invariant check — does not catch
-   `is_partial_operation_error` and convert it to a `partial_op` `Violation`.
-   `fsl_verifier::verify_bounded` instead returns a *verdict*: `violated`,
-   `kind: "invariant"` (not `partial_op`), naming the user's own invariant,
-   at step 0 — its symbolic Seq encoding treats an out-of-range read as
-   *defined* with some solver-chosen value outside the element type's own
-   declared bound, rather than as undefined the way the concrete engines
-   (and LANGUAGE.md's own account of `/`/`%`, by contrast) treat it. Root
-   cause in the symbolic encoding is not diagnosed here; that is for the
-   tracking issue. Self-retiring exclusion:
-   `relations.rs::r6_property_context_seq_head_disagrees_across_engines_self_retiring_exclusion`
-   re-measures the exact `(kind, name, step)` and both error messages on
-   every run.
+The former property-context Seq exclusion was resolved by #650. Reached
+`pop`/`head`/`at`/index operations now use the same path-sensitive definedness
+conditions in concrete and symbolic state-property evaluation. Monitor BFS,
+explicit verification, and BMC return `partial_op` at the same step with
+`_partial_property_<property>`; no solver-selected inactive slot can become a
+property value or reachable witness. The former self-retiring exclusion is now
+the positive agreement control
+`relations.rs::r6_property_context_seq_head_is_uniformly_partial`.
 
-2. **`fsl_verifier::verify_bounded` does not perform LANGUAGE.md S6's
-   automatic "Partial operations" check at all**, for any of the six named
-   operations, in action context. `rust/fsl-verifier/src/bmc.rs` has no
-   `partial_op` handling anywhere in it; the CLI's `--engine bmc`
-   `partial_op` classification comes from `rust/fslc/src/verification.rs`'s
-   `run_bmc_filtered` merging in a *concrete* pre-scan
-   (`fsl_runtime::find_boundary_violation`), not from the solver. This is a
-   scope boundary this suite documents rather than a bug: raw
-   `verify_bounded`'s outcome for these six fixtures ranges from a clean
-   verdict (`divide`/`remainder`) to a spurious `type_bound` on the
-   assigned scalar (`head`/`at`/index — the same symbolic-Seq gap as
-   finding 1, surfacing differently) to `Err("model sequence length is
-   negative")` (`pop`) — all recorded, none asserted, in
-   `relations.rs::r6_action_context_partial_operations_are_caught_only_by_the_concrete_engines`.
-   The three concrete-family engines (Monitor BFS / explicit /
-   `find_boundary_violation`) agree with each other on `partial_op` for
-   all six.
+The former raw-API gap for action-context partial operations was resolved by
+#651. `fsl_verifier::verify_bounded` now applies backend-neutral symbolic
+definedness at the public verifier boundary for ordered guards, reached body
+expressions, and `ensures`. The CLI and Worker no longer consume `partial_op`
+from their concrete boundary pre-scan; non-partial outcomes that the bounded
+symbolic value cannot represent still retain that exact concrete evidence. The
+R6 fixtures assert Monitor BFS, explicit,
+`find_boundary_violation`, and raw BMC agree on `partial_op` for all six named
+operations. Property-context `/` and `%` totalization remains the deliberate
+exception and has a dedicated negative control in the #650 regression test.
 
 ### Z3js / Worker parity ownership
 
@@ -667,3 +701,28 @@ operator row or shipped injection hook.
 `tools/check-native-integration.sh rust` runs the workspace Rust tests and
 therefore owns this native anchor. The frozen Python test is outside that gate
 and remains a compatibility reference only.
+
+## Triangulated Assurance (#670)
+
+`rust/fslc/tests/triangulated_assurance.rs` generalizes the strongest C7 shape
+without weakening C3/C5/C7. Semantic owners register CI-internal claims under
+`tests/triangulated/`; the aggregator rejects missing/stale claims, non-raw
+observations, missing fields or edges, skipped/unknown evidence, stale
+citations, shared semantic owners/decision lineage, and missing calibration.
+The complete contract is `docs/DESIGN-triangulated-assurance.md`.
+
+The initial federation registers P1 compound outcome conservation, P2 native
+symbolic-witness versus solver-free explicit/Monitor replay identity, and P3
+token-based dialect dispatch. P1 now retains raw stdout/stderr bytes, process
+exit, parsed JSON, and the native build fingerprint before its independent
+mapping classifies the observation. P2 recomputes violation identity and source
+span and rejects state/step/kind/location mutants. P3 uses one checked-in raw
+source manifest across syntax-library, CLI, and LSP consumers while a manual
+fixture oracle remains independent of the production registry.
+
+`shared-observer-lineage.patch` is the calibrated common-mode fault: it selects
+the production outcome classifier in place of the registered independent P1
+mapping and declares the self-spec's owner/lineage. The primary test executes
+that substituted registered path before the triangulated independence detector
+fails, while the blind parser detector stays green. Consumer parity is never
+counted as observer independence.

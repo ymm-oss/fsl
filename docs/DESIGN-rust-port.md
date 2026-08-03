@@ -254,13 +254,14 @@ solver-independent crates used by both delivery surfaces:
 - `fsl-runtime::verification_warnings` owns vacuous-implication and
   vacuous-leadsto reachability, deadlock warnings, and action-coverage
   warnings. It consumes only the checked model and backend-neutral result
-  facts. The remaining three `docs/DESIGN-vacuity.md` §2 lanes
-  (`always_true_requires`, `tautology_over_frozen`, `urgency_freeze`) are
+  facts. The remaining four `docs/DESIGN-vacuity.md` §2 lanes
+  (`always_true_requires`, `tautology_over_frozen`, `urgency_freeze`,
+  `vacuous_deadline`) are
   solver-dependent, so `fsl-verifier::vacuity` proves them and carries them
   out of the verifier as `BmcResult.vacuity`. The frontend renders that into
   warning JSON and passes it back into `verification_warnings`, which keeps
   the documented warning order in one place without giving `fsl-runtime` a
-  solver dependency. `--vacuity` selects over the closed 5-kind set in
+  solver dependency. `--vacuity` selects over the closed 6-kind set in
   `fsl-core::VACUITY_KINDS`, not a `"vacuous_"` name-prefix check.
 - The solver-dependent lanes run after every witness, reachable, and deadlock
   trace has been projected. They quantify over freshly named states and never

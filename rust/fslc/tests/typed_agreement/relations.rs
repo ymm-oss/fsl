@@ -8,15 +8,14 @@
 //! declared structurally (domain bound coincides with the invariant bound
 //! by construction) before the mutation that breaks it runs.
 //!
-//! R6 additionally records two confirmed cross-engine findings instead of
-//! silently normalizing them away: a self-retiring exclusion for
+//! R6 additionally records the remaining confirmed cross-engine finding as a
+//! self-retiring exclusion for
 //! `head()` read from property context on an empty sequence (BMC finds a
-//! spurious `violated`/`invariant` while the concrete engines correctly
-//! error), and a documented scope boundary for the six partial operations
-//! in *action* context (`fsl_verifier::verify_bounded` alone does not
-//! perform LANGUAGE.md S6's automatic "Partial operations" check at all --
-//! only the concrete engines and the CLI's own `find_boundary_violation`
-//! pre-scan do).
+//! spurious `violated`/`invariant` while the concrete engines correctly error).
+//! Action-context partial operations are a direct four-engine agreement anchor:
+//! Monitor BFS, explicit, the concrete boundary oracle, and raw
+//! `fsl_verifier::verify_bounded` must all classify the six named operations
+//! as `partial_op`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -488,19 +487,14 @@ fn r5_domain_size_boundary_verdict_change_matches_the_declared_structural_expect
 // R6: short-circuit / partial operation / Euclidean division duality.
 // LANGUAGE.md S3:557-570: `/`/`%` are total in property context (`a/0==0`,
 // `a%0==0`) but still reported `partial_op` when read unguarded in an
-// action's requires/body/ensures -- a contract about `fslc verify`'s
-// observable behavior, not about the bare `fsl_verifier::verify_bounded`
-// function alone; see
-// `assert_action_context_partial_op_is_caught_only_concretely`'s doc for why
-// those two are not the same thing. `docs/LANGUAGE.md` S6's "Partial
-// operations" row scopes the *checked* class to action context; it makes no
-// totalization promise for `head`/`pop`/`at`/index the way S3 explicitly
-// does for `/`/`%`, so this suite exercises the six named operations in
-// action context via the dedicated tests below (not
-// `generator.rs::operation_sweep`, which only carries the safe/totalized
-// entries `engines::run_agreement`'s raw-BMC comparison can actually make),
-// and records the property-context asymmetry as its own finding below
-// instead of assuming S3's `/`/`%` guarantee extends to them.
+// action's requires/body/ensures through every public verifier entry point,
+// including bare `fsl_verifier::verify_bounded`. `docs/LANGUAGE.md` S6's
+// "Partial operations" row scopes the *checked* class to action context; it
+// makes no totalization promise for `head`/`pop`/`at`/index the way S3
+// explicitly does for `/`/`%`, so this suite exercises the six named
+// operations in action context via the dedicated tests below and records the
+// property-context asymmetry as its own finding instead of assuming S3's
+// `/`/`%` guarantee extends to them.
 // ---------------------------------------------------------------------
 
 #[test]
@@ -526,28 +520,10 @@ spec R6Euclid {
     );
 }
 
-/// The automatic "Partial operations" check (`docs/LANGUAGE.md` S6, action
-/// context only) is not performed by `fsl_verifier::verify_bounded`'s own
-/// symbolic loop: `rust/fsl-verifier/src/bmc.rs` has no `partial_op`
-/// handling anywhere in it. `rust/fslc/src/verification.rs`'s
-/// `run_bmc_filtered` produces the CLI's `--engine bmc` `partial_op`
-/// classification by merging in a *concrete* pre-scan
-/// (`fsl_runtime::find_boundary_violation`), not from the solver. So the
-/// three-way comparison this suite uses everywhere else
-/// (`engines::run_agreement`, which asserts raw `verify_bounded` agrees
-/// with Monitor BFS / explicit) does not apply to an unguarded
-/// action-context partial operation: raw `verify_bounded` reports Clean by
-/// construction, which is a documented capability gap in what the bare
-/// solver checks, not a disagreement to investigate. This asserts the
-/// concrete family (Monitor BFS / explicit / the concrete
-/// `find_boundary_violation` pre-scan the CLI itself relies on) agrees
-/// among itself, and separately documents raw BMC's Clean result, for one
-/// of `docs/LANGUAGE.md` S6's six named partial operations.
-fn assert_action_context_partial_op_is_caught_only_concretely(
-    id: &str,
-    source: &str,
-    depth: usize,
-) {
+/// LANGUAGE.md S6's action-context automatic check belongs to the public
+/// verifier boundary, not to a caller-owned pre-scan. Each operation must
+/// produce the same first failure and replayable evidence through raw BMC.
+fn assert_action_context_partial_op_agrees_across_engines(id: &str, source: &str, depth: usize) {
     let model = build(id, source);
 
     let bfs_violation = fsl_runtime::bfs(model.clone(), depth)
@@ -575,32 +551,41 @@ fn assert_action_context_partial_op_is_caught_only_concretely(
         "'{id}': find_boundary_violation kind"
     );
 
-    // Raw `verify_bounded` is not asserted against here at all: it never
-    // performs the "Partial operations" check itself (confirmed above the
-    // module), but its own *unrelated* automatic type-bound check can still
-    // independently misfire on the same underlying symbolic-Seq gap this
-    // module's `r6_property_context_seq_head_disagrees_across_engines_...`
-    // test documents -- observed outcomes range from a clean verdict
-    // (`divide`/`remainder`), to a spurious `type_bound` on the assigned
-    // scalar (`head`/`at`/index), to `verify_bounded` itself returning
-    // `Err("model sequence length is negative")` (`pop`). All three are the
-    // same underlying symbolic-Seq gap surfacing differently depending on
-    // where the phantom value flows, not independent findings, so this
-    // helper does not assert a specific raw-BMC outcome per operation --
-    // only records whichever one occurs for visibility.
     let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
-    match engines::block_on(fsl_verifier::verify_bounded(&model, &mut solver, depth)) {
-        Ok(bmc) => eprintln!(
-            "'{id}': raw verify_bounded (not asserted) = {:?}",
-            bmc.violation
+    let bmc = engines::block_on(fsl_verifier::verify_bounded(&model, &mut solver, depth))
+        .unwrap_or_else(|error| panic!("'{id}': raw verify_bounded errored: {error}"));
+    let bmc_violation = bmc
+        .violation
+        .unwrap_or_else(|| panic!("'{id}': raw verify_bounded found no violation"));
+    assert_eq!(
+        (
+            bmc_violation.kind.as_str(),
+            bmc_violation.name.as_str(),
+            bmc_violation.step,
         ),
-        Err(error) => eprintln!("'{id}': raw verify_bounded (not asserted) errored: {error}"),
-    }
+        (
+            boundary_violation.kind.as_str(),
+            boundary_violation.name.as_str(),
+            boundary_violation.step,
+        ),
+        "'{id}': raw BMC and the concrete boundary oracle disagree"
+    );
+    assert_eq!(
+        bmc_violation.last_action.as_deref(),
+        bmc_violation
+            .trace
+            .last()
+            .and_then(|step| step.action.as_ref())
+            .map(|action| action.name.as_str()),
+        "'{id}': last_action does not match the trace"
+    );
+    fsl_runtime::replay_trace(model, &bmc_violation.trace)
+        .unwrap_or_else(|error| panic!("'{id}': raw BMC trace is not replayable: {error}"));
 }
 
 #[test]
-fn r6_action_context_partial_operations_are_caught_only_by_the_concrete_engines() {
-    assert_action_context_partial_op_is_caught_only_concretely(
+fn r6_action_context_partial_operations_agree_across_all_engines() {
+    assert_action_context_partial_op_agrees_across_engines(
         "r6_action_head",
         r"
 spec R6ActionHead {
@@ -612,7 +597,7 @@ spec R6ActionHead {
 ",
         2,
     );
-    assert_action_context_partial_op_is_caught_only_concretely(
+    assert_action_context_partial_op_agrees_across_engines(
         "r6_action_pop",
         r"
 spec R6ActionPop {
@@ -624,7 +609,7 @@ spec R6ActionPop {
 ",
         2,
     );
-    assert_action_context_partial_op_is_caught_only_concretely(
+    assert_action_context_partial_op_agrees_across_engines(
         "r6_action_at",
         r"
 spec R6ActionAt {
@@ -636,7 +621,7 @@ spec R6ActionAt {
 ",
         2,
     );
-    assert_action_context_partial_op_is_caught_only_concretely(
+    assert_action_context_partial_op_agrees_across_engines(
         "r6_action_index",
         r"
 spec R6ActionIndex {
@@ -648,7 +633,7 @@ spec R6ActionIndex {
 ",
         2,
     );
-    assert_action_context_partial_op_is_caught_only_concretely(
+    assert_action_context_partial_op_agrees_across_engines(
         "r6_action_divide",
         r"
 spec R6ActionDivide {
@@ -660,7 +645,7 @@ spec R6ActionDivide {
 ",
         2,
     );
-    assert_action_context_partial_op_is_caught_only_concretely(
+    assert_action_context_partial_op_agrees_across_engines(
         "r6_action_remainder",
         r"
 spec R6ActionRemainder {
@@ -672,44 +657,37 @@ spec R6ActionRemainder {
 ",
         2,
     );
+    assert_action_context_partial_op_agrees_across_engines(
+        "r6_action_negative_at",
+        r"
+spec R6ActionNegativeAt {
+  type Small = -3..3
+  state { q: Seq<Small, 2>, last: Small }
+  init { q = Seq { 0 }  last = 0 }
+  action read_negative() { last = q.at(-1) }
+}
+",
+        2,
+    );
+    assert_action_context_partial_op_agrees_across_engines(
+        "r6_action_negative_index",
+        r"
+spec R6ActionNegativeIndex {
+  type Small = -3..3
+  state { q: Seq<Small, 2>, last: Small }
+  init { q = Seq { 0 }  last = 0 }
+  action read_negative() { last = q[-1] }
+}
+",
+        2,
+    );
 }
 
-/// #537 C6 slice 1 finding, recorded as a self-retiring exclusion rather
-/// than silently normalized away: a partial Seq read (`head`) evaluated in
-/// *property* context on a sequence that is empty at the initial state
-/// disagrees across engines instead of being caught uniformly.
-///
-/// Observed (this test re-measures every value below on every run):
-///
-/// - `fsl_runtime::verify_explicit` / `fsl_runtime::bfs` ("Monitor BFS"):
-///   both raise a raw `RuntimeError` ("`head()` on empty sequence") instead of
-///   returning a verdict. Both call `Monitor::current_violation[_selected]`,
-///   which -- unlike `Monitor::execute_selected`'s post-step invariant check
-///   -- does not catch `is_partial_operation_error` and convert it to a
-///   `partial_op` `Violation`; the CLI surfaces this as
-///   `result:"error"`/`kind:"semantics"` rather than a verdict at all.
-/// - BMC (`verify_bounded`): returns a *verdict*, not an error --
-///   `violated`, `kind:"invariant"` (the plain property-failure
-///   classification, not `partial_op`), `name:"HeadRead"` (the invariant's
-///   own declared name), at `step:0` (the initial state itself, before any
-///   action runs). The witness trace's projected state shows `queue` as the
-///   empty sequence it actually is at init. This means BMC's symbolic
-///   encoding treats `queue.head()` on an empty sequence as *defined* with
-///   some value the solver is free to pick outside `Item`'s `0..2` bound,
-///   rather than as undefined the way the concrete engines (and this
-///   suite's own `Monitor`-direct walk) treat it -- a distinct, and
-///   arguably more concerning, discrepancy than "differing labels for the
-///   same undefinedness": BMC is not applying LANGUAGE.md's action-context
-///   `partial_op` treatment here at all, and property-context totalization
-///   is only documented for `/`/`%` (S3:561-563), not for `head`. Root
-///   cause in the symbolic Seq encoding is not diagnosed here; that is a
-///   question for the tracking issue, not this suite.
-///
-/// A fix that makes the two engine families agree turns the `expect_err`
-/// calls or the `kind`/`name`/`step` assertions below into failures, so the
-/// exclusion cannot go stale silently.
+/// #650 regression: a reached partial Seq read in state-property context is a
+/// `partial_op` violation in every engine, never a raw concrete error or a
+/// solver-chosen phantom value.
 #[test]
-fn r6_property_context_seq_head_disagrees_across_engines_self_retiring_exclusion() {
+fn r6_property_context_seq_head_is_uniformly_partial() {
     let source = r"
 spec R6HeadPropertyDisagreement {
   type Item = 0..2
@@ -721,39 +699,39 @@ spec R6HeadPropertyDisagreement {
 ";
     let model = build("r6_head_property_disagreement", source);
 
-    let bfs_error = fsl_runtime::bfs(model.clone(), 2).expect_err(
-        "premise re-measurement: Monitor BFS must still error on an empty-sequence head() \
-         read in property context; if this now returns Ok, the engines agree and this \
-         exclusion (and the R6 doc note) must be retired",
-    );
-    assert!(
-        bfs_error.message.contains("head() on empty sequence"),
-        "bfs error message changed shape, re-check the exclusion: {bfs_error}"
-    );
-
-    let explicit_error = fsl_runtime::verify_explicit(model.clone(), 2, 100).expect_err(
-        "premise re-measurement: explicit must still error the same way as Monitor BFS",
-    );
-    assert!(
-        explicit_error.message.contains("head() on empty sequence"),
-        "explicit error message changed shape, re-check the exclusion: {explicit_error}"
-    );
+    let bfs = fsl_runtime::bfs(model.clone(), 2).expect("Monitor BFS verdict");
+    let bfs_violation = bfs.violation.expect("Monitor BFS partial violation");
+    let explicit =
+        fsl_runtime::verify_explicit(model.clone(), 2, 100).expect("explicit verification verdict");
+    let explicit_violation = explicit.violation.expect("explicit partial violation");
 
     let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
     let bmc_result = engines::block_on(fsl_verifier::verify_bounded(&model, &mut solver, 2))
-        .expect("premise re-measurement: BMC must still return a clean Result, not error");
-    let violation = bmc_result
-        .violation
-        .expect("premise re-measurement: BMC must still report a violation, not a clean verdict");
+        .expect("BMC verdict");
+    let violation = bmc_result.violation.expect("BMC partial violation");
+    assert_eq!(
+        (
+            bfs_violation.kind.as_str(),
+            bfs_violation.name.as_str(),
+            bfs_violation.step,
+        ),
+        ("partial_op", "_partial_property_HeadRead", 0)
+    );
+    assert_eq!(
+        (
+            explicit_violation.violation.kind.as_str(),
+            explicit_violation.violation.name.as_str(),
+            explicit_violation.violation.step,
+        ),
+        ("partial_op", "_partial_property_HeadRead", 0)
+    );
     assert_eq!(
         (
             violation.kind.as_str(),
             violation.name.as_str(),
-            violation.step
+            violation.step,
         ),
-        ("invariant", "HeadRead", 0),
-        "BMC's classification of the same condition changed shape, re-check the exclusion: \
-         {violation:?}"
+        ("partial_op", "_partial_property_HeadRead", 0)
     );
 }
 

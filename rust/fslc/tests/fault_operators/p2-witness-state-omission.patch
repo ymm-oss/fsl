@@ -1,0 +1,16 @@
+P2 witness-state omission: remove one state component from every projected
+trace step. Concrete replay and full witness identity must reject the partial
+trace.
+
+--- a/rust/fsl-verifier/src/trace.rs
++++ b/rust/fsl-verifier/src/trace.rs
+@@ -21,7 +21,8 @@ pub(crate) fn project_trace<S: SmtSolver>(
+ ) -> Result<Vec<TraceStep>, VerifyError> {
+     let mut trace = Vec::new();
+     for step in 0..=upto {
+-        let state = project_state(solver, model, &states[step])?;
++        let mut state = project_state(solver, model, &states[step])?;
++        let _ = state.pop_first();
+         let action = if step == 0 {
+             None
+         } else {

@@ -2532,279 +2532,6 @@
           ],
           "ensures": [],
           "fair": false
-        },
-        {
-          "name": "saga_payment_flow_observe_payment_captured",
-          "parameters": [
-            {
-              "kind": "typed",
-              "name": "payment_request_id",
-              "type": {
-                "kind": "named",
-                "name": "PaymentRequestId"
-              }
-            }
-          ],
-          "requires": [],
-          "lets": [],
-          "updates": [
-            [
-              "assign",
-              [
-                "var",
-                "event_Approved"
-              ],
-              [
-                "bool",
-                false
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "event_PaymentCaptured"
-              ],
-              [
-                "bool",
-                true
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "event_PaymentFailed"
-              ],
-              [
-                "bool",
-                false
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "event_PaymentRequested"
-              ],
-              [
-                "bool",
-                false
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "event_PaymentTimedOut"
-              ],
-              [
-                "bool",
-                false
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "order_status"
-              ],
-              [
-                "var",
-                "Status_Paid"
-              ],
-              "<location>"
-            ]
-          ],
-          "ensures": [],
-          "fair": false
-        },
-        {
-          "name": "saga_payment_flow_observe_payment_failed",
-          "parameters": [
-            {
-              "kind": "typed",
-              "name": "payment_request_id",
-              "type": {
-                "kind": "named",
-                "name": "PaymentRequestId"
-              }
-            }
-          ],
-          "requires": [],
-          "lets": [],
-          "updates": [
-            [
-              "assign",
-              [
-                "var",
-                "event_Approved"
-              ],
-              [
-                "bool",
-                false
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "event_PaymentCaptured"
-              ],
-              [
-                "bool",
-                false
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "event_PaymentFailed"
-              ],
-              [
-                "bool",
-                true
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "event_PaymentRequested"
-              ],
-              [
-                "bool",
-                false
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "event_PaymentTimedOut"
-              ],
-              [
-                "bool",
-                false
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "order_status"
-              ],
-              [
-                "var",
-                "Status_Failed"
-              ],
-              "<location>"
-            ]
-          ],
-          "ensures": [],
-          "fair": false
-        },
-        {
-          "name": "saga_payment_flow_observe_payment_timed_out",
-          "parameters": [
-            {
-              "kind": "typed",
-              "name": "payment_request_id",
-              "type": {
-                "kind": "named",
-                "name": "PaymentRequestId"
-              }
-            }
-          ],
-          "requires": [],
-          "lets": [],
-          "updates": [
-            [
-              "assign",
-              [
-                "var",
-                "event_Approved"
-              ],
-              [
-                "bool",
-                false
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "event_PaymentCaptured"
-              ],
-              [
-                "bool",
-                false
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "event_PaymentFailed"
-              ],
-              [
-                "bool",
-                false
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "event_PaymentRequested"
-              ],
-              [
-                "bool",
-                false
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "event_PaymentTimedOut"
-              ],
-              [
-                "bool",
-                true
-              ],
-              "<location>"
-            ],
-            [
-              "assign",
-              [
-                "var",
-                "order_status"
-              ],
-              [
-                "var",
-                "Status_Failed"
-              ],
-              "<location>"
-            ]
-          ],
-          "ensures": [],
-          "fair": false
         }
       ],
       "invariants": [
@@ -7857,11 +7584,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8013,11 +7740,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8038,11 +7765,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8083,10 +7810,7 @@
             "order_approve": true,
             "order_request_payment": true,
             "saga_payment_flow_capture": true,
-            "saga_payment_flow_capture_timeout": true,
-            "saga_payment_flow_observe_payment_captured": true,
-            "saga_payment_flow_observe_payment_failed": true,
-            "saga_payment_flow_observe_payment_timed_out": true
+            "saga_payment_flow_capture_timeout": true
           },
           "deadlock": {
             "found": false
@@ -8094,11 +7818,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8119,11 +7843,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8158,11 +7882,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8189,11 +7913,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8218,11 +7942,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8248,11 +7972,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8276,11 +8000,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8306,11 +8030,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8334,11 +8058,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8364,11 +8088,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8392,11 +8116,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8423,11 +8147,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8452,11 +8176,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8483,11 +8207,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8512,11 +8236,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8542,11 +8266,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",
@@ -8570,11 +8294,11 @@
           "versions": {
             "verifier": {
               "name": "fslc-rust",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "core": {
               "name": "fsl-core",
-              "version": "4.1.0"
+              "version": "4.2.0"
             },
             "solver": {
               "name": "z3",

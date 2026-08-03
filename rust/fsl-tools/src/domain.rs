@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::BTreeSet;
+
 use fsl_syntax::{DomainEffect, DomainSpec, SyntaxExpr};
 use serde_json::{Value, json};
 
@@ -88,7 +90,18 @@ fn actions(domain: &DomainSpec) -> Vec<String> {
         }
     }
     for saga in &domain.sagas {
-        for event in saga.steps.iter().flat_map(|step| step.awaits.iter()) {
+        let mut observed = BTreeSet::new();
+        for step in &saga.steps {
+            observed.extend(step.awaits.iter());
+        }
+        for compensation in &saga.compensations {
+            observed.insert(&compensation.trigger_event);
+            observed.insert(&compensation.after_event);
+        }
+        for event in observed {
+            if fsl_core::domain_effect_owns_event(domain, event) {
+                continue;
+            }
             out.push(format!(
                 "saga_{}_observe_{}",
                 snake(&saga.name),

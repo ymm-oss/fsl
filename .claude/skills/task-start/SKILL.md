@@ -23,7 +23,9 @@ Create or update `.claude/work/active.md` from `.claude/work/active.template.md`
 4. Inspect only the implementation and tests required to establish current state. For broad exploration,
    delegate to `fsl-codebase-explorer` and retain only its evidence summary.
 5. Record invariants, exact repository-relative evidence, expected scope, sibling paths, verification
-   commands, uncertainty, and the first next action.
+   commands, uncertainty, the discovered-follow-up ledger, and the first next action. For migration
+   or parity work, inventory behavior-bearing AST/enum variants; top-level corpus counts are not
+   semantic completeness.
 6. Compare the packet with the working tree. Remove stale claims and never mark a change or test complete
    without direct evidence.
 7. Stop after writing the task packet. Do not implement the task in this skill invocation.

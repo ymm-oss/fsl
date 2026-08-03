@@ -174,10 +174,10 @@ fn all_five_public_kernel_domain_targets_match_pre_migration_goldens() {
 }
 
 #[test]
-fn domain_testgen_adapter_and_effects_match_the_pre_migration_golden() {
+fn domain_testgen_adapter_and_effects_match_the_typestate_contract_golden() {
     assert_eq!(
         domain_testgen_digest(),
-        "14f8a1466b9140875d288fb083e58401acf5f511b0089571098e7f148a841cf8"
+        "334724c8b917a5789eacfeb9076b6d7ab10c5d994880954ba404708e7908a76f"
     );
 }
 

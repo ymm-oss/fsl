@@ -65,6 +65,9 @@ post-merge product-gate failure or treat its automatically created issue as a wa
 Python is optional and is used only for changes explicitly scoped to the frozen compatibility
 reference or Python-based repository hooks. Native solver changes should also run
 the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests.
+Changes to concrete/symbolic semantics additionally run
+`./tools/check-native-integration.sh fsl-logic pr`; generator, comparator,
+inventory, and promotion changes run the `scheduled` tier.
 
 ## Correctness invariants
 
@@ -86,12 +89,27 @@ the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests.
   (`DIALECTS`, `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS`), or the conformance harness
   (`docs/DESIGN-conformance-harness.md`) fails loudly with an unregistered-construct error instead
   of silently excluding the corpus.
+- Top-level dialect counts and parser parity do not establish nested semantic coverage. When porting
+  or auditing an AST/enum sum type, inventory every behavior-bearing variant and bind each accepted
+  variant to executable native semantics with accepting/rejecting controls, or to an explicit
+  fail-closed diagnostic. Prefer a total lowering expression whose arms all return the same semantic
+  output type; an empty unit arm must not compile as a valid implementation.
 - Do not weaken or hollow out `.fsl` specs to make checks pass. Verify mutation/vacuity evidence.
 - Every formal-to-implementation conformance anchor must include a negative control that rejects a
   known contract-violating trace, transition, or mutation. A green positive path alone does not
   establish that the anchor can detect drift.
+- A soundness-critical claim marked triangulated must follow
+  `docs/DESIGN-triangulated-assurance.md`: preserve the pre-classification raw observation, declare
+  two reviewably independent semantic lineages, execute all three agreement edges, and calibrate
+  accepting/rejecting controls. Consumer parity through one parser/classifier is not independence,
+  and triangulation never promotes the public assurance class or process exit.
 - Do not hand-edit generated compatibility snapshots. Regenerate them only when the corresponding
   contract change is intentional and review the resulting diff.
+- An accepted construct with absent, placeholder, or hollow semantics is a soundness defect, even if
+  it is outside the current edit. Before reporting a task complete, either fix it in scope or record
+  an existing/new issue URL in the task packet. If external issue creation is not authorized, leave
+  an explicit unresolved follow-up and request authorization; do not let the finding survive only in
+  chat, a review transcript, or agent memory.
 
 ## Knowledge distillation
 

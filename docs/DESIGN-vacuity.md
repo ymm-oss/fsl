@@ -42,8 +42,17 @@ bugs. Conventionally `kind:"vacuous"` referred only to init unsatisfiability.
    actions, and Z3 proves `urgent_enabled` holds in every initial state and is preserved by
    every action. This is depth-independent and intentionally incomplete: if the initial or
    inductive proof fails, no warning is emitted.
+6. **`vacuous_deadline`**: for each generated deadline, derive the predicate
+   that all entries of its age state equal zero. Warn when Z3 proves that
+   predicate for every initial state and proves it is preserved by every
+   transition. Unlike `urgency_freeze`, this does not claim that `tick` is
+   globally dead: `tick` may run while the age condition is false, yet no
+   execution consumes deadline slack. The proof permits non-`tick` actions to
+   reset age to zero and catches state-changing urgent handlers that disable
+   their own guards. A `tick` transition that advances age is the rejecting
+   control and suppresses the finding.
 
-### Native lanes 3–5: "over all reachable states" is decided over the type space
+### Native lanes 3–6: "over all reachable states" is decided over the type space
 
 The frozen Python reference discharges lane 3 from the states an unrolling actually witnesses:
 a clause survives to a warning when nothing within depth K falsified it. That reports a real
@@ -83,7 +92,7 @@ so there is zero detection loss.
 
 - bmc.py: `pending_vacuity` contains dynamic candidates (implication antecedents + leadsTo
   triggers), isomorphic to the `pending_reachables` loop, plus static candidates
-  (`tautology_over_frozen`, `urgency_freeze`) that are proven before exploration and carried to
+  (`tautology_over_frozen`, `urgency_freeze`, `vacuous_deadline`) that are proven before exploration and carried to
   finalization. requires tautology adds the sat of "preceding clauses ∧ ¬clause" to the coverage
   loop. Context-bearing candidates are pre-filtered to only "clauses logically implied by the
   preceding clauses over the type space" (`_requires_clause_locally_implied`), excluding bounded
@@ -104,7 +113,8 @@ so there is zero detection loss.
 
 The warning kinds (display name, loc, requirement) / forall wrapping / context-bearing
 redundant clause / two suppressions (coverage false, sync) / frozen-ghost tautology /
-urgency-freeze positive and deadline-urgency-pattern negative / not shown on the violated path /
+urgency-freeze positive / state-changing deadline-zero positive and
+deadline-urgency-pattern negative / not shown on the violated path /
 induction pass-through / error (exit 2) and ignore / **corpus zero-false-positive gatekeeper**
 (specs/ + examples/ + gallery/valid in one batch). Gallery
 `vacuous_implication_warning.fsl` (`--vacuity error`).

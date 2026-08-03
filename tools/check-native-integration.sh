@@ -42,6 +42,14 @@ check_fault_operators() {
   ./tools/run-fault-operators.sh
 }
 
+check_semantic_mutation() {
+  ./tools/run-semantic-mutation-gate.sh "${1:-complete}"
+}
+
+check_fsl_logic() {
+  ./tools/run-fsl-logic-test.sh "${1:-pr}"
+}
+
 # Negative control for issue #617: `fslc` must not depend on the operating
 # system's choice of main-thread stack.
 #
@@ -106,16 +114,23 @@ case "${1:-all}" in
   fault-operators)
     check_fault_operators
     ;;
+  semantic-mutation)
+    check_semantic_mutation "${2:-complete}"
+    ;;
+  fsl-logic)
+    check_fsl_logic "${2:-pr}"
+    ;;
   stack-parity)
     check_stack_parity
     ;;
   all)
     check_rust
     check_wasm
-    check_fault_operators
+    check_semantic_mutation complete
+    check_fsl_logic scheduled
     ;;
   *)
-    echo "usage: $0 [all|rust|wasm|boundaries|fault-operators|stack-parity]" >&2
+    echo "usage: $0 [all|rust|wasm|boundaries|fault-operators|semantic-mutation [changed|complete]|fsl-logic [pr|scheduled]|stack-parity]" >&2
     exit 2
     ;;
 esac

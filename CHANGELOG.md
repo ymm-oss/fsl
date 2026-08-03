@@ -5,6 +5,101 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-08-03
+
+- Fixed native Rust business-dialect precedence policies so `every <Entity>
+  reaching ... must have passed through ...` lowers to deduplicated history
+  state, transition updates, the attributed no-bypass invariant, and its
+  dominated-set stability invariant. Native BMC, induction, and explicit-state
+  regressions now fail if the lowering is hollowed back into a no-op (#681).
+- Hardened semantic migrations against another hollow accepted construct:
+  behavior-bearing variants now require executable or fail-closed controls,
+  the precedence bypass gallery and a curated implementation fault operator
+  calibrate native detection, all four business policy variants have native
+  rejecting controls, and both agent harnesses retain soundness findings until
+  they are fixed or linked to an issue; the merge-readiness automation lane
+  executes that harness contract on every pull request (#681).
+- Accepted the measured correlated-saga-history design: retain one-hot event
+  flags as current-transition observations and add a dedicated
+  correlation-indexed six-phase saga map in a follow-up. The maintained
+  two-correlation fixture measures the three candidates as ×1 reused effect
+  state, 32 sticky-event valuations versus 6 one-hot valuations, and 36
+  dedicated saga-progress valuations; a negative control proves global sticky
+  flags alias correlations (#662).
+- Reached `Seq` `pop`/`head`/`at`/index operations are now uniformly
+  `partial_op` violations in property context across Monitor BFS, explicit
+  verification, native/browser symbolic BMC, and CLI rendering. The contract
+  includes `terminal` and `leadsTo`, so neither can turn an undefined Seq read
+  into a solver-selected deadlock decision or vacuously false antecedent.
+  Symbolic phantom slots can no longer fabricate a property verdict or
+  reachable witness; property-context `/` and `%` zero totalization is
+  unchanged (#650).
+- Native BMC now distinguishes structurally impossible `reachable` targets
+  from depth-limited ones. `over_constrained` entries carry an irreducible
+  `blocking_requires` set computed in an independent solver session, so path
+  UNSAT cannot poison the classification and diagnostic queries cannot perturb
+  native/browser witness projection (#634).
+- Fixed `fslc typestate` silently omitting locally guarded read/query actions.
+  They now appear as explicit state-preserving self-loops, and generated
+  TypeScript preserves the caller's exact phantom state instead of widening a
+  multi-state guard (#635).
+- Bounded LSP workspace discovery now scans only direct siblings for a document
+  opened outside every registered workspace root, preventing an arbitrary
+  parent such as `/tmp` from becoming an unbounded recursive index while
+  preserving explicit workspace and sibling cross-file behavior (#623).
+- `fslc explain` counterfactual weakening now evaluates only the invariant and
+  reachable outcomes it actually reports, and explicitly marks liveness as
+  skipped. Quantified `leadsTo` checks no longer multiply every safety mutant's
+  runtime while their results are discarded (#633).
+- Added a calibrated `vacuous_deadline` lane that proves a generated deadline's
+  age remains zero across every transition, catching state-changing urgent
+  handlers that evade the narrower global `urgency_freeze` proof. The SLA worker
+  example now consumes slack and fails when its deadline is tightened (#632).
+- Added the M13 FSL Logic Test (#673): deterministic valid finite models now
+  carry stable seed/case IDs, a single-case replay command, machine-coupled
+  generation/dialect/metamorphic inventory, and named concrete-versus-symbolic
+  agreement edges over verdicts, clean-run reachables/action coverage, exact
+  witnesses, replay, and successor admission. PR and scheduled tiers emit a
+  fail-closed completeness report; scheduled evidence spans three seeds and
+  three depths (1,152 cases), delayed violations carry nontrivial actions, and
+  a comparator corruption control exercises structural shrinking and minimized replay, while a deduplicated corpus owns
+  future real disagreements. Generation volume does not promote public
+  assurance or change product output.
+- Added the M13 soundness-critical semantic mutation gate (#672). A pinned
+  `cargo-mutants 27.1.0` pilot now mutates exact P2 bounded-verification,
+  witness projection/replay, identity/location, and result-fold decisions;
+  reviewed semantic operators cover unknown/backend failures, inclusive
+  depth, witness omissions, replay bypass, and false-success folds that
+  generic token mutation cannot express. Pull requests run changed-scope
+  mutants plus every curated control, with the detector package named
+  explicitly even when a diff selects only `fsl-verifier`; product events run
+  the complete accepted scope. Survivors, timeouts, stale seams, missing output,
+  and stale equivalence records fail closed; this calibrates detection power
+  without promoting any public assurance class or changing product output.
+- Added CI-internal Triangulated Assurance (#670): a federated, fail-closed
+  registry now requires one raw observation, two explicitly independent
+  semantic lineages, all three executable agreement edges, positive/negative
+  calibration, and honest scope. Initial pilots cover compound native outcome
+  conservation, symbolic-witness/concrete-replay identity (including
+  state/step/kind/location corruption controls), and token-based dialect
+  dispatch across the syntax library, CLI, and LSP. A calibrated common-mode
+  fault executes a production-classifier substitution for the registered P1
+  independent observer and declares its shared model lineage; no public
+  assurance class, JSON field, or exit code changes.
+- Fixed raw `fsl_verifier::verify_bounded*` calls bypassing the automatic
+  action-context partial-operation check. Symbolic BMC now reports replayable
+  `partial_op` evidence for ordered guards, reached action bodies, and
+  `ensures`, including selected-property, supplied-state, and nondeterministic
+  init paths; native CLI and Worker no longer source `partial_op` from their
+  separate concrete boundary pre-scan (#651).
+- Fixed `domain` saga lowering so effect-owned outcome events cannot bypass the
+  effect correlation guard through weaker generated observation actions. Three
+  observation actions disappear from generated kernels (#640).
+- `fslc domain check` now preserves the nested kernel's `warnings` and
+  `action_coverage`, so vacuity and generated-action coverage diagnostics remain
+  visible to domain users instead of being dropped by the stable projection
+  (#641).
+
 ## [4.1.0] - 2026-07-30
 
 - Semantic Assurance Matrix slices 2/3 add source-derived `expr` (24
@@ -4160,7 +4255,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.1.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.2.0...HEAD
+[4.2.0]: https://github.com/ymm-oss/fsl/compare/v4.1.0...v4.2.0
 [4.1.0]: https://github.com/ymm-oss/fsl/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/ymm-oss/fsl/compare/v3.1.0...v4.0.0
 [3.1.0]: https://github.com/ymm-oss/fsl/compare/v3.0.0...v3.1.0

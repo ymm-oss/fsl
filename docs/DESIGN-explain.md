@@ -64,6 +64,13 @@ verification logic is written. Key points:
   cannot be broken by any single weakening within depth (it is either redundant — implied by
   other invariants — or requires greater depth). State this gracefully rather than erroring.
   Continuous with #6's `empty_formalization`.
+- Counterfactual weakening is scoped to user invariants and reachability. The
+  per-candidate verifier model removes `leadsTo` properties because their lasso
+  results are not consumed by either counterfactual artifact; normal `verify`
+  remains the authority for liveness. JSON reports this as
+  `counterfactual_scope.liveness:"skipped"`, and `--readable` states the same
+  scope. This prevents quantified liveness from multiplying every safety
+  weakening without silently implying that liveness was analyzed (#633).
 
 ## 5. Ripple / tests
 

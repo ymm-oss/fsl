@@ -765,25 +765,31 @@ fn insert_helpful_rank_failure_json(
 }
 
 /// Prove the solver-dependent vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes
-/// 3–5) for a run decided by the solver-free explicit-state engine.
+/// 3–6) for a run decided by the solver-free explicit-state engine.
 ///
 /// The lanes describe the model, not the exploration, so `--engine explicit`
 /// must surface the same vacuity kinds `--engine bmc` does; letting the engine
 /// choice change which kinds `--vacuity error` can see would be exactly the
 /// exit-code divergence `docs/DESIGN-rust-port.md` forbids. A solver or
 /// semantics failure is surfaced, never swallowed.
-fn explicit_vacuity_findings(
+type ExplicitSolverFindings = (
+    Vec<fsl_verifier::VacuityFinding>,
+    std::collections::BTreeMap<String, fsl_verifier::ReachableDiagnosis>,
+);
+
+fn explicit_solver_findings(
     model: &KernelModel,
     action_coverage: &std::collections::BTreeMap<String, bool>,
-) -> Result<Vec<fsl_verifier::VacuityFinding>, (Value, i32)> {
+) -> Result<ExplicitSolverFindings, (Value, i32)> {
     let mut solver = fsl_solver_z3::Z3Solver::new()
         .map_err(|error| (error_output("internal", &error.to_string()), 3))?;
-    block_on_native(fsl_verifier::model_vacuity_findings(
-        model,
-        &mut solver,
-        action_coverage,
-    ))
-    .map_err(|error| (error_output("semantics", &error.to_string()), 2))
+    block_on_native(async {
+        let diagnostics = fsl_verifier::diagnose_reachables(model, &mut solver).await?;
+        let vacuity =
+            fsl_verifier::model_vacuity_findings(model, &mut solver, action_coverage).await?;
+        Ok((vacuity, diagnostics))
+    })
+    .map_err(|error: fsl_verifier::VerifyError| (error_output("semantics", &error.to_string()), 2))
 }
 
 pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
@@ -809,10 +815,11 @@ pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32
         Ok(result) => result,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    let vacuity = match explicit_vacuity_findings(&model, &result.action_coverage) {
-        Ok(findings) => findings,
-        Err(output) => return output,
-    };
+    let (vacuity, reachable_diagnostics) =
+        match explicit_solver_findings(&model, &result.action_coverage) {
+            Ok(findings) => findings,
+            Err(output) => return output,
+        };
     finish_explicit_output(fslc_rust::verification_output::render_explicit_output(
         envelope(),
         &model,
@@ -821,6 +828,7 @@ pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32
         request.deadlock,
         started.elapsed().as_secs_f64(),
         &vacuity,
+        &reachable_diagnostics,
     ))
 }
 
@@ -865,10 +873,11 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
         Ok(result) => result,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
-    let vacuity = match explicit_vacuity_findings(&model, &result.action_coverage) {
-        Ok(findings) => findings,
-        Err(output) => return output,
-    };
+    let (vacuity, reachable_diagnostics) =
+        match explicit_solver_findings(&model, &result.action_coverage) {
+            Ok(findings) => findings,
+            Err(output) => return output,
+        };
     let (output, status) =
         finish_explicit_output(fslc_rust::verification_output::render_explicit_output(
             envelope(),
@@ -878,6 +887,7 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
             request.deadlock,
             started.elapsed().as_secs_f64(),
             &vacuity,
+            &reachable_diagnostics,
         ));
     if output.get("result").and_then(Value::as_str) == Some("unknown_budget") {
         return auto_fallback_to_bmc(request, &budget_fallback_reason(&output), "budget");
@@ -972,19 +982,16 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
         request.selection.property,
         request.selection.excluded,
     );
-    // `find_boundary_violation` is a concrete pre-scan: an optional
-    // shortcut ahead of the full Z3-backed solve below, not the source of
-    // verify's soundness. It needs a deterministic concrete initial state
-    // to run at all (#519); a model whose init leaves some state free is
-    // still fully supported by `solve_bmc`, which explores every
-    // admissible initial value symbolically, so skip the shortcut rather
-    // than failing the whole command when it does not apply.
+    // Some concrete boundary outcomes (notably an over-capacity Seq successor)
+    // cannot be represented by the bounded symbolic value and must retain the
+    // exact Monitor evidence. Action-context `partial_op` is deliberately not
+    // consumed here: it belongs to `verify_bounded*` itself (#651).
     if checked_bounds.is_none()
         && request.initial_state.is_none()
         && fsl_runtime::deterministic_initial_state(&model).is_ok()
     {
         match fsl_runtime::find_boundary_violation(model.clone(), request.depth) {
-            Ok(Some((violation, trace))) => {
+            Ok(Some((violation, trace))) if violation.kind != "partial_op" => {
                 let statistics = fsl_solver::VerificationStatistics::default();
                 return Err(fslc_rust::verification_output::render_boundary_output(
                     envelope(),
@@ -1000,7 +1007,7 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
                     },
                 ));
             }
-            Ok(None) => {}
+            Ok(Some(_) | None) => {}
             Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
         }
     }
@@ -1031,7 +1038,7 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
             prepared.checked_bounds.as_ref(),
         ))
     };
-    let result = match verification {
+    let mut result = match verification {
         Ok(result) => result,
         Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
     };
@@ -1042,10 +1049,28 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
     ) {
         return Err((error_output("internal", &error), 3));
     }
-    Ok(SolvedBmc {
-        result,
-        statistics: fsl_solver::SmtSolver::statistics(&solver),
-    })
+    // Static reachable diagnosis deliberately uses a separate solver session.
+    // Even stack-isolated queries perturb backend query history and can change
+    // underdetermined witness projections, which are byte-compared across the
+    // native and browser backends.
+    let mut statistics = fsl_solver::SmtSolver::statistics(&solver);
+    let needs_reachable_diagnosis =
+        result.violation.is_none() && result.reachables.values().any(Option::is_none);
+    if needs_reachable_diagnosis {
+        let mut diagnosis_solver = match fsl_solver_z3::Z3Solver::new() {
+            Ok(solver) => solver,
+            Err(error) => return Err((error_output("internal", &error.to_string()), 3)),
+        };
+        result.reachable_diagnostics = match block_on_native(fsl_verifier::diagnose_reachables(
+            &prepared.model,
+            &mut diagnosis_solver,
+        )) {
+            Ok(diagnostics) => diagnostics,
+            Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
+        };
+        statistics.merge(&fsl_solver::SmtSolver::statistics(&diagnosis_solver));
+    }
+    Ok(SolvedBmc { result, statistics })
 }
 
 fn synthetic_span() -> fsl_syntax::Span {
@@ -2345,6 +2370,7 @@ mod tests {
             DeadlockMode::Ignore,
             0.0,
             &[],
+            &std::collections::BTreeMap::new(),
         );
         let (output, status) = finish_explicit_output(rendered);
         assert_eq!(status, 3);

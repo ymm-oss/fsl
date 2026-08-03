@@ -142,6 +142,17 @@ fn attempt_var(effect: &DomainEffect) -> String {
     format!("{}_attempts", lower_name(&effect.name))
 }
 
+/// Return whether an event is owned by an effect's completion lifecycle.
+#[must_use]
+pub fn domain_effect_owns_event(domain: &DomainSpec, event_name: &str) -> bool {
+    domain.effects.iter().any(|effect| {
+        effect
+            .outcome_events()
+            .into_iter()
+            .any(|outcome| outcome == event_name)
+    })
+}
+
 pub(crate) fn effect_outcome_member(effect: &DomainEffect, event: &str) -> &'static str {
     if effect.success_event.as_deref() == Some(event) {
         return "Succeeded";
@@ -2666,6 +2677,13 @@ fn lower_saga_actions(
             observed.insert(compensation.after_event.clone());
         }
         for event_name in observed {
+            // `lower_effect_actions` already owns an effect outcome's state
+            // effects through a correlation-guarded completion action. A saga
+            // observe action would be a weaker second writer that bypasses the
+            // modeled completion-requires-request lifecycle.
+            if domain_effect_owns_event(domain, &event_name) {
+                continue;
+            }
             let (aggregate, event) = resolver.event(&event_name, saga.loc)?;
             let span = span_at(event.loc);
             let mut scope = resolver.scope_for_aggregate(aggregate)?;

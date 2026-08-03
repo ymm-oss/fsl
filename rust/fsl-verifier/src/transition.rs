@@ -9,7 +9,11 @@ use fsl_core::{
 use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
-use crate::eval::{binder_values, binder_where, definedness, eval, index_accessible};
+use crate::eval::{
+    EvaluationStatus, binder_has_partial_operation_candidate, binder_values, binder_where, eval,
+    evaluation_status, expression_has_partial_operation_candidate, index_accessible,
+    partial_operation_index_accessible, sequence_statuses,
+};
 use crate::value::{
     Bindings, SymbolicState, SymbolicValue, bool_term, coerce, i64_index, ite_value, logical_equal,
     select_finite, store_finite,
@@ -31,7 +35,61 @@ pub(crate) struct ActionInstance<T> {
 pub(crate) struct ActionGuardDefinedness<T> {
     pub enabled: T,
     pub defined: T,
+    pub first_partial: T,
+    pub has_partial_operation: bool,
     pub bindings: Bindings<T>,
+}
+
+pub(crate) fn action_has_partial_operation_candidate(action: &ActionDef) -> bool {
+    action.guards.iter().any(|guard| match guard {
+        ActionGuard::Let(_, expr) | ActionGuard::Requires(expr) => {
+            expression_has_partial_operation_candidate(expr)
+        }
+    }) || action
+        .statements
+        .iter()
+        .any(statement_has_partial_operation_candidate)
+        || action
+            .ensures
+            .iter()
+            .any(expression_has_partial_operation_candidate)
+}
+
+fn statement_has_partial_operation_candidate(statement: &Statement) -> bool {
+    match statement {
+        Statement::Assign { target, value, .. } => {
+            expression_has_partial_operation_candidate(value)
+                || lvalue_has_partial_operation_candidate(target)
+        }
+        Statement::If {
+            condition,
+            then_statements,
+            else_statements,
+            ..
+        } => {
+            expression_has_partial_operation_candidate(condition)
+                || then_statements
+                    .iter()
+                    .chain(else_statements)
+                    .any(statement_has_partial_operation_candidate)
+        }
+        Statement::ForAll {
+            binder, statements, ..
+        } => {
+            binder_has_partial_operation_candidate(binder)
+                || statements
+                    .iter()
+                    .any(statement_has_partial_operation_candidate)
+        }
+    }
+}
+
+fn lvalue_has_partial_operation_candidate(target: &LValue) -> bool {
+    match target {
+        LValue::Var(_) => false,
+        LValue::Index(_, _) => true,
+        LValue::Field(base, _) => lvalue_has_partial_operation_candidate(base),
+    }
 }
 
 pub(crate) fn action_instances<S: SmtSolver>(
@@ -112,23 +170,33 @@ pub(crate) fn action_guard_definedness<S: SmtSolver>(
 ) -> Result<ActionGuardDefinedness<S::Term>, VerifyError> {
     let mut bindings = params.clone();
     let mut reaches_guard = solver.bool_value(true);
-    let mut guard_terms = Vec::new();
+    let mut fully_defined = solver.bool_value(true);
+    let mut first_partial = solver.bool_value(false);
+    let mut has_partial_operation = false;
     for guard in &action.guards {
         let expression = match guard {
             ActionGuard::Let(_, expression) | ActionGuard::Requires(expression) => expression,
         };
-        let expression_defined = definedness(solver, model, expression, state, &bindings, None)?;
-        guard_terms.push(solver.implies(&reaches_guard, &expression_defined)?);
+        let status = evaluation_status(solver, model, expression, state, &bindings, None)?;
+        has_partial_operation |= status.has_partial_operation;
+        first_partial = solver.or(&[
+            first_partial,
+            solver.and(&[reaches_guard.clone(), status.first_partial])?,
+        ])?;
+        fully_defined = solver.and(&[
+            fully_defined,
+            solver.implies(&reaches_guard, &status.fully_defined)?,
+        ])?;
         let value = eval(solver, model, expression, state, &mut bindings, None)?;
         match guard {
             ActionGuard::Let(name, _) => {
-                reaches_guard = solver.and(&[reaches_guard, expression_defined])?;
+                reaches_guard = solver.and(&[reaches_guard, status.fully_defined])?;
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(_) => {
                 reaches_guard = solver.and(&[
                     reaches_guard,
-                    expression_defined,
+                    status.fully_defined,
                     bool_term(&value)?.clone(),
                 ])?;
             }
@@ -136,7 +204,9 @@ pub(crate) fn action_guard_definedness<S: SmtSolver>(
     }
     Ok(ActionGuardDefinedness {
         enabled: reaches_guard,
-        defined: solver.and(&guard_terms)?,
+        defined: fully_defined,
+        first_partial,
+        has_partial_operation,
         bindings,
     })
 }
@@ -148,7 +218,17 @@ pub(crate) fn action_statements_definedness<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
 ) -> Result<S::Term, VerifyError> {
-    statements_definedness(
+    Ok(action_statements_evaluation_status(solver, model, action, state, bindings)?.fully_defined)
+}
+
+pub(crate) fn action_statements_evaluation_status<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    action: &ActionDef,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    statements_evaluation_status(
         solver,
         model,
         &action.statements,
@@ -157,33 +237,37 @@ pub(crate) fn action_statements_definedness<S: SmtSolver>(
     )
 }
 
-fn statements_definedness<S: SmtSolver>(
+fn statements_evaluation_status<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     statements: &[Statement],
     read_state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
-) -> Result<S::Term, VerifyError> {
-    let terms = statements
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    let statuses = statements
         .iter()
-        .map(|statement| statement_definedness(solver, model, statement, read_state, bindings))
+        .map(|statement| {
+            statement_evaluation_status(solver, model, statement, read_state, bindings)
+        })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(solver.and(&terms)?)
+    sequence_statuses(solver, statuses)
 }
 
-fn statement_definedness<S: SmtSolver>(
+#[allow(clippy::too_many_lines)]
+fn statement_evaluation_status<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     statement: &Statement,
     read_state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
-) -> Result<S::Term, VerifyError> {
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     match statement {
         Statement::Assign { target, value, .. } => {
-            let value_defined = definedness(solver, model, value, read_state, bindings, None)?;
+            let value_status = evaluation_status(solver, model, value, read_state, bindings, None)?;
             let _ = eval(solver, model, value, read_state, bindings, None)?;
-            let target_defined = lvalue_definedness(solver, model, target, read_state, bindings)?;
-            Ok(solver.and(&[value_defined, target_defined])?)
+            let target_status =
+                lvalue_evaluation_status(solver, model, target, read_state, bindings)?;
+            sequence_statuses(solver, [value_status, target_status])
         }
         Statement::If {
             condition,
@@ -191,81 +275,148 @@ fn statement_definedness<S: SmtSolver>(
             else_statements,
             ..
         } => {
-            let condition_defined =
-                definedness(solver, model, condition, read_state, bindings, None)?;
+            let condition_status =
+                evaluation_status(solver, model, condition, read_state, bindings, None)?;
             let condition = eval(solver, model, condition, read_state, bindings, None)?;
-            let then_defined = statements_definedness(
+            let then_status = statements_evaluation_status(
                 solver,
                 model,
                 then_statements,
                 read_state,
                 &mut bindings.clone(),
             )?;
-            let else_defined = statements_definedness(
+            let else_status = statements_evaluation_status(
                 solver,
                 model,
                 else_statements,
                 read_state,
                 &mut bindings.clone(),
             )?;
-            Ok(solver.and(&[
-                condition_defined,
-                solver.ite(bool_term(&condition)?, &then_defined, &else_defined)?,
-            ])?)
+            let branch_defined = solver.ite(
+                bool_term(&condition)?,
+                &then_status.fully_defined,
+                &else_status.fully_defined,
+            )?;
+            let branch_partial = solver.ite(
+                bool_term(&condition)?,
+                &then_status.first_partial,
+                &else_status.first_partial,
+            )?;
+            Ok(EvaluationStatus {
+                fully_defined: solver
+                    .and(&[condition_status.fully_defined.clone(), branch_defined])?,
+                first_partial: solver.or(&[
+                    condition_status.first_partial,
+                    solver.and(&[condition_status.fully_defined, branch_partial])?,
+                ])?,
+                has_partial_operation: condition_status.has_partial_operation
+                    || then_status.has_partial_operation
+                    || else_status.has_partial_operation,
+            })
         }
         Statement::ForAll {
             binder, statements, ..
         } => {
-            let mut terms = Vec::new();
+            let mut active = solver.bool_value(true);
+            let mut fully_defined = solver.bool_value(true);
+            let mut first_partial = solver.bool_value(false);
+            let mut has_partial_operation = false;
             for (name, value) in binder_values(solver, model, binder)? {
                 let mut local = bindings.clone();
                 local.insert(name, value);
-                let where_defined = match binder {
+                let where_status = match binder {
                     fsl_core::KernelBinder::Typed { where_expr, .. }
                     | fsl_core::KernelBinder::Range { where_expr, .. }
                     | fsl_core::KernelBinder::Collection { where_expr, .. } => {
                         where_expr.as_deref().map_or_else(
-                            || Ok(solver.bool_value(true)),
+                            || {
+                                Ok(EvaluationStatus {
+                                    fully_defined: solver.bool_value(true),
+                                    first_partial: solver.bool_value(false),
+                                    has_partial_operation: false,
+                                })
+                            },
                             |expression| {
-                                definedness(solver, model, expression, read_state, &local, None)
+                                evaluation_status(
+                                    solver, model, expression, read_state, &local, None,
+                                )
                             },
                         )?
                     }
                 };
+                first_partial = solver.or(&[
+                    first_partial,
+                    solver.and(&[active.clone(), where_status.first_partial])?,
+                ])?;
+                has_partial_operation |= where_status.has_partial_operation;
                 let where_term = binder_where(solver, model, binder, read_state, &mut local, None)?
                     .unwrap_or_else(|| solver.bool_value(true));
-                let body_defined =
-                    statements_definedness(solver, model, statements, read_state, &mut local)?;
-                terms.push(
-                    solver.and(&[where_defined, solver.implies(&where_term, &body_defined)?])?,
-                );
+                let body_reached = solver.and(&[
+                    active.clone(),
+                    where_status.fully_defined.clone(),
+                    where_term,
+                ])?;
+                let body_status = statements_evaluation_status(
+                    solver, model, statements, read_state, &mut local,
+                )?;
+                has_partial_operation |= body_status.has_partial_operation;
+                first_partial = solver.or(&[
+                    first_partial,
+                    solver.and(&[body_reached.clone(), body_status.first_partial])?,
+                ])?;
+                let iteration_ok = solver.and(&[
+                    where_status.fully_defined,
+                    solver.implies(&body_reached, &body_status.fully_defined)?,
+                ])?;
+                fully_defined = solver.and(&[fully_defined, iteration_ok.clone()])?;
+                active = solver.and(&[active, iteration_ok])?;
             }
-            Ok(solver.and(&terms)?)
+            Ok(EvaluationStatus {
+                fully_defined,
+                first_partial,
+                has_partial_operation,
+            })
         }
     }
 }
 
-fn lvalue_definedness<S: SmtSolver>(
+fn lvalue_evaluation_status<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     target: &LValue,
     read_state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
-) -> Result<S::Term, VerifyError> {
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     match target {
-        LValue::Var(_) => Ok(solver.bool_value(true)),
+        LValue::Var(_) => Ok(EvaluationStatus {
+            fully_defined: solver.bool_value(true),
+            first_partial: solver.bool_value(false),
+            has_partial_operation: false,
+        }),
         LValue::Index(name, index) => {
-            let index_defined = definedness(solver, model, index, read_state, bindings, None)?;
+            let index_status = evaluation_status(solver, model, index, read_state, bindings, None)?;
             let index_value = eval(solver, model, index, read_state, bindings, None)?;
             let root = read_state
                 .get(name)
                 .ok_or_else(|| VerifyError::new(format!("unknown state variable '{name}'")))?;
-            Ok(solver.and(&[
-                index_defined,
-                index_accessible(solver, model, root, &index_value)?,
-            ])?)
+            let fully_accessible = index_accessible(solver, model, root, &index_value)?;
+            let partial_accessible =
+                partial_operation_index_accessible(solver, root, &index_value)?;
+            sequence_statuses(
+                solver,
+                [
+                    index_status,
+                    EvaluationStatus {
+                        fully_defined: fully_accessible,
+                        first_partial: solver.not(&partial_accessible)?,
+                        has_partial_operation: matches!(root, SymbolicValue::Seq { .. }),
+                    },
+                ],
+            )
         }
-        LValue::Field(base, _) => lvalue_definedness(solver, model, base, read_state, bindings),
+        LValue::Field(base, _) => {
+            lvalue_evaluation_status(solver, model, base, read_state, bindings)
+        }
     }
 }
 

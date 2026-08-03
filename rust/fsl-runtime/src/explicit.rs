@@ -164,7 +164,15 @@ pub fn verify_explicit_selected(
                 });
                 return Ok(result);
             }
-            record_reachables(monitor, level, &initial_state, &parents, &mut result)?;
+            if let Some(violation) =
+                record_reachables(monitor, level, &initial_state, &parents, &mut result)?
+            {
+                result.violation = Some(ExplicitViolation {
+                    trace: reconstruct_trace(&initial_state, &monitor.state, &parents),
+                    violation,
+                });
+                return Ok(result);
+            }
         }
 
         let mut enabled_by_state = BTreeMap::new();
@@ -173,9 +181,27 @@ pub fn verify_explicit_selected(
             for instance in &enabled {
                 result.action_coverage.insert(instance.action.clone(), true);
             }
-            if enabled.is_empty() && result.deadlock_step.is_none() && !terminal_holds(monitor)? {
-                result.deadlock_step = Some(level);
-                result.deadlock_trace = Some(reconstruct_trace(&initial_state, state, &parents));
+            if enabled.is_empty() && result.deadlock_step.is_none() {
+                let terminal = match terminal_holds(monitor) {
+                    Ok(value) => value,
+                    Err(error) if super::is_partial_operation_error(&error.message) => {
+                        result.violation = Some(ExplicitViolation {
+                            trace: reconstruct_trace(&initial_state, state, &parents),
+                            violation: Violation {
+                                kind: "partial_op".to_owned(),
+                                name: "_partial_property_terminal".to_owned(),
+                                step: level,
+                            },
+                        });
+                        return Ok(result);
+                    }
+                    Err(error) => return Err(error),
+                };
+                if !terminal {
+                    result.deadlock_step = Some(level);
+                    result.deadlock_trace =
+                        Some(reconstruct_trace(&initial_state, state, &parents));
+                }
             }
             enabled_by_state.insert(state.clone(), enabled);
         }
@@ -238,16 +264,18 @@ fn terminal_holds(monitor: &Monitor) -> Result<bool, RuntimeError> {
     let Some(terminal) = &monitor.model.terminal else {
         return Ok(false);
     };
-    match eval(
-        terminal,
-        &monitor.state,
-        &mut Bindings::new(),
-        &monitor.model,
-        None,
-    )? {
-        Value::Bool(value) => Ok(value),
-        _ => Err(runtime_error("terminal expression must be Boolean")),
-    }
+    with_total_division(|| {
+        match eval(
+            terminal,
+            &monitor.state,
+            &mut Bindings::new(),
+            &monitor.model,
+            None,
+        )? {
+            Value::Bool(value) => Ok(value),
+            _ => Err(runtime_error("terminal expression must be Boolean")),
+        }
+    })
 }
 
 fn record_reachables(
@@ -256,19 +284,30 @@ fn record_reachables(
     initial_state: &State,
     parents: &BTreeMap<State, ParentLink>,
     result: &mut ExplicitResult,
-) -> Result<(), RuntimeError> {
+) -> Result<Option<Violation>, RuntimeError> {
     with_total_division(|| {
         for property in &monitor.model.reachables {
             if result.reachables[&property.name].is_some() {
                 continue;
             }
-            match eval(
+            let value = match eval(
                 &property.expr,
                 &monitor.state,
                 &mut Bindings::new(),
                 &monitor.model,
                 None,
-            )? {
+            ) {
+                Ok(value) => value,
+                Err(error) if super::is_partial_operation_error(&error.message) => {
+                    return Ok(Some(Violation {
+                        kind: "partial_op".to_owned(),
+                        name: format!("_partial_property_{}", property.name),
+                        step: level,
+                    }));
+                }
+                Err(error) => return Err(error),
+            };
+            match value {
                 Value::Bool(true) => {
                     result.reachables.insert(
                         property.name.clone(),
@@ -282,7 +321,7 @@ fn record_reachables(
                 _ => return Err(runtime_error("reachable expression must be Boolean")),
             }
         }
-        Ok(())
+        Ok(None)
     })
 }
 

@@ -168,3 +168,89 @@ spec AndGuard {
     assert_eq!(action["verdict"], "derivable");
     assert_eq!(action["transitions"][0]["from"], serde_json::json!(["A"]));
 }
+
+/// A locally guarded read/query operation is a real typestate operation even
+/// when FSL's frame semantics leave the state field unchanged. It must remain
+/// visible as a self-loop instead of disappearing from an otherwise `full`
+/// report.
+#[test]
+fn locally_guarded_state_preserving_action_is_an_explicit_self_loop() {
+    let source = r"
+spec StatePreservingAction {
+  enum St { A, B }
+  struct Item { status: St }
+  state { item: Item, flag: Bool }
+  init { item = Item { status: A } flag = true }
+  action go() {
+    requires item.status == A
+    item.status = B
+  }
+  action probe() {
+    requires item.status == B
+  }
+  action unrelated() {
+    requires flag
+  }
+}
+";
+    let report = run_typestate_json(source);
+    let entity = &report["entities"][0];
+    assert_eq!(entity["applicability"], "full");
+    let actions = entity["actions"].as_array().expect("actions");
+    assert_eq!(
+        actions.len(),
+        2,
+        "unrelated actions are not entity operations"
+    );
+    let probe = actions
+        .iter()
+        .find(|action| action["action"] == "probe")
+        .expect("state-preserving probe");
+    assert_eq!(probe["verdict"], "derivable");
+    assert_eq!(probe["state_preserving"], true);
+    assert_eq!(
+        probe["transitions"],
+        serde_json::json!([{
+            "entity": "item",
+            "from": ["B"],
+            "to": "B",
+            "conditional": false
+        }])
+    );
+
+    let ts = String::from_utf8(run_typestate(source, &["--ts"])).expect("utf8 typescript");
+    assert!(
+        ts.contains("export function probe<S extends \"B\">(self: Item<S>): Item<S>;"),
+        "state-preserving methods must retain the exact phantom state: {ts}"
+    );
+    assert!(!ts.contains("export function unrelated"));
+}
+
+/// When a state-preserving operation is legal in more than one state, its
+/// return type must preserve the caller's exact state rather than widen an A
+/// handle to A|B.
+#[test]
+fn multi_state_self_loop_preserves_phantom_identity() {
+    let source = r"
+spec MultiStatePreservingAction {
+  enum St { A, B, C }
+  struct Item { status: St }
+  state { item: Item }
+  init { item = Item { status: A } }
+  action inspect() {
+    requires item.status == A or item.status == B
+  }
+}
+";
+    let report = run_typestate_json(source);
+    let action = &report["entities"][0]["actions"][0];
+    assert_eq!(action["state_preserving"], true);
+    assert_eq!(action["transitions"].as_array().map(Vec::len), Some(2));
+
+    let ts = String::from_utf8(run_typestate(source, &["--ts"])).expect("utf8 typescript");
+    assert!(
+        ts.contains("export function inspect<S extends \"A\" | \"B\">(self: Item<S>): Item<S>;"),
+        "multi-state self-loops must preserve S: {ts}"
+    );
+    assert!(!ts.contains("): Item<\"A\" | \"B\">;"));
+}

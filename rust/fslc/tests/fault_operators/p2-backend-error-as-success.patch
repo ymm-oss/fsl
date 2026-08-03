@@ -1,0 +1,15 @@
+P2 backend-failure-as-success substitution: coerce a failed initial solver
+query to SAT. The injected backend error detector must remain an error rather
+than allowing a clean result.
+
+--- a/rust/fsl-verifier/src/bmc.rs
++++ b/rust/fsl-verifier/src/bmc.rs
+@@ -150,7 +150,7 @@ async fn verify_bounded_config<S: SmtSolver>(
+         }
+     }
+     solver.set_query_context("init", "initial_state");
+-    match solver.check().await? {
++    match solver.check().await.unwrap_or(SatResult::Sat) {
+         SatResult::Sat => {}
+         SatResult::Unsat => return Err(VerifyError::new("init constraints are unsatisfiable")),
+         SatResult::Unknown => return Err(VerifyError::new("solver returned unknown for init")),

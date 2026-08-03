@@ -122,8 +122,212 @@ pub fn domain_sweep() -> Vec<GeneratedModel> {
     domain_axis()
         .into_iter()
         .enumerate()
-        .map(|(index, (kind, size))| build_domain_model(index, kind, size))
+        .map(|(index, (kind, size))| {
+            build_domain_model(
+                index,
+                kind,
+                size,
+                PROPERTY_KINDS[index % PROPERTY_KINDS.len()],
+            )
+        })
         .collect()
+}
+
+/// One replayable FSL Logic Test case. Coordinates are retained separately
+/// from the source so failures can be shrunk and regenerated without parsing
+/// panic text.
+#[derive(Clone, Debug)]
+pub struct LogicCase {
+    pub case_id: String,
+    pub seed: u64,
+    pub index: usize,
+    pub domain_kind: DomainKind,
+    pub domain_size: i64,
+    pub property_kind: PropertyKind,
+    pub state_vars: usize,
+    pub action_count: usize,
+    pub guarded: bool,
+    pub fair: bool,
+    pub expected_violation: bool,
+    pub expected_violation_step: Option<usize>,
+    pub source: String,
+    pub depth: usize,
+}
+
+fn splitmix64(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
+}
+
+/// Regenerate one case from its stable `(seed, index)` coordinates.
+#[must_use]
+pub fn logic_case(seed: u64, index: usize) -> LogicCase {
+    const KINDS: [DomainKind; 4] = [
+        DomainKind::Range,
+        DomainKind::Entity,
+        DomainKind::Number,
+        DomainKind::Enum,
+    ];
+    // leadsTo is intentionally absent: it is BMC-only and the inventory owns
+    // that reviewed exclusion from common agreement.
+    const COMMON_PROPERTIES: [PropertyKind; 4] = [
+        PropertyKind::Invariant,
+        PropertyKind::Reachable,
+        PropertyKind::Trans,
+        PropertyKind::Terminal,
+    ];
+    let bits = splitmix64(seed ^ u64::try_from(index).expect("case index fits u64"));
+    let kind = KINDS[usize::try_from(bits & 3).expect("two bits fit usize")];
+    let size = 1 + i64::try_from((bits >> 2) & 3).expect("two bits fit i64");
+    let property_kind =
+        COMMON_PROPERTIES[usize::try_from((bits >> 4) & 3).expect("two bits fit usize")];
+    let render_index = 10_000 + index;
+    let generated = build_domain_model(render_index, kind, size, property_kind);
+    let expected_violation_step = if index.is_multiple_of(8) {
+        Some(0)
+    } else if index % 8 == 4 {
+        Some(1)
+    } else {
+        None
+    };
+    let expected_violation = expected_violation_step.is_some();
+    let mut source = generated.source;
+    if let Some(step) = expected_violation_step {
+        let closing = source
+            .rfind("\n}\n")
+            .expect("generated direct spec has a top-level closing brace");
+        let control = if step == 0 {
+            "  invariant LogicControl { false }\n"
+        } else {
+            "  action LogicTrip() { x = x  ensures false }\n"
+        };
+        source.insert_str(closing + 1, control);
+    }
+    LogicCase {
+        case_id: format!("fsl-logic-v1-s{seed}-c{index}-d6"),
+        seed,
+        index,
+        domain_kind: kind,
+        domain_size: size,
+        property_kind,
+        state_vars: generated.state_vars,
+        action_count: generated.action_count,
+        guarded: generated.guarded,
+        fair: generated.fair,
+        expected_violation,
+        expected_violation_step,
+        source,
+        depth: generated.depth,
+    }
+}
+
+#[must_use]
+pub fn logic_case_at_depth(seed: u64, index: usize, depth: usize) -> LogicCase {
+    let mut case = logic_case(seed, index);
+    case.depth = depth;
+    case.case_id = format!("fsl-logic-v1-s{seed}-c{index}-d{depth}");
+    case
+}
+
+#[must_use]
+pub fn logic_cases_at_depth(seed: u64, count: usize, depth: usize) -> Vec<LogicCase> {
+    (0..count)
+        .map(|index| logic_case_at_depth(seed, index, depth))
+        .collect()
+}
+
+fn rebuild_logic_case(mut case: LogicCase) -> LogicCase {
+    case.case_id = format!(
+        "fsl-logic-v1-s{}-c{}-d{}",
+        case.seed, case.index, case.depth
+    );
+    let generated = build_domain_model_with_shape(
+        10_000 + case.index,
+        case.domain_kind,
+        case.domain_size,
+        case.property_kind,
+        case.state_vars,
+        case.action_count,
+        case.guarded,
+        case.fair,
+        case.depth,
+    );
+    let mut source = generated.source;
+    if let Some(step) = case.expected_violation_step {
+        let closing = source
+            .rfind("\n}\n")
+            .expect("generated direct spec has a top-level closing brace");
+        let control = if step == 0 {
+            "  invariant LogicControl { false }\n"
+        } else {
+            "  action LogicTrip() { x = x  ensures false }\n"
+        };
+        source.insert_str(closing + 1, control);
+    }
+    case.source = source;
+    case
+}
+
+/// Produce strictly simpler, same-coordinate structural candidates. Unlike
+/// seed/index search, every candidate removes one explicit model dimension;
+/// the shrinker can greedily retain only reductions that preserve the named
+/// semantic failure.
+#[must_use]
+pub fn structural_shrink_candidates(case: &LogicCase) -> Vec<LogicCase> {
+    let mut candidates = Vec::new();
+    let mut push = |mut candidate: LogicCase| {
+        candidate = rebuild_logic_case(candidate);
+        candidates.push(candidate);
+    };
+    if case.expected_violation {
+        let mut candidate = case.clone();
+        candidate.expected_violation = false;
+        candidate.expected_violation_step = None;
+        push(candidate);
+    }
+    if case.depth > 1 {
+        let mut candidate = case.clone();
+        candidate.depth = 1;
+        push(candidate);
+    }
+    if case.fair {
+        let mut candidate = case.clone();
+        candidate.fair = false;
+        push(candidate);
+    }
+    if case.guarded {
+        let mut candidate = case.clone();
+        candidate.guarded = false;
+        push(candidate);
+    }
+    if case.action_count > 1 {
+        let mut candidate = case.clone();
+        candidate.action_count = 1;
+        push(candidate);
+    }
+    if case.state_vars > 1 {
+        let mut candidate = case.clone();
+        candidate.state_vars = 1;
+        push(candidate);
+    }
+    if case.property_kind != PropertyKind::Invariant {
+        let mut candidate = case.clone();
+        candidate.property_kind = PropertyKind::Invariant;
+        push(candidate);
+    }
+    if case.domain_kind != DomainKind::Range {
+        let mut candidate = case.clone();
+        candidate.domain_kind = DomainKind::Range;
+        push(candidate);
+    }
+    if case.domain_size > 1 {
+        let mut candidate = case.clone();
+        candidate.domain_size = 1;
+        push(candidate);
+    }
+    candidates
 }
 
 struct IntDomain {
@@ -171,12 +375,41 @@ fn int_domain(kind: DomainKind, index: usize, size: i64) -> IntDomain {
     }
 }
 
-fn build_domain_model(index: usize, kind: DomainKind, size: i64) -> GeneratedModel {
+fn build_domain_model(
+    index: usize,
+    kind: DomainKind,
+    size: i64,
+    property_kind: PropertyKind,
+) -> GeneratedModel {
     let state_vars = if index.is_multiple_of(2) { 1 } else { 2 };
     let action_count = 1 + index % 3;
     let guarded = index.is_multiple_of(2);
     let fair = index.is_multiple_of(3);
-    let property_kind = PROPERTY_KINDS[index % PROPERTY_KINDS.len()];
+    build_domain_model_with_shape(
+        index,
+        kind,
+        size,
+        property_kind,
+        state_vars,
+        action_count,
+        guarded,
+        fair,
+        6,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_domain_model_with_shape(
+    index: usize,
+    kind: DomainKind,
+    size: i64,
+    property_kind: PropertyKind,
+    state_vars: usize,
+    action_count: usize,
+    guarded: bool,
+    fair: bool,
+    depth: usize,
+) -> GeneratedModel {
     let id = format!(
         "domain_{}_{size}_sv{state_vars}_ac{action_count}_{}",
         kind.label(),
@@ -213,7 +446,7 @@ fn build_domain_model(index: usize, kind: DomainKind, size: i64) -> GeneratedMod
         guarded,
         fair,
         property_kind,
-        depth: 6,
+        depth,
     }
 }
 
@@ -619,11 +852,10 @@ pub fn expression_sweep() -> Vec<ExpressionModel> {
 /// `divide`/`remainder`, each in action context (guarded, so no partial-op
 /// boundary is ever crossed here -- that boundary is exercised by the
 /// dedicated, unguarded action-context tests in `relations.rs`'s R6 section
-/// instead, because `fsl_verifier::verify_bounded` does not perform the
-/// automatic "Partial operations" check on its own; see that section's
-/// module doc) and in property context, where S3:561-563 guarantees
-/// totalization. `head`/`pop`/`at`/index are exercised only in
-/// `relations.rs` for the same reason, not swept here.
+/// instead, where all four native engines must agree) and in property context,
+/// where S3:561-563 guarantees totalization. `head`/`pop`/`at`/index are
+/// exercised only in `relations.rs`, which owns the full automatic-boundary
+/// matrix rather than duplicating it in this successful-transition sweep.
 #[derive(Clone, Debug)]
 pub struct OperationModel {
     pub id: String,

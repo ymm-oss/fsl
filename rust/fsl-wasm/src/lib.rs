@@ -392,15 +392,12 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             Ok(deadlock) => deadlock,
             Err(message) => return error(solver_version, "usage", message),
         };
-    // Mirrors the native CLI's `prepare_bmc` (`fslc/src/verification.rs`):
-    // this pre-scan is an optional shortcut ahead of the full solve below
-    // and needs a deterministic concrete initial state to run at all
-    // (#519). Skip it rather than failing the whole command when a model's
-    // init legitimately leaves some state free — the full solve below
-    // still explores every admissible initial value symbolically.
+    // Preserve exact concrete evidence for boundary outcomes the bounded
+    // symbolic value cannot represent. `partial_op` is intentionally left to
+    // the public symbolic verifier boundary itself (#651).
     if fsl_runtime::deterministic_initial_state(&model).is_ok() {
         match fsl_runtime::find_boundary_violation(model.clone(), request.options.depth) {
-            Ok(Some((violation, trace))) => {
+            Ok(Some((violation, trace))) if violation.kind != "partial_op" => {
                 let statistics = fsl_solver::VerificationStatistics::default();
                 return fslc_rust::verification_output::render_boundary_output(
                     envelope(solver_version),
@@ -417,26 +414,36 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
                 )
                 .0;
             }
-            Ok(None) => {}
+            Ok(Some(_) | None) => {}
             Err(failure) => {
                 return verifier_error(solver_version, &failure);
             }
         }
     }
     let mut solver = fsl_solver_z3js::Z3JsSolver::new();
-    let result =
+    let mut result =
         match fsl_verifier::verify_bounded(&model, &mut solver, request.options.depth).await {
             Ok(result) => result,
             Err(failure) => {
+                fsl_solver_z3js::reset();
                 return verifier_error(solver_version, &failure);
             }
         };
     if let Err(failure) =
         fslc_rust::verification_output::replay_bmc_witnesses(&model, &result, None)
     {
+        fsl_solver_z3js::reset();
         return error(solver_version, "internal", failure);
     }
-    let statistics = fsl_solver::SmtSolver::statistics(&solver);
+    let mut statistics = fsl_solver::SmtSolver::statistics(&solver);
+    // The browser bridge owns one global Z3 solver, so a fresh Rust wrapper is
+    // not a fresh solver session. Reset only after witness replay has consumed
+    // the BMC model; diagnosis then starts from an assertion-free backend
+    // without perturbing the witness-producing query sequence.
+    fsl_solver_z3js::reset();
+    if let Err(failure) = add_reachable_diagnostics(&model, &mut result, &mut statistics).await {
+        return verifier_error(solver_version, &failure);
+    }
     let (mut output, _) = fslc_rust::verification_output::render_bmc_output(
         envelope(solver_version),
         &model,
@@ -449,6 +456,18 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             statistics: &statistics,
         },
     );
+    prepend_compose_warnings(&mut output, compose_warnings);
+    add_frontend_metadata(
+        request,
+        solver_version,
+        &model,
+        has_trace_contract,
+        request.options.depth,
+        output,
+    )
+}
+
+fn prepend_compose_warnings(output: &mut Value, compose_warnings: Vec<Value>) {
     if !compose_warnings.is_empty()
         && let Some(object) = output.as_object_mut()
         && object.get("result").and_then(Value::as_str) != Some("error")
@@ -459,14 +478,21 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
         // per-component fairness information, so they cannot come from `model`.
         warnings.splice(0..0, compose_warnings);
     }
-    add_frontend_metadata(
-        request,
-        solver_version,
-        &model,
-        has_trace_contract,
-        request.options.depth,
-        output,
-    )
+}
+
+async fn add_reachable_diagnostics(
+    model: &fsl_core::KernelModel,
+    result: &mut fsl_verifier::BmcResult,
+    statistics: &mut fsl_solver::VerificationStatistics,
+) -> Result<(), fsl_verifier::VerifyError> {
+    if result.violation.is_some() || result.reachables.values().all(Option::is_some) {
+        return Ok(());
+    }
+    let mut diagnosis_solver = fsl_solver_z3js::Z3JsSolver::new();
+    result.reachable_diagnostics =
+        fsl_verifier::diagnose_reachables(model, &mut diagnosis_solver).await?;
+    statistics.merge(&fsl_solver::SmtSolver::statistics(&diagnosis_solver));
+    Ok(())
 }
 
 /// Execute one Worker request and return the stable JSON envelope as text.
@@ -743,6 +769,7 @@ mod tests {
             violation: None,
             leadsto_violation: None,
             reachables: BTreeMap::new(),
+            reachable_diagnostics: BTreeMap::new(),
             deadlock_step: Some(0),
             deadlock_trace: Some(vec![initial]),
             action_coverage: BTreeMap::from([("blocked".to_owned(), false)]),
@@ -817,6 +844,7 @@ mod tests {
                 }),
             }),
             reachables: BTreeMap::new(),
+            reachable_diagnostics: BTreeMap::new(),
             deadlock_step: Some(1),
             deadlock_trace: Some(Vec::new()),
             action_coverage: BTreeMap::new(),

@@ -194,6 +194,29 @@ def test_active_task_is_worktree_local() -> None:
     assert proc.returncode == 0
 
 
+def test_semantic_findings_cannot_disappear_between_agents_and_checkpoint() -> None:
+    template = (CLAUDE / "work" / "active.template.md").read_text(encoding="utf-8")
+    task_start = (CLAUDE / "skills" / "task-start" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    checkpoint = (CLAUDE / "skills" / "checkpoint" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    explorer = (CLAUDE / "agents" / "fsl-codebase-explorer.md").read_text(
+        encoding="utf-8"
+    )
+    reviewer = (CLAUDE / "agents" / "fsl-soundness-reviewer.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "## Discovered follow-ups" in template
+    assert "authorization required" in template
+    assert "behavior-bearing AST/enum variants" in task_start
+    assert "Reconcile every discovered soundness defect" in checkpoint
+    assert "hollow semantics" in explorer
+    assert "hollow arm" in reviewer
+
+
 def test_claude_assets_do_not_route_product_work_to_python() -> None:
     paths = [
         CLAUDE / "agents" / "fsl-soundness-reviewer.md",
