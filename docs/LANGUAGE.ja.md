@@ -1086,6 +1086,17 @@ fsl 以外のフェンス付きブロック(` ```python ` など)は無視され
 literate な `.md` はこの方法で `.fsl` ファイルを `use`/compose できますが、別の
 `.md` ファイルを compose のターゲットにすることはサポートされません。
 
+このフェンス抽出を行うのは `check`・`verify`・`scenarios` の 3 コマンドだけです。
+仕様パスを読み取る他のすべてのコマンド(`lint`・`migrate`・`fmt`・`kernel`・
+`conformance`・`explain`・`mutate`・`typestate`・`testgen`・`html`・`ledger`・
+`analyze`・`diff`・`refine`・`replay`・`sweep`、および
+`document generate`/`claims`/`check`)は、`.md` 入力を代わりに入力種別の誤りとして
+拒否します: `result: "error"`、`kind: "usage"`、
+`diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"`、対応コマンドを挙げたメッセージ、
+そして仕様上の位置ではなく入力ファイル自体を指す `loc` です。これにより、非対応
+コマンドに渡された Markdown ドキュメントが、その Markdown 自身の最初の非 fsl 文字の
+位置にある仕様の構文エラーとして誤報されることを防ぎます。
+
 ## 8. 推奨ワークフロー: proved を標準にする
 
 1. spec を書く → `fslc check`(高速な構文/型のループ)

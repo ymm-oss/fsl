@@ -437,3 +437,211 @@ example only
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// --- Issue #665: unsupported commands fail closed as an input-kind error --
+
+/// The Markdown fixture the issue itself reproduced against
+/// (`examples/literate/toggle.md`), not the `tests/fixtures` copy used above.
+fn examples_literate_toggle() -> String {
+    repository_root()
+        .join("examples/literate/toggle.md")
+        .to_str()
+        .expect("UTF-8 path")
+        .to_owned()
+}
+
+/// `command_key`'s space-joined pieces, followed by `doc` as its positional
+/// spec argument(s). `refine` alone needs three positionals (`IMPL ABS
+/// MAPPING`) before its own arm ever reaches the literate-input decision, so
+/// it repeats `doc` three times; every other registered command's decision
+/// point sits before any other required argument.
+fn minimal_arguments<'a>(command_key: &'a str, doc: &'a str) -> Vec<&'a str> {
+    let mut arguments: Vec<&str> = command_key.split(' ').collect();
+    if command_key == "refine" {
+        arguments.extend([doc, doc, doc]);
+    } else {
+        arguments.push(doc);
+    }
+    arguments
+}
+
+/// Positive: the registry's `Supported` commands still accept
+/// `examples/literate/toggle.md` unchanged. Exercises
+/// [`fslc_rust::literate_access::LITERATE_SUPPORTED_COMMANDS`] directly so a
+/// command added to that list without a matching case here is at least
+/// asserted not to error, even before a dedicated test is written for it.
+#[test]
+fn registry_supported_commands_still_accept_the_measured_repro_file() {
+    let doc = examples_literate_toggle();
+    for &command in fslc_rust::literate_access::LITERATE_SUPPORTED_COMMANDS {
+        let (output, status) = match command {
+            "verify" => run_cli(&["verify", &doc, "--depth", "4", "--no-cache"]),
+            "scenarios" => run_cli(&["scenarios", &doc, "--depth", "4"]),
+            _ => run_cli(&[command, &doc]),
+        };
+        assert_eq!(status, 0, "{command}: {output:#}");
+        assert_ne!(
+            output["result"], "error",
+            "{command} should still accept literate input: {output:#}"
+        );
+    }
+}
+
+/// Negative control per unsupported command, driven entirely from
+/// [`fslc_rust::literate_access::LITERATE_REGISTRY`] rather than a
+/// hand-copied command list (issue #665 design constraint 2): a command
+/// newly registered as `Unsupported` is covered by this test the moment it
+/// is added, with no test-file edit required.
+///
+/// Also the test that "the lie must not come back": the message must never
+/// contain the Markdown's own `1:2` position, and the diagnostic code must
+/// never be `FSL-PARSE` -- the two symptoms the issue reported before this
+/// fix. This is what fails if a future change re-routes an unsupported
+/// command back into the surface parser.
+#[test]
+fn every_unsupported_registry_command_fails_closed_as_an_input_kind_error() {
+    use fslc_rust::literate_access::{LITERATE_REGISTRY, LiterateSupport};
+
+    let doc = examples_literate_toggle();
+    let mut exercised = 0;
+    for (command_key, support) in LITERATE_REGISTRY {
+        if *support != LiterateSupport::Unsupported {
+            continue;
+        }
+        exercised += 1;
+        let arguments = minimal_arguments(command_key, &doc);
+        let (output, status) = run_cli(&arguments);
+
+        assert_eq!(
+            status, 2,
+            "{command_key}: exit code must not move: {output:#}"
+        );
+        assert_eq!(output["result"], "error", "{command_key}: {output:#}");
+        assert_eq!(
+            output["diagnostic_code"], "FSL-INPUT-LITERATE-UNSUPPORTED",
+            "{command_key}: {output:#}"
+        );
+        assert_ne!(
+            output["kind"], "parse",
+            "{command_key}: kind must not be parse: {output:#}"
+        );
+        assert_ne!(
+            output["kind"], "format",
+            "{command_key}: kind must not be format: {output:#}"
+        );
+        let message = output["message"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{command_key} missing message: {output:#}"));
+        for supported in fslc_rust::literate_access::LITERATE_SUPPORTED_COMMANDS {
+            assert!(
+                message.contains(*supported),
+                "{command_key}: message should name '{supported}': {message}"
+            );
+        }
+        // loc identifies the input file, never a spec position.
+        assert!(
+            output["loc"].get("line").is_none() && output["loc"].get("column").is_none(),
+            "{command_key}: loc must not carry a spec line/column: {output:#}"
+        );
+        assert_eq!(
+            output["loc"]["file"], doc,
+            "{command_key}: loc should name the input file: {output:#}"
+        );
+        // The lie must not come back.
+        assert!(
+            !message.contains("1:2"),
+            "{command_key}: the Markdown-as-syntax-error lie returned: {message}"
+        );
+        assert_ne!(
+            output["diagnostic_code"], "FSL-PARSE",
+            "{command_key}: {output:#}"
+        );
+    }
+    assert!(
+        exercised >= 19,
+        "expected at least the 19 commands issue #665 classified Unsupported, got {exercised}"
+    );
+}
+
+/// Over-firing control: an ordinary `.fsl` spec must be unaffected on every
+/// registered command, including the `Supported` ones -- the guard keys on
+/// the input's extension, not on which command is running.
+#[test]
+fn ordinary_fsl_input_is_unaffected_on_every_registered_command() {
+    use fslc_rust::literate_access::LITERATE_REGISTRY;
+
+    let dir = std::env::temp_dir().join(format!("fslc-literate-overfire-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let plain = dir.join("toggle.fsl");
+    std::fs::write(
+        &plain,
+        "\
+spec Toggle {
+  state { active: Bool }
+  init  { active = false }
+  action toggle() {
+    active = not active
+  }
+  invariant AlwaysBool {
+    active or not active
+  }
+}
+",
+    )
+    .expect("write plain fsl fixture");
+    let plain_str = plain.to_str().expect("UTF-8 path").to_owned();
+
+    // `testgen`/`html`/`ledger`/`document generate` print their generated
+    // artifact raw to stdout on success instead of the JSON envelope
+    // (`main.rs`'s `raw_delivery_allowed` bypass) -- redirect to a file with
+    // `-o` so a *successful* run here still parses as JSON like every other
+    // command's.
+    let redirect = dir.join("out.txt");
+    let redirect_str = redirect.to_str().expect("UTF-8 path");
+
+    for (command_key, _) in LITERATE_REGISTRY {
+        let mut arguments = minimal_arguments(command_key, &plain_str);
+        if matches!(
+            *command_key,
+            "testgen" | "html" | "ledger" | "document generate"
+        ) {
+            arguments.extend(["-o", redirect_str]);
+        }
+        // `fmt` prints the raw formatted source on success unless `--check`
+        // asks for the JSON envelope instead (same reason as the `-o`
+        // redirects above).
+        if *command_key == "fmt" {
+            arguments.push("--check");
+        }
+        let (output, _status) = run_cli(&arguments);
+        assert_ne!(
+            output["diagnostic_code"], "FSL-INPUT-LITERATE-UNSUPPORTED",
+            "{command_key}: the literate guard must not fire on a .fsl input: {output:#}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Unregistered-command gate (issue #665 design constraint 2): a command key
+/// nobody classified must fail closed as an internal inconsistency rather
+/// than silently falling through to either behavior. The registry's own
+/// totality gate (`literate_registry_is_total_over_the_cli_surface` in
+/// `rust/fslc/src/literate_access.rs`) is what actually keeps every real CLI
+/// command classified; this test pins the *fallback* that function's
+/// enumeration exists to make unreachable in production.
+#[test]
+fn an_unregistered_command_key_fails_closed_not_silently() {
+    use fslc_rust::literate_access::literate_access;
+
+    let doc = PathBuf::from(examples_literate_toggle());
+    let Err((output, status)) = literate_access("a_command_nobody_registered", &doc) else {
+        panic!("an unregistered command key must not resolve to Ok");
+    };
+    assert_eq!(status, 3, "{output:#}");
+    assert_eq!(output["kind"], "internal", "{output:#}");
+    assert_ne!(
+        output["result"], "ok",
+        "an internal inconsistency must never read as a pass: {output:#}"
+    );
+}

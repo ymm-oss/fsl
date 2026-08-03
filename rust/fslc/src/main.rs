@@ -13,6 +13,7 @@ use fsl_core::{
     ParamDef, TraceStep, TypeDef, TypeRef, insert_requirement_metadata, model_warnings,
     requirement_metadata,
 };
+use fslc_rust::literate_access::literate_access;
 use fslc_rust::outcome::{OutcomeClass, outcome_class};
 use fslc_rust::spec_load::{
     SemanticDiagnostic, SpecLoadError, kernel_load_error, surface_parse_failure,
@@ -42,44 +43,6 @@ const DEFAULT_EXPLICIT_BUDGET: usize = 1_000_000;
 /// evaluates a different mutant set and reports a different kill rate
 /// (issue #524).
 const DEFAULT_MAX_MUTANTS: usize = 200;
-
-struct LiterateState {
-    path: PathBuf,
-}
-
-impl Drop for LiterateState {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-fn materialize_literate(path: &Path) -> Result<Option<LiterateState>, String> {
-    if path.extension().and_then(std::ffi::OsStr::to_str) != Some("md") {
-        return Ok(None);
-    }
-    let raw =
-        std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let blanked = fsl_syntax::extract_literate_fsl(&raw).ok_or_else(|| {
-        format!(
-            "{}: Markdown file does not contain any ```fsl fenced code blocks",
-            path.display()
-        )
-    })?;
-    let stem = path
-        .file_stem()
-        .and_then(std::ffi::OsStr::to_str)
-        .unwrap_or("literate");
-    // Each CLI process owns its materialization. The original Markdown path is
-    // passed separately as the stable verify-cache identity, so physical
-    // isolation does not trade away cache hits across invocations.
-    let materialized = literate_materialization_path(path, stem, std::process::id());
-    std::fs::write(&materialized, &blanked).map_err(|error| error.to_string())?;
-    Ok(Some(LiterateState { path: materialized }))
-}
-
-fn literate_materialization_path(path: &Path, stem: &str, process_id: u32) -> PathBuf {
-    path.with_file_name(format!(".{stem}.literate-{process_id}.fsl"))
-}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ScopeBounds {
@@ -428,6 +391,9 @@ fn run_fmt(options: &FmtOptions) -> (FmtCliOutput, i32) {
     let mut files = Vec::new();
     let mut any_changed = false;
     for path in &options.paths {
+        if let Err((output, status)) = literate_access("fmt", path) {
+            return (FmtCliOutput::Json(output), status);
+        }
         let source = match read_fmt_source(path) {
             Ok(source) => source,
             Err(error) => return (FmtCliOutput::Json(error_output("io", &error)), 2),
@@ -1077,7 +1043,10 @@ fn command() -> Result<(Value, i32), String> {
                 args.next()
                     .ok_or_else(|| "usage: fslc check SPEC [options]".to_owned())?,
             );
-            let literate_guard = materialize_literate(&display_path)?;
+            let literate_guard = match literate_access("check", &display_path) {
+                Ok(guard) => guard,
+                Err(early_return) => return Ok(early_return),
+            };
             let path = literate_guard
                 .as_ref()
                 .map_or(&display_path, |state| &state.path);
@@ -1120,10 +1089,20 @@ fn command() -> Result<(Value, i32), String> {
         }
         "lint" => {
             let options = parse_migration_options(args, false)?;
+            for path in &options.paths {
+                if let Err(early_return) = literate_access("lint", path) {
+                    return Ok(early_return);
+                }
+            }
             Ok(run_lint(&options))
         }
         "migrate" => {
             let options = parse_migration_options(args, true)?;
+            for path in &options.paths {
+                if let Err(early_return) = literate_access("migrate", path) {
+                    return Ok(early_return);
+                }
+            }
             Ok(run_migrate(&options))
         }
         "kernel" => {
@@ -1149,6 +1128,9 @@ fn command() -> Result<(Value, i32), String> {
             }
             let path =
                 path.ok_or_else(|| "usage: fslc kernel SPEC [--kernel-version MAJOR]".to_owned())?;
+            if let Err(early_return) = literate_access("kernel", &path) {
+                return Ok(early_return);
+            }
             Ok(run_kernel_contract(&path, version))
         }
         "conformance" => {
@@ -1181,6 +1163,9 @@ fn command() -> Result<(Value, i32), String> {
             let path = path.ok_or_else(|| {
                 "usage: fslc conformance SPEC [--depth N] [--kernel-version MAJOR]".to_owned()
             })?;
+            if let Err(early_return) = literate_access("conformance", &path) {
+                return Ok(early_return);
+            }
             Ok(run_conformance(&path, depth, version))
         }
         "approval" => approval_command(args),
@@ -1216,6 +1201,9 @@ fn command() -> Result<(Value, i32), String> {
                 args.next()
                     .ok_or_else(|| format!("fslc {command} requires a spec"))?,
             );
+            if let Err(early_return) = literate_access(&command, &path) {
+                return Ok(early_return);
+            }
             let mut depth = 8_usize;
             let mut readable = false;
             let mut max_mutants = DEFAULT_MAX_MUTANTS;
@@ -1287,6 +1275,9 @@ fn command() -> Result<(Value, i32), String> {
                 args.next()
                     .ok_or_else(|| format!("fslc {command} requires a spec"))?,
             );
+            if let Err(early_return) = literate_access(&command, &path) {
+                return Ok(early_return);
+            }
             let mut depth = 8_usize;
             let mut output = None;
             let mut target = "pytest".to_owned();
@@ -1420,6 +1411,11 @@ fn command() -> Result<(Value, i32), String> {
                     _ => return Err(format!("unknown analyze option '{option}'")),
                 }
             }
+            for path in &paths {
+                if let Err(early_return) = literate_access("analyze", path) {
+                    return Ok(early_return);
+                }
+            }
             let result = if paths.len() != 1 || paths[0].is_dir() {
                 run_analyze_batch(
                     &paths,
@@ -1486,6 +1482,11 @@ fn command() -> Result<(Value, i32), String> {
                     }
                     _ if !option.starts_with('-') => paths.push(PathBuf::from(option)),
                     _ => return Err(format!("unknown diff option '{option}'")),
+                }
+            }
+            for path in &paths {
+                if let Err(early_return) = literate_access("diff", path) {
+                    return Ok(early_return);
                 }
             }
             if let Some(range) = git_range {
@@ -1569,6 +1570,11 @@ fn command() -> Result<(Value, i32), String> {
                     _ => rest.push(PathBuf::from(option)),
                 }
             }
+            for candidate in [&path, &abstraction, &mapping].into_iter().chain(&rest) {
+                if let Err(early_return) = literate_access("refine", candidate) {
+                    return Ok(early_return);
+                }
+            }
             if rest.is_empty() {
                 Ok(run_refine(&path, &abstraction, &mapping, depth))
             } else if rest.len() % 2 != 0 {
@@ -1594,6 +1600,9 @@ fn command() -> Result<(Value, i32), String> {
                 args.next()
                     .ok_or_else(|| "usage: fslc replay SPEC --trace TRACE.json".to_owned())?,
             );
+            if let Err(early_return) = literate_access("replay", &path) {
+                return Ok(early_return);
+            }
             let mut trace = None;
             let mut from_log = None;
             let mut mapping = None;
@@ -1651,6 +1660,9 @@ fn command() -> Result<(Value, i32), String> {
                 args.next()
                     .ok_or_else(|| "usage: fslc sweep SPEC [options]".to_owned())?,
             );
+            if let Err(early_return) = literate_access("sweep", &path) {
+                return Ok(early_return);
+            }
             let mut depth = "0..8".to_owned();
             let mut deadlock = "warn".to_owned();
             let mut engine = "bmc".to_owned();
@@ -1740,7 +1752,10 @@ fn command() -> Result<(Value, i32), String> {
                 args.next()
                     .ok_or_else(|| format!("usage: fslc {command} SPEC [options]"))?,
             );
-            let literate_guard = materialize_literate(&display_path)?;
+            let literate_guard = match literate_access(&command, &display_path) {
+                Ok(guard) => guard,
+                Err(early_return) => return Ok(early_return),
+            };
             let path = literate_guard
                 .as_ref()
                 .map_or(&display_path, |state| &state.path);
@@ -1959,6 +1974,16 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
         args.next()
             .ok_or_else(|| format!("fslc document {subcommand} requires a spec"))?,
     );
+    // Only the three known subcommands are registered
+    // (`literate_access.rs`'s `LITERATE_REGISTRY`); an unrecognized
+    // subcommand must still fall through to this match's own `_` arm and its
+    // `kind:"usage"` diagnostic rather than the registry's "unregistered
+    // command" internal-error fallback.
+    if matches!(subcommand.as_str(), "generate" | "claims" | "check")
+        && let Err(early_return) = literate_access(&format!("document {subcommand}"), &path)
+    {
+        return Ok(early_return);
+    }
     match subcommand.as_str() {
         "generate" => {
             let mut locale = fsl_tools::Locale::Ja;
@@ -15978,15 +16003,6 @@ mod exit_status_tests {
         assert_eq!(
             normalized_exit_status(&error_output("semantics", "bad spec"), 2),
             2
-        );
-    }
-
-    #[test]
-    fn literate_materialization_paths_are_process_owned() {
-        let source = Path::new("spec.md");
-        assert_ne!(
-            literate_materialization_path(source, "spec", 41),
-            literate_materialization_path(source, "spec", 42)
         );
     }
 

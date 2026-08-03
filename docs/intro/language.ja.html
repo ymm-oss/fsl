@@ -1165,7 +1165,17 @@ spec Cart {
 fsl 以外のフェンス付きブロック(<code>```python</code> など)は無視されます。<code>use</code>/compose の
 パスは(<code>.fsl</code> ファイルと同様に)Markdown ファイルのディレクトリを基準に解決されます。
 literate な <code>.md</code> はこの方法で <code>.fsl</code> ファイルを <code>use</code>/compose できますが、別の
-<code>.md</code> ファイルを compose のターゲットにすることはサポートされません。</p></div></details>
+<code>.md</code> ファイルを compose のターゲットにすることはサポートされません。</p>
+<p>このフェンス抽出を行うのは <code>check</code>・<code>verify</code>・<code>scenarios</code> の 3 コマンドだけです。
+仕様パスを読み取る他のすべてのコマンド(<code>lint</code>・<code>migrate</code>・<code>fmt</code>・<code>kernel</code>・
+<code>conformance</code>・<code>explain</code>・<code>mutate</code>・<code>typestate</code>・<code>testgen</code>・<code>html</code>・<code>ledger</code>・
+<code>analyze</code>・<code>diff</code>・<code>refine</code>・<code>replay</code>・<code>sweep</code>、および
+<code>document generate</code>/<code>claims</code>/<code>check</code>)は、<code>.md</code> 入力を代わりに入力種別の誤りとして
+拒否します: <code>result: "error"</code>、<code>kind: "usage"</code>、
+<code>diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"</code>、対応コマンドを挙げたメッセージ、
+そして仕様上の位置ではなく入力ファイル自体を指す <code>loc</code> です。これにより、非対応
+コマンドに渡された Markdown ドキュメントが、その Markdown 自身の最初の非 fsl 文字の
+位置にある仕様の構文エラーとして誤報されることを防ぎます。</p></div></details>
 <details id="8-recommended-workflow-make-proved-the-standard"><summary>8. 推奨ワークフロー: proved を標準にする<span class="tree-blurb"> — BMC から帰納法へ、proved を標準にする推奨ワークフロー。</span></summary><div class="tree-body"><ol>
 <li>spec を書く → <code>fslc check</code>(高速な構文/型のループ)</li>
 <li><code>fslc verify --depth 8</code> → violated ならトレースを使って直す。

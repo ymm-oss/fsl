@@ -1076,7 +1076,13 @@ Multiple fsl blocks form one compilation unit (split definitions across
 sections). Files without fsl fences are rejected; non-fsl fences
 (` ```python ` etc.) are ignored. A literate `.md` may `use`/compose `.fsl`
 files relative to its own directory; using another `.md` as a compose target
-is not supported.
+is not supported. Every other spec-reading command (`lint`, `migrate`, `fmt`,
+`kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`, `html`,
+`ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`,
+`document generate`/`claims`/`check`) rejects `.md` input as an input-kind
+error (`kind:"usage"`, `diagnostic_code:"FSL-INPUT-LITERATE-UNSUPPORTED"`,
+`loc` naming the input file, not a spec position) instead of handing it to
+the parser (issue #665).
 
 `diff` uses bidirectional bounded refinement for behavior changes, implication
 between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`
