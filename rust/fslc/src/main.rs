@@ -5974,29 +5974,16 @@ fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
         // that came back `unknown_cti`/`reachable_failed`/`unknown_budget`
         // made the envelope contradict its own exit code.
         let kernel_passed = outcome_class(&kernel).is_success();
-        if let Value::Object(kernel) = kernel {
-            if !kernel_passed {
-                result.insert("result".to_owned(), json!("violated"));
-            }
-            let projection = [
-                "result",
-                "spec",
-                "depth",
-                "checked_to_depth",
-                "completeness",
-                "invariant",
-                "violation_kind",
-            ]
-            .into_iter()
-            .filter_map(|key| {
-                kernel
-                    .get(key)
-                    .cloned()
-                    .map(|value| (key.to_owned(), value))
-            })
-            .collect();
-            result.insert("kernel".to_owned(), Value::Object(projection));
+        if !kernel_passed {
+            result.insert("result".to_owned(), json!("violated"));
         }
+        // Issue #663. The projection registry and its rationale live with
+        // the rest of the outcome vocabulary; `run_domain_check` calls the
+        // same function.
+        result.insert(
+            "kernel".to_owned(),
+            fslc_rust::outcome::project_kernel(kernel),
+        );
         kernel_status
     };
     let mut output = envelope();
@@ -6086,45 +6073,6 @@ fn run_db_import(
     (Value::Object(output), 0)
 }
 
-fn stable_kernel_projection(kernel: Value) -> Value {
-    let Value::Object(kernel) = kernel else {
-        return kernel;
-    };
-    Value::Object(
-        [
-            "result",
-            "spec",
-            "depth",
-            "checked_to_depth",
-            "completeness",
-            "invariant",
-            "violation_kind",
-            // Replayable evidence for a violated/reachable_failed/unknown_cti/
-            // unknown_budget kernel result (AGENTS.md: "Do not allowlist
-            // verdict, location, assurance, or exit-code differences").
-            "loc",
-            "violated_at_step",
-            "violating_bindings",
-            "blame",
-            "last_action",
-            "trace",
-            // Issue #641. Vacuity/coverage diagnostics are quality signals on
-            // the generated kernel itself: an unreachable generated action can
-            // signal a lowering bug, so these channels fold with the verdict.
-            "warnings",
-            "action_coverage",
-        ]
-        .into_iter()
-        .filter_map(|key| {
-            kernel
-                .get(key)
-                .cloned()
-                .map(|value| (key.to_owned(), value))
-        })
-        .collect(),
-    )
-}
-
 /// Whether a producer's output may be delivered as raw bytes instead of its
 /// JSON envelope (issue #537 C2, Verdict Conservation Law).
 ///
@@ -6199,7 +6147,7 @@ fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
                 return (kernel, status);
             }
             // `check_ai` needs the unprojected verify envelope (fields like
-            // `trace` that `stable_kernel_projection` omits) to translate a
+            // `origin` that a projected `kernel` object omits) to translate a
             // kernel invariant violation into a finding; it applies its own
             // published-kernel projection to the `kernel` field of its own
             // output.
@@ -6835,7 +6783,8 @@ fn run_domain_check(
     if !fslc_rust::outcome::is_definitive_kernel_verdict(status) {
         return apply_domain_edition((kernel, status), path, path, edition);
     }
-    let result = match fsl_tools::check_domain(&domain, &stable_kernel_projection(kernel)) {
+    let result = match fsl_tools::check_domain(&domain, &fslc_rust::outcome::project_kernel(kernel))
+    {
         Ok(result) => wrap_specialized(result),
         Err(error) => (semantic_error_output(&error.to_string()), 2),
     };

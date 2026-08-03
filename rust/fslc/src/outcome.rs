@@ -36,8 +36,17 @@
 //!
 //! Cacheability is a separate predicate ([`verify_cache_admits`]) and does not
 //! collapse into the classifier — see its own comment.
+//!
+//! This module also owns [`is_definitive_kernel_verdict`] and, since issue
+//! #663, [`classify_kernel_key`]/[`project_kernel`]: the sibling question of
+//! which nested-kernel keys a dialect check's projected `kernel` object may
+//! keep. It lives here rather than a new module because it needs the exact
+//! same registry discipline this file already states above (enumerate every
+//! member, never fall through to a silent default) and the same two-command
+//! motivation as `is_definitive_kernel_verdict`'s doc comment: `run_db_check`
+//! and `run_domain_check` must not each carry their own answer.
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// The two classes the Verdict Conservation Law is stated over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -274,6 +283,247 @@ pub fn verify_cache_admits(output: &Value) -> bool {
 #[must_use]
 pub fn is_definitive_kernel_verdict(status: i32) -> bool {
     status == 0 || status == 1
+}
+
+/// Fate of one top-level key of a nested `verify` kernel envelope when
+/// `run_db_check`/`run_domain_check` project it into their own `kernel`
+/// object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KernelKeyFate {
+    /// Survives into the projected `kernel` object.
+    Projected,
+    /// Deliberately absent from the projected `kernel` object.
+    /// [`classify_kernel_key`]'s match arm for the key states the reason.
+    Dropped,
+}
+
+/// The order [`project_kernel`] emits its surviving keys in. Declaration
+/// order is emission order, so this doubles as the field order of the
+/// `kernel` object both `run_db_check` and `run_domain_check` produce.
+///
+/// Grouped verdict identity, then AGENTS.md replayable evidence (issue
+/// #515/#641's domain-only fix, now shared), then vacuity/coverage quality
+/// signals (#641), then issue #663's additions. `unknown_cti`'s primary
+/// evidence is the induction counterexample (`cti`) plus the guidance that
+/// goes with every failure-class result (`hint`); `reachable_failed`'s is the
+/// list of properties that could not be reached (`unreached`) -- before
+/// #663 that verdict class projected to little more than
+/// `result`/`spec`/`checked_to_depth`. `trace_type` says how to read `trace`/
+/// `cti`; `requirement`/`requirements` are the traceability identifiers a
+/// violated property carries when the spec tags one.
+///
+/// The last group is a `leadsTo` violation's evidence
+/// (`bindings`/`pending_since`/`loop_start`/`deadline`/`within`/`stutter`,
+/// `verification_output.rs`'s `render_leadsto_failure`) and a ranked-
+/// termination counterexample's (`measure`/`rank_failure`/`measure_value`/
+/// `measure_before`/`measure_after`/`message`, `verification.rs`'s
+/// `render_rank_failure`, `violation_kind: "leadsTo_rank"`). Neither
+/// `fsl-core`'s domain lowering (`domain_lowering.rs`, which emits only
+/// `SpecItem::{Action, Enum, Type, Struct, State, Init, Terminal, Invariant,
+/// Trans, Reachable}`) nor its `db.rs` lowering generates a `LeadsTo` item,
+/// so a `db check`/`domain check` kernel cannot reach either shape today --
+/// this is measured, not assumed (`issue_663_kernel_projection_owner.rs`'s
+/// `every_key_a_curated_verify_corpus_emits_is_classified` corpus includes a
+/// plain-kernel `leadsTo` violation and cites the ranked-termination fixture
+/// `induction_suggestions.rs` already exercises). They are projected anyway:
+/// a future dialect lowering that does emit a `LeadsTo` item must inherit
+/// this evidence, not silently lose it the way `db check` lost the rest of
+/// this list before #663.
+const PROJECTED_KERNEL_KEYS: &[&str] = &[
+    "result",
+    "spec",
+    "depth",
+    "checked_to_depth",
+    "completeness",
+    "invariant",
+    "violation_kind",
+    "loc",
+    "violated_at_step",
+    "violating_bindings",
+    "blame",
+    "last_action",
+    "trace",
+    "warnings",
+    "action_coverage",
+    "cti",
+    "hint",
+    "trace_type",
+    "requirement",
+    "requirements",
+    "unreached",
+    "bindings",
+    "pending_since",
+    "loop_start",
+    "deadline",
+    "within",
+    "stutter",
+    "measure",
+    "rank_failure",
+    "measure_value",
+    "measure_before",
+    "measure_after",
+    "message",
+];
+
+/// Classify one top-level key a `verify` kernel envelope can carry.
+///
+/// This is the single owner of "which nested-kernel keys survive a
+/// projection" (issue #663). Before it, `run_domain_check` held a 16-key
+/// allowlist (`stable_kernel_projection`, carrying an AGENTS.md-citing
+/// comment for its replayable-evidence keys) and `run_db_check` held an
+/// independent 7-key allowlist with no such comment and none of those keys —
+/// the same defect shape #600/#612 describe for `is_definitive_kernel_verdict`,
+/// applied one level down. Fixes #515 and #641 landed on the domain copy only
+/// because there was nowhere else for them to land.
+///
+/// The `Dropped` arm is listed explicitly, one key per reason, rather than
+/// left to a catch-all: the enumeration *is* the registry (same idiom as
+/// [`outcome_class`]'s failure arm). A key this function has not seen — a
+/// new `verify` output channel nobody registered — returns `None`, and
+/// [`project_kernel`] passes it through unchanged rather than dropping or
+/// panicking on it (see that function's doc comment for why); the loud gate
+/// against an unregistered key living there unnoticed is
+/// `issue_663_kernel_projection_owner.rs`'s
+/// `every_key_a_curated_verify_corpus_emits_is_classified` census test, run
+/// in CI rather than at runtime against production input.
+#[must_use]
+pub fn classify_kernel_key(key: &str) -> Option<KernelKeyFate> {
+    if PROJECTED_KERNEL_KEYS.contains(&key) {
+        return Some(KernelKeyFate::Projected);
+    }
+    #[allow(clippy::match_same_arms)]
+    match key {
+        // ---- Nested-run bookkeeping, not evidence about the verdict -----
+        //
+        // The outer `db`/`domain` command's own envelope already carries its
+        // own `fsl`; a nested copy from the inner `verify` run would be
+        // ambiguous about which run it describes.
+        "fsl"
+        // The top-level `fslc verify` CLI command's own on-disk
+        // verification-cache lookup metadata (`{"hit":true,...}`), inserted
+        // by `run_verify_cli`'s cache wrapper -- never by `run_verify`
+        // itself. `run_db_check`/`run_domain_check` call `run_verify`
+        // directly and so never produce it in a nested kernel, but a census
+        // of the `fslc verify` command can still surface it and needs a
+        // registered fate.
+        | "cache"
+        // Tool/solver version metadata for the *inner* `verify` run. The
+        // outer command's own envelope is never stamped with this (
+        // `with_version_metadata` wraps only the top-level `fslc verify`
+        // command), so carrying it here would misattribute the outer
+        // command's versions to a run it did not perform.
+        | "versions"
+        // Solver/timing statistics for the inner run; not evidence of what
+        // was found, and the outer command has its own cost profile.
+        | "cost"
+        // Induction step-index bookkeeping, superseded by `cti.violated_at`
+        // once `cti` is projected.
+        | "k"
+        // Internal generated-symbol provenance for a domain/db-lowered
+        // Kernel construct. The *generating* command already knows how it
+        // lowered the spec; `loc` (kept) already carries the user-authored
+        // location this maps back to.
+        | "origin"
+        | "generated_name"
+        // Echoes the `--engine` flag the caller already supplied.
+        | "engine"
+        // Induction proof bookkeeping for a *passing* verdict (no violation
+        // to interpret): per-invariant step counts and the induction base
+        // case, both already summarized by `checked_to_depth`/`completeness`.
+        | "k_used"
+        | "base_depth"
+        // Explicit-engine exploration statistics for a passing or
+        // budget-exhausted run; `hint` already carries the actionable
+        // guidance for `unknown_budget`.
+        | "closure"
+        | "states_explored"
+        | "max_frontier_width"
+        | "depth_reached"
+        // Coverage bookkeeping (which named properties this run checked),
+        // not evidence of a specific finding. Distinct from `action_coverage`
+        // (kept, #641), which qualifies the verdict's own confidence rather
+        // than just listing names.
+        | "invariants_checked"
+        | "transitions_checked"
+        // Witnessed-reachable detail and the reachability probe's own
+        // deadlock flag: both describe a *passing* verdict, so there is no
+        // violation for this evidence to help replay. An actual deadlock is
+        // a `violated` result and travels through `trace`/`trace_type`
+        // (kept) instead.
+        | "reachables"
+        | "deadlock"
+        // Per-property leadsTo proof/coverage summary on a passing verdict.
+        | "leads_to"
+        // Free-text summary paired with a passing/closure verdict.
+        | "note"
+        // Redundant with `violation_kind`/`invariant`, which already say the
+        // violated property is a transition postcondition.
+        | "trans"
+        // Authoring assistance (candidate auxiliary invariant text to add to
+        // the spec), not evidence needed to replay the counterexample `cti`
+        // already carries.
+        | "suggested_invariants"
+        // A bundled, independent `implements`/refinement verdict riding on
+        // the same envelope (declared via a spec's `implements` contract).
+        // Folding it in here would silently promote a second verdict axis
+        // into a `dbsystem`/`domain` kernel projection without its own
+        // AGENTS.md discipline; out of scope for #663, which is about the
+        // `verify` verdict's own replayable evidence.
+        | "implements"
+        // Advisory "what to do next" guidance that duplicates `hint`'s role
+        // on the `reachable_failed`/`partial_op` paths.
+        | "faithfulness_class"
+        | "recommended_action" => Some(KernelKeyFate::Dropped),
+        _ => None,
+    }
+}
+
+/// Project a nested `verify` kernel envelope for `run_db_check`/
+/// `run_domain_check`'s `kernel` object, applying the single
+/// [`classify_kernel_key`] registry both commands share (issue #663).
+///
+/// Non-object input (never produced by `run_verify` in practice) passes
+/// through unchanged, matching the pre-#663 `stable_kernel_projection`.
+///
+/// A key [`classify_kernel_key`] does not recognize passes through
+/// unchanged too, appended after the known [`PROJECTED_KERNEL_KEYS`] in the
+/// kernel's own key order. Only a `Dropped` classification removes a key.
+///
+/// A panic here was considered and rejected. AGENTS.md makes the JSON
+/// envelope itself an invariant ("Native CLI and Worker output must preserve
+/// the JSON envelope, exit codes, locations, and replayable evidence
+/// contract"): panicking on an unrecognized key would exit 101 with no
+/// envelope at all, discarding a verdict `run_verify` had already computed
+/// correctly. That is different from the native-Z3-backend panic at
+/// `main.rs`'s "unexpectedly yielded Pending" site, where no correct output
+/// exists to discard -- here one does. Passing the key through instead makes
+/// an unregistered key harmless *by construction*: evidence is never lost,
+/// and the only cost is an unclassified field surfacing in output, which
+/// `issue_663_kernel_projection_owner.rs`'s
+/// `every_key_a_curated_verify_corpus_emits_is_classified` census exists to
+/// catch as a loud CI failure. Do not reinstate a panic/assert here; there is
+/// nothing left for a runtime check to protect once the fallback is
+/// pass-through rather than silent loss.
+#[must_use]
+pub fn project_kernel(kernel: Value) -> Value {
+    let Value::Object(kernel) = kernel else {
+        return kernel;
+    };
+    let mut projected: Map<String, Value> = PROJECTED_KERNEL_KEYS
+        .iter()
+        .filter_map(|&key| {
+            kernel
+                .get(key)
+                .cloned()
+                .map(|value| (key.to_owned(), value))
+        })
+        .collect();
+    for (key, value) in &kernel {
+        if classify_kernel_key(key).is_none() {
+            projected.insert(key.clone(), value.clone());
+        }
+    }
+    Value::Object(projected)
 }
 
 /// `docs/LANGUAGE.md`'s exit-code table applied to an envelope, as a total

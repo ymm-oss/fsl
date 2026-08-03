@@ -726,8 +726,13 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 <td><code>violated</code> / <code>type_bound</code> / <code>_bounds_&lt;var&gt;</code></td>
 </tr>
 <tr>
-<td>部分演算(action 文脈限定: <code>requires</code>/本体/<code>ensures</code> のみ、§3 参照)</td>
-<td><code>pop()</code>/<code>head()</code>/<code>at(i)</code> の時点で列が非空かつインデックスが範囲内であり、<code>/</code> <code>%</code> の除数が非ゼロ</td>
+<td>Seq の部分演算(action および property 文脈)</td>
+<td><code>pop()</code>/<code>head()</code>/<code>at(i)</code>/index の時点で列が非空かつインデックスが範囲内である</td>
+<td><code>violated</code> / <code>partial_op</code> / <code>_partial_&lt;action&gt;</code>、<code>_partial_property_&lt;property&gt;</code>、または <code>_partial_property_terminal</code></td>
+</tr>
+<tr>
+<td>算術の部分演算(action 文脈限定: <code>requires</code>/本体/<code>ensures</code> のみ、§3 参照)</td>
+<td><code>/</code> <code>%</code> の除数が非ゼロである</td>
 <td><code>violated</code> / <code>partial_op</code> / <code>_partial_&lt;action&gt;</code></td>
 </tr>
 <tr>
@@ -1200,8 +1205,10 @@ action drain() { if q.size() &gt; 0 { x = q.head()  q = q.pop() } }
   }
 }
 </code></pre>
-<p><code>at()</code> はプロパティの文脈では全域です(範囲外は不特定の値を生みます)ので、常に
-<code>i &lt; q.size()</code> でガードしてください。</p>
+<p>プロパティ文脈で範囲外の <code>at()</code>/index を読むこと(または空の Seq に対する
+<code>head()</code>/<code>pop()</code>)は <code>partial_op</code> 違反です。<code>i &lt; q.size() =&gt; ...</code> でガードすると
+read は短絡評価され、プロパティは定義されたままになります。<code>/</code> と <code>%</code> とは異なり、
+Seq read が不特定のシンボリック値へ全域化されることはありません。</p>
 <h3 id="seq">Seq 上の集約: インデックス / ドメイン型のイディオム</h3>
 <pre><code class="language-fsl">type Idx = 0..3                        // a domain type covering up to capacity-1
 invariant BalanceMatchesLog {
@@ -2160,8 +2167,10 @@ requirement NFR-1 &quot;complete within 4 ticks of acceptance&quot; {
   urgent にすること(<code>requires age &gt;= K</code> を持つ respond_due 形式)</strong>です。
   非空虚性を確認するには、<code>K-1</code> へ下げて violated になることを確認します。
   <code>fslc verify --vacuity</code> は、この罠の証明可能な形式(urgent の条件が初期かつ
-  帰納的)に対して <code>kind:"urgency_freeze"</code> を出します。警告の不在は非空虚性の証明
-  ではありません。</li>
+  帰納的)に対して <code>kind:"urgency_freeze"</code> を出します。さらに、<code>tick</code> が age 条件の
+  偽の間には動ける場合でも、対象 deadline の全 age が全遷移で 0 のままと証明された
+  ときは <code>kind:"vacuous_deadline"</code> を出します。どちらの警告も不在であることは
+  非空虚性の証明ではありません。</li>
 <li>BMC の検査はすぐに機能します。帰納的な証明はしばしば、時間予算の補助 invariant
   (<code>age + remaining work &lt;= K</code> の形)を必要とします(CTI から導出します。実例は
   <code>examples/nfr/</code>)。</li>
@@ -2268,8 +2277,13 @@ fslc db import examples/db/minimal_prisma_schema.prisma --name ImportedFromPrism
 migration/schema の要素、最小の競合集合、修復候補を含む <code>findings[]</code> を返します。
 ランタイムの観測は <code>formal_result: "not_run"</code> の <code>observed_mismatch</code> を返します。
 ログからの不在は、未使用の振る舞いの証明ではありません。
-生成されたカーネルの反例を直接調べたいときは、通常の <code>fslc verify</code> を使って
-ください。</p>
+入れ子の <code>kernel.result</code> が非成功(<code>violated</code>/<code>reachable_failed</code>/
+<code>unknown_cti</code>/<code>unknown_budget</code>)であれば最上位の <code>result</code> に畳み込まれ、入れ子
+の <code>kernel</code> オブジェクトはその verdict の再現可能な証拠(<code>loc</code>/<code>trace</code>/
+<code>blame</code>/<code>cti</code>/<code>hint</code>/<code>unreached</code>/…— <code>fslc domain check</code> と同じレジストリ)を
+保持します。生成されたカーネルの完全なエンベロープ(<code>db check</code>/<code>domain check</code>
+が意図的に射影しないカバレッジ名リストや実行統計など)を調べたいときは、通常の
+<code>fslc verify</code> を使ってください。</p>
 <p><code>fslc db observe</code> は、観測イベントを評価する前に、観測エンベロープ/イベントを
 <code>schemas/fslc/db/observation.v0.schema.json</code> に対して検証します(型付きの必須
 フィールド、閉じた <code>capability</code> 語彙、不正なレコードでは exit 2)。各イベントの
@@ -2517,7 +2531,9 @@ DESIGN-*.md があります)。</p>
   (先行する節の文脈の下で常に真であるガード)、
   <code>tautology_over_frozen</code>(どの action も変えない状態の上の、動的に
   トートロジーである invariant)、<code>urgency_freeze</code>(urgency が時間を凍結するために
-  死んでいると証明された、生成された deadline の <code>tick</code>)を警告します。
+  死んでいると証明された、生成された deadline の <code>tick</code>)、
+  <code>vacuous_deadline</code>(生成 deadline の age が全遷移で 0 のままと証明される)を
+  警告します。
   <code>error</code> は exit 2 です。→
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
 <li><strong><code>--strict-tags</code></strong> — 成功の結果の上で、タグのない宣言(捏造の候補)と、参照
