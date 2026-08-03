@@ -2318,8 +2318,14 @@ capability-completeness assumptions. Compatibility failures return
 environment, artifact, migration/schema element, minimal conflict set, and repair
 candidates. Runtime observation returns `observed_mismatch` with
 `formal_result: "not_run"`; absence from logs is not proof of unused behavior.
-Use ordinary `fslc verify` when you want to inspect the generated kernel
-counterexample directly.
+A non-passing nested `kernel.result` (`violated`/`reachable_failed`/
+`unknown_cti`/`unknown_budget`) folds through to the top-level `result`, and
+the nested `kernel` object carries that verdict's replayable evidence
+(`loc`/`trace`/`blame`/`cti`/`hint`/`unreached`/... — the same registry
+`fslc domain check` uses). Use ordinary `fslc verify` when you want the full
+generated-kernel envelope, including diagnostics `db check`/`domain check`
+deliberately do not project (coverage-name lists, run statistics, and the
+like).
 
 `fslc db observe` validates the observation envelope/events against
 `schemas/fslc/db/observation.v0.schema.json` (typed required fields, a closed

@@ -2265,8 +2265,13 @@ fslc db import examples/db/minimal_prisma_schema.prisma --name ImportedFromPrism
 migration/schema の要素、最小の競合集合、修復候補を含む `findings[]` を返します。
 ランタイムの観測は `formal_result: "not_run"` の `observed_mismatch` を返します。
 ログからの不在は、未使用の振る舞いの証明ではありません。
-生成されたカーネルの反例を直接調べたいときは、通常の `fslc verify` を使って
-ください。
+入れ子の `kernel.result` が非成功(`violated`/`reachable_failed`/
+`unknown_cti`/`unknown_budget`)であれば最上位の `result` に畳み込まれ、入れ子
+の `kernel` オブジェクトはその verdict の再現可能な証拠(`loc`/`trace`/
+`blame`/`cti`/`hint`/`unreached`/…— `fslc domain check` と同じレジストリ)を
+保持します。生成されたカーネルの完全なエンベロープ(`db check`/`domain check`
+が意図的に射影しないカバレッジ名リストや実行統計など)を調べたいときは、通常の
+`fslc verify` を使ってください。
 
 `fslc db observe` は、観測イベントを評価する前に、観測エンベロープ/イベントを
 `schemas/fslc/db/observation.v0.schema.json` に対して検証します(型付きの必須

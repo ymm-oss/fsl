@@ -5,6 +5,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Unified the nested `verify` kernel projection that `run_db_check` and
+  `run_domain_check` each carried as an independent, hand-copied key list:
+  `fslc_rust::outcome::{classify_kernel_key, project_kernel}` is now the
+  single owner both commands call. `db check`'s copy previously dropped
+  every AGENTS.md-protected replayable-evidence key (`loc`, `trace`,
+  `blame`, ...); it now carries the same evidence `domain check` has since
+  #515/#641. Both commands also gain `cti`/`hint` (the `unknown_cti`
+  counterexample and its guidance), `unreached` (`reachable_failed`'s list
+  of properties that could not be reached), and `trace_type`/
+  `requirement`/`requirements`. Additive only: no existing key, top-level
+  field, `result` value, or exit code changes; `db check`'s `kernel` object
+  gains keys and loses none (#663). `rust/fsl-tools/src/ai.rs`'s independent
+  third copy (`fslc ai check`) is a known, deliberately out-of-scope
+  boundary — it cannot call the new owner because `fslc-rust` depends on
+  `fsl-tools`, not the reverse — tracked separately as #687.
+
 - Added a corpus-wide agreement gate between `domain`'s two independent
   lowering paths: `lower_domain` (typed `KernelSpec`, used by `check`/
   `verify`) and `domain_kernel_source` (rendered `.fsl` text, used by
