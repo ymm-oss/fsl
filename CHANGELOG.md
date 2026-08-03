@@ -5,6 +5,23 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed literate Markdown FSL's diagnostic-quality gap: the 19 commands that
+  read a spec path but do not extract ` ```fsl ` fences from a `.md` input
+  (`lint`, `migrate`, `fmt`, `kernel`, `conformance`, `explain`, `mutate`,
+  `typestate`, `testgen`, `html`, `ledger`, `analyze`, `diff`, `refine`,
+  `replay`, `sweep`, and `document generate`/`claims`/`check`) used to hand
+  the raw Markdown to the parser and report the user's spec as a syntax
+  error at the position of the Markdown's own first non-fsl character
+  (`fmt` reported it under `kind:"format"` with no `diagnostic_code` at all).
+  They now fail closed with a dedicated `FSL-INPUT-LITERATE-UNSUPPORTED`
+  `kind:"usage"` diagnostic naming `check`/`verify`/`scenarios` as the
+  commands that do support literate input, with `loc` naming the input file
+  rather than a spec position. No exit code changed. The decision and
+  materialization are now owned by one function
+  (`fslc_rust::literate_access::literate_access`), driven by a total,
+  test-gated registry checked against `rust/fslc/cli-contract.json`'s real
+  command surface (#665).
+
 - Unified the nested `verify` kernel projection that `run_db_check` and
   `run_domain_check` each carried as an independent, hand-copied key list:
   `fslc_rust::outcome::{classify_kernel_key, project_kernel}` is now the

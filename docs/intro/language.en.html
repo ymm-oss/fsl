@@ -1193,7 +1193,18 @@ spec Cart {
 Non-fsl fenced blocks (<code>```python</code>, etc.) are ignored. <code>use</code>/compose paths
 resolve relative to the Markdown file's directory (same as for <code>.fsl</code> files);
 a literate <code>.md</code> may <code>use</code>/compose <code>.fsl</code> files this way, but using another
-<code>.md</code> file as a compose target is not supported.</p></div></details>
+<code>.md</code> file as a compose target is not supported.</p>
+<p><code>check</code>, <code>verify</code>, and <code>scenarios</code> are the only commands that extract fences
+this way. Every other command that reads a spec path (<code>lint</code>, <code>migrate</code>,
+<code>fmt</code>, <code>kernel</code>, <code>conformance</code>, <code>explain</code>, <code>mutate</code>, <code>typestate</code>, <code>testgen</code>,
+<code>html</code>, <code>ledger</code>, <code>analyze</code>, <code>diff</code>, <code>refine</code>, <code>replay</code>, <code>sweep</code>, and
+<code>document generate</code>/<code>claims</code>/<code>check</code>) rejects a <code>.md</code> input as an input-kind
+error instead: <code>result: "error"</code>, <code>kind: "usage"</code>,
+<code>diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"</code>, a message naming the
+commands that do support literate input, and a <code>loc</code> that names the input
+file rather than a spec position. This keeps a Markdown document passed to an
+unsupported command from being misreported as a spec syntax error at the
+position of the Markdown's own first non-fsl character.</p></div></details>
 <details id="8-recommended-workflow-make-proved-the-standard"><summary>8. Recommended workflow: make proved the standard<span class="tree-blurb"> — The recommended BMC-to-induction workflow toward proved.</span></summary><div class="tree-body"><ol>
 <li>Write the spec → <code>fslc check</code> (the fast syntax/type loop)</li>
 <li><code>fslc verify --depth 8</code> → if violated, fix using the trace.

@@ -1115,6 +1115,18 @@ resolve relative to the Markdown file's directory (same as for `.fsl` files);
 a literate `.md` may `use`/compose `.fsl` files this way, but using another
 `.md` file as a compose target is not supported.
 
+`check`, `verify`, and `scenarios` are the only commands that extract fences
+this way. Every other command that reads a spec path (`lint`, `migrate`,
+`fmt`, `kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`,
+`html`, `ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, and
+`document generate`/`claims`/`check`) rejects a `.md` input as an input-kind
+error instead: `result: "error"`, `kind: "usage"`,
+`diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"`, a message naming the
+commands that do support literate input, and a `loc` that names the input
+file rather than a spec position. This keeps a Markdown document passed to an
+unsupported command from being misreported as a spec syntax error at the
+position of the Markdown's own first non-fsl character.
+
 ## 8. Recommended workflow: make proved the standard
 
 1. Write the spec → `fslc check` (the fast syntax/type loop)
