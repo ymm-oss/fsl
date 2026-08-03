@@ -747,8 +747,13 @@ variable.</p></div></details>
 <td><code>violated</code> / <code>type_bound</code> / <code>_bounds_&lt;var&gt;</code></td>
 </tr>
 <tr>
-<td>Partial operations (action context: <code>requires</code>/body/<code>ensures</code> only, see §3)</td>
-<td>At the time of <code>pop()</code>/<code>head()</code>/<code>at(i)</code>, the sequence is non-empty and the index is in range, and the divisor of <code>/</code> <code>%</code> is non-zero</td>
+<td>Partial Seq operations (action and property contexts)</td>
+<td>At the time of <code>pop()</code>/<code>head()</code>/<code>at(i)</code>/index, the sequence is non-empty and the index is in range</td>
+<td><code>violated</code> / <code>partial_op</code> / <code>_partial_&lt;action&gt;</code>, <code>_partial_property_&lt;property&gt;</code>, or <code>_partial_property_terminal</code></td>
+</tr>
+<tr>
+<td>Partial arithmetic (action context: <code>requires</code>/body/<code>ensures</code> only, see §3)</td>
+<td>The divisor of <code>/</code> <code>%</code> is non-zero</td>
 <td><code>violated</code> / <code>partial_op</code> / <code>_partial_&lt;action&gt;</code></td>
 </tr>
 <tr>
@@ -1228,8 +1233,10 @@ action drain() { if q.size() &gt; 0 { x = q.head()  q = q.pop() } }
   }
 }
 </code></pre>
-<p><code>at()</code> is total in property contexts (out-of-range yields an unspecified value),
-so always guard it with <code>i &lt; q.size()</code>.</p>
+<p>An out-of-range <code>at()</code>/index (or <code>head()</code>/<code>pop()</code> on an empty sequence) is a
+<code>partial_op</code> violation in property context. Guarding with <code>i &lt; q.size() =&gt; ...</code>
+short-circuits the read and keeps the property defined. Unlike <code>/</code> and <code>%</code>, Seq
+reads never totalize to an unspecified symbolic value.</p>
 <h3 id="aggregating-over-a-seq-the-index-domain-type-idiom">Aggregating over a Seq: the index / domain-type idiom</h3>
 <pre><code class="language-fsl">type Idx = 0..3                        // a domain type covering up to capacity-1
 invariant BalanceMatchesLog {
@@ -2214,8 +2221,10 @@ requirement NFR-1 &quot;complete within 4 ticks of acceptance&quot; {
   <code>requires age &gt;= K</code>)</strong>. To confirm non-vacuity, lower it to <code>K-1</code> and check
   that it becomes violated. <code>fslc verify --vacuity</code> emits
   <code>kind:"urgency_freeze"</code> for the provable form of this trap (the urgent
-  condition is initial and inductive); absence of the warning is not a proof of
-  non-vacuity.</li>
+  condition is initial and inductive). It emits <code>kind:"vacuous_deadline"</code> when
+  the stronger per-deadline check proves that every relevant age value remains
+  zero across all transitions even though <code>tick</code> may run while the age
+  condition is false. Absence of either warning is not a proof of non-vacuity.</li>
 <li>The BMC check works immediately. An inductive proof often needs a time-budget
   auxiliary invariant (the <code>age + remaining work &lt;= K</code> form) (derived from the
   CTI; real examples in <code>examples/nfr/</code>).</li>
@@ -2567,8 +2576,9 @@ DESIGN-*.md).</p>
   <code>vacuous_leadsto</code> (the trigger is unreachable), <code>always_true_requires</code>
   (a guard that is always true under the context of preceding clauses),
   <code>tautology_over_frozen</code> (a dynamically tautological invariant over state no
-  action changes), and <code>urgency_freeze</code> (a generated deadline <code>tick</code> proven dead
-  because urgency freezes time). <code>error</code> exits 2. →
+  action changes), <code>urgency_freeze</code> (a generated deadline <code>tick</code> proven dead
+  because urgency freezes time), and <code>vacuous_deadline</code> (a generated deadline
+  whose age is proven to remain zero across every transition). <code>error</code> exits 2. →
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
 <li><strong><code>--strict-tags</code></strong> — warns on success results about untagged declarations
   (fabrication candidates) and unreferenced requirements (omission candidates,
