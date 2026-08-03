@@ -298,6 +298,22 @@ queue delivery, wall-clock time, production idempotency across unbounded keys, o
 that generated code is production optimal. Those require runtime replay, adapter
 tests, or external evidence.
 
+`domain` semantics has two independent lowerings that must stay in agreement:
+`lower_domain` (typed `KernelSpec`, used by `check`/`verify`) and
+`domain_kernel_source` (rendered `.fsl` text, used by `domain expand`/
+`check_domain`/`domain testgen`/`domain scaffold`).
+`rust/fsl-core/tests/domain_render_agreement.rs` projects both through
+`public_kernel_contract` for the full domain corpus and requires them to match
+except on source spans (#664). Building that gate found the two
+implementations already disagree: `Context::normalize`/`Context::default`
+(`domain.rs`) render text with `str::replace` and no syntax tree, so they
+cannot be scope- or precedence-aware the way `lower_domain`'s typed AST
+composition is, and one shape of that gap can invert a verified/violated
+verdict rather than merely change generated text.
+`domain_render_agreement.rs`'s `KNOWN_DIVERGENT_DOMAIN_FIXTURES` pins the
+currently known instances as regression fixtures; #690 and #691 own
+resolving them.
+
 ## Future Work
 
 Remaining work is production hardening rather than dialect absence: the

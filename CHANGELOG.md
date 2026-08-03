@@ -5,6 +5,25 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Added a corpus-wide agreement gate between `domain`'s two independent
+  lowering paths: `lower_domain` (typed `KernelSpec`, used by `check`/
+  `verify`) and `domain_kernel_source` (rendered `.fsl` text, used by
+  `domain expand`/`check_domain`/`domain testgen`/`domain scaffold`).
+  `rust/fsl-core/tests/domain_render_agreement.rs` projects both paths
+  through `public_kernel_contract` for every domain spec in `examples/` and
+  `rust/fslc/tests/fixtures/` and diffs the two structurally, excluding only
+  source spans (a gated, single-entry exclusion whose classifier defaults
+  to comparing every field unless one is explicitly named, so a future
+  contract field cannot silently escape comparison the way #689 describes).
+  Building the gate found three pre-existing, previously undetected live
+  divergences between the two implementations -- not hypothetical, and not
+  fixed here, but pinned as regression fixtures and filed as #690 (an
+  internal generated-name check gap, plus a `quantity` name-shadowing bug
+  and an unparenthesized `can(...)` macro expansion that can invert a
+  verified/violated verdict on independent `Bool` state) and #691 (a
+  `Map`-typed state field with no default renders an ill-typed literal `0`)
+  (#664).
+
 ## [4.2.0] - 2026-08-03
 
 - Fixed native Rust business-dialect precedence policies so `every <Entity>
