@@ -5,6 +5,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Added a standalone `site reference freshness` CI workflow
+  (`.github/workflows/site-reference-freshness.yml`) that runs the
+  pre-existing but previously unwired `tests/test_site_reference_snapshot.py`
+  on every pull request into `main`, so a stale `docs/intro/language.{ja,en}.html`
+  or `cli.{ja,en}.html` (regenerated from `docs/LANGUAGE.md`/
+  `docs/LANGUAGE.ja.md`/`src/fslc/cli.py` by `tools/build_site_reference.py`)
+  now fails loudly on this workflow's own run (#630). Kept out of both
+  `ci.yml`'s Rust-native-only product gate and `merge-readiness.yml`'s
+  deliberately stdlib-only fail-fast lane; see `docs/DESIGN-docs-site.md`'s D7
+  addendum for the full rationale, including the stated, unresolved
+  frozen-Python-vs-native-CLI asymmetry this gate now enforces for
+  `cli.*.html` (#688).
+
 - Fixed literate Markdown FSL's diagnostic-quality gap: the 19 commands that
   read a spec path but do not extract ` ```fsl ` fences from a `.md` input
   (`lint`, `migrate`, `fmt`, `kernel`, `conformance`, `explain`, `mutate`,

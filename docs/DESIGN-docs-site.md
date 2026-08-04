@@ -208,6 +208,48 @@ readable in Japanese, accepting the resulting maintenance cost.
   Japanese sync) is a separate future task, not implemented here. Today the only enforcement is
   the section-count parity check above — it catches an added/removed/reordered section, not a
   paragraph that changed English wording without a matching Japanese edit.
+- **Addendum (#630) — CI enforcement of generated-page freshness, and where it lives.**
+  `tests/test_site_reference_snapshot.py` — the check D4 flagged as "recommended for the separate
+  generation-pipeline task" — already existed and already regenerates both pages into memory and
+  diffs them against the committed `docs/intro/{language,cli}.{ja,en}.html`; it was never wired
+  into any CI workflow, so a stale commit could merge undetected (`#630`). The fix adds only a
+  runner, a new standalone workflow, `.github/workflows/site-reference-freshness.yml`, on
+  `pull_request`/`merge_group` into `main`. It deliberately does **not** join either existing
+  gate:
+  - Not `ci.yml` ("product gate"): `AGENTS.md` states that gate "has one Rust-native entrypoint
+    and does not execute Python," and this check needs the third-party `markdown` package plus
+    pytest. This check is not product evidence in `docs/DESIGN-ci.md`'s sense either — it protects
+    a documentation artifact, not Rust/solver/Monitor behavior.
+  - Not `merge-readiness.yml`'s `automation-contracts` lane (or a new sibling lane inside that
+    workflow): that lane deliberately stays stdlib-only with no pytest and no third-party
+    dependency (`tools/check-merge-readiness.sh`'s `check_automation` comment). This is a
+    dependency-contract objection, not a latency one — measured, `automation-contracts` runs in
+    ~5s against `core-contracts`'s ~45s critical path (the three `merge-readiness.yml` lanes run
+    in parallel, so the workflow's wall-clock is set by the slowest lane), so adding a ~10s
+    pip-install-plus-pytest step there would cost the workflow zero wall-clock. What it would
+    cost is the lane's stdlib-only contract, which `tools/check-merge-readiness.sh` states is
+    deliberate independent of speed.
+
+  The new workflow covers all **4** generated pages (`language.{ja,en}.html` and
+  `cli.{ja,en}.html`), not just the 2 `language.*` pages, because `test_site_reference_snapshot.py`
+  already checks both pairs and splitting the gate by page would be an arbitrary carve-out with no
+  contract basis. This is a deliberate, stated choice against `#688`: `#688` records that
+  `cli.{ja,en}.html` is generated from the **frozen** Python `src/fslc/cli.py`, not the
+  authoritative native `fslc`, so gating it makes that asymmetry CI-enforced — a frozen-reference
+  argparse edit will now force a site update, and a native CLI change will not, and the two
+  surfaces' actual flag/subcommand parity is still unmeasured. Wiring the gate does not resolve
+  that; `#688` stays open and is the place that asymmetry gets decided, not this check.
+
+  **This workflow is visible, not enforced — and that is the price of the placement above, not an
+  incidental property.** `merge readiness` is the *only* required status check in this
+  repository's `main safety and CI` ruleset. Joining it would have made a stale page block the
+  merge; landing this check as a standalone workflow instead means it fails loudly on its own run
+  but is not in that required set, so a red run does not block a merge. The trade made here is:
+  keep `merge-readiness.yml`'s stdlib-only dependency contract intact, at the cost of the
+  freshness check not being merge-blocking, rather than gain merge-blocking enforcement by
+  breaking that contract. Adding this workflow to the ruleset is a separate repository-settings
+  decision outside this pull request's reach, stated here rather than recommended — whoever owns
+  the ruleset decides, and can reverse this trade on the merits above.
 
 ## 2. Chapter → category mapping
 
