@@ -10,6 +10,20 @@ on:
   push:
     branches: [main]
   pull_request:
+    # Agent-configuration surfaces are not product inputs: no build, test,
+    # generator, or release path reads them. A pull request whose every
+    # changed file matches this list skips the product gate pre-merge; one
+    # file outside it restores the full run, and GitHub runs the workflow
+    # anyway when a diff is too large to evaluate. The post-merge `main`
+    # push, schedule, and dispatch triggers carry no filter, so every merged
+    # main state still receives the complete product evidence
+    # (docs/DESIGN-ci.md). Do not add `skills/**` or `docs/**`: those are
+    # coupled product surfaces (language reference, site freshness).
+    paths-ignore:
+      - ".claude/**"
+      - ".agents/**"
+      - "CLAUDE.md"
+      - "AGENTS.md"
   schedule:
     - cron: "17 18 * * *"
   workflow_dispatch:

@@ -5,6 +5,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Exempted agent-configuration-only pull requests (`.claude/**`, `.agents/**`,
+  `CLAUDE.md`, `AGENTS.md`) from the pre-merge product gate via `paths-ignore`
+  on `ci.yml`'s `pull_request` trigger. One changed file outside the list
+  restores the full run, and the unfiltered `main` push trigger still gives
+  every merged state the complete product evidence; `docs/DESIGN-ci.md`
+  records the exemption contract and why `skills/**` and `docs/**` must never
+  join the list.
+
 - Added the `pr-review` agent skill (`.claude/skills/pr-review/SKILL.md`), a
   two-layer review orchestrator for pull requests that resolve issues: the
   skill reconstructs the issue contract from repository evidence, dispatches
