@@ -122,7 +122,9 @@ const VALID_DOMAIN_FIXTURES: &[&str] = &[
     "examples/domain/unsafe_irreversible_effect_without_idempotency.fsl",
     "rust/fslc/tests/fixtures/domain_canonical_enum.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/can_expansion_precedence.fsl",
+    "rust/fslc/tests/fixtures/domain_characterization/container_defaults_surface.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/effect_saga_valid.fsl",
+    "rust/fslc/tests/fixtures/domain_characterization/lvalues_surface.fsl",
     "rust/fslc/tests/fixtures/domain_legacy_enum_union.fsl",
     "rust/fslc/tests/fixtures/domain_origin_violation.fsl",
     "rust/fslc/tests/fixtures/issue_515_domain_broken_invariant.fsl",
@@ -137,6 +139,7 @@ const VALID_DOMAIN_FIXTURES: &[&str] = &[
 /// `domain_kernel_source` -> `parse_kernel_source` -> `build_model`) because
 /// they are semantically invalid (type mismatch / unknown symbol).
 const SEMANTICALLY_INVALID_DOMAIN_FIXTURES: &[&str] = &[
+    "rust/fslc/tests/fixtures/domain_characterization/invalid_empty_enum_containers.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_type_mismatch.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_member.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl",
@@ -161,6 +164,14 @@ enum DivergenceShape {
     PathARejects,
     /// The `domain_kernel_source` pipeline (path B) rejects; `lower_domain`
     /// (path A) accepts and produces a checked model.
+    ///
+    /// No [`KNOWN_DIVERGENT_DOMAIN_FIXTURES`] entry currently has this shape
+    /// (the sole example, `lvalues_surface.fsl` / #691, was fixed and moved
+    /// to [`VALID_DOMAIN_FIXTURES`]) -- kept for the next fixture that needs
+    /// it, since `known_divergent_domain_fixture_pins_the_open_finding` and
+    /// `assert_rejection_pinned` are already written generically over this
+    /// enum's full three-shape taxonomy.
+    #[allow(dead_code)]
     PathBRejects,
     /// Both paths accept and produce a checked model, but the two
     /// `public_kernel_contract` projections are not structurally equal.
@@ -197,19 +208,22 @@ struct KnownDivergence {
 /// a review transcript (AGENTS.md: "do not let the finding survive only in
 /// chat, a review transcript, or agent memory").
 ///
-/// **#690** <https://github.com/ymm-oss/fsl/issues/690> covers entries 1 and
-/// 3 below as one root cause: `domain.rs`'s `Context::normalize`
+/// **#690** <https://github.com/ymm-oss/fsl/issues/690> covers both entries
+/// below as one root cause: `domain.rs`'s `Context::normalize`
 /// (`rust/fsl-core/src/domain.rs:301`) is a chain of `str::replace` calls
 /// over rendered text with no syntax tree, so it cannot be scope-aware
-/// (entry 3's `quantity` shadowing) or precedence-aware (entry 3's
+/// (entry 2's `quantity` shadowing) or precedence-aware (entry 2's
 /// `can(...)` expansion) the way a typed AST composition can. Entry 1's
 /// generated-name leak is a symptom of the same string-level substitution
 /// having no notion of what is and is not a legal domain-level reference.
 ///
-/// **#691** <https://github.com/ymm-oss/fsl/issues/691> covers entry 2: a
-/// separate root cause, a missing match arm in `Context::default` rather
-/// than a substitution-order problem, and it fails loudly (a type error)
-/// rather than silently.
+/// **#691** <https://github.com/ymm-oss/fsl/issues/691> covered a third,
+/// now-resolved entry (`lvalues_surface.fsl`, a `Map<K, V>` domain state
+/// field with no explicit default): a missing match arm in
+/// `Context::default` rather than a substitution-order problem, fixed by
+/// making `Context::default`/`Context::default_for_type` total over
+/// `SyntaxTypeExprKind` with no catch-all arm. The two paths now agree on
+/// that fixture; it has moved to [`VALID_DOMAIN_FIXTURES`].
 ///
 /// 1. `ai_internal_name_misuse.fsl` writes the invariant
 ///    `status == Status_Draft`, directly naming the *generated*
@@ -231,26 +245,7 @@ struct KnownDivergence {
 ///    produced, so the rendered text parses and type-checks as an ordinary
 ///    valid kernel spec.
 ///
-/// 2. `lvalues_surface.fsl` declares `counts: Map<ItemId, Quantity>;` with
-///    no explicit default. `lower_domain` (path A,
-///    `rust/fsl-core/src/domain_lowering.rs` around line 2182) has an
-///    explicit `LogicalType::Map` case for aggregate state fields: it
-///    generates a `forall k: ItemId { inventory_counts[k] = 0 }` init
-///    statement, a well-typed dense-map default. `domain_kernel_source`'s
-///    `Context::default` (path B, `rust/fsl-core/src/domain.rs` around line
-///    268) has no `Map` case at all: `field.type_name.as_str()` is not
-///    `"Bool"`/`"Int"`, and `self.ty("Map<ItemId, Quantity>")` never matches
-///    a registered named type, so it falls through to the generic
-///    `_ => "0".to_owned()` default and renders `inventory_counts = 0` --
-///    which then fails `build_model` with
-///    `expression of type Int is not assignable to Map(...)`. This gap was
-///    previously invisible because the only existing coverage of this
-///    fixture's rendered text
-///    (`rust/fslc/tests/domain_expression_characterization.rs::generated_fragments`)
-///    greps for line substrings and never re-parses or type-checks the
-///    rendered source.
-///
-/// 3. `expressions_valid.fsl` both paths accept, but the projected
+/// 2. `expressions_valid.fsl` both paths accept, but the projected
 ///    contracts still disagree at one point (name-shadowing, #690 symptom
 ///    2). A second point that used to disagree here -- `can(...)`
 ///    operator-precedence misgrouping, #690 symptom 1 -- was fixed and is
@@ -315,12 +310,6 @@ const KNOWN_DIVERGENT_DOMAIN_FIXTURES: &[KnownDivergence] = &[
         shape: DivergenceShape::PathARejects,
         expected_contains: &["unknown domain symbol 'Status_Draft'"],
         tracking_issue: "https://github.com/ymm-oss/fsl/issues/690",
-    },
-    KnownDivergence {
-        fixture: "rust/fslc/tests/fixtures/domain_characterization/lvalues_surface.fsl",
-        shape: DivergenceShape::PathBRejects,
-        expected_contains: &["is not assignable to Map"],
-        tracking_issue: "https://github.com/ymm-oss/fsl/issues/691",
     },
     KnownDivergence {
         fixture: "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
@@ -662,7 +651,11 @@ fn run_path_b(domain: &DomainSpec) -> PipelineOutcome {
         Ok(source) => source,
         Err(error) => return PipelineOutcome::Rejected(error.to_string()),
     };
-    let kernel = match parse_kernel_source(&source, &FsResolver::new(".")) {
+    run_rendered_kernel(&source)
+}
+
+fn run_rendered_kernel(source: &str) -> PipelineOutcome {
+    let kernel = match parse_kernel_source(source, &FsResolver::new(".")) {
         Ok(kernel) => kernel,
         Err(error) => return PipelineOutcome::Rejected(error.to_string()),
     };
@@ -675,6 +668,89 @@ fn run_path_b(domain: &DomainSpec) -> PipelineOutcome {
 // ---------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------
+
+/// #691's rejecting controls: reintroducing the former `= 0` rendering for
+/// any accepted container default must be detected before an agreement claim
+/// can be made. Each case starts from the real path-B output, applies only the
+/// historical faulty initializer, and proves the checked kernel rejects it.
+#[test]
+fn container_default_zero_regressions_are_rejected() {
+    let root = repo_root();
+    let cases = [
+        (
+            "rust/fslc/tests/fixtures/domain_characterization/container_defaults_surface.fsl",
+            "basket_picked = none",
+            "basket_picked = 0",
+        ),
+        (
+            "rust/fslc/tests/fixtures/domain_characterization/container_defaults_surface.fsl",
+            "basket_seen = Set {}",
+            "basket_seen = 0",
+        ),
+        (
+            "rust/fslc/tests/fixtures/domain_characterization/lvalues_surface.fsl",
+            "forall k: ItemId { inventory_counts[k] = 0 }",
+            "inventory_counts = 0",
+        ),
+    ];
+
+    for (relative, accepted, faulty) in cases {
+        let source = fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|error| panic!("read {relative}: {error}"));
+        let domain = parse_domain_spec(&source).unwrap_or_else(|error| {
+            panic!("{relative}: expected a parseable domain document: {error}")
+        });
+        let rendered = domain_kernel_source(&domain)
+            .unwrap_or_else(|error| panic!("{relative}: render path B: {error}"));
+        assert!(
+            rendered.contains(accepted),
+            "{relative}: accepting control '{accepted}' is absent from path-B output"
+        );
+        let faulty_source = rendered.replacen(accepted, faulty, 1);
+        match run_rendered_kernel(&faulty_source) {
+            PipelineOutcome::Rejected(message) => assert!(
+                message.contains("is not assignable"),
+                "{relative}: faulty initializer '{faulty}' was rejected for an unexpected reason: {message}"
+            ),
+            PipelineOutcome::Checked(..) => {
+                panic!("{relative}: faulty initializer '{faulty}' produced a checked kernel")
+            }
+        }
+    }
+}
+
+/// Rejected declaration control for every affected container position. Empty
+/// enums are parseable surface ASTs but cannot produce an executable kernel;
+/// both paths must reject at the enum declaration before path B serializes
+/// invalid text, independent of whether the enum is direct, nested, a Map
+/// key, or a Map value.
+#[test]
+fn empty_enum_declarations_fail_closed_before_rendering() {
+    let source = r"
+domain EmptyEnumContainers {
+  enum Status {}
+  aggregate A {
+    state {
+      direct: Status;
+      optional: Option<Status>;
+      members: Set<Status>;
+      keyed: Map<Status, Bool>;
+      by_key: Map<Bool, Status>;
+    }
+  }
+}
+";
+
+    let domain = parse_domain_spec(source).expect("parse empty-enum domain");
+    let enum_span = domain.types[0].span;
+    let path_a = lower_domain(&domain).expect_err("typed path must reject empty enum");
+    let path_b = domain_kernel_source(&domain).expect_err("renderer must reject empty enum");
+    for (path, error) in [("path A", path_a), ("path B", path_b)] {
+        assert_eq!(error.message, "enum 'Status' has no members", "{path}");
+        assert_eq!(error.line, enum_span.start.line, "{path}");
+        assert_eq!(error.column, enum_span.start.column, "{path}");
+    }
+}
 
 #[test]
 fn syntax_invalid_domain_fixtures_fail_to_parse() {

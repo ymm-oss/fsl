@@ -71,6 +71,31 @@ fn error_at(message: impl Into<String>, span: Span) -> CoreError {
     }
 }
 
+pub(crate) fn validate_domain_enums(types: &[DomainType]) -> Result<(), CoreError> {
+    for ty in types {
+        if ty.kind != "enum" {
+            continue;
+        }
+        if ty.members.is_empty() {
+            return Err(error_at(
+                format!("enum '{}' has no members", ty.name),
+                ty.span,
+            ));
+        }
+        let mut seen = BTreeSet::new();
+        for (index, member) in ty.members.iter().enumerate() {
+            if !seen.insert(member) {
+                return Err(error_at(
+                    format!("duplicate enum member '{member}' in '{}'", ty.name),
+                    ty.member_spans.get(index).copied().unwrap_or(ty.span),
+                )
+                .into_name_resolution());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn span_at(loc: DomainLoc) -> Span {
     loc.span()
 }
@@ -1854,27 +1879,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn validate_document_expressions(&self) -> Result<(), CoreError> {
-        for ty in &self.types {
-            if ty.kind != "enum" {
-                continue;
-            }
-            if ty.members.is_empty() {
-                return Err(error_at(
-                    format!("enum '{}' has no members", ty.name),
-                    ty.span,
-                ));
-            }
-            let mut seen = BTreeSet::new();
-            for (index, member) in ty.members.iter().enumerate() {
-                if !seen.insert(member) {
-                    return Err(error_at(
-                        format!("duplicate enum member '{member}' in '{}'", ty.name),
-                        ty.member_spans.get(index).copied().unwrap_or(ty.span),
-                    )
-                    .into_name_resolution());
-                }
-            }
-        }
+        validate_domain_enums(&self.types)?;
         for ty in &self.types {
             if ty.kind != "value_object" {
                 continue;

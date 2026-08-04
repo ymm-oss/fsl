@@ -17,6 +17,11 @@ fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/domain_origin_violation.fsl")
 }
 
+fn empty_enum_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/domain_characterization/invalid_empty_enum_containers.fsl")
+}
+
 fn run(arguments: &[String]) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(arguments)
@@ -30,6 +35,20 @@ fn run(arguments: &[String]) -> (Value, i32) {
         )
     });
     (value, output.status.code().expect("exit status"))
+}
+
+#[test]
+fn domain_expand_rejects_empty_enum_at_its_declaration() {
+    let path = empty_enum_fixture();
+    let (output, status) = run(&[
+        "domain".to_owned(),
+        "expand".to_owned(),
+        path.to_string_lossy().into_owned(),
+    ]);
+    assert_eq!(status, 2);
+    assert_eq!(output["result"], "error");
+    assert_eq!(output["kind"], "semantics");
+    assert_eq!(output["message"], "enum 'Status' has no members at 4:3");
 }
 
 #[test]

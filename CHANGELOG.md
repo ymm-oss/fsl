@@ -24,6 +24,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `expressions_valid.fsl` remains in `KNOWN_DIVERGENT_DOMAIN_FIXTURES` for
   the still-open name-shadowing symptom.
 
+- Fixed `domain expand`/`domain testgen`/`domain scaffold` producing an
+  ill-typed `= 0` initializer for domain state fields whose accepted container
+  type had no explicit default. The rendered lowering path now dispatches
+  exhaustively over the structured type expression: `Option<T>` initializes to
+  `none`, `Set<T>` to `Set {}`, and top-level `Map<K, V>` to the same dense
+  per-key `forall` initializer as the typed lowering path. New corpus fixtures
+  keep all three variants in the checked two-path agreement gate. Both paths
+  now also share enum declaration validation, so an empty enum nested anywhere
+  in those containers fails at its declaration instead of producing invalid
+  text or panicking (#691).
+
 - Added a standalone `site reference freshness` CI workflow
   (`.github/workflows/site-reference-freshness.yml`) that runs the
   pre-existing but previously unwired `tests/test_site_reference_snapshot.py`

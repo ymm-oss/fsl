@@ -9,9 +9,21 @@ an intentional semantic or diagnostic change has been accepted and documented.
 - `expressions_valid.fsl` covers canonical logical operators and legacy `->`, bare
   enum members, finite membership, `can(Command)`, aggregate state references,
   scalar/field assignments, defaults, invariants, and stale-policy expressions.
-- `lvalues_surface.fsl` covers root, index, and field lvalue parsing. Its current
-  Map-state lowering limitation is intentionally characterized as a failure.
+- `lvalues_surface.fsl` covers root, index, and field lvalue parsing, including a
+  `Map<K, V>` domain state field with no explicit default (issue #691: fixed --
+  `Context::default_for_type` in `rust/fsl-core/src/domain.rs` is now total over
+  the field's `SyntaxTypeExprKind`, and the top-level state-field loop in
+  `domain_kernel_source` renders the same dense per-key `forall` init
+  `domain_lowering.rs`'s path A already generated).
+- `container_defaults_surface.fsl` covers `Option<T>`/`Set<T>` domain state
+  fields with no explicit default (issue #691's other two affected variants;
+  registered in `rust/fsl-core/tests/domain_render_agreement.rs`'s
+  `VALID_DOMAIN_FIXTURES` so the two lowering paths' agreement on this shape
+  stays gated, not just this corpus's own characterization).
 - `effect_saga_valid.fsl` covers expressions used by effect and saga lowering.
+- `invalid_empty_enum_containers.fsl` is the rejecting control that keeps empty
+  enum validation ahead of both typed lowering and rendered-kernel generation,
+  including direct, `Option`, `Set`, Map-key, and Map-value positions.
 - `on_stale` is captured in the surface projection only because current domain
   lowering omits it; this corpus records that gap without accepting it as the
   intended language contract.
