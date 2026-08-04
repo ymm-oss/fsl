@@ -5,6 +5,20 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Added the `pr-review` agent skill (`.claude/skills/pr-review/SKILL.md`), a
+  two-layer review orchestrator for pull requests that resolve issues: the
+  skill reconstructs the issue contract from repository evidence, dispatches
+  the specialized read-only reviewer agents (`fsl-coupled-change-reviewer`,
+  `fsl-soundness-reviewer`, `fsl-vacuity-reviewer`, with
+  `fsl-test-diagnostician` for failure triage) in parallel, audits the diff
+  for green-faking (weakened specs, hand-edited snapshots, allowlist growth,
+  loosened tests, missing negative controls, substring-strength assertions),
+  reproduces the PR's verification claims, adversarially verifies
+  soundness-critical changes with reviewer-authored fixtures and a live
+  mutation of the claimed negative control, and delivers a severity-ranked
+  verdict without merging. `CLAUDE.md`'s verification checklist now points
+  to it.
+
 - Fixed a false green in `domain expand`/`check_domain`'s `can(Command)`
   rendering: `Context::normalize`
   (`rust/fsl-core/src/domain.rs`) joined a `decide`'s `requires` clauses and
