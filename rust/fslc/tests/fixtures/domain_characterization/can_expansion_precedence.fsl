@@ -1,0 +1,35 @@
+domain CanExpansionPrecedence {
+  // SPDX-License-Identifier: Apache-2.0
+  aggregate Gate {
+    state {
+      a: Bool = false;
+      b: Bool = false;
+      c: Bool = false;
+    }
+
+    command Open {}
+    command SetA {}
+    command SetC {}
+
+    event Opened {}
+    event ASet {}
+    event CSet {}
+
+    decide SetA { emits ASet }
+    decide SetC { emits CSet }
+
+    decide Open {
+      requires a or b
+      requires c
+      emits Opened
+    }
+
+    evolve ASet { a = true }
+    evolve CSet { c = true }
+    evolve Opened { }
+
+    invariant aImpliesCanOpen {
+      a => can(Open)
+    }
+  }
+}

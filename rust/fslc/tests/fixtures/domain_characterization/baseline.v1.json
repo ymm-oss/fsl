@@ -7557,7 +7557,7 @@
       "requires order_status == OrderStatus_Draft and not (order_status == OrderStatus_Cancelled)",
       "requires order_status != OrderStatus_Cancelled and order_quantity >= 0",
       "order_audit.status = order_status",
-      "invariant Order_legacyImplication \"DOMAIN-INVARIANT: Order.legacyImplication\" { order_status == OrderStatus_Cancelled => not (order_status == OrderStatus_Draft or order_status == OrderStatus_Approved and not (order_status == OrderStatus_Cancelled)) }",
+      "invariant Order_legacyImplication \"DOMAIN-INVARIANT: Order.legacyImplication\" { order_status == OrderStatus_Cancelled => not ((order_status == OrderStatus_Draft or order_status == OrderStatus_Approved) and (not (order_status == OrderStatus_Cancelled))) }",
       "invariant Order_legacyDisjunction \"DOMAIN-INVARIANT: Order.legacyDisjunction\" { order_status == OrderStatus_Draft or order_status == OrderStatus_Approved or order_status == OrderStatus_Cancelled }",
       "invariant Order_finiteMembership \"DOMAIN-INVARIANT: Order.finiteMembership\" { (order_status == OrderStatus_Draft or order_status == OrderStatus_Approved or order_status == OrderStatus_Cancelled) }"
     ],

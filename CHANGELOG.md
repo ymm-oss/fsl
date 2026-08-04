@@ -5,6 +5,25 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed a false green in `domain expand`/`domain testgen`/`domain scaffold`/
+  `check_domain`'s `can(Command)` rendering: `Context::normalize`
+  (`rust/fsl-core/src/domain.rs`) joined a `decide`'s `requires` clauses and
+  negated `rejects` conditions with literal `" and "` without
+  parenthesizing each piece individually, so a piece containing a
+  top-level `or` misgrouped once two or more pieces were present (`and`
+  binds tighter than `or` in FSL's grammar). This could invert a verifier
+  verdict between the directly-lowered typed model (`check`/`verify` on
+  domain source) and the rendered-then-reparsed kernel (`domain expand`'s
+  output): a `violated` invariant rendered as a tautology and reported
+  `verified`. Each piece is now individually parenthesized before joining
+  (#690, symptom 1 of 3; symptoms 2 and 3 remain open). Added
+  `rust/fslc/tests/fixtures/domain_characterization/can_expansion_precedence.fsl`
+  and `rust/fslc/tests/issue_690_can_precedence_false_green.rs` as the
+  reproducing fixture and verdict-agreement regression control, and moved
+  the fixture into `domain_render_agreement.rs`'s `VALID_DOMAIN_FIXTURES`;
+  `expressions_valid.fsl` remains in `KNOWN_DIVERGENT_DOMAIN_FIXTURES` for
+  the still-open name-shadowing symptom.
+
 - Added a standalone `site reference freshness` CI workflow
   (`.github/workflows/site-reference-freshness.yml`) that runs the
   pre-existing but previously unwired `tests/test_site_reference_snapshot.py`
