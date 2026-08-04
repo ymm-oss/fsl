@@ -29,18 +29,16 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn read(relative: &str) -> String {
-    read_path(&workspace_root().join(relative))
-}
-
-/// The actual read path both `read()` and the composition regression below
-/// exercise: read whatever bytes are on disk, then normalize. Kept as its
-/// own function (rather than inlined in `read()`) so a test can point it at
-/// an arbitrary file -- a temporary CRLF fixture, not just a workspace path
-/// -- and observe the composed behavior instead of `normalize_line_endings`
-/// in isolation.
-fn read_path(path: &Path) -> String {
-    let source = std::fs::read_to_string(path)
+/// Read a workspace-relative document or an absolute regression fixture
+/// through the single entrypoint used by every contract assertion.
+fn read(path: impl AsRef<Path>) -> String {
+    let path = path.as_ref();
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        workspace_root().join(path)
+    };
+    let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
     normalize_line_endings(&source)
 }
@@ -259,8 +257,9 @@ fn command_names_expands_the_document_subcommand_chain() {
 ///
 /// This alone is not a sufficient guard: it calls `normalize_line_endings`
 /// directly, so it proves the helper works in isolation but says nothing
-/// about whether `read()`/`read_path()` actually calls it -- deleting that
-/// one call site leaves this test green. `implementation_mutation_manifest.rs`
+/// about whether the contract's `read()` entrypoint actually calls it --
+/// deleting that one call site leaves this test green.
+/// `implementation_mutation_manifest.rs`
 /// has the same gap for the same reason. See
 /// `crlf_checkout_of_a_real_doc_reaches_the_anchor_matcher_normalized` below
 /// for the composed guard that closes it; keep both, since this one is
@@ -305,13 +304,12 @@ impl Drop for Fixture {
 
 /// The composed guard the helper-level test above cannot provide: write a
 /// CRLF copy of the real `docs/LANGUAGE.md` to a temp file, read it back
-/// through the actual production path (`read_path()`, the function `read()`
-/// delegates to), and confirm `between()` finds the anchor and returns the
-/// same slice as the LF original. Deleting the `normalize_line_endings`
-/// call inside `read_path()` makes this test fail -- and only this shape of
-/// test can observe that deletion, because it exercises the composition
-/// (disk read + normalization) rather than the normalization function
-/// called directly.
+/// through the same `read()` entrypoint as every documentation contract, and
+/// confirm `between()` finds the anchor and returns the same slice as the LF
+/// original. Deleting the `normalize_line_endings` call inside `read()` makes
+/// this test fail -- and only this shape of test can observe that deletion,
+/// because it exercises the composition (disk read + normalization) rather
+/// than the normalization function called directly.
 #[test]
 fn crlf_checkout_of_a_real_doc_reaches_the_anchor_matcher_normalized() {
     let lf_original = read("docs/LANGUAGE.md");
@@ -322,10 +320,10 @@ fn crlf_checkout_of_a_real_doc_reaches_the_anchor_matcher_normalized() {
     );
     let fixture = Fixture::new("language-md", &crlf_source);
 
-    let read_back = read_path(&fixture.0);
+    let read_back = read(&fixture.0);
     assert_eq!(
         read_back, lf_original,
-        "read_path() must normalize a CRLF checkout back to the LF content"
+        "read() must normalize a CRLF checkout back to the LF content"
     );
 
     let start_anchor = "is not supported.\n\n";
