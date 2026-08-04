@@ -121,6 +121,7 @@ const VALID_DOMAIN_FIXTURES: &[&str] = &[
     "examples/domain/order_functional_ddd.fsl",
     "examples/domain/unsafe_irreversible_effect_without_idempotency.fsl",
     "rust/fslc/tests/fixtures/domain_canonical_enum.fsl",
+    "rust/fslc/tests/fixtures/domain_characterization/can_expansion_precedence.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/effect_saga_valid.fsl",
     "rust/fslc/tests/fixtures/domain_legacy_enum_union.fsl",
     "rust/fslc/tests/fixtures/domain_origin_violation.fsl",
@@ -250,7 +251,11 @@ struct KnownDivergence {
 ///    rendered source.
 ///
 /// 3. `expressions_valid.fsl` both paths accept, but the projected
-///    contracts disagree at two independent points:
+///    contracts still disagree at one point (name-shadowing, #690 symptom
+///    2). A second point that used to disagree here -- `can(...)`
+///    operator-precedence misgrouping, #690 symptom 1 -- was fixed and is
+///    described below, after this list, rather than removed from the
+///    historical record:
 ///
 ///    - `command Approve { quantity: Quantity }` shares a name with the
 ///      aggregate's own `quantity` state field. Inside `evolve Approved`,
@@ -265,37 +270,38 @@ struct KnownDivergence {
 ///      that silently drops the incoming event payload. The same
 ///      mis-substitution reaches the `decide Approve` guard
 ///      `quantity >= 0`, which refers to the *command input* `quantity`,
-///      not the state field.
-///    - `invariant legacyImplication { status == Cancelled -> not can(Cancel) }`
-///      expands `can(Cancel)` against
-///      `decide Cancel { requires status == Draft or status == Approved rejects ... }`.
-///      `domain.rs`'s `can(...)` expansion (path B,
-///      `Context::normalize` around line 328) joins the requires/rejects
-///      pieces with literal `" and "` without individually parenthesizing
-///      each piece, so the rendered text reads
-///      `status == Draft or status == Approved and not (status == Cancelled)`
-///      -- `and` binds tighter than `or` in FSL's grammar, so this
-///      re-parses as `Draft or (Approved and not Cancelled)`, not the
-///      intended `(Draft or Approved) and not Cancelled` that
-///      `lower_domain`'s typed AST composition (path A) builds directly and
-///      therefore cannot get wrong the same way.
+///      not the state field. This needs a scope-aware substitution (design
+///      option B/C in #690) and is out of scope for the `can(...)` fix.
 ///
-///      In *this* fixture, `decide Cancel`'s pieces are over a
-///      single-valued enum and mutually exclusive, so the misgrouping only
-///      changes the JSON AST shape here, not the truth value -- this is
-///      the whole observable divergence this repository's corpus exposes
-///      for this bug. It is worse in general: the same misgrouping can flip
-///      a verdict once the pieces are over independent `Bool` state (e.g.
-///      `decide Open { requires a or b  requires c  emits Opened }` with
-///      `invariant aImpliesCanOpen { a => can(Open) }` renders the
-///      tautology `gate_a => (gate_a or gate_b and gate_c)` instead of the
-///      intended, sometimes-false `gate_a => ((gate_a or gate_b) and
-///      gate_c)`), so `fslc verify` returns `violated` on the checked model
-///      and `verified` on the rendered/re-parsed one for the identical
-///      domain spec -- a false green, the class AGENTS.md ranks above a
-///      crash. #690 owns that reproducing case; it is deliberately not
-///      added to this repository's corpus (doing so would change what this
-///      gate's own corpus-classification test enforces).
+///    Before #690's fix, this fixture's
+///    `invariant legacyImplication { status == Cancelled -> not can(Cancel) }`
+///    also disagreed at the projected `and`/`or` operator shape:
+///    `domain.rs`'s `can(...)` expansion (path B, `Context::normalize`
+///    around line 328) joined the requires/rejects pieces with literal
+///    `" and "` without individually parenthesizing each piece, so the
+///    rendered text read
+///    `status == Draft or status == Approved and not (status == Cancelled)`
+///    -- `and` binds tighter than `or` in FSL's grammar, so this re-parsed
+///    as `Draft or (Approved and not Cancelled)`, not the intended
+///    `(Draft or Approved) and not Cancelled` that `lower_domain`'s typed
+///    AST composition (path A) builds directly and therefore could not get
+///    wrong the same way. In *this* fixture, `decide Cancel`'s pieces are
+///    over a single-valued enum and mutually exclusive, so the misgrouping
+///    only changed the JSON AST shape here, not the truth value. It was
+///    worse in general: the same misgrouping could flip a verdict once the
+///    pieces are over independent `Bool` state -- see
+///    `can_expansion_precedence.fsl` in [`VALID_DOMAIN_FIXTURES`], which
+///    pins exactly that (`decide Open { requires a or b  requires c  emits
+///    Opened }` with `invariant aImpliesCanOpen { a => can(Open) }` used to
+///    render the tautology `gate_a => (gate_a or gate_b and gate_c)`
+///    instead of the intended, sometimes-false `gate_a => ((gate_a or
+///    gate_b) and gate_c)`, so `fslc verify` returned `violated` on the
+///    checked model and `verified` on the rendered/re-parsed one for the
+///    identical domain spec -- a false green, the class AGENTS.md ranks
+///    above a crash). #690's fix parenthesizes each piece individually
+///    before joining, which is why this fixture's `can(Cancel)` fingerprint
+///    is gone from [`KNOWN_DIVERGENT_DOMAIN_FIXTURES`] below while the
+///    `quantity`/`order_quantity` fingerprint remains.
 ///
 /// `known_divergent_domain_fixture_pins_the_open_finding` asserts each
 /// fixture's exact shape so an incidental change that makes the two agree --
@@ -319,10 +325,15 @@ const KNOWN_DIVERGENT_DOMAIN_FIXTURES: &[KnownDivergence] = &[
     KnownDivergence {
         fixture: "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
         shape: DivergenceShape::ContractsDisagree,
-        expected_contains: &[
-            "path A = \"quantity\", path B = \"order_quantity\"",
-            "operator: path A = \"and\", path B = \"or\"",
-        ],
+        // #690 symptom 1 (the `can(...)` operator-precedence misgrouping,
+        // previously pinned here as `"operator: path A = \"and\", path B =
+        // \"or\""`) is fixed: `Context::normalize` now parenthesizes each
+        // `requires`/`rejects` piece individually before joining, so this
+        // fixture's `can(Cancel)` projection no longer disagrees with path
+        // A. Only #690 symptom 2 remains here: the name-shadowing rewrite
+        // still needs a scope-aware substitution (design option B/C, still
+        // open), so `quantity`/`order_quantity` still disagrees.
+        expected_contains: &["path A = \"quantity\", path B = \"order_quantity\""],
         tracking_issue: "https://github.com/ymm-oss/fsl/issues/690",
     },
 ];

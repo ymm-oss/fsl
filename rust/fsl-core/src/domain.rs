@@ -332,12 +332,9 @@ impl<'a> Context<'a> {
                             "({})",
                             pieces
                                 .iter()
-                                .map(|piece| self.normalize(
-                                    piece,
-                                    Some(aggregate),
-                                    type_env,
-                                    None,
-                                    false
+                                .map(|piece| format!(
+                                    "({})",
+                                    self.normalize(piece, Some(aggregate), type_env, None, false)
                                 ))
                                 .collect::<Vec<_>>()
                                 .join(" and ")
