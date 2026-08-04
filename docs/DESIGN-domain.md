@@ -312,8 +312,21 @@ cannot be scope-aware the way `lower_domain`'s typed AST composition is. #690
 fixed the known `can(...)` precedence false green by parenthesizing each joined
 piece; its scope-aware substitution and generated-name symptoms remain open.
 `domain_render_agreement.rs`'s `KNOWN_DIVERGENT_DOMAIN_FIXTURES` pins the
-currently known instances as regression fixtures; #690 and #691 own
-resolving them.
+currently known instances as regression fixtures; #690 owns the remaining
+`Context::normalize` scope and generated-name gaps. #691 (a separate root cause --
+`Context::default` had a catch-all arm reachable for every container type,
+not `Context::normalize`'s substitution-order problem) is fixed:
+`Context::default`/`Context::default_for_type` are now total over the
+field's `SyntaxTypeExprKind` with no catch-all, `Option<T>`/`Set<T>` render
+`none`/`Set {}`, and a top-level `Map<K, V>` state field renders the same
+dense per-key `forall` init `lower_domain` already generated. Fixtures for
+all three affected shapes (`Option`, `Set`, `Map`) are registered in
+`VALID_DOMAIN_FIXTURES`. Enum declaration validation is shared ahead of both
+paths, so a container cannot hide an empty or duplicate enum until rendered
+kernel parsing; rejection is anchored at the enum declaration.
+The CLI keeps the renderer's typed location and name-resolution classification
+when it constructs that rejection envelope; it does not recover either from the
+formatted message.
 
 ## Future Work
 
