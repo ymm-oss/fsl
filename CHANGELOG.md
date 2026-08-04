@@ -21,7 +21,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `fsl-test-diagnostician` for failure triage) in parallel, audits the diff
   for green-faking (weakened specs, hand-edited snapshots, allowlist growth,
   loosened tests, missing negative controls, substring-strength assertions),
-  reproduces the PR's verification claims, adversarially verifies
+  reproduces the PR's verification claims into an explicit claim ledger
+  (executed / read / unverified), adversarially verifies
   soundness-critical changes with reviewer-authored fixtures and a live
   mutation of the claimed negative control, and delivers a severity-ranked
   verdict without merging. `CLAUDE.md`'s verification checklist now points

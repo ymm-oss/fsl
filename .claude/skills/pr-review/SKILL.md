@@ -115,7 +115,12 @@ Skip this phase for doc, fixture-only, or tooling changes; say so explicitly in 
 
 ## Phase 5 — Synthesize the verdict
 
-Rank findings by severity:
+Build a claim ledger before writing the verdict: enumerate every verification claim made by the
+PR body and every claim the verdict itself is about to make, and classify each as verified by
+execution (command + observed output), verified by reading (file:line evidence), or unverified.
+The verdict must name its unverified residue explicitly — a claim the review neither executed
+nor read is an assumption, and certifying it is the reviewer's own green-faking. Rank the
+remainder by severity:
 
 1. Soundness defect (false-negative risk, hollow accepted semantics, broken
    symbolic/concrete/BFS agreement).
