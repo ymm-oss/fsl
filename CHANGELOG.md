@@ -5,6 +5,33 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Exempted agent-configuration-only pull requests (`.claude/**`, `.agents/**`,
+  `CLAUDE.md`, `AGENTS.md`, and `CHANGELOG.md`, whose coupled entry would
+  otherwise defeat the exemption) from the pre-merge product gate via
+  `paths-ignore` on `ci.yml`'s `pull_request` trigger. No product-gate lane
+  reads those files; the paths that do (`merge readiness / automation
+  contracts` runs the `.claude/` environment contract test, `release.yml`
+  reads the changelog at tag time) keep unfiltered coverage. One changed
+  file outside the list restores the full run, and the unfiltered `main`
+  push trigger still gives every merged state the complete product
+  evidence; `docs/DESIGN-ci.md` records the exemption contract and why
+  `skills/**` and `docs/**` must never join the list.
+
+- Added the `pr-review` agent skill (`.claude/skills/pr-review/SKILL.md`), a
+  two-layer review orchestrator for pull requests that resolve issues: the
+  skill reconstructs the issue contract from repository evidence, dispatches
+  the specialized read-only reviewer agents (`fsl-coupled-change-reviewer`,
+  `fsl-soundness-reviewer`, `fsl-vacuity-reviewer`, with
+  `fsl-test-diagnostician` for failure triage) in parallel, audits the diff
+  for green-faking (weakened specs, hand-edited snapshots, allowlist growth,
+  loosened tests, missing negative controls, substring-strength assertions),
+  reproduces the PR's verification claims into an explicit claim ledger
+  (executed / read / unverified), adversarially verifies
+  soundness-critical changes with reviewer-authored fixtures and a live
+  mutation of the claimed negative control, and delivers a severity-ranked
+  verdict without merging. `CLAUDE.md`'s verification checklist now points
+  to it.
+
 - Fixed a false green in `domain expand`/`check_domain`'s `can(Command)`
   rendering: `Context::normalize`
   (`rust/fsl-core/src/domain.rs`) joined a `decide`'s `requires` clauses and

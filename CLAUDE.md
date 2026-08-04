@@ -37,7 +37,9 @@
 2. Inspect the diff and exercise the changed contract with positive, negative, and boundary evidence.
 3. Run broader Rust, compatibility, or browser gates in proportion to the affected surface.
 4. Use the specialized FSL reviewers after semantics, coupled language files, or specs change.
-5. Before ending or compacting substantial work, run `/checkpoint` and preserve exact test outcomes.
+5. To review a pull request that resolves an issue, use `/pr-review`; it orchestrates the
+   specialized reviewers and never merges.
+6. Before ending or compacting substantial work, run `/checkpoint` and preserve exact test outcomes.
 
 ## Context management
 

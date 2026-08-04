@@ -98,6 +98,37 @@ parallel:
 what makes the Linux evidence pre-merge. Only `native Z3 4.16` and the aggregate `product gate`
 context honour `FSL_OPTIMISTIC_CI` and skip on pull requests into `main`.
 
+### Agent-configuration exemption
+
+The `pull_request` trigger carries a `paths-ignore` list naming the agent-configuration surfaces
+plus the changelog: `.claude/**`, `.agents/**`, `CLAUDE.md`, `AGENTS.md`, and `CHANGELOG.md`.
+`CHANGELOG.md` must be on the list for the exemption to fire at all — the coupled-change
+convention gives nearly every notable agent-configuration change a changelog entry.
+
+No **product-gate lane** reads those files. The paths that do read them keep their own
+unfiltered pre-merge coverage: `merge readiness / automation contracts` executes the `.claude/`
+environment contract test from `tests/test_claude_environment.py`, and `release.yml` extracts
+release notes from `CHANGELOG.md` at tag time and fails loudly (`test -s`) on a malformed file.
+A pull request whose every changed file matches the list therefore skips the product gate
+pre-merge and merges on `merge readiness` (plus `site reference freshness`) alone.
+
+The exemption is fail-closed three ways. A single changed file outside the list restores the full
+pre-merge run, and GitHub runs the workflow anyway when a diff is too large for path evaluation.
+The `main` push, schedule, and dispatch triggers carry no filter, so every merged `main` state
+still receives the complete product evidence, and a wrongly exempted defect surfaces through the
+existing post-merge reporting contract below instead of reaching `production`. And a pull request
+into `production` that matches the list is blocked rather than waved through: the production
+ruleset's required contexts (`rust workspace`, `WASM`, the `native Z3 4.16` matrix) simply never
+report, so the merge stays unsatisfiable — such a pull request should not exist, and the gate does
+not invent evidence for it.
+
+Growing the list is a contract change to this decision, not a workflow tweak, and each candidate
+needs the same evidence sweep: name every path that reads it and show that path keeps unfiltered
+pre-merge or fail-loud coverage. `skills/**` and `docs/**` must never join it:
+`skills/fsl/reference.md` moves with language features under the coupled-change contract,
+`docs/LANGUAGE*.md` feeds the site-reference freshness gate, and product-gate literate
+doc-contract tests read documentation files directly.
+
 `semantic mutation` is required on pull requests and every product-gate event. Ordinary pull
 requests run all curated controls plus generic mutants intersecting the recorded base-to-head diff;
 pushes, schedules, manual runs, and pull requests targeting `production` run the complete accepted
