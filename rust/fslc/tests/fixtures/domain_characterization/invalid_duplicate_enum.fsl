@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
+domain InvalidDuplicateEnum {
+  enum Status { Draft, Draft }
+
+  aggregate A {
+    state { status: Status; }
+  }
+}

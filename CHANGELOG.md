@@ -51,6 +51,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `expressions_valid.fsl` remains in `KNOWN_DIVERGENT_DOMAIN_FIXTURES` for
   the still-open name-shadowing symptom.
 
+- Fixed `domain check`/`domain expand` producing an
+  ill-typed `= 0` initializer for domain state fields whose accepted container
+  type had no explicit default. The rendered lowering path now dispatches
+  exhaustively over the structured type expression: `Option<T>` initializes to
+  `none`, `Set<T>` to `Set {}`, and top-level `Map<K, V>` to the same dense
+  per-key `forall` initializer as the typed lowering path. New corpus fixtures
+  keep all three variants in the checked two-path agreement gate. Both paths
+  now also share enum declaration validation, so an empty enum nested anywhere
+  in those containers fails at its declaration instead of producing invalid
+  text or panicking. Renderer failures now retain their source location and
+  name-resolution classification in the CLI JSON envelope (#691).
+
 - Added a standalone `site reference freshness` CI workflow
   (`.github/workflows/site-reference-freshness.yml`) that runs the
   pre-existing but previously unwired `tests/test_site_reference_snapshot.py`
@@ -100,7 +112,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 - Added a corpus-wide agreement gate between `domain`'s two independent
   lowering paths: `lower_domain` (typed `KernelSpec`, used by `check`/
   `verify`) and `domain_kernel_source` (rendered `.fsl` text, used by
-  `domain expand`/`check_domain`/`domain testgen`/`domain scaffold`).
+  `domain expand` and `check_domain`).
   `rust/fsl-core/tests/domain_render_agreement.rs` projects both paths
   through `public_kernel_contract` for every domain spec in `examples/` and
   `rust/fslc/tests/fixtures/` and diffs the two structurally, excluding only

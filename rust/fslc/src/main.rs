@@ -6811,7 +6811,7 @@ fn run_domain_check(
     let result = match fsl_tools::check_domain(&domain, &fslc_rust::outcome::project_kernel(kernel))
     {
         Ok(result) => wrap_specialized(result),
-        Err(error) => (semantic_error_output(&error.to_string()), 2),
+        Err(error) => (core_error_output(&error), 2),
     };
     apply_domain_edition(result, path, path, edition)
 }
@@ -6830,7 +6830,7 @@ fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
     };
     let source = match fsl_tools::domain_kernel_source(&domain) {
         Ok(source) => source,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        Err(error) => return (core_error_output(&error), 2),
     };
     if let Some(output_path) = output_path
         && let Err(error) = std::fs::write(output_path, &source)
@@ -15817,6 +15817,18 @@ fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
 
 fn semantic_error_output(message: &str) -> Value {
     fslc_rust::verification_output::render_semantic_error(envelope(), message, None, false)
+}
+
+/// Render a core frontend/lowering diagnostic without discarding its typed
+/// location or name-resolution classification at a command boundary.
+fn core_error_output(error: &fsl_core::CoreError) -> Value {
+    let diagnostic = SemanticDiagnostic::from_core_error(error);
+    fslc_rust::verification_output::render_semantic_error(
+        envelope(),
+        &diagnostic.message,
+        diagnostic.loc,
+        diagnostic.name_resolution,
+    )
 }
 
 /// Render a typed-model failure with the location the model recorded for the
