@@ -9,22 +9,41 @@ use fsl_syntax::{
 };
 
 use crate::{
-    CoreError,
+    CoreError, LoweringStep, OriginChain, OriginId, OriginSite,
     domain_lowering::{
         domain_effect_owns_event, effect_outcome_member, validate_effect_outcome_roles,
     },
 };
 
-/// Mirrors `compose.rs`'s `error_at`: a rendering-time failure located at a
-/// span in the *original* `DomainSpec` source (this module runs before any
-/// text serialization, so these spans are real, unlike the ones inside the
-/// ephemeral kernel text `domain_kernel_source` produces).
+/// A rendering-time failure located at a span in the original `DomainSpec`.
+///
+/// This module runs before text serialization, so both the public location and
+/// the internal origin chain point at authored domain source rather than the
+/// ephemeral Kernel text produced by [`domain_kernel_source`].
 fn error_at(message: impl Into<String>, span: Span) -> CoreError {
     CoreError {
         message: message.into(),
         line: span.start.line,
         column: span.start.column,
-        origin: None,
+        origin: Some(Box::new(OriginChain {
+            id: OriginId(format!(
+                "domain:render-error:{}:{}",
+                span.start.offset, span.end.offset
+            )),
+            dialect: "domain".to_owned(),
+            primary: Some(OriginSite {
+                source_file: None,
+                span: Some(span),
+                dialect: "domain".to_owned(),
+                declaration_path: Vec::new(),
+            }),
+            secondary: Vec::new(),
+            lowering_steps: vec![LoweringStep {
+                kind: "render_domain_kernel_source".to_owned(),
+                detail: None,
+            }],
+            generated: false,
+        })),
         name_resolution: false,
     }
 }

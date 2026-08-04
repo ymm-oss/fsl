@@ -24,6 +24,9 @@ an intentional semantic or diagnostic change has been accepted and documented.
 - `invalid_empty_enum_containers.fsl` is the rejecting control that keeps empty
   enum validation ahead of both typed lowering and rendered-kernel generation,
   including direct, `Option`, `Set`, Map-key, and Map-value positions.
+- `invalid_duplicate_enum.fsl` keeps the repeated member's original location
+  and `name` diagnostic classification across both the `domain expand`
+  renderer boundary and the `domain check` load path.
 - `on_stale` is captured in the surface projection only because current domain
   lowering omits it; this corpus records that gap without accepting it as the
   intended language contract.

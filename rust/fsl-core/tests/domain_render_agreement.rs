@@ -10,8 +10,9 @@
 //!   typed [`fsl_core::KernelSpec`] directly. `check`/`verify` use this path.
 //! - path B: [`fsl_core::domain_kernel_source`] (`domain.rs`) renders the
 //!   same `DomainSpec` to `.fsl` **text**, which is then re-parsed with
-//!   [`fsl_core::parse_kernel_source`] into a `KernelSpec`. `domain expand`,
-//!   `domain testgen`, `domain scaffold`, and `check_domain` use this path.
+//!   [`fsl_core::parse_kernel_source`] into a `KernelSpec`. `domain expand`
+//!   and `check_domain` use the renderer in production; this gate additionally
+//!   re-parses its output so the comparison reaches a checked model.
 //!
 //! Before this file, no test checked that the two paths produce the same
 //! checked model for any spec, so a rule fixed on one side (e.g. PR #661)
@@ -139,6 +140,7 @@ const VALID_DOMAIN_FIXTURES: &[&str] = &[
 /// `domain_kernel_source` -> `parse_kernel_source` -> `build_model`) because
 /// they are semantically invalid (type mismatch / unknown symbol).
 const SEMANTICALLY_INVALID_DOMAIN_FIXTURES: &[&str] = &[
+    "rust/fslc/tests/fixtures/domain_characterization/invalid_duplicate_enum.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_empty_enum_containers.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_type_mismatch.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_member.fsl",
@@ -237,7 +239,7 @@ struct KnownDivergence {
 ///    `generated-enum-name-check-gap`, `misuse.internal_generated_name: 1`):
 ///    domain-level code must not reference compiler-generated names.
 ///    `domain_kernel_source` (path B -- what `domain expand` /
-///    `check_domain` / `domain testgen` / `domain scaffold` run) does not
+///    `check_domain` run) does not
 ///    reject it: its textual substitution only rewrites *bare* enum member
 ///    names it recognizes (`Draft` -> `Status_Draft`); the already-qualified
 ///    name the fixture writes is left untouched, and happens to be
@@ -716,6 +718,83 @@ fn container_default_zero_regressions_are_rejected() {
                 panic!("{relative}: faulty initializer '{faulty}' produced a checked kernel")
             }
         }
+    }
+}
+
+/// Rejecting controls for every fail-closed branch added by #691. These are
+/// intentionally separate cases: a single invalid fixture would stop at its
+/// first error and leave the later type-shape branches uncalibrated.
+#[test]
+fn unsupported_default_shapes_fail_closed_with_original_origins() {
+    let cases = [
+        (
+            "nested Map value",
+            "Map<Id, Map<Id, Id>>",
+            "",
+            "Map state requires explicit initialization through supported semantics",
+        ),
+        (
+            "Seq state",
+            "Seq<Id>",
+            "",
+            "unsupported domain type constructor 'Seq'/1",
+        ),
+        (
+            "unknown constructor",
+            "Bag<Id>",
+            "",
+            "unsupported domain type constructor 'Bag'/1",
+        ),
+        (
+            "malformed Map arity",
+            "Map<Id>",
+            "",
+            "unsupported domain type constructor 'Map'/1",
+        ),
+        (
+            "explicit whole-Map default",
+            "Map<Id, Id>",
+            " = 0",
+            "whole-Map domain defaults are not supported",
+        ),
+        (
+            "non-scalar Map key",
+            "Map<Option<Id>, Id>",
+            "",
+            "map keys require a scalar or named type",
+        ),
+    ];
+
+    for (label, type_name, explicit_default, expected) in cases {
+        let source = format!(
+            "domain InvalidDefaultShape {{\n  type Id = 0..1\n  aggregate A {{\n    state {{\n      value: {type_name}{explicit_default};\n    }}\n  }}\n}}\n"
+        );
+        let domain = parse_domain_spec(&source)
+            .unwrap_or_else(|error| panic!("{label}: expected parseable domain: {error}"));
+        let field_span = domain.aggregates[0].state[0].span;
+        let Err(error) = domain_kernel_source(&domain) else {
+            panic!("{label}: renderer unexpectedly accepted invalid shape");
+        };
+        assert_eq!(error.message, expected, "{label}");
+        assert_eq!(
+            (error.line, error.column),
+            (field_span.start.line, field_span.start.column),
+            "{label}"
+        );
+        let origin = error
+            .origin
+            .as_deref()
+            .unwrap_or_else(|| panic!("{label}: renderer discarded the domain origin"));
+        assert_eq!(
+            origin.primary.as_ref().and_then(|site| site.span),
+            Some(field_span),
+            "{label}"
+        );
+        assert_eq!(origin.lowering_steps.len(), 1, "{label}");
+        assert_eq!(
+            origin.lowering_steps[0].kind, "render_domain_kernel_source",
+            "{label}"
+        );
     }
 }
 
