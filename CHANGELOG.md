@@ -5,6 +5,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Added an opt-in, CI-independent, Store-first Referance semantic-drift pilot for
+  the bounded domain lowering/rendering slice (#709). The content-addressed
+  Python/Rust generation probe retains the full JSON envelope and exit code with
+  a failing mutation control, FSL verification bindings expose stale code/adapter
+  evidence, and an auxiliary scoped CodeReferance profile indexes Rust enum
+  variants and exact symbols. Referance
+  output remains shadow evidence: the accepted procedure forbids automatic
+  grounding, promotion, issue creation, and use in product or release gates.
+  Authority triage filed the independent accepted-but-hollow findings as
+  #710–#713 rather than treating Python parity or symbol presence as proof.
+
 - Added a standalone `site reference freshness` CI workflow
   (`.github/workflows/site-reference-freshness.yml`) that runs the
   pre-existing but previously unwired `tests/test_site_reference_snapshot.py`

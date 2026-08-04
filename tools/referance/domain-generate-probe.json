@@ -1,0 +1,65 @@
+{
+  "binding_id": "fsl:domain-generate:python-rust",
+  "candidate": {
+    "artifacts": [
+      "rust/Cargo.lock",
+      "rust/Cargo.toml",
+      "rust/fsl-syntax/Cargo.toml",
+      "rust/fsl-syntax/src/lib.rs",
+      "rust/fsl-syntax/src/domain.rs",
+      "rust/fsl-core/Cargo.toml",
+      "rust/fsl-core/src/lib.rs",
+      "rust/fsl-core/src/dialect.rs",
+      "rust/fsl-core/src/domain.rs",
+      "rust/fsl-core/src/domain_lowering.rs",
+      "rust/fsl-core/src/public_kernel.rs",
+      "rust/fsl-tools/Cargo.toml",
+      "rust/fsl-tools/src/lib.rs",
+      "rust/fsl-tools/src/domain.rs",
+      "rust/fsl-tools/src/domain_codegen.rs",
+      "rust/fsl-tools/src/domain_naming.rs",
+      "rust/fslc/Cargo.toml",
+      "rust/fslc/build.rs",
+      "rust/fslc/src/main.rs",
+      "rust/fslc/src/spec_load.rs",
+      "docs/DESIGN-domain.md",
+      "docs/DESIGN-kernel-contract.md",
+      "tools/referance/domain-probe-adapter.py"
+    ],
+    "command": ["{python}", "tools/referance/domain-probe-adapter.py", "--implementation", "rust"]
+  },
+  "cases": [
+    {
+      "id": "functional-ddd-rust-scaffold",
+      "spec": "examples/domain/order_functional_ddd.fsl",
+      "target": "rust"
+    },
+    {
+      "id": "async-effect-python-scaffold",
+      "spec": "examples/domain/order_async_effect.fsl",
+      "target": "python"
+    }
+  ],
+  "schema_version": "referance.transpilation.v1",
+  "seed": 709,
+  "selector": "domain-generate-full-json-envelope-v1",
+  "source": {
+    "artifacts": [
+      "examples/domain/order_functional_ddd.fsl",
+      "examples/domain/order_async_effect.fsl",
+      "pyproject.toml",
+      "src/fslc/__init__.py",
+      "src/fslc/__main__.py",
+      "src/fslc/domain_parser.py",
+      "src/fslc/domain_ir.py",
+      "src/fslc/domain_check.py",
+      "src/fslc/domain_expand.py",
+      "src/fslc/domain_codegen/simple.py",
+      "src/fslc/cli.py",
+      "docs/DESIGN-domain.md",
+      "tests/test_rust_cli_semantics.py",
+      "tools/referance/domain-probe-adapter.py"
+    ],
+    "command": ["{python}", "tools/referance/domain-probe-adapter.py", "--implementation", "python"]
+  }
+}
