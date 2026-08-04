@@ -6,10 +6,10 @@
 //! joining each `requires`/`rejects` piece with literal `" and "` without
 //! individually parenthesizing each piece. Because `and` binds tighter
 //! than `or` in FSL's grammar, a `decide` with two or more pieces where one
-//! piece contains a top-level `or` misgrouped on the rendered/re-parsed
-//! path (`domain expand` / `domain testgen` / `domain scaffold` /
-//! `check_domain`) while the directly-lowered typed path (`check`/`verify`
-//! on the `.fsl` domain source) built the correct grouping directly.
+//! piece contains a top-level `or` misgrouped in the rendered source exposed
+//! by `domain expand` / `check_domain`. Re-parsing that source, as this test
+//! and the agreement gate do, then disagreed with the directly-lowered typed
+//! path (`check`/`verify` on the `.fsl` domain source).
 //!
 //! `rust/fsl-core/tests/domain_render_agreement.rs` pins that the two
 //! paths' *public Kernel contracts* agree (issue #664's structural gate).
@@ -148,6 +148,10 @@ fn verify_agrees_between_typed_model_and_rendered_kernel() {
     assert_eq!(status_b, 1, "path B: {verify_b:#}");
     assert_eq!(verify_b["result"], "violated", "path B: {verify_b:#}");
     assert_eq!(
+        verify_b["invariant"], verify_a["generated_name"],
+        "path B violated a different property: {verify_b:#}"
+    );
+    assert_eq!(
         status_a, status_b,
         "path A/B exit codes disagree: {verify_a:#} vs {verify_b:#}"
     );
@@ -157,4 +161,5 @@ fn verify_agrees_between_typed_model_and_rendered_kernel() {
     );
 
     std::fs::remove_file(&expanded_path).ok();
+    std::fs::remove_dir(&directory).ok();
 }

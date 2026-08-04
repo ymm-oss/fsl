@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+
 domain CanExpansionPrecedence {
-  // SPDX-License-Identifier: Apache-2.0
   aggregate Gate {
     state {
       a: Bool = false;

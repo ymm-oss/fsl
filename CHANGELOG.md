@@ -5,8 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
-- Fixed a false green in `domain expand`/`domain testgen`/`domain scaffold`/
-  `check_domain`'s `can(Command)` rendering: `Context::normalize`
+- Fixed a false green in `domain expand`/`check_domain`'s `can(Command)`
+  rendering: `Context::normalize`
   (`rust/fsl-core/src/domain.rs`) joined a `decide`'s `requires` clauses and
   negated `rejects` conditions with literal `" and "` without
   parenthesizing each piece individually, so a piece containing a
