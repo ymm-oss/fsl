@@ -10,20 +10,25 @@ on:
   push:
     branches: [main]
   pull_request:
-    # Agent-configuration surfaces are not product inputs: no build, test,
-    # generator, or release path reads them. A pull request whose every
-    # changed file matches this list skips the product gate pre-merge; one
-    # file outside it restores the full run, and GitHub runs the workflow
-    # anyway when a diff is too large to evaluate. The post-merge `main`
-    # push, schedule, and dispatch triggers carry no filter, so every merged
-    # main state still receives the complete product evidence
+    # No product-gate lane reads these surfaces. The paths that do read
+    # them keep their own unfiltered pre-merge coverage: `merge readiness /
+    # automation contracts` runs the `.claude/` environment contract test,
+    # and `release.yml` extracts notes from CHANGELOG.md at tag time and
+    # fails loudly on a malformed file. A pull request whose every changed
+    # file matches this list skips the product gate pre-merge; one file
+    # outside it restores the full run, and GitHub runs the workflow anyway
+    # when a diff is too large to evaluate. The post-merge `main` push,
+    # schedule, and dispatch triggers carry no filter, so every merged main
+    # state still receives the complete product evidence
     # (docs/DESIGN-ci.md). Do not add `skills/**` or `docs/**`: those are
-    # coupled product surfaces (language reference, site freshness).
+    # coupled product surfaces (language reference, site freshness,
+    # literate doc-contract tests).
     paths-ignore:
       - ".claude/**"
       - ".agents/**"
       - "CLAUDE.md"
       - "AGENTS.md"
+      - "CHANGELOG.md"
   schedule:
     - cron: "17 18 * * *"
   workflow_dispatch:
