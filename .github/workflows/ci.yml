@@ -10,25 +10,18 @@ on:
   push:
     branches: [main]
   pull_request:
-    # No product-gate lane reads these surfaces. The paths that do read
-    # them keep their own unfiltered pre-merge coverage: `merge readiness /
-    # automation contracts` runs the `.claude/` environment contract test,
-    # and `release.yml` extracts notes from CHANGELOG.md at tag time and
-    # fails loudly on a malformed file. A pull request whose every changed
-    # file matches this list skips the product gate pre-merge; one file
-    # outside it restores the full run, and GitHub runs the workflow anyway
-    # when a diff is too large to evaluate. The post-merge `main` push,
-    # schedule, and dispatch triggers carry no filter, so every merged main
-    # state still receives the complete product evidence
-    # (docs/DESIGN-ci.md). Do not add `skills/**` or `docs/**`: those are
-    # coupled product surfaces (language reference, site freshness,
-    # literate doc-contract tests).
-    paths-ignore:
-      - ".claude/**"
-      - ".agents/**"
-      - "CLAUDE.md"
-      - "AGENTS.md"
-      - "CHANGELOG.md"
+    # The agent-configuration exemption formerly lived here as a
+    # `paths-ignore` list. It now lives in `tools/check-product-gate-scope.sh`,
+    # run as the first step of each heavy job below, so a skip is an
+    # in-job early exit that still reports a context instead of a
+    # workflow-level skip that reports none at all. See docs/DESIGN-ci.md,
+    # "Agent-configuration exemption" and "Merge queue (planned, not yet
+    # enabled)".
+  merge_group:
+    # Unfiltered: GitHub does not support `paths`/`paths-ignore` on
+    # `merge_group` (docs/DESIGN-ci.md), and only `main` will ever have a
+    # queue, so an unfiltered trigger is equivalent. Currently dormant --
+    # no merge queue exists on `main` yet, so this event never fires today.
   schedule:
     - cron: "17 18 * * *"
   workflow_dispatch:
@@ -36,12 +29,25 @@ on:
 permissions:
   contents: read
 
-# The Linux evidence — `rust workspace` and `WASM` — runs on every pull request.
-# It is where the tests live: 103 of the repository's 124 integration test files
-# sit in `fslc`, `fsl-tools`, `fsl-verifier` and `fsl-lsp`, none of which the
-# bounded `merge readiness` gate compiles or runs, and its `cargo check` carries
-# no `--all-targets`, so a type error or a failing assertion in any of them used
-# to reach main and surface only after the merge.
+# The Linux evidence — `rust workspace` and `WASM` — runs on every pull request
+# today. It is where the tests live: 103 of the repository's 124 integration
+# test files sit in `fslc`, `fsl-tools`, `fsl-verifier` and `fsl-lsp`, none of
+# which the bounded `merge readiness` gate compiles or runs, and its
+# `cargo check` carries no `--all-targets`, so a type error or a failing
+# assertion in any of them used to reach main and surface only after the
+# merge.
+#
+# The four heavy jobs (`rust-workspace`, `wasm`, `semantic-mutation`,
+# `fsl-logic`) also trigger on `merge_group`, which is where they are meant to
+# eventually run for real once a merge queue is configured on `main`: pull
+# requests would then report a cheap queue-entry stub instead, batches of
+# candidates would be validated together, and the pre-merge cost this file's
+# header used to describe would move to queue-entry time. That rollout has
+# two remaining, explicit, human-confirmed steps this PR does not take —
+# creating the `FSL_MERGE_QUEUE_CI` repository variable and adding a
+# `merge_queue` rule to the `main` ruleset — so today `pull_request` events
+# still run the complete evidence in full, exactly as before. See
+# docs/DESIGN-ci.md, "Merge queue (planned, not yet enabled)".
 #
 # Only the cross-platform matrix — `native Z3 4.16` on macOS and Windows — stays
 # post-merge under FSL_OPTIMISTIC_CI, reported by the post-merge CI reporter.
@@ -52,7 +58,7 @@ permissions:
 # Product gates for main pushes, schedules, manual runs, and production
 # promotions never honor that opt-out.
 concurrency:
-  group: product-gate-${{ github.event.pull_request.number || github.run_id }}
+  group: product-gate-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -62,16 +68,28 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide required evidence scope
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: ./tools/check-product-gate-scope.sh >>"$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.scope.outputs.run == 'true'
         with:
           components: clippy,rustfmt
 
       - uses: Swatinem/rust-cache@v2
+        if: steps.scope.outputs.run == 'true'
         with:
           workspaces: rust -> target
 
       - name: Check Rust workspace
+        if: steps.scope.outputs.run == 'true'
         run: ./tools/check-native-integration.sh rust
 
   wasm:
@@ -80,16 +98,28 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide required evidence scope
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: ./tools/check-product-gate-scope.sh >>"$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.scope.outputs.run == 'true'
         with:
           targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
+        if: steps.scope.outputs.run == 'true'
         with:
           workspaces: rust -> target
 
       - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
         with:
           node-version: "22"
           cache: npm
@@ -99,6 +129,7 @@ jobs:
 
       - name: Cache pinned wasm-bindgen CLI
         id: wasm-bindgen-cache
+        if: steps.scope.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -108,17 +139,18 @@ jobs:
           key: ${{ runner.os }}-wasm-bindgen-cli-0.2.126
 
       - name: Install pinned wasm-bindgen CLI
-        if: steps.wasm-bindgen-cache.outputs.cache-hit != 'true'
+        if: steps.wasm-bindgen-cache.outputs.cache-hit != 'true' && steps.scope.outputs.run == 'true'
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
 
       - name: Check WASM integration
+        if: steps.scope.outputs.run == 'true'
         run: ./tools/check-native-integration.sh wasm
 
   rust-native-z3:
     name: native Z3 4.16 (${{ matrix.os }})
     if: >-
-      github.event_name != 'pull_request' ||
-      github.base_ref != 'main' ||
+      (github.event_name != 'pull_request' && github.event_name != 'merge_group') ||
+      github.base_ref == 'production' ||
       vars.FSL_OPTIMISTIC_CI != 'enabled'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
@@ -171,7 +203,7 @@ jobs:
   # control matrix plus generic mutants intersecting their diff. Push,
   # schedule, and manual runs execute the complete accepted P2 pilot scope.
   semantic-mutation:
-    name: semantic mutation (${{ github.event_name == 'pull_request' && github.base_ref != 'production' && 'changed' || 'complete' }})
+    name: semantic mutation (${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production')) && 'changed' || 'complete' }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -179,37 +211,47 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Decide required evidence scope
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: ./tools/check-product-gate-scope.sh >>"$GITHUB_OUTPUT"
+
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.scope.outputs.run == 'true'
 
       - uses: Swatinem/rust-cache@v2
+        if: steps.scope.outputs.run == 'true'
         with:
           workspaces: rust -> target
 
       - name: Install pinned semantic mutation runner
+        if: steps.scope.outputs.run == 'true'
         run: cargo install cargo-mutants --version 27.1.0 --locked
 
-      - name: Build pull-request diff
-        if: github.event_name == 'pull_request' && github.base_ref != 'production'
+      - name: Build change diff
+        if: steps.scope.outputs.run == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production'))
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         # cargo-mutants runs at rust/ and matches patch paths relative to that
         # workspace; --relative prevents a silent rust/ prefix mismatch.
         run: git diff --relative=rust --binary "$BASE_SHA...$HEAD_SHA" -- rust >"$RUNNER_TEMP/semantic-mutation.diff"
 
       - name: Calibrate changed implementation semantics
-        if: github.event_name == 'pull_request' && github.base_ref != 'production'
+        if: steps.scope.outputs.run == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production'))
         env:
           FSL_MUTATION_DIFF: ${{ runner.temp }}/semantic-mutation.diff
-          FSL_MUTATION_BASE: ${{ github.event.pull_request.base.sha }}
+          FSL_MUTATION_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: ./tools/check-native-integration.sh semantic-mutation changed
 
       - name: Calibrate complete accepted implementation scope
-        if: github.event_name != 'pull_request' || github.base_ref == 'production'
+        if: steps.scope.outputs.run == 'true' && github.event_name != 'merge_group' && (github.event_name != 'pull_request' || github.base_ref == 'production')
         run: ./tools/check-native-integration.sh semantic-mutation complete
 
       - name: Preserve mutation evidence
-        if: always()
+        if: always() && steps.scope.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: semantic-mutation-${{ github.run_id }}-${{ github.run_attempt }}
@@ -223,28 +265,39 @@ jobs:
   # incomplete and becomes complete only after every selected case and edge
   # executes, so a truncated shard cannot read green.
   fsl-logic:
-    name: FSL Logic Test (${{ github.event_name == 'pull_request' && github.base_ref != 'production' && 'pr' || 'scheduled' }})
+    name: FSL Logic Test (${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production')) && 'pr' || 'scheduled' }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide required evidence scope
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: ./tools/check-product-gate-scope.sh >>"$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.scope.outputs.run == 'true'
 
       - uses: Swatinem/rust-cache@v2
+        if: steps.scope.outputs.run == 'true'
         with:
           workspaces: rust -> target
 
       - name: Run bounded pull-request generation
-        if: github.event_name == 'pull_request' && github.base_ref != 'production'
+        if: steps.scope.outputs.run == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production'))
         run: ./tools/check-native-integration.sh fsl-logic pr
 
       - name: Run scheduled-volume generation
-        if: github.event_name != 'pull_request' || github.base_ref == 'production'
+        if: steps.scope.outputs.run == 'true' && github.event_name != 'merge_group' && (github.event_name != 'pull_request' || github.base_ref == 'production')
         run: ./tools/check-native-integration.sh fsl-logic scheduled
 
       - name: Preserve FSL Logic evidence
-        if: always()
+        if: always() && steps.scope.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: fsl-logic-${{ github.run_id }}-${{ github.run_attempt }}
@@ -257,8 +310,8 @@ jobs:
     if: >-
       always() &&
       (
-        github.event_name != 'pull_request' ||
-        github.base_ref != 'main' ||
+        (github.event_name != 'pull_request' && github.event_name != 'merge_group') ||
+        github.base_ref == 'production' ||
         vars.FSL_OPTIMISTIC_CI != 'enabled'
       )
     needs:

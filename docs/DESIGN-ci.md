@@ -94,37 +94,73 @@ parallel:
 - the deterministic finite-model agreement gate from `tools/check-native-integration.sh fsl-logic`
   (`FSL Logic Test`).
 
-**The first two carry no event condition and therefore also run on every pull request**, which is
-what makes the Linux evidence pre-merge. Only `native Z3 4.16` and the aggregate `product gate`
-context honour `FSL_OPTIMISTIC_CI` and skip on pull requests into `main`.
+**The first two carry no event condition beyond scope evidence and therefore also run on every
+pull request today**, which is what makes the Linux evidence pre-merge. Only `native Z3 4.16` and
+the aggregate `product gate` context honour `FSL_OPTIMISTIC_CI` and skip on pull requests into
+`main`.
+
+All four heavy jobs (`rust workspace`, `WASM`, `semantic mutation`, `FSL Logic Test`) also trigger
+on the `merge_group` event. As of this writing that trigger is dormant — no merge queue is
+configured on `main`, so `merge_group` never fires — but once one exists, this is where these jobs
+are meant to execute for real, batched per queue entry. On `pull_request` events they still run
+in full today, because the `FSL_MERGE_QUEUE_CI` repository variable does not exist yet.
+Once that variable and a `merge_queue` ruleset rule are added (see "Merge queue (planned, not yet
+enabled)" below), pull-request pushes would report cheap queue-entry stubs from
+`tools/check-product-gate-scope.sh` instead of running the jobs in full. Until that rollout
+happens, treat this paragraph's first sentence — full evidence on every pull request — as the
+live contract, and the `merge_group` sentence as forward-looking infrastructure only.
 
 ### Agent-configuration exemption
 
-The `pull_request` trigger carries a `paths-ignore` list naming the agent-configuration surfaces
-plus the changelog: `.claude/**`, `.agents/**`, `CLAUDE.md`, `AGENTS.md`, and `CHANGELOG.md`.
-`CHANGELOG.md` must be on the list for the exemption to fire at all — the coupled-change
-convention gives nearly every notable agent-configuration change a changelog entry.
+Each of the four heavy jobs runs `tools/check-product-gate-scope.sh` as its first step (named
+"Decide required evidence scope"), reads its `run`/`reason` output, and gates every later step on
+`steps.scope.outputs.run == 'true'`. This replaced a workflow-level `paths-ignore` list on
+`ci.yml`'s `pull_request` trigger that named the same five surfaces: `.claude/**`, `.agents/**`,
+`CLAUDE.md`, `AGENTS.md`, and `CHANGELOG.md` (exact root filenames, not prefixes —
+`CLAUDE.md.d/x` does not match). `CHANGELOG.md` stays on the list for the exemption to fire at
+all — the coupled-change convention gives nearly every notable agent-configuration change a
+changelog entry.
+
+The mechanism moved, not the accepted scope, for a concrete reason: a `paths-ignore`-skipped
+workflow never emits its job's context at all. If that context were ever made a required status
+check — issue #707 tracks exactly this gap — or ever needed to satisfy merge-queue entry, a
+workflow-level skip would leave it permanently `Expected`, unfixable even by an admin merge. This
+was independently observed while merging PR #715. An in-job early exit does not have that failure
+mode: the job always starts, checks out, computes the diff, and reports success either from the
+stub path or from real evidence. None of the four contexts are required status checks today —
+`merge readiness` remains the only one — so this is a latent-risk fix, not a response to an
+already-broken required check.
 
 No **product-gate lane** reads those files. The paths that do read them keep their own
 unfiltered pre-merge coverage: `merge readiness / automation contracts` executes the `.claude/`
 environment contract test from `tests/test_claude_environment.py`, and `release.yml` extracts
 release notes from `CHANGELOG.md` at tag time and fails loudly (`test -s`) on a malformed file.
-A pull request whose every changed file matches the list therefore skips the product gate
-pre-merge and merges on `merge readiness` (plus `site reference freshness`) alone.
+A pull request whose every changed file matches the list therefore still gets `run=false` from the
+scope script, each heavy job exits its remaining steps fast, and the pull request merges on
+`merge readiness` (plus `site reference freshness`) alone — exactly as under the retired
+`paths-ignore` list.
 
-The exemption is fail-closed three ways. A single changed file outside the list restores the full
-pre-merge run, and GitHub runs the workflow anyway when a diff is too large for path evaluation.
-The `main` push, schedule, and dispatch triggers carry no filter, so every merged `main` state
-still receives the complete product evidence, and a wrongly exempted defect surfaces through the
-existing post-merge reporting contract below instead of reaching `production`. And a pull request
-into `production` that matches the list is blocked rather than waved through: the production
-ruleset's required contexts (`rust workspace`, `WASM`, the `native Z3 4.16` matrix) simply never
-report, so the merge stays unsatisfiable — such a pull request should not exist, and the gate does
-not invent evidence for it.
+The exemption is fail-closed the same three ways as before, now enforced by the script rather than
+by GitHub's path evaluation. A single changed file outside the list restores the full pre-merge
+run. A missing base/head SHA, a failed `git diff`, or an event the script does not recognize all
+resolve to `run=true` — never to a stub. The `main` push, schedule, and dispatch triggers carry no
+exemption at all: `tools/check-product-gate-scope.sh` returns `run=true` unconditionally for
+those events, so every merged `main` state still receives the complete product evidence, and a
+wrongly exempted defect surfaces through the existing post-merge reporting contract below instead
+of reaching `production`. And a pull request into `production` that matches the list is blocked
+rather than waved through: the script's `production` branch always returns `run=true`, so the
+production ruleset's required contexts (`rust workspace`, `WASM`, the `native Z3 4.16` matrix)
+still report real evidence — such a pull request should not exist, and the gate does not invent a
+stub for it.
 
-Growing the list is a contract change to this decision, not a workflow tweak, and each candidate
-needs the same evidence sweep: name every path that reads it and show that path keeps unfiltered
-pre-merge or fail-loud coverage. `skills/**` and `docs/**` must never join it:
+The script's `selftest` subcommand is the executable accepting/rejecting control for its
+classifier (all-exempt, all-product, mixed, a filename-prefix near-miss, and fail-closed-on-empty
+cases), run by `merge readiness / automation contracts` on every pull request and merge-group
+event.
+
+Growing the exempt list is a contract change to this decision, not a script tweak, and each
+candidate needs the same evidence sweep: name every path that reads it and show that path keeps
+unfiltered pre-merge or fail-loud coverage. `skills/**` and `docs/**` must never join it:
 `skills/fsl/reference.md` moves with language features under the coupled-change contract,
 `docs/LANGUAGE*.md` feeds the site-reference freshness gate, and product-gate literate
 doc-contract tests read documentation files directly.
@@ -154,6 +190,41 @@ successful evidence; an accidentally skipped lane cannot make the workflow confi
 
 Product-gate runs for merged commits are not cancelled. Each merged state therefore retains its own
 portable evidence and failure attribution even when agents merge changes quickly.
+
+## Merge queue (planned, not yet enabled)
+
+**As of this writing, neither the ruleset rule nor the `FSL_MERGE_QUEUE_CI` variable described in
+this section exists.** This section documents infrastructure that this change lands in an inert
+state, not a live contract. Do not cite it as evidence that pull requests currently merge through
+a queue, or that the four heavy contexts are currently optional on `pull_request`.
+
+The target mechanism: once a GitHub merge queue is configured on `main`, `ci.yml`'s four heavy
+jobs (`rust workspace`, `WASM`, `semantic mutation (changed)`, `FSL Logic Test (pr)`) would execute
+for real on the `merge_group` event, validating each batched queue entry against current `main`
+instead of each pull request individually. A `pull_request` push would then report a cheap
+queue-entry stub for those same context names — `tools/check-product-gate-scope.sh` returns
+`run=false, reason=queue-entry-stub` for that case — deferring the real evidence to queue-entry
+time, the same way `native Z3 4.16` already defers to post-merge under `FSL_OPTIMISTIC_CI`.
+
+`ci.yml` already carries the (currently dormant) `merge_group` trigger and the scope-check
+plumbing this needs. What is missing is entirely on the GitHub configuration side, and enabling it
+is a separate, explicit, human-confirmed operational action — not something this or any other
+automated change performs. Issue #707 tracks the underlying required-status-check/ruleset gap
+this mechanism is meant to eventually close; this repository has already seen a design document
+assert ruleset enforcement that the live ruleset did not actually implement, and this section is
+written to not repeat that mistake.
+
+A future PR or operational change would need to, in order:
+
+1. Create the repository variable `FSL_MERGE_QUEUE_CI` (e.g. set to `enabled`).
+2. Add a `merge_queue` type rule to the `main` branch ruleset (id `19090811`), and add the four
+   heavy context names — `rust workspace`, `WASM`, `semantic mutation (changed)`, and
+   `FSL Logic Test (pr)` — to that rule's required status checks.
+
+Neither step is automated by this change, and completing only one of them without the other would
+leave the mechanism either invisible (variable set, no queue to batch into) or inert (queue rule
+added, but `FSL_MERGE_QUEUE_CI` unset, so `pull_request` pushes keep running full evidence as they
+do today).
 
 ## Failure reporting contract
 
@@ -219,3 +290,6 @@ discipline, which step 1 alone does not achieve.
 - Hiding platform failures with `continue-on-error`.
 - Trusting agent-authored verification claims in place of independent GitHub-hosted execution.
 - Changing FSL language, Kernel, CLI/JSON, LSP, Worker, or frozen Python compatibility behavior.
+- Enabling the GitHub merge queue or changing any live branch-protection ruleset — this PR lands
+  only the inert workflow/script mechanism; see the new "Merge queue (planned, not yet enabled)"
+  section.

@@ -5,6 +5,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Replaced `ci.yml`'s `paths-ignore`-based agent-configuration exemption with
+  `tools/check-product-gate-scope.sh`, run as the first step of each of the
+  four heavy product-gate jobs (`rust workspace`, `WASM`, `semantic
+  mutation`, `FSL Logic Test`). Same accepted exemption scope
+  (`.claude/**`, `.agents/**`, `CLAUDE.md`, `AGENTS.md`, `CHANGELOG.md`),
+  but a workflow-level path skip never emits its job's context at all — if
+  that context is ever made a required status check (issue #707) or needed
+  to satisfy merge-queue entry, the skip leaves it permanently `Expected`,
+  unfixable even by an admin merge (observed while merging PR #715); an
+  in-job diff-checked early exit cannot get stuck that way. `ci.yml` also
+  gains a currently dormant `merge_group` trigger and per-job scope checks
+  on those four jobs, as inert groundwork for a future merge-queue-gated CI
+  architecture — no live ruleset or repository-variable change ships with
+  this PR; see `docs/DESIGN-ci.md`'s new "Merge queue (planned, not yet
+  enabled)" section. The script's `selftest` subcommand is wired into
+  `merge readiness / automation contracts` as its accepting/rejecting
+  control.
+
 - Exempted agent-configuration-only pull requests (`.claude/**`, `.agents/**`,
   `CLAUDE.md`, `AGENTS.md`, and `CHANGELOG.md`, whose coupled entry would
   otherwise defeat the exemption) from the pre-merge product gate via
