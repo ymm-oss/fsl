@@ -400,9 +400,12 @@ there and re-target the patch. Silently skipping a stale operator is how a
 detector matrix rots into decoration.
 
 Rebuild cost keeps this out of the ordinary Rust workspace lane, but M13 makes
-it part of the dedicated semantic-mutation lane on every pull request and
-product-gate run. Operators patch `rust/fslc` where possible, so the rebuild is
-that crate plus a relink rather than the workspace.
+it part of the dedicated semantic-mutation lanes on every pull request and
+product-gate run — round-robin sharded three ways across the
+`semantic-mutation-operators` matrix (docs/DESIGN-ci.md, "Sharded pre-merge
+Linux evidence"; docs/DESIGN-semantic-mutation-gate.md, "CI scheduling: two
+lanes, one aggregator"). Operators patch `rust/fslc` where possible, so the
+rebuild is that crate plus a relink rather than the workspace.
 
 Patches are applied with `git apply`, never the system `patch`. The first CI run
 of this matrix failed (#613) because BSD `patch` on macOS accepted the no-op
@@ -416,12 +419,16 @@ nothing. `git apply` is one implementation wherever git is, applies zero fuzz by
 default, and tolerates the prose preamble each patch file carries.
 
 The harness is `tools/run-fault-operators.sh`, reached directly as the legacy
-`fault-operators` phase and, together with pinned generic implementation
-mutants, through `tools/check-native-integration.sh semantic-mutation`. It is
-deliberately not in the ordinary `rust` phase. CI requires the dedicated
-semantic-mutation job on every event: pull requests run the curated matrix and
-generic mutants intersecting the PR diff, while other events run the complete
-accepted P2 pilot scope. Operators are rows in
+`fault-operators` phase, through `tools/check-native-integration.sh
+semantic-mutation` for a complete unsharded local run, and — with its own
+`--shard K/N` — as the curated half of `tools/run-semantic-mutation-gate.sh
+--lane operators` in CI's sharded `semantic-mutation-operators` matrix. It is
+deliberately not in the ordinary `rust` phase. CI requires the aggregate
+`semantic-mutation` context on every event: pull requests run the curated
+matrix and generic mutants intersecting the PR diff, while other events run
+the complete accepted P2 pilot scope; the aggregator requires both the
+operator-shard matrix and the unsharded generic-mutants job to succeed and
+enforces that the shards' union covers every operator. Operators are rows in
 `rust/fslc/tests/fault_operators/operators.txt`, each naming a patch file, a
 primary detector, and a blind detector; the two controls are
 `controls/no-op.patch` and `controls/stale-seam.patch`. Adding an operator is a
@@ -699,8 +706,11 @@ scratch checkout and requires
 operator row or shipped injection hook.
 
 `tools/check-native-integration.sh rust` runs the workspace Rust tests and
-therefore owns this native anchor. The frozen Python test is outside that gate
-and remains a compatibility reference only.
+therefore owns this native anchor for a complete local run; in CI the same
+test runs under whichever `rust-tests` shard `cargo-nextest`'s partitioning
+assigns it to (docs/DESIGN-ci.md, "Sharded pre-merge Linux evidence"). The
+frozen Python test is outside that gate and remains a compatibility
+reference only.
 
 ## Triangulated Assurance (#670)
 

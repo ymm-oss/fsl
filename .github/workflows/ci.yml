@@ -62,10 +62,19 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  rust-workspace:
-    name: rust workspace
+  # `rust workspace` is split three ways (docs/DESIGN-ci.md, "Sharded
+  # pre-merge Linux evidence"): `rust-checks` runs the non-test phases once
+  # (formatting, Clippy, doctests -- which `cargo-nextest` cannot run, so
+  # they stay here rather than being silently dropped -- and the full
+  # workspace build), and `rust-tests` shards the ~29-minute sequential test
+  # execution three ways with `cargo-nextest`. The `rust-workspace` job below
+  # aggregates both under the exact required-context name and keeps its job
+  # id unchanged, so `product-gate`'s `needs:` list and the `main` ruleset's
+  # required-context set both keep working without any further edit.
+  rust-checks:
+    name: rust checks
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -87,10 +96,135 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         with:
           workspaces: rust -> target
+          shared-key: rust-workspace
 
-      - name: Check Rust workspace
+      - name: Check Rust workspace (non-test phases)
         if: steps.scope.outputs.run == 'true'
-        run: ./tools/check-native-integration.sh rust
+        run: ./tools/check-native-integration.sh rust-checks
+
+  rust-tests:
+    name: rust tests (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide required evidence scope
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: ./tools/check-product-gate-scope.sh >>"$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.scope.outputs.run == 'true'
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.scope.outputs.run == 'true'
+        with:
+          workspaces: rust -> target
+          shared-key: rust-workspace
+
+      - name: Cache pinned cargo-nextest CLI
+        id: nextest-cache
+        if: steps.scope.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-nextest
+          key: ${{ runner.os }}-cargo-nextest-0.9.143
+
+      - name: Install pinned cargo-nextest CLI
+        if: steps.nextest-cache.outputs.cache-hit != 'true' && steps.scope.outputs.run == 'true'
+        run: cargo install cargo-nextest --version 0.9.143 --locked
+
+      - name: Run Rust test shard
+        if: steps.scope.outputs.run == 'true'
+        run: ./tools/check-native-integration.sh rust-tests ${{ matrix.shard }}/3
+
+      - name: Preserve test-shard inventory
+        if: always() && steps.scope.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-test-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: rust/target/test-shards/*.txt
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  rust-workspace:
+    name: rust workspace
+    if: always()
+    needs:
+      - rust-checks
+      - rust-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide required evidence scope
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: ./tools/check-product-gate-scope.sh >>"$GITHUB_OUTPUT"
+
+      - name: Require complete rust-checks and rust-tests evidence
+        env:
+          RUST_CHECKS: ${{ needs.rust-checks.result }}
+          RUST_TESTS: ${{ needs.rust-tests.result }}
+        shell: bash
+        run: |
+          failures=0
+          for result in "$RUST_CHECKS" "$RUST_TESTS"; do
+            if [ "$result" != "success" ]; then
+              failures=1
+            fi
+          done
+          if [ "$failures" -ne 0 ]; then
+            echo "rust workspace failed: rust-checks=$RUST_CHECKS rust-tests=$RUST_TESTS" >&2
+            exit 1
+          fi
+
+      # Agent-configuration-exempt pull requests never upload shard
+      # inventories (the upload steps above are gated on the same scope
+      # check), so there is nothing to download or validate: the shards
+      # already reported `success` from their early exit, which the
+      # previous step accepted.
+      - name: Download rust test-shard inventories
+        if: steps.scope.outputs.run == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rust-test-shard-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: rust-test-shards
+
+      - name: Verify shard completeness
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          mapfile -t fulls < <(find rust-test-shards -name full.txt | sort)
+          mapfile -t shards < <(find rust-test-shards -name shard.txt | sort)
+          if [ "${#fulls[@]}" -ne 3 ] || [ "${#shards[@]}" -ne 3 ]; then
+            echo "rust workspace: expected 3 shard inventories, found ${#fulls[@]} full.txt and ${#shards[@]} shard.txt" >&2
+            exit 1
+          fi
+          # Three independently computed listings must agree exactly -- a
+          # divergence means the shards did not see the same workspace.
+          if ! cmp -s "${fulls[0]}" "${fulls[1]}" || ! cmp -s "${fulls[1]}" "${fulls[2]}"; then
+            echo "rust workspace: the three shards computed different full test listings" >&2
+            diff "${fulls[0]}" "${fulls[1]}" || true
+            diff "${fulls[1]}" "${fulls[2]}" || true
+            exit 1
+          fi
+          ./tools/check-shard-union.sh "${fulls[0]}" "${shards[@]}"
 
   wasm:
     name: WASM
@@ -199,13 +333,27 @@ jobs:
         working-directory: rust
         run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
 
-  # M13 semantic mutation gate (#672). Pull requests run the complete curated
-  # control matrix plus generic mutants intersecting their diff. Push,
-  # schedule, and manual runs execute the complete accepted P2 pilot scope.
-  semantic-mutation:
-    name: semantic mutation (${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production')) && 'changed' || 'complete' }})
+  # M13 semantic mutation gate (#672), split into two lanes (docs/DESIGN-ci.md,
+  # "Sharded pre-merge Linux evidence"). Pull requests run the complete
+  # curated control matrix plus generic mutants intersecting their diff.
+  # Push, schedule, and manual runs execute the complete accepted P2 pilot
+  # scope. `semantic-mutation-operators` shards the curated fault-operator
+  # controls three ways; `semantic-mutation-mutants` runs the generic
+  # cargo-mutants half complete and unsharded, because it is already at
+  # roughly the operator lane's floor and sharding it would add cargo-mutants
+  # partitioning risk for no wall-clock gain. The `semantic-mutation` job
+  # below aggregates both under the exact required-context name expression
+  # and keeps its job id unchanged, so `product-gate`'s `needs:` list and the
+  # `main` ruleset's required-context set both keep working without any
+  # further edit.
+  semantic-mutation-operators:
+    name: mutation operators (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -225,6 +373,46 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         with:
           workspaces: rust -> target
+          shared-key: semantic-mutation
+
+      - name: Calibrate curated fault-operator shard
+        if: steps.scope.outputs.run == 'true'
+        run: ./tools/run-semantic-mutation-gate.sh "${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production')) && 'changed' || 'complete' }}" --lane operators --shard ${{ matrix.shard }}/3
+
+      - name: Preserve operator shard evidence
+        if: always() && steps.scope.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: semantic-mutation-operators-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: rust/target/fault-operators/logs/**
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  semantic-mutation-mutants:
+    name: mutation mutants
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide required evidence scope
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: ./tools/check-product-gate-scope.sh >>"$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.scope.outputs.run == 'true'
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.scope.outputs.run == 'true'
+        with:
+          workspaces: rust -> target
+          shared-key: semantic-mutation
 
       - name: Install pinned semantic mutation runner
         if: steps.scope.outputs.run == 'true'
@@ -244,22 +432,97 @@ jobs:
         env:
           FSL_MUTATION_DIFF: ${{ runner.temp }}/semantic-mutation.diff
           FSL_MUTATION_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-        run: ./tools/check-native-integration.sh semantic-mutation changed
+        run: ./tools/run-semantic-mutation-gate.sh changed --lane mutants
 
       - name: Calibrate complete accepted implementation scope
         if: steps.scope.outputs.run == 'true' && github.event_name != 'merge_group' && (github.event_name != 'pull_request' || github.base_ref == 'production')
-        run: ./tools/check-native-integration.sh semantic-mutation complete
+        run: ./tools/run-semantic-mutation-gate.sh complete --lane mutants
 
       - name: Preserve mutation evidence
         if: always() && steps.scope.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: semantic-mutation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            rust/target/semantic-mutation.*/**
-            rust/target/fault-operators/logs/**
+          name: semantic-mutation-mutants-${{ github.run_id }}-${{ github.run_attempt }}
+          path: rust/target/semantic-mutation.*/**
           if-no-files-found: error
           retention-days: 14
+          overwrite: true
+
+  semantic-mutation:
+    name: semantic mutation (${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production')) && 'changed' || 'complete' }})
+    if: always()
+    needs:
+      - semantic-mutation-operators
+      - semantic-mutation-mutants
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide required evidence scope
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: ./tools/check-product-gate-scope.sh >>"$GITHUB_OUTPUT"
+
+      - name: Require complete operator-shard and mutants-lane evidence
+        env:
+          SEMANTIC_MUTATION_OPERATORS: ${{ needs.semantic-mutation-operators.result }}
+          SEMANTIC_MUTATION_MUTANTS: ${{ needs.semantic-mutation-mutants.result }}
+        shell: bash
+        run: |
+          failures=0
+          for result in "$SEMANTIC_MUTATION_OPERATORS" "$SEMANTIC_MUTATION_MUTANTS"; do
+            if [ "$result" != "success" ]; then
+              failures=1
+            fi
+          done
+          if [ "$failures" -ne 0 ]; then
+            echo "semantic mutation failed: operators=$SEMANTIC_MUTATION_OPERATORS mutants=$SEMANTIC_MUTATION_MUTANTS" >&2
+            exit 1
+          fi
+
+      # Agent-configuration-exempt pull requests never upload shard
+      # manifests (the upload steps above are gated on the same scope
+      # check), so there is nothing to download or validate: the shards
+      # already reported `success` from their early exit, which the
+      # previous step accepted.
+      - name: Download operator shard manifests
+        if: steps.scope.outputs.run == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: semantic-mutation-operators-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: semantic-mutation-operators
+
+      - name: Verify operator shard completeness
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          mapfile -t manifests < <(find semantic-mutation-operators -name shard-manifest.v1.json | sort)
+          if [ "${#manifests[@]}" -ne 3 ]; then
+            echo "semantic mutation: expected 3 operator shard manifests, found ${#manifests[@]}" >&2
+            exit 1
+          fi
+          base_revision="$(jq -r '.base_revision' "${manifests[0]}")"
+          table_operators="$(jq -c '.table_operators' "${manifests[0]}")"
+          work="$(mktemp -d)"
+          for index in "${!manifests[@]}"; do
+            manifest="${manifests[$index]}"
+            if [ "$(jq -r '.base_revision' "$manifest")" != "$base_revision" ]; then
+              echo "semantic mutation: $manifest disagrees with ${manifests[0]} on base_revision" >&2
+              exit 1
+            fi
+            if [ "$(jq -c '.table_operators' "$manifest")" != "$table_operators" ]; then
+              echo "semantic mutation: $manifest disagrees with ${manifests[0]} on table_operators" >&2
+              exit 1
+            fi
+            jq -r '.executed_operators[]' "$manifest" | sort -u >"$work/shard-$index.txt"
+          done
+          jq -r '.[]' <<<"$table_operators" | sort -u >"$work/full.txt"
+          ./tools/check-shard-union.sh "$work/full.txt" "$work"/shard-*.txt
 
   # M13 deterministic finite-model agreement (#673). The report begins
   # incomplete and becomes complete only after every selected case and edge
