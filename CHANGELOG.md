@@ -5,6 +5,54 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Added (#707): a ruleset drift audit, closing the drift-detection half of #707 (the
+  required-context half landed separately). `.github/ruleset-contract.json` is a checked-in,
+  schema-versioned record of the `main safety and CI` ruleset (id `19090811`): identity,
+  enforcement, conditions, rule types, strict/`do_not_enforce_on_create` policy, required
+  contexts as `(context, integration_id)` pairs, `bypass_actors`, and two explanatory lists
+  (`deferred_contexts` — the `FSL_OPTIMISTIC_CI`-gated cross-platform matrix and aggregate that
+  can never require pre-merge without deadlocking; `constituent_contexts` — the sharded lane
+  names whose `if: always()` aggregator alone carries the required-context name). The new
+  `.github/scripts/audit-ruleset-drift.mjs` fetches the live ruleset and compares it against the
+  contract through pure, unit-testable `compareRuleset`/`validateContract` functions, rejecting
+  on `ruleset-identity`, `ruleset-missing`, `api-unreadable`, `enforcement`, `conditions`,
+  `rule-type-missing`/`-unexpected`, `empty-rules`, `strict-policy`, `enforce-on-create`,
+  `required-context-missing`/`-unexpected`/`-duplicated`, `required-contexts-empty`,
+  `bypass-actors-unobserved`, `bypass-actor-added`, and `contract-invalid`. Required contexts are
+  keyed on `(context, integration_id)`, not context name alone, so a same-named check reported by
+  a different GitHub App is treated as impersonation, not satisfaction. `pull_request` rule
+  parameters (review counts, `allowed_merge_methods`, …) are deliberately unaudited — human
+  review policy is ruleset `19090821`'s separate accepted decision — and the calibration suite's
+  blind control proves an edit there stays invisible to this audit. `bypass_actors` is in scope
+  and its **absence** (not just an added actor) is a failure: GitHub returns that field only to a
+  caller with write access to the ruleset, the workflow's `GITHUB_TOKEN` has no `administration`
+  permission at all, and a new `RULESET_AUDIT_TOKEN` fine-grained-PAT secret is required to
+  observe it — without the secret the audit still runs and fails closed with
+  `bypass-actors-unobserved` rather than treating absence as an empty (safe) list. The raw
+  observation is written and digested to the step summary *before* classification. Failure-issue
+  lifecycle (`ci/ruleset-drift` label, marker `<!-- ruleset-drift:19090811 -->`, occurrence
+  markers, reopen-on-recurrence, close-on-clean-with-recovery-comment) imports and reuses
+  `report-post-merge-ci.mjs`'s exported `GitHubRestClient` rather than adding a second REST
+  client. `.github/workflows/ruleset-drift-audit.yml` runs on `schedule`, `workflow_dispatch`,
+  and a path-filtered `push` to `main`; it deliberately carries no `pull_request` trigger, since a
+  fork PR has no access to the elevated token. `.github/scripts/audit-ruleset-drift.test.mjs`
+  derives every case from a verbatim capture of the live ruleset
+  (`.github/scripts/fixtures/ruleset-19090811.json`) by `structuredClone` plus one mutation, and
+  is wired into `tools/check-merge-readiness.sh`'s `check_automation` lane. `site reference
+  freshness` joins the `main` ruleset's required contexts, now six instead of five — it reports on
+  every pull request with no path filter, so requiring it cannot deadlock a pull request the way
+  the deferred cross-platform matrix would. `docs/DESIGN-ci.md` gains a "Ruleset drift audit"
+  subsection and corrects two sentences that had gone stale after the five-context requirement
+  landed (2026-08-05): "None of the four contexts are required status checks today" is now scoped
+  to the time the exemption mechanism moved, and the agent-configuration-exemption's "merges on
+  `merge readiness` (plus `site reference freshness`) alone" is restated for the six-required-
+  context reality. `docs/DESIGN-docs-site.md`'s D7 addendum and
+  `.github/workflows/site-reference-freshness.yml`'s header now say the workflow's own context is
+  enforced (not merely visible) and why that is deadlock-safe; the `#688` frozen-`cli.py`
+  asymmetry it separately flagged is unchanged and stays open. The live ruleset edit adding
+  `site reference freshness` is applied out of band; until then, the audit correctly reports a
+  `required-context-missing: site reference freshness` finding — the designed pre-rollout state,
+  not a bug.
 - Fixed (#713): saga `compensation { when Trigger after After { ... } }` now
   lowers to a kernel action guarded by BOTH the trigger event flag and the
   `after` event flag on both lowering paths (`lower_saga_actions` in

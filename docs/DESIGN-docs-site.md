@@ -240,16 +240,23 @@ readable in Japanese, accepting the resulting maintenance cost.
   surfaces' actual flag/subcommand parity is still unmeasured. Wiring the gate does not resolve
   that; `#688` stays open and is the place that asymmetry gets decided, not this check.
 
-  **This workflow is visible, not enforced — and that is the price of the placement above, not an
-  incidental property.** `merge readiness` is the *only* required status check in this
-  repository's `main safety and CI` ruleset. Joining it would have made a stale page block the
-  merge; landing this check as a standalone workflow instead means it fails loudly on its own run
-  but is not in that required set, so a red run does not block a merge. The trade made here is:
-  keep `merge-readiness.yml`'s stdlib-only dependency contract intact, at the cost of the
-  freshness check not being merge-blocking, rather than gain merge-blocking enforcement by
-  breaking that contract. Adding this workflow to the ruleset is a separate repository-settings
-  decision outside this pull request's reach, stated here rather than recommended — whoever owns
-  the ruleset decides, and can reverse this trade on the merits above.
+  **This workflow is now enforced, and that costs nothing the placement above was protecting.**
+  The original objection conflated two different moves: joining this check to *another*
+  workflow's job graph, and requiring *this* workflow's own context on the ruleset. The first
+  would have broken a real contract — `ci.yml` is Rust-native by `AGENTS.md`'s "one Rust-native
+  entrypoint, no Python" clause, and `merge-readiness.yml`'s `automation-contracts` lane is
+  stdlib-only by `tools/check-merge-readiness.sh`'s own comment — and that objection still holds;
+  neither workflow gained a Python dependency. The second move breaks nothing: `site reference
+  freshness` runs as its own standalone workflow on every pull request with no path filter
+  (`pull_request`/`merge_group`, unconditioned), so it cannot deadlock a pull request the way a
+  deferred, `FSL_OPTIMISTIC_CI`-gated context would (`docs/DESIGN-ci.md`, "Ruleset drift audit").
+  `.github/ruleset-contract.json` now lists it as the sixth required context alongside `merge
+  readiness`, `rust workspace`, `WASM`, `semantic mutation (changed)`, and `FSL Logic Test (pr)`,
+  and `.github/scripts/audit-ruleset-drift.mjs` audits the live ruleset against that contract so
+  the requirement cannot silently regress the way the underlying gap (issue #707) once did. The
+  `#688` frozen-`cli.py` asymmetry this addendum flagged is unchanged by any of this and stays
+  open: requiring the check makes a frozen-reference argparse edit force a site update exactly as
+  before, and the two surfaces' actual flag/subcommand parity remains unmeasured.
 
 ## 2. Chapter → category mapping
 

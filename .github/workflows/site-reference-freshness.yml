@@ -19,12 +19,13 @@ name: site reference freshness
 #     path, so adding this ~10s pip-install-plus-pytest step there would cost zero wall-clock on
 #     merge-readiness.yml as a whole. The lane's purity, not its speed, is what this placement
 #     protects.
-#   - That placement has a real cost, named rather than hidden: `merge readiness` is the only
-#     required status check in this repository's `main safety and CI` ruleset, so joining it
-#     would have made a stale page block the merge. This standalone workflow is not in that
-#     required set, so it makes staleness visible on the pull request but does not block it.
-#     That is the trade this placement makes: keep merge-readiness.yml's stdlib-only contract
-#     intact, at the cost of enforcement, rather than gain enforcement by breaking that contract.
+#   - This workflow's own context, `site reference freshness`, IS a required status check in the
+#     `main safety and CI` ruleset (.github/ruleset-contract.json), so a stale page does block the
+#     merge. That is safe specifically because this workflow runs on every pull request with no
+#     path filter (see the `on:` block below) -- unlike the deferred, FSL_OPTIMISTIC_CI-gated
+#     contexts in docs/DESIGN-ci.md's "Product gate contract", it can never fail to report on an
+#     ordinary pull request, so requiring it cannot deadlock one. docs/DESIGN-ci.md's "Ruleset
+#     drift audit" audits this requirement against the live ruleset so it cannot silently regress.
 #
 # See docs/DESIGN-docs-site.md's D7 addendum for the full rationale and #630/#688.
 
