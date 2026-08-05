@@ -99,16 +99,14 @@ pull request today**, which is what makes the Linux evidence pre-merge. Only `na
 the aggregate `product gate` context honour `FSL_OPTIMISTIC_CI` and skip on pull requests into
 `main`.
 
-All four heavy jobs (`rust workspace`, `WASM`, `semantic mutation`, `FSL Logic Test`) also trigger
-on the `merge_group` event. As of this writing that trigger is dormant — no merge queue is
-configured on `main`, so `merge_group` never fires — but once one exists, this is where these jobs
-are meant to execute for real, batched per queue entry. On `pull_request` events they still run
-in full today, because the `FSL_MERGE_QUEUE_CI` repository variable does not exist yet.
-Once that variable and a `merge_queue` ruleset rule are added (see "Merge queue (planned, not yet
-enabled)" below), pull-request pushes would report cheap queue-entry stubs from
-`tools/check-product-gate-scope.sh` instead of running the jobs in full. Until that rollout
-happens, treat this paragraph's first sentence — full evidence on every pull request — as the
-live contract, and the `merge_group` sentence as forward-looking infrastructure only.
+All four heavy jobs (`rust workspace`, `WASM`, `semantic mutation`, `FSL Logic Test`) are required
+contexts on the `main` ruleset, and all four also carry a `merge_group` trigger that is **inert**:
+no merge queue is configured on `main`, and the accepted decision below records that one was tried
+and rejected, so `merge_group` never fires. The same is true of
+`tools/check-product-gate-scope.sh`'s `queue-entry-stub` branch, which is gated on a
+`FSL_MERGE_QUEUE_CI` variable that does not exist. Every pull request therefore runs the complete
+Linux evidence in full, and that is the live contract — see "Required pre-merge contexts, and why
+the merge queue was rejected" below before assuming otherwise.
 
 ### Agent-configuration exemption
 
@@ -191,58 +189,56 @@ successful evidence; an accidentally skipped lane cannot make the workflow confi
 Product-gate runs for merged commits are not cancelled. Each merged state therefore retains its own
 portable evidence and failure attribution even when agents merge changes quickly.
 
-## Merge queue (ruleset live, per-push cost not yet reduced)
+## Required pre-merge contexts, and why the merge queue was rejected
 
-**As of this writing, the `main` ruleset (id `19090811`) carries an active `merge_queue` rule and
-five required status checks — `merge readiness`, `rust workspace`, `WASM`,
-`semantic mutation (changed)`, and `FSL Logic Test (pr)` — applied 2026-08-05. The
-`FSL_MERGE_QUEUE_CI` repository variable does not exist yet.** Concretely, this means: a pull
-request into `main` can now be added to the queue once all five contexts pass on the pull request
-itself, and the queue will re-validate a `merge_group` run before merging — but because
-`FSL_MERGE_QUEUE_CI` is unset, `tools/check-product-gate-scope.sh` still returns `run=true` for
-ordinary pull requests, so the four heavy jobs still run in full on every push, exactly as before
-this section's rollout began. Nothing here changes today's per-push cost yet; it changes what
-happens once a pull request author clicks "Merge when ready" — that action now enqueues into a
-real, ruleset-configured queue rather than merging immediately once required checks pass on the
-branch. Do not cite this ruleset state as evidence that per-push evidence has become cheap; that
-is what step 2 below still needs to do.
+The `main` ruleset (`main safety and CI`, id `19090811`) requires five contexts, applied
+2026-08-05: `merge readiness`, `rust workspace`, `WASM`, `semantic mutation (changed)`, and
+`FSL Logic Test (pr)`. `strict_required_status_checks_policy` is `true` and `bypass_actors` is
+empty, so `current_user_can_bypass` is `"never"` for every account — an administrator cannot merge
+past a failing or missing required context.
 
-The target mechanism, once step 2 completes: `ci.yml`'s four heavy jobs would execute for real on
-the `merge_group` event, validating each batched queue entry against current `main` instead of
-each pull request individually. A `pull_request` push would then report a cheap queue-entry stub
-for those same context names — `tools/check-product-gate-scope.sh` returns
-`run=false, reason=queue-entry-stub` for that case — deferring the real evidence to queue-entry
-time, the same way `native Z3 4.16` already defers to post-merge under `FSL_OPTIMISTIC_CI`.
+This closes the gap issue #707 opened: the Safe rollout section below has always required the
+Linux evidence to be *required*, not merely running, and until this change only `merge readiness`
+was. Making the other four required was blocked before, because `ci.yml`'s `paths-ignore` exemption
+meant an agent-configuration-only pull request emitted none of those contexts at all, leaving them
+permanently `Expected`. The in-job scope check that replaced `paths-ignore` (see
+"Agent-configuration exemption" above) is what makes them safe to require: every gated job now
+always reports, either from real evidence or from a fast early exit.
 
-`ci.yml` already carries the `merge_group` trigger and the scope-check plumbing this needs, and
-the ruleset now enforces the target required-context set — but until step 2 completes, every
-pull-request run is real evidence, not a stub, so nothing merges on unvalidated stand-ins. Issue
-#707 tracks the underlying required-status-check/ruleset gap this mechanism is meant to close;
-this repository has already seen a design document assert ruleset enforcement that the live
-ruleset did not actually implement, and this section is written to not repeat that mistake by
-naming exactly which half is live.
+### The merge queue was tried, measured against this repository's workflow, and rejected
 
-The ruleset's `merge_queue` rule enforcement has one operator escape hatch: `bypass_actors`
-carries a single `User` entry (repository admin, `bypass_mode: "pull_request"`), added because the
-ruleset's prior `bypass_actors` list was empty and `current_user_can_bypass` was `"never"` for
-every account — including admins — which was independently confirmed while merging #715 (`--admin`
-could not override an `Expected` required context). Without this entry, a queue malfunction (an
-undocumented `merge_group` branch-filter behavior, a `check_response_timeout_minutes` too low for
-a slow batch, or any other queue-side failure) would have no direct-merge recovery path short of
-reverting this ruleset change via the API. `OrganizationAdmin` was tried first and rejected: this
-repository's admin operates at the repository role, not the organization-owner role, so that actor
-type resolved to nobody, confirmed by `current_user_can_bypass` staying `"never"` after applying
-it. `bypass_mode` is scoped to `"pull_request"` rather than `"always"`, so this bypass cannot be
-used to push directly to `main` outside a pull request.
+A GitHub merge queue was configured on this ruleset on 2026-08-05 and removed the same day. The
+intent was to move the heavy Linux evidence from once per pull-request push to once per landed
+change, using `ci.yml`'s `merge_group` trigger and a queue-entry stub path in
+`tools/check-product-gate-scope.sh` gated on a `FSL_MERGE_QUEUE_CI` variable. Two measurements
+killed it, both observed directly rather than reasoned about:
 
-A future PR or operational change would still need to:
+- **An administrator's merge bypasses the queue entirely.** `gh pr merge --admin` on #717 merged it
+  directly (`7b140af`); the workflow-run history shows no `merge_group` event at any point, only the
+  `push` run on `main`. The queue never validated anything.
+- **The normal enqueue path is unsatisfiable in this repository.** `enqueuePullRequest` was refused
+  with `New changes require approval from someone other than the last pusher`, from the separate
+  `main review for non-admins` ruleset (id `19090821`: one approving review,
+  `require_last_push_approval: true`). GitHub does not let an author approve their own pull request,
+  and its admin bypass does not extend to the enqueue path, so a single-maintainer workflow cannot
+  enqueue at all.
 
-1. Create the repository variable `FSL_MERGE_QUEUE_CI` (e.g. set to `enabled`).
+Together those mean every merge here would take the bypass path, so a queue would sit configured
+and never run. Had `FSL_MERGE_QUEUE_CI=enabled` been set on top of that, the four heavy jobs would
+have reported cheap stubs on every pull request while no `merge_group` run ever replaced them:
+changes would land on `main` with **no pre-merge Linux evidence at all**, detected only by the
+post-merge push run. That is the confidently-green false negative this repository's invariants
+forbid, and it is what the canary pull request (#717) was for — the failure was found before the
+variable was created, not after.
 
-Completing this step is what activates the queue-entry-stub path described above. Until then, the
-ruleset changes recorded here are enforcement of the *target* required-context set without yet
-changing per-push cost — the queue exists and gates merges, but every pull request still earns its
-five green checks the expensive way.
+Reviving the queue requires changing *human review policy*, not CI configuration: the review
+requirement in ruleset `19090821` would have to drop to zero approvals (removing review enforcement
+for non-admin contributors too), or a second approving identity would have to exist. Neither is a
+CI decision, so neither is made here. `ci.yml` keeps its `merge_group` trigger and the scope
+script keeps its `queue-entry-stub` branch — both inert, both harmless, and both ready if that
+policy question is ever answered differently. Until then, per-push cost is unchanged and the
+remaining levers for it are ordinary ones: cache hit rates, job splitting, or moving specific lanes
+post-merge under a new accepted decision.
 
 ## Failure reporting contract
 
@@ -284,7 +280,10 @@ produce the new required context. Roll out in this order:
    immediately, as visible but not-yet-required evidence.
 2. In the `main` repository ruleset, add `rust workspace` and `WASM` alongside `merge readiness`.
    `native Z3 4.16 (macos-15)` and `native Z3 4.16 (windows-latest)` stay out of the required set —
-   they are the deferred cross-platform matrix.
+   they are the deferred cross-platform matrix. **Completed 2026-08-05**, together with
+   `semantic mutation (changed)` and `FSL Logic Test (pr)`; see "Required pre-merge contexts, and
+   why the merge queue was rejected" for the live set and for why requiring them was blocked until
+   the `paths-ignore` exemption moved in-job.
 3. Leave `FSL_OPTIMISTIC_CI=enabled`. It now governs only the cross-platform matrix and the
    aggregate `product gate` context; main pushes, schedules, manual runs, and production promotions
    ignore it as before.
@@ -308,6 +307,9 @@ discipline, which step 1 alone does not achieve.
 - Hiding platform failures with `continue-on-error`.
 - Trusting agent-authored verification claims in place of independent GitHub-hosted execution.
 - Changing FSL language, Kernel, CLI/JSON, LSP, Worker, or frozen Python compatibility behavior.
-- Enabling the GitHub merge queue or changing any live branch-protection ruleset — this PR lands
-  only the inert workflow/script mechanism; see the new "Merge queue (planned, not yet enabled)"
-  section.
+- Running a GitHub merge queue. One was configured and removed on 2026-08-05 after direct
+  measurement; reviving it is a human-review-policy decision, not a CI one. See "Required
+  pre-merge contexts, and why the merge queue was rejected".
+- Relaxing the review requirement in ruleset `main review for non-admins` (id `19090821`) to make
+  a merge queue enqueueable. That trades review enforcement for non-admin contributors against CI
+  latency and needs its own accepted decision.

@@ -5,22 +5,32 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
-- Enabled a GitHub merge queue on `main`: the `main safety and CI` ruleset
-  (id `19090811`) now carries an active `merge_queue` rule and requires
+- Required the complete Linux evidence on `main`, closing the gap #707
+  opened: the `main safety and CI` ruleset (id `19090811`) now requires
   `rust workspace`, `WASM`, `semantic mutation (changed)`, and
-  `FSL Logic Test (pr)` alongside the existing `merge readiness` context. A
-  pull request can now be enqueued via "Merge when ready" once all five
-  contexts pass on the pull request; the queue re-validates a `merge_group`
-  run before merging. This does **not** yet reduce per-push cost — the
-  `FSL_MERGE_QUEUE_CI` repository variable that activates
-  `tools/check-product-gate-scope.sh`'s queue-entry-stub path is still unset,
-  so the four heavy jobs keep running in full on every pull-request push
-  until that variable is created. The ruleset also gained a `User`
-  bypass-actor entry (repository admin, pull-request-scoped) as an
-  operator escape hatch: the prior ruleset had zero bypass actors, so a
-  queue malfunction would have had no direct-merge recovery path short of
-  reverting the ruleset itself. See `docs/DESIGN-ci.md`'s "Merge queue
-  (ruleset live, per-push cost not yet reduced)" section.
+  `FSL Logic Test (pr)` alongside `merge readiness`. `bypass_actors` stays
+  empty and `strict_required_status_checks_policy` stays `true`, so no
+  account — administrators included — can merge past a failing or missing
+  required context. Requiring these four was previously unsafe: under the
+  retired `paths-ignore` exemption an agent-configuration-only pull request
+  emitted none of them, leaving them permanently `Expected`. The in-job scope
+  check makes them always report, which is what unblocked this.
+
+- Reverted a GitHub merge queue that was configured on `main` earlier the
+  same day (2026-08-05), after direct measurement showed it cannot function
+  in this repository's workflow: `gh pr merge --admin` bypasses the queue
+  entirely (observed on #717 — merged directly, no `merge_group` event in the
+  run history), and the normal `enqueuePullRequest` path is refused by
+  ruleset `main review for non-admins` (one approving review plus
+  `require_last_push_approval`), which a single-maintainer workflow cannot
+  satisfy because GitHub does not allow self-approval. Setting
+  `FSL_MERGE_QUEUE_CI=enabled` on top of that state would have made every
+  pull request report cheap stubs with no `merge_group` run ever replacing
+  them, landing changes on `main` with no pre-merge Linux evidence at all;
+  the canary pull request found this before the variable was created.
+  `ci.yml`'s `merge_group` trigger and the scope script's
+  `queue-entry-stub` branch remain in place, inert, documented as such in
+  `docs/DESIGN-ci.md`.
 
 - Replaced `ci.yml`'s `paths-ignore`-based agent-configuration exemption with
   `tools/check-product-gate-scope.sh`, run as the first step of each of the
