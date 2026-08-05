@@ -195,12 +195,33 @@ split into a sharded lane plus an aggregator that keeps the exact required-conte
   `operators.txt`) + `semantic-mutation-mutants` (generic cargo-mutants, complete and **deliberately
   unsharded** — see below) + the `semantic-mutation` aggregator.
 
-Expected wall clock after sharding is **≈17 min**, down from 38m15s — a little over 2x, not 3x,
-because both lanes carry a large unshardable fixed cost measured during this work and stated in the
-floors below. The first sharded operator run measured it directly: a 6-operator shard's no-op control
-took **760s** against 912s for all 17, so splitting the lane three ways removed only ~150s of
-detector time, not two thirds of the lane. Do not quote a lower figure than ≈17 min without a fresh
-measurement.
+Measured wall clock after sharding is **20.7 min**, down from 38m15s — 1.85x, saving ~17.5 min per
+pull request. Recorded from the first sharded run (30989320577, PR #719), all lanes green:
+
+| lane | wall clock |
+| --- | --- |
+| `mutation operators (1/3)` | **20.3 min** ← critical path |
+| `mutation operators (2/3)` / `(3/3)` | 19.0 / 18.4 min |
+| `rust tests (1/3)` | **18.1 min** |
+| `rust tests (3/3)` / `(2/3)` | 12.6 / 8.3 min |
+| `mutation mutants` | 16.7 min |
+| `WASM` | 5.9 min |
+| `rust checks` | 2.7 min |
+| `FSL Logic Test (pr)` | 1.1 min |
+| both aggregators | 0.1 min each |
+
+Two costs are visible in that table and are the honest limits of this change, not incidental noise:
+
+- **`cargo-nextest --partition count:K/N` balances by test count, not duration.** The three shards
+  received 518/460/411 tests and took 18.1/8.3/12.6 min — shard 1 is 2.2x shard 2, so `rust workspace`
+  finishes on its slowest shard at ≈18 min rather than the ≈13 min a duration-balanced split would
+  give. Recovering that ~5 min needs a duration-aware assignment (pinning the known-slow binaries to
+  separate shards), which `count:` cannot express.
+- **Sharding the curated operator lane bought about 10%, not two thirds.** 22.5 min unsharded became
+  20.3 min at `K/3` — three times the compute for ~2 min of wall clock — because the fixed cold build
+  in each shard's synced scratch checkout dominates. It is retained because runner minutes are free on
+  a public repository and it is the current critical path's only lever in this change, but it is a
+  poor trade and the floors below say what would actually move it.
 
 **Doctests moved to `rust-checks`, explicitly, because `cargo-nextest` cannot run them at all.**
 Silently dropping them to make the sharded lane faster would be exactly the "weaken a gate for
@@ -261,14 +282,20 @@ download.
 test (≈7.3 min) cannot be split further by this scheme, so together with the ≈3.5 min compile it
 bounds `rust-workspace` at roughly ≈12 min no matter how the remaining 175 binaries are distributed.
 Each `semantic-mutation-operators` shard independently pays the cold build in its own synced scratch
-checkout (`tools/run-fault-operators.sh`'s `sync_scratch`), and that cost dominates the lane:
-measured, a 6-operator shard's no-op control took 760s where all 17 operators took 912s, so roughly
-700s of the 912s is the fixed scratch build and only ~12s per detector run scales with the shard.
-The lane's floor is therefore ≈760s plus its ~26s-per-assigned-operator loop — about 15–16 min at
-`K/3`, against 22.5 min unsharded, **not** 1350s ÷ 3. Raising the shard count barely helps; only
-making that scratch build cheaper (caching `rust/target/fault-operators`, or sharing a warm target
-dir without breaking the patch-isolation contract) would move this floor, and neither is attempted
-here. Nobody should expect either lane to shrink further without changing what it measures.
+checkout (`tools/run-fault-operators.sh`'s `sync_scratch`), and that cost dominates the lane. Locally,
+a 6-operator shard's no-op control took 760s where all 17 took 912s; in CI the sharded lane landed at
+18.4–20.3 min against 22.5 min unsharded, so the fixed scratch build is an even larger share there.
+Raising the shard count cannot fix this. The two levers that would, neither attempted here, are:
+
+- caching `rust/target/fault-operators` so the scratch build starts warm — the same
+  `Swatinem/rust-cache` treatment the main lanes already get, and the one place in this gate where
+  caching genuinely is the bottleneck (it is not, for `rust workspace`: compilation there is ~3.5 min
+  of 33 on a warm cache);
+- a duration-aware `rust-tests` assignment, worth ~5 min on its own (see the imbalance above).
+
+With both, the gate would plausibly reach ≈13 min; without them, 20.7 min is the floor this design
+delivers. Nobody should expect either lane to shrink further without changing what it measures or how
+its scratch build is warmed.
 
 `semantic mutation` is required on pull requests and every product-gate event. Ordinary pull
 requests run all curated controls plus generic mutants intersecting the recorded base-to-head diff;

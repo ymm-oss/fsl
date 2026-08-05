@@ -6,13 +6,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 ## [Unreleased]
 
 - Sharded the two heaviest pre-merge product-gate jobs to cut PR wall clock
-  from a measured 38m15s (`semantic mutation (changed)`, run 30968645971)
-  toward an expected ≈17 min, without weakening any check or changing the
-  `main` ruleset. The gain is a little over 2x rather than 3x because both
-  lanes carry a large unshardable fixed cost: the first sharded operator run
-  measured a 6-operator shard's no-op control at 760s against 912s for all
-  17, so splitting that lane three ways removed ~150s of detector time, not
-  two thirds of the lane. `rust workspace` (32m43s, of which ~29 min was `cargo test`
+  from a measured 38m15s (`semantic mutation (changed)`, run 30968645971) to a
+  measured **20.7 min** (run 30989320577, all lanes green) — 1.85x, ~17.5 min
+  saved per pull request — without weakening any check or changing the `main`
+  ruleset. The gain is under 2x, not 3x, and `docs/DESIGN-ci.md` records why
+  from the same run: `cargo-nextest --partition count:` balances by test count,
+  not duration, so the three test shards took 18.1/8.3/12.6 min and
+  `rust workspace` waits on its slowest; and sharding the curated operator lane
+  three ways bought only ~10% (22.5 min → 20.3 min) because each shard pays a
+  fixed cold build in its own scratch checkout. The two remaining levers,
+  neither attempted here, are a duration-aware test assignment (~5 min) and
+  caching `rust/target/fault-operators` so that scratch build starts warm. `rust workspace` (32m43s, of which ~29 min was `cargo test`
   running 176 test binaries strictly sequentially) is now `rust-checks`
   (formatting, Clippy, doctests, the full build, and the boundary/stack-
   parity controls, run once) plus `rust-tests` (a 3-way `cargo-nextest
