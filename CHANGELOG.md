@@ -5,6 +5,61 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed (#713): saga `compensation { when Trigger after After { ... } }` now
+  lowers to a kernel action guarded by BOTH the trigger event flag and the
+  `after` event flag on both lowering paths (`lower_saga_actions` in
+  `rust/fsl-core/src/domain_lowering.rs` and `render_saga_actions` in
+  `rust/fsl-core/src/domain.rs`); previously only the trigger flag was
+  required, so a compensation could fire on a trace that never observed its
+  `after` event. Because generated `event_*` flags are one-hot per
+  transition, a compensation whose trigger and after events differ (the
+  common shape, e.g. `examples/domain/order_fulfillment_saga.fsl`) is now
+  structurally disabled and surfaces as a `fslc verify` never-enabled action
+  warning instead of silently accepting the bad trace; this is the accepted
+  interim state pending the correlation-indexed saga history follow-up
+  (issue #662, `docs/DESIGN-saga-history.md`). No spec migration is required:
+  an existing `compensation` block's syntax and semantics are unchanged
+  (only its guard strength, previously unsound). See `docs/DESIGN-domain.md`.
+- Fixed (#712): top-level `await` blocks (e.g.
+  `await PaymentResult { waits_for one_of [...] on X -> Y }`) are now
+  rejected fail-closed by both lowering paths through a new
+  `validate_lowerable_constructs` gate (`rust/fsl-core/src/domain_lowering.rs`,
+  called from both `lower_domain_surface` and `domain_kernel_source`):
+  `DomainAwait` was consumed by nothing outside the parser, and cross-
+  aggregate routing proofs remain explicit Future Work in
+  `docs/DESIGN-domain.md`. **Migration**: remove the top-level
+  `await { ... }` block and use a saga step's `awaits` instead; the
+  top-level form never had executable meaning under `check`/`verify`, so
+  removing it changes no verification outcome.
+  `examples/domain/order_async_effect.fsl` had its now-rejected `await
+  PaymentResult` block removed as part of this fix (its `projection
+  OrderObservedState` block is unaffected and out of this fix's scope). See
+  `docs/DESIGN-domain.md`. Tracked mechanism for future migration
+  diagnostics: #702, #703.
+- Fixed (#711): aggregate `on_stale` policies (e.g.
+  `on_stale Approved when ... { emits ApprovalRejected }`) are now rejected
+  fail-closed by both lowering paths through the same
+  `validate_lowerable_constructs` gate: nothing in `docs/DESIGN-domain.md`
+  pins `on_stale` semantics, and the finding it references
+  (`late_completion_without_stale_policy`) is itself unimplemented in native
+  Rust (#724). **Migration**: remove the `on_stale { ... }` block; it never
+  had executable meaning under `check`/`verify`, so removing it changes no
+  verification outcome. See `docs/DESIGN-domain.md`. Tracked mechanism for
+  future migration diagnostics: #702, #703.
+- Fixed (#710): `value_object` invariants (e.g.
+  `value_object AuditStamp { ... invariant nonNegative { attempts >= 0 } }`)
+  are now rejected fail-closed by both lowering paths through the same
+  `validate_lowerable_constructs` gate. No accepted design pins a
+  `value_object` instance set, and the frozen Python reference only emits
+  direct-state-field instances while skipping `Option<VO>`/`Set<VO>`/
+  `Map<_,VO>`/command-input/event-field/nested-VO positions -- adopting that
+  partial coverage in the verifier would leave most instances unconstrained
+  while an author believes every instance is checked. **Migration**: remove
+  the `invariant { ... }` block from any `value_object`; it never had
+  executable meaning under `check`/`verify`, so removing it changes no
+  verification outcome. `value_object` field defaults without invariants
+  remain fully supported. See `docs/DESIGN-domain.md`. Tracked mechanism for
+  future migration diagnostics: #702, #703.
 - Sharded the two heaviest pre-merge product-gate jobs to cut PR wall clock
   from a measured 38m15s (`semantic mutation (changed)`, run 30968645971) to a
   measured **20.7 min** (run 30989320577, all lanes green) — 1.85x, ~17.5 min

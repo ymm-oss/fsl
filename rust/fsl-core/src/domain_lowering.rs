@@ -100,6 +100,53 @@ fn span_at(loc: DomainLoc) -> Span {
     loc.span()
 }
 
+/// Reject domain constructs that parse into a [`DomainSpec`] but have no
+/// executable lowering on either path (#710/#711/#712). Each of these
+/// constructs is accepted by the grammar and, before this validation, was
+/// silently dropped by both `lower_domain` and `domain_kernel_source`: an
+/// author who wrote one believed it was checked when nothing consumed it.
+/// Fail closed instead of inventing semantics no accepted design pins.
+///
+/// This walks the raw parsed [`DomainSpec`], not a resolver context: these
+/// are `semantics`-class diagnostics (an accepted-but-unlowerable construct),
+/// not name-resolution failures.
+pub(crate) fn validate_lowerable_constructs(domain: &DomainSpec) -> Result<(), CoreError> {
+    if let Some(awaited) = domain.awaits.first() {
+        return Err(error_at(
+            format!(
+                "top-level await '{}' has no executable lowering; use a saga step's awaits",
+                awaited.name
+            ),
+            span_at(awaited.loc),
+        ));
+    }
+    for aggregate in &domain.aggregates {
+        if let Some(stale) = aggregate.stale_policies.first() {
+            return Err(error_at(
+                format!(
+                    "on_stale '{}' has no executable lowering; stale policies are not supported",
+                    stale.event
+                ),
+                span_at(stale.loc),
+            ));
+        }
+    }
+    for ty in &domain.types {
+        if ty.kind == "value_object"
+            && let Some(invariant) = ty.invariants.first()
+        {
+            return Err(error_at(
+                format!(
+                    "value_object invariant '{}.{}' has no executable lowering; value-object invariants are not supported",
+                    ty.name, invariant.name.text
+                ),
+                invariant.span,
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn safe(name: &str) -> String {
     let mut value = name
         .chars()
@@ -1892,9 +1939,6 @@ impl<'a> Resolver<'a> {
                         self.resolve_expr(default, Some(&expected), &scope, None, &mut Vec::new())?;
                 }
             }
-            for invariant in &ty.invariants {
-                self.resolve_bool(&invariant.expr, &scope, None)?;
-            }
         }
         for aggregate in &self.domain.aggregates {
             let state_scope = self.scope_for_aggregate(aggregate)?;
@@ -1918,13 +1962,6 @@ impl<'a> Resolver<'a> {
                         )?;
                     }
                 }
-            }
-            for stale in &aggregate.stale_policies {
-                self.event(&stale.event, stale.loc)?;
-                for emitted in &stale.emits {
-                    self.event(emitted, stale.loc)?;
-                }
-                self.resolve_bool(&stale.condition, &state_scope, Some(aggregate))?;
             }
             for evolve in &aggregate.evolves {
                 let (_, event) = self.event(&evolve.event, evolve.loc)?;
@@ -2069,6 +2106,7 @@ pub(crate) fn lower_domain_surface(
     domain: &DomainSpec,
 ) -> Result<(SurfaceSpec, OriginRegistry), CoreError> {
     validate_effect_outcome_roles(domain)?;
+    validate_lowerable_constructs(domain)?;
     let resolver = Resolver::new(domain);
     resolver.validate_document_expressions()?;
     let mut items = Vec::new();
@@ -2758,10 +2796,10 @@ fn lower_saga_actions(
             resolver.event(&compensation.trigger_event, compensation.loc)?;
             resolver.event(&compensation.after_event, compensation.loc)?;
             let span = span_at(compensation.loc);
-            let mut action_items = vec![ActionItem::Requires(
-                Expr::Var(event_flag(&compensation.trigger_event)),
-                span,
-            )];
+            let mut action_items = vec![
+                ActionItem::Requires(Expr::Var(event_flag(&compensation.trigger_event)), span),
+                ActionItem::Requires(Expr::Var(event_flag(&compensation.after_event)), span),
+            ];
             action_items.extend(
                 resolver
                     .event_assignments(&compensation.emits, span)?

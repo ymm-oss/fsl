@@ -319,6 +319,11 @@ exactly-once semantics.
 The accepted #662 design keeps `event_*` flags one-hot/current-step and will add
 a dedicated `Map<Correlation,SagaPhase>` in a follow-up; do not make global
 event flags sticky or treat one effect's status map as a general saga history.
+A saga `compensation { when Trigger after After { ... } }` block is guarded by
+BOTH event flags (#713); because flags are one-hot, a compensation whose
+trigger and after events differ is structurally disabled today and surfaces
+as a `fslc verify` never-enabled action warning — do not suppress that
+warning or weaken the guard to make it disappear.
 Native domain generation is grounded in Public Kernel v1. A closed
 `domain-scaffold-metadata.v1` companion retains source grouping/spelling that
 lowering cannot publish. Versions, dialect, duplicate Kernel members, and
