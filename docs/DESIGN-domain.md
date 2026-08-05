@@ -110,6 +110,44 @@ not cross the parse boundary as strings. This parse IR deliberately does not
 perform domain name or type resolution. Checked and lowered expressions remain
 the responsibility of `fsl-core` and the public Kernel contract.
 
+### Rejected constructs: parsed, never lowered, so rejected fail-closed
+
+Parsing a construct into the IR is not a promise that it means anything. Three
+constructs reached the parse IR, were type-checked there, and were then dropped
+by **both** lowering paths, so an author could write them and the executable
+model would not contain them — an accepted construct with hollow semantics,
+which `AGENTS.md` classifies as a soundness defect. They are now rejected at
+their declaration, with a located `semantics` diagnostic, by the shared
+`validate_lowerable_constructs` in `rust/fsl-core/src/domain_lowering.rs`,
+called from both `lower_domain_surface` (path A) and `domain_kernel_source`
+(path B) so neither path can accept what the other rejects:
+
+- **top-level `await` routing** (#712). No accepted decision assigns routing a
+  meaning; this document accepts only its grammar (see the Parse IR boundary
+  above), and cross-aggregate routing proofs are Future Work. A saga step's
+  `awaits` is a different construct and remains fully lowered.
+- **aggregate `on_stale`** (#711). Nothing pins the stale-completion semantics.
+  For this to become implementable, an accepted decision must define the stale
+  predicate's evaluation point, the generated action and guard, and the
+  interaction with the effect-completion single-writer rule below.
+- **`value_object` invariants** (#710). What is undecided here is the *instance
+  set*, not the predicate: whether the constraint attaches to direct aggregate
+  state fields only, or also to occurrences inside `Option<T>`/`Set<T>`/
+  `Map<_, T>`, to command parameters and event fields, to nested value objects,
+  and whether a value object's own field defaults must satisfy it. The frozen
+  Python reference emits only the direct-state-field instances, which is why it
+  is not adopted as the contract: an author would believe every occurrence is
+  checked while most are unconstrained. Value objects *without* invariants are
+  unaffected and still lower as structs.
+
+Rejecting is deliberate rather than conservative: implementing any of the three
+would require inventing semantics inside a verifier, which is worse than
+refusing the construct. Each becomes implementable when an accepted amendment
+to this document settles the questions named above. Because the constructs never
+had executable meaning, removing such a block from an existing spec changes no
+verification outcome — see `CHANGELOG.md` for the migration note, and #702/#703
+for the general strictness-migration mechanism.
+
 Domain-only finite membership is represented structurally. Accepted legacy
 spellings retain their source spelling while recording the canonical operator:
 `||` is `or`, and logical `->` is `=>`. Structural `->` in declarations such
