@@ -151,6 +151,7 @@ const SEMANTICALLY_INVALID_DOMAIN_FIXTURES: &[&str] = &[
     "rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_member.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl",
     "rust/fslc/tests/fixtures/domain_stale_policy_rejected.fsl",
+    "rust/fslc/tests/fixtures/domain_value_object_invariant_rejected.fsl",
 ];
 
 /// Domain specs that fail at the single shared surface parser
@@ -869,6 +870,19 @@ const UNLOWERABLE_CONSTRUCT_CASES: &[UnlowerableConstructCase] = &[
         location: |domain| {
             let loc = domain.aggregates[0].stale_policies[0].loc;
             (loc.line, loc.column)
+        },
+    },
+    UnlowerableConstructCase {
+        fixture: "rust/fslc/tests/fixtures/domain_value_object_invariant_rejected.fsl",
+        expected_message: "value_object invariant 'AuditStamp.nonNegative' has no executable lowering; value-object invariants are not supported",
+        location: |domain| {
+            let value_object = domain
+                .types
+                .iter()
+                .find(|ty| ty.kind == "value_object")
+                .expect("fixture declares a value_object");
+            let span = value_object.invariants[0].span;
+            (span.start.line, span.start.column)
         },
     },
 ];

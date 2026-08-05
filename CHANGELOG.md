@@ -46,6 +46,20 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   had executable meaning under `check`/`verify`, so removing it changes no
   verification outcome. See `docs/DESIGN-domain.md`. Tracked mechanism for
   future migration diagnostics: #702, #703.
+- Fixed (#710): `value_object` invariants (e.g.
+  `value_object AuditStamp { ... invariant nonNegative { attempts >= 0 } }`)
+  are now rejected fail-closed by both lowering paths through the same
+  `validate_lowerable_constructs` gate. No accepted design pins a
+  `value_object` instance set, and the frozen Python reference only emits
+  direct-state-field instances while skipping `Option<VO>`/`Set<VO>`/
+  `Map<_,VO>`/command-input/event-field/nested-VO positions -- adopting that
+  partial coverage in the verifier would leave most instances unconstrained
+  while an author believes every instance is checked. **Migration**: remove
+  the `invariant { ... }` block from any `value_object`; it never had
+  executable meaning under `check`/`verify`, so removing it changes no
+  verification outcome. `value_object` field defaults without invariants
+  remain fully supported. See `docs/DESIGN-domain.md`. Tracked mechanism for
+  future migration diagnostics: #702, #703.
 - Sharded the two heaviest pre-merge product-gate jobs to cut PR wall clock
   from a measured 38m15s (`semantic mutation (changed)`, run 30968645971) to a
   measured **20.7 min** (run 30989320577, all lanes green) — 1.85x, ~17.5 min

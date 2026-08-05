@@ -131,6 +131,19 @@ pub(crate) fn validate_lowerable_constructs(domain: &DomainSpec) -> Result<(), C
             ));
         }
     }
+    for ty in &domain.types {
+        if ty.kind == "value_object"
+            && let Some(invariant) = ty.invariants.first()
+        {
+            return Err(error_at(
+                format!(
+                    "value_object invariant '{}.{}' has no executable lowering; value-object invariants are not supported",
+                    ty.name, invariant.name.text
+                ),
+                invariant.span,
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -1925,9 +1938,6 @@ impl<'a> Resolver<'a> {
                     let _ =
                         self.resolve_expr(default, Some(&expected), &scope, None, &mut Vec::new())?;
                 }
-            }
-            for invariant in &ty.invariants {
-                self.resolve_bool(&invariant.expr, &scope, None)?;
             }
         }
         for aggregate in &self.domain.aggregates {

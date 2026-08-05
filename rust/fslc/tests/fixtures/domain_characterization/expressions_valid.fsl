@@ -9,7 +9,7 @@ domain DomainExpressionCharacterization {
   value_object AuditStamp {
     status: OrderStatus = Draft;
     attempts: Quantity = 0;
-    invariant nonNegative { attempts >= 0 }
+    // invariant nonNegative rejected fail-closed since #710 (docs/DESIGN-domain.md)
   }
 
   aggregate Order {
