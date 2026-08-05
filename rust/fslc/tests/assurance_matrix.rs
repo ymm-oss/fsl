@@ -36,6 +36,8 @@ mod expr;
 mod outcome_kind;
 #[path = "assurance/properties.rs"]
 mod properties;
+#[path = "assurance/property_selection.rs"]
+mod property_selection;
 #[path = "support/mod.rs"]
 mod support;
 #[path = "assurance/types.rs"]
@@ -50,6 +52,7 @@ fn axes() -> Vec<Axis> {
         outcome_kind::axis(),
         violation_kind::axis(),
         properties::axis(),
+        property_selection::axis(),
         expr::axis(),
         types::axis(),
         dialects::axis(),

@@ -223,6 +223,26 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   by treating proof dependencies as unselected obligations. Existing selected-
   invariant semantics are unchanged, and selected `leadsTo`/`reachable` plus
   unknown property names remain rejected as before (#701).
+- Added a `property_selection` C3 assurance-matrix axis
+  (`rust/fslc/tests/assurance/property_selection.rs`) so the pre-existing
+  `properties` axis's `(property group, engine)` cells are no longer the only
+  inventoried dimension: the `properties` axis records capability for an
+  *unfiltered* run only, which is exactly how #701 went undetected --
+  `transitions x induction` was `Exercised` there while the CLI's
+  `--property`-selected run of that same cell was independently rejected.
+  The new axis's rows (`"{property group}x{engine}"`) are generated from the
+  Kernel-schema-synced `properties::ROWS` crossed with `properties.rs`'s own
+  declared engine columns, never a hand-copied list, so a new property group
+  or engine automatically gains rows here too and an unclaimed cell fails
+  `every_declared_cell_across_every_axis_has_a_claim` until reviewed. Columns
+  are the `--property Name` and `--exclude-property Name` selector lanes;
+  `terminal` is `NotApplicable` on both for every engine because it has no
+  name `select_properties` can resolve at all. Includes the `trans x
+  induction x selected` positive control and the `reachable x induction x
+  selected` rejecting control named in #705, plus the `leads_to x explicit x
+  selected` rejecting control (explicit's leadsTo incapability holds under
+  isolation too, unlike its accepted `leads_to x explicit x excluded` lane)
+  (#705).
 
 - Added a standalone `site reference freshness` CI workflow
   (`.github/workflows/site-reference-freshness.yml`) that runs the

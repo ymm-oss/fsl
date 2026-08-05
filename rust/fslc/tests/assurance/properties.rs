@@ -39,7 +39,7 @@ use crate::claim::{Axis, Citation, Claim, workspace_root};
 /// `properties.required` spells them. Kept in sync with
 /// `schemas/fslc/kernel/kernel.v1.schema.json` by
 /// [`kernel_schema_property_groups_match_the_axis_rows`].
-const ROWS: &[&str] = &[
+pub(crate) const ROWS: &[&str] = &[
     "invariants",
     "transitions",
     "reachables",
