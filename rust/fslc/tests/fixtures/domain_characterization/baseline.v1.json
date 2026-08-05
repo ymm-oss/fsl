@@ -78,16 +78,7 @@
               }
             }
           ],
-          "invariants": [
-            {
-              "name": "nonNegative",
-              "expr": "attempts >= 0",
-              "loc": {
-                "line": 12,
-                "column": 5
-              }
-            }
-          ],
+          "invariants": [],
           "loc": {
             "line": 9,
             "column": 3
@@ -308,19 +299,7 @@
               }
             }
           ],
-          "stale_policies": [
-            {
-              "event": "Approved",
-              "condition": "status == Approved and previous_status != Cancelled",
-              "emits": [
-                "ApprovalRejected"
-              ],
-              "loc": {
-                "line": 69,
-                "column": 5
-              }
-            }
-          ],
+          "stale_policies": [],
           "loc": {
             "line": 15,
             "column": 3
@@ -7557,7 +7536,7 @@
       "requires order_status == OrderStatus_Draft and not (order_status == OrderStatus_Cancelled)",
       "requires order_status != OrderStatus_Cancelled and order_quantity >= 0",
       "order_audit.status = order_status",
-      "invariant Order_legacyImplication \"DOMAIN-INVARIANT: Order.legacyImplication\" { order_status == OrderStatus_Cancelled => not (order_status == OrderStatus_Draft or order_status == OrderStatus_Approved and not (order_status == OrderStatus_Cancelled)) }",
+      "invariant Order_legacyImplication \"DOMAIN-INVARIANT: Order.legacyImplication\" { order_status == OrderStatus_Cancelled => not ((order_status == OrderStatus_Draft or order_status == OrderStatus_Approved) and (not (order_status == OrderStatus_Cancelled))) }",
       "invariant Order_legacyDisjunction \"DOMAIN-INVARIANT: Order.legacyDisjunction\" { order_status == OrderStatus_Draft or order_status == OrderStatus_Approved or order_status == OrderStatus_Cancelled }",
       "invariant Order_finiteMembership \"DOMAIN-INVARIANT: Order.finiteMembership\" { (order_status == OrderStatus_Draft or order_status == OrderStatus_Approved or order_status == OrderStatus_Cancelled) }"
     ],
@@ -7660,18 +7639,18 @@
                   "name": "Cancel",
                   "generated_name": "order_cancel",
                   "origin": {
-                    "identity": "domain:DomainExpressionCharacterization/aggregate/Order/decide/Cancel:1003:1009:46:5",
+                    "identity": "domain:DomainExpressionCharacterization/aggregate/Order/decide/Cancel:1044:1050:46:5",
                     "dialect": "domain",
                     "primary": {
                       "source_file": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
                       "span": {
                         "start": {
-                          "offset": 1003,
+                          "offset": 1044,
                           "line": 46,
                           "column": 5
                         },
                         "end": {
-                          "offset": 1009,
+                          "offset": 1050,
                           "line": 46,
                           "column": 11
                         }
@@ -7690,12 +7669,12 @@
                         "source_file": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
                         "span": {
                           "start": {
-                            "offset": 604,
+                            "offset": 645,
                             "line": 28,
                             "column": 5
                           },
                           "end": {
-                            "offset": 611,
+                            "offset": 652,
                             "line": 28,
                             "column": 12
                           }

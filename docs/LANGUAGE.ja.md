@@ -247,6 +247,17 @@ aggregate 内で解決され、そのコマンドの `requires` 節の連言と�
 なります。未知のシンボル、aggregate をまたぐコマンド、型の不一致、未対応の呼び出し
 は、元の domain 式の位置で報告されます。
 
+saga の `compensation { when Trigger after After { emits ... } }` ブロックは、
+トリガーイベントフラグと `after` イベントフラグの**両方**でガードされたカーネル
+action へ lowering されます。つまり compensation は、両方のイベントが観測されて
+初めて発火します。生成されるイベントフラグは 1 遷移につき 1 つだけ立つ one-hot な
+観測なので、この二重ガードは単一の `decide` が両方のイベントを同一遷移で emit する
+場合にしか充足できません。トリガーイベントと after イベントが異なる一般的なケース
+(例えば、先の成功の後で起きた失敗によってトリガーされる compensation)は、現在の
+one-hot フラグ方式のもとでは構造的に無効化されており、`fslc verify` はこれを、
+after イベントを一度も観測していないトレースを黙って受理するのではなく、
+never-enabled action の警告として報告します。
+
 effect は `success_event`、`failure_event`、`timeout_event` により、完了イベントへ
 明示的な outcome role を割り当てられます。これらの宣言が分類の正規契約であり、
 イベント名に `fail`、`cancel`、`timeout` が含まれていても、それぞれ `Succeeded`、

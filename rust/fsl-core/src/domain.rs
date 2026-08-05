@@ -5,15 +5,66 @@ use std::collections::{BTreeMap, BTreeSet};
 use fsl_syntax::{
     DomainAggregate, DomainEffect, DomainEvolve, DomainField, DomainLoc, DomainSaga,
     DomainSagaStep, DomainSpec, DomainType, DomainTypeSourceForm, SourcePos, Span, SyntaxExpr,
-    SyntaxExprKind,
+    SyntaxExprKind, SyntaxTypeExpr, SyntaxTypeExprKind,
 };
 
 use crate::{
-    CoreError,
+    CoreError, LoweringStep, OriginChain, OriginId, OriginSite,
     domain_lowering::{
         domain_effect_owns_event, effect_outcome_member, validate_effect_outcome_roles,
     },
 };
+
+/// A rendering-time failure located at a span in the original `DomainSpec`.
+///
+/// This module runs before text serialization, so both the public location and
+/// the internal origin chain point at authored domain source rather than the
+/// ephemeral Kernel text produced by [`domain_kernel_source`].
+fn error_at(message: impl Into<String>, span: Span) -> CoreError {
+    CoreError {
+        message: message.into(),
+        line: span.start.line,
+        column: span.start.column,
+        origin: Some(Box::new(OriginChain {
+            id: OriginId(format!(
+                "domain:render-error:{}:{}",
+                span.start.offset, span.end.offset
+            )),
+            dialect: "domain".to_owned(),
+            primary: Some(OriginSite {
+                source_file: None,
+                span: Some(span),
+                dialect: "domain".to_owned(),
+                declaration_path: Vec::new(),
+            }),
+            secondary: Vec::new(),
+            lowering_steps: vec![LoweringStep {
+                kind: "render_domain_kernel_source".to_owned(),
+                detail: None,
+            }],
+            generated: false,
+        })),
+        name_resolution: false,
+    }
+}
+
+/// If `type_name` is a top-level `Map<K, V>` application, its key and value
+/// type expressions; `None` for every other shape (including a malformed
+/// `Map` arity, which falls through to [`Context::default_for_type`]'s
+/// generic "unsupported domain type constructor" rejection instead of being
+/// treated as a renderable Map here).
+fn map_key_value(type_name: &SyntaxTypeExpr) -> Option<(&SyntaxTypeExpr, &SyntaxTypeExpr)> {
+    match &type_name.kind {
+        SyntaxTypeExprKind::Apply {
+            constructor,
+            arguments,
+        } if constructor.text == "Map" => match arguments.as_slice() {
+            [key, value] => Some((key, value)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
 
 fn synthetic_num(value: i64, loc: DomainLoc) -> SyntaxExpr {
     let position = SourcePos {
@@ -265,35 +316,115 @@ impl<'a> Context<'a> {
             .map(|candidate| candidate.type_name.render_source())
     }
 
-    fn default(&self, field: &DomainField, type_env: &BTreeMap<String, String>) -> String {
+    /// The field-level default: an explicit `= expr` wins; otherwise falls
+    /// through to [`Self::default_for_type`]'s total dispatch on the field's
+    /// type. Mirrors `domain_lowering.rs`'s `Resolver::default_value`
+    /// (field-level, checks for an explicit default) versus
+    /// `Resolver::default_for_type` (type-level, total).
+    fn default(
+        &self,
+        field: &DomainField,
+        type_env: &BTreeMap<String, String>,
+    ) -> Result<String, CoreError> {
         if let Some(value) = &field.default {
-            return self.normalize(
+            return Ok(self.normalize(
                 &value.render_source(),
                 None,
                 type_env,
                 Some(&field.type_name),
                 true,
-            );
+            ));
         }
-        match field.type_name.as_str() {
-            "Bool" => "false".to_owned(),
-            "Int" => "0".to_owned(),
-            _ => match self.ty(&field.type_name) {
-                Some(ty) if ty.kind == "enum" => self.enum_value(&ty.name, &ty.members[0]),
-                Some(ty) if matches!(ty.kind.as_str(), "range" | "external") => ty
-                    .lo
-                    .as_ref()
-                    .map_or_else(|| "0".to_owned(), SyntaxExpr::render_source),
-                Some(ty) if ty.kind == "value_object" => format!(
-                    "{} {{ {} }}",
-                    ty.name,
-                    ty.fields
-                        .iter()
-                        .map(|field| format!("{}: {}", field.name, self.default(field, type_env)))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                _ => "0".to_owned(),
+        self.default_for_type(&field.type_name, field.span, type_env)
+    }
+
+    /// Total dispatch over `SyntaxTypeExprKind` -- the same two-variant AST
+    /// enum `domain_lowering.rs`'s `LogicalType` is itself derived from --
+    /// with no catch-all arm that can produce a value. An unrecognized
+    /// `SyntaxTypeExprKind::Apply` constructor reaches the final named arm,
+    /// which returns [`CoreError`] (the same "unsupported domain type
+    /// constructor" message `domain_lowering.rs`'s
+    /// `logical_type`/`surface_type` already use for the identical case), not
+    /// a silently rendered `"0"`.
+    fn default_for_type(
+        &self,
+        type_name: &SyntaxTypeExpr,
+        span: Span,
+        type_env: &BTreeMap<String, String>,
+    ) -> Result<String, CoreError> {
+        match &type_name.kind {
+            SyntaxTypeExprKind::Name(ident) => match ident.text.as_str() {
+                "Bool" => Ok("false".to_owned()),
+                "Int" => Ok("0".to_owned()),
+                other => match self.ty(other) {
+                    Some(ty) if ty.kind == "enum" => {
+                        let Some(member) = ty.members.first() else {
+                            return Err(error_at(
+                                format!("enum '{}' has no members", ty.name),
+                                span,
+                            ));
+                        };
+                        Ok(self.enum_value(&ty.name, member))
+                    }
+                    Some(ty) if matches!(ty.kind.as_str(), "range" | "external") => Ok(ty
+                        .lo
+                        .as_ref()
+                        .map_or_else(|| "0".to_owned(), SyntaxExpr::render_source)),
+                    Some(ty) if ty.kind == "value_object" => Ok(format!(
+                        "{} {{ {} }}",
+                        ty.name,
+                        ty.fields
+                            .iter()
+                            .map(|field| Ok(format!(
+                                "{}: {}",
+                                field.name,
+                                self.default(field, type_env)?
+                            )))
+                            .collect::<Result<Vec<_>, CoreError>>()?
+                            .join(", ")
+                    )),
+                    // Only "enum" | "range" | "external" | "value_object" are
+                    // ever constructed (fsl-syntax's domain parser and this
+                    // crate's own "external" backfill for referenced names
+                    // are the only producers); a fifth kind string reaching
+                    // here is unrecognized and must fail closed, not render
+                    // "0".
+                    Some(ty) => Err(error_at(
+                        format!("unsupported domain type kind '{}'", ty.kind),
+                        span,
+                    )),
+                    None => Err(error_at(format!("unknown domain type '{other}'"), span)),
+                },
+            },
+            SyntaxTypeExprKind::Apply {
+                constructor,
+                arguments,
+            } => match (constructor.text.as_str(), arguments.as_slice()) {
+                ("Option", [_]) => Ok("none".to_owned()),
+                ("Set", [_]) => Ok("Set {}".to_owned()),
+                // A bare `Map` default (no top-level state-field forall
+                // context) is always rejected, matching
+                // `domain_lowering.rs`'s `default_for_type` Map arm exactly:
+                // the only supported Map default is the per-key `forall`
+                // form `domain_kernel_source`'s state-field loop builds
+                // directly, before this function is ever called on the
+                // Map's own type.
+                ("Map", [_, _]) => Err(error_at(
+                    "Map state requires explicit initialization through supported semantics",
+                    span,
+                )),
+                // Includes `Seq` (out of scope: path A already rejects Seq
+                // domain state at `surface_type`, before any default is
+                // requested) and any unrecognized constructor/arity -- both
+                // fail closed here instead of falling through to "0".
+                (unsupported_constructor, unsupported_arguments) => Err(error_at(
+                    format!(
+                        "unsupported domain type constructor '{}'/{}",
+                        unsupported_constructor,
+                        unsupported_arguments.len()
+                    ),
+                    span,
+                )),
             },
         }
     }
@@ -332,12 +463,9 @@ impl<'a> Context<'a> {
                             "({})",
                             pieces
                                 .iter()
-                                .map(|piece| self.normalize(
-                                    piece,
-                                    Some(aggregate),
-                                    type_env,
-                                    None,
-                                    false
+                                .map(|piece| format!(
+                                    "({})",
+                                    self.normalize(piece, Some(aggregate), type_env, None, false)
                                 ))
                                 .collect::<Vec<_>>()
                                 .join(" and ")
@@ -718,6 +846,10 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
             "  requires {}",
             Context::event_flag(&compensation.trigger_event)
         ));
+        lines.push(format!(
+            "  requires {}",
+            Context::event_flag(&compensation.after_event)
+        ));
         lines.extend(
             event_assignments(context.domain, &compensation.emits)
                 .into_iter()
@@ -732,11 +864,15 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
 ///
 /// # Errors
 ///
-/// Returns [`CoreError`] when an effect event has conflicting explicit outcome roles.
+/// Returns [`CoreError`] when a domain declaration cannot be rendered into a
+/// valid executable kernel, including invalid enums and conflicting explicit
+/// effect outcome roles.
 #[allow(clippy::too_many_lines)]
 pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
     validate_effect_outcome_roles(domain)?;
+    crate::domain_lowering::validate_lowerable_constructs(domain)?;
     let context = Context::new(domain);
+    crate::domain_lowering::validate_domain_enums(&context.types)?;
     let mut lines = vec![format!(
         "spec {} \"domain: generated from fsl-domain/fsl-effect\" {{",
         domain.name
@@ -810,10 +946,42 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
         for field in &aggregate.state {
             let name = Context::state_name(aggregate, &field.name);
             state.push(format!("    {name}: {},", field.type_name));
-            init.push(format!(
-                "    {name} = {}",
-                context.default(field, &environment)
-            ));
+            match map_key_value(&field.type_name) {
+                Some((key, value)) => {
+                    // Mirrors `domain_lowering.rs`'s `expand_domain`
+                    // (~line 2182): a top-level Map state field with no
+                    // explicit default lowers to a dense per-key `forall`
+                    // init, and an explicit whole-Map default is rejected
+                    // here rather than rendered, matching path A's
+                    // "whole-Map domain defaults are not supported".
+                    if field.default.is_some() {
+                        return Err(error_at(
+                            "whole-Map domain defaults are not supported",
+                            field.span,
+                        ));
+                    }
+                    let key_type = match &key.kind {
+                        SyntaxTypeExprKind::Name(ident) => ident.text.clone(),
+                        SyntaxTypeExprKind::Apply { .. } => {
+                            return Err(error_at(
+                                "map keys require a scalar or named type",
+                                field.span,
+                            ));
+                        }
+                    };
+                    let value_default =
+                        context.default_for_type(value, field.span, &environment)?;
+                    init.push(format!(
+                        "    forall k: {key_type} {{ {name}[k] = {value_default} }}"
+                    ));
+                }
+                None => {
+                    init.push(format!(
+                        "    {name} = {}",
+                        context.default(field, &environment)?
+                    ));
+                }
+            }
         }
     }
     let mut events = domain

@@ -76,6 +76,17 @@ impl SemanticDiagnostic {
         }
     }
 
+    /// A core-lowering failure, preserving both its lowering origin and the
+    /// frontend's name-resolution classification.
+    #[must_use]
+    pub fn from_core_error(error: &fsl_core::CoreError) -> Self {
+        Self {
+            message: error.to_string(),
+            loc: crate::verification_output::origin_loc(error.origin.as_deref()),
+            name_resolution: error.name_resolution,
+        }
+    }
+
     /// A typed-model failure, located by the span it recorded for itself or by
     /// its enclosing construct's lowering origin, and classified by whether it
     /// was resolving a name.
@@ -134,10 +145,7 @@ pub fn kernel_load_error(source: &str, error: &fsl_core::CoreError) -> SpecLoadE
     if error.message == "top-level document has not reached the kernel lowering gate" {
         return SpecLoadError::Semantic(SemanticDiagnostic::unlocated("spec has no state block"));
     }
-    SpecLoadError::Semantic(SemanticDiagnostic::located(
-        error.to_string(),
-        error.origin.as_deref(),
-    ))
+    SpecLoadError::Semantic(SemanticDiagnostic::from_core_error(error))
 }
 
 /// Render a classified spec-load failure into the public error envelope.

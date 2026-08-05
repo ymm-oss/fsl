@@ -285,6 +285,16 @@ lowering します。domain の enum メンバーは lowering 時に名前空間
 aggregate 内で解決され、そのコマンドの <code>requires</code> 節の連言と、各拒否条件の否定に
 なります。未知のシンボル、aggregate をまたぐコマンド、型の不一致、未対応の呼び出し
 は、元の domain 式の位置で報告されます。</p>
+<p>saga の <code>compensation { when Trigger after After { emits ... } }</code> ブロックは、
+トリガーイベントフラグと <code>after</code> イベントフラグの<strong>両方</strong>でガードされたカーネル
+action へ lowering されます。つまり compensation は、両方のイベントが観測されて
+初めて発火します。生成されるイベントフラグは 1 遷移につき 1 つだけ立つ one-hot な
+観測なので、この二重ガードは単一の <code>decide</code> が両方のイベントを同一遷移で emit する
+場合にしか充足できません。トリガーイベントと after イベントが異なる一般的なケース
+(例えば、先の成功の後で起きた失敗によってトリガーされる compensation)は、現在の
+one-hot フラグ方式のもとでは構造的に無効化されており、<code>fslc verify</code> はこれを、
+after イベントを一度も観測していないトレースを黙って受理するのではなく、
+never-enabled action の警告として報告します。</p>
 <p>effect は <code>success_event</code>、<code>failure_event</code>、<code>timeout_event</code> により、完了イベントへ
 明示的な outcome role を割り当てられます。これらの宣言が分類の正規契約であり、
 イベント名に <code>fail</code>、<code>cancel</code>、<code>timeout</code> が含まれていても、それぞれ <code>Succeeded</code>、

@@ -5,6 +5,216 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed (#713): saga `compensation { when Trigger after After { ... } }` now
+  lowers to a kernel action guarded by BOTH the trigger event flag and the
+  `after` event flag on both lowering paths (`lower_saga_actions` in
+  `rust/fsl-core/src/domain_lowering.rs` and `render_saga_actions` in
+  `rust/fsl-core/src/domain.rs`); previously only the trigger flag was
+  required, so a compensation could fire on a trace that never observed its
+  `after` event. Because generated `event_*` flags are one-hot per
+  transition, a compensation whose trigger and after events differ (the
+  common shape, e.g. `examples/domain/order_fulfillment_saga.fsl`) is now
+  structurally disabled and surfaces as a `fslc verify` never-enabled action
+  warning instead of silently accepting the bad trace; this is the accepted
+  interim state pending the correlation-indexed saga history follow-up
+  (issue #662, `docs/DESIGN-saga-history.md`). No spec migration is required:
+  an existing `compensation` block's syntax and semantics are unchanged
+  (only its guard strength, previously unsound). See `docs/DESIGN-domain.md`.
+- Fixed (#712): top-level `await` blocks (e.g.
+  `await PaymentResult { waits_for one_of [...] on X -> Y }`) are now
+  rejected fail-closed by both lowering paths through a new
+  `validate_lowerable_constructs` gate (`rust/fsl-core/src/domain_lowering.rs`,
+  called from both `lower_domain_surface` and `domain_kernel_source`):
+  `DomainAwait` was consumed by nothing outside the parser, and cross-
+  aggregate routing proofs remain explicit Future Work in
+  `docs/DESIGN-domain.md`. **Migration**: remove the top-level
+  `await { ... }` block and use a saga step's `awaits` instead; the
+  top-level form never had executable meaning under `check`/`verify`, so
+  removing it changes no verification outcome.
+  `examples/domain/order_async_effect.fsl` had its now-rejected `await
+  PaymentResult` block removed as part of this fix (its `projection
+  OrderObservedState` block is unaffected and out of this fix's scope). See
+  `docs/DESIGN-domain.md`. Tracked mechanism for future migration
+  diagnostics: #702, #703.
+- Fixed (#711): aggregate `on_stale` policies (e.g.
+  `on_stale Approved when ... { emits ApprovalRejected }`) are now rejected
+  fail-closed by both lowering paths through the same
+  `validate_lowerable_constructs` gate: nothing in `docs/DESIGN-domain.md`
+  pins `on_stale` semantics, and the finding it references
+  (`late_completion_without_stale_policy`) is itself unimplemented in native
+  Rust (#724). **Migration**: remove the `on_stale { ... }` block; it never
+  had executable meaning under `check`/`verify`, so removing it changes no
+  verification outcome. See `docs/DESIGN-domain.md`. Tracked mechanism for
+  future migration diagnostics: #702, #703.
+- Fixed (#710): `value_object` invariants (e.g.
+  `value_object AuditStamp { ... invariant nonNegative { attempts >= 0 } }`)
+  are now rejected fail-closed by both lowering paths through the same
+  `validate_lowerable_constructs` gate. No accepted design pins a
+  `value_object` instance set, and the frozen Python reference only emits
+  direct-state-field instances while skipping `Option<VO>`/`Set<VO>`/
+  `Map<_,VO>`/command-input/event-field/nested-VO positions -- adopting that
+  partial coverage in the verifier would leave most instances unconstrained
+  while an author believes every instance is checked. **Migration**: remove
+  the `invariant { ... }` block from any `value_object`; it never had
+  executable meaning under `check`/`verify`, so removing it changes no
+  verification outcome. `value_object` field defaults without invariants
+  remain fully supported. See `docs/DESIGN-domain.md`. Tracked mechanism for
+  future migration diagnostics: #702, #703.
+- Sharded the two heaviest pre-merge product-gate jobs to cut PR wall clock
+  from a measured 38m15s (`semantic mutation (changed)`, run 30968645971) to a
+  measured **20.7 min** (run 30989320577, all lanes green) — 1.85x, ~17.5 min
+  saved per pull request — without weakening any check or changing the `main`
+  ruleset. The gain is under 2x, not 3x, and `docs/DESIGN-ci.md` records why
+  from the same run: `cargo-nextest --partition count:` balances by test count,
+  not duration, so the three test shards took 18.1/8.3/12.6 min and
+  `rust workspace` waits on its slowest; and sharding the curated operator lane
+  three ways bought only ~10% (22.5 min → 20.3 min) because each shard pays a
+  fixed cold build in its own scratch checkout. The two remaining levers,
+  neither attempted here, are a duration-aware test assignment (~5 min) and
+  caching `rust/target/fault-operators` so that scratch build starts warm. `rust workspace` (32m43s, of which ~29 min was `cargo test`
+  running 176 test binaries strictly sequentially) is now `rust-checks`
+  (formatting, Clippy, doctests, the full build, and the boundary/stack-
+  parity controls, run once) plus `rust-tests` (a 3-way `cargo-nextest
+  --partition count:K/3` matrix), aggregated by a `rust-workspace` job.
+  `semantic mutation (…)` is now `semantic-mutation-operators` (the curated
+  fault-operator table, round-robin sharded three ways by
+  `tools/run-fault-operators.sh --shard K/N`) plus `semantic-mutation-mutants`
+  (the generic cargo-mutants half, kept **complete and unsharded** — at its
+  measured ~14.3 min it is already close to the curated lane's post-split
+  floor, and cargo-mutants sharding would add real risk for no measured
+  gain), aggregated by a `semantic-mutation` job. Doctests move explicitly to
+  `rust-checks` because `cargo-nextest` cannot run them at all; silently
+  dropping them would have been exactly the "weaken a gate for speed" move
+  this repository forbids. Both aggregators keep the exact required-context
+  job id and name (`rust-workspace` / `rust workspace`,
+  `semantic-mutation` / `semantic mutation (${{ ... }})`) and run
+  `if: always()`, because GitHub treats a *skipped* required check as
+  satisfied — without `always()` a failing shard could skip the aggregator
+  into a false-green required context. Each aggregator also downloads its
+  shards' inventories and proves the split is a true partition of the
+  unsharded set before trusting it: `rust-workspace` requires the three
+  `rust-tests` shards' `full.txt` listings to be byte-identical and their
+  `shard.txt`s to union back to exactly one of them; `semantic-mutation`
+  requires the three operator shards' manifests to agree on
+  `base_revision`/`table_operators` and their `executed_operators` to union
+  back to `table_operators` exactly. Both checks reuse a new generic
+  `tools/check-shard-union.sh` (subset/pairwise-disjoint/union-equality,
+  fail-closed and naming the offending entries), whose `selftest` — an
+  accepting 3-way split plus four rejecting cases (uncovered entry,
+  duplicated entry, invented entry, empty shard list) — is wired into
+  `tools/check-merge-readiness.sh`'s automation lane next to
+  `check-product-gate-scope.sh selftest`. `tools/run-semantic-mutation-gate.sh`
+  gained `--lane operators|mutants` and `--shard K/N`; with neither flag its
+  behavior, order, and output are unchanged from before this change.
+  `tools/check-native-integration.sh` gained `rust-checks` and
+  `rust-tests K/N` phases; `rust` (the single unsharded local entrypoint
+  named in `AGENTS.md`) is untouched. See `docs/DESIGN-ci.md`, "Sharded
+  pre-merge Linux evidence", and `docs/DESIGN-semantic-mutation-gate.md`,
+  "CI scheduling: two lanes, one aggregator".
+
+- Required the complete Linux evidence on `main`, closing the gap #707
+  opened: the `main safety and CI` ruleset (id `19090811`) now requires
+  `rust workspace`, `WASM`, `semantic mutation (changed)`, and
+  `FSL Logic Test (pr)` alongside `merge readiness`. `bypass_actors` stays
+  empty and `strict_required_status_checks_policy` stays `true`, so no
+  account — administrators included — can merge past a failing or missing
+  required context. Requiring these four was previously unsafe: under the
+  retired `paths-ignore` exemption an agent-configuration-only pull request
+  emitted none of them, leaving them permanently `Expected`. The in-job scope
+  check makes them always report, which is what unblocked this.
+
+- Reverted a GitHub merge queue that was configured on `main` earlier the
+  same day (2026-08-05), after direct measurement showed it cannot function
+  in this repository's workflow: `gh pr merge --admin` bypasses the queue
+  entirely (observed on #717 — merged directly, no `merge_group` event in the
+  run history), and the normal `enqueuePullRequest` path is refused by
+  ruleset `main review for non-admins` (one approving review plus
+  `require_last_push_approval`), which a single-maintainer workflow cannot
+  satisfy because GitHub does not allow self-approval. Setting
+  `FSL_MERGE_QUEUE_CI=enabled` on top of that state would have made every
+  pull request report cheap stubs with no `merge_group` run ever replacing
+  them, landing changes on `main` with no pre-merge Linux evidence at all;
+  the canary pull request found this before the variable was created.
+  `ci.yml`'s `merge_group` trigger and the scope script's
+  `queue-entry-stub` branch remain in place, inert, documented as such in
+  `docs/DESIGN-ci.md`.
+
+- Replaced `ci.yml`'s `paths-ignore`-based agent-configuration exemption with
+  `tools/check-product-gate-scope.sh`, run as the first step of each of the
+  four heavy product-gate jobs (`rust workspace`, `WASM`, `semantic
+  mutation`, `FSL Logic Test`). Same accepted exemption scope
+  (`.claude/**`, `.agents/**`, `CLAUDE.md`, `AGENTS.md`, `CHANGELOG.md`),
+  but a workflow-level path skip never emits its job's context at all — if
+  that context is ever made a required status check (issue #707) or needed
+  to satisfy merge-queue entry, the skip leaves it permanently `Expected`,
+  unfixable even by an admin merge (observed while merging PR #715); an
+  in-job diff-checked early exit cannot get stuck that way. `ci.yml` also
+  gains a currently dormant `merge_group` trigger and per-job scope checks
+  on those four jobs, as inert groundwork for a future merge-queue-gated CI
+  architecture — no live ruleset or repository-variable change ships with
+  this PR; see `docs/DESIGN-ci.md`'s new "Merge queue (planned, not yet
+  enabled)" section. The script's `selftest` subcommand is wired into
+  `merge readiness / automation contracts` as its accepting/rejecting
+  control.
+
+- Exempted agent-configuration-only pull requests (`.claude/**`, `.agents/**`,
+  `CLAUDE.md`, `AGENTS.md`, and `CHANGELOG.md`, whose coupled entry would
+  otherwise defeat the exemption) from the pre-merge product gate via
+  `paths-ignore` on `ci.yml`'s `pull_request` trigger. No product-gate lane
+  reads those files; the paths that do (`merge readiness / automation
+  contracts` runs the `.claude/` environment contract test, `release.yml`
+  reads the changelog at tag time) keep unfiltered coverage. One changed
+  file outside the list restores the full run, and the unfiltered `main`
+  push trigger still gives every merged state the complete product
+  evidence; `docs/DESIGN-ci.md` records the exemption contract and why
+  `skills/**` and `docs/**` must never join the list.
+
+- Added the `pr-review` agent skill (`.claude/skills/pr-review/SKILL.md`), a
+  two-layer review orchestrator for pull requests that resolve issues: the
+  skill reconstructs the issue contract from repository evidence, dispatches
+  the specialized read-only reviewer agents (`fsl-coupled-change-reviewer`,
+  `fsl-soundness-reviewer`, `fsl-vacuity-reviewer`, with
+  `fsl-test-diagnostician` for failure triage) in parallel, audits the diff
+  for green-faking (weakened specs, hand-edited snapshots, allowlist growth,
+  loosened tests, missing negative controls, substring-strength assertions),
+  reproduces the PR's verification claims into an explicit claim ledger
+  (executed / read / unverified), adversarially verifies
+  soundness-critical changes with reviewer-authored fixtures and a live
+  mutation of the claimed negative control, and delivers a severity-ranked
+  verdict without merging. `CLAUDE.md`'s verification checklist now points
+  to it.
+
+- Fixed a false green in `domain expand`/`check_domain`'s `can(Command)`
+  rendering: `Context::normalize`
+  (`rust/fsl-core/src/domain.rs`) joined a `decide`'s `requires` clauses and
+  negated `rejects` conditions with literal `" and "` without
+  parenthesizing each piece individually, so a piece containing a
+  top-level `or` misgrouped once two or more pieces were present (`and`
+  binds tighter than `or` in FSL's grammar). This could invert a verifier
+  verdict between the directly-lowered typed model (`check`/`verify` on
+  domain source) and the rendered-then-reparsed kernel (`domain expand`'s
+  output): a `violated` invariant rendered as a tautology and reported
+  `verified`. Each piece is now individually parenthesized before joining
+  (#690, symptom 1 of 3; symptoms 2 and 3 remain open). Added
+  `rust/fslc/tests/fixtures/domain_characterization/can_expansion_precedence.fsl`
+  and `rust/fslc/tests/issue_690_can_precedence_false_green.rs` as the
+  reproducing fixture and verdict-agreement regression control, and moved
+  the fixture into `domain_render_agreement.rs`'s `VALID_DOMAIN_FIXTURES`;
+  `expressions_valid.fsl` remains in `KNOWN_DIVERGENT_DOMAIN_FIXTURES` for
+  the still-open name-shadowing symptom.
+
+- Fixed `domain check`/`domain expand` producing an
+  ill-typed `= 0` initializer for domain state fields whose accepted container
+  type had no explicit default. The rendered lowering path now dispatches
+  exhaustively over the structured type expression: `Option<T>` initializes to
+  `none`, `Set<T>` to `Set {}`, and top-level `Map<K, V>` to the same dense
+  per-key `forall` initializer as the typed lowering path. New corpus fixtures
+  keep all three variants in the checked two-path agreement gate. Both paths
+  now also share enum declaration validation, so an empty enum nested anywhere
+  in those containers fails at its declaration instead of producing invalid
+  text or panicking. Renderer failures now retain their source location and
+  name-resolution classification in the CLI JSON envelope (#691).
+
 - Added an opt-in, CI-independent, Store-first Referance semantic-drift pilot for
   the bounded domain lowering/rendering slice (#709). The content-addressed
   Python/Rust generation probe retains the full JSON envelope and exit code with
@@ -65,7 +275,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 - Added a corpus-wide agreement gate between `domain`'s two independent
   lowering paths: `lower_domain` (typed `KernelSpec`, used by `check`/
   `verify`) and `domain_kernel_source` (rendered `.fsl` text, used by
-  `domain expand`/`check_domain`/`domain testgen`/`domain scaffold`).
+  `domain expand` and `check_domain`).
   `rust/fsl-core/tests/domain_render_agreement.rs` projects both paths
   through `public_kernel_contract` for every domain spec in `examples/` and
   `rust/fslc/tests/fixtures/` and diffs the two structurally, excluding only

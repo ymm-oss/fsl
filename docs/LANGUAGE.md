@@ -248,6 +248,18 @@ the negation of each rejection condition. Unknown symbols, cross-aggregate
 commands, type mismatches, and unsupported calls are reported at the original
 domain expression.
 
+A saga `compensation { when Trigger after After { emits ... } }` block lowers
+to a kernel action guarded by BOTH the trigger event flag and the `after`
+event flag, so the compensation only fires once both events have been
+observed. Because generated event flags are a one-hot, one-step observation,
+this dual guard is satisfiable only when a single `decide` emits both events
+in the same transition; the common case where the trigger and after events
+differ (for example, a compensation triggered by a later failure after an
+earlier success) is structurally disabled under the current flag scheme, and
+`fslc verify` reports the disabled compensation action as a never-enabled
+action warning rather than silently accepting a trace that never observed the
+`after` event.
+
 An effect can assign completion events explicit outcome roles with
 `success_event`, `failure_event`, and `timeout_event`. These declarations are the
 authoritative classification: they lower to `Succeeded`, `Failed`, and `TimedOut`

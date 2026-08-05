@@ -1,0 +1,40 @@
+domain SagaCompensationDualGuard {
+  // SPDX-License-Identifier: Apache-2.0
+  implementation_profile functional_ddd
+
+  type OrderId = 0..1
+
+  aggregate Order {
+    id OrderId
+    state {
+      triggered: Bool = false;
+      after_happened: Bool = false;
+      released: Bool = false;
+    }
+
+    command Trigger {}
+
+    event TriggerHappened {}
+    event AfterHappened {}
+    event Released {}
+
+    decide Trigger {
+      requires not triggered
+      emits TriggerHappened, AfterHappened
+    }
+
+    evolve TriggerHappened { triggered = true }
+    evolve AfterHappened { after_happened = true }
+    evolve Released { released = true }
+  }
+
+  saga CompensateBoth {
+    starts_on TriggerHappened
+
+    compensation {
+      when TriggerHappened after AfterHappened {
+        emits Released
+      }
+    }
+  }
+}

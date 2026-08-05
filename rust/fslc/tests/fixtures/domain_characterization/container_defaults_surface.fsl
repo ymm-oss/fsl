@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+
+domain DomainContainerDefaultsCharacterization {
+  type ItemId = 0..1
+
+  aggregate Basket {
+    id ItemId
+    state {
+      picked: Option<ItemId>;
+      seen: Set<ItemId>;
+    }
+    command Pick { item: ItemId }
+    event Picked { item: ItemId }
+    decide Pick { emits Picked }
+    evolve Picked {
+      picked = some(item)
+      seen = seen.add(item)
+    }
+    invariant pickedIsSeen { picked != none => seen.size() >= 1 }
+  }
+}

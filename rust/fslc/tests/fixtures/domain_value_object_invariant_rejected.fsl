@@ -1,0 +1,31 @@
+domain ValueObjectInvariantRejected {
+  // SPDX-License-Identifier: Apache-2.0
+  type Quantity = 0..2
+  type Status = Draft | Approved
+
+  value_object AuditStamp {
+    status: Status = Draft;
+    attempts: Quantity = 0;
+    invariant nonNegative { attempts >= 0 }
+  }
+
+  aggregate Order {
+    state {
+      status: Status = Draft;
+      audit: AuditStamp;
+    }
+
+    command Approve {}
+    event Approved {}
+
+    decide Approve {
+      requires status == Draft
+      emits Approved
+    }
+
+    evolve Approved {
+      status = Approved
+      audit.status = status
+    }
+  }
+}

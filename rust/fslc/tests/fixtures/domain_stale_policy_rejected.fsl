@@ -1,0 +1,34 @@
+domain StalePolicyRejected {
+  // SPDX-License-Identifier: Apache-2.0
+  type Status = Draft | Approved | Cancelled
+
+  aggregate Order {
+    state {
+      status: Status = Draft;
+      previous_status: Status = Draft;
+    }
+
+    command Approve {}
+
+    event Approved {}
+    event ApprovalRejected {}
+
+    decide Approve {
+      requires status == Draft
+      emits Approved
+    }
+
+    evolve Approved {
+      previous_status = status
+      status = Approved
+    }
+
+    evolve ApprovalRejected {
+      previous_status = status
+    }
+
+    on_stale Approved when status == Approved and previous_status != Cancelled {
+      emits ApprovalRejected
+    }
+  }
+}
