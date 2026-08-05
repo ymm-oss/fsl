@@ -39,6 +39,9 @@ check_automation() {
   # product behavior. These zero-argument contract tests use only the standard
   # library, so run them directly without adding pytest to the fail-fast lane.
   python3 -c 'from tests.test_codex_environment import test_semantic_findings_cannot_disappear_between_agents_and_checkpoint as codex_contract; from tests.test_claude_environment import test_semantic_findings_cannot_disappear_between_agents_and_checkpoint as claude_contract; codex_contract(); claude_contract()'
+  # Accepting/rejecting controls for the agent-configuration-exemption
+  # classifier that ci.yml's heavy jobs now run in-job (docs/DESIGN-ci.md).
+  ./tools/check-product-gate-scope.sh selftest
 }
 
 case "${1:-all}" in
