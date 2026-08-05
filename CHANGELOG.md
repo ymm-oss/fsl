@@ -5,6 +5,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Documented (#722): the implicit domain aggregate initializer enumeration in
+  `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md`
+  covered only Bool `false`/enum first-member/range lower-bound/external-
+  placeholder `0`, omitting the container defaults `Context::default_for_type`
+  (`rust/fsl-core/src/domain.rs`) and its `domain_lowering.rs` counterpart
+  already select: `Option<T>` -> `none`, `Set<T>` -> `Set {}`, and a top-level
+  `Map<K, V>` -> dense per-key `forall k: K { field[k] = <value default> }`
+  (#691 / PR #708). Confirmed empirically with `fslc check` on
+  `rust/fslc/tests/fixtures/domain_characterization/container_defaults_surface.fsl`
+  and `.../lvalues_surface.fsl` that `implicit_initial_value` does **not**
+  fire for these container shapes -- that warning's `omitted_domain_value`
+  (`rust/fslc/src/frontend_output.rs`) only ever recognizes the four scalar
+  shapes, a real (documented, not fixed) gap between the warning's coverage
+  and the renderer's total default dispatch. Also documented the two
+  `Map`-specific rejections: an explicit whole-`Map` default ("whole-Map
+  domain defaults are not supported") and a `Map` nested as another `Map`'s
+  value ("Map state requires explicit initialization through supported
+  semantics"). No Rust behavior changed. See `docs/DESIGN-domain.md`.
 - Fixed (#713): saga `compensation { when Trigger after After { ... } }` now
   lowers to a kernel action guarded by BOTH the trigger event flag and the
   `after` event flag on both lowering paths (`lower_saga_actions` in

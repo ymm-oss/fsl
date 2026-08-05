@@ -292,7 +292,18 @@ domain aggregate の状態フィールドが初期化子を省略した場合、
 確立された Bool `false`、enum 先頭メンバー、範囲下限、external-placeholder `0` の
 選択を維持し、`implicit_initial_value` を出力します。この警告には、選択された値、
 理由、current/next の深刻度、フィールドのスパン、機械適用可能な明示初期化子の挿入
-が含まれます。次のエディションでは初期化子の明示が必須になります。
+が含まれます。次のエディションでは初期化子の明示が必須になります。コンテナ型の
+フィールドにも暗黙の既定値があります — `Option<T>` は `none` を、`Set<T>` は
+`Set {}` を選び、トップレベルの `Map<K, V>` は密な per-key init
+(`forall k: K { field[k] = <V の既定値> }`)を選びます。`<V の既定値>` はこの同じ
+選択を再帰的に辿ります — ただし省略しても `implicit_initial_value` は
+**出力されません**。この警告のカバー範囲は上記の4つのスカラー形状で止まります。
+`Map` フィールドには、さらに2つの fail-closed ルールがあります: 明示の whole-`Map`
+既定値(`field: Map<K, V> = expr;`)は常に棄却されます(「whole-Map domain defaults
+are not supported」)。サポートされる `Map` の既定値は per-key 形式のみだからです。
+また、別の `Map` の値として nested された `Map` も棄却されます(「Map state requires
+explicit initialization through supported semantics」)。per-key init は `Map` 値型
+に対して選べる既定値を持たないからです。
 
 安定した fsl-domain findings とネストされたカーネル結果(成功時は
 `verified_under_assumptions`)には `fslc domain check` を、aggregate/effect の
