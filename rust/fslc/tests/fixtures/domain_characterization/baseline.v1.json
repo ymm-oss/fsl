@@ -308,19 +308,7 @@
               }
             }
           ],
-          "stale_policies": [
-            {
-              "event": "Approved",
-              "condition": "status == Approved and previous_status != Cancelled",
-              "emits": [
-                "ApprovalRejected"
-              ],
-              "loc": {
-                "line": 69,
-                "column": 5
-              }
-            }
-          ],
+          "stale_policies": [],
           "loc": {
             "line": 15,
             "column": 3

@@ -36,6 +36,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   OrderObservedState` block is unaffected and out of this fix's scope). See
   `docs/DESIGN-domain.md`. Tracked mechanism for future migration
   diagnostics: #702, #703.
+- Fixed (#711): aggregate `on_stale` policies (e.g.
+  `on_stale Approved when ... { emits ApprovalRejected }`) are now rejected
+  fail-closed by both lowering paths through the same
+  `validate_lowerable_constructs` gate: nothing in `docs/DESIGN-domain.md`
+  pins `on_stale` semantics, and the finding it references
+  (`late_completion_without_stale_policy`) is itself unimplemented in native
+  Rust (#724). **Migration**: remove the `on_stale { ... }` block; it never
+  had executable meaning under `check`/`verify`, so removing it changes no
+  verification outcome. See `docs/DESIGN-domain.md`. Tracked mechanism for
+  future migration diagnostics: #702, #703.
 - Sharded the two heaviest pre-merge product-gate jobs to cut PR wall clock
   from a measured 38m15s (`semantic mutation (changed)`, run 30968645971) to a
   measured **20.7 min** (run 30989320577, all lanes green) — 1.85x, ~17.5 min

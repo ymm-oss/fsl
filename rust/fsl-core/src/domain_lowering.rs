@@ -120,6 +120,17 @@ pub(crate) fn validate_lowerable_constructs(domain: &DomainSpec) -> Result<(), C
             span_at(awaited.loc),
         ));
     }
+    for aggregate in &domain.aggregates {
+        if let Some(stale) = aggregate.stale_policies.first() {
+            return Err(error_at(
+                format!(
+                    "on_stale '{}' has no executable lowering; stale policies are not supported",
+                    stale.event
+                ),
+                span_at(stale.loc),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -1941,13 +1952,6 @@ impl<'a> Resolver<'a> {
                         )?;
                     }
                 }
-            }
-            for stale in &aggregate.stale_policies {
-                self.event(&stale.event, stale.loc)?;
-                for emitted in &stale.emits {
-                    self.event(emitted, stale.loc)?;
-                }
-                self.resolve_bool(&stale.condition, &state_scope, Some(aggregate))?;
             }
             for evolve in &aggregate.evolves {
                 let (_, event) = self.event(&evolve.event, evolve.loc)?;

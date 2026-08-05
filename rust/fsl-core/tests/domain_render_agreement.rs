@@ -150,6 +150,7 @@ const SEMANTICALLY_INVALID_DOMAIN_FIXTURES: &[&str] = &[
     "rust/fslc/tests/fixtures/domain_characterization/invalid_type_mismatch.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_member.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl",
+    "rust/fslc/tests/fixtures/domain_stale_policy_rejected.fsl",
 ];
 
 /// Domain specs that fail at the single shared surface parser
@@ -853,14 +854,24 @@ struct UnlowerableConstructCase {
     location: fn(&DomainSpec) -> (u32, u32),
 }
 
-const UNLOWERABLE_CONSTRUCT_CASES: &[UnlowerableConstructCase] = &[UnlowerableConstructCase {
-    fixture: "rust/fslc/tests/fixtures/domain_await_routing_rejected.fsl",
-    expected_message: "top-level await 'PaymentResult' has no executable lowering; use a saga step's awaits",
-    location: |domain| {
-        let loc = domain.awaits[0].loc;
-        (loc.line, loc.column)
+const UNLOWERABLE_CONSTRUCT_CASES: &[UnlowerableConstructCase] = &[
+    UnlowerableConstructCase {
+        fixture: "rust/fslc/tests/fixtures/domain_await_routing_rejected.fsl",
+        expected_message: "top-level await 'PaymentResult' has no executable lowering; use a saga step's awaits",
+        location: |domain| {
+            let loc = domain.awaits[0].loc;
+            (loc.line, loc.column)
+        },
     },
-}];
+    UnlowerableConstructCase {
+        fixture: "rust/fslc/tests/fixtures/domain_stale_policy_rejected.fsl",
+        expected_message: "on_stale 'Approved' has no executable lowering; stale policies are not supported",
+        location: |domain| {
+            let loc = domain.aggregates[0].stale_policies[0].loc;
+            (loc.line, loc.column)
+        },
+    },
+];
 
 #[test]
 fn unlowered_domain_constructs_fail_closed_on_both_paths() {

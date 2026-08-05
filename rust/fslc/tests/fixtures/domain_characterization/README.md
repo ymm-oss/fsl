@@ -27,9 +27,15 @@ an intentional semantic or diagnostic change has been accepted and documented.
 - `invalid_duplicate_enum.fsl` keeps the repeated member's original location
   and `name` diagnostic classification across both the `domain expand`
   renderer boundary and the `domain check` load path.
-- `on_stale` is captured in the surface projection only because current domain
-  lowering omits it; this corpus records that gap without accepting it as the
-  intended language contract.
+- `on_stale` is captured in the surface projection for parser/AST fidelity, but
+  since #711 it is rejected fail-closed by `validate_lowerable_constructs`
+  before either lowering path runs (`domain_stale_policy_rejected.fsl` in
+  `rust/fsl-core/tests/domain_render_agreement.rs`'s
+  `SEMANTICALLY_INVALID_DOMAIN_FIXTURES`): no accepted design pins `on_stale`
+  semantics, so this is now an accepted, intentional rejection rather than a
+  recorded omission. `expressions_valid.fsl` keeps a commented-out `on_stale`
+  block (same line count, so later constructs' spans do not shift) as a record
+  that the construct used to be silently accepted here.
 - `expressions_valid.fsl` records accepted legacy `||` and `->` normalization;
   `legacy_logical_parse_error.fsl` records the current lexer rejection of `&&`.
   The later typed-expression migration must make any change explicit.

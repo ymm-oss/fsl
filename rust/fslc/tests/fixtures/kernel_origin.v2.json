@@ -5502,7 +5502,7 @@
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -5511,8 +5511,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1640,
-            "byte_end": 1717,
+            "byte_start": 1610,
+            "byte_end": 1687,
             "line": 74,
             "column": 7,
             "end_line": 74,
@@ -5534,8 +5534,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1601,
-              "byte_end": 1723,
+              "byte_start": 1571,
+              "byte_end": 1693,
               "line": 73,
               "column": 5,
               "end_line": 75,
@@ -5559,11 +5559,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -5572,8 +5572,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1640,
-            "byte_end": 1717,
+            "byte_start": 1610,
+            "byte_end": 1687,
             "line": 74,
             "column": 7,
             "end_line": 74,
@@ -5595,8 +5595,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1601,
-              "byte_end": 1723,
+              "byte_start": 1571,
+              "byte_end": 1693,
               "line": 73,
               "column": 5,
               "end_line": 75,
@@ -5620,11 +5620,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -5633,8 +5633,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1640,
-            "byte_end": 1717,
+            "byte_start": 1610,
+            "byte_end": 1687,
             "line": 74,
             "column": 7,
             "end_line": 74,
@@ -5656,8 +5656,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1601,
-              "byte_end": 1723,
+              "byte_start": 1571,
+              "byte_end": 1693,
               "line": 73,
               "column": 5,
               "end_line": 75,
@@ -5681,11 +5681,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:left:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:left:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -5694,8 +5694,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1640,
-            "byte_end": 1717,
+            "byte_start": 1610,
+            "byte_end": 1687,
             "line": 74,
             "column": 7,
             "end_line": 74,
@@ -5717,8 +5717,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1601,
-              "byte_end": 1723,
+              "byte_start": 1571,
+              "byte_end": 1693,
               "line": 73,
               "column": 5,
               "end_line": 75,
@@ -5742,11 +5742,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:left:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:left:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -5755,8 +5755,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1640,
-            "byte_end": 1717,
+            "byte_start": 1610,
+            "byte_end": 1687,
             "line": 74,
             "column": 7,
             "end_line": 74,
@@ -5778,8 +5778,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1601,
-              "byte_end": 1723,
+              "byte_start": 1571,
+              "byte_end": 1693,
               "line": 73,
               "column": 5,
               "end_line": 75,
@@ -5803,11 +5803,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -5816,8 +5816,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1640,
-            "byte_end": 1717,
+            "byte_start": 1610,
+            "byte_end": 1687,
             "line": 74,
             "column": 7,
             "end_line": 74,
@@ -5839,8 +5839,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1601,
-              "byte_end": 1723,
+              "byte_start": 1571,
+              "byte_end": 1693,
               "line": 73,
               "column": 5,
               "end_line": 75,
@@ -5864,11 +5864,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -5877,8 +5877,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1640,
-            "byte_end": 1717,
+            "byte_start": 1610,
+            "byte_end": 1687,
             "line": 74,
             "column": 7,
             "end_line": 74,
@@ -5900,8 +5900,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1601,
-              "byte_end": 1723,
+              "byte_start": 1571,
+              "byte_end": 1693,
               "line": 73,
               "column": 5,
               "end_line": 75,
@@ -5925,11 +5925,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -5938,8 +5938,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1640,
-            "byte_end": 1717,
+            "byte_start": 1610,
+            "byte_end": 1687,
             "line": 74,
             "column": 7,
             "end_line": 74,
@@ -5961,8 +5961,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1601,
-              "byte_end": 1723,
+              "byte_start": 1571,
+              "byte_end": 1693,
               "line": 73,
               "column": 5,
               "end_line": 75,
@@ -5986,11 +5986,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -5999,8 +5999,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1640,
-            "byte_end": 1717,
+            "byte_start": 1610,
+            "byte_end": 1687,
             "line": 74,
             "column": 7,
             "end_line": 74,
@@ -6022,8 +6022,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1601,
-              "byte_end": 1723,
+              "byte_start": 1571,
+              "byte_end": 1693,
               "line": 73,
               "column": 5,
               "end_line": 75,
@@ -6047,11 +6047,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6060,8 +6060,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1640,
-            "byte_end": 1717,
+            "byte_start": 1610,
+            "byte_end": 1687,
             "line": 74,
             "column": 7,
             "end_line": 74,
@@ -6083,8 +6083,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1601,
-              "byte_end": 1723,
+              "byte_start": 1571,
+              "byte_end": 1693,
               "line": 73,
               "column": 5,
               "end_line": 75,
@@ -6108,11 +6108,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6121,8 +6121,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1640,
-            "byte_end": 1717,
+            "byte_start": 1610,
+            "byte_end": 1687,
             "line": 74,
             "column": 7,
             "end_line": 74,
@@ -6144,8 +6144,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1601,
-              "byte_end": 1723,
+              "byte_start": 1571,
+              "byte_end": 1693,
               "line": 73,
               "column": 5,
               "end_line": 75,
@@ -6169,11 +6169,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6182,8 +6182,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1640,
-            "byte_end": 1717,
+            "byte_start": 1610,
+            "byte_end": 1687,
             "line": 74,
             "column": 7,
             "end_line": 74,
@@ -6205,8 +6205,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1601,
-              "byte_end": 1723,
+              "byte_start": 1571,
+              "byte_end": 1693,
               "line": 73,
               "column": 5,
               "end_line": 75,
@@ -6230,11 +6230,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6243,8 +6243,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1958,
-            "byte_end": 1996,
+            "byte_start": 1928,
+            "byte_end": 1966,
             "line": 86,
             "column": 7,
             "end_line": 86,
@@ -6266,8 +6266,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1923,
-              "byte_end": 2002,
+              "byte_start": 1893,
+              "byte_end": 1972,
               "line": 85,
               "column": 5,
               "end_line": 87,
@@ -6295,11 +6295,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6308,8 +6308,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1958,
-            "byte_end": 1996,
+            "byte_start": 1928,
+            "byte_end": 1966,
             "line": 86,
             "column": 7,
             "end_line": 86,
@@ -6331,8 +6331,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1923,
-              "byte_end": 2002,
+              "byte_start": 1893,
+              "byte_end": 1972,
               "line": 85,
               "column": 5,
               "end_line": 87,
@@ -6360,11 +6360,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6373,8 +6373,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1958,
-            "byte_end": 1996,
+            "byte_start": 1928,
+            "byte_end": 1966,
             "line": 86,
             "column": 7,
             "end_line": 86,
@@ -6396,8 +6396,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1923,
-              "byte_end": 2002,
+              "byte_start": 1893,
+              "byte_end": 1972,
               "line": 85,
               "column": 5,
               "end_line": 87,
@@ -6425,11 +6425,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6438,8 +6438,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1958,
-            "byte_end": 1996,
+            "byte_start": 1928,
+            "byte_end": 1966,
             "line": 86,
             "column": 7,
             "end_line": 86,
@@ -6461,8 +6461,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1923,
-              "byte_end": 2002,
+              "byte_start": 1893,
+              "byte_end": 1972,
               "line": 85,
               "column": 5,
               "end_line": 87,
@@ -6490,11 +6490,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6503,8 +6503,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1958,
-            "byte_end": 1996,
+            "byte_start": 1928,
+            "byte_end": 1966,
             "line": 86,
             "column": 7,
             "end_line": 86,
@@ -6526,8 +6526,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1923,
-              "byte_end": 2002,
+              "byte_start": 1893,
+              "byte_end": 1972,
               "line": 85,
               "column": 5,
               "end_line": 87,
@@ -6555,11 +6555,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6568,8 +6568,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1958,
-            "byte_end": 1996,
+            "byte_start": 1928,
+            "byte_end": 1966,
             "line": 86,
             "column": 7,
             "end_line": 86,
@@ -6591,8 +6591,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1923,
-              "byte_end": 2002,
+              "byte_start": 1893,
+              "byte_end": 1972,
               "line": 85,
               "column": 5,
               "end_line": 87,
@@ -6620,11 +6620,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6633,8 +6633,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1958,
-            "byte_end": 1996,
+            "byte_start": 1928,
+            "byte_end": 1966,
             "line": 86,
             "column": 7,
             "end_line": 86,
@@ -6656,8 +6656,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1923,
-              "byte_end": 2002,
+              "byte_start": 1893,
+              "byte_end": 1972,
               "line": 85,
               "column": 5,
               "end_line": 87,
@@ -6685,11 +6685,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6698,8 +6698,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1958,
-            "byte_end": 1996,
+            "byte_start": 1928,
+            "byte_end": 1966,
             "line": 86,
             "column": 7,
             "end_line": 86,
@@ -6721,8 +6721,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1923,
-              "byte_end": 2002,
+              "byte_start": 1893,
+              "byte_end": 1972,
               "line": 85,
               "column": 5,
               "end_line": 87,
@@ -6750,11 +6750,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6763,8 +6763,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1958,
-            "byte_end": 1996,
+            "byte_start": 1928,
+            "byte_end": 1966,
             "line": 86,
             "column": 7,
             "end_line": 86,
@@ -6786,8 +6786,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1923,
-              "byte_end": 2002,
+              "byte_start": 1893,
+              "byte_end": 1972,
               "line": 85,
               "column": 5,
               "end_line": 87,
@@ -6815,11 +6815,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6828,8 +6828,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1958,
-            "byte_end": 1996,
+            "byte_start": 1928,
+            "byte_end": 1966,
             "line": 86,
             "column": 7,
             "end_line": 86,
@@ -6851,8 +6851,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1923,
-              "byte_end": 2002,
+              "byte_start": 1893,
+              "byte_end": 1972,
               "line": 85,
               "column": 5,
               "end_line": 87,
@@ -6880,11 +6880,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:right:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:right:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6893,8 +6893,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1958,
-            "byte_end": 1996,
+            "byte_start": 1928,
+            "byte_end": 1966,
             "line": 86,
             "column": 7,
             "end_line": 86,
@@ -6916,8 +6916,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1923,
-              "byte_end": 2002,
+              "byte_start": 1893,
+              "byte_end": 1972,
               "line": 85,
               "column": 5,
               "end_line": 87,
@@ -6945,11 +6945,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:right:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:right:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -6958,8 +6958,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1958,
-            "byte_end": 1996,
+            "byte_start": 1928,
+            "byte_end": 1966,
             "line": 86,
             "column": 7,
             "end_line": 86,
@@ -6981,8 +6981,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1923,
-              "byte_end": 2002,
+              "byte_start": 1893,
+              "byte_end": 1972,
               "line": 85,
               "column": 5,
               "end_line": 87,
@@ -7010,11 +7010,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7023,8 +7023,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1851,
-            "byte_end": 1911,
+            "byte_start": 1821,
+            "byte_end": 1881,
             "line": 82,
             "column": 7,
             "end_line": 82,
@@ -7046,8 +7046,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1815,
-              "byte_end": 1917,
+              "byte_start": 1785,
+              "byte_end": 1887,
               "line": 81,
               "column": 5,
               "end_line": 83,
@@ -7075,11 +7075,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7088,8 +7088,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1851,
-            "byte_end": 1911,
+            "byte_start": 1821,
+            "byte_end": 1881,
             "line": 82,
             "column": 7,
             "end_line": 82,
@@ -7111,8 +7111,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1815,
-              "byte_end": 1917,
+              "byte_start": 1785,
+              "byte_end": 1887,
               "line": 81,
               "column": 5,
               "end_line": 83,
@@ -7140,11 +7140,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7153,8 +7153,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1851,
-            "byte_end": 1911,
+            "byte_start": 1821,
+            "byte_end": 1881,
             "line": 82,
             "column": 7,
             "end_line": 82,
@@ -7176,8 +7176,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1815,
-              "byte_end": 1917,
+              "byte_start": 1785,
+              "byte_end": 1887,
               "line": 81,
               "column": 5,
               "end_line": 83,
@@ -7205,11 +7205,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7218,8 +7218,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1851,
-            "byte_end": 1911,
+            "byte_start": 1821,
+            "byte_end": 1881,
             "line": 82,
             "column": 7,
             "end_line": 82,
@@ -7241,8 +7241,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1815,
-              "byte_end": 1917,
+              "byte_start": 1785,
+              "byte_end": 1887,
               "line": 81,
               "column": 5,
               "end_line": 83,
@@ -7270,11 +7270,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7283,8 +7283,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1851,
-            "byte_end": 1911,
+            "byte_start": 1821,
+            "byte_end": 1881,
             "line": 82,
             "column": 7,
             "end_line": 82,
@@ -7306,8 +7306,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1815,
-              "byte_end": 1917,
+              "byte_start": 1785,
+              "byte_end": 1887,
               "line": 81,
               "column": 5,
               "end_line": 83,
@@ -7335,11 +7335,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7348,8 +7348,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1851,
-            "byte_end": 1911,
+            "byte_start": 1821,
+            "byte_end": 1881,
             "line": 82,
             "column": 7,
             "end_line": 82,
@@ -7371,8 +7371,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1815,
-              "byte_end": 1917,
+              "byte_start": 1785,
+              "byte_end": 1887,
               "line": 81,
               "column": 5,
               "end_line": 83,
@@ -7400,11 +7400,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7413,8 +7413,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1851,
-            "byte_end": 1911,
+            "byte_start": 1821,
+            "byte_end": 1881,
             "line": 82,
             "column": 7,
             "end_line": 82,
@@ -7436,8 +7436,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1815,
-              "byte_end": 1917,
+              "byte_start": 1785,
+              "byte_end": 1887,
               "line": 81,
               "column": 5,
               "end_line": 83,
@@ -7465,11 +7465,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7478,8 +7478,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1851,
-            "byte_end": 1911,
+            "byte_start": 1821,
+            "byte_end": 1881,
             "line": 82,
             "column": 7,
             "end_line": 82,
@@ -7501,8 +7501,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1815,
-              "byte_end": 1917,
+              "byte_start": 1785,
+              "byte_end": 1887,
               "line": 81,
               "column": 5,
               "end_line": 83,
@@ -7530,11 +7530,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7543,8 +7543,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1851,
-            "byte_end": 1911,
+            "byte_start": 1821,
+            "byte_end": 1881,
             "line": 82,
             "column": 7,
             "end_line": 82,
@@ -7566,8 +7566,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1815,
-              "byte_end": 1917,
+              "byte_start": 1785,
+              "byte_end": 1887,
               "line": 81,
               "column": 5,
               "end_line": 83,
@@ -7595,11 +7595,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7608,8 +7608,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1851,
-            "byte_end": 1911,
+            "byte_start": 1821,
+            "byte_end": 1881,
             "line": 82,
             "column": 7,
             "end_line": 82,
@@ -7631,8 +7631,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1815,
-              "byte_end": 1917,
+              "byte_start": 1785,
+              "byte_end": 1887,
               "line": 81,
               "column": 5,
               "end_line": 83,
@@ -7660,11 +7660,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:right:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:right:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7673,8 +7673,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1851,
-            "byte_end": 1911,
+            "byte_start": 1821,
+            "byte_end": 1881,
             "line": 82,
             "column": 7,
             "end_line": 82,
@@ -7696,8 +7696,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1815,
-              "byte_end": 1917,
+              "byte_start": 1785,
+              "byte_end": 1887,
               "line": 81,
               "column": 5,
               "end_line": 83,
@@ -7725,11 +7725,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:right:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:right:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7738,8 +7738,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1851,
-            "byte_end": 1911,
+            "byte_start": 1821,
+            "byte_end": 1881,
             "line": 82,
             "column": 7,
             "end_line": 82,
@@ -7761,8 +7761,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1815,
-              "byte_end": 1917,
+              "byte_start": 1785,
+              "byte_end": 1887,
               "line": 81,
               "column": 5,
               "end_line": 83,
@@ -7790,11 +7790,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7803,8 +7803,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -7826,8 +7826,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -7859,11 +7859,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7872,8 +7872,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -7895,8 +7895,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -7928,11 +7928,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -7941,8 +7941,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -7964,8 +7964,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -7997,11 +7997,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:left:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:left:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8010,8 +8010,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8033,8 +8033,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8066,11 +8066,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:left:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:left:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8079,8 +8079,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8102,8 +8102,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8135,11 +8135,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8148,8 +8148,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8171,8 +8171,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8204,11 +8204,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8217,8 +8217,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8240,8 +8240,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8273,11 +8273,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8286,8 +8286,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8309,8 +8309,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8342,11 +8342,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8355,8 +8355,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8378,8 +8378,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8411,11 +8411,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8424,8 +8424,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8447,8 +8447,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8480,11 +8480,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8493,8 +8493,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8516,8 +8516,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8549,11 +8549,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8562,8 +8562,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8585,8 +8585,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8618,11 +8618,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8631,8 +8631,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8654,8 +8654,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8687,11 +8687,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8700,8 +8700,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8723,8 +8723,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8756,11 +8756,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8769,8 +8769,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8792,8 +8792,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8825,11 +8825,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8838,8 +8838,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8861,8 +8861,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8894,11 +8894,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:expr:left:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:expr:left:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8907,8 +8907,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8930,8 +8930,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -8963,11 +8963,11 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
-        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:expr:right:0",
+        "id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:expr:right:0",
         "dialect": "domain",
         "assurance": "source_backed",
         "primary": {
@@ -8976,8 +8976,8 @@
             "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
           },
           "span": {
-            "byte_start": 1765,
-            "byte_end": 1803,
+            "byte_start": 1735,
+            "byte_end": 1773,
             "line": 78,
             "column": 7,
             "end_line": 78,
@@ -8999,8 +8999,8 @@
               "value": "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl"
             },
             "span": {
-              "byte_start": 1729,
-              "byte_end": 1809,
+              "byte_start": 1699,
+              "byte_end": 1779,
               "line": 77,
               "column": 5,
               "end_line": 79,
@@ -9032,7 +9032,7 @@
         ],
         "generated": false,
         "extensions": {},
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7"
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7"
       },
       {
         "kind": "source_chain",
@@ -10013,325 +10013,325 @@
       {
         "target": "property:invariant:Order_canonicalImplication",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:0"
         ]
       },
       {
         "target": "property:invariant:Order_canonicalImplication:expr:root",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:0"
         ]
       },
       {
         "target": "property:invariant:Order_canonicalImplication:expr:root:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_canonicalImplication:expr:root:expr:left:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:left:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:left:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_canonicalImplication:expr:root:expr:left:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:left:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:left:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_canonicalImplication:expr:root:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:left:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7@property:invariant:Order_canonicalImplication:expr:root:expr:right:expr:right:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_finiteMembership",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:0"
         ]
       },
       {
         "target": "property:invariant:Order_finiteMembership:expr:root",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:0"
         ]
       },
       {
         "target": "property:invariant:Order_finiteMembership:expr:root:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:left:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:left:expr:right:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_finiteMembership:expr:root:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_finiteMembership:expr:root:expr:right:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:right:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:right:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_finiteMembership:expr:root:expr:right:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7@property:invariant:Order_finiteMembership:expr:root:expr:right:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7@property:invariant:Order_finiteMembership:expr:root:expr:right:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyDisjunction",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyDisjunction:expr:root",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyDisjunction:expr:root:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:left:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:left:expr:right:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyDisjunction:expr:root:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyDisjunction:expr:root:expr:right:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:right:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:right:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyDisjunction:expr:root:expr:right:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:right:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7@property:invariant:Order_legacyDisjunction:expr:root:expr:right:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:left:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:left:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:left:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:left:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:left:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:left:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:left:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:left:expr:right:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:expr:left",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:expr:left:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:expr:left:0"
         ]
       },
       {
         "target": "property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:expr:right",
         "origin_ids": [
-          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:expr:right:0"
+          "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7@property:invariant:Order_legacyImplication:expr:root:expr:right:expr:operand:expr:right:expr:operand:expr:right:0"
         ]
       },
       {
@@ -10542,7 +10542,7 @@
         ]
       },
       {
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1640:1717:74:7",
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/canonicalImplication:1610:1687:74:7",
         "targets": [
           "property:invariant:Order_canonicalImplication",
           "property:invariant:Order_canonicalImplication:expr:root",
@@ -10559,7 +10559,7 @@
         ]
       },
       {
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1958:1996:86:7",
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/finiteMembership:1928:1966:86:7",
         "targets": [
           "property:invariant:Order_finiteMembership",
           "property:invariant:Order_finiteMembership:expr:root",
@@ -10576,7 +10576,7 @@
         ]
       },
       {
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1851:1911:82:7",
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyDisjunction:1821:1881:82:7",
         "targets": [
           "property:invariant:Order_legacyDisjunction",
           "property:invariant:Order_legacyDisjunction:expr:root",
@@ -10593,7 +10593,7 @@
         ]
       },
       {
-        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1765:1803:78:7",
+        "source_node_id": "source:repository_path:rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl#domain:DomainExpressionCharacterization/aggregate/Order/invariant/legacyImplication:1735:1773:78:7",
         "targets": [
           "property:invariant:Order_legacyImplication",
           "property:invariant:Order_legacyImplication:expr:root",
