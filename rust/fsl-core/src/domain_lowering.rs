@@ -100,6 +100,29 @@ fn span_at(loc: DomainLoc) -> Span {
     loc.span()
 }
 
+/// Reject domain constructs that parse into a [`DomainSpec`] but have no
+/// executable lowering on either path (#710/#711/#712). Each of these
+/// constructs is accepted by the grammar and, before this validation, was
+/// silently dropped by both `lower_domain` and `domain_kernel_source`: an
+/// author who wrote one believed it was checked when nothing consumed it.
+/// Fail closed instead of inventing semantics no accepted design pins.
+///
+/// This walks the raw parsed [`DomainSpec`], not a resolver context: these
+/// are `semantics`-class diagnostics (an accepted-but-unlowerable construct),
+/// not name-resolution failures.
+pub(crate) fn validate_lowerable_constructs(domain: &DomainSpec) -> Result<(), CoreError> {
+    if let Some(awaited) = domain.awaits.first() {
+        return Err(error_at(
+            format!(
+                "top-level await '{}' has no executable lowering; use a saga step's awaits",
+                awaited.name
+            ),
+            span_at(awaited.loc),
+        ));
+    }
+    Ok(())
+}
+
 fn safe(name: &str) -> String {
     let mut value = name
         .chars()
@@ -2069,6 +2092,7 @@ pub(crate) fn lower_domain_surface(
     domain: &DomainSpec,
 ) -> Result<(SurfaceSpec, OriginRegistry), CoreError> {
     validate_effect_outcome_roles(domain)?;
+    validate_lowerable_constructs(domain)?;
     let resolver = Resolver::new(domain);
     resolver.validate_document_expressions()?;
     let mut items = Vec::new();

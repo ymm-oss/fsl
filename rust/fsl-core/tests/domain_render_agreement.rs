@@ -139,8 +139,12 @@ const VALID_DOMAIN_FIXTURES: &[&str] = &[
 /// Domain specs that parse into a [`DomainSpec`] but must be rejected by
 /// both lowering pipelines (path A at `lower_domain`, path B somewhere in
 /// `domain_kernel_source` -> `parse_kernel_source` -> `build_model`) because
-/// they are semantically invalid (type mismatch / unknown symbol).
+/// they are semantically invalid (type mismatch / unknown symbol) OR because
+/// they use a construct that parses but has no executable lowering on either
+/// path and is therefore rejected fail-closed (#710/#711/#712: `value_object`
+/// invariants, aggregate `on_stale`, and top-level `await` routing).
 const SEMANTICALLY_INVALID_DOMAIN_FIXTURES: &[&str] = &[
+    "rust/fslc/tests/fixtures/domain_await_routing_rejected.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_duplicate_enum.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_empty_enum_containers.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_type_mismatch.fsl",
@@ -829,6 +833,61 @@ domain EmptyEnumContainers {
         assert_eq!(error.message, "enum 'Status' has no members", "{path}");
         assert_eq!(error.line, enum_span.start.line, "{path}");
         assert_eq!(error.column, enum_span.start.column, "{path}");
+    }
+}
+
+/// One case per accepted-but-unlowerable domain construct fail-closed by
+/// `validate_lowerable_constructs` (#710/#711/#712). Both paths must reject
+/// with the exact same message and the same `line`/`column`, located at the
+/// construct's own declaration, not some downstream position -- an author
+/// debugging the rejection needs to land on the block to delete, and a
+/// located-diagnostic regression on only one path would otherwise slip past
+/// `semantically_invalid_domain_fixtures_are_rejected_by_both_lowering_paths`
+/// (which only checks *that* both reject, not *where*).
+///
+/// Starts with the #712 top-level `await` case; #711's `on_stale` and #710's
+/// `value_object` invariant cases are added alongside their own fixes.
+struct UnlowerableConstructCase {
+    fixture: &'static str,
+    expected_message: &'static str,
+    location: fn(&DomainSpec) -> (u32, u32),
+}
+
+const UNLOWERABLE_CONSTRUCT_CASES: &[UnlowerableConstructCase] = &[UnlowerableConstructCase {
+    fixture: "rust/fslc/tests/fixtures/domain_await_routing_rejected.fsl",
+    expected_message: "top-level await 'PaymentResult' has no executable lowering; use a saga step's awaits",
+    location: |domain| {
+        let loc = domain.awaits[0].loc;
+        (loc.line, loc.column)
+    },
+}];
+
+#[test]
+fn unlowered_domain_constructs_fail_closed_on_both_paths() {
+    let root = repo_root();
+    for case in UNLOWERABLE_CONSTRUCT_CASES {
+        let source = fs::read_to_string(root.join(case.fixture))
+            .unwrap_or_else(|error| panic!("read {}: {error}", case.fixture));
+        let domain = parse_domain_spec(&source).unwrap_or_else(|error| {
+            panic!(
+                "{}: expected a parseable domain document: {error}",
+                case.fixture
+            )
+        });
+        let (expected_line, expected_column) = (case.location)(&domain);
+        let path_a =
+            lower_domain(&domain).expect_err("path A must reject an unlowerable construct");
+        let path_b =
+            domain_kernel_source(&domain).expect_err("path B must reject an unlowerable construct");
+        for (path, error) in [("path A", path_a), ("path B", path_b)] {
+            assert_eq!(
+                error.message, case.expected_message,
+                "{}: {path}",
+                case.fixture
+            );
+            assert_eq!(error.line, expected_line, "{}: {path}", case.fixture);
+            assert_eq!(error.column, expected_column, "{}: {path}", case.fixture);
+        }
     }
 }
 

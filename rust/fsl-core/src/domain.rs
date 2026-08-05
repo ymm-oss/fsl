@@ -870,6 +870,7 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
 #[allow(clippy::too_many_lines)]
 pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
     validate_effect_outcome_roles(domain)?;
+    crate::domain_lowering::validate_lowerable_constructs(domain)?;
     let context = Context::new(domain);
     crate::domain_lowering::validate_domain_enums(&context.types)?;
     let mut lines = vec![format!(

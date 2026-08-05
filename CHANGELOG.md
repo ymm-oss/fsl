@@ -20,6 +20,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   (issue #662, `docs/DESIGN-saga-history.md`). No spec migration is required:
   an existing `compensation` block's syntax and semantics are unchanged
   (only its guard strength, previously unsound). See `docs/DESIGN-domain.md`.
+- Fixed (#712): top-level `await` blocks (e.g.
+  `await PaymentResult { waits_for one_of [...] on X -> Y }`) are now
+  rejected fail-closed by both lowering paths through a new
+  `validate_lowerable_constructs` gate (`rust/fsl-core/src/domain_lowering.rs`,
+  called from both `lower_domain_surface` and `domain_kernel_source`):
+  `DomainAwait` was consumed by nothing outside the parser, and cross-
+  aggregate routing proofs remain explicit Future Work in
+  `docs/DESIGN-domain.md`. **Migration**: remove the top-level
+  `await { ... }` block and use a saga step's `awaits` instead; the
+  top-level form never had executable meaning under `check`/`verify`, so
+  removing it changes no verification outcome.
+  `examples/domain/order_async_effect.fsl` had its now-rejected `await
+  PaymentResult` block removed as part of this fix (its `projection
+  OrderObservedState` block is unaffected and out of this fix's scope). See
+  `docs/DESIGN-domain.md`. Tracked mechanism for future migration
+  diagnostics: #702, #703.
 - Sharded the two heaviest pre-merge product-gate jobs to cut PR wall clock
   from a measured 38m15s (`semantic mutation (changed)`, run 30968645971) to a
   measured **20.7 min** (run 30989320577, all lanes green) — 1.85x, ~17.5 min
