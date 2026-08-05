@@ -1,5 +1,4 @@
 {
-  "$comment": "Verbatim capture of `gh api repos/ymm-oss/fsl/rulesets/19090811` on 2026-08-06, with ONE hand-added entry: the sixth required_status_checks entry for \"site reference freshness\" (integration_id 15368, matching the other five). The live ruleset still has only five required contexts as of this capture -- the sixth entry here is the pending post-rollout state the contract in ../../ruleset-contract.json expects, added by hand so the accepting test (audit-ruleset-drift.test.mjs) exercises the six-context contract this fixture is meant to model once the live edit lands. Everything else in this file is the unmodified API response. Do not silently reconcile this note away by deleting it once the live edit happens -- recapture instead and drop this comment.",
   "id": 19090811,
   "name": "main safety and CI",
   "target": "branch",
@@ -77,7 +76,7 @@
   ],
   "node_id": "RRS_lACqUmVwb3NpdG9yec5Lu2QuzgEjTXs",
   "created_at": "2026-07-17T16:28:37.565+09:00",
-  "updated_at": "2026-08-05T13:50:30.270+09:00",
+  "updated_at": "2026-08-06T08:14:18.007+09:00",
   "bypass_actors": [],
   "current_user_can_bypass": "never",
   "_links": {
