@@ -5,6 +5,23 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Enabled a GitHub merge queue on `main`: the `main safety and CI` ruleset
+  (id `19090811`) now carries an active `merge_queue` rule and requires
+  `rust workspace`, `WASM`, `semantic mutation (changed)`, and
+  `FSL Logic Test (pr)` alongside the existing `merge readiness` context. A
+  pull request can now be enqueued via "Merge when ready" once all five
+  contexts pass on the pull request; the queue re-validates a `merge_group`
+  run before merging. This does **not** yet reduce per-push cost — the
+  `FSL_MERGE_QUEUE_CI` repository variable that activates
+  `tools/check-product-gate-scope.sh`'s queue-entry-stub path is still unset,
+  so the four heavy jobs keep running in full on every pull-request push
+  until that variable is created. The ruleset also gained a `User`
+  bypass-actor entry (repository admin, pull-request-scoped) as an
+  operator escape hatch: the prior ruleset had zero bypass actors, so a
+  queue malfunction would have had no direct-merge recovery path short of
+  reverting the ruleset itself. See `docs/DESIGN-ci.md`'s "Merge queue
+  (ruleset live, per-push cost not yet reduced)" section.
+
 - Replaced `ci.yml`'s `paths-ignore`-based agent-configuration exemption with
   `tools/check-product-gate-scope.sh`, run as the first step of each of the
   four heavy product-gate jobs (`rust workspace`, `WASM`, `semantic
