@@ -5,6 +5,54 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Sharded the two heaviest pre-merge product-gate jobs to cut PR wall clock
+  from a measured 38m15s (`semantic mutation (changed)`, run 30968645971)
+  toward an expected ≈17 min, without weakening any check or changing the
+  `main` ruleset. The gain is a little over 2x rather than 3x because both
+  lanes carry a large unshardable fixed cost: the first sharded operator run
+  measured a 6-operator shard's no-op control at 760s against 912s for all
+  17, so splitting that lane three ways removed ~150s of detector time, not
+  two thirds of the lane. `rust workspace` (32m43s, of which ~29 min was `cargo test`
+  running 176 test binaries strictly sequentially) is now `rust-checks`
+  (formatting, Clippy, doctests, the full build, and the boundary/stack-
+  parity controls, run once) plus `rust-tests` (a 3-way `cargo-nextest
+  --partition count:K/3` matrix), aggregated by a `rust-workspace` job.
+  `semantic mutation (…)` is now `semantic-mutation-operators` (the curated
+  fault-operator table, round-robin sharded three ways by
+  `tools/run-fault-operators.sh --shard K/N`) plus `semantic-mutation-mutants`
+  (the generic cargo-mutants half, kept **complete and unsharded** — at its
+  measured ~14.3 min it is already close to the curated lane's post-split
+  floor, and cargo-mutants sharding would add real risk for no measured
+  gain), aggregated by a `semantic-mutation` job. Doctests move explicitly to
+  `rust-checks` because `cargo-nextest` cannot run them at all; silently
+  dropping them would have been exactly the "weaken a gate for speed" move
+  this repository forbids. Both aggregators keep the exact required-context
+  job id and name (`rust-workspace` / `rust workspace`,
+  `semantic-mutation` / `semantic mutation (${{ ... }})`) and run
+  `if: always()`, because GitHub treats a *skipped* required check as
+  satisfied — without `always()` a failing shard could skip the aggregator
+  into a false-green required context. Each aggregator also downloads its
+  shards' inventories and proves the split is a true partition of the
+  unsharded set before trusting it: `rust-workspace` requires the three
+  `rust-tests` shards' `full.txt` listings to be byte-identical and their
+  `shard.txt`s to union back to exactly one of them; `semantic-mutation`
+  requires the three operator shards' manifests to agree on
+  `base_revision`/`table_operators` and their `executed_operators` to union
+  back to `table_operators` exactly. Both checks reuse a new generic
+  `tools/check-shard-union.sh` (subset/pairwise-disjoint/union-equality,
+  fail-closed and naming the offending entries), whose `selftest` — an
+  accepting 3-way split plus four rejecting cases (uncovered entry,
+  duplicated entry, invented entry, empty shard list) — is wired into
+  `tools/check-merge-readiness.sh`'s automation lane next to
+  `check-product-gate-scope.sh selftest`. `tools/run-semantic-mutation-gate.sh`
+  gained `--lane operators|mutants` and `--shard K/N`; with neither flag its
+  behavior, order, and output are unchanged from before this change.
+  `tools/check-native-integration.sh` gained `rust-checks` and
+  `rust-tests K/N` phases; `rust` (the single unsharded local entrypoint
+  named in `AGENTS.md`) is untouched. See `docs/DESIGN-ci.md`, "Sharded
+  pre-merge Linux evidence", and `docs/DESIGN-semantic-mutation-gate.md`,
+  "CI scheduling: two lanes, one aggregator".
+
 - Required the complete Linux evidence on `main`, closing the gap #707
   opened: the `main safety and CI` ruleset (id `19090811`) now requires
   `rust workspace`, `WASM`, `semantic mutation (changed)`, and

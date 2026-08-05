@@ -85,12 +85,21 @@ candidate against current `main`.
 `.github/workflows/ci.yml` is named `product gate`. A trusted `main` push runs all of these jobs in
 parallel:
 
-- the complete Rust-native integration phase from `tools/check-native-integration.sh rust`
-  (`rust workspace`);
+- the Rust-native integration phase, sharded across three jobs: `rust-checks` runs
+  `tools/check-native-integration.sh rust-checks` once (formatting, Clippy, the workspace doctests,
+  the full workspace build, and the boundary/stack-parity controls); `rust-tests` shards the
+  workspace's non-doctest tests three ways with `cargo-nextest` via
+  `tools/check-native-integration.sh rust-tests K/3`; the `rust-workspace` aggregator requires both
+  and enforces shard-union completeness (`rust workspace`; see "Sharded pre-merge Linux evidence"
+  below);
 - the production WASM/browser phase from `tools/check-native-integration.sh wasm` (`WASM`);
 - focused native-Z3 tests on macOS and Windows (`native Z3 4.16`);
-- the M13 semantic mutation gate from `tools/check-native-integration.sh semantic-mutation`
-  (`semantic mutation`), including curated implementation operators and pinned generic mutants.
+- the M13 semantic mutation gate, sharded across three jobs: `semantic-mutation-operators` runs the
+  curated fault-operator controls three ways via `tools/run-semantic-mutation-gate.sh <mode> --lane
+  operators --shard K/3`; `semantic-mutation-mutants` runs the generic cargo-mutants half, complete
+  and unsharded, via `tools/run-semantic-mutation-gate.sh <mode> --lane mutants`; the
+  `semantic-mutation` aggregator requires both and enforces operator-union completeness (`semantic
+  mutation`; see "Sharded pre-merge Linux evidence" below);
 - the deterministic finite-model agreement gate from `tools/check-native-integration.sh fsl-logic`
   (`FSL Logic Test`).
 
@@ -162,6 +171,104 @@ unfiltered pre-merge or fail-loud coverage. `skills/**` and `docs/**` must never
 `skills/fsl/reference.md` moves with language features under the coupled-change contract,
 `docs/LANGUAGE*.md` feeds the site-reference freshness gate, and product-gate literate
 doc-contract tests read documentation files directly.
+
+### Sharded pre-merge Linux evidence
+
+Measured on run 30968645971 (PR #717): `semantic mutation (changed)` was the critical-path job at
+38m15s, `rust workspace` was 32m43s, `WASM` was 6m08s, and `FSL Logic Test (pr)` was 1m09s. Inside
+`rust workspace`, cache restore and compilation together were only ~3.5 min on a warm cache; the
+remaining ~29 min was `cargo test` running 176 test binaries **strictly sequentially** — the
+harness-sum across binaries (28.6 min) matches the observed wall clock, and five binaries
+(`refine_corpus_parity` 7.34 min/4 tests, `explicit_engine` 4.58 min/12, `injection_detector_matrix`
+3.75 min/1 test, `corpus_check_sweep` 3.16 min/3, `issue_226_auto_engine` 3.13 min/15) are 77% of
+that time while 146 of the 176 binaries finish in under a second. Inside `semantic mutation`, the
+curated fault-operator half's no-op control alone (`control no-op: all 17 operators' detectors
+green`) took 912s and the full curated loop (`fault-operators: 17 operators calibrated`) took 1350s;
+the generic cargo-mutants half took roughly the remaining ~14.3 min.
+
+Both jobs are dominated by work that parallelizes cleanly across independent shards, so each is
+split into a sharded lane plus an aggregator that keeps the exact required-context name:
+
+- `rust workspace` = `rust-checks` (once) + `rust-tests` (`cargo-nextest`, 3-way `--partition
+  count:K/3`) + the `rust-workspace` aggregator.
+- `semantic mutation (…)` = `semantic-mutation-operators` (3-way round-robin shard of
+  `operators.txt`) + `semantic-mutation-mutants` (generic cargo-mutants, complete and **deliberately
+  unsharded** — see below) + the `semantic-mutation` aggregator.
+
+Expected wall clock after sharding is **≈17 min**, down from 38m15s — a little over 2x, not 3x,
+because both lanes carry a large unshardable fixed cost measured during this work and stated in the
+floors below. The first sharded operator run measured it directly: a 6-operator shard's no-op control
+took **760s** against 912s for all 17, so splitting the lane three ways removed only ~150s of
+detector time, not two thirds of the lane. Do not quote a lower figure than ≈17 min without a fresh
+measurement.
+
+**Doctests moved to `rust-checks`, explicitly, because `cargo-nextest` cannot run them at all.**
+Silently dropping them to make the sharded lane faster would be exactly the "weaken a gate for
+speed" move this repository's invariants forbid, so
+`cargo test --manifest-path rust/Cargo.toml --workspace --doc --locked` runs once, unsharded, in
+`rust-checks`, alongside formatting, Clippy, the full workspace build, and the boundary/stack-parity
+controls. `rust-tests` then shards only what `cargo-nextest` can run: everything else.
+
+**The generic mutants lane is deliberately unsharded.** At ~14.3 min it is already close to the
+curated operator lane's floor once that lane is split three ways (see below), and cargo-mutants
+sharding would add real risk — mutant-inventory slicing, uncertain `--shard`/partition index-base
+semantics in the pinned runner, and migrating the stale-reviewed-equivalents check to a sharded
+world — for no measurable wall-clock gain. `semantic-mutation-mutants` therefore runs
+`tools/run-semantic-mutation-gate.sh <mode> --lane mutants`, complete, on one runner, with the same
+fresh-`CARGO_TARGET_DIR` anti-contamination behavior it has always had.
+
+**Why `if: always()` is load-bearing on both aggregators.** GitHub treats a *skipped* required
+status check as satisfied — it is not "pending" or "failing," it reads as passed. If `rust-workspace`
+or `semantic-mutation` inherited the default skip-on-upstream-failure behavior, a failing shard would
+skip the aggregator, and the skip would silently satisfy the `main` ruleset's required context instead
+of blocking the merge: a confidently-green false negative on the exact two contexts this split
+touches. `if: always()` forces the aggregator to run and evaluate its dependencies' results even when
+one failed, so it can fail loudly instead of disappearing. The aggregator job **ids** are unchanged
+(`rust-workspace`, `semantic-mutation`), so `product-gate`'s `needs:` list and the `main` ruleset's
+required-context set (`rust workspace`, `semantic mutation (changed)`) both keep working without
+their own edit.
+
+**Union-completeness guards.** A scheduling change must not be able to silently narrow what runs, so
+each aggregator downloads its shards' inventories and proves the split is a true partition of the
+unsharded set before trusting a `success` result:
+
+- `rust-workspace` downloads the three `rust-tests` shards' `full.txt`/`shard.txt` (written by
+  `check_rust_tests` in `tools/check-native-integration.sh` *before* the shard's tests run, so the
+  inventory exists even when a test in it fails), asserts the three `full.txt` files are
+  byte-identical — three independent `cargo nextest list` invocations agreeing — then runs
+  `tools/check-shard-union.sh full.txt shard1.txt shard2.txt shard3.txt`.
+- `semantic-mutation` downloads the three operator shards' `shard-manifest.v1.json` (written by
+  `tools/run-fault-operators.sh` only after a successful shard run), asserts identical
+  `base_revision` and `table_operators` across all three, then checks that the disjoint union of
+  their `executed_operators` equals `table_operators` with the same `check-shard-union.sh` logic.
+
+`tools/check-shard-union.sh` is the generic, reusable primitive both checks build on: given one full
+list and N shard lists, it fails closed — naming the offending entries — unless every shard is a
+subset of the full list, the shards are pairwise disjoint, and their union equals the full list
+exactly. Its `selftest` subcommand exercises an accepting three-way split and four rejecting cases
+(an entry covered by no shard, an entry duplicated across shards, an invented shard entry, an empty
+shard list) and is wired into `tools/check-merge-readiness.sh`'s `check_automation`, alongside
+`check-product-gate-scope.sh selftest`.
+
+**Agent-configuration-exempt pull requests still work.** Every shard job runs
+`check-product-gate-scope.sh` itself and early-exits its own later steps when `run=false`, so the
+shard's job result is still `success` and no artifact is ever uploaded. Both aggregators therefore
+also run the scope step themselves: when `run=false` they trust the (trivially successful) shard
+results and skip the artifact-download/union-validation steps outright, because there is nothing to
+download.
+
+**Floors — sharding buys parallelism, not a lower bound.** `refine_corpus_parity`'s slowest single
+test (≈7.3 min) cannot be split further by this scheme, so together with the ≈3.5 min compile it
+bounds `rust-workspace` at roughly ≈12 min no matter how the remaining 175 binaries are distributed.
+Each `semantic-mutation-operators` shard independently pays the cold build in its own synced scratch
+checkout (`tools/run-fault-operators.sh`'s `sync_scratch`), and that cost dominates the lane:
+measured, a 6-operator shard's no-op control took 760s where all 17 operators took 912s, so roughly
+700s of the 912s is the fixed scratch build and only ~12s per detector run scales with the shard.
+The lane's floor is therefore ≈760s plus its ~26s-per-assigned-operator loop — about 15–16 min at
+`K/3`, against 22.5 min unsharded, **not** 1350s ÷ 3. Raising the shard count barely helps; only
+making that scratch build cheaper (caching `rust/target/fault-operators`, or sharing a warm target
+dir without breaking the patch-isolation contract) would move this floor, and neither is attempted
+here. Nobody should expect either lane to shrink further without changing what it measures.
 
 `semantic mutation` is required on pull requests and every product-gate event. Ordinary pull
 requests run all curated controls plus generic mutants intersecting the recorded base-to-head diff;
@@ -236,9 +343,12 @@ requirement in ruleset `19090821` would have to drop to zero approvals (removing
 for non-admin contributors too), or a second approving identity would have to exist. Neither is a
 CI decision, so neither is made here. `ci.yml` keeps its `merge_group` trigger and the scope
 script keeps its `queue-entry-stub` branch — both inert, both harmless, and both ready if that
-policy question is ever answered differently. Until then, per-push cost is unchanged and the
-remaining levers for it are ordinary ones: cache hit rates, job splitting, or moving specific lanes
-post-merge under a new accepted decision.
+policy question is ever answered differently. Until then, per-push cost is unchanged from a
+human-review-policy standpoint. Of the ordinary levers named here previously, job splitting is now
+exercised — see "Sharded pre-merge Linux evidence" above — and cache hit rates were measured to have
+no headroom: compile is only ~3.5 min of the ~33 min `rust workspace` measured on a warm cache, so a
+better hit rate could not have bought back more than that. The remaining lever is moving specific
+lanes post-merge under a new accepted decision.
 
 ## Failure reporting contract
 

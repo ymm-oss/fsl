@@ -42,6 +42,10 @@ check_automation() {
   # Accepting/rejecting controls for the agent-configuration-exemption
   # classifier that ci.yml's heavy jobs now run in-job (docs/DESIGN-ci.md).
   ./tools/check-product-gate-scope.sh selftest
+  # Accepting/rejecting controls for the shard-completeness guard the sharded
+  # `rust workspace` and `semantic mutation` aggregators depend on
+  # (docs/DESIGN-ci.md, "Sharded pre-merge Linux evidence").
+  ./tools/check-shard-union.sh selftest
 }
 
 case "${1:-all}" in

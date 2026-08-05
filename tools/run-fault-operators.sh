@@ -28,6 +28,45 @@
 
 set -euo pipefail
 
+# Sharding (issue: CI wall-clock reduction). `--shard K/N` restricts the no-op
+# control and the main operator loop to a round-robin slice of `operators.txt`
+# (operator index `i`, 0-based in table order, belongs to shard `K` iff
+# `i % N == K - 1`), so three shards can run the ~912s no-op control and the
+# ~1350s operator loop in parallel. Everything else -- the whole-table
+# validation in `read_table` and the harness's own stale-seam negative control
+# -- still runs in every shard: those are cheap and a fault in either one must
+# be caught by every shard, not by whichever shard happened to draw it. The
+# default `1/1` (no flag) path assigns every operator to the one shard, so its
+# behavior is unchanged apart from also writing `shard-manifest.v1.json`.
+shard_index=1
+shard_total=1
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --shard)
+      if [ "$#" -lt 2 ]; then
+        echo "usage: $0 [--shard K/N]" >&2
+        exit 2
+      fi
+      if [[ "$2" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]]; then
+        shard_index="${BASH_REMATCH[1]}"
+        shard_total="${BASH_REMATCH[2]}"
+        if [ "$shard_index" -gt "$shard_total" ]; then
+          echo "usage: $0 [--shard K/N]: K must be <= N, got '$2'" >&2
+          exit 2
+        fi
+      else
+        echo "usage: $0 [--shard K/N]: '$2' is not K/N" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    *)
+      echo "usage: $0 [--shard K/N]" >&2
+      exit 2
+      ;;
+  esac
+done
+
 root="$(cd "$(dirname "$0")/.." && pwd)"
 operators_dir="$root/rust/fslc/tests/fault_operators"
 table="$operators_dir/operators.txt"
@@ -131,6 +170,20 @@ read_table() {
       fail "$file is not referenced by any row in $table. Either add its row or
   delete the patch -- an operator that runs nowhere is not an operator."
   done
+}
+
+assigned_indices=()
+assign_shard() {
+  local index
+  for index in "${!names[@]}"; do
+    if [ $((index % shard_total)) -eq $((shard_index - 1)) ]; then
+      assigned_indices+=("$index")
+    fi
+  done
+  [ "${#assigned_indices[@]}" -gt 0 ] || fail "shard $shard_index/$shard_total is
+  assigned no operators among the ${#names[@]} rows in $table. Either the shard
+  count exceeds the table size or the round-robin assignment is wrong -- an
+  empty shard would silently run nothing and still read green."
 }
 
 sync_scratch() {
@@ -253,7 +306,7 @@ check_no_op_control() {
   local started=$SECONDS index
   sync_scratch
   apply_operator_patch "$operators_dir/controls/no-op.patch" "$logs/no-op.apply.log"
-  for index in "${!names[@]}"; do
+  for index in "${assigned_indices[@]}"; do
     run_detector "${primary_targets[$index]}" "${primary_tests[$index]}" \
       "$logs/no-op.${names[$index]}.primary.log"
     [ "$detector_result" = "ok" ] || fail "no-op control: primary detector
@@ -266,7 +319,7 @@ check_no_op_control() {
   '${blind_tests[$index]}' (operator ${names[$index]}) failed without any fault
   applied. Full log: $logs/no-op.${names[$index]}.blind.log"
   done
-  echo "control no-op: all ${#names[@]} operators' detectors green ($((SECONDS - started))s)"
+  echo "control no-op: all ${#assigned_indices[@]} operators' detectors green ($((SECONDS - started))s)"
 }
 
 failures=()
@@ -299,10 +352,11 @@ run_operator() {
 }
 
 read_table
+assign_shard
 check_stale_seam_control
 check_no_op_control
 
-for index in "${!names[@]}"; do
+for index in "${assigned_indices[@]}"; do
   run_operator "$index"
 done
 
@@ -311,4 +365,34 @@ if [ "${#failures[@]}" -gt 0 ]; then
   exit 1
 fi
 
-echo "fault-operators: ${#names[@]} operators calibrated (${SECONDS}s total)"
+# Per-shard completeness evidence (issue: CI wall-clock reduction). Written
+# only on success, so a failed shard's manifest never masquerades as
+# completed evidence. The aggregator downloads every shard's manifest, checks
+# `base_revision` and `table_operators` agree across shards, and requires the
+# disjoint union of `executed_operators` to equal `table_operators` exactly --
+# the same fail-closed shape as `check-shard-union.sh`.
+mkdir -p "$logs"
+executed_names=()
+for index in "${assigned_indices[@]}"; do
+  executed_names+=("${names[$index]}")
+done
+table_operators_json="$(printf '%s\n' "${names[@]}" | jq -R . | jq -s .)"
+executed_operators_json="$(printf '%s\n' "${executed_names[@]}" | jq -R . | jq -s .)"
+jq -n \
+  --arg schema "fslc.fault-operator-shard-manifest.v1" \
+  --argjson schema_version 1 \
+  --arg base_revision "$(git -C "$root" rev-parse HEAD)" \
+  --argjson shard_index "$shard_index" \
+  --argjson shard_total "$shard_total" \
+  --argjson table_operators "$table_operators_json" \
+  --argjson executed_operators "$executed_operators_json" \
+  '{
+    schema: $schema,
+    schema_version: $schema_version,
+    base_revision: $base_revision,
+    shard: {index: $shard_index, total: $shard_total},
+    table_operators: $table_operators,
+    executed_operators: $executed_operators
+  }' >"$logs/shard-manifest.v1.json"
+
+echo "fault-operators: ${#assigned_indices[@]} operators calibrated (${SECONDS}s total)"
