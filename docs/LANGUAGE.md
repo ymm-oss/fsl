@@ -752,8 +752,9 @@ fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexa
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
-               [--property <Name>]               # check one named property in isolation —
-                                                 #   invariant / trans / leadsTo / reachable (for probing)
+               [--property <Name>]               # check one named property obligation —
+                                                 #   invariant / trans / leadsTo / reachable;
+                                                 #   induction keeps all invariants for a selected trans
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
@@ -867,6 +868,16 @@ two are never conflated.
 
 `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
 `reachable` declarations and checks only the named property kind in isolation.
+There is one induction-specific dependency rule: with
+`--engine induction --property <trans>`, the named `trans` is the only transition
+obligation, but all user invariants and implicit type bounds remain in the base
+case and the induction hypothesis. This preserves proofs whose two-state safety
+argument depends on established state invariants and makes the selected
+transition's verdict match the same transition in an all-properties induction
+run. Existing `--property <invariant>` behavior is unchanged: it still restricts
+the model to that invariant rather than retaining sibling invariants. The
+induction selector continues to reject selected `leadsTo` and `reachable`
+properties with a usage error.
 `--exclude-property Name` is repeatable and acts as the cross-kind inverse:
 it removes named invariants, `trans`, `leadsTo`, and `reachable` properties
 from the run and from checked-property outputs (`invariants_checked`,

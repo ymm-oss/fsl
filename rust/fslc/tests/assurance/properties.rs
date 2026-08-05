@@ -106,8 +106,8 @@ pub fn axis() -> Axis {
         ("transitions", "induction"),
         Claim::Exercised {
             by: Citation {
-                path: "rust/fslc/tests/induction_suggestions.rs",
-                anchor: "fn trans_ctis_never_receive_invariant_suggestions()",
+                path: "rust/fslc/tests/verification_ownership.rs",
+                anchor: "fn selected_transition_induction_matches_the_all_properties_proof()",
             },
         },
     );

@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: Apache-2.0
+
+requirements InductionTransScope {
+  number Count
+
+  process Ticket with amount: Count {
+    stages Open, Closed
+    initial Open
+
+    transition close Open -> Closed by Agent
+      with value: Count
+      when value > 0
+      set amount = value
+      covers REQ-701 "An agent closes a ticket"
+  }
+
+  trans StableRange { true }
+}
+verify {
+  instances Ticket = 1
+  values Count = 0..1
+}

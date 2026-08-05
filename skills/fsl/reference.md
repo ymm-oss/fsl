@@ -908,8 +908,9 @@ fslc conformance <f> [--depth K=4] [--kernel-version 1|2] # matching vectors (de
 fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
                [--explicit-budget N=1000000]        # explicit/auto; max visited states
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
-               [--property <Name>]                  # check one named property in isolation
-                                                    #   (invariant / trans / leadsTo / reachable)
+               [--property <Name>]                  # check one named property obligation
+                                                    #   (invariant / trans / leadsTo / reachable;
+                                                    #    selected trans keeps induction invariants)
                [--exclude-property <Name>]...       # skip named invariant/trans/leadsTo/reachable
                [--instances NAME=N]...              # override verify-block `instances NAME = N`
                [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`
@@ -1291,6 +1292,12 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   to the built-in catalog (`0` gives an external-only run).
 - `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
   `reachable` declarations and checks only the named property kind in isolation.
+  Under `--engine induction --property <trans>`, the named transition is the
+  only transition obligation, while every user invariant and implicit type
+  bound remains in the base case and induction hypothesis. This is the one
+  dependency-preserving exception to model restriction. Existing selected-
+  invariant behavior is unchanged and still drops sibling invariants. Selected
+  `leadsTo` and `reachable` remain rejected by the induction selector.
   `--exclude-property Name` is repeatable and acts as the cross-kind inverse:
   it removes named invariants, `trans`, `leadsTo`, and `reachable` checks from
   the run and from checked-property outputs. If both options name the same

@@ -810,8 +810,9 @@ fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, count
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
-               [--property &lt;Name&gt;]               # check one named property in isolation —
-                                                 #   invariant / trans / leadsTo / reachable (for probing)
+               [--property &lt;Name&gt;]               # check one named property obligation —
+                                                 #   invariant / trans / leadsTo / reachable;
+                                                 #   induction の trans 選択は全 invariant を保持
                [--exclude-property &lt;Name&gt;]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc sweep     &lt;file.fsl&gt; --instances E=lo..hi --depth lo..hi [--property Name]
@@ -917,6 +918,14 @@ Public Kernel v2 はオプトインで、
 「has no response scenario within depth K」になります。両者は混同されません。</p>
 <p><code>verify --property Name</code> は invariant、<code>trans</code>、<code>leadsTo</code>、<code>reachable</code> の宣言を
 横断して解決し、指名されたプロパティ種別だけを単独で検査します。
+ただし induction には依存関係に関する規則が 1 つあります:
+<code>--engine induction --property &lt;trans&gt;</code> では、指名した <code>trans</code> だけが遷移の証明義務に
+なりますが、すべてのユーザー invariant と暗黙の型境界はベースケースと induction
+仮定に残ります。これにより、確立済みの状態 invariant に依存する 2 状態安全性の証明を
+維持し、選択実行のその遷移に対する verdict を all-properties induction 実行と一致させます。
+既存の <code>--property &lt;invariant&gt;</code> の挙動は変更しません: sibling invariant は保持せず、
+指名した invariant だけにモデルを制限します。induction selector は、選択された
+<code>leadsTo</code> と <code>reachable</code> を引き続き usage error として拒否します。
 <code>--exclude-property Name</code> は繰り返し指定でき、種別を横断する逆操作として機能します:
 指名された invariant、<code>trans</code>、<code>leadsTo</code>、<code>reachable</code> プロパティを、実行と、検査済み
 プロパティの出力(<code>invariants_checked</code>、<code>transitions_checked</code>、<code>leads_to</code>、

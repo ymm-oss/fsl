@@ -214,6 +214,15 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   in those containers fails at its declaration instead of producing invalid
   text or panicking. Renderer failures now retain their source location and
   name-resolution classification in the CLI JSON envelope (#691).
+- Fixed native induction's property selector so
+  `verify --engine induction --property <trans>` reaches the already-supported
+  transition base/step obligations instead of returning a usage error. The
+  selected transition is the only transition obligation, while the complete
+  user-invariant and implicit-bound set remains proved in the base case and
+  available as the induction hypothesis; this avoids the false negative caused
+  by treating proof dependencies as unselected obligations. Existing selected-
+  invariant semantics are unchanged, and selected `leadsTo`/`reachable` plus
+  unknown property names remain rejected as before (#701).
 
 - Added a standalone `site reference freshness` CI workflow
   (`.github/workflows/site-reference-freshness.yml`) that runs the
