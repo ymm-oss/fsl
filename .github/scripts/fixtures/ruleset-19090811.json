@@ -1,0 +1,91 @@
+{
+  "$comment": "Verbatim capture of `gh api repos/ymm-oss/fsl/rulesets/19090811` on 2026-08-06, with ONE hand-added entry: the sixth required_status_checks entry for \"site reference freshness\" (integration_id 15368, matching the other five). The live ruleset still has only five required contexts as of this capture -- the sixth entry here is the pending post-rollout state the contract in ../../ruleset-contract.json expects, added by hand so the accepting test (audit-ruleset-drift.test.mjs) exercises the six-context contract this fixture is meant to model once the live edit lands. Everything else in this file is the unmodified API response. Do not silently reconcile this note away by deleting it once the live edit happens -- recapture instead and drop this comment.",
+  "id": 19090811,
+  "name": "main safety and CI",
+  "target": "branch",
+  "source_type": "Repository",
+  "source": "ymm-oss/fsl",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "refs/heads/main"
+      ]
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "required_reviewers": [],
+        "require_code_owner_review": false,
+        "dismissal_restriction": {
+          "enabled": false,
+          "allowed_actors": []
+        },
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false,
+        "allowed_merge_methods": [
+          "merge",
+          "squash",
+          "rebase"
+        ]
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "merge readiness",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust workspace",
+            "integration_id": 15368
+          },
+          {
+            "context": "WASM",
+            "integration_id": 15368
+          },
+          {
+            "context": "semantic mutation (changed)",
+            "integration_id": 15368
+          },
+          {
+            "context": "FSL Logic Test (pr)",
+            "integration_id": 15368
+          },
+          {
+            "context": "site reference freshness",
+            "integration_id": 15368
+          }
+        ]
+      }
+    }
+  ],
+  "node_id": "RRS_lACqUmVwb3NpdG9yec5Lu2QuzgEjTXs",
+  "created_at": "2026-07-17T16:28:37.565+09:00",
+  "updated_at": "2026-08-05T13:50:30.270+09:00",
+  "bypass_actors": [],
+  "current_user_can_bypass": "never",
+  "_links": {
+    "self": {
+      "href": "https://api.github.com/repos/ymm-oss/fsl/rulesets/19090811"
+    },
+    "html": {
+      "href": "https://github.com/ymm-oss/fsl/rules/19090811"
+    }
+  }
+}
