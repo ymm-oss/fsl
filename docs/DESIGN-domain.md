@@ -70,6 +70,11 @@ Each aggregate becomes kernel state and actions:
 - saga step -> kernel action guarded by `starts_on`, `requires`, or awaited
   event flags
 - saga compensation -> kernel action guarded by trigger/after event flags
+  (#713: both lowering paths, `lower_saga_actions` in `domain_lowering.rs` and
+  `render_saga_actions` in `domain.rs`, emit a `requires` for the trigger
+  event flag AND a separate `requires` for the `after_event` flag, in that
+  order; before #713 only the trigger flag was required, so a compensation
+  could fire on a trace that never observed its `after_event`)
 
 Domain enum members are namespaced during lowering (`OrderStatus_Pending`) so
 two domain enums can both contain `Pending`. Domain expressions stay in the
@@ -288,6 +293,20 @@ history is checked through replay evidence rather than treated as an unbounded
 kernel proof. Outcome events owned by an effect are observed only through that
 effect's correlation-guarded completion action, so the modeled lifecycle retains
 completion-requires-request without a weaker saga observation writer.
+
+Because generated `event_<Event>` flags are a one-hot, one-step observation
+(see `docs/DESIGN-saga-history.md`), a compensation's dual trigger/after guard
+is only satisfiable by a single transition that emits both events. When the
+trigger and after events differ — the typical shape, e.g.
+`examples/domain/order_fulfillment_saga.fsl`'s
+`when PaymentFailed after InventoryReserved` — the compensation action is
+structurally disabled under the current one-hot flag scheme, and `fslc
+verify` surfaces it as a "never enabled" action warning rather than silently
+passing. This is the accepted interim boundary
+(`docs/DESIGN-saga-history.md`'s "Implementation boundary" section): the
+warning is valid evidence of the known gap and must not be suppressed or
+replaced by sticky global flags until the correlation-indexed saga history
+follow-up (issue #662) lands.
 
 ## Guarantee Boundary
 

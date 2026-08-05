@@ -2758,10 +2758,10 @@ fn lower_saga_actions(
             resolver.event(&compensation.trigger_event, compensation.loc)?;
             resolver.event(&compensation.after_event, compensation.loc)?;
             let span = span_at(compensation.loc);
-            let mut action_items = vec![ActionItem::Requires(
-                Expr::Var(event_flag(&compensation.trigger_event)),
-                span,
-            )];
+            let mut action_items = vec![
+                ActionItem::Requires(Expr::Var(event_flag(&compensation.trigger_event)), span),
+                ActionItem::Requires(Expr::Var(event_flag(&compensation.after_event)), span),
+            ];
             action_items.extend(
                 resolver
                     .event_assignments(&compensation.emits, span)?

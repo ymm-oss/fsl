@@ -5,6 +5,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed (#713): saga `compensation { when Trigger after After { ... } }` now
+  lowers to a kernel action guarded by BOTH the trigger event flag and the
+  `after` event flag on both lowering paths (`lower_saga_actions` in
+  `rust/fsl-core/src/domain_lowering.rs` and `render_saga_actions` in
+  `rust/fsl-core/src/domain.rs`); previously only the trigger flag was
+  required, so a compensation could fire on a trace that never observed its
+  `after` event. Because generated `event_*` flags are one-hot per
+  transition, a compensation whose trigger and after events differ (the
+  common shape, e.g. `examples/domain/order_fulfillment_saga.fsl`) is now
+  structurally disabled and surfaces as a `fslc verify` never-enabled action
+  warning instead of silently accepting the bad trace; this is the accepted
+  interim state pending the correlation-indexed saga history follow-up
+  (issue #662, `docs/DESIGN-saga-history.md`). No spec migration is required:
+  an existing `compensation` block's syntax and semantics are unchanged
+  (only its guard strength, previously unsound). See `docs/DESIGN-domain.md`.
 - Sharded the two heaviest pre-merge product-gate jobs to cut PR wall clock
   from a measured 38m15s (`semantic mutation (changed)`, run 30968645971) to a
   measured **20.7 min** (run 30989320577, all lanes green) — 1.85x, ~17.5 min

@@ -846,6 +846,10 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
             "  requires {}",
             Context::event_flag(&compensation.trigger_event)
         ));
+        lines.push(format!(
+            "  requires {}",
+            Context::event_flag(&compensation.after_event)
+        ));
         lines.extend(
             event_assignments(context.domain, &compensation.emits)
                 .into_iter()
