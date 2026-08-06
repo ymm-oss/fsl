@@ -402,7 +402,7 @@ jobs:
   semantic-mutation-operators:
     name: mutation operators (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
@@ -436,6 +436,13 @@ jobs:
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
           shared-key: semantic-mutation
+          # Save even when the job fails. Without this the lane cannot recover from a
+          # cold start: a cold scratch build exceeds the job budget, the job is
+          # cancelled, `rust-cache` skips saving, and the next run is cold again. The
+          # cache can then only be created by a run that succeeds, and a run can only
+          # succeed once the cache exists. Measured on `main` and on three pull
+          # requests; see docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          cache-on-failure: true
 
       - name: Calibrate curated fault-operator shard
         if: steps.scope.outputs.run == 'true'
@@ -454,7 +461,7 @@ jobs:
   semantic-mutation-mutants:
     name: mutation mutants
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -484,6 +491,13 @@ jobs:
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
           shared-key: semantic-mutation
+          # Save even when the job fails. Without this the lane cannot recover from a
+          # cold start: a cold scratch build exceeds the job budget, the job is
+          # cancelled, `rust-cache` skips saving, and the next run is cold again. The
+          # cache can then only be created by a run that succeeds, and a run can only
+          # succeed once the cache exists. Measured on `main` and on three pull
+          # requests; see docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          cache-on-failure: true
 
       - name: Install pinned semantic mutation runner
         if: steps.scope.outputs.run == 'true'

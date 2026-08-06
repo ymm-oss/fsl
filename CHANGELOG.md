@@ -33,6 +33,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   qualifies this repository's earlier finding that cache hit rates have no headroom — true **on a
   warm cache**, which is the premise concurrency breaks. #720's Finding 2 adds a cache and therefore
   depends on this budget holding first.
+  Eviction started the problem; `cache-on-failure: false` made it unrecoverable. The
+  `semantic mutation` lane fell into a closed loop: a cold scratch build exceeds the job budget, the
+  job is cancelled, `rust-cache` skips saving from a failed job, and the next run is cold again — so
+  the cache could only be created by a run that succeeds while a run could only succeed once the cache
+  existed. Both semantic-mutation cache steps now carry `cache-on-failure: true`, and both budgets are
+  raised past a measured cold run: `mutation operators` 30 → 50 min (warm 18.0–19.5, cancelled at 30.2
+  cold) and `mutation mutants` 60 → 90 min (warm 17.2–34.2, cancelled at ~61 cold). Raised rather than
+  narrowed, for the reason this repository already gives for the promotion-only native-Z3 job: a gate
+  that runs out of wall clock reports a failure it did not observe. This is the most likely explanation
+  for `main`'s standing #721 and #678, whose cancellations sit exactly at the old budgets; whether they
+  clear once this lands is the test of that reading.
 - Fixed (#736): `.github/workflows/ci.yml` cited a `docs/DESIGN-ci.md` section,
   `"Merge queue (planned, not yet enabled)"`, that does not exist and asserted the
   opposite of the accepted decision — the design document records that a merge

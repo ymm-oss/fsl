@@ -381,6 +381,32 @@ no headroom for `rust workspace` — compile is only ~3.5 min of ~33 min **on a 
 remains true warm, and it is exactly the premise that fails under concurrency: the question is not
 how much a better hit rate buys, but whether a hit happens at all.
 
+**Eviction started this; `cache-on-failure: false` made it unrecoverable.** The
+`semantic mutation` lane fell into a closed loop, measured on `main` and on three pull requests:
+
+1. a cold scratch build exceeds the job's budget, so the job is cancelled;
+2. `Swatinem/rust-cache` does not save from a failed job (`cache-on-failure` defaults to false),
+   so nothing is written;
+3. the next run is cold again.
+
+**The cache can then only be created by a run that succeeds, and a run can only succeed once the
+cache exists.** Measured budgets against measured durations:
+
+| job | budget before | warm | cold | budget now |
+|---|---|---|---|---|
+| `mutation operators (K/3)` | 30 min | 18.0–19.5 min | **>30** (cancelled at 30.2) | **50 min** |
+| `mutation mutants` | 60 min | 17.2–34.2 min | **>60** (cancelled at ~61) | **90 min** |
+
+Both semantic-mutation cache steps now carry `cache-on-failure: true`, so a cold run that runs out
+of budget still leaves a warm cache behind, and both budgets are raised past a measured cold run.
+Raised rather than narrowed, for the reason this document already gives for the promotion-only
+native-Z3 job: a gate that runs out of wall clock reports a failure it did not observe.
+
+This is also the most likely explanation for `main`'s standing post-merge failures #721
+(`mutation mutants`) and #678 (`semantic mutation (complete)`), whose cancellations sit exactly at
+the old budgets. Whether they clear once this lands is the test of that reading, and #747's
+acceptance criteria record it as such.
+
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,
 and on `main` pushes that touch it or `ci.yml`. It fails closed on three states: usage at or above
