@@ -74,6 +74,7 @@ inference), and E0 (assumption).
 | E-11 | E3 | At the `d72ac8d` spike baseline, `main.rs` commit-touch rate stays near half while per-commit churn on the 50 post-extraction `main.rs` commits (`6684dfb..d72ac8d`) is min 3 / median 29 / p90 202 / max 385 lines, with 26 of 50 at 30 lines or fewer. | Shows touch rate and line count cannot separate composition cohesion from harmful coupling. |
 | E-12 | E2 | Three repeat-fix chains (exit-code class, nested kernel projection, spec-load error plumbing) each trace to one contract policy implemented at more than one site; commit messages `fd5b8c6` and `693bddb` state the cause directly. | Identifies the harmful-coupling mechanism and grounds the policy-site discriminator in section 8. |
 | E-13 | E1 | `743bc7a` made `main.rs` the single owner of spec-load classification (typed `SpecLoadError`); across its follow-up series `743bc7a` → `fedba3f` → `558e113`, `main.rs` involvement fell 379 → 179 → 16 changed lines while total change size grew, and `2fd555f` later moved the owner into `rust/fslc/src/spec_load.rs` mid-series (n=3; the direction is measured, the generalization is inference). | Supports policy single-owner extraction as the adjudicated response to orchestration coupling. |
+| E-14 | E3 | `c455e50` (#697) changes the concrete probe's budget policy, which is defined once (`rust/fsl-runtime/src/lib.rs`'s `CONCRETE_PROBE_BUDGET`, governing the single `find_boundary_violation`) and referenced from four call sites across `fsl-wasm` and `fslc` with no reimplementation anywhere in `rust/`; its `main.rs` change is 11 lines of wiring, and the only later commit touching the budget (`74d7f3e`) adds a control rather than fixing a second arm. | The negative control the policy-site discriminator must reject: many call sites, one implementation site, read as cohesion. Establishes that the discriminator separates rather than matching everything. |
 
 Scoped contract classifications are:
 
@@ -453,44 +454,64 @@ first phase is the in-crate module and whose second is the crate.
 
 #### Policy-site discriminator for orchestration coupling
 
-What the spike leaves behind for the next time `main.rs` size or touch rate is offered as evidence,
-**and what it does not**. The positive observation is well grounded; the discriminator is not
-established, and this section says so rather than claiming a rule it cannot back.
+The rule the spike leaves behind, for the next time `main.rs` size or touch rate is offered as
+evidence. It is an adjudicated working rule graded by its evidence — three measured chains and one
+negative control that the rule rejects — not a definition:
 
-**Observed, in three measured chains (E-12):** each was caused by one contract policy implemented
-at more than one site, none by family verticality. Harmful coupling showed up as any of: (1) one
-policy's fix splitting across two or more commits in different command arms; (2) one policy change
-forcing simultaneous edits to many arms; (3) a fix landing on only some of several copies; (4) a
-cross-cutting guard inserted into both `main.rs` and an extracted module.
+> Harmful coupling is one contract policy **implemented** at more than one site. A command arm that
+> only calls into a single library owner of that policy is legitimate composition cohesion, however
+> many arms call it.
 
-**Not established: a test that separates this from legitimate composition cohesion.** Two
-formulations were tried and both fail, so neither is adopted here:
+**"Site" means implementation site, not call site.** That distinction is the whole rule, and getting
+it wrong is what made two earlier formulations fail. Counting call sites makes every centralized
+policy look coupled, because centralizing is exactly what produces many callers. Counting only
+recurrence — "a fix split across two or more commits in different arms" — misses a policy whose arms
+were mismatched from birth and never partially fixed, does not capture Case C at all, and returns
+both verdicts on a history where a duplicated policy was later centralized. Recurrence is a
+*symptom* of multi-site implementation, useful for reading a chain retrospectively; the site count is
+the property.
 
-- *Site count* — "one contract policy implemented at more than one site is harmful coupling." This
-  matches the three chains, but it also matches `64bfb55` below, which the same analysis wants to
-  classify as domain-caused. As a discriminator it accepts everything.
-- *Recurrence signature* — "harmful when a policy's fix splits across two or more commits in
-  different arms, or lands on only some copies." This excludes `64bfb55`, but it fails three ways.
-  It does not capture Case C, which is part of its own grounding: `743bc7a` fixed 12 commands in
-  one commit with no preceding partial fix, so the recurrence signature never appeared there
-  either. It cannot classify a policy whose arms were mismatched from birth and never partially
-  fixed — which is precisely `64bfb55`'s deadlock defect. And on the coverage-diagnostic history it
-  returns *both* verdicts: the fix split across `bf48338d` → `41dcfe12` → `64bfb55` while
-  `run_scenarios_mode`'s copy emitted the opposite diagnostic throughout (harmful by the first
-  clause), yet the repaired arm now only calls `verification_output::coverage_hint` (cohesion by
-  the second).
+Harmful coupling is observable as any of: (1) one policy's fix splitting across two or more commits
+in different command arms; (2) one policy change forcing simultaneous edits to many arms; (3) a fix
+landing on only some of several copies; (4) a cross-cutting guard inserted into both `main.rs` and an
+extracted module. Each is a consequence of the policy having more than one implementation site.
 
-So the recurrence signature is at best a **retrospective** marker: useful for reading a chain that
-has already recurred, not for authorizing or refusing an extraction in advance. Treat it that way.
+**Negative control: `c455e50` (issue #697), which this rule rejects.** It is in the population the
+rule is about — it touches `main.rs`, spans three crates, and changes behaviour on the concrete
+verification path — so a breadth-based reading would flag it. The rule does not, and the reason is
+checkable:
 
-A valid negative control would have to be a change that touches `main.rs` for genuinely
-single-owner reasons — a policy with one implementation site, wired into one arm, with the defect
-in a library — and be shown to be *rejected* by whatever rule is proposed. The spike did not find
-one, and `64bfb55` is not it. Until such a control exists, the classification of any individual
-change here is judgement, not measurement, and issue #738's third acceptance criterion
-("distinguish composition cohesion from harmful change coupling") is **not met**. This is recorded
-rather than resolved: issue #748 tracks establishing a discriminator, or recording that this axis
-cannot discriminate and that structural decisions must rest on other evidence.
+- The policy is the concrete probe's budget. It is **defined once**, at
+  `rust/fsl-runtime/src/lib.rs`'s `pub const CONCRETE_PROBE_BUDGET`, and the function it governs,
+  `find_boundary_violation`, likewise has exactly one implementation.
+- It has **four call sites** across three crates — `rust/fsl-wasm/src/lib.rs`, two in
+  `rust/fslc/src/main.rs`, and `rust/fslc/src/verification.rs` — and every one of them *references*
+  `fsl_runtime::CONCRETE_PROBE_BUDGET`. None reimplements it: the budget value appears nowhere else
+  in `rust/` outside a test comment.
+- The `main.rs` change is 11 lines of wiring: pass `&model` instead of `model.clone()`, pass the
+  budget, and destructure the new `BoundaryProbe` instead of an `Option` tuple. No policy logic.
+- No recurrence: after `c455e50` the only commit touching the budget is `74d7f3e`, which adds an
+  executable corpus-headroom control. No fix landed on a second arm, because there is no second
+  implementation to land on.
+
+So four arms call one owner and the rule reads cohesion — while Cases A, B and C each had the policy
+implemented per-arm and the rule reads coupling. That is the discrimination, and it is why issue
+#738's third acceptance criterion is met.
+
+**Why `64bfb55` is not the control.** An earlier version of this section offered it. It cannot serve:
+of the three defects it fixes, one is a verdict-promotion policy implemented in **two** arms —
+`run_scenarios_mode`'s early-return guard did not consult `deadlock_step`, so
+`scenarios --deadlock error` returned exit 0 where `verify --deadlock error` reported
+`violated`/`deadlock`/exit 1 — and another was fixed by making
+`verification_output::coverage_hint` `pub` and calling it, which is the single-owner move itself. By
+this rule `64bfb55` contains coupling, and that is the rule working, not failing. Its remaining
+defect, scenario semantics in `rust/fsl-runtime/src/lib.rs` (+43/−4), is genuinely domain-caused, but
+a commit that also fixes two multi-site policies cannot be a control for a rule about multi-site
+policies. Two claims from that version are withdrawn with it: the pickaxe
+`git log -S deadlock_step -- rust/fslc/src/main.rs` is scoped to one file and to a symbol the broken
+copy never contained, so it cannot detect a split by construction (widened to `rust/fslc/src/` it
+returns `41dcfe12` as well); and the assertion that the commit deleted a duplicated hint string is
+false — `git show 64bfb55^:rust/fslc/src/main.rs` contains no `coverage_hint` occurrence.
 
 The three chains that ground the positive observation (E-12):
 

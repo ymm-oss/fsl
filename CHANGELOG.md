@@ -17,20 +17,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   stays unconfirmed, not disproven; the response that measurably worked is policy single-owner
   extraction (`spec_load.rs`, `outcome.rs`, `literate_access.rs`): after `743bc7a` gave spec-load
   classification one owner, `main.rs` involvement fell 379 → 179 → 16 lines across its follow-up
-  series. Section 8 records the positive observation — touch rate and line count cannot separate
-  composition wiring from coupling (post-extraction `main.rs` churn median 29 lines, 26 of 50
-  commits at wiring scale), and all three chains trace to one contract policy implemented at more
-  than one site — and, explicitly, that **a test separating that from legitimate cohesion is not
-  established**. Two formulations were tried and both fail: site count matches the candidate
-  negative control too, and the recurrence signature misses Case C (which is part of its own
-  grounding), cannot classify a policy whose arms were mismatched from birth, and returns both
-  verdicts on the coverage-diagnostic history. `64bfb55` cannot serve as the control because it
-  contains two multi-site policies; an earlier version of this entry claimed otherwise on the
-  strength of a single-file pickaxe over a symbol the broken copy never contained, and also claimed
-  the commit deleted a duplicated hint string — `git show 64bfb55^:rust/fslc/src/main.rs` contains
-  no `coverage_hint` occurrence, so both claims are withdrawn. Issue #738's third acceptance
-  criterion is therefore **not met** and #748 tracks it, so this lands as `Refs #738`, not
-  `Closes`. Also recorded: the accepting/rejecting controls a future extraction would have to
+  series. Section 8 records the discriminator the spike leaves behind, and it is stated in terms of
+  **implementation sites, not call sites** — one contract policy implemented at more than one site is
+  harmful coupling; an arm that only calls into a single library owner is cohesion, however many arms
+  call it. That distinction is the whole rule: counting call sites makes every centralized policy look
+  coupled, because centralizing is what produces callers, and counting only recurrence misses a policy
+  whose arms were mismatched from birth, does not capture Case C, and returns both verdicts on a
+  history where a duplicated policy was later centralized. Touch rate and line count discriminate
+  nothing (post-extraction `main.rs` churn median 29 lines, 26 of 50 commits at wiring scale). The
+  negative control is **`c455e50` (#697)**, which the rule rejects: it touches `main.rs`, spans three
+  crates and changes concrete-verification behaviour, yet its policy — `CONCRETE_PROBE_BUDGET`
+  governing the single `find_boundary_violation` — is defined once and merely referenced from four
+  call sites, with the budget value appearing nowhere else in `rust/` outside a test comment, an
+  11-line wiring change in `main.rs`, and no later fix landing on a second arm. `64bfb55` is
+  explicitly **not** the control: two of its three defects are multi-site policies, so by this rule it
+  contains coupling — the rule working, not failing — and two claims made for it are withdrawn, the
+  single-file pickaxe over a symbol the broken copy never contained, and the false assertion that it
+  deleted a duplicated hint string (`git show 64bfb55^:rust/fslc/src/main.rs` has no `coverage_hint`
+  occurrence). Also recorded: the accepting/rejecting controls a future extraction would have to
   calibrate, and the measurable changed-owner rollback rule any future extraction PR must carry.
   Documentation only; no Rust behavior changed.
 - Documented (#722): the implicit domain aggregate initializer enumeration in
