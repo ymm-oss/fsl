@@ -5,6 +5,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Documented (#738): the command-family extraction spike's result as re-evaluation evidence in
+  `docs/DESIGN-rust-components.md`. Section 10's first trigger — three unrelated command changes
+  failing on `fslc` orchestration coupling — has fired (the exit-code chain alone supplies five)
+  and is adjudicated: the harmful coupling is one contract policy implemented at more than one
+  site, which a vertical command-family split cannot remove, so further family extraction is
+  no-go and a new crate is rejected for lack of independent version/dependency/consumer evidence
+  (C1 remains the selected candidate). The one executed extraction (`causal.rs`, #393 / PR #440)
+  produced zero confirming samples and two counter-shaped ones in 13 days, observing the
+  falsifier section 8 already named; the response that measurably worked is policy single-owner
+  extraction (`spec_load.rs`, `outcome.rs`, `literate_access.rs`), where `main.rs` involvement
+  fell 379 → 179 → 16 lines across the spec-load follow-up series. Section 8 now records a
+  durable policy-site discriminator (touch rate and line count cannot separate composition
+  wiring — post-extraction `main.rs` churn median 30 lines, 25 of 49 commits at wiring scale —
+  from coupling), plus the calibrated accepting/rejecting controls and the measurable
+  changed-owner rollback rule any future extraction PR must carry. Documentation only; no Rust
+  behavior changed.
 - Documented (#722): the implicit domain aggregate initializer enumeration in
   `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md`
   covered only Bool `false`/enum first-member/range lower-bound/external-

@@ -3,7 +3,9 @@
 # Rust component boundaries
 
 Status: accepted current-architecture record. Evidence baseline:
-`dc0f3fb3b6b22f84bf5f37432379641d4a08c0ca`.
+`dc0f3fb3b6b22f84bf5f37432379641d4a08c0ca`. Re-evaluation evidence from the issue #738 extraction
+spike, measured at baseline `d72ac8d0f717b16914790fe270566a8a1c407803`, is recorded in
+sections 3, 8, and 10.
 
 ## 1. Decision
 
@@ -68,6 +70,10 @@ inference), and E0 (assumption).
 | E-07 | E1 | From `295508e9^` through the baseline, 35 of 104 non-merge commits touch `rust/fslc/src/main.rs`; the file is also substantially larger than other entry modules. | Identifies an orchestration hotspot, not by itself a faulty crate boundary. |
 | E-08 | E0 | Future team ownership, production scale, incident isolation, and roadmap likelihood. | Prevents service/organization-level restructuring claims. |
 | E-09 | E3 | `./tools/check-native-integration.sh rust` passed with locked formatting, Clippy, LSP, workspace tests, build, and dependency checks. | Confirms the documented Rust boundaries are reproducible at the baseline revision. |
+| E-10 | E3 | Extraction commit `6684dfb` (issue #393, PR #440) moved the causal family into `rust/fslc/src/causal.rs` in one revertible commit; in the following 13 days it produced zero family-scoped semantic changes, and the only two commits touching `causal.rs` both also touched `main.rs`. | Tests C2's falsifier once; the falsifier was observed. Recorded in section 8. |
+| E-11 | E3 | At the `d72ac8d` spike baseline, `main.rs` commit-touch rate stays near half while per-commit churn on the 49 post-extraction `main.rs` commits is min 3 / median 30 / p90 202 / max 385 lines, with 25 of 49 at 30 lines or fewer. | Shows touch rate and line count cannot separate composition cohesion from harmful coupling. |
+| E-12 | E2 | Three repeat-fix chains (exit-code class, nested kernel projection, spec-load error plumbing) each trace to one contract policy implemented at more than one site; commit messages `fd5b8c6` and `693bddb` state the cause directly. | Identifies the harmful-coupling mechanism and grounds the policy-site discriminator in section 8. |
+| E-13 | E1 | After spec-load classification received a single owner, `main.rs` involvement across the follow-up series `743bc7a` → `fedba3f` → `558e113` fell 379 → 179 → 16 changed lines while total change size grew (n=3; the direction is measured, the generalization is inference). | Supports policy single-owner extraction as the adjudicated response to orchestration coupling. |
 
 Scoped contract classifications are:
 
@@ -298,7 +304,7 @@ authorization to move source; section 8 remains the selection gate.
 | Pressure | Evidence | Priority | Current response |
 |---|---|---|---|
 | Cross-layer semantic changes touch many crates. | Multiple language/effect/liveness commits plus coupled-change tests. | High consequence, high recurrence, medium uncertainty. | Preserve explicit ownership and agreement gates; do not hide required coupling behind a facade. |
-| Native command orchestration is concentrated in `fslc/src/main.rs`. | Responsibility inventory and the reproducible `295508e9^..dc0f3fb` non-merge history range. | Medium consequence and recurrence, medium uncertainty. | Record small in-crate extractions as C2 candidates requiring separate authorization and scenario evidence; line count does not authorize a crate split. |
+| Native command orchestration is concentrated in `fslc/src/main.rs`. | Responsibility inventory and the reproducible `295508e9^..dc0f3fb` non-merge history range. | Medium consequence and recurrence, medium uncertainty. | Record small in-crate extractions as C2 candidates requiring separate authorization and scenario evidence; line count does not authorize a crate split. The one executed extraction has since been measured, and the policy-site discriminator in section 8 now governs how this pressure is read. |
 | Browser backend behavior is opaque to Rust-only analysis. | JavaScript global bridge and absence of standalone Rust backend tests. | High consequence, medium recurrence. | Keep browser parity/cancellation as a required separate gate. |
 | Architecture authority text drifted after migration. | Migration-era Python statements contradicted the native integration contract. | Medium consequence, observed recurrence. | Consolidate this record and correct stale authority wording. |
 | Production-log replay lacks comprehensive coverage in the required Rust gate. | The native implementation is direct, while focused and broader cases are Python-driven tests excluded from the product gate. | High consequence, unknown recurrence. | Treat coverage as unknown; add Rust-native regression cases before changing mapped-log semantics. |
@@ -365,13 +371,138 @@ rejecting oracle, pre-PR audit, and independently revertible pull request.
   a new crate would add a version/dependency boundary without current consumer need.
 - Falsifier: replayed changes touch the same responsibilities after extraction or require broader
   fixtures than before.
-- Gate result: not tested. The hotspot evidence cannot distinguish legitimate composition cohesion
-  from harmful coupling, so implementation is not justified now.
+- Gate result: not tested at the original baseline. The hotspot evidence cannot distinguish
+  legitimate composition cohesion from harmful coupling, so implementation was not justified then.
+  One family extraction has since been executed and measured; the post-extraction evidence below
+  extends this analysis and confirms the falsifier.
+
+#### Post-extraction measurement (issue #738 spike)
+
+The falsifier above has now been tested once. The issue #738 spike measured the first executed
+family extraction — issue #393, landed by PR #440 as commit `6684dfb` "refactor(cli): extract
+causal command family" (2026-07-23) — against `origin/main` at
+`d72ac8d0f717b16914790fe270566a8a1c407803`. Issue #738 labels its options C0 keep / C1 in-crate
+family extraction / C2 new crate; both of its extraction options map into this candidate, whose
+first phase is the in-crate module and whose second is the crate.
+
+- The extraction moved the causal family into `rust/fslc/src/causal.rs` (+1468 lines) out of
+  `main.rs` (−1462) in a single revertible commit (6 files, +1567/−1466). (E2)
+- In the 13 days between the extraction and the spike baseline, causal-family-specific semantic
+  changes numbered zero, and `git log` on `rust/fslc/src/causal.rs` shows no mis-wiring fix
+  attributable to the extraction either. The only two non-extraction commits touching `causal.rs`
+  both also touched `main.rs`: `9fe427b` (`causal.rs` +10/−0, `main.rs` +81/−6) defines guard
+  helpers in `main.rs` that `causal.rs` calls back through `crate::`, and `cc1c318` (`causal.rs`
+  +2/−2, `main.rs` +46/−10). Before the extraction, the `9fe427b` change would have had one owner
+  instead of two — that counterfactual is inference, the two-owner edit is measured. This is the
+  falsifier stated above, observed. (E-10)
+- **New crate: rejected on measurement.** The independent version/dependency/consumer lifecycle
+  this candidate requires before a crate does not exist: one workspace version, no external
+  consumer, and `causal.rs` is a bin-only module (`mod causal;` in `main.rs`, absent from
+  `rust/fslc/src/lib.rs`) with no `fsl-wasm` or `fsl-lsp` consumer.
+- **Further family extraction: no-go.** The one executed instance produced zero confirming samples
+  and two counter-shaped ones in 13 days, and every measured harmful chain (Cases A–C below) is
+  cross-family policy duplication that a vertical family split cannot remove. The largest remaining
+  `run_*` families in `main.rs` at the spike baseline — domain 504 lines, document 425, mutate 403,
+  diff 397, approval 355, ai 324 — are all an order of magnitude below causal's pre-extraction
+  1,462 lines, and naming `domain` as the next candidate would be unsupported because Case B shows
+  its repeat-fix chain is policy duplication, not verticality.
+- **The response that measurably worked is policy single-owner extraction**, which the repository
+  is already executing: `rust/fslc/src/spec_load.rs` (`2fd555f`), `rust/fslc/src/outcome.rs`
+  (`fd5b8c6`, #537 C2 / #603), and `rust/fslc/src/literate_access.rs` (`95acd70`, #665), all
+  crate-public in `rust/fslc/src/lib.rs`, in contrast to the bin-only family module. After
+  spec-load classification received one owner, `main.rs` involvement across the follow-up series
+  `743bc7a` → `fedba3f` → `558e113` fell 379 → 179 → 16 changed lines while the total change kept
+  growing (763 lines across 7 files → 541 across 16 → 319 across 21). n=3: the direction is
+  measured, the generalization is inference. (E-13)
+- The 13-day observation window is short. The correct reading of the extraction's effect is
+  unconfirmed, not disproven; but the rollback rule below applied to that window yields no
+  confirmation, which is what makes a further extraction unjustified now. Review latency, rebase
+  count, and conflict-resolution time were not measured; they belong to issue #735.
+
+#### Policy-site discriminator for orchestration coupling
+
+The durable rule the spike leaves behind, for the next time `main.rs` size or touch rate is
+offered as evidence:
+
+> A contract rule implemented at more than one site is harmful coupling. A command arm that only
+> calls into a single library owner is legitimate composition cohesion.
+
+Harmful coupling is observable as any of: (1) one policy's fix splitting across two or more
+commits in different command arms; (2) one policy change forcing simultaneous edits to many arms;
+(3) a fix landing on only some of several copies; (4) a cross-cutting guard inserted into both
+`main.rs` and an extracted module. Three measured chains ground the rule, each caused by one
+contract policy implemented at more than one site, none by family verticality (E-12):
+
+- **Case A — exit-code class.** Five commands independently fixed the same fail-closed/exit-code
+  defect: `1bc5cf2` (mutate), `fbcb62d` (ledger, #599), `6933c7b` (ledger), `addc45f` (chain),
+  `169fc20` (ai). The terminal commit `fd5b8c6` states the cause: "the crate has 43 distinct
+  `result` values with no such definition".
+- **Case B — nested kernel projection.** `707523c` (#515) → `ed28f9a` (#641) → `db9a51a` (#619) →
+  `693bddb` (#663). `run_db_check` and `run_domain_check` each held a hand-copied projection key
+  list; `693bddb`'s message records that the #515 and #641 fixes "landed on the domain copy alone
+  because there was nowhere else to land them".
+- **Case C — spec-load error plumbing.** `743bc7a`: `load_kernel_model`'s String flattening
+  misclassified spec-load errors in 12 commands at once.
+
+Negative control that the rule discriminates rather than matching everything: `64bfb55`
+(scenarios) has its root cause in `rust/fsl-runtime/src/lib.rs`; its `main.rs` portion is that one
+command's own projection, and no repeat fix appeared in another arm. Domain-caused, not
+coupling-caused.
+
+Why the hotspot metrics cannot substitute for the rule: at the spike baseline `main.rs` is 16,052
+lines of the workspace's 167,241 Rust lines (`wc -l`, excluding `target/`), and its commit-touch
+rate is not decaying — 124 of 251 non-merge rust-touching commits since 2026-06-11 (49.4%), 53 of
+112 (47.3%) in the spike's final two weeks. Yet the per-commit churn distribution on the 49
+post-extraction commits touching `main.rs` is min 3 / median 30 / p90 202 / max 385 lines, and 25
+of 49 change 30 lines or fewer — wiring scale (E-11). A file can appear in half of all commits and
+still mostly receive legitimate composition wiring, so touch rate and line count cannot separate
+cohesion from coupling and neither authorizes an extraction. The 30-line wiring scale is the
+observed median, not a semantically derived threshold.
+
+#### Controls and rollback rule for a future extraction slice
+
+A future extraction pull request (this candidate's in-crate first phase) starts from these
+controls instead of re-deriving them. Each control must be calibrated — demonstrated to fail on
+the pre-extraction tree — because a green positive path alone is not evidence of detection power.
+
+1. **CLI JSON envelope.** Accepting: `rust/fslc/cli-contract.json` verified by
+   `rust/fslc/tests/native_integration.rs`, plus the family's existing CLI suite unmodified and
+   green. Rejecting: a tamper fixture that drops one key from the moved command's envelope golden
+   must fail. String assertions of the `rust/fslc/tests/causal_ownership.rs` kind cannot detect
+   envelope drift.
+2. **Exit codes.** Accepting: classification goes through `rust/fslc/src/outcome.rs`, including
+   its rule that unknown values classify as failure (`fd5b8c6`). Rejecting: a known fail-closed
+   fixture fed to the moved command must fail the test if exit 0 comes back — this detects
+   re-introduction of arm-local exit derivation, Case A's recurrence shape.
+3. **Diagnostics.** Accepting: the closed diagnostic classification in `DESIGN-v1.md` section 7.2
+   (`parse`/`name`/`type`/`semantics` carry `loc`). Rejecting: a syntax-error spec through the
+   moved command must fail unless `kind:"parse"` with a non-null `loc` comes back. This control
+   has caught real drift: `743bc7a` records the 12-command misclassification it would have
+   blocked.
+4. **Worker/LSP projection.** Accepting: the native/browser parity harness plus CLI/LSP diagnostic
+   identity. Rejecting: assert that the `unsupportedDocuments` registry in
+   `rust/fsl-wasm/test-browser.mjs` does not grow, closing the escape hatch of greening a broken
+   Worker projection by adding an exclusion; for a bin-only family, assert instead that its
+   reviewed-unsupported registration stays accurate.
+
+The rollback condition is measured, not judged. Define the changed-owner count of a change as the
+number of distinct owners — in-crate module files plus other crates — touched by its
+production-code diff, excluding `CHANGELOG.md`, documentation, and tests. After an extraction
+merges, measure the next three family-scoped changes and revert the extraction commit unless both
+hold: the median changed-owner count is below the pre-extraction family baseline, and at most one
+of the three touches `main.rs`, that one by ten or fewer wiring lines. Roll back immediately if
+any change inserts the same policy into both `main.rs` and the family module (the `9fe427b`
+shape). If six weeks pass without three family-scoped changes, record the effect as unconfirmed
+and treat further extraction as no-go — the causal extraction hit exactly this outcome, with zero
+family-scoped samples in 13 days.
 
 C1 does not robustly dominate C0 on change cost, but C0 fails the requested outcome. C2 has only a
 speculative maintainability benefit and higher verification/migration cost. Under a delivery-speed,
 correctness-risk, or flat-roadmap weighting, C1 remains the least-regret reversible choice. A future
-independent command team or repeated cross-command regression could make C2 preferable.
+independent command team or repeated cross-command regression could make C2 preferable. The
+cross-command regressions that did occur (Cases A–C above) were adjudicated in the issue #738 spike
+as policy duplication, answered by single-owner policy modules inside `fslc-rust` rather than by a
+C2 structural extraction.
 
 ## 9. Migration slice and fitness functions
 
@@ -402,7 +533,8 @@ adjudication still share one primary model and are not statistically independent
 
 Re-evaluate before the twelve-month horizon if:
 
-- three unrelated command changes fail because of `fslc` orchestration coupling;
+- three unrelated command changes fail because of `fslc` orchestration coupling
+  (fired and adjudicated; see below);
 - `fsl-tools` gains an independently versioned external consumer or incompatible dependency;
 - a production incident or SLO identifies a failure-isolation boundary absent from the crate graph;
 - LSP or Worker cannot reuse a shared diagnostic/result without importing inappropriate native
@@ -412,7 +544,18 @@ Re-evaluate before the twelve-month horizon if:
 - a normal-maintenance holdout shows materially different co-change behavior from the migration
   period.
 
+The first trigger has fired and been adjudicated (issue #738 spike). Case A in section 8 supplies
+five, not three, unrelated command changes that failed on the same `fslc` orchestration coupling.
+The adjudicated response is policy single-owner extraction inside `fslc-rust` — already executed
+as `spec_load.rs`, `outcome.rs`, and `literate_access.rs` — not the C2 structural extraction,
+because every measured failure chain was one contract policy implemented at more than one site,
+which a vertical family split cannot remove. C1 remains selected. This trigger is answered, not
+pending; it fires again only on a new coupling chain whose policy already has a single owner.
+
 The recommendation is falsified if a locally extracted command family demonstrably reduces the
 semantic responsibilities, contracts, and test environments touched by representative changes
-without weakening any hard gate. Until then, documentation and executable boundary checks have
-greater option value than a structural migration.
+without weakening any hard gate. That test has now been run once: the extracted causal family
+produced zero confirming samples and two counter-shaped ones in 13 days (section 8), so the
+recommendation stands on measured rather than merely untested ground. Documentation, executable
+boundary checks, and single-owner policy modules retain greater option value than a structural
+migration.
