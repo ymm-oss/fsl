@@ -2027,8 +2027,17 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
 /// headroom before an unoptimized debug build's peak RSS reached the same
 /// order of magnitude as the original failure. See
 /// `docs/DESIGN-kernel-contract.md` "Concrete boundary pre-pass budget" for
-/// the full measurement and `rust/fslc/tests/corpus_check_sweep.rs` for the
-/// sweep this budget must stay generous enough never to exhaust.
+/// the full measurement.
+///
+/// The value is bracketed from both sides by measurement, not chosen by feel:
+/// below by the corpus (167 specs at depth 8; the largest pre-pass explored
+/// 23,409 states, in `examples/named_predicate.fsl`, so 50,000 leaves ~2.1x of
+/// headroom) and above by debug-build peak RSS. Because 2.1x is thin, the
+/// property is protected by an executable control rather than by the margin:
+/// `rust/fslc/tests/issue_697_corpus_probe_budget.rs` fails loudly if any
+/// corpus spec would exhaust this budget and therefore lose its concrete
+/// evidence. Raise the constant only together with that test's recorded
+/// maximum.
 pub const CONCRETE_PROBE_BUDGET: usize = 50_000;
 
 /// The outcome of a budgeted [`find_boundary_violation`] search.
