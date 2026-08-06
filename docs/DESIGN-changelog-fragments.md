@@ -46,16 +46,26 @@ the 209 first-parent merges (`git diff --name-only <p1>...<p2>`): `CHANGELOG.md`
 39 (19%), implementation (`rust/`, `src/fslc`) 157 (75%).
 
 `CHANGELOG.md` insertions are small and top-loaded: n=405, p50=9 lines, p90=23, max=391. The
-`[Unreleased]` section is 276 lines of a 4,569-line file at the measurement revision.
+`[Unreleased]` section body is 442 lines of a 4,735-line file at the measurement revision
+(`git show d72ac8d:CHANGELOG.md`; the body count excludes the `## [Unreleased]` heading line).
 
 ### The replay measurement (load-bearing)
 
-Method, re-runnable: enumerate the 209 first-parent merges on `origin/main`; derive each
-merge's side-branch active interval from the committer dates of `git log <merge>^1..<merge>^2`;
-keep pairs of side branches whose intervals overlap **and** where
-`git merge-base --is-ancestor` is false in both directions (neither branch had seen the
-other) — 22 genuinely concurrent pairs; run
-`git merge-tree --write-tree --name-only <A^2> <B^2>` on each pair (exit 1 = conflict).
+Method, re-runnable — every definition below is part of the procedure; varying the interval
+end or the ancestor filter changes the pair count (both variations are quantified where they
+are used):
+
+- enumerate the 209 first-parent merges on `origin/main`;
+- derive each merge's side-branch active interval as **[the earliest committer date among
+  `git log <merge>^1..<merge>^2`, the merge commit's own committer date]** — the interval ends
+  when the branch lands on `main`, not at its last side-branch commit (ending it at the last
+  side-branch committer date shrinks rebased branches' intervals and yields 4 pairs, not 22);
+- keep pairs of side branches whose intervals overlap **and** where
+  `git merge-base --is-ancestor` is false in both directions between the two side tips
+  (neither branch had seen the other) — 22 genuinely concurrent pairs;
+- run `git merge-tree --write-tree --name-only <A^2> <B^2>` on each pair (exit 1 = conflict);
+- where a both-sides-touch tally is cited, it intersects the per-branch touch sets
+  `git diff --name-only <merge>^1...<merge>^2` over the pair.
 
 **16 of 22 pairs conflict.** Conflicting-file frequency across the 16: `CHANGELOG.md` 16/16
 (100%), `docs/LANGUAGE.md` 10, `skills/fsl/reference.md` 10, `src/fslc/bmc.py` 10,
@@ -77,15 +87,20 @@ The structure of those 16 matters more than the totals:
 - Counter-example: pair #82 × #79 edited `CHANGELOG.md`, `docs/LANGUAGE.md`,
   `skills/fsl/reference.md`, and `src/fslc/grammar.py` on both sides and did **not** conflict.
   Both-sides-touch does not imply conflict; insertion position does.
-- One tallying artifact, disclosed: `docs/LANGUAGE.md` shows 10 conflicting pairs against 9 in
-  the both-touch tally — a three-dot-diff base artifact against the sync merge. It does not
-  affect any conclusion.
+- Touching is not conflicting, in the tallies as well as the counter-example: over the 22
+  pairs the both-sides-touch counts are `CHANGELOG.md` 21, `docs/LANGUAGE.md` 16,
+  `skills/fsl/reference.md` 16, `docs/LANGUAGE.ja.md` 0, against 16/10/10/0 conflicting.
 
 ### Honest limitation: serial rebase hides the true denominator
 
 Rebase rewrites committer time, so the 22-pair set understates real concurrency. Re-deriving
-the intervals from **author** time yields 397 concurrent pairs, of which 384 have both sides
-touching `CHANGELOG.md` (110 for `docs/LANGUAGE.md`). This repository's serial-rebase practice
+the intervals from **author** time — same merge-date interval end — **and dropping the
+ancestor filter** yields 397 concurrent pairs, of which 384 have both sides touching
+`CHANGELOG.md` by the per-branch tally (110 for `docs/LANGUAGE.md`). Both deviations from the
+committer-time procedure are deliberate and both are required to reach 397: a rebased branch
+contains the other branch as an ancestor, so the filter must be dropped to see exactly the
+concurrency rebasing hides — keeping it returns the same 22 pairs even under author time.
+This repository's serial-rebase practice
 absorbs those collisions as rebase work that never surfaces as a merge conflict, and how many
 `CHANGELOG.md` collisions were actually resolved by hand during rebases is **not measurable
 from history** — once a branch is rebased it contains the other branch as an ancestor and is
@@ -127,80 +142,132 @@ in `merge readiness / automation contracts`, whose lane is deliberately stdlib-o
 pytest and no third-party dependency (`tools/check-merge-readiness.sh`'s own comment;
 reaffirmed in `docs/DESIGN-docs-site.md` D7's addendum).
 
-### Four fail-closed negative controls
+### Five fail-closed negative controls
 
-This repository does not accept a positive-only control (`AGENTS.md`: every conformance
-anchor needs a negative control that rejects a known violation). Each of the four controls
-below therefore ships with a **calibrated rejecting fixture** proving it detects the failure
-it exists for, alongside its accepting fixture; a green accepting path alone establishes
-nothing.
+This decision adopts, as its own rule for every control below, the requirement `AGENTS.md`
+states for formal-to-implementation conformance anchors: an anchor must include a negative
+control that rejects a known violation, because a green accepting path alone establishes
+nothing. Each control therefore ships with a **calibrated rejecting fixture** proving it
+detects the failure it exists for, alongside its accepting fixture.
 
-1. **Missing fragment.** A pull-request diff touching a product surface (`rust/`,
-   `src/fslc/`, `specs/`, `docs/LANGUAGE*`) with no new file under `changelog.d/` must fail.
-   Rejecting fixture: exactly such a synthetic diff → exit 1,
-   `changelog-fragment-missing: <changed paths>`. Second net: aggregating an empty
-   `changelog.d/` at release → exit 1, `no-fragments-to-aggregate`.
-2. **Duplicate id.** Two fragments declaring the same `(id, section)` pair must fail; silent
-   last-wins or silent concatenation is forbidden. Rejecting fixture: `691-a.added.md` and
-   `691-b.added.md` present together → exit 1,
-   `duplicate-fragment-id: 691 (691-a.added.md, 691-b.added.md)`.
-3. **Nondeterministic order.** The aggregator must sort by (fixed section order, numeric id,
-   filename bytes) and must never depend on directory enumeration order. Rejecting fixture:
-   inject a shuffled or reversed enumeration; output must be byte-identical or the test fails
-   with `aggregation-not-deterministic` — and the control itself is calibrated by running it
-   against a deliberately readdir-ordered sham implementation, which it must reject. An
-   idempotence snapshot (two consecutive runs, byte-identical output) is the accepting
-   counterpart.
+1. **Missing or empty fragment.** A pull-request diff touching a product surface with no new
+   file under `changelog.d/` must fail. The surface list is the coupled-change contract's
+   list, not a subset of it: `rust/`, `src/fslc/`, `specs/`, `examples/`, `docs/LANGUAGE*`,
+   and `skills/fsl/reference.md` (`AGENTS.md`, "A language feature moves with …";
+   `CONTRIBUTING.md`, "Language or semantics"). Rejecting fixture: exactly such a synthetic
+   diff → exit 1, `changelog-fragment-missing: <changed paths>`. A fragment must also carry
+   content: a whitespace-only fragment body → exit 1, `changelog-fragment-empty: <file>`.
+   The release-time net — aggregating an entirely empty `changelog.d/` → exit 1,
+   `no-fragments-to-aggregate` — stays as a sanity floor only; it cannot see a single missing
+   entry, which is control 5's job.
+2. **Duplicate id.** The duplicate key is the pair **(numeric id, section)**, where the id is
+   the decimal integer parsed from the fragment filename's leading digits — `0691-…` and
+   `691-…` therefore declare the same id, and control 3's sort key uses the same parsed
+   integer. Two fragments declaring the same (id, section) must fail; silent last-wins or
+   silent concatenation is forbidden. One issue legitimately producing entries in two
+   sections (`691-x.added.md` together with `691-y.fixed.md`) is the accepting fixture.
+   Rejecting fixtures: `691-a.added.md` with `691-b.added.md`, and the zero-padded alias
+   `0691-a.added.md` with `691-b.added.md` → exit 1,
+   `duplicate-fragment-id: 691 added (691-a.added.md, 691-b.added.md)` — the diagnostic
+   carries the same (id, section) key the rule is defined on.
+3. **Nondeterministic or nonconforming order.** The aggregator must sort by (fixed section
+   order, numeric id, filename bytes) and must never depend on directory enumeration order.
+   Rejecting fixture: inject a shuffled or reversed enumeration; output must be
+   byte-identical or the test fails with `aggregation-not-deterministic` — and the control
+   itself is calibrated by running it against a deliberately readdir-ordered sham
+   implementation, which it must reject. An idempotence snapshot (two consecutive runs,
+   byte-identical output) is the accepting counterpart. Determinism alone is not conformance:
+   a deterministic but lexicographic enumeration (`sorted(os.listdir())`) passes both the
+   shuffle and idempotence checks while ordering ids `10`, `100` before `9`. A fixture whose
+   ids make numeric and byte order diverge — `9-…`, `10-…`, `100-…` in one section —
+   therefore pins the aggregated output as a golden in numeric order 9, 10, 100; the
+   lexicographic sham must fail that golden comparison (`aggregation-order-wrong`) and the
+   conforming sort must match it byte-for-byte.
 4. **Unaggregated at release, and post-migration direct edits.** A guard in
    `.github/workflows/release.yml` before its "Extract release notes" step: fragments still
    present under `changelog.d/` at tag time → exit 1, `stale-fragments-present: <files>`. The
    workflow's existing `test -s release-notes.md` stays as the second net. Continuously after
-   migration, a pull-request diff adding a line under `## [Unreleased]` in `CHANGELOG.md`
-   directly → exit 1, `changelog-direct-edit-forbidden`; the rejecting fixture is exactly
-   such a diff. This last check is what keeps authority single (next section).
+   migration, the merge-readiness checker (migration site 6 below) — the same pre-merge job
+   that runs control 1 on every pull request — also rejects a pull-request diff that **adds or
+   deletes** any line inside `CHANGELOG.md`'s `## [Unreleased]` body → exit 1,
+   `changelog-direct-edit-forbidden`. Both directions are load-bearing: an added line
+   duplicates authority, and a deleted line erases someone else's pending entry; the
+   rejecting fixtures are one diff of each kind. This check is what keeps authority single
+   (next section).
+5. **Silent drop at aggregation (conservation).** Controls 1–4 leave one direction open: an
+   aggregation that deletes a fragment whose content never reaches the version section. At
+   release `changelog.d/` ends up empty, so `stale-fragments-present` stays silent, and the
+   remaining entries keep `test -s release-notes.md` green while one entry vanishes. Because
+   the same-commit authority handover below is load-bearing, the handover itself must be
+   checked: the aggregator verifies, before the aggregation commit is created, that every
+   fragment it deletes contributes its body to the version section it writes and that the
+   entry count equals the deleted-fragment count → otherwise exit 1,
+   `fragment-dropped: <files>`. Rejecting fixture, calibrating the check itself: a sham
+   aggregator that silently drops one of three fragments must be rejected with
+   `fragment-dropped` naming the dropped file; the accepting fixture is the faithful
+   aggregation of the same three.
 
 ### Single authoritative source, preserved
 
 One change fact lives in exactly one place at every instant: in its fragment from merge until
 release, then in the versioned `CHANGELOG.md` section — and the fragment is deleted in the
-**same commit** that aggregates it. Authority is handed over, never duplicated. Aggregated
-version sections become ordinary reviewed history, not a regenerated artifact — the
-no-hand-edits rule for generated files does not apply to them, and hand edits to
+**same commit** that aggregates it, a handover whose completeness is checked by control 5.
+Authority is handed over, never duplicated. Aggregated version sections become ordinary
+reviewed history, not a regenerated artifact — `AGENTS.md`'s no-hand-edits rule is scoped to
+generated **compatibility snapshots** and never applied to them — and hand edits to
 `[Unreleased]` are refused by control 4. The release-notes consumer (`release.yml`'s `awk`
 over `## [<version>]` headings plus `test -s`) is never changed, which is what makes the
 rollback below trivial.
 
 ## Migration: six named sites
 
-1. New `tools/aggregate_changelog` (stdlib-only) plus executable tests for all four controls,
+1. New `tools/aggregate_changelog` (stdlib-only) plus executable tests for all five controls,
    accepting and rejecting fixtures both.
 2. `tools/check-product-gate-scope.sh` — add a `changelog.d/` **directory prefix** to
    `is_exempt_path`. The current list matches `CLAUDE.md`/`AGENTS.md`/`CHANGELOG.md` as exact
    root filenames, not prefixes (`docs/DESIGN-ci.md`, "Agent-configuration exemption":
    "`CLAUDE.md.d/x` does not match"), so without this every fragment-only change would start
-   all four heavy product-gate jobs. The script's `selftest` gains matching
-   accepting/rejecting cases.
+   all four heavy product-gate jobs. The script's `selftest` gains the matching pair:
+   accepting `changelog.d/691-a.added.md` → exempt, and the prefix near-miss
+   `changelog.dx/y` → **product**, mirroring the existing `CLAUDE.md.d/x` rejecting case.
 3. `.github/workflows/release.yml` — the control-4 aggregation guard before "Extract release
    notes". The `awk` consumer itself is unchanged.
-4. `AGENTS.md` — the coupled-change wording: "add notable changes under `CHANGELOG.md`
-   `[Unreleased]`" becomes "add a changelog fragment under `changelog.d/`". The obligation
-   itself — a changelog entry moves with the feature, in the same pull request — is unchanged.
+4. The surfaces that hard-code the `CHANGELOG.md` entry shape, all migrated in the same pull
+   request. The obligation itself — a changelog entry moves with the feature, in the same
+   pull request — is unchanged everywhere:
+   - `AGENTS.md`, in **both** places: the commit convention ("add notable changes under
+     `CHANGELOG.md` `[Unreleased]`") and the feature-moves list ("… a design note, and
+     `CHANGELOG.md`") take the fragment wording.
+   - `CONTRIBUTING.md`, the same two shapes: the "Language or semantics" guideline and the
+     commits/pull-requests checklist.
+   - `.claude/hooks/changelog_reminder.py` — `needs_reminder` matches `path ==
+     "CHANGELOG.md"` exactly. Unmigrated, every fragment-only product change would trip its
+     "product source changed but CHANGELOG.md did not" reminder permanently, manufacturing
+     exactly the routine false positives that reversal condition (a) below treats as grounds
+     for no-go; it must accept new files under `changelog.d/`.
+   - `docs/RELEASE.md` — release step "Review the non-empty `CHANGELOG.md` `[Unreleased]`
+     section" becomes a review of the aggregated version section produced from the fragments.
+   - `.claude/agents/fsl-coupled-change-reviewer.md` and
+     `.claude/skills/add-language-feature/SKILL.md` — both instruct a `CHANGELOG.md`
+     `[Unreleased]` entry and take the fragment wording.
 5. `docs/DESIGN-ci.md` — amend the "Agent-configuration exemption" decision for site 2.
    That document states growing the exempt list "is a contract change to this decision, not a
    script tweak" and requires naming every path that reads the new entry with its unfiltered
    or fail-loud coverage: for `changelog.d/` those readers are `release.yml` (fail-loud via
    control 4 and `test -s`) and the merge-readiness fragment checker of site 6 (unfiltered,
    runs pre-merge on every pull request).
-6. `.github/workflows/merge-readiness.yml` — the pull-request-level missing-fragment checker
-   (control 1), stdlib-only to respect the `automation contracts` lane's dependency contract.
+6. `.github/workflows/merge-readiness.yml` — the pull-request-level checker for control 1
+   (missing or empty fragment) and for control 4's direct-edit half, stdlib-only to respect
+   the `automation contracts` lane's dependency contract.
 
-The existing 4,569-line `CHANGELOG.md` needs no migration; released sections stay as history.
+The existing 4,735-line `CHANGELOG.md` needs no migration; released sections stay as history.
 Only future `[Unreleased]` entries change shape.
 
 ## Rollback and reversal condition
 
 Rollback: aggregate any remaining fragments into `[Unreleased]` once, delete `changelog.d/`,
-revert the mechanism sites (1, 2, 3, 6), restore `AGENTS.md`'s direct-edit wording (4), and
+revert the mechanism sites (1, 2, 3, 6), restore the direct-edit wording on every site-4
+surface, and
 amend this document and the `docs/DESIGN-ci.md` exemption entry (5) to record the no-go. No
 history rewrite is involved, and release compatibility cannot break because the release-notes
 consumer was never changed.
@@ -242,7 +309,7 @@ predates this decision, is independent of it, and is not widened or narrowed by 
 ## Non-goals
 
 - Building the aggregator, creating `changelog.d/`, or editing `AGENTS.md`'s wording in the
-  same change as this record — implementation is #737's follow-up, gated on the four controls
+  same change as this record — implementation is #737's follow-up, gated on the five controls
   above.
 - Deferring documentation updates out of feature pull requests, or making `CHANGELOG.md`
   optional (#737's stated non-goals).

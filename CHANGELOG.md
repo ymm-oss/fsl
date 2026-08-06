@@ -16,10 +16,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   zero additional pairs (every contract-document conflict co-occurs with an implementation
   conflict in one early-Python cluster), which is #737's own no-go condition, and would put
   a generated layer upstream of the required `site reference freshness` check. The record
-  carries the four fail-closed negative controls (missing fragment, duplicate id,
-  nondeterministic order, unaggregated-at-release/direct-edit), each with a calibrated
-  rejecting fixture and named diagnostic, the six migration sites, the rollback method, and
-  the reversal condition. Implementation is deliberately not included. The `LANGUAGE.md` /
+  carries the five fail-closed negative controls (missing or empty fragment, duplicate id,
+  order determinism plus sort-key conformance, unaggregated-at-release plus bidirectional
+  direct-edit, and aggregation conservation against silent entry drops), each with a
+  calibrated rejecting fixture and named diagnostic, the six migration sites, the rollback
+  method, and the reversal condition. Implementation is deliberately not included. The `LANGUAGE.md` /
   `LANGUAGE.ja.md` section-alignment enforcement is untouched by C1; a pre-existing
   count-only gap in that enforcement found during the evaluation is tracked as #741.
 - Documented (#722): the implicit domain aggregate initializer enumeration in
