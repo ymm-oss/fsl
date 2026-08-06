@@ -1,9 +1,10 @@
 # Duration-aware pinning for `rust-tests` shards (issue #720 Finding 1;
 # docs/DESIGN-ci.md, "Duration-aware `rust-tests` shard pinning", which also
-# records when this file must be edited). Each non-comment,
-# non-blank line is "<shard> <binary-id>", 1-based shard index <= the shard
-# total cargo-nextest is invoked with (3 in .github/workflows/ci.yml today).
-# A pinned binary's tests all run in that shard, unpartitioned.
+# records the cost model, the reachable floor, and when this file must be
+# edited). Each non-comment, non-blank line is "<shard> <binary-id>", 1-based
+# shard index <= the shard total cargo-nextest is invoked with (3 in
+# .github/workflows/ci.yml today). A pinned binary's tests all run in that
+# shard, unpartitioned.
 #
 # `binary-id` is cargo-nextest's own identifier (`cargo nextest list
 # --message-format json`, the `binary-id` field; see `cargo nextest help
@@ -18,18 +19,56 @@
 # depends on this file being current -- only duration balance does. What
 # does depend on this file: `tools/check-shard-union.sh check-groups` fails
 # closed if a pin below names a binary the live workspace no longer has
-# (rename/removal) or pins one binary to more than one shard.
+# (rename/removal), pins one binary to more than one shard, uses a shard index
+# above the total, or is malformed.
 #
-# Measured per-binary wall clock (run 30989320577 / rerun, docs/DESIGN-ci.md):
-# refine_corpus_parity ~7.34 min (4 tests), explicit_engine ~4.58 min
-# (12 tests), injection_detector_matrix ~3.75 min (1 test),
-# corpus_check_sweep ~3.16 min (3 tests), issue_226_auto_engine ~3.13 min
-# (15 tests) -- together ~77% of the suite's sequential time while most of
-# the remaining ~190 binaries finish in under a second. Bin-packed across 3
-# shards: shard 1 ~7.34 min, shard 2 ~7.74 min, shard 3 ~6.88 min, each then
-# also taking its share of the count-partitioned leftover.
+# THE COST MODEL IS THE LONGEST SINGLE TEST, NOT THE SUM.
+# nextest runs tests concurrently inside a shard, so a shard's pinned phase
+# costs about its slowest individual test -- measured to the second on all
+# three shards of run 31076668077, where the pinned phases took 7m40s / 4m27s /
+# 4m36s against slowest tests of 458.8s / 266.6s / 275.6s. Packing by the sum
+# of per-binary sequential minutes (which this file did in its first version)
+# overestimated shards 2 and 3 by roughly 40% and balanced the wrong quantity.
+#
+# Two consequences follow, and they are why the list below is longer than the
+# first version's:
+#   - Adding a pin to a shard that already holds a slower test is close to
+#     free, because the shard's phase cost does not move.
+#   - Every pin removes its binary's whole sequential duration from the
+#     count-partitioned leftover, which is duration-blind. On run 31076668077
+#     the leftover phases were 5m16s / 7m31s / 1m25s -- a 5.3x spread, worse
+#     than the pinned phases' 1.72x. Pinning is therefore the only lever
+#     currently available against leftover skew as well.
+#
+# Measured slowest-single-test per binary, run 31076668077 (this pull request's
+# own CI run; per-test `PASS [ Ns]` lines from the three `rust tests (K/3)`
+# job logs). Sequential total and test count in brackets:
+#   refine_corpus_parity                458.8s  [458.9s total,  4 tests]
+#   issue_697_all_properties_memory     371.8s  [655.6s total,  4 tests]
+#   injection_detector_matrix           275.6s  [275.6s total,  1 test]
+#   explicit_engine                     266.6s  [266.7s total,  4 tests]
+#   issue_226_auto_engine               205.9s  [338.4s total,  6 tests]
+#   corpus_check_sweep                  192.5s  [224.5s total,  2 tests]
+#   issue_697_corpus_probe_budget        76.7s  [ 76.7s total,  1 test]
+#   explain_cli                          69.5s  [439.7s total, 13 tests]
+# Nothing else exceeds 62s. Note `explain_cli`: 439.7s sequential but only 69.5s
+# slowest test, so under the corrected model it is not a heavy shard occupant --
+# it is pinned only to take its 439.7s out of the leftover.
+#
+# `issue_697_all_properties_memory` did not exist when the first version of this
+# file was written; it arrived with the #697 fix (pull request #739) and, being
+# unpinned, put its 371.8s test into shard 2's count-partitioned leftover. That
+# single test is what took shard 2 from 5.0 min to 14.6 min.
+#
+# Projected pinned-phase cost with the assignment below: 458.8s / 371.8s / 275.6s
+# = 7.6 / 6.2 / 4.6 min, and 2,061s of sequential work removed from the
+# leftover. Projected, not measured -- the next `product gate` run on this
+# branch is what confirms it.
 1 fslc-rust::refine_corpus_parity
+1 fslc-rust::corpus_check_sweep
+2 fslc-rust::issue_697_all_properties_memory
 2 fslc-rust::explicit_engine
-2 fslc-rust::corpus_check_sweep
 3 fslc-rust::injection_detector_matrix
 3 fslc-rust::issue_226_auto_engine
+3 fslc-rust::explain_cli
+3 fslc-rust::issue_697_corpus_probe_budget

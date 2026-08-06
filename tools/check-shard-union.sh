@@ -38,9 +38,12 @@
 #     N-way split) and five rejecting cases (a full-only entry covered by no
 #     shard; an entry duplicated across two shards; a shard entry absent from
 #     full; an empty shard list; an entire binary's tests dropped from every
-#     shard), plus check-groups's accepting case and two rejecting cases (an
-#     unknown pinned binary-id; a binary-id pinned to two shards) -- each
-#     rejecting case must make this script exit non-zero.
+#     shard), plus check-groups's two accepting cases (a clean pinning, and a
+#     final line with no trailing newline -- the shape `check_rust_tests` in
+#     tools/check-native-integration.sh must agree with) and four rejecting
+#     cases (an unknown pinned binary-id; a binary-id pinned to two shards; a
+#     shard index above the shard total; a malformed line, in three shapes) --
+#     each rejecting case must make this script exit non-zero.
 
 set -euo pipefail
 
@@ -238,6 +241,37 @@ selftest() {
   printf '1 binA\n2 binA\n' >"$tmp/groups-dup.txt"
   if (check_groups "$tmp/groups-dup.txt" "$tmp/known.txt" 3) >/dev/null 2>&1; then
     echo "check-shard-union selftest: FAIL: a binary-id pinned to two shards was accepted" >&2
+    return 1
+  fi
+
+  # check-groups rejecting (c): a shard index above the shard total. This bound
+  # is stated as a guarantee in docs/DESIGN-ci.md, so it needs an executable
+  # control -- otherwise deleting the check passes every gate.
+  printf '1 binA\n4 binB\n' >"$tmp/groups-range.txt"
+  if (check_groups "$tmp/groups-range.txt" "$tmp/known.txt" 3) >/dev/null 2>&1; then
+    echo "check-shard-union selftest: FAIL: a shard index above the total was accepted" >&2
+    return 1
+  fi
+
+  # check-groups rejecting (d): a malformed line. Three shapes, each of which
+  # would otherwise reach the runner as a pin with an empty binary-id or an
+  # empty index: no index, index only, non-numeric index.
+  local malformed
+  for malformed in 'binA' '1' 'x binA'; do
+    printf '%s\n' "$malformed" >"$tmp/groups-malformed.txt"
+    if (check_groups "$tmp/groups-malformed.txt" "$tmp/known.txt" 3) >/dev/null 2>&1; then
+      echo "check-shard-union selftest: FAIL: a malformed groups line was accepted: '$malformed'" >&2
+      return 1
+    fi
+  done
+
+  # check-groups accepting: a final line with no trailing newline is still a pin.
+  # `check_rust_tests` in tools/check-native-integration.sh parses the same file,
+  # and the two must not disagree about it.
+  printf '1 binA\n2 binB' >"$tmp/groups-nonewline.txt"
+  if ! (check_groups "$tmp/groups-nonewline.txt" "$tmp/known.txt" 3) \
+      | grep -q 'pins 2 binary'; then
+    echo "check-shard-union selftest: FAIL: a groups file with no trailing newline lost its last pin" >&2
     return 1
   fi
 

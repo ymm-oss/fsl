@@ -148,7 +148,12 @@ check_rust_tests() {
 
   local -a pinned_here=() pinned_all=()
   local line
-  while IFS= read -r line; do
+  # `|| [ -n "$line" ]` keeps a final line with no trailing newline. Without it
+  # this loop and `check-shard-union.sh check-groups` -- which has always had the
+  # guard -- disagree about the same file: the guard would accept a pin that this
+  # loop silently drops. Coverage stays correct either way (a dropped pin falls
+  # into the count partition), but two parsers of one file must not differ.
+  while IFS= read -r line || [ -n "$line" ]; do
     local trimmed="${line%%#*}"
     trimmed="$(printf '%s' "$trimmed" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     [ -z "$trimmed" ] && continue
