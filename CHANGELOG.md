@@ -19,13 +19,28 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   carried the third instance of the same dangling citation and additionally
   described the inert `queue-entry-stub` branch as "implemented ahead of that
   rollout"; it now records that no rollout is pending and that reviving the queue
-  is a human-review-policy question, not a CI one. An independent verification
-  pass is what found that third site — the first sweep named only the two in
-  `ci.yml`. Audited every other `docs/DESIGN-ci.md` citation in `ci.yml`,
-  `ruleset-drift-audit.yml`, and `site-reference-freshness.yml`: all resolve to
-  real headings. Comment/citation fix only — no trigger, job, or required-context
-  name changed; the parsed YAML structure is unchanged before and after, and
-  `./tools/check-product-gate-scope.sh selftest` still passes.
+  is a human-review-policy question, not a CI one. The same file's
+  `FSL_MERGE_QUEUE_CI` branch comment said enabling the variable was "the only
+  remaining step", contradicting both the rejection record and the file's own
+  header eighty lines above; it now states that reaching that branch needs the
+  policy change first, and why enabling the variable alone would land changes
+  with no pre-merge Linux evidence. Four sites in total, of two different
+  signatures, each found by a different pass. Three quote the removed section
+  name; the first sweep found only two of those because the string is wrapped
+  across lines behind `#` prefixes and a single-line `git grep` matches one of
+  the three — the reliable detector strips the comment prefix before joining
+  lines (`sed 's/^[[:space:]]*#[[:space:]]*//' | tr '\n' ' ' | tr -s ' '`), and
+  swept over all 1,436 tracked files it leaves only the two `CHANGELOG.md`
+  entries that quote the string as history. The fourth site contains no section
+  name at all, so no citation detector could have found it; it was found by
+  reading the file, and it is the most consequential of the four because it
+  described a dangerous operation as one flag away. No mechanical check exists
+  for `docs/DESIGN-ci.md` heading citations, tracked as #742. Audited every
+  other `docs/DESIGN-ci.md` citation in
+  `ci.yml`, `ruleset-drift-audit.yml`, and `site-reference-freshness.yml`: all
+  resolve to real headings. Comment/citation fix only — no trigger, job, or
+  required-context name changed; the parsed YAML structure is unchanged before
+  and after, and `./tools/check-product-gate-scope.sh selftest` still passes.
 - Documented (#722): the implicit domain aggregate initializer enumeration in
   `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md`
   covered only Bool `false`/enum first-member/range lower-bound/external-

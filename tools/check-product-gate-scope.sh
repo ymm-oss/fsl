@@ -106,8 +106,13 @@ decide() {
         # Never stub or skip promotion evidence.
         emit true production-promotion-evidence
       elif [ "${FSL_MERGE_QUEUE_CI:-}" = "enabled" ]; then
-        # Unreachable today: FSL_MERGE_QUEUE_CI does not exist yet. Correct
-        # ahead of time so enabling the variable is the only remaining step.
+        # Unreachable: neither the `FSL_MERGE_QUEUE_CI` variable nor a
+        # `merge_queue` ruleset rule exists, and the queue was tried and
+        # rejected (see the header comment). Enabling the variable is
+        # therefore NOT "the only remaining step" -- doing so while no
+        # `merge_group` run replaces these stubs would land changes on `main`
+        # with no pre-merge Linux evidence at all. Reaching this branch
+        # requires the human-review-policy change first.
         emit false queue-entry-stub
       else
         diff_scope
