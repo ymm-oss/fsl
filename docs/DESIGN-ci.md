@@ -134,18 +134,25 @@ check — issue #707 tracks exactly this gap — or ever needed to satisfy merge
 workflow-level skip would leave it permanently `Expected`, unfixable even by an admin merge. This
 was independently observed while merging PR #715. An in-job early exit does not have that failure
 mode: the job always starts, checks out, computes the diff, and reports success either from the
-stub path or from real evidence. None of the four contexts are required status checks today —
-`merge readiness` remains the only one — so this is a latent-risk fix, not a response to an
-already-broken required check.
+stub path or from real evidence. None of the four contexts were required status checks *at the
+time this mechanism moved* — `merge readiness` was the only one — so this was a latent-risk fix,
+not a response to an already-broken required check. The requirement change landed 2026-08-05,
+making `rust workspace`, `WASM`, `semantic mutation (changed)`, and `FSL Logic Test (pr)` required
+alongside `merge readiness`; `site reference freshness` joined the required set afterward, closing
+issue #707's drift-detection half (see "Required pre-merge contexts, and why the merge queue was
+rejected" below for the live set, and "Ruleset drift audit" for why a required context can no
+longer drift silently).
 
 No **product-gate lane** reads those files. The paths that do read them keep their own
 unfiltered pre-merge coverage: `merge readiness / automation contracts` executes the `.claude/`
 environment contract test from `tests/test_claude_environment.py`, and `release.yml` extracts
 release notes from `CHANGELOG.md` at tag time and fails loudly (`test -s`) on a malformed file.
 A pull request whose every changed file matches the list therefore still gets `run=false` from the
-scope script, each heavy job exits its remaining steps fast, and the pull request merges on
-`merge readiness` (plus `site reference freshness`) alone — exactly as under the retired
-`paths-ignore` list.
+scope script, each heavy job exits its remaining steps fast, and the pull request merges once all
+six required contexts report: real evidence from `merge readiness` and `site reference freshness`
+(neither reads the exempt paths, so neither is affected by the stub), and fast stub-success
+evidence from `rust workspace`, `WASM`, `semantic mutation (changed)`, and `FSL Logic Test (pr)` —
+exactly as under the retired `paths-ignore` list.
 
 The exemption is fail-closed the same three ways as before, now enforced by the script rather than
 by GitHub's path evaluation. A single changed file outside the list restores the full pre-merge
@@ -325,11 +332,17 @@ portable evidence and failure attribution even when agents merge changes quickly
 
 ## Required pre-merge contexts, and why the merge queue was rejected
 
-The `main` ruleset (`main safety and CI`, id `19090811`) requires five contexts, applied
-2026-08-05: `merge readiness`, `rust workspace`, `WASM`, `semantic mutation (changed)`, and
-`FSL Logic Test (pr)`. `strict_required_status_checks_policy` is `true` and `bypass_actors` is
-empty, so `current_user_can_bypass` is `"never"` for every account — an administrator cannot merge
-past a failing or missing required context.
+The `main` ruleset (`main safety and CI`, id `19090811`) requires six contexts: `merge readiness`,
+`rust workspace`, `WASM`, `semantic mutation (changed)`, and `FSL Logic Test (pr)` (applied
+2026-08-05), plus `site reference freshness` (added to the contract as part of closing issue
+#707's drift-detection half; see "Ruleset drift audit" below). `site reference freshness` reports
+on every pull request with no path filter — `.github/workflows/site-reference-freshness.yml`'s
+`pull_request`/`merge_group` triggers carry no `paths:` restriction — so requiring it cannot
+deadlock a pull request the way requiring `native Z3 4.16` or `product gate` would; those stay
+deferred precisely because they never report on an ordinary pull request.
+`strict_required_status_checks_policy` is `true` and `bypass_actors` is empty, so
+`current_user_can_bypass` is `"never"` for every account — an administrator cannot merge past a
+failing or missing required context.
 
 This closes the gap issue #707 opened: the Safe rollout section below has always required the
 Linux evidence to be *required*, not merely running, and until this change only `merge readiness`
@@ -376,6 +389,95 @@ exercised — see "Sharded pre-merge Linux evidence" above — and cache hit rat
 no headroom: compile is only ~3.5 min of the ~33 min `rust workspace` measured on a warm cache, so a
 better hit rate could not have bought back more than that. The remaining lever is moving specific
 lanes post-merge under a new accepted decision.
+
+### Ruleset drift audit
+
+Issue #707 has two halves. The first — making the Linux evidence *required*, not merely running —
+is the section above. The second, closed here, is the reason the first half was needed at all: the
+accepted design required five (now six) contexts to be required on the `main` ruleset, and the live
+ruleset silently required only `merge readiness` until 2026-08-05. Nothing detected that gap; it
+was found by manual inspection. `.github/scripts/audit-ruleset-drift.mjs`, its calibration suite
+`.github/scripts/audit-ruleset-drift.test.mjs`, and the checked-in `.github/ruleset-contract.json`
+exist so the same silent drift cannot happen again undetected.
+
+**Scope, by discovery-by-id.** The audit fetches ruleset `19090811` by id (`GET
+/repos/ymm-oss/fsl/rulesets/19090811`, readable unauthenticated for this public repository) and
+compares it against the matching entry in `.github/ruleset-contract.json`. Every context the
+contract or the live ruleset can mention falls into exactly one of four kinds, and the contract
+records which:
+
+- **required** — the six contexts above; missing, renamed, or extra membership is drift.
+- **deferred** — `native Z3 4.16 (macos-15)`, `native Z3 4.16 (windows-latest)`, and `product gate`
+  (the `FSL_OPTIMISTIC_CI`-gated cross-platform matrix and its aggregate, "Product gate contract"
+  above): these never report on an ordinary pull request, so requiring them would deadlock every
+  one; an audit finding that one of them is present in the live required set gets a sharper message
+  saying exactly that, rather than being reported as an ordinary unexpected context.
+- **constituent** — the sharded lane names (`rust checks`, `rust tests (K/3)`, `mutation operators
+  (K/3)`, `mutation mutants`, "Sharded pre-merge Linux evidence" above): only their `if: always()`
+  aggregator carries the required-context name, so the contract records these explicitly to stop a
+  future reviewer from "fixing" the ruleset by requiring a shard directly — that would let a single
+  skipped shard silently satisfy the ruleset, the exact false-negative shape that section's
+  `if: always()` discussion warns about.
+- **unaudited** — the `pull_request` rule's own parameters (`required_approving_review_count`,
+  `allowed_merge_methods`, review dismissal, …). These are **deliberately never read**. Human
+  review policy is a separate accepted process decision (ruleset `19090821`, "The merge queue was
+  tried…" above); this audit's job is CI-evidence configuration, not review policy. An editable
+  `allowed_merge_methods` change is the audit's blind control — its calibration suite proves the
+  audit stays clean when that field changes, so a green audit is never accidentally load-bearing
+  evidence for review-policy drift it was never designed to catch.
+
+**`bypass_actors` is in scope, and its absence is a failure, not a pass.** An added bypass actor is
+exactly what would let a failing required check merge anyway — it defeats every other guarantee
+this audit checks. But GitHub returns `bypass_actors` only to a caller with write access to the
+ruleset, and the workflow's own `GITHUB_TOKEN` has no `administration` permission at all, so it
+cannot observe the field even though the rest of the ruleset is public. `RULESET_AUDIT_TOKEN`, a
+fine-grained PAT scoped to read that permission, exists for exactly this leg. Absence of the field
+is never read as an empty (safe) list — "absence of evidence is not evidence of emptiness" — so an
+unset or revoked `RULESET_AUDIT_TOKEN` makes the audit fail closed with `bypass-actors-unobserved`
+rather than silently skip the check it exists for.
+
+**The seam.** `compareRuleset(contractEntry, observationJson)` and `validateContract(contract)` are
+pure — no network, no filesystem, no process access — so every case in the calibration suite is
+built by `structuredClone`-ing the checked-in fixture (`.github/scripts/fixtures/ruleset-19090811.json`,
+a verbatim capture) and mutating exactly one field, with no live ruleset ever touched by a test.
+The suite covers the accepting case (the fixture is clean against the contract, which also freezes
+contract/fixture agreement — editing one without the other fails pre-merge), two rejecting cases
+(a dropped context; a renamed context, which must surface as one `missing` plus one `unexpected`
+rather than being silently satisfied by name), the blind control above, and the fail-closed guards
+(empty rules, empty required-context list, missing/added `bypass_actors`, an unexpected rule type,
+wrong enforcement, flipped strict policy, retargeted conditions, a schema-invalid contract) —
+including, for the network-facing wrapper, an injected fetch failure and a 404 against a fake
+client, both of which must still create the failure issue. This suite runs in
+`tools/check-merge-readiness.sh`'s `check_automation` lane (so a contract, fixture, or checker
+change gets pre-merge evidence — `.github/**` is not on the agent-configuration exemption's path
+list) and again as the live workflow's first step.
+
+**Issue lifecycle.** `reconcileRulesetDrift` in `audit-ruleset-drift.mjs` imports
+`report-post-merge-ci.mjs`'s exported `GitHubRestClient` rather than building a second REST client
+and a second dedupe mechanism, and keeps that file's `reconcilePostMerge` *shape* — one canonical
+issue per key (`ci/ruleset-drift` label, marker `<!-- ruleset-drift:19090811 -->`), an occurrence
+marker per run so re-runs are idempotent, reopen on recurrence, close with a recovery comment on
+the next clean audit — without trying to parameterize `reconcilePostMerge` itself: its keying,
+recovery predicate, and out-of-order run redirection are shaped around a workflow run's jobs and do
+not mean anything for a single ruleset comparison. The issue body lists finding classes and details
+plus a link to the run's raw-observation artifact, never token material or log text, and its footer
+states the two legitimate exits — revert the live ruleset, or amend the contract, the fixture, and
+this document together in one pull request — and names `RULESET_AUDIT_TOKEN` as the secret to
+rotate when the finding is `bypass-actors-unobserved`.
+
+**A legitimate ruleset change is a three-surface move in one pull request:** this document, the
+contract, and a re-captured fixture, with the live ruleset edit applied before that pull request
+merges. Editing `.github/ruleset-contract.json` alone to make the audit agree with unexplained live
+state is precisely the drift this audit exists to catch, not a fix for it — the same principle
+"Growing the exempt list is a contract change to this decision, not a script tweak" states above
+for the agent-configuration exemption applies here to the required-context set.
+
+`.github/workflows/ruleset-drift-audit.yml` runs on a daily `schedule`, `workflow_dispatch`, and a
+path-filtered `push` to `main` (the four files above, so a legitimate contract change self-verifies
+minutes after merge). It deliberately carries no `pull_request` trigger: a fork pull request has no
+access to `RULESET_AUDIT_TOKEN` or a writable `GITHUB_TOKEN`, so running there would produce
+spurious failures indistinguishable from real drift. Pre-merge coverage is the offline calibration
+suite above, not a live run.
 
 ## Failure reporting contract
 
