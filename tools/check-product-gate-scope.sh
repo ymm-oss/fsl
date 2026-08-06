@@ -78,11 +78,13 @@ emit() {
   fi
 }
 
-# Diff-based exemption shared by `pull_request` (once FSL_MERGE_QUEUE_CI is
+# Diff-based exemption shared by `pull_request` (when FSL_MERGE_QUEUE_CI is
 # not "enabled") and `merge_group` events -- the latter cannot be path-
-# filtered at the trigger level, so this in-job check is the only place the
-# exemption can apply once a merge queue exists. Fails closed to a full run
-# when either SHA is missing or the diff itself cannot be computed.
+# filtered at the trigger level, so this in-job check would be the only place
+# the exemption could apply if a merge queue ever existed. None does, and the
+# queue was rejected rather than deferred: see the header comment. Fails
+# closed to a full run when either SHA is missing or the diff itself cannot be
+# computed.
 diff_scope() {
   if [ -z "${BASE_SHA:-}" ] || [ -z "${HEAD_SHA:-}" ]; then
     emit true diff-unavailable-fail-closed

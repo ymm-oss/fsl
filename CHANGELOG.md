@@ -24,19 +24,32 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   remaining step", contradicting both the rejection record and the file's own
   header eighty lines above; it now states that reaching that branch needs the
   policy change first, and why enabling the variable alone would land changes
-  with no pre-merge Linux evidence. Four sites in total, of two different
-  signatures, each found by a different pass. Three quote the removed section
-  name; the first sweep found only two of those because the string is wrapped
-  across lines behind `#` prefixes and a single-line `git grep` matches one of
-  the three — the reliable detector strips the comment prefix before joining
-  lines (`sed 's/^[[:space:]]*#[[:space:]]*//' | tr '\n' ' ' | tr -s ' '`), and
-  swept over all 1,436 tracked files it leaves only the two `CHANGELOG.md`
-  entries that quote the string as history. The fourth site contains no section
-  name at all, so no citation detector could have found it; it was found by
-  reading the file, and it is the most consequential of the four because it
-  described a dangerous operation as one flag away. No mechanical check exists
-  for `docs/DESIGN-ci.md` heading citations, tracked as #742. Audited every
-  other `docs/DESIGN-ci.md` citation in
+  with no pre-merge Linux evidence. `tools/check-product-gate-scope.sh`'s
+  `diff_scope` comment said the in-job check is "the only place the exemption can
+  apply **once** a merge queue exists", presupposing one will; it now says
+  "if a merge queue ever existed" and states that none does. And
+  `docs/DESIGN-ci.md` itself — the authority the other five sites cite —
+  recommended a merge queue as a mitigation "worth using ... once `ci.yml` gains
+  the same trigger", while its own `## Non-goals` lists running a queue as a
+  non-goal; `ci.yml` had already gained that trigger, so the paragraph read as an
+  available next step. It is corrected rather than deleted, so the sequence stays
+  legible.
+
+  **Seven sites across three files, of two signatures, found over four passes** —
+  not one clean sweep. Three quote the removed section name; four state a stale
+  premise without naming any section. The section-name sites are findable
+  mechanically, but only with a comment-prefix-aware detector: the string wraps
+  across lines behind `#` prefixes, so a single-line `git grep` matches one of the
+  three. The reliable form is
+  `sed 's/^[[:space:]]*#[[:space:]]*//' | tr '\n' ' ' | tr -s ' '`; calibrated
+  against the pre-repair tree it finds all three, and over all 1,436 tracked files
+  here it leaves only the two `CHANGELOG.md` entries that quote the string as
+  history. **The four stale-premise sites are not findable that way at all** — they
+  contain no section name — and they include both the most dangerous one (an
+  operation the #717 canary proved unsafe, described as one flag away) and the one
+  inside the accepted decision record. #742 tracks mechanising the citation check;
+  it must also cover this second signature, or the recurrence continues. Audited
+  every other `docs/DESIGN-ci.md` citation in
   `ci.yml`, `ruleset-drift-audit.yml`, and `site-reference-freshness.yml`: all
   resolve to real headings. Comment/citation fix only — no trigger, job, or
   required-context name changed; the parsed YAML structure is unchanged before

@@ -38,11 +38,20 @@ Measured on the batch that motivated this revision:
 
 The cost is stated plainly: a pull request into `main` now waits for `rust workspace`, measured at
 18m17s on a cold cache and around twelve minutes warm, rather than forty seconds. Because a branch
-that falls behind `main` must re-run its checks, a serial chain of rebases pays that repeatedly. Two
-mitigations already exist and are worth using before the cost is treated as inherent: independent
-changes can share one pull request with one commit per topic, and `merge-readiness.yml` already
-handles `merge_group`, so a merge queue can validate several candidates as one batch once `ci.yml`
-gains the same trigger.
+that falls behind `main` must re-run its checks, a serial chain of rebases pays that repeatedly. One
+mitigation exists and is worth using before the cost is treated as inherent: independent changes can
+share one pull request with one commit per topic.
+
+A merge queue would be the other, batching several candidates into one validation, and both
+`merge-readiness.yml` and `ci.yml` carry a `merge_group` trigger for exactly that. **It is not an
+available mitigation.** The queue itself was configured on the `main` ruleset on 2026-08-05 and
+removed the same day; both triggers are inert and enabling one changes nothing, because no
+`merge_group` event fires without a queue. Reviving it is a human-review-policy decision, not a CI
+one — see "Required pre-merge contexts, and why the merge queue was rejected" below, and the
+"Non-goals" entry that follows from it. This paragraph previously recommended the queue as a
+mitigation "once `ci.yml` gains the same trigger"; `ci.yml` gained it, the queue was then measured
+and rejected, and the recommendation was left behind. It is corrected here rather than deleted so the
+sequence stays legible.
 
 ## Merge readiness contract
 

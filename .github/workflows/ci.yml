@@ -18,11 +18,12 @@ on:
     # "Agent-configuration exemption".
   merge_group:
     # Unfiltered: GitHub does not support `paths`/`paths-ignore` on
-    # `merge_group`, and only `main` could ever have a queue, so an
-    # unfiltered trigger is equivalent. Dormant -- no merge queue exists on
-    # `main`. One was configured on this ruleset on 2026-08-05 and removed
-    # the same day: every merge here takes the admin-bypass path, so the
-    # queue never validated anything. Reviving it needs a human-review-policy
+    # `merge_group` (docs/DESIGN-ci.md), and only `main` could ever have a
+    # queue, so an unfiltered trigger is equivalent. Dormant -- no merge
+    # queue exists on `main`. One was configured on the `main` ruleset on
+    # 2026-08-05 and removed the same day: every merge would have taken the
+    # admin-bypass path, so the queue would never have validated anything --
+    # measured, not predicted. Reviving it needs a human-review-policy
     # change, not a CI change, so this trigger stays inert rather than
     # removed. See docs/DESIGN-ci.md, "Required pre-merge contexts, and why
     # the merge queue was rejected" and its "The merge queue was tried,
