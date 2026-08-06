@@ -39,7 +39,7 @@ use crate::claim::{Axis, Citation, Claim, workspace_root};
 /// `properties.required` spells them. Kept in sync with
 /// `schemas/fslc/kernel/kernel.v1.schema.json` by
 /// [`kernel_schema_property_groups_match_the_axis_rows`].
-const ROWS: &[&str] = &[
+pub(crate) const ROWS: &[&str] = &[
     "invariants",
     "transitions",
     "reachables",
@@ -106,8 +106,8 @@ pub fn axis() -> Axis {
         ("transitions", "induction"),
         Claim::Exercised {
             by: Citation {
-                path: "rust/fslc/tests/induction_suggestions.rs",
-                anchor: "fn trans_ctis_never_receive_invariant_suggestions()",
+                path: "rust/fslc/tests/verification_ownership.rs",
+                anchor: "fn selected_transition_induction_matches_the_all_properties_proof()",
             },
         },
     );

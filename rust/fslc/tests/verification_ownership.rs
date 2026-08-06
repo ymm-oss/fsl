@@ -106,6 +106,313 @@ fn verification_rejects_an_unknown_engine_with_the_stable_usage_contract() {
     );
 }
 
+fn verification_json(arguments: &[&str]) -> (Value, i32) {
+    let output = run(arguments);
+    (
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+            panic!(
+                "invalid verification JSON: {error}; stderr={}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+        }),
+        output.status.code().expect("native exit status"),
+    )
+}
+
+#[test]
+fn selected_transition_induction_matches_the_all_properties_proof() {
+    let fixture = "rust/fslc/tests/fixtures/issue_701_induction_trans_hypothesis.fsl";
+    let common = [
+        "--engine",
+        "induction",
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+    ];
+    let mut all_arguments = vec!["verify", fixture];
+    all_arguments.extend(common);
+    let (all, all_status) = verification_json(&all_arguments);
+
+    let mut selected_arguments = vec!["verify", fixture, "--property", "StartsZero"];
+    selected_arguments.extend(common);
+    let (selected, selected_status) = verification_json(&selected_arguments);
+
+    assert_eq!(all_status, 0, "{all}");
+    assert_eq!(
+        selected_status, all_status,
+        "selected={selected}; all={all}"
+    );
+    assert_eq!(selected["result"], all["result"]);
+    assert_eq!(selected["result"], "proved");
+    assert_eq!(selected["engine"], "induction");
+    assert_eq!(
+        selected["transitions_checked"],
+        json!(["StartsZero"]),
+        "{selected}"
+    );
+    assert_eq!(selected["transitions_checked"], all["transitions_checked"]);
+    assert_eq!(
+        selected["invariants_checked"],
+        json!(["_bounds_x", "Zero"]),
+        "the selected transition relies on the full invariant hypothesis: {selected}"
+    );
+}
+
+#[test]
+fn selected_transition_keeps_bounds_without_checking_sibling_transitions() {
+    let (selected, status) = verification_json(&[
+        "verify",
+        "rust/fslc/tests/fixtures/issue_701_induction_trans_siblings.fsl",
+        "--engine",
+        "induction",
+        "--property",
+        "StartsZero",
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+    ]);
+    assert_eq!(status, 0, "{selected}");
+    assert_eq!(selected["result"], "proved");
+    assert_eq!(selected["transitions_checked"], json!(["StartsZero"]));
+    assert_eq!(selected["invariants_checked"], json!(["_bounds_x", "Zero"]));
+    assert!(
+        selected["cost"]["properties"]
+            .as_array()
+            .is_some_and(|properties| properties.iter().any(|property| {
+                property["kind"] == "type_bound" && property["name"] == "_bounds_x"
+            })),
+        "selected transition must retain its implicit type bound: {selected}"
+    );
+}
+
+#[test]
+fn selected_transition_exclusion_still_wins() {
+    let (selected, status) = verification_json(&[
+        "verify",
+        "rust/fslc/tests/fixtures/issue_701_induction_trans_hypothesis.fsl",
+        "--engine",
+        "induction",
+        "--property",
+        "StartsZero",
+        "--exclude-property",
+        "StartsZero",
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+    ]);
+    assert_eq!(status, 0, "{selected}");
+    assert_eq!(selected["result"], "proved");
+    assert_eq!(selected["transitions_checked"], json!([]));
+}
+
+#[test]
+fn selected_transition_lemma_path_honors_scope_overrides() {
+    let (selected, status) = verification_json(&[
+        "verify",
+        "rust/fslc/tests/fixtures/issue_701_induction_trans_scope.fsl",
+        "--engine",
+        "induction",
+        "--property",
+        "StableRange",
+        "--lemma",
+        "true",
+        "--values",
+        "Count=0..0",
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+    ]);
+    assert_eq!(status, 0, "{selected}");
+    assert_eq!(selected["result"], "proved");
+    assert_eq!(selected["transitions_checked"], json!(["StableRange"]));
+    assert_eq!(
+        selected["bounds_overrides"]["values"]["Count"],
+        json!([0, 0])
+    );
+
+    let (invalid, invalid_status) = verification_json(&[
+        "verify",
+        "rust/fslc/tests/fixtures/issue_701_induction_trans_hypothesis.fsl",
+        "--engine",
+        "induction",
+        "--property",
+        "StartsZero",
+        "--lemma",
+        "true",
+        "--values",
+        "Count=0..0",
+        "--no-cache",
+    ]);
+    assert_eq!(invalid_status, 2, "{invalid}");
+    assert_eq!(invalid["result"], "error");
+}
+
+#[test]
+fn inductive_transition_property_row_reports_proved_assurance() {
+    let output_dir =
+        std::env::temp_dir().join(format!("fslc-issue-701-assurance-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&output_dir);
+    std::fs::create_dir_all(&output_dir).expect("create issue 701 output directory");
+    let output_path = output_dir.join("report.html");
+    let output_path = output_path.to_string_lossy().into_owned();
+    let output = run(&[
+        "html",
+        "rust/fslc/tests/fixtures/issue_701_induction_trans_hypothesis.fsl",
+        "--engine",
+        "induction",
+        "-o",
+        &output_path,
+    ]);
+    assert_eq!(output.status.code(), Some(0));
+    let envelope: Value = serde_json::from_slice(&output.stdout).expect("html result JSON");
+    assert_eq!(envelope["result"], "generated", "{envelope}");
+    let html = std::fs::read_to_string(&output_path).expect("read HTML report");
+    let row = html
+        .split("<tr>")
+        .find(|row| row.contains("<code>StartsZero</code>"))
+        .expect("StartsZero property row");
+    assert!(row.contains("<td>proved(induction)</td>"), "{row}");
+    std::fs::remove_dir_all(output_dir).expect("remove issue 701 output directory");
+}
+
+#[test]
+fn selected_invariant_induction_keeps_its_existing_isolated_model_semantics() {
+    let (selected, status) = verification_json(&[
+        "verify",
+        "rust/fslc/tests/fixtures/explicit_property_narrow.fsl",
+        "--engine",
+        "induction",
+        "--property",
+        "AlwaysBoolean",
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+    ]);
+    assert_eq!(status, 0, "{selected}");
+    assert_eq!(selected["result"], "proved");
+    assert_eq!(selected["invariants_checked"], json!(["AlwaysBoolean"]));
+}
+
+#[test]
+fn selected_transition_preserves_bmc_violation_and_induction_cti_contracts() {
+    let (violated, violated_status) = verification_json(&[
+        "verify",
+        "rust/fslc/tests/fixtures/assurance_trans_violation.fsl",
+        "--engine",
+        "induction",
+        "--property",
+        "NeverDecrease",
+        "--depth",
+        "3",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+    ]);
+    assert_eq!(violated_status, 1, "{violated}");
+    assert_eq!(violated["result"], "violated");
+    assert_eq!(violated["violation_kind"], "trans");
+    assert_eq!(violated["trans"], "NeverDecrease");
+
+    let (cti, cti_status) = verification_json(&[
+        "verify",
+        "rust/fslc/tests/fixtures/induction_suggestion_trans.fsl",
+        "--engine",
+        "induction",
+        "--property",
+        "NeverIncrease",
+        "--depth",
+        "1",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+    ]);
+    assert_eq!(cti_status, 1, "{cti}");
+    assert_eq!(cti["result"], "unknown_cti");
+    assert_eq!(cti["trans"], "NeverIncrease");
+    assert_eq!(cti["trace_type"], "induction_cti");
+    assert!(
+        cti.get("violation_kind").is_none(),
+        "preserve the existing transition CTI envelope: {cti}"
+    );
+}
+
+#[test]
+fn induction_property_selection_keeps_unknown_and_unsupported_kinds_rejected() {
+    let cases = [
+        (
+            "rust/fslc/tests/fixtures/explicit_reachable_witnessed.fsl",
+            "HitTwo",
+            "reachable",
+        ),
+        (
+            "rust/fslc/tests/fixtures/testgen_leadsto_violation.fsl",
+            "Served",
+            "leadsTo",
+        ),
+    ];
+    for (fixture, property, kind) in cases {
+        for lemma in [None, Some("true")] {
+            let mut arguments = vec![
+                "verify",
+                fixture,
+                "--engine",
+                "induction",
+                "--property",
+                property,
+                "--no-cache",
+            ];
+            if let Some(lemma) = lemma {
+                arguments.extend(["--lemma", lemma]);
+            }
+            let (output, status) = verification_json(&arguments);
+            assert_eq!(status, 2, "{output}");
+            assert_eq!(output["result"], "error");
+            assert_eq!(output["kind"], "usage");
+            assert_eq!(
+                output["message"],
+                format!(
+                    "--property {property} is a {kind}, which the induction engine cannot prove; check it with the default bmc engine"
+                )
+            );
+        }
+    }
+
+    for lemma in [None, Some("true")] {
+        let mut arguments = vec![
+            "verify",
+            "rust/fslc/tests/fixtures/issue_701_induction_trans_hypothesis.fsl",
+            "--engine",
+            "induction",
+            "--property",
+            "MissingProperty",
+            "--no-cache",
+        ];
+        if let Some(lemma) = lemma {
+            arguments.extend(["--lemma", lemma]);
+        }
+        let (unknown, unknown_status) = verification_json(&arguments);
+        assert_eq!(unknown_status, 2, "{unknown}");
+        assert_eq!(unknown["result"], "error");
+        assert_eq!(unknown["kind"], "usage");
+        assert!(
+            unknown["message"]
+                .as_str()
+                .is_some_and(|message| message.starts_with("no such property: MissingProperty")),
+            "{unknown}"
+        );
+    }
+}
+
 #[test]
 fn native_verification_has_explicit_dependencies_and_no_renderer_copy() {
     let source = include_str!("../src/verification.rs");
