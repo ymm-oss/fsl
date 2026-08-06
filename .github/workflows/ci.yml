@@ -103,6 +103,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
+          # Saving is restricted to non-pull-request events. A pull request's cache is
+          # readable only by that same pull request -- Actions caches are ref-scoped, so
+          # sibling pull requests cannot use each other's -- while `ci.yml`'s four shared
+          # keys together store about 6.9 GiB per pull request against a 10 GiB repository
+          # limit. Two concurrent pull requests therefore evicted `main`'s caches, after
+          # which every run built cold: measured +8 to +16 min per shard. Only `main`
+          # saves now, and every pull request can read `main` because it is the default
+          # branch. See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
           shared-key: rust-workspace
 
@@ -136,6 +145,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
+          # Saving is restricted to non-pull-request events. A pull request's cache is
+          # readable only by that same pull request -- Actions caches are ref-scoped, so
+          # sibling pull requests cannot use each other's -- while `ci.yml`'s four shared
+          # keys together store about 6.9 GiB per pull request against a 10 GiB repository
+          # limit. Two concurrent pull requests therefore evicted `main`'s caches, after
+          # which every run built cold: measured +8 to +16 min per shard. Only `main`
+          # saves now, and every pull request can read `main` because it is the default
+          # branch. See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
           shared-key: rust-workspace
 
@@ -258,6 +276,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
+          # Saving is restricted to non-pull-request events. A pull request's cache is
+          # readable only by that same pull request -- Actions caches are ref-scoped, so
+          # sibling pull requests cannot use each other's -- while `ci.yml`'s four shared
+          # keys together store about 6.9 GiB per pull request against a 10 GiB repository
+          # limit. Two concurrent pull requests therefore evicted `main`'s caches, after
+          # which every run built cold: measured +8 to +16 min per shard. Only `main`
+          # saves now, and every pull request can read `main` because it is the default
+          # branch. See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
 
       - uses: actions/setup-node@v4
@@ -308,6 +335,15 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          # Saving is restricted to non-pull-request events. A pull request's cache is
+          # readable only by that same pull request -- Actions caches are ref-scoped, so
+          # sibling pull requests cannot use each other's -- while `ci.yml`'s four shared
+          # keys together store about 6.9 GiB per pull request against a 10 GiB repository
+          # limit. Two concurrent pull requests therefore evicted `main`'s caches, after
+          # which every run built cold: measured +8 to +16 min per shard. Only `main`
+          # saves now, and every pull request can read `main` because it is the default
+          # branch. See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
 
       - name: Test pinned native solver and BMC crates
@@ -335,6 +371,15 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          # Saving is restricted to non-pull-request events. A pull request's cache is
+          # readable only by that same pull request -- Actions caches are ref-scoped, so
+          # sibling pull requests cannot use each other's -- while `ci.yml`'s four shared
+          # keys together store about 6.9 GiB per pull request against a 10 GiB repository
+          # limit. Two concurrent pull requests therefore evicted `main`'s caches, after
+          # which every run built cold: measured +8 to +16 min per shard. Only `main`
+          # saves now, and every pull request can read `main` because it is the default
+          # branch. See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
 
       - name: Test pinned native solver and BMC crates
@@ -357,7 +402,7 @@ jobs:
   semantic-mutation-operators:
     name: mutation operators (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
@@ -380,8 +425,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
+          # Saving is restricted to non-pull-request events. A pull request's cache is
+          # readable only by that same pull request -- Actions caches are ref-scoped, so
+          # sibling pull requests cannot use each other's -- while `ci.yml`'s four shared
+          # keys together store about 6.9 GiB per pull request against a 10 GiB repository
+          # limit. Two concurrent pull requests therefore evicted `main`'s caches, after
+          # which every run built cold: measured +8 to +16 min per shard. Only `main`
+          # saves now, and every pull request can read `main` because it is the default
+          # branch. See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
           shared-key: semantic-mutation
+          # Save even when the job fails. Without this the lane cannot recover from a
+          # cold start: a cold scratch build exceeds the job budget, the job is
+          # cancelled, `rust-cache` skips saving, and the next run is cold again. The
+          # cache can then only be created by a run that succeeds, and a run can only
+          # succeed once the cache exists. Measured on `main` and on three pull
+          # requests; see docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          cache-on-failure: true
 
       - name: Calibrate curated fault-operator shard
         if: steps.scope.outputs.run == 'true'
@@ -400,7 +461,7 @@ jobs:
   semantic-mutation-mutants:
     name: mutation mutants
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -419,8 +480,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
+          # Saving is restricted to non-pull-request events. A pull request's cache is
+          # readable only by that same pull request -- Actions caches are ref-scoped, so
+          # sibling pull requests cannot use each other's -- while `ci.yml`'s four shared
+          # keys together store about 6.9 GiB per pull request against a 10 GiB repository
+          # limit. Two concurrent pull requests therefore evicted `main`'s caches, after
+          # which every run built cold: measured +8 to +16 min per shard. Only `main`
+          # saves now, and every pull request can read `main` because it is the default
+          # branch. See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
           shared-key: semantic-mutation
+          # Save even when the job fails. Without this the lane cannot recover from a
+          # cold start: a cold scratch build exceeds the job budget, the job is
+          # cancelled, `rust-cache` skips saving, and the next run is cold again. The
+          # cache can then only be created by a run that succeeds, and a run can only
+          # succeed once the cache exists. Measured on `main` and on three pull
+          # requests; see docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          cache-on-failure: true
 
       - name: Install pinned semantic mutation runner
         if: steps.scope.outputs.run == 'true'
@@ -557,6 +634,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
+          # Saving is restricted to non-pull-request events. A pull request's cache is
+          # readable only by that same pull request -- Actions caches are ref-scoped, so
+          # sibling pull requests cannot use each other's -- while `ci.yml`'s four shared
+          # keys together store about 6.9 GiB per pull request against a 10 GiB repository
+          # limit. Two concurrent pull requests therefore evicted `main`'s caches, after
+          # which every run built cold: measured +8 to +16 min per shard. Only `main`
+          # saves now, and every pull request can read `main` because it is the default
+          # branch. See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
 
       - name: Run bounded pull-request generation
