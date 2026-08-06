@@ -740,8 +740,9 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
-               [--property <Name>]               # check one named property in isolation —
-                                                 #   invariant / trans / leadsTo / reachable (for probing)
+               [--property <Name>]               # check one named property obligation —
+                                                 #   invariant / trans / leadsTo / reachable;
+                                                 #   induction の trans 選択は全 invariant を保持
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
@@ -853,6 +854,14 @@ Public Kernel v2 はオプトインで、
 
 `verify --property Name` は invariant、`trans`、`leadsTo`、`reachable` の宣言を
 横断して解決し、指名されたプロパティ種別だけを単独で検査します。
+ただし induction には依存関係に関する規則が 1 つあります:
+`--engine induction --property <trans>` では、指名した `trans` だけが遷移の証明義務に
+なりますが、すべてのユーザー invariant と暗黙の型境界はベースケースと induction
+仮定に残ります。これにより、確立済みの状態 invariant に依存する 2 状態安全性の証明を
+維持し、選択実行のその遷移に対する verdict を all-properties induction 実行と一致させます。
+既存の `--property <invariant>` の挙動は変更しません: sibling invariant は保持せず、
+指名した invariant だけにモデルを制限します。induction selector は、選択された
+`leadsTo` と `reachable` を引き続き usage error として拒否します。
 `--exclude-property Name` は繰り返し指定でき、種別を横断する逆操作として機能します:
 指名された invariant、`trans`、`leadsTo`、`reachable` プロパティを、実行と、検査済み
 プロパティの出力(`invariants_checked`、`transitions_checked`、`leads_to`、
