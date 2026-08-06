@@ -1,0 +1,34 @@
+# Duration-aware pinning for `rust-tests` shards (issue #720 Finding 1;
+# docs/DESIGN-ci.md, "Sharded pre-merge Linux evidence"). Each non-comment,
+# non-blank line is "<shard> <binary-id>", 1-based shard index <= the shard
+# total cargo-nextest is invoked with (3 in .github/workflows/ci.yml today).
+# A pinned binary's tests all run in that shard, unpartitioned.
+#
+# `binary-id` is cargo-nextest's own identifier (`cargo nextest list
+# --message-format json`, the `binary-id` field; see `cargo nextest help
+# filterset`'s binary_id() predicate) -- typically `<package>::<binary-name>`,
+# disambiguating same-named test files across crates (this workspace has two
+# `explicit_engine.rs` files, in `fslc` and `fsl-runtime`; only the `fslc`
+# one is pinned here).
+#
+# A binary NOT named here is not dropped: `check_rust_tests` in
+# tools/check-native-integration.sh falls every unpinned binary back to
+# cargo-nextest's ordinary `--partition count:K/N` split. Coverage never
+# depends on this file being current -- only duration balance does. What
+# does depend on this file: `tools/check-shard-union.sh check-groups` fails
+# closed if a pin below names a binary the live workspace no longer has
+# (rename/removal) or pins one binary to more than one shard.
+#
+# Measured per-binary wall clock (run 30989320577 / rerun, docs/DESIGN-ci.md):
+# refine_corpus_parity ~7.34 min (4 tests), explicit_engine ~4.58 min
+# (12 tests), injection_detector_matrix ~3.75 min (1 test),
+# corpus_check_sweep ~3.16 min (3 tests), issue_226_auto_engine ~3.13 min
+# (15 tests) -- together ~77% of the suite's sequential time while most of
+# the remaining ~190 binaries finish in under a second. Bin-packed across 3
+# shards: shard 1 ~7.34 min, shard 2 ~7.74 min, shard 3 ~6.88 min, each then
+# also taking its share of the count-partitioned leftover.
+1 fslc-rust::refine_corpus_parity
+2 fslc-rust::explicit_engine
+2 fslc-rust::corpus_check_sweep
+3 fslc-rust::injection_detector_matrix
+3 fslc-rust::issue_226_auto_engine

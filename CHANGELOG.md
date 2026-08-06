@@ -5,6 +5,26 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed (#720 Finding 1): `rust-tests`' `cargo-nextest --partition count:K/3` balanced pre-merge
+  shards by test count, not wall clock, so five binaries holding ~77% of the suite's sequential time
+  (`refine_corpus_parity`, `explicit_engine`, `injection_detector_matrix`, `corpus_check_sweep`,
+  `issue_226_auto_engine`) could land unevenly across shards — measured spreads of 2.2x and 3.1x
+  between the fastest and slowest shard. `check_rust_tests` in `tools/check-native-integration.sh` now
+  pins those five binaries to specific shards via a checked-in
+  `tools/rust-test-shard-groups.txt` and `cargo nextest`'s `binary_id(=…)` filterset, unpartitioned,
+  while every other test still goes through the original count-partition, scoped to exclude every
+  pinned binary. Coverage cannot silently drop: an unlisted binary simply falls into the
+  count-partitioned leftover as before, and `tools/check-shard-union.sh`'s existing full.txt/shard.txt
+  guard needed no shape change to keep validating the result. Added `check-shard-union.sh
+  check-groups`, a narrower guard that fails closed if the grouping file pins a binary-id the live
+  workspace no longer has or pins one binary to two shards, plus new accepting/rejecting `selftest`
+  cases (including a whole-binary-dropped fixture) wired into the existing `merge readiness /
+  automation contracts` lane. `.github/workflows/ci.yml` is unchanged — the required `rust workspace`
+  context, its `if: always()` aggregator, and the shard-union contract all keep their exact shape.
+  Expected gain ~5 min off `rust workspace`'s current ≈18 min slowest shard (docs/DESIGN-ci.md); not
+  yet measured — that needs a pull-request run of this change against `ci.yml`. Issue #720 Finding 2
+  (warming the fault-operator scratch build, and a possible revert of that lane's sharding) is
+  untouched and #720 stays open for it.
 - Documented (#722): the implicit domain aggregate initializer enumeration in
   `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md`
   covered only Bool `false`/enum first-member/range lower-bound/external-
