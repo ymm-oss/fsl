@@ -9,7 +9,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   shards by test count, not wall clock, so five binaries holding ~77% of the suite's sequential time
   (`refine_corpus_parity`, `explicit_engine`, `injection_detector_matrix`, `corpus_check_sweep`,
   `issue_226_auto_engine`) could land unevenly across shards — measured spreads of 2.2x and 3.1x
-  between the fastest and slowest shard. `check_rust_tests` in `tools/check-native-integration.sh` now
+  between the fastest and slowest shard on two runs of the same commit, now both
+  recorded in `docs/DESIGN-ci.md` (previously only the 2.2x run was). `check_rust_tests` in `tools/check-native-integration.sh` now
   pins those five binaries to specific shards via a checked-in
   `tools/rust-test-shard-groups.txt` and `cargo nextest`'s `binary_id(=…)` filterset, unpartitioned,
   while every other test still goes through the original count-partition, scoped to exclude every

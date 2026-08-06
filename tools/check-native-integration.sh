@@ -56,7 +56,8 @@ check_rust_checks() {
 readonly NEXTEST_VERSION="0.9.143"
 
 # Duration-aware pinning file for `rust-tests` (issue #720 Finding 1;
-# docs/DESIGN-ci.md, "Sharded pre-merge Linux evidence"). `--partition
+# docs/DESIGN-ci.md, "Duration-aware `rust-tests` shard pinning" -- the sibling
+# section of "Sharded pre-merge Linux evidence", not a part of it). `--partition
 # count:K/N` balances by test *count*, not wall clock: five binaries hold
 # ~77% of this suite's sequential time while most of the other ~170 finish
 # in under a second, so a pure count split puts wildly different amounts of

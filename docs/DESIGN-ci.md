@@ -223,7 +223,10 @@ incidental noise:
 - **`cargo-nextest --partition count:K/N` balances by test count, not duration.** The three shards
   received 518/460/411 tests and took 18.1/8.3/12.6 min — shard 1 is 2.2x shard 2, so `rust workspace`
   finished on its slowest shard at ≈18 min rather than the ≈13 min a duration-balanced split would
-  give. Issue #720 Finding 1 addressed this — see "Duration-aware `rust-tests` shard pinning" below —
+  give. A rerun of the same commit gave 15.6/5.0/8.7 min, a **3.1x** spread: the skew is not a fixed
+  property of the split but varies run to run, which is what makes an explicit assignment worth more
+  than a better hash. Issue #720 Finding 1 addressed this — see "Duration-aware `rust-tests` shard
+  pinning" below —
   by pinning the known-slow binaries to distinct shards explicitly, which `count:` alone cannot
   express.
 - **Sharding the curated operator lane bought about 10%, not two thirds.** 22.5 min unsharded became
@@ -275,9 +278,13 @@ unsharded set before trusting a `success` result:
 `tools/check-shard-union.sh` is the generic, reusable primitive both checks build on: given one full
 list and N shard lists, it fails closed — naming the offending entries — unless every shard is a
 subset of the full list, the shards are pairwise disjoint, and their union equals the full list
-exactly. Its `selftest` subcommand exercises an accepting three-way split and four rejecting cases
-(an entry covered by no shard, an entry duplicated across shards, an invented shard entry, an empty
-shard list) and is wired into `tools/check-merge-readiness.sh`'s `check_automation`, alongside
+exactly. It has a second mode, `check-groups`, described under "Duration-aware `rust-tests` shard
+pinning" below. Its `selftest` subcommand exercises the union form's accepting three-way split and
+five rejecting cases (an entry covered by no shard, an entry duplicated across shards, an invented
+shard entry, an empty shard list, and an entire binary's tests dropped from every shard), plus
+`check-groups`'s accepting case and two rejecting cases (a pin naming a binary-id the live workspace
+no longer has, and one binary pinned to two shards). It is wired into
+`tools/check-merge-readiness.sh`'s `check_automation`, alongside
 `check-product-gate-scope.sh selftest`.
 
 **Agent-configuration-exempt pull requests still work.** Every shard job runs
@@ -315,7 +322,11 @@ that run is what would confirm it. Finding 2 remains 20.3 min at best until it l
 expect either lane to shrink further without changing what it measures or how its scratch build is
 warmed.
 
-### Duration-aware `rust-tests` shard pinning (issue #720 Finding 1)
+### Duration-aware `rust-tests` shard pinning
+
+Issue #720 Finding 1. No other heading in this document carries a parenthetical issue tag, and three
+citations of this section elsewhere in the file quoted the heading without one, so the tag lives here
+in the body instead.
 
 `cargo-nextest --partition count:K/N` assigns tests to shards by count, with no notion of how long
 each test takes, so five binaries holding ~77% of the suite's sequential wall clock
@@ -348,9 +359,24 @@ ordinary count-partitioned leftover exactly as before. A new test binary landing
 it; only duration balance, not coverage, depends on the file being current. Coverage is still proven
 the same way as before this change: `check_rust_tests` writes `full.txt` (unfiltered) and `shard.txt`
 (this shard's union of pinned + leftover) exactly as it always has, and `rust-workspace`'s aggregator
-still runs the unmodified `tools/check-shard-union.sh full.txt shard1.txt shard2.txt shard3.txt` against
-them — the shape those files take did not change, so that guard needed no changes to keep validating
-the new mechanism.
+still runs `tools/check-shard-union.sh full.txt shard1.txt shard2.txt shard3.txt` against them with
+that invocation's behaviour unchanged — the script gained a `check-groups` mode and a fifth rejecting
+selftest case, but the union form itself was not touched, and the shape of the files it consumes did
+not change, so that guard keeps validating the new mechanism without alteration.
+
+**When to update `tools/rust-test-shard-groups.txt`.** Coverage never depends on it, but two cases do
+require an edit, and neither is discoverable from the file alone:
+
+- **Renaming or removing a pinned binary hard-fails every shard.** `check-groups` runs before the
+  partition and rejects a pin whose binary-id is absent from the live `cargo nextest list` output, so
+  `rust workspace` goes red until the pin is updated. That is deliberate — a silently stale pin would
+  degrade balance invisibly — but it means a rename is a two-file change: the test binary and this
+  file. The failure message names the file and the offending id.
+- **Adding a binary slower than roughly three minutes.** Below that, the count partition absorbs it
+  without materially skewing a shard. Above it, pin the binary to whichever shard currently carries
+  the least pinned time (the per-shard totals are in the list above), because one such binary is
+  enough to make its shard the aggregator's critical path. Adding a pin is a single data edit and no
+  code change, the same shape as adding a row to `rust/fslc/tests/fault_operators/operators.txt`.
 
 What *is* new is a second, narrower guard: `tools/check-shard-union.sh check-groups
 tools/rust-test-shard-groups.txt <live-binary-ids> <shard-total>`, run once per shard before any

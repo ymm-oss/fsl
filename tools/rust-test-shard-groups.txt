@@ -1,5 +1,6 @@
 # Duration-aware pinning for `rust-tests` shards (issue #720 Finding 1;
-# docs/DESIGN-ci.md, "Sharded pre-merge Linux evidence"). Each non-comment,
+# docs/DESIGN-ci.md, "Duration-aware `rust-tests` shard pinning", which also
+# records when this file must be edited). Each non-comment,
 # non-blank line is "<shard> <binary-id>", 1-based shard index <= the shard
 # total cargo-nextest is invoked with (3 in .github/workflows/ci.yml today).
 # A pinned binary's tests all run in that shard, unpartitioned.
