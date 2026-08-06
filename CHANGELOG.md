@@ -22,25 +22,25 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   cases (including a whole-binary-dropped fixture) wired into the existing `merge readiness /
   automation contracts` lane. `.github/workflows/ci.yml` is unchanged — the required `rust workspace`
   context, its `if: always()` aggregator, and the shard-union contract all keep their exact shape.
-  **Measured on run 31076668077 and the first form did not deliver**: shards took 15.5 / 14.6 / 8.75 min
-  against a 15.6 / 5.0 / 8.7 baseline — the spread improved 3.1x → 1.77x but the aggregator's critical
-  path moved about 0.1 min. Three measured causes, each of which changed the design. The cost model was
-  wrong: a shard's pinned phase costs its *slowest single test*, not the sum of its binaries' sequential
-  times (7m40s / 4m27s / 4m36s against 458.8s / 266.6s / 275.6s — agreement to the second), because
-  nextest runs tests concurrently inside a shard. The two `cargo nextest run` invocations are serial, so
-  shard wall clock is pinned + leftover + a fixed ≈1m50s, and the leftover phases spread 5.3x — worse
-  than the pinned phases' 1.72x, i.e. the duration-blindness moved rather than went away. And the
-  pinning file was stale before it merged: `fslc-rust::issue_697_all_properties_memory`, whose 371.8s
-  test is the workspace's slowest after `refine_corpus_parity`, arrived with this branch's own base
-  (the #739 merge) and was unpinned, which is what took shard 2 from 5.0 to 14.6 min. The assignment now
-  pins eight binaries chosen by slowest-single-test, removing 2,061s of sequential work from the
-  duration-blind leftover, and `docs/DESIGN-ci.md` **withdraws the ≈13 min projection**: the floor for
-  whichever shard holds `refine_corpus_parity`'s indivisible 458.8s test is ≈9.5 min, and getting below
-  that needs either splitting that test or running the two phases concurrently. The new assignment's
-  own gain is again expected rather than measured; the next `product gate` run on this branch is what
-  confirms it. Issue #720 Finding 2
-  (warming the fault-operator scratch build, and a possible revert of that lane's sharding) is
-  untouched and #720 stays open for it.
+  **Measured, and the second form delivers**: the slowest shard — the only quantity
+  `rust workspace` waits on — fell from **15.6 min to 12.2 min** and the spread from 3.1x to 1.17x
+  (warm-cache runs 31076668077 and 31081427765 attempt 2; shard wall clocks 12.2 / 10.85 / 10.46 min,
+  clean shard union on both). The first form delivered ~0.1 min and this entry previously said so;
+  two measured defects explain the gap. The cost model was wrong twice: packing by each binary's
+  sequential total, then by its slowest single test, which underestimates a shard holding several
+  long binaries by 52%. The model that fits all three shards is
+  `1.11 × max(slowest single test, sequential sum / 3)` — error −0.2% / +12.7% / +0.1%, the outlier
+  being the shard holding `issue_697_all_properties_memory`, which is memory-bound by construction
+  (`CONCRETE_PROBE_BUDGET`, #697) and so overlaps less than the model assumes. Adding a pin is
+  therefore **not** free. And the pinning file was stale before the first form merged:
+  `issue_697_all_properties_memory`, whose 371.8s test is the workspace's second slowest, arrived with
+  the #739 merge and was unpinned, putting that test in shard 2's count partition — which is what took
+  shard 2 from 5.0 to 14.6 min. The assignment now pins eight binaries by
+  `max(slowest, sum/3)`, which also cut the duration-blind leftover's spread from 5.3x to **1.75x**
+  (phases 75.4s / 43.0s / 63.9s). Remaining floor ≈10.4 min: `refine_corpus_parity`'s indivisible
+  458.8s test plus a measured ≈113s of fixed cost per shard, so going materially lower needs that test
+  split or the two phases run concurrently rather than serially. Every comparison here is warm-cache;
+  an eviction-induced cold build adds 6–12 min per shard and is tracked as #747.
 - Documented (#722): the implicit domain aggregate initializer enumeration in
   `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md`
   covered only Bool `false`/enum first-member/range lower-bound/external-

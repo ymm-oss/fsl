@@ -222,8 +222,9 @@ incidental noise:
 
 - **`cargo-nextest --partition count:K/N` balances by test count, not duration.** The three shards
   received 518/460/411 tests and took 18.1/8.3/12.6 min — shard 1 is 2.2x shard 2, so `rust workspace`
-  finished on its slowest shard at ≈18 min. A duration-balanced split was expected to give ≈13 min;
-  it did not — see "Duration-aware `rust-tests` shard pinning" below for the measurement and why. A rerun of the same commit gave 15.6/5.0/8.7 min, a **3.1x** spread: the skew is not a fixed
+  finished on its slowest shard at ≈18 min rather than the ≈13 min a duration-balanced split would
+  give — which it now does, measured: see "Duration-aware `rust-tests` shard pinning" below. A
+  rerun of the same commit gave 15.6/5.0/8.7 min, a **3.1x** spread: the skew is not a fixed
   property of the split but varies run to run, which is what makes an explicit assignment worth more
   than a better hash. Issue #720 Finding 1 addressed this — see "Duration-aware `rust-tests` shard
   pinning" below —
@@ -317,16 +318,15 @@ Raising the shard count cannot fix this. Two levers would move it further:
   changes a different mechanism (`tools/run-fault-operators.sh`'s scratch checkout) with its own
   patch-isolation contract, and because #720 asks that a possible revert of the operator sharding be
   evaluated in the same change once this lands, which needs its own review;
-- a duration-aware `rust-tests` assignment. **Landed, and its first form did not deliver** — issue
-  #720 Finding 1; see "Duration-aware `rust-tests` shard pinning" below for the measurement that
-  refuted the ~5 min estimate and what changed in response.
+- a duration-aware `rust-tests` assignment, worth **3.4 min measured**. **Landed** — issue #720
+  Finding 1. Its first form delivered about 0.1 min and its second delivers 3.4; see
+  "Duration-aware `rust-tests` shard pinning" below for both measurements and what changed between
+  them.
 
-The ≈13 min figure this section previously projected for `rust workspace` is **withdrawn as a
-prediction**. It was derived from the wrong cost model, and the first measured run of duration-aware
-pinning moved the aggregator's critical path by about 0.1 min. What replaces it: the slowest shard
-cannot go below ≈9.5 min (the indivisible 458.8s test plus the ≈1m50s fixed cost) while
-`refine_corpus_parity` holds a single test that long, and every minute between there and the measured
-15.5 min is leftover-phase work whose distribution is still count-based. Finding 2 remains 20.3 min at best until it lands; nobody should
+With Finding 1 landed, `rust workspace`'s slowest shard is **12.2 min measured**, against ≈15.6 before
+it and the ≈13 min this section projected. The remaining floor is ≈10.4 min — the indivisible 458.8s
+test plus the measured ≈113s of fixed cost — so most of what is left is that one test. Finding 2
+remains 20.3 min at best until it lands; nobody should
 expect either lane to shrink further without changing what it measures or how its scratch build is
 warmed.
 
@@ -356,54 +356,63 @@ land in the same shard, or unevenly across shards, by chance. `check_rust_tests`
    run used the five-binary assignment; the pin list has since changed but the mechanism has not, so
    the next `product gate` run re-proves the union for the current list.
 
-**The first form of this change was measured and did not deliver.** Run 31076668077 on the pull
-request that introduced it:
+**Measured, in two forms.** The first form did not deliver; the second does. All figures below
+are warm-cache runs, which matters: an eviction-induced cold build adds 6-12 min per shard and
+makes any comparison across cache states meaningless (see issue #747).
 
 | | shard 1 | shard 2 | shard 3 | slowest | spread |
 |---|---|---|---|---|---|
 | baseline run 1 | 18.1 | 8.3 | 12.6 | **18.1** | 2.2x |
 | baseline run 2 | 15.6 | 5.0 | 8.7 | **15.6** | 3.1x |
-| first pinning form | 15.5 | 14.6 | 8.75 | **15.5** | **1.77x** |
+| first form, 5 pins (run 31076668077) | 15.5 | 14.6 | 8.75 | **15.5** | 1.77x |
+| second form, 8 pins (run 31081427765 attempt 2) | **12.2** | **10.85** | **10.46** | **12.2** | **1.17x** |
 
-Spread improved from 3.1x to 1.77x, and the aggregator's critical path — which is the only quantity
-`rust workspace` actually waits on — moved by about **0.1 min against the nearer baseline**. Three
-measured facts explain it, and each changed the design:
+The slowest shard — the only quantity `rust workspace` waits on — fell from 15.6 min to
+**12.2 min**, and the spread from 3.1x to 1.17x. `tools/check-shard-union.sh` reported a clean
+union on that run.
 
-**The cost model was wrong.** Decomposed from job-step timestamps, each shard's pinned phase took
-7m40s / 4m27s / 4m36s against slowest individual tests of 458.8s / 266.6s / 275.6s — agreement to the
-second. nextest runs tests concurrently inside a shard, so **a shard's pinned phase costs about its
-slowest single test, not the sum of its binaries' sequential times.** The first assignment packed by
-that sum and overestimated shards 2 and 3 by roughly 40%. Two consequences: adding a pin to a shard
-that already holds a slower test is nearly free, and every pin removes its binary's whole sequential
-duration from the leftover.
+**The first form failed for two measurable reasons, both since fixed.**
 
-**The two phases are serial.** Shard wall clock is `pinned + leftover + fixed`, with fixed cost
-measured at ≈1m50s. The leftover phases took 5m16s / 7m31s / 1m25s — a **5.3x spread, worse than the
-pinned phases' 1.72x**. The duration-blindness this change set out to remove was displaced into the
-leftover rather than eliminated, because the leftover is still `count:K/N`.
+*The cost model was wrong, twice over.* The original assignment packed by the sum of each
+binary's sequential minutes. Corrected to the slowest single test, it then underestimated a shard
+holding several long binaries by 52%. The model that fits all three shards is
+**`1.11 × max(slowest single test, sequential sum / 3)`**:
 
-**The pinning file was stale before it merged.** `fslc-rust::issue_697_all_properties_memory`
-(slowest test 371.8s) arrived with the #697 fix in pull request #739 and was not pinned, so its test
-went into shard 2's count-partitioned leftover. That single test is what took shard 2 from 5.0 min to
-14.6 min. `fslc-rust::explain_cli` was also unpinned — although under the corrected model its slowest
-test is only 69.5s, so it matters for the 439.7s it puts in the leftover, not as a shard occupant.
+| shard | pinned sum | slowest | model | actual | error |
+|---|---|---|---|---|---|
+| 1 | 683.4s | 458.8s | 509s | 508.1s | −0.2% |
+| 2 | 922.3s | 371.8s | 413s | 465.2s | +12.7% |
+| 3 | 1130.4s | 275.6s | 418s | 418.5s | +0.1% |
 
-**Decision on the leftover skew.** Pinning is currently the only lever against it, because every pin
-takes its binary's sequential time out of the count partition. The assignment therefore pins eight
-binaries rather than five, removing 2,061s of sequential work from the leftover. Making the leftover
-itself duration-aware is *not* attempted here: `--partition count:` has no duration input, so it would
-mean replacing the partition with a second checked-in assignment covering every test binary, which
-trades a small maintained file for a large one. If the pinning form below still leaves a leftover
-spread above roughly 2x, that trade is the next thing to evaluate, and it should be its own change.
+Neither term alone works, so adding a pin is **not** free: it raises the sum, and once `sum/3`
+exceeds the slowest test the phase grows with each addition. Shard 2 is the one outlier at +12.7%,
+and the reason is specific: `issue_697_all_properties_memory` is memory-bound by construction
+(`CONCRETE_PROBE_BUDGET`, issue #697), so its tests contend for memory rather than CPU and overlap
+less than the model assumes. Treat +15% as the planning margin for whichever shard holds it.
 
-**What is reachable.** Not ≈13 min on the strength of pinning alone, and that projection is withdrawn.
-`refine_corpus_parity`'s 458.8s single test is indivisible under this scheme, so whichever shard holds
-it pays 7.65 min plus its leftover share plus ≈1m50s fixed — an absolute floor of **≈9.5 min** for that
-shard even with an empty leftover. Going below that needs one of: splitting that test (and
-`issue_697_all_properties_memory`'s 371.8s one), or running the pinned and leftover phases
-concurrently instead of serially. Neither is attempted here; both are larger changes than a scheduling
-tweak, and the second would need care because the two phases currently write one `shard.txt` between
-them.
+*The pinning file was stale before the first form merged.*
+`fslc-rust::issue_697_all_properties_memory`, whose 371.8s test is the workspace's second slowest,
+arrived with the #739 merge for issue #697 and was not pinned. Its test landed in shard 2's count
+partition, which is exactly what took shard 2 from 5.0 min to 14.6 min.
+
+**The leftover skew is reduced, not removed.** Pinning is the only lever currently available
+against it, because every pin takes its binary's whole sequential duration out of the
+count-partitioned remainder. The second form's leftover phases are 75.4s / 43.0s / 63.9s — a
+**1.75x spread, down from 5.3x**. Making the leftover itself duration-aware is not attempted:
+`--partition count:` takes no duration input, so it would mean a checked-in assignment covering
+every test binary, trading a small maintained file for a large one. At 1.75x that trade is not
+currently worth making; if the spread returns above roughly 2x, it is the next thing to evaluate,
+as its own change.
+
+**Where the floor is.** `refine_corpus_parity`'s 458.8s single test is indivisible under this
+scheme, and each shard pays a constant ≈113s of checkout, toolchain and build (measured, all three
+shards). So whichever shard holds that test cannot go below about **10.4 min** even with an empty
+leftover, and the measured 12.2 min is within two minutes of that. The ≈13 min this document
+projected earlier for `rust workspace` **is met, measured at 12.2 min** — it was unreachable with
+the wrong pinning, not unreachable in principle. Going materially below 10 min needs one of:
+splitting that test (and `issue_697_all_properties_memory`'s 371.8s one), or running the pinned and
+leftover phases concurrently instead of serially. Neither is attempted here; the second would need
+care because the two phases currently write one `shard.txt` between them.
 
 **Coverage cannot silently drop, by construction, independent of this file's accuracy.** A binary this
 file does not name is not "unhandled" — it simply is not pinned to anyone, so it falls into the
