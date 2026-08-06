@@ -354,6 +354,12 @@ Omitted domain aggregate initializers retain the current Bool `false`, enum
 first-member, range lower-bound, or external-placeholder `0` behavior while
 emitting `implicit_initial_value`. The warning carries the selected value,
 reason, edition severities, source span, and a machine-applicable insertion.
+Container-typed fields default too but do **not** trigger that warning:
+`Option<T>` -> `none`, `Set<T>` -> `Set {}`, top-level `Map<K, V>` -> dense
+per-key `forall k: K { field[k] = <value default> }`. An explicit whole-`Map`
+default and a `Map` nested as another `Map`'s value are both rejected
+("whole-Map domain defaults are not supported" / "Map state requires explicit
+initialization through supported semantics").
 
 AI hard-contract dialect (expands to the same kernel for deterministic
 tool-boundary checks and reports stable fsl-ai findings for runtime replay):

@@ -298,7 +298,19 @@ preserves the established Bool `false`, enum first-member, range lower-bound, or
 external-placeholder `0` choice and emits `implicit_initial_value`. The warning
 contains the selected value, reason, current/next severity, field span, and a
 machine-applicable explicit-initializer insertion. The next edition requires the
-initializer to be explicit.
+initializer to be explicit. Container-typed fields also get an implicit
+default — `Option<T>` selects `none`, `Set<T>` selects `Set {}`, and a
+top-level `Map<K, V>` selects a dense per-key init
+(`forall k: K { field[k] = <V's default> }`), where `<V's default>` recurses
+through this same selection — but omitting one does **not** emit
+`implicit_initial_value`; that warning's coverage stops at the four scalar
+shapes above. `Map` fields carry two additional fail-closed rules: an explicit
+whole-`Map` default (`field: Map<K, V> = expr;`) is always rejected
+("whole-Map domain defaults are not supported") because the per-key form is the
+only supported `Map` default, and a `Map` nested as another `Map`'s value is
+rejected too ("Map state requires explicit initialization through supported
+semantics") because the per-key init has no default to select for a `Map`
+value type.
 
 Use `fslc domain check` for stable fsl-domain findings and the nested kernel
 result (`verified_under_assumptions` on success), `fslc domain analyze` for the
