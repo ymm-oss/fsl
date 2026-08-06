@@ -8307,10 +8307,9 @@ fn reachable_counterfactuals(path: &Path, depth: usize) -> Value {
         // cost while discarding its result, especially for quantified
         // liveness with mixed fair/non-fair actions (issue #633).
         model.leadstos.clear();
-        if fsl_runtime::find_boundary_violation(model.clone(), depth)
+        if fsl_runtime::find_boundary_violation(&model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET)
             .ok()
-            .flatten()
-            .is_some()
+            .is_some_and(|probe| probe.finding.is_some())
         {
             continue;
         }
@@ -9516,7 +9515,11 @@ fn mutation_oracle(spec: fsl_syntax::SurfaceSpec, depth: usize) -> MutationOracl
 }
 
 fn mutation_oracle_for_model(model: KernelModel, depth: usize) -> MutationOracle {
-    if let Ok(Some((violation, _))) = fsl_runtime::find_boundary_violation(model.clone(), depth) {
+    if let Ok(fsl_runtime::BoundaryProbe {
+        finding: Some((violation, _)),
+        ..
+    }) = fsl_runtime::find_boundary_violation(&model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET)
+    {
         return MutationOracle {
             clean: false,
             killed_by: Some(violation.name.clone()),

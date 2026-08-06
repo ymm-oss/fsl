@@ -5,6 +5,66 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed issue #697: verifying **all** properties at once (no `--property`)
+  could blow past 11.4 GB RSS while every property verified fine in seconds
+  in isolation, on both `--engine bmc` and `--engine induction`. The cause
+  was not the solver — a Z3 session's own `cost.solver.memory_mb` during a
+  blowing-up run measured 27.8 MB — it was an **unbudgeted concrete
+  (solver-free) BFS** in `fsl-runtime`: `find_boundary_violation`, the
+  pre-pass `prepare_bmc` runs to catch a concrete boundary outcome (a
+  reachable over-capacity `Seq` successor) the bounded symbolic value cannot
+  represent. That pre-pass runs only when no `--property`/
+  `--exclude-property _bounds_*` narrows the request, which is exactly the
+  asymmetry the issue reported. Its `Monitor` held the whole model by value
+  and was cloned per visited BFS node, and its trace was cloned per node
+  too, so memory grew with branching factor and path length on top of raw
+  state count; a history-recording `Seq` (records push order, so the same
+  set of values in a different order is a different value) defeated the
+  BFS's own `visited` dedup, making the frontier grow like branching^depth.
+  `find_boundary_violation` (`rust/fsl-runtime/src/lib.rs`) now takes the
+  model by reference plus a `budget: usize`, returns a `BoundaryProbe`
+  (`finding`, `exhausted`, `states_explored`) instead of a bare
+  `Option`, terminates at exactly `budget` distinct states, stops cloning
+  the model per node (one scratch `Monitor` is re-pointed at each popped
+  state instead), and stops cloning the trace per node (a lifted parent-link
+  `reconstruct_trace` — shared with, not duplicated from, the explicit
+  engine's own pattern — replaces the per-node `Vec<TraceStep>` clone). All
+  four production call sites (`rust/fslc/src/verification.rs`'s
+  `prepare_bmc`, `rust/fsl-wasm/src/lib.rs`'s identical Worker pre-pass —
+  same constant, so native/Worker strategy parity holds by construction —
+  and `rust/fslc/src/main.rs`'s weakening-counterfactual and
+  `mutation_oracle_for_model` call sites) now pass the new
+  `CONCRETE_PROBE_BUDGET` and treat `exhausted && finding.is_none()`
+  identically to today's empty result: this pre-pass is an evidence detour,
+  not a verdict authority, so exhaustion falls through to the symbolic
+  engine, which finds every symbolically representable violation on its
+  own, and the one outcome class the pre-pass alone covers still fails
+  closed downstream (`rust/fsl-verifier/src/value.rs`'s "model sequence
+  length exceeds capacity") rather than passing — confirmed directly with a
+  `Seq<Int, 2>` overflow fixture: the default path still reports
+  `violated`/`type_bound` with a full concrete trace, while isolating to a
+  property that must render the overflowed value still fails closed with
+  that exact error, both unchanged by the budget. `CONCRETE_PROBE_BUDGET =
+  50_000` is calibrated, not guessed: a full sweep of `specs/` + `examples/`
+  at their default `--depth 8` found a maximum `states_explored` of 23,409
+  (`examples/named_predicate.fsl`), with every file reaching normal BFS
+  closure well short of even a 500,000-state ceiling; 50,000 keeps a >=2.1x
+  margin over that observed maximum (>=3x over every other corpus file). On
+  the diagnosis's validated reproducer (a label-workflow spec whose
+  `audit: Seq<LabelId, 10>` is the load-bearing history-recording
+  ingredient), the joint all-properties `--depth 8` run went from
+  OOM-killed at an artificial 4 GB cap and still growing (extrapolating past
+  the reported 11.4 GB) to completing `verified` in ~8s (release) / ~82s
+  (debug) at ~2.2 GB peak RSS on both engines, with the per-property and
+  per-engine verdict sets unchanged and a mutated (genuinely violated) copy
+  of the same fixture still reporting `violated`. See
+  `docs/DESIGN-kernel-contract.md`, "Concrete boundary pre-pass budget", for
+  the full measurement and the budget contract, and
+  `rust/fslc/tests/issue_697_all_properties_memory.rs` /
+  `rust/fsl-runtime/tests/boundary_probe_budget.rs` for the regression
+  controls (verdict/attribution agreement, fail-closed preservation, and a
+  structural exhaustion assertion independent of any resource cap).
+
 - Sharded the two heaviest pre-merge product-gate jobs to cut PR wall clock
   from a measured 38m15s (`semantic mutation (changed)`, run 30968645971) to a
   measured **20.7 min** (run 30989320577, all lanes green) — 1.85x, ~17.5 min

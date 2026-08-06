@@ -7,10 +7,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_core::{
     FslValue as Value, KernelBinder as Binder, KernelExpr as Expr, KernelLValue as LValue,
-    KernelModel, KernelStatement as Statement, TraceAction, TraceChange, TraceStep, TypeDef,
-    TypeRef,
+    KernelModel, KernelStatement as Statement, TraceAction, TraceStep, TypeDef, TypeRef,
 };
 
+use super::trace::{ParentLink, reconstruct_trace, state_changes};
 use super::{
     Bindings, Monitor, RuntimeError, State, Violation, eval, runtime_error, with_total_division,
 };
@@ -47,12 +47,6 @@ pub struct ExplicitResult {
 enum InitWriteKey {
     Root(String),
     ConcreteIndex(String, String),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ParentLink {
-    parent: State,
-    action: TraceAction,
 }
 
 /// Verify a finite kernel model using level-synchronous concrete BFS.
@@ -325,37 +319,6 @@ fn record_reachables(
     })
 }
 
-fn reconstruct_trace(
-    initial_state: &State,
-    final_state: &State,
-    parents: &BTreeMap<State, ParentLink>,
-) -> Vec<TraceStep> {
-    let mut cursor = final_state.clone();
-    let mut reversed = Vec::<(State, TraceAction)>::new();
-    while let Some(link) = parents.get(&cursor) {
-        reversed.push((cursor, link.action.clone()));
-        cursor = link.parent.clone();
-    }
-    reversed.reverse();
-    let mut trace = vec![TraceStep {
-        step: 0,
-        state: initial_state.clone(),
-        action: None,
-        changes: BTreeMap::new(),
-    }];
-    let mut before = initial_state.clone();
-    for (index, (state, action)) in reversed.into_iter().enumerate() {
-        trace.push(TraceStep {
-            step: index + 1,
-            changes: state_changes(&before, &state),
-            state: state.clone(),
-            action: Some(action),
-        });
-        before = state;
-    }
-    trace
-}
-
 fn edge_trace_step(
     step: usize,
     before: &State,
@@ -371,24 +334,6 @@ fn edge_trace_step(
         }),
         changes: state_changes(before, state),
     }
-}
-
-fn state_changes(before: &State, after: &State) -> BTreeMap<String, TraceChange> {
-    after
-        .iter()
-        .filter_map(|(name, value)| {
-            let old = &before[name];
-            (old != value).then(|| {
-                (
-                    name.clone(),
-                    TraceChange {
-                        from: old.clone(),
-                        to: value.clone(),
-                    },
-                )
-            })
-        })
-        .collect()
 }
 
 /// Per-root definite-assignment coverage tracked at component granularity.

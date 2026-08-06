@@ -396,25 +396,35 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
     // symbolic value cannot represent. `partial_op` is intentionally left to
     // the public symbolic verifier boundary itself (#651).
     if fsl_runtime::deterministic_initial_state(&model).is_ok() {
-        match fsl_runtime::find_boundary_violation(model.clone(), request.options.depth) {
-            Ok(Some((violation, trace))) if violation.kind != "partial_op" => {
-                let statistics = fsl_solver::VerificationStatistics::default();
-                return fslc_rust::verification_output::render_boundary_output(
-                    envelope(solver_version),
-                    &model,
-                    &violation,
-                    &trace,
-                    &fslc_rust::verification_output::BmcOutputOptions {
-                        depth: request.options.depth,
-                        deadlock,
-                        checked_bounds: None,
-                        elapsed_s: (performance_now() - started) / 1000.0,
-                        statistics: &statistics,
-                    },
-                )
-                .0;
+        match fsl_runtime::find_boundary_violation(
+            &model,
+            request.options.depth,
+            fsl_runtime::CONCRETE_PROBE_BUDGET,
+        ) {
+            Ok(probe) => {
+                if let Some((violation, trace)) = probe.finding
+                    && violation.kind != "partial_op"
+                {
+                    let statistics = fsl_solver::VerificationStatistics::default();
+                    return fslc_rust::verification_output::render_boundary_output(
+                        envelope(solver_version),
+                        &model,
+                        &violation,
+                        &trace,
+                        &fslc_rust::verification_output::BmcOutputOptions {
+                            depth: request.options.depth,
+                            deadlock,
+                            checked_bounds: None,
+                            elapsed_s: (performance_now() - started) / 1000.0,
+                            statistics: &statistics,
+                        },
+                    )
+                    .0;
+                }
+                // `exhausted && finding.is_none()` falls through here exactly
+                // like a completed empty search (issue #697; same contract
+                // as the native pre-pass in `rust/fslc/src/verification.rs`).
             }
-            Ok(Some(_) | None) => {}
             Err(failure) => {
                 return verifier_error(solver_version, &failure);
             }

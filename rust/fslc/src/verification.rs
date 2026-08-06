@@ -990,24 +990,34 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
         && request.initial_state.is_none()
         && fsl_runtime::deterministic_initial_state(&model).is_ok()
     {
-        match fsl_runtime::find_boundary_violation(model.clone(), request.depth) {
-            Ok(Some((violation, trace))) if violation.kind != "partial_op" => {
-                let statistics = fsl_solver::VerificationStatistics::default();
-                return Err(fslc_rust::verification_output::render_boundary_output(
-                    envelope(),
-                    &model,
-                    &violation,
-                    &trace,
-                    &fslc_rust::verification_output::BmcOutputOptions {
-                        depth: request.depth,
-                        deadlock: request.deadlock,
-                        checked_bounds: None,
-                        elapsed_s: started.elapsed().as_secs_f64(),
-                        statistics: &statistics,
-                    },
-                ));
+        match fsl_runtime::find_boundary_violation(
+            &model,
+            request.depth,
+            fsl_runtime::CONCRETE_PROBE_BUDGET,
+        ) {
+            Ok(probe) => {
+                if let Some((violation, trace)) = probe.finding
+                    && violation.kind != "partial_op"
+                {
+                    let statistics = fsl_solver::VerificationStatistics::default();
+                    return Err(fslc_rust::verification_output::render_boundary_output(
+                        envelope(),
+                        &model,
+                        &violation,
+                        &trace,
+                        &fslc_rust::verification_output::BmcOutputOptions {
+                            depth: request.depth,
+                            deadlock: request.deadlock,
+                            checked_bounds: None,
+                            elapsed_s: started.elapsed().as_secs_f64(),
+                            statistics: &statistics,
+                        },
+                    ));
+                }
+                // `exhausted && finding.is_none()` falls through here exactly
+                // like a completed empty search: the pre-pass is an evidence
+                // detour, not a verdict authority (issue #697).
             }
-            Ok(Some(_) | None) => {}
             Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
         }
     }
