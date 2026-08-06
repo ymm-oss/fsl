@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: ruleset drift audit
+
+# Configuration-conformance automation, not product verification in docs/DESIGN-ci.md's sense
+# (rust workspace / WASM / native Z3 / semantic mutation / FSL Logic Test). It compares the live
+# `main safety and CI` GitHub ruleset (id 19090811) against the checked-in
+# .github/ruleset-contract.json, because that ruleset drifted silently once -- the accepted
+# design required the Linux evidence to be *required* contexts while the live ruleset required
+# only `merge readiness` (issue #707) -- and without an audit it can drift again the same way.
+# See docs/DESIGN-ci.md, "Ruleset drift audit".
+#
+# Why RULESET_AUDIT_TOKEN exists: ruleset read endpoints are public for this repository, but
+# GitHub returns `bypass_actors` only to a caller with write access to the ruleset, and the
+# workflow's own GITHUB_TOKEN has no `administration` permission at all -- it structurally
+# cannot observe that field. RULESET_AUDIT_TOKEN is a fine-grained PAT scoped to read that
+# permission. Without it, the audit still runs to completion and FAILS with
+# `bypass-actors-unobserved` -- that is the designed fail-closed behavior, not a bug: absence of
+# the field is never read as an empty (safe) bypass-actor list.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/ruleset-contract.json
+      - .github/scripts/audit-ruleset-drift.mjs
+      - .github/scripts/audit-ruleset-drift.test.mjs
+      - .github/scripts/fixtures/ruleset-19090811.json
+      - .github/workflows/ruleset-drift-audit.yml
+
+# No `pull_request` trigger, deliberately: a fork pull request has no access to
+# RULESET_AUDIT_TOKEN or (with default fork-PR permissions) a writable GITHUB_TOKEN, so running
+# this on `pull_request` would produce spurious `bypass-actors-unobserved`/`api-unreadable`
+# failures with no way to distinguish "the ruleset drifted" from "this PR is a fork". Pre-merge
+# coverage for a legitimate contract/fixture/checker change is the offline calibration suite
+# (audit-ruleset-drift.test.mjs), which this workflow also runs, and which is already wired into
+# `tools/check-merge-readiness.sh`'s `check_automation` lane.
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ruleset-drift-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: ruleset drift audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Test the drift checker's classifier against the checked-in fixture
+        run: node --test .github/scripts/audit-ruleset-drift.test.mjs
+
+      - name: Audit the live ruleset against the contract
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RULESET_AUDIT_TOKEN: ${{ secrets.RULESET_AUDIT_TOKEN }}
+          RULESET_OBSERVATION_PATH: ruleset-observation.json
+        run: node .github/scripts/audit-ruleset-drift.mjs
+
+      - name: Upload the raw ruleset observation
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ruleset-observation
+          path: ruleset-observation.json
+          if-no-files-found: ignore
+          retention-days: 30
