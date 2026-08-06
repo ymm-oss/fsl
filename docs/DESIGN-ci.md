@@ -339,6 +339,92 @@ successful evidence; an accidentally skipped lane cannot make the workflow confi
 Product-gate runs for merged commits are not cancelled. Each merged state therefore retains its own
 portable evidence and failure attribution even when agents merge changes quickly.
 
+### Actions cache budget
+
+GitHub gives a repository **10 GiB** of Actions cache and evicts least-recently-used entries once
+that is exceeded. Caches are also **ref-scoped**: a run restores only its own ref's caches and the
+default branch's, so a pull request's cache is worthless to a sibling pull request while still
+counting against the shared limit.
+
+`ci.yml` declares four shared keys, measured: `semantic-mutation` 2.72 GiB, `rust-workspace`
+1.50 GiB, `fsl-logic` 1.37 GiB, `wasm` 1.35 GiB — about **6.9 GiB per ref**. Two concurrent pull
+requests therefore exceed the limit on their own, and on 2026-08-06 they did: usage stood at
+9.96 GiB across 12 entries, every large cache belonged to `refs/pull/743/merge` or
+`refs/pull/745/merge`, and `refs/heads/main` held only three tool binaries totalling 26 MiB — no
+Rust build cache at all. A `main` push four hours earlier had restored one in 25–50 s, so it had
+existed and been evicted.
+
+The consequence is measured, not inferred. Two runs of the same commit on the same branch:
+
+| | shard 1 | shard 2 | shard 3 | `rust-cache` restore |
+|---|---|---|---|---|
+| cold | 27.88 | 20.81 | 20.61 | 0–1 s (miss) |
+| warm | 12.2 | 10.85 | 10.46 | 24–25 s (hit) |
+
+**+8 to +16 min per shard**, independently on each of `rust workspace`'s three shards, `WASM`,
+`FSL Logic Test` and `semantic mutation`. And it is self-reinforcing: each cold run saves a fresh
+ref-scoped copy, which evicts more. `main` can heal — a miss there does save — but the pressure
+from concurrent pull requests outran the healing.
+
+**Decision: only non-pull-request events save.** Every `Swatinem/rust-cache` step in `ci.yml`
+carries `save-if: ${{ github.event_name != 'pull_request' }}`. Pull requests still *restore*,
+because `main` is the default branch and therefore readable from every ref. What a pull request
+gives up is a warm second run of itself; what it gains is that `main`'s caches stay resident, which
+is the only cache any pull request could ever share.
+
+`merge-readiness.yml` is deliberately **not** changed. Its two keys total about 131 MiB, they are not
+the pressure, and its lanes are the sub-minute fast path — making them cold would defeat the reason
+that workflow exists.
+
+This also qualifies a claim made elsewhere in this document. Cache hit rates were measured to have
+no headroom for `rust workspace` — compile is only ~3.5 min of ~33 min **on a warm cache**. That
+remains true warm, and it is exactly the premise that fails under concurrency: the question is not
+how much a better hit rate buys, but whether a hit happens at all.
+
+**Eviction started this; `cache-on-failure: false` made it unrecoverable.** The
+`semantic mutation` lane fell into a closed loop, measured on `main` and on three pull requests:
+
+1. a cold scratch build exceeds the job's budget, so the job is cancelled;
+2. `Swatinem/rust-cache` does not save from a failed job (`cache-on-failure` defaults to false),
+   so nothing is written;
+3. the next run is cold again.
+
+**The cache can then only be created by a run that succeeds, and a run can only succeed once the
+cache exists.** Measured budgets against measured durations:
+
+| job | budget before | warm | cold | budget now |
+|---|---|---|---|---|
+| `mutation operators (K/3)` | 30 min | 18.0–19.5 min | **>30** (cancelled at 30.2) | **50 min** |
+| `mutation mutants` | 60 min | 17.2–34.2 min | **>60** (cancelled at ~61) | **90 min** |
+
+Both semantic-mutation cache steps now carry `cache-on-failure: true`, so a cold run that runs out
+of budget still leaves a warm cache behind, and both budgets are raised past a measured cold run.
+Raised rather than narrowed, for the reason this document already gives for the promotion-only
+native-Z3 job: a gate that runs out of wall clock reports a failure it did not observe.
+
+This is also the most likely explanation for `main`'s standing post-merge failures #721
+(`mutation mutants`) and #678 (`semantic mutation (complete)`), whose cancellations sit exactly at
+the old budgets. Whether they clear once this lands is the test of that reading, and #747's
+acceptance criteria record it as such.
+
+**The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
+listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,
+and on `main` pushes that touch it or `ci.yml`. It fails closed on three states: usage at or above
+85% of the limit, a missing `refs/heads/main` cache for any critical-path shared key, and — the
+rejecting control for the `save-if` guard itself — **any pull-request-scoped cache for one of
+`ci.yml`'s shared keys**, which can only appear if that guard is removed. An unreadable listing or
+an absent usage total fail closed too; neither is read as headroom.
+
+`.github/scripts/audit-cache-budget.test.mjs` calibrates all of it offline, including a fixture that
+reproduces the 2026-08-06 listing verbatim and must fail. `tools/check-merge-readiness.sh`'s
+`check_automation` lane runs that suite on every pull request, so a change to the checker is covered
+pre-merge even though the live audit deliberately is not a required context: the shared cache state
+can change after a pull request's own checks pass, so gating a merge on it would gate on something
+outside the change under review.
+
+Issue #747 records the incident. Issue #720's Finding 2 — warming the fault-operator scratch build —
+**adds** a cache and therefore depends on this budget holding first.
+
 ## Required pre-merge contexts, and why the merge queue was rejected
 
 The `main` ruleset (`main safety and CI`, id `19090811`) requires six contexts: `merge readiness`,
