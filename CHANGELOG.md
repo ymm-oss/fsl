@@ -27,6 +27,130 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   bullets rather than introducing subheadings. Implementation is deliberately not included. The `LANGUAGE.md` /
   `LANGUAGE.ja.md` section-alignment enforcement is untouched by C1; a pre-existing
   count-only gap in that enforcement found during the evaluation is tracked as #741.
+- Fixed (#720 Finding 1): `rust-tests`' `cargo-nextest --partition count:K/3` balanced pre-merge
+  shards by test count, not wall clock, so five binaries holding ~77% of the suite's sequential time
+  (`refine_corpus_parity`, `explicit_engine`, `injection_detector_matrix`, `corpus_check_sweep`,
+  `issue_226_auto_engine`) could land unevenly across shards — measured spreads of 2.2x and 3.1x
+  between the fastest and slowest shard on two runs of the same commit, now both
+  recorded in `docs/DESIGN-ci.md` (previously only the 2.2x run was). `check_rust_tests` in `tools/check-native-integration.sh` now
+  pins those five binaries to specific shards via a checked-in
+  `tools/rust-test-shard-groups.txt` and `cargo nextest`'s `binary_id(=…)` filterset, unpartitioned,
+  while every other test still goes through the original count-partition, scoped to exclude every
+  pinned binary. Coverage cannot silently drop: an unlisted binary simply falls into the
+  count-partitioned leftover as before, and `tools/check-shard-union.sh`'s existing full.txt/shard.txt
+  guard needed no shape change to keep validating the result. Added `check-shard-union.sh
+  check-groups`, a narrower guard that fails closed if the grouping file pins a binary-id the live
+  workspace no longer has or pins one binary to two shards, plus new accepting/rejecting `selftest`
+  cases (including a whole-binary-dropped fixture) wired into the existing `merge readiness /
+  automation contracts` lane. `.github/workflows/ci.yml` is unchanged — the required `rust workspace`
+  context, its `if: always()` aggregator, and the shard-union contract all keep their exact shape.
+  **Measured, and the second form delivers**: the slowest shard — the only quantity
+  `rust workspace` waits on — fell from **15.6 min to 12.2 min** and the spread from 3.1x to 1.17x
+  (warm-cache runs 31076668077 and 31081427765 attempt 2; shard wall clocks 12.2 / 10.85 / 10.46 min,
+  clean shard union on both). The first form delivered ~0.1 min and this entry previously said so;
+  two measured defects explain the gap. The cost model was wrong twice: packing by each binary's
+  sequential total, then by its slowest single test, which underestimates a shard holding several
+  long binaries by 52%. The model that fits all three shards is
+  `1.11 × max(slowest single test, sequential sum / 3)` — error −0.2% / +12.7% / +0.1%, the outlier
+  being the shard holding `issue_697_all_properties_memory`, which is memory-bound by construction
+  (`CONCRETE_PROBE_BUDGET`, #697) and so overlaps less than the model assumes. Adding a pin is
+  therefore **not** free. And the pinning file was stale before the first form merged:
+  `issue_697_all_properties_memory`, whose 371.8s test is the workspace's second slowest, arrived with
+  the #739 merge and was unpinned, putting that test in shard 2's count partition — which is what took
+  shard 2 from 5.0 to 14.6 min. The assignment now pins eight binaries by
+  `max(slowest, sum/3)`, which also cut the duration-blind leftover's spread from 5.3x to **1.75x**
+  (phases 75.4s / 43.0s / 63.9s). Remaining floor ≈10.4 min: `refine_corpus_parity`'s indivisible
+  458.8s test plus a measured ≈113s of fixed cost per shard, so going materially lower needs that test
+  split or the two phases run concurrently rather than serially. Every comparison here is warm-cache;
+  an eviction-induced cold build adds 6–12 min per shard and is tracked as #747.
+- Fixed (#747): two concurrent pull requests exhausted the repository's 10 GiB Actions cache
+  allowance and evicted `main`'s Rust build caches, after which every run built cold. Actions caches
+  are ref-scoped — a pull request's cache is readable only by that same pull request — while
+  `ci.yml`'s four shared keys store about 6.9 GiB per ref (`semantic-mutation` 2.72 GiB,
+  `rust-workspace` 1.50, `fsl-logic` 1.37, `wasm` 1.35), so two pull requests exceed the limit on
+  their own. Measured on 2026-08-06: usage 9.96 GiB across 12 entries, every large cache on a
+  `refs/pull/*` ref, and `refs/heads/main` holding only 26 MiB of tool binaries — while a `main` push
+  four hours earlier had restored a cache in 25–50 s, so one had existed and been evicted. The cost
+  is measured too: two runs of the same commit on the same branch gave 27.88 / 20.81 / 20.61 min cold
+  against 12.2 / 10.85 / 10.46 warm, i.e. **+8 to +16 min per shard**, independently on each of `rust
+  workspace`'s three shards, `WASM`, `FSL Logic Test` and `semantic mutation` — and each cold run
+  saved a fresh ref-scoped copy, evicting more. Every `Swatinem/rust-cache` step in `ci.yml` now
+  carries `save-if: ${{ github.event_name != 'pull_request' }}`; pull requests still restore, because
+  `main` is the default branch and readable from every ref. `merge-readiness.yml` is deliberately
+  unchanged — its two keys total ~131 MiB and its lanes are the sub-minute fast path. New
+  `.github/scripts/audit-cache-budget.mjs` fails closed on usage at or above 85% of the limit, on a
+  missing `refs/heads/main` cache for a critical-path shared key, and — the rejecting control for the
+  `save-if` guard itself — on any pull-request-scoped cache for one of `ci.yml`'s shared keys, which
+  can only appear if that guard is removed; an unreadable listing or absent usage total also fail
+  closed rather than reading as headroom. `.github/workflows/cache-budget-audit.yml` runs it on a
+  schedule, on dispatch, and on `main` pushes touching it or `ci.yml`; it is not a required context
+  because the shared cache state can change after a pull request's checks pass. The 11-case
+  calibration suite, including a fixture reproducing the 2026-08-06 listing verbatim, is wired into
+  `tools/check-merge-readiness.sh`'s `check_automation` lane. No job, trigger, or required-context
+  name changed: the parsed `ci.yml` differs from `main` only inside its cache steps. This also
+  qualifies this repository's earlier finding that cache hit rates have no headroom — true **on a
+  warm cache**, which is the premise concurrency breaks. #720's Finding 2 adds a cache and therefore
+  depends on this budget holding first.
+  Eviction started the problem; `cache-on-failure: false` made it unrecoverable. The
+  `semantic mutation` lane fell into a closed loop: a cold scratch build exceeds the job budget, the
+  job is cancelled, `rust-cache` skips saving from a failed job, and the next run is cold again — so
+  the cache could only be created by a run that succeeds while a run could only succeed once the cache
+  existed. Both semantic-mutation cache steps now carry `cache-on-failure: true`, and both budgets are
+  raised past a measured cold run: `mutation operators` 30 → 50 min (warm 18.0–19.5, cancelled at 30.2
+  cold) and `mutation mutants` 60 → 90 min (warm 17.2–34.2, cancelled at ~61 cold). Raised rather than
+  narrowed, for the reason this repository already gives for the promotion-only native-Z3 job: a gate
+  that runs out of wall clock reports a failure it did not observe. This is the most likely explanation
+  for `main`'s standing #721 and #678, whose cancellations sit exactly at the old budgets; whether they
+  clear once this lands is the test of that reading.
+- Fixed (#736): `.github/workflows/ci.yml` cited a `docs/DESIGN-ci.md` section,
+  `"Merge queue (planned, not yet enabled)"`, that does not exist and asserted the
+  opposite of the accepted decision — the design document records that a merge
+  queue was configured on the `main` ruleset on 2026-08-05 and rejected the same
+  day (`### The merge queue was tried, measured against this repository's
+  workflow, and rejected`), not merely planned. The `merge_group:` trigger
+  comment's "no merge queue exists on `main` **yet**" carried the same stale
+  implication. Both comments, plus the `pull_request:` trigger comment's
+  reference to the same dangling section, now cite the real heading
+  (`## Required pre-merge contexts, and why the merge queue was rejected` and
+  its subsection) and state the rejection accurately. `tools/check-product-gate-scope.sh`
+  carried the third instance of the same dangling citation and additionally
+  described the inert `queue-entry-stub` branch as "implemented ahead of that
+  rollout"; it now records that no rollout is pending and that reviving the queue
+  is a human-review-policy question, not a CI one. The same file's
+  `FSL_MERGE_QUEUE_CI` branch comment said enabling the variable was "the only
+  remaining step", contradicting both the rejection record and the file's own
+  header eighty lines above; it now states that reaching that branch needs the
+  policy change first, and why enabling the variable alone would land changes
+  with no pre-merge Linux evidence. `tools/check-product-gate-scope.sh`'s
+  `diff_scope` comment said the in-job check is "the only place the exemption can
+  apply **once** a merge queue exists", presupposing one will; it now says
+  "if a merge queue ever existed" and states that none does. And
+  `docs/DESIGN-ci.md` itself — the authority the other five sites cite —
+  recommended a merge queue as a mitigation "worth using ... once `ci.yml` gains
+  the same trigger", while its own `## Non-goals` lists running a queue as a
+  non-goal; `ci.yml` had already gained that trigger, so the paragraph read as an
+  available next step. It is corrected rather than deleted, so the sequence stays
+  legible.
+
+  **Seven sites across three files, of two signatures, found over four passes** —
+  not one clean sweep. Three quote the removed section name; four state a stale
+  premise without naming any section. The section-name sites are findable
+  mechanically, but only with a comment-prefix-aware detector: the string wraps
+  across lines behind `#` prefixes, so a single-line `git grep` matches one of the
+  three. The reliable form is
+  `sed 's/^[[:space:]]*#[[:space:]]*//' | tr '\n' ' ' | tr -s ' '`; calibrated
+  against the pre-repair tree it finds all three, and over all 1,436 tracked files
+  here it leaves only the two `CHANGELOG.md` entries that quote the string as
+  history. **The four stale-premise sites are not findable that way at all** — they
+  contain no section name — and they include both the most dangerous one (an
+  operation the #717 canary proved unsafe, described as one flag away) and the one
+  inside the accepted decision record. #742 tracks mechanising the citation check;
+  it must also cover this second signature, or the recurrence continues. Audited
+  every other `docs/DESIGN-ci.md` citation in
+  `ci.yml`, `ruleset-drift-audit.yml`, and `site-reference-freshness.yml`: all
+  resolve to real headings. Comment/citation fix only — no trigger, job, or
+  required-context name changed; the parsed YAML structure is unchanged before
+  and after, and `./tools/check-product-gate-scope.sh selftest` still passes.
 - Documented (#722): the implicit domain aggregate initializer enumeration in
   `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md`
   covered only Bool `false`/enum first-member/range lower-bound/external-

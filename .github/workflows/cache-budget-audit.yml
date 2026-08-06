@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: cache budget audit
+
+# Configuration-conformance automation, not product verification in
+# docs/DESIGN-ci.md's sense (rust workspace / WASM / native Z3 / semantic
+# mutation / FSL Logic Test). It checks the live Actions cache state against the
+# budget contract, because that state silently degraded once: two concurrent
+# pull requests filled the repository's 10 GiB allowance with ref-scoped caches,
+# evicted `main`'s, and every run afterwards built cold -- measured +8 to +16 min
+# per shard, with each cold run saving a fresh ref-scoped copy and evicting more.
+# See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+#
+# Unlike the ruleset audit this needs no PAT: the cache endpoints are readable
+# with the workflow's own GITHUB_TOKEN and `actions: read`.
+#
+# Not a required status check. It reports on the shared cache state, which any
+# pull request's own runs can change after that pull request's checks have
+# passed, so gating a merge on it would be gating on something outside the
+# change under review. Pre-merge coverage for a change to the checker itself is
+# the offline calibration suite, which `tools/check-merge-readiness.sh`'s
+# `check_automation` lane runs on every pull request.
+
+on:
+  schedule:
+    - cron: "43 3 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/scripts/audit-cache-budget.mjs
+      - .github/scripts/audit-cache-budget.test.mjs
+      - .github/scripts/run-cache-budget-audit.mjs
+      - .github/workflows/cache-budget-audit.yml
+      - .github/workflows/ci.yml
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: cache-budget-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: audit Actions cache budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      # The calibration suite runs first: an audit whose own rejecting fixtures
+      # no longer fail is not evidence about the live state.
+      - name: Calibrate the audit
+        run: node --test .github/scripts/audit-cache-budget.test.mjs
+
+      - name: Audit the live cache budget
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/run-cache-budget-audit.mjs
