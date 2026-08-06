@@ -205,8 +205,8 @@ the generic cargo-mutants half took roughly the remaining ~14.3 min.
 Both jobs are dominated by work that parallelizes cleanly across independent shards, so each is
 split into a sharded lane plus an aggregator that keeps the exact required-context name:
 
-- `rust workspace` = `rust-checks` (once) + `rust-tests` (`cargo-nextest`, 3-way `--partition
-  count:K/3`) + the `rust-workspace` aggregator.
+- `rust workspace` = `rust-checks` (once) + `rust-tests` (`cargo-nextest`, 3-way, duration-aware —
+  see "Duration-aware `rust-tests` shard pinning" below) + the `rust-workspace` aggregator.
 - `semantic mutation (…)` = `semantic-mutation-operators` (3-way round-robin shard of
   `operators.txt`) + `semantic-mutation-mutants` (generic cargo-mutants, complete and **deliberately
   unsharded** — see below) + the `semantic-mutation` aggregator.
@@ -226,13 +226,19 @@ pull request. Recorded from the first sharded run (30989320577, PR #719), all la
 | `FSL Logic Test (pr)` | 1.1 min |
 | both aggregators | 0.1 min each |
 
-Two costs are visible in that table and are the honest limits of this change, not incidental noise:
+Two costs were visible in that table and were the honest limits of that first change, not
+incidental noise:
 
 - **`cargo-nextest --partition count:K/N` balances by test count, not duration.** The three shards
   received 518/460/411 tests and took 18.1/8.3/12.6 min — shard 1 is 2.2x shard 2, so `rust workspace`
-  finishes on its slowest shard at ≈18 min rather than the ≈13 min a duration-balanced split would
-  give. Recovering that ~5 min needs a duration-aware assignment (pinning the known-slow binaries to
-  separate shards), which `count:` cannot express.
+  finished on its slowest shard at ≈18 min rather than the ≈13 min a duration-balanced split would
+  give — which it now does, measured: see "Duration-aware `rust-tests` shard pinning" below. A
+  rerun of the same commit gave 15.6/5.0/8.7 min, a **3.1x** spread: the skew is not a fixed
+  property of the split but varies run to run, which is what makes an explicit assignment worth more
+  than a better hash. Issue #720 Finding 1 addressed this — see "Duration-aware `rust-tests` shard
+  pinning" below —
+  by pinning the known-slow binaries to distinct shards explicitly, which `count:` alone cannot
+  express.
 - **Sharding the curated operator lane bought about 10%, not two thirds.** 22.5 min unsharded became
   20.3 min at `K/3` — three times the compute for ~2 min of wall clock — because the fixed cold build
   in each shard's synced scratch checkout dominates. It is retained because runner minutes are free on
@@ -282,9 +288,13 @@ unsharded set before trusting a `success` result:
 `tools/check-shard-union.sh` is the generic, reusable primitive both checks build on: given one full
 list and N shard lists, it fails closed — naming the offending entries — unless every shard is a
 subset of the full list, the shards are pairwise disjoint, and their union equals the full list
-exactly. Its `selftest` subcommand exercises an accepting three-way split and four rejecting cases
-(an entry covered by no shard, an entry duplicated across shards, an invented shard entry, an empty
-shard list) and is wired into `tools/check-merge-readiness.sh`'s `check_automation`, alongside
+exactly. It has a second mode, `check-groups`, described under "Duration-aware `rust-tests` shard
+pinning" below. Its `selftest` subcommand exercises the union form's accepting three-way split and
+five rejecting cases (an entry covered by no shard, an entry duplicated across shards, an invented
+shard entry, an empty shard list, and an entire binary's tests dropped from every shard), plus
+`check-groups`'s accepting case and two rejecting cases (a pin naming a binary-id the live workspace
+no longer has, and one binary pinned to two shards). It is wired into
+`tools/check-merge-readiness.sh`'s `check_automation`, alongside
 `check-product-gate-scope.sh selftest`.
 
 **Agent-configuration-exempt pull requests still work.** Every shard job runs
@@ -295,23 +305,165 @@ results and skip the artifact-download/union-validation steps outright, because 
 download.
 
 **Floors — sharding buys parallelism, not a lower bound.** `refine_corpus_parity`'s slowest single
-test (≈7.3 min) cannot be split further by this scheme, so together with the ≈3.5 min compile it
-bounds `rust-workspace` at roughly ≈12 min no matter how the remaining 175 binaries are distributed.
+test is an indivisible 458.8s (7.65 min) under this scheme. A `rust-tests` shard's wall clock is
+`pinned phase + leftover phase + fixed cost`, because the two `cargo nextest run` invocations execute
+**serially** inside the shard — so the floor for whichever shard holds that test is 7.65 min plus
+its share of the leftover plus the fixed ≈1m50s of checkout, toolchain and build. An earlier version
+of this paragraph put the floor at ≈12 min "no matter how the remaining 175 binaries are distributed",
+adding a ≈3.5 min compile to the 7.3 min test. Both parts were wrong: the fixed cost is ≈1m50s, not
+3.5 min, and the leftover term was missing entirely — leftover distribution is exactly what run
+31076668077's shard 2 lost nine minutes to. See "Duration-aware `rust-tests` shard pinning" below for
+the measured decomposition and what the floor actually is.
 Each `semantic-mutation-operators` shard independently pays the cold build in its own synced scratch
 checkout (`tools/run-fault-operators.sh`'s `sync_scratch`), and that cost dominates the lane. Locally,
 a 6-operator shard's no-op control took 760s where all 17 took 912s; in CI the sharded lane landed at
 18.4–20.3 min against 22.5 min unsharded, so the fixed scratch build is an even larger share there.
-Raising the shard count cannot fix this. The two levers that would, neither attempted here, are:
+Raising the shard count cannot fix this. Two levers would move it further:
 
 - caching `rust/target/fault-operators` so the scratch build starts warm — the same
   `Swatinem/rust-cache` treatment the main lanes already get, and the one place in this gate where
   caching genuinely is the bottleneck (it is not, for `rust workspace`: compilation there is ~3.5 min
-  of 33 on a warm cache);
-- a duration-aware `rust-tests` assignment, worth ~5 min on its own (see the imbalance above).
+  of 33 on a warm cache). **Not attempted** — issue #720 Finding 2, tracked separately because it
+  changes a different mechanism (`tools/run-fault-operators.sh`'s scratch checkout) with its own
+  patch-isolation contract, and because #720 asks that a possible revert of the operator sharding be
+  evaluated in the same change once this lands, which needs its own review;
+- a duration-aware `rust-tests` assignment, worth **3.4 min measured**. **Landed** — issue #720
+  Finding 1. Its first form delivered about 0.1 min and its second delivers 3.4; see
+  "Duration-aware `rust-tests` shard pinning" below for both measurements and what changed between
+  them.
 
-With both, the gate would plausibly reach ≈13 min; without them, 20.7 min is the floor this design
-delivers. Nobody should expect either lane to shrink further without changing what it measures or how
-its scratch build is warmed.
+With Finding 1 landed, `rust workspace`'s slowest shard is **12.2 min measured**, against ≈15.6 before
+it and the ≈13 min this section projected. The remaining floor is ≈10.4 min — the indivisible 458.8s
+test plus the measured ≈113s of fixed cost — so most of what is left is that one test. Finding 2
+remains 20.3 min at best until it lands; nobody should
+expect either lane to shrink further without changing what it measures or how its scratch build is
+warmed.
+
+### Duration-aware `rust-tests` shard pinning
+
+Issue #720 Finding 1. No other heading in this document carries a parenthetical issue tag, and the
+four citations of this section elsewhere in the file quote the heading without one, so the tag lives
+here in the body instead.
+
+`cargo-nextest --partition count:K/N` assigns tests to shards by count, with no notion of how long
+each test takes, so the handful of binaries holding most of the suite's sequential wall clock could
+land in the same shard, or unevenly across shards, by chance. `check_rust_tests` in
+`tools/check-native-integration.sh` replaces the single `--partition` invocation with two, unioned:
+
+1. `tools/rust-test-shard-groups.txt`, a checked-in text file pinning specific binary-ids to specific
+   shards (`<shard> <binary-id>`, comments with `#`), read once per shard invocation. Each shard's
+   pinned binaries run through `cargo nextest run -E 'binary_id(=…) or binary_id(=…) …'` — the
+   exact-match `=` name-matcher (`cargo nextest help filterset`) — unpartitioned, so a pinned binary is
+   never split across shards or forced to share a shard with another pin by count-hash chance. The
+   assignment and the measurements behind it live in that file; the cost model it uses is below.
+2. Every test *not* in any pinned binary still goes through the original `--partition count:K/N`,
+   scoped by `-E 'not binary_id(=…) and not binary_id(=…) …'` excluding every pinned binary (not just
+   this shard's), so a pinned binary's tests are never double-counted into another shard's leftover
+   share. Proven end to end by run 31076668077's aggregator, whose guard reported
+   `check-shard-union: PASS -- 1419 entries, 3 shard(s), union matches exactly`, with the three shard
+   logs showing 4+519, 15+457 and 16+408 tests — 1419, matching the unfiltered inventory exactly. That
+   run used the five-binary assignment; the pin list has since changed but the mechanism has not, so
+   the next `product gate` run re-proves the union for the current list.
+
+**Measured, in two forms.** The first form did not deliver; the second does. All figures below
+are warm-cache runs, which matters: an eviction-induced cold build adds 6-12 min per shard and
+makes any comparison across cache states meaningless (see issue #747).
+
+| | shard 1 | shard 2 | shard 3 | slowest | spread |
+|---|---|---|---|---|---|
+| baseline run 1 | 18.1 | 8.3 | 12.6 | **18.1** | 2.2x |
+| baseline run 2 | 15.6 | 5.0 | 8.7 | **15.6** | 3.1x |
+| first form, 5 pins (run 31076668077) | 15.5 | 14.6 | 8.75 | **15.5** | 1.77x |
+| second form, 8 pins (run 31081427765 attempt 2) | **12.2** | **10.85** | **10.46** | **12.2** | **1.17x** |
+
+The slowest shard — the only quantity `rust workspace` waits on — fell from 15.6 min to
+**12.2 min**, and the spread from 3.1x to 1.17x. `tools/check-shard-union.sh` reported a clean
+union on that run.
+
+**The first form failed for two measurable reasons, both since fixed.**
+
+*The cost model was wrong, twice over.* The original assignment packed by the sum of each
+binary's sequential minutes. Corrected to the slowest single test, it then underestimated a shard
+holding several long binaries by 52%. The model that fits all three shards is
+**`1.11 × max(slowest single test, sequential sum / 3)`**:
+
+| shard | pinned sum | slowest | model | actual | error |
+|---|---|---|---|---|---|
+| 1 | 683.4s | 458.8s | 509s | 508.1s | −0.2% |
+| 2 | 922.3s | 371.8s | 413s | 465.2s | +12.7% |
+| 3 | 1130.4s | 275.6s | 418s | 418.5s | +0.1% |
+
+Neither term alone works, so adding a pin is **not** free: it raises the sum, and once `sum/3`
+exceeds the slowest test the phase grows with each addition. Shard 2 is the one outlier at +12.7%,
+and the reason is specific: `issue_697_all_properties_memory` is memory-bound by construction
+(`CONCRETE_PROBE_BUDGET`, issue #697), so its tests contend for memory rather than CPU and overlap
+less than the model assumes. Treat +15% as the planning margin for whichever shard holds it.
+
+*The pinning file was stale before the first form merged.*
+`fslc-rust::issue_697_all_properties_memory`, whose 371.8s test is the workspace's second slowest,
+arrived with the #739 merge for issue #697 and was not pinned. Its test landed in shard 2's count
+partition, which is exactly what took shard 2 from 5.0 min to 14.6 min.
+
+**The leftover skew is reduced, not removed.** Pinning is the only lever currently available
+against it, because every pin takes its binary's whole sequential duration out of the
+count-partitioned remainder. The second form's leftover phases are 75.4s / 43.0s / 63.9s — a
+**1.75x spread, down from 5.3x**. Making the leftover itself duration-aware is not attempted:
+`--partition count:` takes no duration input, so it would mean a checked-in assignment covering
+every test binary, trading a small maintained file for a large one. At 1.75x that trade is not
+currently worth making; if the spread returns above roughly 2x, it is the next thing to evaluate,
+as its own change.
+
+**Where the floor is.** `refine_corpus_parity`'s 458.8s single test is indivisible under this
+scheme, and each shard pays a constant ≈113s of checkout, toolchain and build (measured, all three
+shards). So whichever shard holds that test cannot go below about **10.4 min** even with an empty
+leftover, and the measured 12.2 min is within two minutes of that. The ≈13 min this document
+projected earlier for `rust workspace` **is met, measured at 12.2 min** — it was unreachable with
+the wrong pinning, not unreachable in principle. Going materially below 10 min needs one of:
+splitting that test (and `issue_697_all_properties_memory`'s 371.8s one), or running the pinned and
+leftover phases concurrently instead of serially. Neither is attempted here; the second would need
+care because the two phases currently write one `shard.txt` between them.
+
+**Coverage cannot silently drop, by construction, independent of this file's accuracy.** A binary this
+file does not name is not "unhandled" — it simply is not pinned to anyone, so it falls into the
+ordinary count-partitioned leftover exactly as before. A new test binary landing with nobody updating
+`tools/rust-test-shard-groups.txt` therefore still runs, in whichever shard the count partition puts
+it; only duration balance, not coverage, depends on the file being current. Coverage is still proven
+the same way as before this change: `check_rust_tests` writes `full.txt` (unfiltered) and `shard.txt`
+(this shard's union of pinned + leftover) exactly as it always has, and `rust-workspace`'s aggregator
+still runs `tools/check-shard-union.sh full.txt shard1.txt shard2.txt shard3.txt` against them with
+that invocation's behaviour unchanged — the script gained a `check-groups` mode, a fifth rejecting
+selftest case for the union form, and four rejecting plus two accepting cases for `check-groups`, but
+the union form itself was not touched, and the shape of the files it consumes did
+not change, so that guard keeps validating the new mechanism without alteration.
+
+**When to update `tools/rust-test-shard-groups.txt`.** Coverage never depends on it, but two cases do
+require an edit, and neither is discoverable from the file alone:
+
+- **Renaming or removing a pinned binary hard-fails every shard.** `check-groups` runs after the one
+  unfiltered `cargo nextest list` (which supplies both `full.txt` and the live binary set) and before
+  the partition, and rejects a pin whose binary-id is absent from that live set, so
+  `rust workspace` goes red until the pin is updated. That is deliberate — a silently stale pin would
+  degrade balance invisibly — but it means a rename is a two-file change: the test binary and this
+  file. The failure message names the file and the offending id.
+- **Adding a binary whose slowest single test exceeds roughly a minute.** The quantity that matters
+  is the slowest *individual* test, not the binary's sequential total — see the cost model above. If
+  that test is slower than every test already pinned to some shard, pin it to the shard with the
+  smallest current maximum, because it will become that shard's pinned-phase cost. If it is faster
+  than an existing pin's slowest test, pinning it is nearly free on that shard and still worth doing:
+  it takes the binary's whole sequential time out of the duration-blind leftover. Adding a pin is a
+  single data edit and no code change, the same shape as adding a row to
+  `rust/fslc/tests/fault_operators/operators.txt`.
+
+What *is* new is a second, narrower guard: `tools/check-shard-union.sh check-groups
+tools/rust-test-shard-groups.txt <live-binary-ids> <shard-total>`, run once per shard before any
+listing or partition happens. It fails closed if the grouping file names a binary-id the live
+workspace's `cargo nextest list` no longer reports (a stale pin surviving a rename or removal) or pins
+the same binary-id to more than one shard. Its `selftest` cases (in `tools/check-shard-union.sh`,
+wired into `merge readiness / automation contracts` alongside the pre-existing shard-union selftest)
+cover an accepting config, an unknown pinned binary-id, and a duplicate pin; a further rejecting case
+added to the pre-existing `check_union` selftest proves that guard catches an entire binary's tests
+(not just one stray entry) dropped from every shard, since that is the failure shape a whole-binary
+pin actually risks.
 
 `semantic mutation` is required on pull requests and every product-gate event. Ordinary pull
 requests run all curated controls plus generic mutants intersecting the recorded base-to-head diff;

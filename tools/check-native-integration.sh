@@ -55,6 +55,22 @@ check_rust_checks() {
 # commit hash, so compare the stable `release:` line instead.
 readonly NEXTEST_VERSION="0.9.143"
 
+# Duration-aware pinning file for `rust-tests` (issue #720 Finding 1;
+# docs/DESIGN-ci.md, "Duration-aware `rust-tests` shard pinning" -- the sibling
+# section of "Sharded pre-merge Linux evidence", not a part of it). `--partition
+# count:K/N` balances by test *count*, not wall clock: five binaries hold
+# ~77% of this suite's sequential time while most of the other ~170 finish
+# in under a second, so a pure count split puts wildly different amounts of
+# work per shard. Each non-comment, non-blank line is "<shard> <binary-id>",
+# 1-based shard index <= the shard total in use; it pins that whole binary's
+# tests to that shard, unpartitioned. A binary this file does not name is
+# not pinned to anyone, so it always falls into the leftover count-partition
+# below -- coverage never depends on this file staying current, only
+# duration balance does. `check-shard-union.sh check-groups` fails closed if
+# a pin names a binary the live workspace no longer has (stale rename or
+# removal) or pins one binary to more than one shard.
+readonly RUST_TEST_SHARD_GROUPS="tools/rust-test-shard-groups.txt"
+
 # Runs one shard (`spec` = "K/N", 1-based, K <= N) of the workspace's
 # non-doctest tests under `cargo-nextest`, after writing the shard's
 # completeness evidence: `full.txt` (every non-ignored test in the
@@ -64,6 +80,16 @@ readonly NEXTEST_VERSION="0.9.143"
 # they are byte-identical (three independently computed listings agreeing),
 # and checks the union of every `shard.txt` against one `full.txt` with
 # `check-shard-union.sh`.
+#
+# The shard itself is the union of two independently computed slices, run in
+# two separate `cargo nextest` invocations:
+#   - `RUST_TEST_SHARD_GROUPS`'s explicit pins for this shard, run whole
+#     (no partition -- the point is to keep a known-slow binary from being
+#     split across shards or landing next to another slow one by chance);
+#   - every test *not* in any pinned binary, still balanced by
+#     `--partition count:K/N` exactly as before. Excluding every pinned
+#     binary (not just this shard's) from that partition is what stops a
+#     pinned binary from being double-counted into another shard's share.
 check_rust_tests() {
   local spec="${1:-}"
   if [[ ! "$spec" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]]; then
@@ -87,29 +113,100 @@ check_rust_tests() {
   mkdir -p "$shard_dir"
   local full="$shard_dir/full.txt"
   local shard="$shard_dir/shard.txt"
+  local known="$shard_dir/known-binaries.txt"
 
   # `rust-suites` is an object keyed by suite name, not an array; each
-  # suite's `binary-id` disambiguates same-named tests across binaries.
-  # `--partition` does not shrink the listing -- every suite still lists
-  # every test, and each testcase's `filter-match.status` says whether *this*
-  # invocation's partition claims it ("matches") or another one does
-  # ("mismatch"). Verified directly against this workspace (1389 tests):
-  # unpartitioned `ignored == false` gives all 1389; the three
-  # `count:K/3` partitions' `filter-match.status == "matches"` sets are
-  # pairwise disjoint and their union is exactly those 1389.
-  cargo nextest list \
+  # suite's `binary-id` disambiguates same-named tests across binaries. One
+  # unfiltered listing serves both `full.txt` (unchanged contract with
+  # `rust-workspace`'s aggregator) and the live binary-id set `check-groups`
+  # validates the pinning file against, so validating the grouping costs no
+  # extra listing pass. Verified directly against this workspace (1418
+  # non-ignored tests as of issue #720's Finding 1 fix, up from 1389 when
+  # #719 wrote this comment; the count drifts as tests are added, which is
+  # exactly why `full.txt` is computed fresh here rather than hardcoded).
+  local full_json
+  full_json="$(cargo nextest list \
     --manifest-path rust/Cargo.toml --workspace --locked \
-    --message-format json \
-    | jq -r '
-        .["rust-suites"][]
-        | ."binary-id" as $bid
-        | .testcases
-        | to_entries[]
-        | select(.value.ignored == false)
-        | $bid + "::" + .key' \
+    --message-format json)"
+  printf '%s' "$full_json" | jq -r '
+      .["rust-suites"][]
+      | ."binary-id" as $bid
+      | .testcases
+      | to_entries[]
+      | select(.value.ignored == false)
+      | $bid + "::" + .key' \
     | sort -u >"$full"
+  printf '%s' "$full_json" | jq -r '.["rust-suites"][] | ."binary-id"' \
+    | sort -u >"$known"
+
+  [ -s "$full" ] || {
+    echo "check-native-integration: nextest listed zero non-ignored tests for the workspace; refusing to run a shard against an empty inventory" >&2
+    exit 1
+  }
+
+  ./tools/check-shard-union.sh check-groups "$RUST_TEST_SHARD_GROUPS" "$known" "$shard_total"
+
+  local -a pinned_here=() pinned_all=()
+  local line
+  # `|| [ -n "$line" ]` keeps a final line with no trailing newline. Without it
+  # this loop and `check-shard-union.sh check-groups` -- which has always had the
+  # guard -- disagree about the same file: the guard would accept a pin that this
+  # loop silently drops. Coverage stays correct either way (a dropped pin falls
+  # into the count partition), but two parsers of one file must not differ.
+  while IFS= read -r line || [ -n "$line" ]; do
+    local trimmed="${line%%#*}"
+    trimmed="$(printf '%s' "$trimmed" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    [ -z "$trimmed" ] && continue
+    local idx bin
+    read -r idx bin <<<"$trimmed"
+    pinned_all+=("$bin")
+    [ "$idx" = "$shard_index" ] && pinned_here+=("$bin")
+  done <"$RUST_TEST_SHARD_GROUPS"
+
+  # `binary_id(=name)` is nextest's exact-match filterset predicate (`cargo
+  # nextest help filterset`). `pinned_expr` selects this shard's pinned
+  # binaries whole; `leftover_expr` excludes every pinned binary (any shard)
+  # from the count-partitioned remainder, so a pin can never land in two
+  # shards at once via the fallback path.
+  local pinned_expr="" leftover_expr="all()" bin
+  if [ "${#pinned_here[@]}" -gt 0 ]; then
+    for bin in "${pinned_here[@]}"; do
+      if [ -z "$pinned_expr" ]; then
+        pinned_expr="binary_id(=$bin)"
+      else
+        pinned_expr="$pinned_expr or binary_id(=$bin)"
+      fi
+    done
+  fi
+  if [ "${#pinned_all[@]}" -gt 0 ]; then
+    leftover_expr=""
+    for bin in "${pinned_all[@]}"; do
+      if [ -z "$leftover_expr" ]; then
+        leftover_expr="not binary_id(=$bin)"
+      else
+        leftover_expr="$leftover_expr and not binary_id(=$bin)"
+      fi
+    done
+  fi
+
+  : >"$shard"
+  if [ -n "$pinned_expr" ]; then
+    cargo nextest list \
+      --manifest-path rust/Cargo.toml --workspace --locked \
+      -E "$pinned_expr" \
+      --message-format json \
+      | jq -r '
+          .["rust-suites"][]
+          | ."binary-id" as $bid
+          | .testcases
+          | to_entries[]
+          | select(.value.ignored == false)
+          | $bid + "::" + .key' \
+      >>"$shard"
+  fi
   cargo nextest list \
     --manifest-path rust/Cargo.toml --workspace --locked \
+    -E "$leftover_expr" \
     --partition "count:${shard_index}/${shard_total}" \
     --message-format json \
     | jq -r '
@@ -119,12 +216,9 @@ check_rust_tests() {
         | to_entries[]
         | select(.value.ignored == false and .value["filter-match"].status == "matches")
         | $bid + "::" + .key' \
-    | sort -u >"$shard"
+    >>"$shard"
+  sort -u -o "$shard" "$shard"
 
-  [ -s "$full" ] || {
-    echo "check-native-integration: nextest listed zero non-ignored tests for the workspace; refusing to run a shard against an empty inventory" >&2
-    exit 1
-  }
   [ -s "$shard" ] || {
     echo "check-native-integration: shard $spec listed zero tests -- N is likely larger than the test count, or the partition math is wrong" >&2
     exit 1
@@ -134,8 +228,14 @@ check_rust_tests() {
     exit 1
   fi
 
+  if [ -n "$pinned_expr" ]; then
+    cargo nextest run \
+      --manifest-path rust/Cargo.toml --workspace --locked \
+      -E "$pinned_expr"
+  fi
   cargo nextest run \
     --manifest-path rust/Cargo.toml --workspace --locked \
+    -E "$leftover_expr" \
     --partition "count:${shard_index}/${shard_total}"
 }
 

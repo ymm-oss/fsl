@@ -5,6 +5,42 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed (#720 Finding 1): `rust-tests`' `cargo-nextest --partition count:K/3` balanced pre-merge
+  shards by test count, not wall clock, so five binaries holding ~77% of the suite's sequential time
+  (`refine_corpus_parity`, `explicit_engine`, `injection_detector_matrix`, `corpus_check_sweep`,
+  `issue_226_auto_engine`) could land unevenly across shards — measured spreads of 2.2x and 3.1x
+  between the fastest and slowest shard on two runs of the same commit, now both
+  recorded in `docs/DESIGN-ci.md` (previously only the 2.2x run was). `check_rust_tests` in `tools/check-native-integration.sh` now
+  pins those five binaries to specific shards via a checked-in
+  `tools/rust-test-shard-groups.txt` and `cargo nextest`'s `binary_id(=…)` filterset, unpartitioned,
+  while every other test still goes through the original count-partition, scoped to exclude every
+  pinned binary. Coverage cannot silently drop: an unlisted binary simply falls into the
+  count-partitioned leftover as before, and `tools/check-shard-union.sh`'s existing full.txt/shard.txt
+  guard needed no shape change to keep validating the result. Added `check-shard-union.sh
+  check-groups`, a narrower guard that fails closed if the grouping file pins a binary-id the live
+  workspace no longer has or pins one binary to two shards, plus new accepting/rejecting `selftest`
+  cases (including a whole-binary-dropped fixture) wired into the existing `merge readiness /
+  automation contracts` lane. `.github/workflows/ci.yml` is unchanged — the required `rust workspace`
+  context, its `if: always()` aggregator, and the shard-union contract all keep their exact shape.
+  **Measured, and the second form delivers**: the slowest shard — the only quantity
+  `rust workspace` waits on — fell from **15.6 min to 12.2 min** and the spread from 3.1x to 1.17x
+  (warm-cache runs 31076668077 and 31081427765 attempt 2; shard wall clocks 12.2 / 10.85 / 10.46 min,
+  clean shard union on both). The first form delivered ~0.1 min and this entry previously said so;
+  two measured defects explain the gap. The cost model was wrong twice: packing by each binary's
+  sequential total, then by its slowest single test, which underestimates a shard holding several
+  long binaries by 52%. The model that fits all three shards is
+  `1.11 × max(slowest single test, sequential sum / 3)` — error −0.2% / +12.7% / +0.1%, the outlier
+  being the shard holding `issue_697_all_properties_memory`, which is memory-bound by construction
+  (`CONCRETE_PROBE_BUDGET`, #697) and so overlaps less than the model assumes. Adding a pin is
+  therefore **not** free. And the pinning file was stale before the first form merged:
+  `issue_697_all_properties_memory`, whose 371.8s test is the workspace's second slowest, arrived with
+  the #739 merge and was unpinned, putting that test in shard 2's count partition — which is what took
+  shard 2 from 5.0 to 14.6 min. The assignment now pins eight binaries by
+  `max(slowest, sum/3)`, which also cut the duration-blind leftover's spread from 5.3x to **1.75x**
+  (phases 75.4s / 43.0s / 63.9s). Remaining floor ≈10.4 min: `refine_corpus_parity`'s indivisible
+  458.8s test plus a measured ≈113s of fixed cost per shard, so going materially lower needs that test
+  split or the two phases run concurrently rather than serially. Every comparison here is warm-cache;
+  an eviction-induced cold build adds 6–12 min per shard and is tracked as #747.
 - Fixed (#747): two concurrent pull requests exhausted the repository's 10 GiB Actions cache
   allowance and evicted `main`'s Rust build caches, after which every run built cold. Actions caches
   are ref-scoped — a pull request's cache is readable only by that same pull request — while
