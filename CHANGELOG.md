@@ -17,12 +17,22 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   stays unconfirmed, not disproven; the response that measurably worked is policy single-owner
   extraction (`spec_load.rs`, `outcome.rs`, `literate_access.rs`): after `743bc7a` gave spec-load
   classification one owner, `main.rs` involvement fell 379 → 179 → 16 lines across its follow-up
-  series. Section 8 now records an adjudicated policy-site working rule (touch rate and line
-  count cannot separate composition wiring — post-extraction `main.rs` churn median 29 lines, 26
-  of 50 commits at wiring scale — from coupling; harmful coupling is observable as one policy's
-  fix recurring across arms or copies), plus the calibrated accepting/rejecting controls and the
-  measurable changed-owner rollback rule any future extraction PR must carry. Documentation only;
-  no Rust behavior changed.
+  series. Section 8 records the positive observation — touch rate and line count cannot separate
+  composition wiring from coupling (post-extraction `main.rs` churn median 29 lines, 26 of 50
+  commits at wiring scale), and all three chains trace to one contract policy implemented at more
+  than one site — and, explicitly, that **a test separating that from legitimate cohesion is not
+  established**. Two formulations were tried and both fail: site count matches the candidate
+  negative control too, and the recurrence signature misses Case C (which is part of its own
+  grounding), cannot classify a policy whose arms were mismatched from birth, and returns both
+  verdicts on the coverage-diagnostic history. `64bfb55` cannot serve as the control because it
+  contains two multi-site policies; an earlier version of this entry claimed otherwise on the
+  strength of a single-file pickaxe over a symbol the broken copy never contained, and also claimed
+  the commit deleted a duplicated hint string — `git show 64bfb55^:rust/fslc/src/main.rs` contains
+  no `coverage_hint` occurrence, so both claims are withdrawn. Issue #738's third acceptance
+  criterion is therefore **not met** and #748 tracks it, so this lands as `Refs #738`, not
+  `Closes`. Also recorded: the accepting/rejecting controls a future extraction would have to
+  calibrate, and the measurable changed-owner rollback rule any future extraction PR must carry.
+  Documentation only; no Rust behavior changed.
 - Documented (#722): the implicit domain aggregate initializer enumeration in
   `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md`
   covered only Bool `false`/enum first-member/range lower-bound/external-
