@@ -12,11 +12,15 @@
 # check out, diff, and exit fast, so its context always reports something.
 #
 # It also owns the (currently inert) `merge_group`/`FSL_MERGE_QUEUE_CI`
-# decision described in docs/DESIGN-ci.md's "Merge queue (planned, not yet
-# enabled)" section. Neither the repository variable nor the ruleset rule
-# exists yet, so the `queue-entry-stub` branch below is dead code in
-# production today -- it is implemented ahead of that rollout, not exercised
-# by it.
+# decision described in docs/DESIGN-ci.md, "The merge queue was tried,
+# measured against this repository's workflow, and rejected". A merge queue
+# was configured on the `main` ruleset on 2026-08-05 and removed the same
+# day: an admin merge bypasses the queue entirely, and the ordinary
+# `enqueuePullRequest` path is unsatisfiable under the single-approver review
+# policy. Neither the repository variable nor a `merge_queue` ruleset rule
+# exists, so the `queue-entry-stub` branch below never runs in production.
+# It is kept because it is harmless and ready if that *human-review-policy*
+# question is ever answered differently -- not because a rollout is pending.
 #
 # Usage:
 #   ./tools/check-product-gate-scope.sh            # decide scope; prints

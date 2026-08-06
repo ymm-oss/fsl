@@ -15,11 +15,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   implication. Both comments, plus the `pull_request:` trigger comment's
   reference to the same dangling section, now cite the real heading
   (`## Required pre-merge contexts, and why the merge queue was rejected` and
-  its subsection) and state the rejection accurately. Audited every other
-  `docs/DESIGN-ci.md` citation in `ci.yml`, `ruleset-drift-audit.yml`, and
-  `site-reference-freshness.yml`: all resolve to real headings. Comment/citation
-  fix only — no trigger, job, or required-context name changed; the parsed YAML
-  structure is unchanged before and after.
+  its subsection) and state the rejection accurately. `tools/check-product-gate-scope.sh`
+  carried the third instance of the same dangling citation and additionally
+  described the inert `queue-entry-stub` branch as "implemented ahead of that
+  rollout"; it now records that no rollout is pending and that reviving the queue
+  is a human-review-policy question, not a CI one. An independent verification
+  pass is what found that third site — the first sweep named only the two in
+  `ci.yml`. Audited every other `docs/DESIGN-ci.md` citation in `ci.yml`,
+  `ruleset-drift-audit.yml`, and `site-reference-freshness.yml`: all resolve to
+  real headings. Comment/citation fix only — no trigger, job, or required-context
+  name changed; the parsed YAML structure is unchanged before and after, and
+  `./tools/check-product-gate-scope.sh selftest` still passes.
 - Documented (#722): the implicit domain aggregate initializer enumeration in
   `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md`
   covered only Bool `false`/enum first-member/range lower-bound/external-
