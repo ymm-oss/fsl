@@ -135,14 +135,34 @@ concurrency.
 
 ## The C1 contract the implementation must satisfy
 
-Fragment shape: one file per change, `changelog.d/<id>-<slug>.<section>.md`, where `<id>` is
-the issue or pull-request number and `<section>` comes from a fixed ordered list of Keep a
-Changelog section names. The aggregator must be **stdlib-only**, so its contract tests can run
-in `merge readiness / automation contracts`, whose lane is deliberately stdlib-only with no
+Fragment shape: one file per change, `changelog.d/<id>-<slug>.<category>.md`, where `<id>` is
+the issue or pull-request number.
+
+**`<category>` must follow this repository's actual convention, not Keep a Changelog's.**
+Measured at the baseline: `## [Unreleased]`'s 460-line body contains **zero `### ` subheadings**,
+and `## [4.2.0]` contains zero as well. Categories are expressed as the **lead word of each
+bullet** — `- Added (#707):`, `- Fixed (#713):`, `- Documented (#722):`, `- Decided (…):` — and
+that vocabulary is already wider than Keep a Changelog's six, since `Documented` and `Decided`
+are not among them. Two consequences the specification must honour:
+
+- `<category>` is the bullet lead word, and its permitted set is **this repository's**, extracted
+  from the existing `[Unreleased]` and released sections rather than imported. Forcing a mapping
+  onto six Keep a Changelog names would be a visible content change, and a steady source of false
+  rejections — exactly the condition reversal condition (a) treats as grounds for no-go.
+- The aggregator emits bullets, **not `### ` groups**. Introducing subheadings would be a visible
+  shape change to the file, which this decision does not authorize; "no behaviour change" has to
+  mean the rendered section keeps the shape it has today.
+
+The ordering key's first component is therefore a **declared order over that lead-word set**,
+which must be written down in the aggregator next to the set itself, because it is repository
+convention and not a standard anyone can look up.
+
+The aggregator must be **stdlib-only**, so its contract tests can run in
+`merge readiness / automation contracts`, whose lane is deliberately stdlib-only with no
 pytest and no third-party dependency (`tools/check-merge-readiness.sh`'s own comment;
 reaffirmed in `docs/DESIGN-docs-site.md` D7's addendum).
 
-### Five fail-closed negative controls
+### Six fail-closed negative controls
 
 This decision adopts, as its own rule for every control below, the requirement `AGENTS.md`
 states for formal-to-implementation conformance anchors: an anchor must include a negative
@@ -168,9 +188,10 @@ detects the failure it exists for, alongside its accepting fixture.
    sections (`691-x.added.md` together with `691-y.fixed.md`) is the accepting fixture.
    Rejecting fixtures: `691-a.added.md` with `691-b.added.md`, and the zero-padded alias
    `0691-a.added.md` with `691-b.added.md` → exit 1,
-   `duplicate-fragment-id: 691 added (691-a.added.md, 691-b.added.md)` — the diagnostic
+   `duplicate-fragment-id: 691 added (0691-a.added.md, 691-b.added.md)` — naming the files as
+   given, since the id shown is the folded value and the names are not — the diagnostic
    carries the same (id, section) key the rule is defined on.
-3. **Nondeterministic or nonconforming order.** The aggregator must sort by (fixed section
+3. **Nondeterministic or nonconforming order.** The aggregator must sort by (declared category
    order, numeric id, filename bytes) and must never depend on directory enumeration order.
    Rejecting fixture: inject a shuffled or reversed enumeration; output must be
    byte-identical or the test fails with `aggregation-not-deterministic` — and the control
@@ -179,10 +200,20 @@ detects the failure it exists for, alongside its accepting fixture.
    byte-identical output) is the accepting counterpart. Determinism alone is not conformance:
    a deterministic but lexicographic enumeration (`sorted(os.listdir())`) passes both the
    shuffle and idempotence checks while ordering ids `10`, `100` before `9`. A fixture whose
-   ids make numeric and byte order diverge — `9-…`, `10-…`, `100-…` in one section —
+   ids make numeric and byte order diverge — `9-…`, `10-…`, `100-…` in one category —
    therefore pins the aggregated output as a golden in numeric order 9, 10, 100; the
    lexicographic sham must fail that golden comparison (`aggregation-order-wrong`) and the
    conforming sort must match it byte-for-byte.
+
+   **The same divergence exists in the first sort component and needs its own golden.** A fixture
+   pinning only the id component leaves a sham that sorts categories lexicographically passing
+   every check, because a lexicographic category order is deterministic and idempotent too. The
+   declared order over this repository's lead words must therefore be pinned by a second golden
+   whose fragments span two categories that lexicographic order would swap. Choose the pair from
+   the declared order when it is written down; the point is that the fixture must **fail** for a
+   sham that sorts the category names as strings. Without it, control 3 covers one of its three
+   sort components and leaves the class of defect this control exists to catch — deterministic but
+   nonconforming — open in the other two.
 4. **Unaggregated at release, and post-migration direct edits.** A guard in
    `.github/workflows/release.yml` before its "Extract release notes" step: fragments still
    present under `changelog.d/` at tag time → exit 1, `stale-fragments-present: <files>`. The
@@ -194,18 +225,55 @@ detects the failure it exists for, alongside its accepting fixture.
    duplicates authority, and a deleted line erases someone else's pending entry; the
    rejecting fixtures are one diff of each kind. This check is what keeps authority single
    (next section).
+
+   **Two diffs must be excluded, or the check blocks its own rollout.** The migration pull
+   request converts the existing `[Unreleased]` body — 442 lines at the measurement
+   revision — into fragments, and the first post-migration release moves whatever remains
+   under a version heading. Both are deletions from the `[Unreleased]` body and both would
+   be rejected by the rule as stated. The exclusion must be explicit and narrow: a diff
+   that empties the `[Unreleased]` body while adding the same content under `changelog.d/`
+   or under a new `## [X.Y.Z]` heading, and nothing else. Anything broader reopens the
+   direction this control exists to close. The `## [Unreleased]` heading line itself is
+   outside the body and therefore unprotected; deleting or renaming it would unanchor every
+   later check, so the rule must reject a diff that touches that line too.
 5. **Silent drop at aggregation (conservation).** Controls 1–4 leave one direction open: an
    aggregation that deletes a fragment whose content never reaches the version section. At
    release `changelog.d/` ends up empty, so `stale-fragments-present` stays silent, and the
    remaining entries keep `test -s release-notes.md` green while one entry vanishes. Because
    the same-commit authority handover below is load-bearing, the handover itself must be
    checked: the aggregator verifies, before the aggregation commit is created, that every
-   fragment it deletes contributes its body to the version section it writes and that the
-   entry count equals the deleted-fragment count → otherwise exit 1,
-   `fragment-dropped: <files>`. Rejecting fixture, calibrating the check itself: a sham
-   aggregator that silently drops one of three fragments must be rejected with
-   `fragment-dropped` naming the dropped file; the accepting fixture is the faithful
-   aggregation of the same three.
+   fragment it deletes reaches the version section it writes, and that the entry count equals
+   the deleted-fragment count → otherwise exit 1, `fragment-dropped: <files>`.
+
+   **Both predicates need a definition, or the control cannot be implemented.** "Reaches" means
+   the fragment's body appears in the written section **in full and byte-for-byte**, modulo one
+   declared normalization: the bullet marker and indentation the aggregator adds, and trailing
+   whitespace. Anything looser lets a truncating aggregator through — one that copies only a
+   multi-line fragment's first line contributes *something* from every fragment and keeps the
+   counts equal, so a "contributes" test with no byte scope passes it. That truncating sham is
+   itself a required rejecting fixture, alongside the dropping one.
+
+   "Entry" means **one fragment, one bullet**: a fragment file produces exactly one top-level
+   bullet in the aggregated section, whatever its internal structure. Without that, a fragment
+   with three sub-bullets makes the count comparison ambiguous and the check unimplementable as
+   written. It also means a fragment must not be authored as several independent entries — split
+   them into separate files, which is what gives each its own id and keeps the conflict surface
+   per-change.
+
+   Rejecting fixtures, calibrating the check itself: a sham aggregator that silently drops one of
+   three fragments must be rejected with `fragment-dropped` naming the dropped file; a sham that
+   copies only each fragment's first line must be rejected too. The accepting fixture is the
+   faithful aggregation of the same three, including one multi-line fragment.
+6. **Nonconforming fragment name.** The only shape control the set otherwise lacks. A file under
+   `changelog.d/` whose name has no leading digits, or whose `<category>` is outside the
+   declared set, has no defined id and no defined sort position — controls 2 and 3 are both
+   defined on quantities it does not have. It must be rejected at the earliest point that sees
+   it, which is the same pre-merge job as control 1 → exit 1,
+   `changelog-fragment-name-invalid: <file>`. Rejecting fixtures: `foo-bar.added.md` (no leading
+   digits) and `691-x.chore.md` (category outside the declared set). Accepting fixture: a
+   conforming name for each category in the declared set. Without this control both defects reach
+   release and surface as `stale-fragments-present`, which fails loudly but late and names the
+   wrong cause.
 
 ### Single authoritative source, preserved
 
@@ -221,7 +289,7 @@ rollback below trivial.
 
 ## Migration: six named sites
 
-1. New `tools/aggregate_changelog` (stdlib-only) plus executable tests for all five controls,
+1. New `tools/aggregate_changelog` (stdlib-only) plus executable tests for all six controls,
    accepting and rejecting fixtures both.
 2. `tools/check-product-gate-scope.sh` — add a `changelog.d/` **directory prefix** to
    `is_exempt_path`. The current list matches `CLAUDE.md`/`AGENTS.md`/`CHANGELOG.md` as exact
@@ -245,10 +313,14 @@ rollback below trivial.
      "product source changed but CHANGELOG.md did not" reminder permanently, manufacturing
      exactly the routine false positives that reversal condition (a) below treats as grounds
      for no-go; it must accept new files under `changelog.d/`.
-   - `docs/RELEASE.md` — release step "Review the non-empty `CHANGELOG.md` `[Unreleased]`
+   - `docs/RELEASE.md` — **step 7, "Move all current `[Unreleased]` entries under
+     `## [X.Y.Z] - YYYY-MM-DD`, leaving an empty `## [Unreleased]`", is the manual procedure
+     the aggregator replaces**, so it is the most consequential entry on this list; and
+     release step "Review the non-empty `CHANGELOG.md` `[Unreleased]`
      section" becomes a review of the aggregated version section produced from the fragments.
-   - `.claude/agents/fsl-coupled-change-reviewer.md` and
-     `.claude/skills/add-language-feature/SKILL.md` — both instruct a `CHANGELOG.md`
+   - `.claude/agents/fsl-coupled-change-reviewer.md` (a `CHANGELOG.md` dependency; it does
+     not name `[Unreleased]`) and `.claude/skills/add-language-feature/SKILL.md` (which does)
+     — both instruct a `CHANGELOG.md`
      `[Unreleased]` entry and take the fragment wording.
 5. `docs/DESIGN-ci.md` — amend the "Agent-configuration exemption" decision for site 2.
    That document states growing the exempt list "is a contract change to this decision, not a
@@ -308,9 +380,11 @@ predates this decision, is independent of it, and is not widened or narrowed by 
 
 ## Non-goals
 
-- Building the aggregator, creating `changelog.d/`, or editing `AGENTS.md`'s wording in the
-  same change as this record — implementation is #737's follow-up, gated on the five controls
-  above.
+- Building the aggregator, creating `changelog.d/`, or editing any of migration site 4's
+  surfaces — `AGENTS.md`, `CONTRIBUTING.md`, `docs/RELEASE.md`,
+  `.claude/hooks/changelog_reminder.py`, `.claude/agents/fsl-coupled-change-reviewer.md`,
+  `.claude/skills/add-language-feature/SKILL.md` — in the same change as this record.
+  Implementation is #737's follow-up, gated on the six controls above.
 - Deferring documentation updates out of feature pull requests, or making `CHANGELOG.md`
   optional (#737's stated non-goals).
 - Treating generation as proof of paragraph-level semantic agreement between the two language
