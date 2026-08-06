@@ -177,6 +177,20 @@ resolved before the kernel AST and remain accepted.
 - **Envelope / exit codes**: `unknown_budget` joins the exit-1 verdict list in
   `exit_code()`; everything else reuses existing vocabulary.
 
+`--explicit-budget` is not the only state-count budget bounding a solver-free
+BFS in this codebase, and the two must not be confused. `fsl_runtime::
+find_boundary_violation`'s `CONCRETE_PROBE_BUDGET` (issue #697,
+`docs/DESIGN-kernel-contract.md` "Concrete boundary pre-pass budget") bounds
+the *internal* concrete pre-pass every BMC/induction `verify` run makes ahead
+of the symbolic engine, looking only for a `partial_op`/`type_bound`
+boundary outcome. Exhausting it is invisible to the caller: it falls through
+to the symbolic engine exactly like an ordinary empty result, and never
+becomes a public verdict. Exhausting `--explicit-budget`, by contrast, is a
+first-class outcome of a user-selected engine: `unknown_budget`, a real
+verdict this section's exit-1 list names explicitly. Both share the same
+idea — an explicit `usize` state-count cutoff rather than depth or wall time
+— but only one of them can ever surface as something a caller observes.
+
 ## 6a. Auto engine dispatch (`--engine auto`, issue #226)
 
 `fslc verify <spec> --engine auto [--explicit-budget N]` composes explicit and

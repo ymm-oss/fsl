@@ -16,6 +16,7 @@ use fsl_core::{
 use serde_json::{Value as JsonValue, json};
 
 mod explicit;
+mod trace;
 
 pub use explicit::{
     ExplicitReachableWitness, ExplicitResult, ExplicitViolation, deterministic_initial_state,
@@ -2004,51 +2005,144 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
     Ok(result)
 }
 
-/// Find the first concrete partial-operation or type-bound violation and its trace.
+/// The default budget for [`find_boundary_violation`]'s state count: the
+/// number of distinct concrete states it will visit before giving up and
+/// reporting [`BoundaryProbe::exhausted`] instead of continuing to grow
+/// without limit (issue #697).
+///
+/// Calibrated, not guessed: a full sweep of `specs/` + `examples/` at their
+/// default `--depth 8` (169 files with a deterministic initial state; every
+/// other file is excluded by [`deterministic_initial_state`] before this
+/// budget is ever consulted) found a maximum `states_explored` of 23,409
+/// (`examples/named_predicate.fsl`), with every file reaching normal BFS
+/// closure -- none came close to exhausting even a 500,000-state ceiling,
+/// and the second-highest file needed only 16,182. 50,000 keeps a >=2.1x
+/// margin over the observed maximum (and >=3x over every other corpus
+/// file) while keeping the pathological case this budget exists for -- a
+/// history-recording `Seq` that defeats BFS dedup, whose true reachable
+/// closure is far larger than any budget this size would ever cover -- to a
+/// low-single-digit-GB peak RSS even in an unoptimized debug build, instead
+/// of the unbounded growth issue #697 reported past 11.4 GB. A larger
+/// budget (e.g. 100,000) was measured and rejected: it left materially less
+/// headroom before an unoptimized debug build's peak RSS reached the same
+/// order of magnitude as the original failure. See
+/// `docs/DESIGN-kernel-contract.md` "Concrete boundary pre-pass budget" for
+/// the full measurement.
+///
+/// The value is bracketed from both sides by measurement, not chosen by feel:
+/// below by the corpus (167 specs at depth 8; the largest pre-pass explored
+/// 23,409 states, in `examples/named_predicate.fsl`, so 50,000 leaves ~2.1x of
+/// headroom) and above by debug-build peak RSS. Because 2.1x is thin, the
+/// property is protected by an executable control rather than by the margin:
+/// `rust/fslc/tests/issue_697_corpus_probe_budget.rs` fails loudly if any
+/// corpus spec would exhaust this budget and therefore lose its concrete
+/// evidence. Raise the constant only together with that test's recorded
+/// maximum.
+pub const CONCRETE_PROBE_BUDGET: usize = 50_000;
+
+/// The outcome of a budgeted [`find_boundary_violation`] search.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoundaryProbe {
+    /// The first concrete `partial_op`/`type_bound` violation found, with its
+    /// full replayable trace from the initial state.
+    pub finding: Option<(Violation, Vec<TraceStep>)>,
+    /// Whether the search stopped because it reached `budget` distinct
+    /// states rather than because it exhausted every state reachable within
+    /// `depth`. A caller must treat `exhausted && finding.is_none()`
+    /// identically to a normal empty result: this probe is an evidence
+    /// detour, not a verdict authority, so an inconclusive budgeted search
+    /// falls through to the symbolic engine exactly as a completed empty
+    /// search does.
+    pub exhausted: bool,
+    /// The number of distinct states visited, for diagnostics and for the
+    /// corpus-conservation check that calibrates `CONCRETE_PROBE_BUDGET`.
+    pub states_explored: usize,
+}
+
+/// Find the first concrete partial-operation or type-bound violation and its
+/// trace, visiting at most `budget` distinct states.
+///
+/// This search is an evidence detour, not a verdict authority: it only ever
+/// returns `partial_op`/`type_bound` findings, and a caller that gets
+/// `exhausted: true` with no finding must fall through to the symbolic
+/// engine, which finds every symbolically representable violation on its
+/// own. The one outcome class this search uniquely covers -- a reachable
+/// over-capacity `Seq` successor the bounded symbolic value cannot represent
+/// -- still fails closed downstream (`rust/fsl-verifier/src/value.rs`'s
+/// "model sequence length exceeds capacity") rather than passing, so
+/// exhaustion never silently downgrades a real violation to a false green
+/// (issue #697).
 ///
 /// # Errors
 ///
 /// Returns [`RuntimeError`] when concrete action evaluation fails for another reason.
 pub fn find_boundary_violation(
-    model: KernelModel,
+    model: &KernelModel,
     depth: usize,
-) -> Result<Option<(Violation, Vec<TraceStep>)>, RuntimeError> {
-    let initial = Monitor::new(model)?;
-    let initial_trace = vec![TraceStep {
-        step: 0,
-        state: initial.state.clone(),
-        action: None,
-        changes: BTreeMap::new(),
-    }];
-    let mut queue = VecDeque::from([(initial.clone(), initial_trace, 0_usize)]);
-    let mut visited = BTreeSet::from([initial.state.clone()]);
-    while let Some((monitor, trace, step)) = queue.pop_front() {
+    budget: usize,
+) -> Result<BoundaryProbe, RuntimeError> {
+    let mut scratch = Monitor::new(model.clone())?;
+    let initial_state = scratch.state.clone();
+    let mut queue = VecDeque::from([(initial_state.clone(), 0_usize)]);
+    let mut visited = BTreeSet::from([initial_state.clone()]);
+    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+
+    while let Some((state, step)) = queue.pop_front() {
         if step >= depth {
             continue;
         }
-        for instance in monitor.enabled()? {
-            let mut child = monitor.clone();
-            let before = child.state.clone();
-            let stepped = child.step(&instance)?;
-            let mut child_trace = trace.clone();
-            child_trace.push(trace_step_from_result(
-                step + 1,
-                &before,
-                &instance,
-                &stepped,
-            ));
-            if let Some(violation) = stepped.violation {
+        scratch.state = state.clone();
+        scratch.step = step;
+        for instance in scratch.enabled()? {
+            scratch.state = state.clone();
+            scratch.step = step;
+            let stepped = scratch.step(&instance)?;
+            if let Some(violation) = stepped.violation.clone() {
                 if matches!(violation.kind.as_str(), "partial_op" | "type_bound") {
-                    return Ok(Some((violation, child_trace)));
+                    let mut found_trace =
+                        trace::reconstruct_trace(&initial_state, &state, &parents);
+                    found_trace.push(trace_step_from_result(
+                        step + 1,
+                        &state,
+                        &instance,
+                        &stepped,
+                    ));
+                    return Ok(BoundaryProbe {
+                        finding: Some((violation, found_trace)),
+                        exhausted: false,
+                        states_explored: visited.len(),
+                    });
                 }
                 continue;
             }
-            if visited.insert(child.state.clone()) {
-                queue.push_back((child, child_trace, step + 1));
+            let child_state = stepped.state.clone();
+            if visited.insert(child_state.clone()) {
+                parents.insert(
+                    child_state.clone(),
+                    trace::ParentLink {
+                        parent: state.clone(),
+                        action: TraceAction {
+                            name: instance.action.clone(),
+                            params: instance.params.clone(),
+                        },
+                    },
+                );
+                if visited.len() >= budget {
+                    return Ok(BoundaryProbe {
+                        finding: None,
+                        exhausted: true,
+                        states_explored: visited.len(),
+                    });
+                }
+                queue.push_back((child_state, step + 1));
             }
         }
     }
-    Ok(None)
+    Ok(BoundaryProbe {
+        finding: None,
+        exhausted: false,
+        states_explored: visited.len(),
+    })
 }
 
 /// Find the first violation of ANY kind (type bound, user invariant, `trans`,

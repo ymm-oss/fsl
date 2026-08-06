@@ -101,6 +101,86 @@ guard/body failures and is the exact uncommitted candidate for any later
 `type_bound`, `partial_op`, `invariant`, `trans`, or `ensures` failure. This
 rollback rule is shared by the schema and executable vectors.
 
+## Concrete boundary pre-pass budget
+
+Before `prepare_bmc` hands a spec to the symbolic engine, it runs a solver-free
+concrete BFS — `fsl_runtime::find_boundary_violation` — over exactly the
+`Monitor` semantics above, looking only for a `partial_op` or `type_bound`
+outcome. This exists because one such outcome cannot be represented by the
+bounded symbolic value at all: a `push` past a `Seq<T, N>`'s declared capacity
+increments the symbolic length without writing a slot
+(`rust/fsl-verifier/src/eval.rs`), so a state that reaches `len > slots.len()`
+fails closed the moment anything tries to render it —
+`rust/fsl-verifier/src/value.rs`'s `project_value` returns "model sequence
+length exceeds capacity" — rather than reporting the concrete, replayable
+`violated`/`type_bound` evidence the concrete Monitor can give directly. The
+pre-pass runs only when no `--property`/`--exclude-property _bounds_*`
+narrows the request (`selected_implicit_bounds` returns `None`); a narrowed
+request skips it and goes straight to the symbolic engine.
+
+This pre-pass is an evidence detour, not a verdict authority: it only ever
+returns `partial_op`/`type_bound`, and `prepare_bmc` consumes only the
+non-`partial_op` half (`partial_op` belongs to `verify_bounded*` itself, per
+issue #651). Nothing about it may change *whether* a spec verifies — only
+*how good the evidence looks* when it doesn't. That is what makes it safe to
+budget (issue #697): `find_boundary_violation(model: &KernelModel, depth:
+usize, budget: usize) -> Result<BoundaryProbe, RuntimeError>` stops after
+visiting `budget` distinct concrete states and reports
+`BoundaryProbe { finding, exhausted, states_explored }`. Every caller must
+treat `exhausted && finding.is_none()` exactly like today's empty result:
+fall through to the symbolic engine, which finds every symbolically
+representable violation on its own, and which still fails closed on the one
+class the pre-pass alone covers (confirmed directly: a `Seq<Int, 2>`-overflow
+fixture reports `violated`/`type_bound` with a full trace by the default
+path, and `error`/"model sequence length exceeds capacity" when isolated to
+a property that must render the overflowed value — both outcomes unaffected
+by the budget). Exhaustion can only ever downgrade a would-be concrete
+`violated` to whatever the symbolic engine reports for the same spec — never
+the reverse, and never past a fail-closed error into a false green.
+
+Before the budget, this pre-pass cloned its `Monitor` (the whole `KernelModel`
+by value) and its trace per visited BFS node; a spec whose history-recording
+`Seq` state defeats the BFS's `visited` dedup made the frontier grow like
+branching^depth, driving the *default*, all-properties path (which alone runs
+this pre-pass) past 11.4 GB RSS while every `--property`-narrowed run of the
+same spec verified in seconds. `find_boundary_violation` now takes the model
+by reference and reuses one scratch `Monitor` across the whole search, and
+reconstructs a found violation's trace from a parent-link map only once
+(rather than cloning `Vec<TraceStep>` per node) — the same pattern
+`rust/fsl-runtime/src/explicit.rs`'s `verify_explicit_selected` already used,
+lifted into `rust/fsl-runtime/src/trace.rs` so both share it instead of
+duplicating it.
+
+`CONCRETE_PROBE_BUDGET` (`rust/fsl-runtime/src/lib.rs`) is the default budget
+every production caller passes — native (`rust/fslc/src/verification.rs`,
+`rust/fslc/src/main.rs`'s weakening-counterfactual and
+`mutation_oracle_for_model` call sites) and the browser Worker
+(`rust/fsl-wasm/src/lib.rs`, sharing the same constant so native/Worker
+strategy parity holds by construction). It is calibrated against a full
+sweep of `specs/` + `examples/` at their default `--depth 8`: the observed
+maximum `states_explored` was 23,409, every file reached ordinary BFS
+closure well short of a 500,000-state sweep ceiling, and the constant keeps
+a >=2.1x margin over that maximum (>=3x over every other corpus file) —
+generous enough that no corpus spec's pre-pass is expected to exhaust, which
+`rust/fslc/tests/corpus_check_sweep.rs` continues to guard by requiring every
+non-error-declaring corpus file to check clean. `rust/fsl-runtime/tests/
+boundary_probe_budget.rs` proves the cutoff is exact (a model whose bounded
+reachable set is provably far larger than the budget still reports
+`states_explored` equal to the budget, not more or less) independent of any
+timing or resource-limit assumption; `rust/fslc/tests/
+issue_697_all_properties_memory.rs` anchors the end-to-end contract this
+section describes — joint-vs-isolated verdict/attribution agreement, the
+fail-closed preservation above, a genuinely broken invariant still reporting
+`violated`, and (Linux only, since macOS does not enforce `RLIMIT_AS`) a
+generous address-space ceiling derived from this fix's own measured
+baseline.
+
+See `docs/DESIGN-explicit-engine.md` for `--explicit-budget`, the
+in-repo precedent for bounding a solver-free BFS by state count rather than
+by depth or wall time; that budget still governs only
+`verify_explicit_selected` and is unrelated to this pre-pass beyond sharing
+the same idea of an explicit `usize` cutoff surfaced in the result.
+
 ## Conformance corpus
 
 `fslc conformance SPEC --depth N` enumerates every finite action instance at
