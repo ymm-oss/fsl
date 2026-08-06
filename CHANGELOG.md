@@ -41,6 +41,55 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   458.8s test plus a measured ≈113s of fixed cost per shard, so going materially lower needs that test
   split or the two phases run concurrently rather than serially. Every comparison here is warm-cache;
   an eviction-induced cold build adds 6–12 min per shard and is tracked as #747.
+- Fixed (#736): `.github/workflows/ci.yml` cited a `docs/DESIGN-ci.md` section,
+  `"Merge queue (planned, not yet enabled)"`, that does not exist and asserted the
+  opposite of the accepted decision — the design document records that a merge
+  queue was configured on the `main` ruleset on 2026-08-05 and rejected the same
+  day (`### The merge queue was tried, measured against this repository's
+  workflow, and rejected`), not merely planned. The `merge_group:` trigger
+  comment's "no merge queue exists on `main` **yet**" carried the same stale
+  implication. Both comments, plus the `pull_request:` trigger comment's
+  reference to the same dangling section, now cite the real heading
+  (`## Required pre-merge contexts, and why the merge queue was rejected` and
+  its subsection) and state the rejection accurately. `tools/check-product-gate-scope.sh`
+  carried the third instance of the same dangling citation and additionally
+  described the inert `queue-entry-stub` branch as "implemented ahead of that
+  rollout"; it now records that no rollout is pending and that reviving the queue
+  is a human-review-policy question, not a CI one. The same file's
+  `FSL_MERGE_QUEUE_CI` branch comment said enabling the variable was "the only
+  remaining step", contradicting both the rejection record and the file's own
+  header eighty lines above; it now states that reaching that branch needs the
+  policy change first, and why enabling the variable alone would land changes
+  with no pre-merge Linux evidence. `tools/check-product-gate-scope.sh`'s
+  `diff_scope` comment said the in-job check is "the only place the exemption can
+  apply **once** a merge queue exists", presupposing one will; it now says
+  "if a merge queue ever existed" and states that none does. And
+  `docs/DESIGN-ci.md` itself — the authority the other five sites cite —
+  recommended a merge queue as a mitigation "worth using ... once `ci.yml` gains
+  the same trigger", while its own `## Non-goals` lists running a queue as a
+  non-goal; `ci.yml` had already gained that trigger, so the paragraph read as an
+  available next step. It is corrected rather than deleted, so the sequence stays
+  legible.
+
+  **Seven sites across three files, of two signatures, found over four passes** —
+  not one clean sweep. Three quote the removed section name; four state a stale
+  premise without naming any section. The section-name sites are findable
+  mechanically, but only with a comment-prefix-aware detector: the string wraps
+  across lines behind `#` prefixes, so a single-line `git grep` matches one of the
+  three. The reliable form is
+  `sed 's/^[[:space:]]*#[[:space:]]*//' | tr '\n' ' ' | tr -s ' '`; calibrated
+  against the pre-repair tree it finds all three, and over all 1,436 tracked files
+  here it leaves only the two `CHANGELOG.md` entries that quote the string as
+  history. **The four stale-premise sites are not findable that way at all** — they
+  contain no section name — and they include both the most dangerous one (an
+  operation the #717 canary proved unsafe, described as one flag away) and the one
+  inside the accepted decision record. #742 tracks mechanising the citation check;
+  it must also cover this second signature, or the recurrence continues. Audited
+  every other `docs/DESIGN-ci.md` citation in
+  `ci.yml`, `ruleset-drift-audit.yml`, and `site-reference-freshness.yml`: all
+  resolve to real headings. Comment/citation fix only — no trigger, job, or
+  required-context name changed; the parsed YAML structure is unchanged before
+  and after, and `./tools/check-product-gate-scope.sh selftest` still passes.
 - Documented (#722): the implicit domain aggregate initializer enumeration in
   `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md`
   covered only Bool `false`/enum first-member/range lower-bound/external-
