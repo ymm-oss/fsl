@@ -5,6 +5,21 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed (#736): `.github/workflows/ci.yml` cited a `docs/DESIGN-ci.md` section,
+  `"Merge queue (planned, not yet enabled)"`, that does not exist and asserted the
+  opposite of the accepted decision — the design document records that a merge
+  queue was configured on the `main` ruleset on 2026-08-05 and rejected the same
+  day (`### The merge queue was tried, measured against this repository's
+  workflow, and rejected`), not merely planned. The `merge_group:` trigger
+  comment's "no merge queue exists on `main` **yet**" carried the same stale
+  implication. Both comments, plus the `pull_request:` trigger comment's
+  reference to the same dangling section, now cite the real heading
+  (`## Required pre-merge contexts, and why the merge queue was rejected` and
+  its subsection) and state the rejection accurately. Audited every other
+  `docs/DESIGN-ci.md` citation in `ci.yml`, `ruleset-drift-audit.yml`, and
+  `site-reference-freshness.yml`: all resolve to real headings. Comment/citation
+  fix only — no trigger, job, or required-context name changed; the parsed YAML
+  structure is unchanged before and after.
 - Documented (#722): the implicit domain aggregate initializer enumeration in
   `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md`
   covered only Bool `false`/enum first-member/range lower-bound/external-

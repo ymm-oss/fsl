@@ -15,13 +15,18 @@ on:
     # run as the first step of each heavy job below, so a skip is an
     # in-job early exit that still reports a context instead of a
     # workflow-level skip that reports none at all. See docs/DESIGN-ci.md,
-    # "Agent-configuration exemption" and "Merge queue (planned, not yet
-    # enabled)".
+    # "Agent-configuration exemption".
   merge_group:
     # Unfiltered: GitHub does not support `paths`/`paths-ignore` on
-    # `merge_group` (docs/DESIGN-ci.md), and only `main` will ever have a
-    # queue, so an unfiltered trigger is equivalent. Currently dormant --
-    # no merge queue exists on `main` yet, so this event never fires today.
+    # `merge_group`, and only `main` could ever have a queue, so an
+    # unfiltered trigger is equivalent. Dormant -- no merge queue exists on
+    # `main`. One was configured on this ruleset on 2026-08-05 and removed
+    # the same day: every merge here takes the admin-bypass path, so the
+    # queue never validated anything. Reviving it needs a human-review-policy
+    # change, not a CI change, so this trigger stays inert rather than
+    # removed. See docs/DESIGN-ci.md, "Required pre-merge contexts, and why
+    # the merge queue was rejected" and its "The merge queue was tried,
+    # measured against this repository's workflow, and rejected" subsection.
   schedule:
     - cron: "17 18 * * *"
   workflow_dispatch:
@@ -38,16 +43,18 @@ permissions:
 # merge.
 #
 # The four heavy jobs (`rust-workspace`, `wasm`, `semantic-mutation`,
-# `fsl-logic`) also trigger on `merge_group`, which is where they are meant to
-# eventually run for real once a merge queue is configured on `main`: pull
-# requests would then report a cheap queue-entry stub instead, batches of
-# candidates would be validated together, and the pre-merge cost this file's
-# header used to describe would move to queue-entry time. That rollout has
-# two remaining, explicit, human-confirmed steps this PR does not take —
-# creating the `FSL_MERGE_QUEUE_CI` repository variable and adding a
-# `merge_queue` rule to the `main` ruleset — so today `pull_request` events
-# still run the complete evidence in full, exactly as before. See
-# docs/DESIGN-ci.md, "Merge queue (planned, not yet enabled)".
+# `fsl-logic`) also trigger on `merge_group`, which stays inert: a merge
+# queue was tried on the `main` ruleset on 2026-08-05 and rejected the same
+# day, because an administrator's merge bypasses the queue entirely and the
+# ordinary enqueue path is unsatisfiable under this repository's
+# single-approver review policy. Reviving the queue would require changing
+# that human review policy, not this workflow, so the trigger and
+# `tools/check-product-gate-scope.sh`'s `queue-entry-stub` branch stay ready
+# rather than removed. `pull_request` events run the complete evidence in
+# full, exactly as before. See docs/DESIGN-ci.md, "Required pre-merge
+# contexts, and why the merge queue was rejected" and its "The merge queue
+# was tried, measured against this repository's workflow, and rejected"
+# subsection.
 #
 # Only the cross-platform matrix — `native Z3 4.16` on macOS and Windows — stays
 # post-merge under FSL_OPTIMISTIC_CI, reported by the post-merge CI reporter.
