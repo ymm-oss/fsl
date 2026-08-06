@@ -91,9 +91,13 @@ fn no_corpus_spec_exhausts_the_concrete_probe_budget() {
 
     println!("probed {probed} corpus specs at depth 8, budget {budget}");
     println!("max states_explored = {max_states} in {max_path}");
+    // Integer tenths, so the report needs no lossy float cast (clippy denies
+    // `cast_precision_loss` in this workspace).
+    let headroom_tenths = budget.saturating_mul(10) / max_states.max(1);
     println!(
-        "headroom factor = {:.1}x",
-        budget as f64 / max_states.max(1) as f64
+        "headroom factor = {}.{}x",
+        headroom_tenths / 10,
+        headroom_tenths % 10
     );
     assert!(
         exhausted.is_empty(),
