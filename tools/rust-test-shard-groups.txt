@@ -1,0 +1,91 @@
+# Duration-aware pinning for `rust-tests` shards (issue #720 Finding 1;
+# docs/DESIGN-ci.md, "Duration-aware `rust-tests` shard pinning", which also
+# records the cost model, the reachable floor, and when this file must be
+# edited). Each non-comment, non-blank line is "<shard> <binary-id>", 1-based
+# shard index <= the shard total cargo-nextest is invoked with (3 in
+# .github/workflows/ci.yml today). A pinned binary's tests all run in that
+# shard, unpartitioned.
+#
+# `binary-id` is cargo-nextest's own identifier (`cargo nextest list
+# --message-format json`, the `binary-id` field; see `cargo nextest help
+# filterset`'s binary_id() predicate) -- typically `<package>::<binary-name>`,
+# disambiguating same-named test files across crates (this workspace has two
+# `explicit_engine.rs` files, in `fslc` and `fsl-runtime`; only the `fslc`
+# one is pinned here).
+#
+# A binary NOT named here is not dropped: `check_rust_tests` in
+# tools/check-native-integration.sh falls every unpinned binary back to
+# cargo-nextest's ordinary `--partition count:K/N` split. Coverage never
+# depends on this file being current -- only duration balance does. What
+# does depend on this file: `tools/check-shard-union.sh check-groups` fails
+# closed if a pin below names a binary the live workspace no longer has
+# (rename/removal), pins one binary to more than one shard, uses a shard index
+# above the total, or is malformed.
+#
+# THE COST MODEL IS max(SLOWEST SINGLE TEST, SEQUENTIAL SUM / 3).
+# nextest runs tests concurrently inside a shard, but the concurrency is finite.
+# Measured against all three shards of run 31081427765 attempt 2 (warm cache),
+# the pinned phase costs about 1.11 * max(slowest single test, sequential sum / 3):
+#
+#   shard  pinned sum  slowest  model  actual   error
+#     1        683.4s   458.8s   509s   508.1s   -0.2%
+#     2        922.3s   371.8s   413s   465.2s  +12.7%
+#     3       1130.4s   275.6s   418s   418.5s   +0.1%
+#
+# Neither term alone works. Using only the slowest test underestimates shard 3 by
+# 52%; using only the sum overestimates shard 1. Shard 2's excess is the one
+# outlier: `issue_697_all_properties_memory` is memory-bound by construction (see
+# `CONCRETE_PROBE_BUDGET`, issue #697), so its tests contend for memory rather
+# than CPU and do not overlap as freely as the model assumes. Treat +15% as the
+# planning margin for a shard holding it.
+#
+# Two consequences, and the second is why this list is longer than five entries:
+#   - Adding a pin is NOT free. It raises the shard's sequential sum, and once
+#     sum/3 exceeds the slowest test the phase grows with every addition.
+#   - Every pin still removes its binary's whole sequential duration from the
+#     count-partitioned leftover, which is duration-blind. Measured on the same
+#     run, the leftover phases fell to 75.4s / 43.0s / 63.9s -- a 1.75x spread,
+#     down from 5.3x under the five-binary assignment.
+# Balance the two: keep max(slowest, sum/3) even across shards, and prefer
+# pinning a binary whose sequential total is large relative to its slowest test
+# (`explain_cli`: 439.7s over 13 tests, slowest 69.5s) because it drains the
+# leftover cheaply.
+#
+# Measured slowest-single-test per binary, run 31076668077 (this pull request's
+# own CI run; per-test `PASS [ Ns]` lines from the three `rust tests (K/3)`
+# job logs). Sequential total and test count in brackets:
+#   refine_corpus_parity                458.8s  [458.9s total,  4 tests]
+#   issue_697_all_properties_memory     371.8s  [655.6s total,  4 tests]
+#   injection_detector_matrix           275.6s  [275.6s total,  1 test]
+#   explicit_engine                     266.6s  [266.7s total,  4 tests]
+#   issue_226_auto_engine               205.9s  [338.4s total,  6 tests]
+#   corpus_check_sweep                  192.5s  [224.5s total,  2 tests]
+#   issue_697_corpus_probe_budget        76.7s  [ 76.7s total,  1 test]
+#   explain_cli                          69.5s  [439.7s total, 13 tests]
+# Nothing else exceeds 62s. `explain_cli` is the instructive case: 439.7s sequential
+# but only a 69.5s slowest test. It is pinned to drain that 439.7s from the
+# duration-blind leftover, and the trade is not free -- it raises shard 3's sum from
+# 690.7s to 1130.4s, which is what moves that shard's model term from max(275.6, 230)
+# to sum/3 = 376.8 and costs it about 112s of pinned phase. It pays because the
+# leftover is count-partitioned across all three shards, so the 439.7s it removes is
+# spread over every shard while the 112s lands on one.
+#
+# `issue_697_all_properties_memory` did not exist when the first version of this
+# file was written; it arrived with the #697 fix (pull request #739) and, being
+# unpinned, put its 371.8s test into shard 2's count-partitioned leftover. That
+# single test is what took shard 2 from 5.0 min to 14.6 min.
+#
+# MEASURED with the assignment below, run 31081427765 attempt 2, warm cache:
+# pinned phases 508.1s / 465.2s / 418.5s, leftover 75.4s / 43.0s / 63.9s, a
+# constant ~113s of setup and build per shard, giving shard wall clocks of
+# 12.2 / 10.85 / 10.46 min. The slowest shard -- which is what `rust workspace`
+# waits on -- fell from 15.6 min to 12.2 min, and the spread from 3.1x to 1.17x.
+# `tools/check-shard-union.sh` reported a clean union on that run.
+1 fslc-rust::refine_corpus_parity
+1 fslc-rust::corpus_check_sweep
+2 fslc-rust::issue_697_all_properties_memory
+2 fslc-rust::explicit_engine
+3 fslc-rust::injection_detector_matrix
+3 fslc-rust::issue_226_auto_engine
+3 fslc-rust::explain_cli
+3 fslc-rust::issue_697_corpus_probe_budget

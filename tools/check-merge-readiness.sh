@@ -49,6 +49,11 @@ check_automation() {
   # Accepting/rejecting controls for the ruleset drift audit's compareRuleset/
   # validateContract classifier (docs/DESIGN-ci.md, "Ruleset drift audit").
   node --test .github/scripts/audit-ruleset-drift.test.mjs
+  # Accepting/rejecting controls for the Actions cache budget audit, including
+  # the rejecting fixture for `ci.yml`'s `save-if` guard: a pull-request-scoped
+  # cache for one of its shared keys must fail the audit, so removing that guard
+  # cannot pass silently (docs/DESIGN-ci.md, "Actions cache budget").
+  node --test .github/scripts/audit-cache-budget.test.mjs
 }
 
 case "${1:-all}" in
