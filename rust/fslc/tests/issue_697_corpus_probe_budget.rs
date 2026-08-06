@@ -62,8 +62,7 @@ fn no_corpus_spec_exhausts_the_concrete_probe_budget() {
         let Ok(source) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let Ok(document) =
-            fsl_core::parse_kernel_source(&source, &fsl_core::FsResolver::new("."))
+        let Ok(document) = fsl_core::parse_kernel_source(&source, &fsl_core::FsResolver::new("."))
         else {
             continue;
         };
@@ -82,13 +81,20 @@ fn no_corpus_spec_exhausts_the_concrete_probe_budget() {
             max_path = path.display().to_string();
         }
         if probe.exhausted {
-            exhausted.push(format!("{} ({} states)", path.display(), probe.states_explored));
+            exhausted.push(format!(
+                "{} ({} states)",
+                path.display(),
+                probe.states_explored
+            ));
         }
     }
 
     println!("probed {probed} corpus specs at depth 8, budget {budget}");
     println!("max states_explored = {max_states} in {max_path}");
-    println!("headroom factor = {:.1}x", budget as f64 / max_states.max(1) as f64);
+    println!(
+        "headroom factor = {:.1}x",
+        budget as f64 / max_states.max(1) as f64
+    );
     assert!(
         exhausted.is_empty(),
         "these corpus specs exhaust the budget, so their concrete evidence would \
