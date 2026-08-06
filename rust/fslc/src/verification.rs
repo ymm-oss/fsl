@@ -134,18 +134,52 @@ fn verification_cost(started: Instant, statistics: &fsl_solver::VerificationStat
 }
 
 fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, SpecLoadError> {
-    let mut model = match selection.model {
+    let mut model = load_unselected_model(selection)?;
+    // A rejected `--property`/`--exclude` names a property that is absent from
+    // the model, so there is no construct in the source to point at.
+    select_properties(&mut model, selection.property, selection.excluded)
+        .map_err(SpecLoadError::unlocated_semantic)?;
+    Ok(model)
+}
+
+fn load_unselected_model(selection: ModelSelection<'_>) -> Result<KernelModel, SpecLoadError> {
+    let model = match selection.model {
         Some(model) => model.clone(),
         None => selection.scope.map_or_else(
             || load_model(selection.path),
             |scope| load_model_scoped(selection.path, scope),
         )?,
     };
-    // A rejected `--property`/`--exclude` names a property that is absent from
-    // the model, so there is no construct in the source to point at.
+    Ok(model)
+}
+
+/// Restrict induction's obligations to a selected transition without deleting
+/// the invariants that establish its base case and form its step hypothesis.
+/// Other selector kinds keep `load_selected_model`'s existing model-restriction
+/// semantics.
+fn selected_transition_induction_model(
+    selection: ModelSelection<'_>,
+) -> Result<Option<KernelModel>, SpecLoadError> {
+    let Some(selected) = selection.property else {
+        return Ok(None);
+    };
+    let mut model = load_unselected_model(selection)?;
+    if !model
+        .transitions
+        .iter()
+        .any(|property| display(&property.name) == selected)
+    {
+        return Ok(None);
+    }
+    let invariant_hypotheses = model.invariants.clone();
     select_properties(&mut model, selection.property, selection.excluded)
         .map_err(SpecLoadError::unlocated_semantic)?;
-    Ok(model)
+    if model.transitions.is_empty() {
+        // `--exclude-property` wins when it names the selected transition.
+        return Ok(None);
+    }
+    model.invariants = invariant_hypotheses;
+    Ok(Some(model))
 }
 
 pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i32) {
@@ -156,6 +190,19 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         k,
         auxiliary,
     } = request;
+    let selected_transition_model = match selected_transition_induction_model(selection) {
+        Ok(model) => model,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let selection = selected_transition_model
+        .as_ref()
+        .map_or(selection, |model| ModelSelection {
+            path: selection.path,
+            model: Some(model),
+            scope: None,
+            property: None,
+            excluded: &[],
+        });
     let started = Instant::now();
     let base_request = BmcRequest {
         selection,
@@ -1227,22 +1274,47 @@ fn collision_free_lemma_name(
     name
 }
 
-pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions) -> (Value, i32) {
-    let deadlock = match DeadlockMode::parse(&options.deadlock) {
-        Ok(mode) => mode,
-        Err(error) => return (error_output("usage", &error), 2),
-    };
+fn prepare_lemma_induction<'a>(
+    path: &'a Path,
+    options: &'a CliVerifyOptions,
+    prepared: &'a PreparedCliVerification,
+) -> Result<
+    (
+        ModelSelection<'a>,
+        KernelModel,
+        std::collections::BTreeSet<String>,
+    ),
+    CommandResult,
+> {
+    let model = prepared
+        .model
+        .as_ref()
+        .map_err(|error| (spec_load_error_output(error), 2))?;
     let selection = ModelSelection {
         path,
-        model: None,
+        model: Some(model),
         scope: None,
         property: options.property.as_deref(),
         excluded: &options.exclude_properties,
     };
-    let (model, mut occupied_names) = match load_lemma_model(path, options) {
-        Ok(model) => model,
-        Err(output) => return output,
+    let (selected, occupied_names) = load_lemma_model(selection)?;
+    Ok((selection, selected, occupied_names))
+}
+
+fn run_induction_with_lemmas(
+    path: &Path,
+    options: &CliVerifyOptions,
+    prepared: &PreparedCliVerification,
+) -> (Value, i32) {
+    let deadlock = match DeadlockMode::parse(&options.deadlock) {
+        Ok(mode) => mode,
+        Err(error) => return (error_output("usage", &error), 2),
     };
+    let (selection, model, mut occupied_names) =
+        match prepare_lemma_induction(path, options, prepared) {
+            Ok(prepared) => prepared,
+            Err(output) => return output,
+        };
     let mut entries = Vec::new();
     let mut proved_candidates = Vec::new();
     let (mut auxiliary, mut auxiliary_sources) = (Vec::new(), Vec::new());
@@ -1331,24 +1403,31 @@ pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions)
 }
 
 fn load_lemma_model(
-    path: &Path,
-    options: &CliVerifyOptions,
+    selection: ModelSelection<'_>,
 ) -> Result<(KernelModel, std::collections::BTreeSet<String>), CommandResult> {
-    let mut model = load_model(path).map_err(|error| (spec_load_error_output(&error), 2))?;
-    let occupied_names = model
+    let unselected =
+        load_unselected_model(selection).map_err(|error| (spec_load_error_output(&error), 2))?;
+    let occupied_names = unselected
         .invariants
         .iter()
-        .chain(&model.transitions)
-        .chain(&model.reachables)
+        .chain(&unselected.transitions)
+        .chain(&unselected.reachables)
         .map(|property| property.name.clone())
-        .chain(model.leadstos.iter().map(|property| property.name.clone()))
+        .chain(
+            unselected
+                .leadstos
+                .iter()
+                .map(|property| property.name.clone()),
+        )
         .collect();
-    select_properties(
-        &mut model,
-        options.property.as_deref(),
-        &options.exclude_properties,
-    )
-    .map_err(|error| (semantic_error_output(&error), 2))?;
+    let model = match selected_transition_induction_model(selection)
+        .map_err(|error| (spec_load_error_output(&error), 2))?
+    {
+        Some(model) => model,
+        None => {
+            load_selected_model(selection).map_err(|error| (spec_load_error_output(&error), 2))?
+        }
+    };
     Ok((model, occupied_names))
 }
 
@@ -1719,13 +1798,14 @@ pub(super) fn run_verify_cli(
             2,
         );
     }
-    if !options.lemmas.is_empty() {
-        return run_induction_with_lemmas(path, options);
-    }
     let prepared = match prepare_cli_verification(path, options) {
         Ok(prepared) => prepared,
         Err(output) => return output,
     };
+    if !options.lemmas.is_empty() {
+        let (output, status) = run_induction_with_lemmas(path, options, &prepared);
+        return finalize_cli_verification(path, options, &prepared, None, output, status);
+    }
     // `auto` never keys a cache entry under the literal string "auto": a
     // lookup consults the explicit/bmc keys directly
     // (`cached_auto_verification`) and a store writes under whichever engine
@@ -1838,17 +1918,10 @@ fn validate_cli_property_selection(
     if options.engine == "induction"
         && let Some(name) = options.property.as_deref()
         && let Some(kind) = model
-            .transitions
+            .leadstos
             .iter()
             .any(|item| display(&item.name) == name)
-            .then_some("trans")
-            .or_else(|| {
-                model
-                    .leadstos
-                    .iter()
-                    .any(|item| display(&item.name) == name)
-                    .then_some("leadsTo")
-            })
+            .then_some("leadsTo")
             .or_else(|| {
                 model
                     .reachables

@@ -5,6 +5,127 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Documented (#722): the implicit domain aggregate initializer enumeration in
+  `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md`
+  covered only Bool `false`/enum first-member/range lower-bound/external-
+  placeholder `0`, omitting the container defaults `Context::default_for_type`
+  (`rust/fsl-core/src/domain.rs`) and its `domain_lowering.rs` counterpart
+  already select: `Option<T>` -> `none`, `Set<T>` -> `Set {}`, and a top-level
+  `Map<K, V>` -> dense per-key `forall k: K { field[k] = <value default> }`
+  (#691 / PR #708). Confirmed empirically with `fslc check` on
+  `rust/fslc/tests/fixtures/domain_characterization/container_defaults_surface.fsl`
+  and `.../lvalues_surface.fsl` that `implicit_initial_value` does **not**
+  fire for these container shapes -- that warning's `omitted_domain_value`
+  (`rust/fslc/src/frontend_output.rs`) only ever recognizes the four scalar
+  shapes, a real (documented, not fixed) gap between the warning's coverage
+  and the renderer's total default dispatch. Also documented the two
+  `Map`-specific rejections: an explicit whole-`Map` default ("whole-Map
+  domain defaults are not supported") and a `Map` nested as another `Map`'s
+  value ("Map state requires explicit initialization through supported
+  semantics"). No Rust behavior changed. See `docs/DESIGN-domain.md`.
+- Added (#707): a ruleset drift audit, closing the drift-detection half of #707 (the
+  required-context half landed separately). `.github/ruleset-contract.json` is a checked-in,
+  schema-versioned record of the `main safety and CI` ruleset (id `19090811`): identity,
+  enforcement, conditions, rule types, strict/`do_not_enforce_on_create` policy, required
+  contexts as `(context, integration_id)` pairs, `bypass_actors`, and two explanatory lists
+  (`deferred_contexts` — the `FSL_OPTIMISTIC_CI`-gated cross-platform matrix and aggregate that
+  can never require pre-merge without deadlocking; `constituent_contexts` — the sharded lane
+  names whose `if: always()` aggregator alone carries the required-context name). The new
+  `.github/scripts/audit-ruleset-drift.mjs` fetches the live ruleset and compares it against the
+  contract through pure, unit-testable `compareRuleset`/`validateContract` functions, rejecting
+  on `ruleset-identity`, `ruleset-missing`, `api-unreadable`, `enforcement`, `conditions`,
+  `rule-type-missing`/`-unexpected`, `empty-rules`, `strict-policy`, `enforce-on-create`,
+  `required-context-missing`/`-unexpected`/`-duplicated`, `required-contexts-empty`,
+  `bypass-actors-unobserved`, `bypass-actor-added`, and `contract-invalid`. Required contexts are
+  keyed on `(context, integration_id)`, not context name alone, so a same-named check reported by
+  a different GitHub App is treated as impersonation, not satisfaction. `pull_request` rule
+  parameters (review counts, `allowed_merge_methods`, …) are deliberately unaudited — human
+  review policy is ruleset `19090821`'s separate accepted decision — and the calibration suite's
+  blind control proves an edit there stays invisible to this audit. `bypass_actors` is in scope
+  and its **absence** (not just an added actor) is a failure: GitHub returns that field only to a
+  caller with write access to the ruleset, the workflow's `GITHUB_TOKEN` has no `administration`
+  permission at all, and a new `RULESET_AUDIT_TOKEN` fine-grained-PAT secret is required to
+  observe it — without the secret the audit still runs and fails closed with
+  `bypass-actors-unobserved` rather than treating absence as an empty (safe) list. The raw
+  observation is written and digested to the step summary *before* classification. Failure-issue
+  lifecycle (`ci/ruleset-drift` label, marker `<!-- ruleset-drift:19090811 -->`, occurrence
+  markers, reopen-on-recurrence, close-on-clean-with-recovery-comment) imports and reuses
+  `report-post-merge-ci.mjs`'s exported `GitHubRestClient` rather than adding a second REST
+  client. `.github/workflows/ruleset-drift-audit.yml` runs on `schedule`, `workflow_dispatch`,
+  and a path-filtered `push` to `main`; it deliberately carries no `pull_request` trigger, since a
+  fork PR has no access to the elevated token. `.github/scripts/audit-ruleset-drift.test.mjs`
+  derives every case from a verbatim capture of the live ruleset
+  (`.github/scripts/fixtures/ruleset-19090811.json`) by `structuredClone` plus one mutation, and
+  is wired into `tools/check-merge-readiness.sh`'s `check_automation` lane. `site reference
+  freshness` joins the `main` ruleset's required contexts, now six instead of five — it reports on
+  every pull request with no path filter, so requiring it cannot deadlock a pull request the way
+  the deferred cross-platform matrix would. `docs/DESIGN-ci.md` gains a "Ruleset drift audit"
+  subsection and corrects two sentences that had gone stale after the five-context requirement
+  landed (2026-08-05): "None of the four contexts are required status checks today" is now scoped
+  to the time the exemption mechanism moved, and the agent-configuration-exemption's "merges on
+  `merge readiness` (plus `site reference freshness`) alone" is restated for the six-required-
+  context reality. `docs/DESIGN-docs-site.md`'s D7 addendum and
+  `.github/workflows/site-reference-freshness.yml`'s header now say the workflow's own context is
+  enforced (not merely visible) and why that is deadlock-safe; the `#688` frozen-`cli.py`
+  asymmetry it separately flagged is unchanged and stays open. The live ruleset edit adding
+  `site reference freshness` is applied out of band; until then, the audit correctly reports a
+  `required-context-missing: site reference freshness` finding — the designed pre-rollout state,
+  not a bug.
+- Fixed (#713): saga `compensation { when Trigger after After { ... } }` now
+  lowers to a kernel action guarded by BOTH the trigger event flag and the
+  `after` event flag on both lowering paths (`lower_saga_actions` in
+  `rust/fsl-core/src/domain_lowering.rs` and `render_saga_actions` in
+  `rust/fsl-core/src/domain.rs`); previously only the trigger flag was
+  required, so a compensation could fire on a trace that never observed its
+  `after` event. Because generated `event_*` flags are one-hot per
+  transition, a compensation whose trigger and after events differ (the
+  common shape, e.g. `examples/domain/order_fulfillment_saga.fsl`) is now
+  structurally disabled and surfaces as a `fslc verify` never-enabled action
+  warning instead of silently accepting the bad trace; this is the accepted
+  interim state pending the correlation-indexed saga history follow-up
+  (issue #662, `docs/DESIGN-saga-history.md`). No spec migration is required:
+  an existing `compensation` block's syntax and semantics are unchanged
+  (only its guard strength, previously unsound). See `docs/DESIGN-domain.md`.
+- Fixed (#712): top-level `await` blocks (e.g.
+  `await PaymentResult { waits_for one_of [...] on X -> Y }`) are now
+  rejected fail-closed by both lowering paths through a new
+  `validate_lowerable_constructs` gate (`rust/fsl-core/src/domain_lowering.rs`,
+  called from both `lower_domain_surface` and `domain_kernel_source`):
+  `DomainAwait` was consumed by nothing outside the parser, and cross-
+  aggregate routing proofs remain explicit Future Work in
+  `docs/DESIGN-domain.md`. **Migration**: remove the top-level
+  `await { ... }` block and use a saga step's `awaits` instead; the
+  top-level form never had executable meaning under `check`/`verify`, so
+  removing it changes no verification outcome.
+  `examples/domain/order_async_effect.fsl` had its now-rejected `await
+  PaymentResult` block removed as part of this fix (its `projection
+  OrderObservedState` block is unaffected and out of this fix's scope). See
+  `docs/DESIGN-domain.md`. Tracked mechanism for future migration
+  diagnostics: #702, #703.
+- Fixed (#711): aggregate `on_stale` policies (e.g.
+  `on_stale Approved when ... { emits ApprovalRejected }`) are now rejected
+  fail-closed by both lowering paths through the same
+  `validate_lowerable_constructs` gate: nothing in `docs/DESIGN-domain.md`
+  pins `on_stale` semantics, and the finding it references
+  (`late_completion_without_stale_policy`) is itself unimplemented in native
+  Rust (#724). **Migration**: remove the `on_stale { ... }` block; it never
+  had executable meaning under `check`/`verify`, so removing it changes no
+  verification outcome. See `docs/DESIGN-domain.md`. Tracked mechanism for
+  future migration diagnostics: #702, #703.
+- Fixed (#710): `value_object` invariants (e.g.
+  `value_object AuditStamp { ... invariant nonNegative { attempts >= 0 } }`)
+  are now rejected fail-closed by both lowering paths through the same
+  `validate_lowerable_constructs` gate. No accepted design pins a
+  `value_object` instance set, and the frozen Python reference only emits
+  direct-state-field instances while skipping `Option<VO>`/`Set<VO>`/
+  `Map<_,VO>`/command-input/event-field/nested-VO positions -- adopting that
+  partial coverage in the verifier would leave most instances unconstrained
+  while an author believes every instance is checked. **Migration**: remove
+  the `invariant { ... }` block from any `value_object`; it never had
+  executable meaning under `check`/`verify`, so removing it changes no
+  verification outcome. `value_object` field defaults without invariants
+  remain fully supported. See `docs/DESIGN-domain.md`. Tracked mechanism for
+  future migration diagnostics: #702, #703.
 - Fixed issue #697: verifying **all** properties at once (no `--property`)
   could blow past 11.4 GB RSS while every property verified fine in seconds
   in isolation, on both `--engine bmc` and `--engine induction`. The cause
@@ -219,6 +340,46 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   in those containers fails at its declaration instead of producing invalid
   text or panicking. Renderer failures now retain their source location and
   name-resolution classification in the CLI JSON envelope (#691).
+- Fixed native induction's property selector so
+  `verify --engine induction --property <trans>` reaches the already-supported
+  transition base/step obligations instead of returning a usage error. The
+  selected transition is the only transition obligation, while the complete
+  user-invariant and implicit-bound set remains proved in the base case and
+  available as the induction hypothesis; this avoids the false negative caused
+  by treating proof dependencies as unselected obligations. Existing selected-
+  invariant semantics are unchanged, and selected `leadsTo`/`reachable` plus
+  unknown property names remain rejected as before (#701).
+- Added a `property_selection` C3 assurance-matrix axis
+  (`rust/fslc/tests/assurance/property_selection.rs`) so the pre-existing
+  `properties` axis's `(property group, engine)` cells are no longer the only
+  inventoried dimension: the `properties` axis records capability for an
+  *unfiltered* run only, which is exactly how #701 went undetected --
+  `transitions x induction` was `Exercised` there while the CLI's
+  `--property`-selected run of that same cell was independently rejected.
+  The new axis's rows (`"{property group}x{engine}"`) are generated from the
+  Kernel-schema-synced `properties::ROWS` crossed with `properties.rs`'s own
+  declared engine columns, never a hand-copied list, so a new property group
+  or engine automatically gains rows here too and an unclaimed cell fails
+  `every_declared_cell_across_every_axis_has_a_claim` until reviewed. Columns
+  are the `--property Name` and `--exclude-property Name` selector lanes;
+  `terminal` is `NotApplicable` on both for every engine because it has no
+  name `select_properties` can resolve at all. Includes the `trans x
+  induction x selected` positive control and the `reachable x induction x
+  selected` rejecting control named in #705, plus the `leads_to x explicit x
+  selected` rejecting control (explicit's leadsTo incapability holds under
+  isolation too, unlike its accepted `leads_to x explicit x excluded` lane)
+  (#705).
+
+- Added an opt-in, CI-independent, Store-first Referance semantic-drift pilot for
+  the bounded domain lowering/rendering slice (#709). The content-addressed
+  Python/Rust generation probe retains the full JSON envelope and exit code with
+  a failing mutation control, FSL verification bindings expose stale code/adapter
+  evidence, and an auxiliary scoped CodeReferance profile indexes Rust enum
+  variants and exact symbols. Referance
+  output remains shadow evidence: the accepted procedure forbids automatic
+  grounding, promotion, issue creation, and use in product or release gates.
+  Authority triage filed the independent accepted-but-hollow findings as
+  #710–#713 rather than treating Python parity or symbol presence as proof.
 
 - Added a standalone `site reference freshness` CI workflow
   (`.github/workflows/site-reference-freshness.yml`) that runs the

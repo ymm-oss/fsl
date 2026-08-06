@@ -12,7 +12,8 @@ of `exercised` / `rejecting-control` / `unsupported-fail-closed` /
 design for slices 1–3: the mechanism
 (`Claim`/`Citation`/aggregator/negative controls) and the fully registered
 `outcome_kind`, `violation_kind`, `properties`, `expr`, `types`, and
-`dialects` axes.
+`dialects` axes, plus the `property_selection` axis added for issue #705
+(see that axis's own section below).
 
 This is not the assurance-*class* vocabulary in
 [`DESIGN-assurance-classes.md`](DESIGN-assurance-classes.md) (`proved` /
@@ -63,6 +64,7 @@ No new crate, no central hand-written table.
 - `rust/fslc/tests/assurance/outcome_kind.rs`,
   `rust/fslc/tests/assurance/violation_kind.rs`,
   `rust/fslc/tests/assurance/properties.rs`,
+  `rust/fslc/tests/assurance/property_selection.rs`,
   `rust/fslc/tests/assurance/expr.rs`,
   `rust/fslc/tests/assurance/types.rs`, and
   `rust/fslc/tests/assurance/dialects.rs` — one module per semantic-surface
@@ -263,7 +265,7 @@ cited assertion.
 | Group | BMC | explicit | induction | replay |
 |---|---|---|---|---|
 | `invariants` | `Exercised` — `expression_agreement.rs::bounded_verification_rejects_initial_violation_without_action_instances` | `Exercised` — `fsl-runtime/tests/explicit_engine.rs::explicit_engine_totalizes_property_context_zero_division` | `Exercised` — `induction_suggestions.rs::suggests_a_scalar_bound_without_changing_the_verdict` | `Exercised` — `explicit_engine.rs::explicit_and_bmc_agree_on_every_accepted_top_level_corpus_spec` (replays every violation trace, `replayed > 0` asserted) |
-| `transitions` | `Exercised` — targeted probe (below) | `Exercised` — same probe | `Exercised` — `induction_suggestions.rs::trans_ctis_never_receive_invariant_suggestions` | `Exercised` — same probe (exit 1, not 3) |
+| `transitions` | `Exercised` — targeted probe (below) | `Exercised` — same probe | `Exercised` — `verification_ownership.rs::selected_transition_induction_matches_the_all_properties_proof` (updated for #701; the induction cell used to cite `induction_suggestions.rs::trans_ctis_never_receive_invariant_suggestions`, an unfiltered-run test that never exercised `--property`, which is exactly how #701's selector regression stayed undetected here — see the `property_selection` axis below) | `Exercised` — same probe (exit 1, not 3) |
 | `reachables` | `Exercised` — `explicit_engine.rs::explicit_reachable_witness_step_matches_bmc` | `Exercised` — same test | `UnsupportedFailClosed` — targeted probe (below) | `Exercised` — same test (witness replay gates the exit) |
 | `leads_to` | `Exercised` — `issue_260_leadsto_stagnation.rs::leadsto_deadlock_stagnation_is_detected_beyond_the_deadlock_step_for_plain_kernel_spec` | `UnsupportedFailClosed` — `explicit_engine.rs::explicit_cli_exit_codes_cover_bounded_proved_violated_budget_and_semantics` (exit 2, "does not support leadsTo") | `Exercised` — `induction_suggestions.rs::ranked_leadsto_failures_never_receive_suggestions` | `Exercised` — `replay_trace_contract.rs::overdue_bounded_response_is_liveness_nonconformance_after_safety` |
 | `terminal` | `Exercised` — targeted probe (below) | `Exercised` — `fsl-runtime/tests/explicit_engine.rs::explicit_bfs_proves_at_state_space_closure` | `NotApplicable` — terminal's only kernel semantic is deadlock-report exclusion and the induction engine has no deadlock probe (basis: `coverage.rs`'s `terminal_deadlock` row description) | `Exercised` — `fsl-runtime/tests/monitor_regression.rs::action_cover_trace_uses_the_enabling_bool_value_and_may_end_at_terminal` |
@@ -284,6 +286,70 @@ real binary before its expectation was written down:
   (`fixtures/assurance_terminal_once_missing.fsl`) must deadlock under
   `--deadlock error`, proving the green verdict on the `terminal` fixture
   is the exclusion at work, not a deadlock probe that never fires.
+
+## Axis: `property_selection` (issue #705)
+
+The `properties` axis above records `(property group, engine)` capability
+for one execution shape only: an *unfiltered* run. That is exactly how #701
+went undetected: `transitions x induction` was `Exercised` there (an
+unfiltered induction run does prove `trans` properties, in its step case),
+while `--engine induction --property <TransName>` — a `--property`-selected
+run of that identical cell — was independently rejected by
+`validate_cli_property_selection` with a usage error. Nothing in the C3
+matrix had a cell for "selected", so the contradiction between "engine can
+prove it" and "selector refuses to let you ask for it" had nowhere to
+register as a blank or failing cell.
+
+`property_selection` adds that missing dimension rather than folding it into
+`properties`, because it is a distinct capability question (can the CLI
+*isolate* this property on this engine, not just whether the engine can ever
+prove it) with its own failure mode (a selector rejecting a provable
+capability, or silently mishandling an exclusion).
+
+Rows are `"{property group}x{engine}"`, generated at `axis()` build time from
+`properties::ROWS` (the same Kernel-schema-synced constant, made
+`pub(crate)` for this) crossed with `properties::axis()`'s own declared
+engine columns minus `"replay"` (not a `--engine` value, and replay has no
+selection semantics of its own) — never a second, hand-copied property-group
+or engine list.
+`property_selection::rows_are_generated_from_the_properties_axis_registry_not_copied`
+pins that derivation, and a manual mutation drill (temporarily adding a
+bogus engine to `properties.rs`'s columns) confirmed `property_selection`'s
+rows expand automatically and `check_complete`/citation rechecking then fail
+loudly on the newly-uninventoried cells, without touching this file.
+
+Declared columns: `selected` (`--property Name`) and `excluded`
+(`--exclude-property Name`). The third execution shape #705 names — an
+unfiltered all-properties run — is `properties.rs`'s own scope and is
+deliberately not repeated here.
+
+`terminal` is `NotApplicable` on both columns for every engine: a bare
+`terminal { .. }` block is anonymous, and `select_properties`'s
+available-name chain (state bounds, invariants, transitions, leadsTo,
+reachables) never includes it, so no engine's selector has a name to try in
+the first place — there is no selection attempt to reject.
+
+The two cells #705 names explicitly:
+
+- `transitions x induction x selected` — `Exercised`,
+  `verification_ownership.rs::selected_transition_induction_matches_the_all_properties_proof`
+  (the #701 fix's own positive control: the selected-run and all-properties
+  verdict and `transitions_checked` agree).
+- `reachables x induction x selected` — `UnsupportedFailClosed`,
+  `properties.rs::induction_rejects_a_reachable_property_fail_closed` (the
+  rejecting control: induction genuinely cannot prove reachability, and the
+  selector still says so with a stable usage error, not a silent skip).
+
+One cell where `selected` and `excluded` genuinely diverge on the same
+`(group, engine)` pair: `leads_to x explicit x selected` is
+`UnsupportedFailClosed` (explicit's leadsTo incapability holds under
+isolation too — `selecting_a_leadsto_under_explicit_is_rejected_closed_regardless_of_isolation`)
+while `leads_to x explicit x excluded` is `Exercised` (excluding the leadsTo
+property removes the obligation entirely, so nothing incapable is being
+asked for —
+`explicit_engine.rs::explicit_excluding_a_leadsto_property_is_accepted_and_verifies_the_rest`).
+The shared `cell()` table therefore carries an explicit override for that
+one pair rather than assuming the two lanes always agree.
 
 ## Negative controls
 

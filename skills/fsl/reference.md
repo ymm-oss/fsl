@@ -319,6 +319,11 @@ exactly-once semantics.
 The accepted #662 design keeps `event_*` flags one-hot/current-step and will add
 a dedicated `Map<Correlation,SagaPhase>` in a follow-up; do not make global
 event flags sticky or treat one effect's status map as a general saga history.
+A saga `compensation { when Trigger after After { ... } }` block is guarded by
+BOTH event flags (#713); because flags are one-hot, a compensation whose
+trigger and after events differ is structurally disabled today and surfaces
+as a `fslc verify` never-enabled action warning — do not suppress that
+warning or weaken the guard to make it disappear.
 Native domain generation is grounded in Public Kernel v1. A closed
 `domain-scaffold-metadata.v1` companion retains source grouping/spelling that
 lowering cannot publish. Versions, dialect, duplicate Kernel members, and
@@ -349,6 +354,12 @@ Omitted domain aggregate initializers retain the current Bool `false`, enum
 first-member, range lower-bound, or external-placeholder `0` behavior while
 emitting `implicit_initial_value`. The warning carries the selected value,
 reason, edition severities, source span, and a machine-applicable insertion.
+Container-typed fields default too but do **not** trigger that warning:
+`Option<T>` -> `none`, `Set<T>` -> `Set {}`, top-level `Map<K, V>` -> dense
+per-key `forall k: K { field[k] = <value default> }`. An explicit whole-`Map`
+default and a `Map` nested as another `Map`'s value are both rejected
+("whole-Map domain defaults are not supported" / "Map state requires explicit
+initialization through supported semantics").
 
 AI hard-contract dialect (expands to the same kernel for deterministic
 tool-boundary checks and reports stable fsl-ai findings for runtime replay):
@@ -903,8 +914,9 @@ fslc conformance <f> [--depth K=4] [--kernel-version 1|2] # matching vectors (de
 fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
                [--explicit-budget N=1000000]        # explicit/auto; max visited states
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
-               [--property <Name>]                  # check one named property in isolation
-                                                    #   (invariant / trans / leadsTo / reachable)
+               [--property <Name>]                  # check one named property obligation
+                                                    #   (invariant / trans / leadsTo / reachable;
+                                                    #    selected trans keeps induction invariants)
                [--exclude-property <Name>]...       # skip named invariant/trans/leadsTo/reachable
                [--instances NAME=N]...              # override verify-block `instances NAME = N`
                [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`
@@ -1286,6 +1298,12 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   to the built-in catalog (`0` gives an external-only run).
 - `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
   `reachable` declarations and checks only the named property kind in isolation.
+  Under `--engine induction --property <trans>`, the named transition is the
+  only transition obligation, while every user invariant and implicit type
+  bound remains in the base case and induction hypothesis. This is the one
+  dependency-preserving exception to model restriction. Existing selected-
+  invariant behavior is unchanged and still drops sibling invariants. Selected
+  `leadsTo` and `reachable` remain rejected by the induction selector.
   `--exclude-property Name` is repeatable and acts as the cross-kind inverse:
   it removes named invariants, `trans`, `leadsTo`, and `reachable` checks from
   the run and from checked-property outputs. If both options name the same

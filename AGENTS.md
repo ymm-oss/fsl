@@ -120,6 +120,14 @@ or a maintained example. Then remove the temporary report and its backlinks. Kee
 experiment record only when its method or raw data is itself a maintained product artifact; Git and
 pull-request history preserve chronology.
 
+For an explicitly requested local Referance semantic-drift audit, follow
+`docs/DESIGN-referance-local-audit.md`: begin with a verified task-local Store and provenance-bearing
+behavior/freshness evidence, then use the repo-owned bounded CodeReferance profile only as an auxiliary
+read-only detector. Confirm both Store path and audited root, keep every observation shadow/local, and
+complete authority-ordered triage before filing a finding. Referance is not a CI, merge, product,
+promotion, or release gate, and its symbol/parity results never establish nested executable semantics
+or authorize automatic ground/promote/issue.
+
 ## Coding and change conventions
 
 Use `cargo fmt` and keep Clippy warning-free. The workspace forbids unsafe Rust. Python code follows

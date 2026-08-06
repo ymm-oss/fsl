@@ -70,6 +70,11 @@ Each aggregate becomes kernel state and actions:
 - saga step -> kernel action guarded by `starts_on`, `requires`, or awaited
   event flags
 - saga compensation -> kernel action guarded by trigger/after event flags
+  (#713: both lowering paths, `lower_saga_actions` in `domain_lowering.rs` and
+  `render_saga_actions` in `domain.rs`, emit a `requires` for the trigger
+  event flag AND a separate `requires` for the `after_event` flag, in that
+  order; before #713 only the trigger flag was required, so a compensation
+  could fire on a trace that never observed its `after_event`)
 
 Domain enum members are namespaced during lowering (`OrderStatus_Pending`) so
 two domain enums can both contain `Pending`. Domain expressions stay in the
@@ -104,6 +109,44 @@ invariants, stale policies, effect keys/correlation paths, and saga guards do
 not cross the parse boundary as strings. This parse IR deliberately does not
 perform domain name or type resolution. Checked and lowered expressions remain
 the responsibility of `fsl-core` and the public Kernel contract.
+
+### Rejected constructs: parsed, never lowered, so rejected fail-closed
+
+Parsing a construct into the IR is not a promise that it means anything. Three
+constructs reached the parse IR, were type-checked there, and were then dropped
+by **both** lowering paths, so an author could write them and the executable
+model would not contain them — an accepted construct with hollow semantics,
+which `AGENTS.md` classifies as a soundness defect. They are now rejected at
+their declaration, with a located `semantics` diagnostic, by the shared
+`validate_lowerable_constructs` in `rust/fsl-core/src/domain_lowering.rs`,
+called from both `lower_domain_surface` (path A) and `domain_kernel_source`
+(path B) so neither path can accept what the other rejects:
+
+- **top-level `await` routing** (#712). No accepted decision assigns routing a
+  meaning; this document accepts only its grammar (see the Parse IR boundary
+  above), and cross-aggregate routing proofs are Future Work. A saga step's
+  `awaits` is a different construct and remains fully lowered.
+- **aggregate `on_stale`** (#711). Nothing pins the stale-completion semantics.
+  For this to become implementable, an accepted decision must define the stale
+  predicate's evaluation point, the generated action and guard, and the
+  interaction with the effect-completion single-writer rule below.
+- **`value_object` invariants** (#710). What is undecided here is the *instance
+  set*, not the predicate: whether the constraint attaches to direct aggregate
+  state fields only, or also to occurrences inside `Option<T>`/`Set<T>`/
+  `Map<_, T>`, to command parameters and event fields, to nested value objects,
+  and whether a value object's own field defaults must satisfy it. The frozen
+  Python reference emits only the direct-state-field instances, which is why it
+  is not adopted as the contract: an author would believe every occurrence is
+  checked while most are unconstrained. Value objects *without* invariants are
+  unaffected and still lower as structs.
+
+Rejecting is deliberate rather than conservative: implementing any of the three
+would require inventing semantics inside a verifier, which is worse than
+refusing the construct. Each becomes implementable when an accepted amendment
+to this document settles the questions named above. Because the constructs never
+had executable meaning, removing such a block from an existing spec changes no
+verification outcome — see `CHANGELOG.md` for the migration note, and #702/#703
+for the general strictness-migration mechanism.
 
 Domain-only finite membership is represented structurally. Accepted legacy
 spellings retain their source spelling while recording the canonical operator:
@@ -288,6 +331,20 @@ history is checked through replay evidence rather than treated as an unbounded
 kernel proof. Outcome events owned by an effect are observed only through that
 effect's correlation-guarded completion action, so the modeled lifecycle retains
 completion-requires-request without a weaker saga observation writer.
+
+Because generated `event_<Event>` flags are a one-hot, one-step observation
+(see `docs/DESIGN-saga-history.md`), a compensation's dual trigger/after guard
+is only satisfiable by a single transition that emits both events. When the
+trigger and after events differ — the typical shape, e.g.
+`examples/domain/order_fulfillment_saga.fsl`'s
+`when PaymentFailed after InventoryReserved` — the compensation action is
+structurally disabled under the current one-hot flag scheme, and `fslc
+verify` surfaces it as a "never enabled" action warning rather than silently
+passing. This is the accepted interim boundary
+(`docs/DESIGN-saga-history.md`'s "Implementation boundary" section): the
+warning is valid evidence of the known gap and must not be suppressed or
+replaced by sticky global flags until the correlation-indexed saga history
+follow-up (issue #662) lands.
 
 ## Guarantee Boundary
 

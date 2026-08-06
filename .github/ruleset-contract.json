@@ -1,0 +1,82 @@
+{
+  "$comment": "Owned by docs/DESIGN-ci.md (\"Ruleset drift audit\"). A change to this file must land in the same pull request as a re-captured .github/scripts/fixtures/ruleset-*.json and the corresponding docs/DESIGN-ci.md update -- editing the contract alone to match unexplained live state is the drift this audit exists to catch, not a fix.",
+  "schema": "fsl-ruleset-contract/1",
+  "rulesets": [
+    {
+      "ruleset_id": 19090811,
+      "ruleset_name": "main safety and CI",
+      "target": "branch",
+      "enforcement": "active",
+      "ref_name_include": ["refs/heads/main"],
+      "ref_name_exclude": [],
+      "rule_types": ["deletion", "non_fast_forward", "pull_request", "required_status_checks"],
+      "strict_required_status_checks_policy": true,
+      "do_not_enforce_on_create": false,
+      "required_status_checks": [
+        { "context": "merge readiness", "integration_id": 15368 },
+        { "context": "rust workspace", "integration_id": 15368 },
+        { "context": "WASM", "integration_id": 15368 },
+        { "context": "semantic mutation (changed)", "integration_id": 15368 },
+        { "context": "FSL Logic Test (pr)", "integration_id": 15368 },
+        { "context": "site reference freshness", "integration_id": 15368 }
+      ],
+      "bypass_actors": [],
+      "deferred_contexts": [
+        {
+          "context": "native Z3 4.16 (macos-15)",
+          "reason": "Post-merge cross-platform matrix member under FSL_OPTIMISTIC_CI (docs/DESIGN-ci.md, \"Product gate contract\"). It never reports on an ordinary pull request, so requiring it pre-merge would deadlock every PR forever."
+        },
+        {
+          "context": "native Z3 4.16 (windows-latest)",
+          "reason": "Post-merge cross-platform matrix member under FSL_OPTIMISTIC_CI (docs/DESIGN-ci.md, \"Product gate contract\"). It never reports on an ordinary pull request, so requiring it pre-merge would deadlock every PR forever."
+        },
+        {
+          "context": "product gate",
+          "reason": "Aggregate workflow-level context for ci.yml, gated by FSL_OPTIMISTIC_CI the same way as the cross-platform matrix (docs/DESIGN-ci.md, \"Product gate contract\"). It never reports on an ordinary pull request, so requiring it pre-merge would deadlock every PR forever."
+        }
+      ],
+      "constituent_contexts": [
+        {
+          "context": "rust checks",
+          "aggregate": "rust workspace",
+          "reason": "Sharded lane inside the rust-workspace aggregator (docs/DESIGN-ci.md, \"Sharded pre-merge Linux evidence\"). Only the aggregator's if: always() job carries the required-context name; requiring a shard directly would let a skipped shard silently satisfy the ruleset."
+        },
+        {
+          "context": "rust tests (1/3)",
+          "aggregate": "rust workspace",
+          "reason": "Sharded lane inside the rust-workspace aggregator (docs/DESIGN-ci.md, \"Sharded pre-merge Linux evidence\"). Only the aggregator's if: always() job carries the required-context name; requiring a shard directly would let a skipped shard silently satisfy the ruleset."
+        },
+        {
+          "context": "rust tests (2/3)",
+          "aggregate": "rust workspace",
+          "reason": "Sharded lane inside the rust-workspace aggregator (docs/DESIGN-ci.md, \"Sharded pre-merge Linux evidence\"). Only the aggregator's if: always() job carries the required-context name; requiring a shard directly would let a skipped shard silently satisfy the ruleset."
+        },
+        {
+          "context": "rust tests (3/3)",
+          "aggregate": "rust workspace",
+          "reason": "Sharded lane inside the rust-workspace aggregator (docs/DESIGN-ci.md, \"Sharded pre-merge Linux evidence\"). Only the aggregator's if: always() job carries the required-context name; requiring a shard directly would let a skipped shard silently satisfy the ruleset."
+        },
+        {
+          "context": "mutation operators (1/3)",
+          "aggregate": "semantic mutation (changed)",
+          "reason": "Sharded lane inside the semantic-mutation aggregator (docs/DESIGN-ci.md, \"Sharded pre-merge Linux evidence\"). Only the aggregator's if: always() job carries the required-context name; requiring a shard directly would let a skipped shard silently satisfy the ruleset."
+        },
+        {
+          "context": "mutation operators (2/3)",
+          "aggregate": "semantic mutation (changed)",
+          "reason": "Sharded lane inside the semantic-mutation aggregator (docs/DESIGN-ci.md, \"Sharded pre-merge Linux evidence\"). Only the aggregator's if: always() job carries the required-context name; requiring a shard directly would let a skipped shard silently satisfy the ruleset."
+        },
+        {
+          "context": "mutation operators (3/3)",
+          "aggregate": "semantic mutation (changed)",
+          "reason": "Sharded lane inside the semantic-mutation aggregator (docs/DESIGN-ci.md, \"Sharded pre-merge Linux evidence\"). Only the aggregator's if: always() job carries the required-context name; requiring a shard directly would let a skipped shard silently satisfy the ruleset."
+        },
+        {
+          "context": "mutation mutants",
+          "aggregate": "semantic mutation (changed)",
+          "reason": "Sharded lane inside the semantic-mutation aggregator (docs/DESIGN-ci.md, \"Sharded pre-merge Linux evidence\"). Only the aggregator's if: always() job carries the required-context name; requiring a shard directly would let a skipped shard silently satisfy the ruleset."
+        }
+      ]
+    }
+  ]
+}

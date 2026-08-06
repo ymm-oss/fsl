@@ -268,10 +268,15 @@ domain InvalidValueObject {
 
 ",
     );
+    // Since #710 the invariant is rejected for having no executable lowering
+    // before its expression is ever resolved, so the fail-closed diagnostic
+    // preempts the unknown-symbol one. Unknown symbols in value-object
+    // positions that *are* still lowered stay covered by `unused_default`
+    // below (field defaults) and by the effect-path case at the end.
     assert!(
         value_object
             .message
-            .contains("unknown domain symbol 'missing'")
+            .contains("value_object invariant 'Counter.bad' has no executable lowering")
     );
 
     let unused_default = lowering_error(
@@ -309,7 +314,14 @@ domain InvalidStale {
 }
 ",
     );
-    assert!(stale.message.contains("unknown domain symbol 'missing'"));
+    // Since #711, as with the value-object invariant above, the stale policy is
+    // rejected for having no executable lowering before its condition is
+    // resolved.
+    assert!(
+        stale
+            .message
+            .contains("on_stale 'Touched' has no executable lowering")
+    );
 
     let idempotency = lowering_error(
         r"

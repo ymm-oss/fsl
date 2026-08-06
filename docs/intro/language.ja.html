@@ -285,6 +285,16 @@ lowering します。domain の enum メンバーは lowering 時に名前空間
 aggregate 内で解決され、そのコマンドの <code>requires</code> 節の連言と、各拒否条件の否定に
 なります。未知のシンボル、aggregate をまたぐコマンド、型の不一致、未対応の呼び出し
 は、元の domain 式の位置で報告されます。</p>
+<p>saga の <code>compensation { when Trigger after After { emits ... } }</code> ブロックは、
+トリガーイベントフラグと <code>after</code> イベントフラグの<strong>両方</strong>でガードされたカーネル
+action へ lowering されます。つまり compensation は、両方のイベントが観測されて
+初めて発火します。生成されるイベントフラグは 1 遷移につき 1 つだけ立つ one-hot な
+観測なので、この二重ガードは単一の <code>decide</code> が両方のイベントを同一遷移で emit する
+場合にしか充足できません。トリガーイベントと after イベントが異なる一般的なケース
+(例えば、先の成功の後で起きた失敗によってトリガーされる compensation)は、現在の
+one-hot フラグ方式のもとでは構造的に無効化されており、<code>fslc verify</code> はこれを、
+after イベントを一度も観測していないトレースを黙って受理するのではなく、
+never-enabled action の警告として報告します。</p>
 <p>effect は <code>success_event</code>、<code>failure_event</code>、<code>timeout_event</code> により、完了イベントへ
 明示的な outcome role を割り当てられます。これらの宣言が分類の正規契約であり、
 イベント名に <code>fail</code>、<code>cancel</code>、<code>timeout</code> が含まれていても、それぞれ <code>Succeeded</code>、
@@ -316,7 +326,18 @@ assurance/completeness を持つトップレベルの provenance グラフとし
 確立された Bool <code>false</code>、enum 先頭メンバー、範囲下限、external-placeholder <code>0</code> の
 選択を維持し、<code>implicit_initial_value</code> を出力します。この警告には、選択された値、
 理由、current/next の深刻度、フィールドのスパン、機械適用可能な明示初期化子の挿入
-が含まれます。次のエディションでは初期化子の明示が必須になります。</p>
+が含まれます。次のエディションでは初期化子の明示が必須になります。コンテナ型の
+フィールドにも暗黙の既定値があります — <code>Option&lt;T&gt;</code> は <code>none</code> を、<code>Set&lt;T&gt;</code> は
+<code>Set {}</code> を選び、トップレベルの <code>Map&lt;K, V&gt;</code> は密な per-key init
+(<code>forall k: K { field[k] = &lt;V の既定値&gt; }</code>)を選びます。<code>&lt;V の既定値&gt;</code> はこの同じ
+選択を再帰的に辿ります — ただし省略しても <code>implicit_initial_value</code> は
+<strong>出力されません</strong>。この警告のカバー範囲は上記の4つのスカラー形状で止まります。
+<code>Map</code> フィールドには、さらに2つの fail-closed ルールがあります: 明示の whole-<code>Map</code>
+既定値(<code>field: Map&lt;K, V&gt; = expr;</code>)は常に棄却されます(「whole-Map domain defaults
+are not supported」)。サポートされる <code>Map</code> の既定値は per-key 形式のみだからです。
+また、別の <code>Map</code> の値として nested された <code>Map</code> も棄却されます(「Map state requires
+explicit initialization through supported semantics」)。per-key init は <code>Map</code> 値型
+に対して選べる既定値を持たないからです。</p>
 <p>安定した fsl-domain findings とネストされたカーネル結果(成功時は
 <code>verified_under_assumptions</code>)には <code>fslc domain check</code> を、aggregate/effect の
 サマリーには <code>fslc domain analyze</code> を、生成されたカーネル FSL のデバッグビューの
@@ -800,8 +821,9 @@ fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, count
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
-               [--property &lt;Name&gt;]               # check one named property in isolation —
-                                                 #   invariant / trans / leadsTo / reachable (for probing)
+               [--property &lt;Name&gt;]               # check one named property obligation —
+                                                 #   invariant / trans / leadsTo / reachable;
+                                                 #   induction の trans 選択は全 invariant を保持
                [--exclude-property &lt;Name&gt;]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc sweep     &lt;file.fsl&gt; --instances E=lo..hi --depth lo..hi [--property Name]
@@ -907,6 +929,14 @@ Public Kernel v2 はオプトインで、
 「has no response scenario within depth K」になります。両者は混同されません。</p>
 <p><code>verify --property Name</code> は invariant、<code>trans</code>、<code>leadsTo</code>、<code>reachable</code> の宣言を
 横断して解決し、指名されたプロパティ種別だけを単独で検査します。
+ただし induction には依存関係に関する規則が 1 つあります:
+<code>--engine induction --property &lt;trans&gt;</code> では、指名した <code>trans</code> だけが遷移の証明義務に
+なりますが、すべてのユーザー invariant と暗黙の型境界はベースケースと induction
+仮定に残ります。これにより、確立済みの状態 invariant に依存する 2 状態安全性の証明を
+維持し、選択実行のその遷移に対する verdict を all-properties induction 実行と一致させます。
+既存の <code>--property &lt;invariant&gt;</code> の挙動は変更しません: sibling invariant は保持せず、
+指名した invariant だけにモデルを制限します。induction selector は、選択された
+<code>leadsTo</code> と <code>reachable</code> を引き続き usage error として拒否します。
 <code>--exclude-property Name</code> は繰り返し指定でき、種別を横断する逆操作として機能します:
 指名された invariant、<code>trans</code>、<code>leadsTo</code>、<code>reachable</code> プロパティを、実行と、検査済み
 プロパティの出力(<code>invariants_checked</code>、<code>transitions_checked</code>、<code>leads_to</code>、

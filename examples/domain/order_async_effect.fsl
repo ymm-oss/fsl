@@ -101,13 +101,6 @@ domain OrderAsyncEffect {
     }
   }
 
-  await PaymentResult {
-    waits_for one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
-    on PaymentCaptured -> PaymentCaptured
-    on PaymentFailed -> PaymentFailed
-    on PaymentCaptureTimedOut -> PaymentCaptureTimedOut
-  }
-
   projection OrderObservedState {
     from Order
     fields [status, payment_status]

@@ -46,6 +46,9 @@ check_automation() {
   # `rust workspace` and `semantic mutation` aggregators depend on
   # (docs/DESIGN-ci.md, "Sharded pre-merge Linux evidence").
   ./tools/check-shard-union.sh selftest
+  # Accepting/rejecting controls for the ruleset drift audit's compareRuleset/
+  # validateContract classifier (docs/DESIGN-ci.md, "Ruleset drift audit").
+  node --test .github/scripts/audit-ruleset-drift.test.mjs
 }
 
 case "${1:-all}" in

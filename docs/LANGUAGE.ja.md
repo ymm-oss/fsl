@@ -247,6 +247,17 @@ aggregate 内で解決され、そのコマンドの `requires` 節の連言と�
 なります。未知のシンボル、aggregate をまたぐコマンド、型の不一致、未対応の呼び出し
 は、元の domain 式の位置で報告されます。
 
+saga の `compensation { when Trigger after After { emits ... } }` ブロックは、
+トリガーイベントフラグと `after` イベントフラグの**両方**でガードされたカーネル
+action へ lowering されます。つまり compensation は、両方のイベントが観測されて
+初めて発火します。生成されるイベントフラグは 1 遷移につき 1 つだけ立つ one-hot な
+観測なので、この二重ガードは単一の `decide` が両方のイベントを同一遷移で emit する
+場合にしか充足できません。トリガーイベントと after イベントが異なる一般的なケース
+(例えば、先の成功の後で起きた失敗によってトリガーされる compensation)は、現在の
+one-hot フラグ方式のもとでは構造的に無効化されており、`fslc verify` はこれを、
+after イベントを一度も観測していないトレースを黙って受理するのではなく、
+never-enabled action の警告として報告します。
+
 effect は `success_event`、`failure_event`、`timeout_event` により、完了イベントへ
 明示的な outcome role を割り当てられます。これらの宣言が分類の正規契約であり、
 イベント名に `fail`、`cancel`、`timeout` が含まれていても、それぞれ `Succeeded`、
@@ -281,7 +292,18 @@ domain aggregate の状態フィールドが初期化子を省略した場合、
 確立された Bool `false`、enum 先頭メンバー、範囲下限、external-placeholder `0` の
 選択を維持し、`implicit_initial_value` を出力します。この警告には、選択された値、
 理由、current/next の深刻度、フィールドのスパン、機械適用可能な明示初期化子の挿入
-が含まれます。次のエディションでは初期化子の明示が必須になります。
+が含まれます。次のエディションでは初期化子の明示が必須になります。コンテナ型の
+フィールドにも暗黙の既定値があります — `Option<T>` は `none` を、`Set<T>` は
+`Set {}` を選び、トップレベルの `Map<K, V>` は密な per-key init
+(`forall k: K { field[k] = <V の既定値> }`)を選びます。`<V の既定値>` はこの同じ
+選択を再帰的に辿ります — ただし省略しても `implicit_initial_value` は
+**出力されません**。この警告のカバー範囲は上記の4つのスカラー形状で止まります。
+`Map` フィールドには、さらに2つの fail-closed ルールがあります: 明示の whole-`Map`
+既定値(`field: Map<K, V> = expr;`)は常に棄却されます(「whole-Map domain defaults
+are not supported」)。サポートされる `Map` の既定値は per-key 形式のみだからです。
+また、別の `Map` の値として nested された `Map` も棄却されます(「Map state requires
+explicit initialization through supported semantics」)。per-key init は `Map` 値型
+に対して選べる既定値を持たないからです。
 
 安定した fsl-domain findings とネストされたカーネル結果(成功時は
 `verified_under_assumptions`)には `fslc domain check` を、aggregate/effect の
@@ -718,8 +740,9 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
-               [--property <Name>]               # check one named property in isolation —
-                                                 #   invariant / trans / leadsTo / reachable (for probing)
+               [--property <Name>]               # check one named property obligation —
+                                                 #   invariant / trans / leadsTo / reachable;
+                                                 #   induction の trans 選択は全 invariant を保持
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
@@ -831,6 +854,14 @@ Public Kernel v2 はオプトインで、
 
 `verify --property Name` は invariant、`trans`、`leadsTo`、`reachable` の宣言を
 横断して解決し、指名されたプロパティ種別だけを単独で検査します。
+ただし induction には依存関係に関する規則が 1 つあります:
+`--engine induction --property <trans>` では、指名した `trans` だけが遷移の証明義務に
+なりますが、すべてのユーザー invariant と暗黙の型境界はベースケースと induction
+仮定に残ります。これにより、確立済みの状態 invariant に依存する 2 状態安全性の証明を
+維持し、選択実行のその遷移に対する verdict を all-properties induction 実行と一致させます。
+既存の `--property <invariant>` の挙動は変更しません: sibling invariant は保持せず、
+指名した invariant だけにモデルを制限します。induction selector は、選択された
+`leadsTo` と `reachable` を引き続き usage error として拒否します。
 `--exclude-property Name` は繰り返し指定でき、種別を横断する逆操作として機能します:
 指名された invariant、`trans`、`leadsTo`、`reachable` プロパティを、実行と、検査済み
 プロパティの出力(`invariants_checked`、`transitions_checked`、`leads_to`、

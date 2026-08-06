@@ -248,6 +248,18 @@ the negation of each rejection condition. Unknown symbols, cross-aggregate
 commands, type mismatches, and unsupported calls are reported at the original
 domain expression.
 
+A saga `compensation { when Trigger after After { emits ... } }` block lowers
+to a kernel action guarded by BOTH the trigger event flag and the `after`
+event flag, so the compensation only fires once both events have been
+observed. Because generated event flags are a one-hot, one-step observation,
+this dual guard is satisfiable only when a single `decide` emits both events
+in the same transition; the common case where the trigger and after events
+differ (for example, a compensation triggered by a later failure after an
+earlier success) is structurally disabled under the current flag scheme, and
+`fslc verify` reports the disabled compensation action as a never-enabled
+action warning rather than silently accepting a trace that never observed the
+`after` event.
+
 An effect can assign completion events explicit outcome roles with
 `success_event`, `failure_event`, and `timeout_event`. These declarations are the
 authoritative classification: they lower to `Succeeded`, `Failed`, and `TimedOut`
@@ -286,7 +298,19 @@ preserves the established Bool `false`, enum first-member, range lower-bound, or
 external-placeholder `0` choice and emits `implicit_initial_value`. The warning
 contains the selected value, reason, current/next severity, field span, and a
 machine-applicable explicit-initializer insertion. The next edition requires the
-initializer to be explicit.
+initializer to be explicit. Container-typed fields also get an implicit
+default — `Option<T>` selects `none`, `Set<T>` selects `Set {}`, and a
+top-level `Map<K, V>` selects a dense per-key init
+(`forall k: K { field[k] = <V's default> }`), where `<V's default>` recurses
+through this same selection — but omitting one does **not** emit
+`implicit_initial_value`; that warning's coverage stops at the four scalar
+shapes above. `Map` fields carry two additional fail-closed rules: an explicit
+whole-`Map` default (`field: Map<K, V> = expr;`) is always rejected
+("whole-Map domain defaults are not supported") because the per-key form is the
+only supported `Map` default, and a `Map` nested as another `Map`'s value is
+rejected too ("Map state requires explicit initialization through supported
+semantics") because the per-key init has no default to select for a `Map`
+value type.
 
 Use `fslc domain check` for stable fsl-domain findings and the nested kernel
 result (`verified_under_assumptions` on success), `fslc domain analyze` for the
@@ -740,8 +764,9 @@ fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexa
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
-               [--property <Name>]               # check one named property in isolation —
-                                                 #   invariant / trans / leadsTo / reachable (for probing)
+               [--property <Name>]               # check one named property obligation —
+                                                 #   invariant / trans / leadsTo / reachable;
+                                                 #   induction keeps all invariants for a selected trans
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
@@ -855,6 +880,16 @@ two are never conflated.
 
 `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
 `reachable` declarations and checks only the named property kind in isolation.
+There is one induction-specific dependency rule: with
+`--engine induction --property <trans>`, the named `trans` is the only transition
+obligation, but all user invariants and implicit type bounds remain in the base
+case and the induction hypothesis. This preserves proofs whose two-state safety
+argument depends on established state invariants and makes the selected
+transition's verdict match the same transition in an all-properties induction
+run. Existing `--property <invariant>` behavior is unchanged: it still restricts
+the model to that invariant rather than retaining sibling invariants. The
+induction selector continues to reject selected `leadsTo` and `reachable`
+properties with a usage error.
 `--exclude-property Name` is repeatable and acts as the cross-kind inverse:
 it removes named invariants, `trans`, `leadsTo`, and `reachable` properties
 from the run and from checked-property outputs (`invariants_checked`,
