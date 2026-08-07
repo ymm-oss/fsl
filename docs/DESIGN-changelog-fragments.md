@@ -321,6 +321,18 @@ detects the failure it exists for, alongside its accepting fixture.
    three fragments must be rejected with `fragment-dropped` naming the dropped file; a sham that
    copies only each fragment's first line must be rejected too. The accepting fixture is the
    faithful aggregation of the same three, including one multi-line fragment.
+
+   **Implementation correction (S4-1; review, #737, comment 2026-08-07): "reaches" must mean
+   per-bullet identity, not substring containment.** The original predicate checked only that
+   each fragment's rendered block appeared *somewhere* in the produced text and that the
+   top-level bullet count matched the fragment count. Both hold for an aggregator that drops
+   fragment A (body `Fixed (#1): a.`) and emits fragment B (body `Fixed (#1): a.\nmore
+   detail.`) **twice**: the bullet count is still 2-for-2, and A's entire rendered block is a
+   byte-for-byte prefix of B's, so the substring scan finds it — inside the duplicate, not in
+   A's own position. `verify_conservation` now compares bullet *i* of the produced text against
+   `render_fragment` of fragment *i* in the declared sort order, position for position; the
+   dropped fragment's own position no longer holds its own block, so it fails. This sham is a
+   third required rejecting fixture, alongside the dropping and truncating ones above.
 6. **Nonconforming fragment name.** The only shape control the set otherwise lacks. A file under
    `changelog.d/` whose name has no leading digits, or whose `<category>` is outside the
    declared set, has no defined id and no defined sort position — controls 2 and 3 are both
