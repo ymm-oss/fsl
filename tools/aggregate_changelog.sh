@@ -263,6 +263,49 @@ fragment_is_empty() {
   [ -z "$body" ]
 }
 
+# Rejects a fragment body shape that would corrupt render_fragment's output
+# even though the fragment itself is non-empty and conservation would still
+# see its bytes reach the section -- content-scoped, so it complements
+# control 5 (which only checks that content is conserved) and control 1
+# (which only checks that content exists) rather than duplicating either.
+# Two shapes are named because they were observed as concrete rendering
+# hazards, not enumerated exhaustively: a CRLF line ending survives as a
+# literal `\r` inside the Markdown file (this repository's fragments and
+# CHANGELOG.md are LF-only); a body whose first line already starts with a
+# Markdown block marker renders wrong once the aggregator's own "- "/"  "
+# markers are added in front of it -- `- ` or `* ` doubles the list marker
+# (`- - like this`), and `#` turns a bullet into a bulleted heading
+# (`- ### Added`) instead of the heading the author's fragment content
+# looks like it should have been.
+validate_fragment_hygiene() {
+  local file="$1" body first_line
+  if LC_ALL=C grep -qU $'\r' "$file" 2>/dev/null; then
+    fail "changelog-fragment-hygiene-invalid: $file (contains a CRLF line ending; fragments must be LF-only)"
+  fi
+  body="$(trimmed_fragment_body "$file")"
+  [ -z "$body" ] && return 0
+  first_line="${body%%$'\n'*}"
+  case "$first_line" in
+    '- '*|'* '*|'+ '*)
+      fail "changelog-fragment-hygiene-invalid: $file (body starts with a Markdown list marker, which would double up under the aggregator's own '- ')"
+      ;;
+    '#'*)
+      fail "changelog-fragment-hygiene-invalid: $file (body starts with a Markdown heading marker, which would render as a bulleted heading)"
+      ;;
+  esac
+}
+
+validate_fragment_hygiene_all() {
+  local dir="$1"
+  local -a files=()
+  local f
+  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$(list_fragment_files "$dir")"
+  [ "${#files[@]}" -eq 0 ] && return 0
+  for f in "${files[@]}"; do
+    validate_fragment_hygiene "$dir/$f"
+  done
+}
+
 # Renders one fragment's trimmed body as a single Markdown bullet: "- " on
 # the first line, "  " on every subsequent non-blank line, blank lines left
 # blank. This is the only transformation control 5's "reaches" predicate is
@@ -552,6 +595,7 @@ check() {
   local dir="${1:-changelog.d}"
   validate_fragment_names "$dir"
   check_duplicates "$dir"
+  validate_fragment_hygiene_all "$dir"
   echo "aggregate_changelog: check PASS -- every fragment in '$dir' has a conforming name and no duplicate (id, category)"
 }
 
@@ -559,6 +603,7 @@ check_pr() {
   local dir="${1:-changelog.d}"
   validate_fragment_names "$dir"
   check_duplicates "$dir"
+  validate_fragment_hygiene_all "$dir"
   check_missing_or_empty_fragment
   check_direct_edit
   echo "aggregate_changelog: check-pr PASS"
@@ -592,6 +637,7 @@ release() {
 
   validate_fragment_names "$fragdir"
   check_duplicates "$fragdir"
+  validate_fragment_hygiene_all "$fragdir"
 
   local -a sorted=()
   local f
@@ -904,6 +950,20 @@ selftest_control1() {
   else
     st_report "control1 rejecting: whitespace-only fragment is detected empty" fail 0
   fi
+
+  # Body hygiene (review finding S4-4): non-empty, but a shape that would
+  # corrupt the rendered bullet.
+  printf 'Added (#1): normal content.\n' >"$tmp/hygienic.md"
+  st_expect_pass "control1 accepting: hygienic fragment body" validate_fragment_hygiene "$tmp/hygienic.md"
+  printf 'Added (#1): a line.\r\nAnother line.\r\n' >"$tmp/crlf.md"
+  st_expect_fail "control1 rejecting: CRLF line ending (changelog-fragment-hygiene-invalid)" \
+    validate_fragment_hygiene "$tmp/crlf.md"
+  printf -- '- Added (#1): looks like a bullet already.\n' >"$tmp/leading-dash.md"
+  st_expect_fail "control1 rejecting: body starts with a list marker (changelog-fragment-hygiene-invalid)" \
+    validate_fragment_hygiene "$tmp/leading-dash.md"
+  printf '### Added\n' >"$tmp/leading-heading.md"
+  st_expect_fail "control1 rejecting: body starts with a heading marker (changelog-fragment-hygiene-invalid)" \
+    validate_fragment_hygiene "$tmp/leading-heading.md"
   rm -rf "$tmp"
 }
 
