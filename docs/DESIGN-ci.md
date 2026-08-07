@@ -186,10 +186,26 @@ candidate needs the same evidence sweep: name every path that reads it and show 
 unfiltered pre-merge or fail-loud coverage. `skills/**` and `docs/**` must never join it:
 `skills/fsl/reference.md` moves with language features under the coupled-change contract,
 `docs/LANGUAGE*.md` feeds the site-reference freshness gate, and product-gate literate
-doc-contract tests read documentation files directly. One such growth is already accepted but
-not yet implemented: `docs/DESIGN-changelog-fragments.md` adds a `changelog.d/` directory
-prefix and names its readers' coverage (`release.yml` fail-loud, the merge-readiness fragment
-checker unfiltered); the amendment to this section lands with that implementation.
+doc-contract tests read documentation files directly.
+
+`changelog.d/` joined the exempt list as a directory prefix
+(`docs/DESIGN-changelog-fragments.md`, issue #737): `tools/check-product-gate-scope.sh`'s
+`is_exempt_path` matches `changelog.d/*`, with the filename-prefix near-miss `changelog.dx/y`
+still classifying as `product` (the same shape as the existing `CLAUDE.md.d/x` case). Its two
+readers keep the coverage this decision requires of every exempt path:
+
+- `.github/workflows/release.yml` reads it fail-loud, at tag time, before "Extract release
+  notes": a fragment still present under `changelog.d/` fails the guard
+  (`stale-fragments-present`) rather than silently shipping notes with a missing entry.
+- `.github/workflows/merge-readiness.yml`'s `automation contracts` job reads it unfiltered, on
+  every pull request and merge-group event, via `tools/aggregate_changelog.sh check-pr`: a
+  fragment's name and (id, category) uniqueness are validated regardless of the exemption
+  above, and a product-surface change with no corresponding fragment fails closed
+  (`changelog-fragment-missing`) even when every other changed path is exempt.
+
+Neither reader is ever skipped by this exemption: it only ever skips the four **heavy**
+product-gate jobs (`rust workspace`, `WASM`, `semantic mutation`, `FSL Logic Test`), never
+`merge readiness` or `release.yml`.
 
 ### Sharded pre-merge Linux evidence
 

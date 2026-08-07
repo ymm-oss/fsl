@@ -2,7 +2,9 @@
 
 # Changelog fragments: reduce shared-edit merge conflicts on `CHANGELOG.md` only
 
-Status: Accepted (evaluation outcome of the #737 spike; implementation is a separate task)
+Status: Accepted (evaluation outcome of the #737 spike). Implementation lands in the pull
+request that also corrects this document's migration section below (#737, comment
+2026-08-07) — see that correction for what changed between acceptance and implementation.
 
 ## Decision
 
@@ -143,7 +145,19 @@ Measured at the baseline: `## [Unreleased]`'s 460-line body contains **zero `###
 and `## [4.2.0]` contains zero as well. Categories are expressed as the **lead word of each
 bullet** — `- Added (#707):`, `- Fixed (#713):`, `- Documented (#722):`, `- Decided (…):` — and
 that vocabulary is already wider than Keep a Changelog's six, since `Documented` and `Decided`
-are not among them. Two consequences the specification must honour:
+are not among them.
+
+**Implementation correction (this pull request; #737, comment 2026-08-07).** The four examples
+above understated the set's actual size. Re-measured against the `[Unreleased]` body at
+implementation time (620 lines, 27 top-level bullets): the lead-word vocabulary is **ten** words,
+not four — `Added`, `Decided`, `Documented`, `Exempted`, `Fixed`, `Replaced`, `Required`,
+`Reverted`, `Sharded`, `Unified` — and `### ` subheadings remain zero, confirming the "bullets
+only" requirement below still holds. `tools/aggregate_changelog.sh`'s `DECLARED_CATEGORY_ORDER`
+and `changelog.d/README.md` are the implementation and the authoritative human-facing copy of
+this exact ten-word set and its declared order; growing it follows the same contract-change
+discipline as growing `tools/check-product-gate-scope.sh`'s exempt-path list (see
+`docs/DESIGN-ci.md`, "Agent-configuration exemption"). Two consequences the specification must
+honour:
 
 - `<category>` is the bullet lead word, and its permitted set is **this repository's**, extracted
   from the existing `[Unreleased]` and released sections rather than imported. Forcing a mapping
@@ -226,13 +240,28 @@ detects the failure it exists for, alongside its accepting fixture.
    rejecting fixtures are one diff of each kind. This check is what keeps authority single
    (next section).
 
-   **Two diffs must be excluded, or the check blocks its own rollout.** The migration pull
-   request converts the existing `[Unreleased]` body — 442 lines at the measurement
-   revision — into fragments, and the first post-migration release moves whatever remains
-   under a version heading. Both are deletions from the `[Unreleased]` body and both would
-   be rejected by the rule as stated. The exclusion must be explicit and narrow: a diff
-   that empties the `[Unreleased]` body while adding the same content under `changelog.d/`
-   or under a new `## [X.Y.Z]` heading, and nothing else. Anything broader reopens the
+   **Implementation correction (this pull request; #737, comment 2026-08-07): the migration
+   pull request does not convert the existing body, so only one exclusion is needed, not two.**
+   This section originally read: "The migration pull request converts the existing
+   `[Unreleased]` body — 442 lines at the measurement revision — into fragments, and the first
+   post-migration release moves whatever remains under a version heading. Both are deletions
+   from the `[Unreleased]` body and both would be rejected by the rule as stated," and asked
+   for two exclusions accordingly. Measured at implementation time, that migration cannot work:
+   of the `[Unreleased]` body's 27 top-level bullets (620 lines by then), only 11 are in
+   `- <Lead> (#NNN):` form, from which a fragment's required id can be parsed; the other 16 are
+   free prose with no `(#NNN)` at all (`- Fixed issue #697: …`, `- Sharded the two heaviest
+   pre-merge …`, and 14 more), so control 6 (nonconforming fragment name, which rejects a name
+   with no leading digits) would reject every fragment the conversion tried to produce for them.
+   **The migration pull request instead creates `changelog.d/` and routes only new entries
+   through it, leaving the existing `[Unreleased]` body untouched**; the first post-migration
+   release still moves that body under a version heading (`docs/RELEASE.md` step 7) in the same
+   step that aggregates whatever has accumulated under `changelog.d/` by then, which is exactly
+   the second of the two diffs this section originally named. Only that one exclusion is needed:
+   a diff that empties the `[Unreleased]` body while adding the same content under a new
+   `## [X.Y.Z]` heading, and nothing else. The first exclusion (emptying the body into
+   `changelog.d/`) is removed rather than kept unused — a narrower exclusion reopens less of the
+   direction this control closes than a broader one that this implementation never exercises.
+   Anything broader than the one remaining exclusion reopens the
    direction this control exists to close. The `## [Unreleased]` heading line itself is
    outside the body and therefore unprotected; deleting or renaming it would unanchor every
    later check, so the rule must reject a diff that touches that line too.
