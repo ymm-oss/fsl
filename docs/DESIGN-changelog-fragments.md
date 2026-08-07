@@ -5,6 +5,11 @@
 Status: Accepted (evaluation outcome of the #737 spike). Implementation lands in the pull
 request that also corrects this document's migration section below (#737, comment
 2026-08-07) — see that correction for what changed between acceptance and implementation.
+An independent review of that implementation found three blocking gaps between the controls
+as specified and as implemented (a release pull request could not merge; control 4's diff
+base disagreed with control 1's after any release landed on `main`; a fragment in a
+subdirectory was silently lost) plus several narrower corrections, addressed inline below
+under their "S2-N"/"S3-N"/"S4-N" labels (#737, comment 2026-08-07, second round).
 
 ## Decision
 
@@ -345,6 +350,24 @@ detects the failure it exists for, alongside its accepting fixture.
    direction this control exists to close. The `## [Unreleased]` heading line itself is
    outside the body and therefore unprotected; deleting or renaming it would unanchor every
    later check, so the rule must reject a diff that touches that line too.
+
+   **Record correction (S3-2; review, #737, comment 2026-08-07): the implemented exclusion is
+   wider than "release move, and nothing else" as this section states it, and the
+   implementation is right; this paragraph was narrower than the code.** `check_direct_edit`
+   additionally (a) drops a trailing contiguous block of `[X]: url` Markdown link-reference
+   lines from both the base and head snapshots before comparing everything after the moved
+   section (`strip_link_ref_tail`), and (b) never compares anything **before** the
+   `## [Unreleased]` heading at all — only the body inside it and everything from the next
+   `## [` heading onward are checked. Both are necessary, not scope creep: `docs/RELEASE.md`
+   lines 105–106 require updating the `[Unreleased]`/`[X.Y.Z]` link references in the same
+   release commit that moves the body, which is itself a change to content after the moved
+   section — without (a), every real release would fail this control on its own required
+   link-reference update. (b) is unexercised in practice (nothing precedes `[Unreleased]`
+   except the file's title and intro, which no migration or release step touches) but is a
+   real gap: a diff that only edits the file's title or intro line is not checked by this
+   control at all. Neither weakens what this control exists to stop — a fragment's authority
+   still cannot be duplicated or erased by a direct `[Unreleased]` edit — so this record, not
+   the implementation, is the thing corrected here: the code was already right.
 5. **Silent drop at aggregation (conservation).** Controls 1–4 leave one direction open: an
    aggregation that deletes a fragment whose content never reaches the version section. At
    release `changelog.d/` ends up empty, so `stale-fragments-present` stays silent, and the
