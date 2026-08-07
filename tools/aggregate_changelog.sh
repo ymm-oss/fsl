@@ -542,6 +542,21 @@ check_direct_edit() {
   local changelog="${1:-CHANGELOG.md}"
   : "${BASE_SHA:?BASE_SHA is required}"
   : "${HEAD_SHA:?HEAD_SHA is required}"
+  # Diff against the merge base, not BASE_SHA's tip: this repository's own
+  # convention for a pull-request/merge-group diff is three-dot
+  # (`git diff "$BASE_SHA...$HEAD_SHA"`, used in `ci.yml` and by
+  # classify_product_diff's caller above), which compares against
+  # `git merge-base BASE_SHA HEAD_SHA`, not BASE_SHA itself. BASE_SHA is
+  # `github.event.pull_request.base.sha` -- the base branch's *current* tip,
+  # which moves every time something else lands on it. Reading CHANGELOG.md
+  # straight from BASE_SHA therefore compares this branch's unchanged
+  # [Unreleased] body against a DIFFERENT [Unreleased] body -- the one a
+  # later release already moved under a version heading -- and every open
+  # pull request that never touched CHANGELOG.md fails
+  # `changelog-direct-edit-forbidden` the moment a release lands on main.
+  local base_sha
+  base_sha="$(git merge-base "$BASE_SHA" "$HEAD_SHA" 2>/dev/null)" \
+    || fail "changelog-direct-edit-forbidden: cannot compute the merge base of $BASE_SHA and $HEAD_SHA"
   local tmp
   tmp="$(mktemp -d)"
   # `trap ... RETURN` is a single global registration, not scoped to this
@@ -550,7 +565,7 @@ check_direct_edit() {
   # aborting with "unbound variable" under `set -u`. Clearing it inside its
   # own body makes it fire exactly once.
   trap 'rm -rf "$tmp"; trap - RETURN' RETURN
-  git show "$BASE_SHA:$changelog" >"$tmp/base.md" 2>/dev/null || fail "changelog-direct-edit-forbidden: cannot read $changelog at $BASE_SHA"
+  git show "$base_sha:$changelog" >"$tmp/base.md" 2>/dev/null || fail "changelog-direct-edit-forbidden: cannot read $changelog at $base_sha"
   git show "$HEAD_SHA:$changelog" >"$tmp/head.md" 2>/dev/null || fail "changelog-direct-edit-forbidden: cannot read $changelog at $HEAD_SHA"
   check_direct_edit_files "$tmp/base.md" "$tmp/head.md"
 }
@@ -1056,6 +1071,47 @@ selftest_control4() {
   local head_sha_direct; head_sha_direct="$(cd "$repo" && git rev-parse HEAD)"
   st_expect_fail "control4b end-to-end rejecting: check-pr on a direct [Unreleased] edit (changelog-direct-edit-forbidden)" \
     bash -c "cd '$repo' && BASE_SHA='$head_sha_missing' HEAD_SHA='$head_sha_direct' '$SELF' check-pr"
+
+  # End-to-end (review finding S2-2, #737, comment 2026-08-07): a feature
+  # branch that never touches CHANGELOG.md must still pass check-pr after a
+  # release has landed on the branch it forked from and moved BASE_SHA's own
+  # CHANGELOG.md to a different [Unreleased] body. Before this fix,
+  # check_direct_edit read CHANGELOG.md straight from BASE_SHA (the base
+  # branch's current tip) instead of the merge base, so this failed
+  # `changelog-direct-edit-forbidden` for an edit the branch never made --
+  # reproduced live before the fix, in a repo built exactly this way.
+  local mbrepo="$tmp/mergebase-repo"
+  mkdir -p "$mbrepo/rust" "$mbrepo/changelog.d"
+  (
+    cd "$mbrepo"
+    git init -q -b main
+    git config user.email "selftest@example.invalid"
+    git config user.name "selftest"
+    printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n- Added (#1): one.\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n' >CHANGELOG.md
+    printf 'fn main() {}\n' >rust/lib.rs
+    printf 'Added (#4): a prior fragment.\n' >changelog.d/4-x.added.md
+    git add -A
+    git commit -q -m base
+  )
+  (
+    cd "$mbrepo"
+    git checkout -q -b feature
+    printf 'fn main() { /* feature work, no CHANGELOG.md touch */ }\n' >rust/lib.rs
+    printf 'Added (#5): a feature.\n' >changelog.d/5-x.added.md
+    git add -A
+    git commit -q -m "feature work"
+  )
+  local mb_feature_sha; mb_feature_sha="$(cd "$mbrepo" && git rev-parse HEAD)"
+  (
+    cd "$mbrepo"
+    git checkout -q main
+    "$SELF" release --version 1.1.0 --date 2026-08-07
+    git add -A
+    git commit -q -m "chore(release): v1.1.0"
+  )
+  local mb_new_main_sha; mb_new_main_sha="$(cd "$mbrepo" && git rev-parse HEAD)"
+  st_expect_pass "control4b end-to-end accepting: base advanced by a release, feature branch never touched CHANGELOG.md" \
+    bash -c "cd '$mbrepo' && BASE_SHA='$mb_new_main_sha' HEAD_SHA='$mb_feature_sha' '$SELF' check-pr"
 
   rm -rf "$tmp"
 }
