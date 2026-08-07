@@ -154,10 +154,38 @@ not four — `Added`, `Decided`, `Documented`, `Exempted`, `Fixed`, `Replaced`, 
 `Reverted`, `Sharded`, `Unified` — and `### ` subheadings remain zero, confirming the "bullets
 only" requirement below still holds. `tools/aggregate_changelog.sh`'s `DECLARED_CATEGORY_ORDER`
 and `changelog.d/README.md` are the implementation and the authoritative human-facing copy of
-this exact ten-word set and its declared order; growing it follows the same contract-change
-discipline as growing `tools/check-product-gate-scope.sh`'s exempt-path list (see
-`docs/DESIGN-ci.md`, "Agent-configuration exemption"). Two consequences the specification must
-honour:
+this exact set and its declared order; growing it follows the same contract-change discipline
+as growing `tools/check-product-gate-scope.sh`'s exempt-path list (see `docs/DESIGN-ci.md`,
+"Agent-configuration exemption"). Two consequences the specification must honour:
+
+**Vocabulary correction (S3-3; review, #737, comment 2026-08-07): `Changed` belongs in the set,
+and the instruction telling authors not to add it was wrong on this repository's own terms.**
+The set above was measured only over `[Unreleased]`'s current, subheading-free body. Measured
+against `CHANGELOG.md`'s complete history instead (`git grep -c '^### ' CHANGELOG.md` → 77
+subheadings total), `Changed` accounts for 12 of them — more than seven of the ten words already
+in the set — with `Fixed` (27) and `Added` (21) the only more frequent ones; `Documentation` (5)
+and `Removed` (1) are the only other Keep-a-Changelog-shaped names present, and neither
+recurs the way `Changed` does. Those 12 predate this mechanism's bullet-lead-word convention —
+they are `### ` subheadings from the file's earlier Keep-a-Changelog-style sections, not bullet
+lead words inside a current, subheading-free section — but the word itself names a real,
+recurring category of change in this project's own history, on the same standing as the other
+ten. **Decision: widen the set.** `changed` joins `DECLARED_CATEGORY_ORDER`, positioned right
+after `added` (matching Keep a Changelog's own Added-then-Changed convention, even though the
+rest of this vocabulary is not Keep a Changelog's), for a contributor whose change modifies
+existing behavior without being a defect fix (`fixed`), a mechanism swap (`replaced`), or an
+undo (`reverted`). The alternative — keep excluding it — would need a criterion that reads
+honestly next to 12 real occurrences in this project's own file, and "unmeasured" is not that
+criterion: it is the fact this correction fixes. Excluding a word this repository has actually
+used before, solely because its past instances used a different rendering mechanism
+(subheadings, before this mechanism existed to render bullets instead), is exactly the "routine
+false positive" reversal condition (a) below treats as grounds for no-go — a reasonable,
+previously-used lead word rejected by control 6 for a reason no contributor filing that
+fragment would find legible. `Removed` (1 occurrence, four major versions ago) is left out on
+the same standard applied honestly: one historical instance is not "real, recurring usage" the
+way 12 current-era occurrences are, and nothing in this mechanism's post-Rust history has needed
+it; it can be added the same way, from real usage, if that changes. The set is therefore
+**eleven** words, and `changelog.d/README.md` documents `changed` on the same footing as the
+other ten.
 
 - `<category>` is the bullet lead word, and its permitted set is **this repository's**, extracted
   from the existing `[Unreleased]` and released sections rather than imported. Forcing a mapping
