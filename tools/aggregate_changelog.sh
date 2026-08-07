@@ -173,8 +173,31 @@ list_fragment_files() {
   done
 }
 
+# Rejects any non-README `*.md` file under $1 that is not a direct child of
+# $1. Subdirectories are not a supported fragment shape: `changelog.d/*.md`
+# is a bash glob and `*` crosses `/`, so `changelog.d/sub/2-x.added.md`
+# satisfies is_top_level_fragment_path's caller-side sibling check in
+# control 1 (a naive `[[ path == changelog.d/*.md ]]`) while
+# `list_fragment_files` -- and therefore controls 2, 3, 6, `check-stale`, and
+# `release`'s aggregation -- never sees it at all. The entry would be
+# silently lost: the exact failure control 5 exists to prevent, happening
+# entirely outside control 5's reach (there is nothing to compare a
+# produced section against when the fragment was never enumerated). Reject
+# it here, at the same earliest point control 6 rejects a nonconforming
+# name, with its own diagnostic naming the actual defect.
+reject_nested_fragments() {
+  local dir="$1" f rel
+  [ -d "$dir" ] || return 0
+  while IFS= read -r -d '' f; do
+    rel="${f#"$dir"/}"
+    [ "$(basename "$f")" = "README.md" ] && continue
+    fail "changelog-fragment-path-invalid: $dir/$rel (fragments must be direct children of $dir/, not in a subdirectory)"
+  done < <(find "$dir" -mindepth 2 -name '*.md' -print0 2>/dev/null)
+}
+
 validate_fragment_names() {
   local dir="$1"
+  reject_nested_fragments "$dir"
   local -a files=()
   local f
   while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$(list_fragment_files "$dir" | sort)"
@@ -354,12 +377,11 @@ split_bullets() {
 # order) must be byte-for-byte render_fragment's output for fragment *i* --
 # not merely "produced contains this block somewhere". A substring/
 # containment check (this function's previous shape) is satisfiable by an
-# aggregator that drops fragment A and emits fragment B twice, where A's
-# rendered block is a byte-for-byte prefix of B's: the bullet count still
-# matches and the substring scan still finds A's block -- inside the
-# duplicate, not in A's own position. Per-position identity closes that: the
-# dropped fragment's own position no longer holds its own block, so it
-# fails.
+# aggregator that drops one fragment and duplicates another whose rendered
+# block is a byte-for-byte prefix of the duplicate: the bullet count still
+# matches and the dropped fragment's block is still found -- inside the
+# duplicate. Per-position identity closes that: the dropped fragment's own
+# position no longer holds its own block, so it fails.
 verify_conservation() {
   local dir="$1" produced="$2"
   local -a sorted=()
@@ -445,30 +467,76 @@ is_product_surface_path() {
   esac
 }
 
+# A fragment path directly under $1 (top-level only -- see is_release_diff's
+# neighbor, reject_nested_fragments, for why `changelog.d/sub/x.added.md`
+# must NOT match here even though the bash glob `changelog.d/*.md` alone
+# would cross the `/`).
+is_top_level_fragment_path() {
+  case "$1" in
+    changelog.d/*/*) return 1 ;;
+    changelog.d/*.md) [ "$(basename "$1")" != "README.md" ] ;;
+    *) return 1 ;;
+  esac
+}
+
 # Reads "<status>\t<path>" lines (git diff --name-status shape) on stdin.
 # Fails `changelog-fragment-missing: <paths>` if any changed path is a
 # product surface and no fragment was added; the caller checks emptiness of
-# each added fragment separately (needs blob content, not just the diff).
+# each touched fragment separately (needs blob content, not just the diff).
+#
+# Release exclusion (docs/DESIGN-changelog-fragments.md, control 1): the
+# release commit itself (docs/RELEASE.md steps 4-7, committed together in
+# step 10) bumps product-surface files (`rust/Cargo.toml`, `rust/Cargo.lock`,
+# the domain characterization baseline) and *deletes* the fragments it
+# aggregates -- it never *adds* one, so the rule as stated cannot be
+# satisfied by the release process it must not block. The exclusion is
+# exactly as narrow as that shape: it fires only when this same diff both
+# deletes at least one top-level fragment (something was actually consumed)
+# and modifies `CHANGELOG.md` (the aggregation target). It does not itself
+# decide the diff IS a conforming release move -- that content-level
+# question (does the [Unreleased] body really move verbatim under a new
+# version heading, with nothing else touched?) is control 4's job
+# (check_direct_edit, run immediately after this check in check_pr), so a
+# diff that merely deletes a fragment and edits CHANGELOG.md for some other
+# reason still fails check-pr, just under `changelog-direct-edit-forbidden`
+# instead of `changelog-fragment-missing`.
 classify_product_diff() {
   local status path
-  local -a product=() added_fragments=()
+  local -a product=() added_fragments=() deleted_fragments=() check_fragments=()
+  local changelog_modified=0
   while IFS=$'\t' read -r status path; do
     [ -z "${status:-}" ] && continue
     if is_product_surface_path "$path"; then
       product+=("$path")
     fi
-    if [ "$status" = "A" ] && [[ "$path" == changelog.d/*.md ]] && [ "$(basename "$path")" != "README.md" ]; then
-      added_fragments+=("$path")
+    if [ "$path" = "CHANGELOG.md" ] && [ "$status" = "M" ]; then
+      changelog_modified=1
+    fi
+    if is_top_level_fragment_path "$path"; then
+      case "$status" in
+        A)
+          added_fragments+=("$path")
+          check_fragments+=("$path")
+          ;;
+        M)
+          check_fragments+=("$path")
+          ;;
+        D)
+          deleted_fragments+=("$path")
+          ;;
+      esac
     fi
   done
   if [ "${#product[@]}" -gt 0 ] && [ "${#added_fragments[@]}" -eq 0 ]; then
-    fail "changelog-fragment-missing: ${product[*]}"
+    if [ "${#deleted_fragments[@]}" -eq 0 ] || [ "$changelog_modified" -eq 0 ]; then
+      fail "changelog-fragment-missing: ${product[*]}"
+    fi
   fi
   # `"${arr[@]}"` on an empty array is an unbound-variable error under
   # `set -u` on bash < 4.4 (macOS's default bash is 3.2), so guard the
   # common empty case explicitly instead of relying on a modern bash.
-  if [ "${#added_fragments[@]}" -gt 0 ]; then
-    printf '%s\n' "${added_fragments[@]}"
+  if [ "${#check_fragments[@]}" -gt 0 ]; then
+    printf '%s\n' "${check_fragments[@]}"
   fi
 }
 
@@ -587,16 +655,21 @@ check_missing_or_empty_fragment() {
   status=$?
   set -e
   [ "$status" -eq 0 ] || exit 1
-  local -a added=()
+  # classify_product_diff prints both newly added fragments and fragments
+  # this diff *modifies*: emptiness must be checked on either, or a pull
+  # request that edits an existing fragment down to whitespace (status `M`,
+  # never `A`) passes silently -- the same failure control 1 exists to
+  # catch, just reached through an edit instead of an omission.
+  local -a to_check=()
   local f
   while IFS= read -r f; do
-    [ -n "$f" ] && added+=("$f")
+    [ -n "$f" ] && to_check+=("$f")
   done <<<"$diff_output"
-  [ "${#added[@]}" -eq 0 ] && return 0
+  [ "${#to_check[@]}" -eq 0 ] && return 0
   local tmp
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"; trap - RETURN' RETURN
-  for f in "${added[@]}"; do
+  for f in "${to_check[@]}"; do
     git show "$HEAD_SHA:$f" >"$tmp/frag.md" 2>/dev/null || fail "changelog-fragment-missing: cannot read $f at $HEAD_SHA"
     if fragment_is_empty "$tmp/frag.md"; then
       fail "changelog-fragment-empty: $f"
@@ -767,6 +840,20 @@ selftest_control6() {
   done
   st_expect_fail "control6 rejecting: no leading digits (foo-bar.added.md)" parse_fragment_name "foo-bar.added.md"
   st_expect_fail "control6 rejecting: undeclared category (691-x.chore.md)" parse_fragment_name "691-x.chore.md"
+
+  # Rejecting: a conforming-looking fragment name hidden in a subdirectory
+  # (review finding S2-3, #737, comment 2026-08-07). It satisfies control 1's
+  # shallow diff-path check and parse_fragment_name itself would happily
+  # accept its basename, but list_fragment_files never enumerates it, so
+  # without reject_nested_fragments it is invisible to controls 2, 3, and 6,
+  # to check-stale, and to release's aggregation -- the entry is silently
+  # lost with no diagnostic naming the cause.
+  mkdir -p "$tmp/sub"
+  st_setup_frag "$tmp/sub" "2-x.added.md" "Added (#2): x, hidden in a subdirectory."
+  st_expect_fail "control6 rejecting: fragment in a subdirectory (changelog-fragment-path-invalid)" \
+    reject_nested_fragments "$tmp"
+  st_expect_fail "control6 rejecting: validate_fragment_names also rejects a subdirectory fragment" \
+    validate_fragment_names "$tmp"
   rm -rf "$tmp"
 }
 
@@ -951,6 +1038,25 @@ selftest_control1() {
   st_expect_pass "control1 accepting: non-product-surface diff needs no fragment" \
     bash -c 'printf "M\tdocs/README.md\n" | classify_product_diff'
 
+  # Release exclusion (review finding S2-1, #737, comment 2026-08-07): the
+  # release commit bumps product-surface files and only *deletes* fragments
+  # (docs/RELEASE.md steps 4-7, one commit per step 10); it never adds one.
+  st_expect_pass "control1 accepting: release shape (product bump + fragment deletion + CHANGELOG.md modified)" \
+    bash -c 'printf "M\trust/Cargo.toml\nM\trust/Cargo.lock\nD\tchangelog.d/2-x.added.md\nM\tCHANGELOG.md\n" | classify_product_diff'
+  # The exclusion must be exactly as narrow as the release shape: a fragment
+  # deletion with no CHANGELOG.md edit is not a release (nothing aggregated
+  # it), and a CHANGELOG.md edit with no fragment deletion is not a release
+  # either (nothing was consumed) -- both must still fail closed.
+  st_expect_fail "control1 rejecting: fragment deleted but CHANGELOG.md untouched (not a release, changelog-fragment-missing)" \
+    bash -c 'printf "M\trust/Cargo.toml\nD\tchangelog.d/2-x.added.md\n" | classify_product_diff'
+  st_expect_fail "control1 rejecting: CHANGELOG.md touched but no fragment deleted (changelog-fragment-missing)" \
+    bash -c 'printf "M\trust/Cargo.toml\nM\tCHANGELOG.md\n" | classify_product_diff'
+  # A fragment hidden in a subdirectory must not count as coverage either
+  # (review finding S2-3): is_top_level_fragment_path excludes it, so this
+  # still fails exactly like the no-fragment case above.
+  st_expect_fail "control1 rejecting: only a nested fragment was added (changelog-fragment-missing)" \
+    bash -c 'printf "M\trust/fsl-core/src/lib.rs\nA\tchangelog.d/sub/2-x.added.md\n" | classify_product_diff'
+
   local tmp; tmp="$(mktemp -d)"
   printf 'Added (#1): real content.\n' >"$tmp/nonempty.md"
   printf '   \n\t\n' >"$tmp/whitespace-only.md"
@@ -1072,6 +1178,42 @@ selftest_control4() {
   st_expect_fail "control4b end-to-end rejecting: check-pr on a direct [Unreleased] edit (changelog-direct-edit-forbidden)" \
     bash -c "cd '$repo' && BASE_SHA='$head_sha_missing' HEAD_SHA='$head_sha_direct' '$SELF' check-pr"
 
+  # End-to-end (review finding S2-1, #737, comment 2026-08-07): a full
+  # release pull request -- product-surface changes (rust/Cargo.toml,
+  # rust/Cargo.lock) and fragment deletions in the same diff, produced by
+  # the real `release` subcommand, exactly as docs/RELEASE.md steps 4-10
+  # commit it. Before this fix, this failed
+  # `changelog-fragment-missing: rust/Cargo.lock rust/Cargo.toml`, and the
+  # documented workaround of adding a dummy fragment only moved the failure
+  # to `check-stale` at tag time -- both reproduced live against this
+  # script, not asserted, while diagnosing the finding.
+  local relrepo="$tmp/release-repo"
+  mkdir -p "$relrepo/rust" "$relrepo/changelog.d"
+  (
+    cd "$relrepo"
+    git init -q
+    git config user.email "selftest@example.invalid"
+    git config user.name "selftest"
+    printf '[workspace.package]\nversion = "1.0.0"\n' >rust/Cargo.toml
+    printf 'lockfile v1\n' >rust/Cargo.lock
+    printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n- Added (#1): one.\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n' >CHANGELOG.md
+    printf 'Added (#2): a real fragment.\n' >changelog.d/2-x.added.md
+    git add -A
+    git commit -q -m base
+  )
+  local rel_base_sha; rel_base_sha="$(cd "$relrepo" && git rev-parse HEAD)"
+  (
+    cd "$relrepo"
+    printf '[workspace.package]\nversion = "1.1.0"\n' >rust/Cargo.toml
+    printf 'lockfile v1.1\n' >rust/Cargo.lock
+    "$SELF" release --version 1.1.0 --date 2026-08-07
+    git add -A
+    git commit -q -m "chore(release): v1.1.0"
+  )
+  local rel_head_sha; rel_head_sha="$(cd "$relrepo" && git rev-parse HEAD)"
+  st_expect_pass "control1 end-to-end accepting: check-pr on a real release pull request (product bump + fragment consumption)" \
+    bash -c "cd '$relrepo' && BASE_SHA='$rel_base_sha' HEAD_SHA='$rel_head_sha' '$SELF' check-pr"
+
   # End-to-end (review finding S2-2, #737, comment 2026-08-07): a feature
   # branch that never touches CHANGELOG.md must still pass check-pr after a
   # release has landed on the branch it forked from and moved BASE_SHA's own
@@ -1113,6 +1255,21 @@ selftest_control4() {
   st_expect_pass "control4b end-to-end accepting: base advanced by a release, feature branch never touched CHANGELOG.md" \
     bash -c "cd '$mbrepo' && BASE_SHA='$mb_new_main_sha' HEAD_SHA='$mb_feature_sha' '$SELF' check-pr"
 
+  # End-to-end (review finding S4-3, #737, comment 2026-08-07): editing an
+  # already-tracked fragment down to whitespace (status `M`, never `A`) must
+  # still fail. classify_product_diff previously only reported *added*
+  # fragments to the emptiness check.
+  (
+    cd "$mbrepo"
+    git checkout -q feature
+    printf '   \n' >changelog.d/5-x.added.md
+    git add -A
+    git commit -q -m "empty out an existing fragment"
+  )
+  local mb_emptied_sha; mb_emptied_sha="$(cd "$mbrepo" && git rev-parse HEAD)"
+  st_expect_fail "control1 end-to-end rejecting: an existing fragment edited down to whitespace (changelog-fragment-empty)" \
+    bash -c "cd '$mbrepo' && BASE_SHA='$mb_feature_sha' HEAD_SHA='$mb_emptied_sha' '$SELF' check-pr"
+
   rm -rf "$tmp"
 }
 
@@ -1135,6 +1292,14 @@ selftest() {
   selftest_control3
   selftest_control4
   selftest_control5
+  # selftest_control6 was defined but never invoked here from this
+  # subcommand's introduction onward -- found auditing this orchestrator
+  # while adding S2-3's nested-fragment fixture to it, since that fixture
+  # would otherwise silently never run either. Control 6 itself (`parse_fragment_name`)
+  # was still exercised indirectly by every other control's fixtures that
+  # set up fragment names, but its own dedicated accepting/rejecting
+  # fixtures were dead code from a `selftest` caller's perspective.
+  selftest_control6
   echo
   if [ "$ST_FAILURES" -eq 0 ]; then
     echo "aggregate_changelog: selftest PASS -- all six controls' accepting and rejecting fixtures behaved as expected"
