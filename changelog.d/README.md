@@ -25,8 +25,10 @@ changelog.d/<id>-<slug>.<category>.md
 - `<id>` is the issue or pull-request number. Leading zeros fold to the same
   id (`0691-x.added.md` and `691-y.added.md` both declare id 691), so do not
   zero-pad unless you mean that.
-- `<slug>` is a short, lowercase, hyphenated description (letters, digits,
-  hyphens only). It is not otherwise interpreted.
+- `<slug>` is a short, lowercase, hyphenated description: one or more
+  lowercase-letter/digit groups separated by single hyphens
+  (`[a-z0-9]+(-[a-z0-9]+)*`) -- no uppercase, no doubled `--`, and no leading
+  or trailing hyphen. It is not otherwise interpreted.
 - `<category>` is one of the declared categories below.
 
 **The file's content is exactly the text that would follow `- ` in the
@@ -47,6 +49,19 @@ fragments (they may share an id if they land in different categories, e.g.
 `691-x.added.md` and `691-y.fixed.md`, but never the same (id, category)
 pair).
 
+**Fragments must live directly in this directory, not in a subdirectory.**
+`changelog.d/sub/2-x.added.md` is rejected outright
+(`changelog-fragment-path-invalid`): a nested fragment is invisible to
+everything except a naive path check, so it would otherwise be silently
+lost rather than aggregated (see `docs/DESIGN-changelog-fragments.md`,
+control 6).
+
+A fragment's body must also be renderable as-is: no CRLF line endings, and
+the first line must not itself start with a Markdown list marker (`- `,
+`* `, `+ `) or a heading marker (`#`), either of which would corrupt the
+bullet the aggregator renders around it
+(`changelog-fragment-hygiene-invalid`).
+
 **Never hand-edit `CHANGELOG.md`'s `[Unreleased]` section.** Adding or
 deleting a line there directly is rejected pre-merge
 (`changelog-direct-edit-forbidden`): it either duplicates authority with a
@@ -64,16 +79,25 @@ introduced and is declared, in aggregation order, in
 `tools/aggregate_changelog.sh`'s `DECLARED_CATEGORY_ORDER`:
 
 1. `added` -- a new capability, tool, or surface.
-2. `fixed` -- a defect corrected.
-3. `replaced` -- one mechanism substituted for another.
-4. `reverted` -- a prior change undone.
-5. `required` -- a check, gate, or piece of evidence made mandatory.
-6. `exempted` -- a path or case carved out of a requirement, with its reason.
-7. `unified` -- two previously-divergent paths merged into one.
-8. `sharded` -- work split for parallelism without changing its scope.
-9. `documented` -- a design record, decision, or non-behavioral write-up.
-10. `decided` -- a design decision recorded (e.g. a `docs/DESIGN-*.md`
+2. `changed` -- existing behavior modified without being a defect fix
+   (`fixed`), a mechanism swap (`replaced`), or an undo (`reverted`).
+3. `fixed` -- a defect corrected.
+4. `replaced` -- one mechanism substituted for another.
+5. `reverted` -- a prior change undone.
+6. `required` -- a check, gate, or piece of evidence made mandatory.
+7. `exempted` -- a path or case carved out of a requirement, with its reason.
+8. `unified` -- two previously-divergent paths merged into one.
+9. `sharded` -- work split for parallelism without changing its scope.
+10. `documented` -- a design record, decision, or non-behavioral write-up.
+11. `decided` -- a design decision recorded (e.g. a `docs/DESIGN-*.md`
     go/no-go).
+
+`changed` was added after this mechanism's introduction: it is measured 12
+times across `CHANGELOG.md`'s full history (as a Keep-a-Changelog-style
+`### Changed` subheading, predating this mechanism's bullet-lead-word
+convention), more than seven of the other ten words -- see
+`docs/DESIGN-changelog-fragments.md`, control 1's "Vocabulary correction",
+for why excluding it was wrong and why `Removed` (1 occurrence) still is.
 
 The order groups user-facing behavior changes first, then process/CI-shape
 changes, then documentation/decision records last. It is arbitrary but
@@ -100,9 +124,11 @@ grow the list from real usage, the same way this one was measured.
 
 The `[Unreleased]` body that existed in `CHANGELOG.md` before this mechanism
 was introduced was deliberately **not** converted into fragments: of its
-27 top-level bullets, 16 have no `(#NNN)` at all and therefore no id a
-fragment name could carry, so control 6 (nonconforming fragment name) would
-reject every one of them. That body is left in place, untouched, and moves
+27 top-level bullets, 10 are in `- <Lead> (#NNN):` form; of the other 17,
+3 carry an id outside that position and 14 carry no id of any kind. Those 14
+alone have no id a fragment name could carry, so control 6 (nonconforming
+fragment name) would reject every fragment the conversion tried to produce
+for them. That body is left in place, untouched, and moves
 under a version heading the ordinary way at the next release
 (`docs/RELEASE.md`, step 7), in the same step that aggregates whatever has
 accumulated in this directory by then. Only new entries route through
