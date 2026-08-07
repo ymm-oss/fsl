@@ -49,18 +49,24 @@ fragments (they may share an id if they land in different categories, e.g.
 `691-x.added.md` and `691-y.fixed.md`, but never the same (id, category)
 pair).
 
-**Fragments must live directly in this directory, not in a subdirectory.**
-`changelog.d/sub/2-x.added.md` is rejected outright
-(`changelog-fragment-path-invalid`): a nested fragment is invisible to
-everything except a naive path check, so it would otherwise be silently
-lost rather than aggregated (see `docs/DESIGN-changelog-fragments.md`,
-control 6).
+**A fragment must be a direct, non-hidden child of this directory, with a
+`.md` extension.** Anything else is rejected outright
+(`changelog-fragment-path-invalid`): a nested fragment
+(`changelog.d/sub/2-x.added.md`) or a top-level dotfile
+(`changelog.d/.9-hidden.added.md`) is invisible to the tooling that
+enumerates fragments for aggregation, even though a shallower check might
+otherwise treat it as present, so it would otherwise be silently lost
+rather than aggregated (see `docs/DESIGN-changelog-fragments.md`, control 6).
+This file, `changelog.d/README.md`, is the one exception.
 
-A fragment's body must also be renderable as-is: no CRLF line endings, and
-the first line must not itself start with a Markdown list marker (`- `,
-`* `, `+ `) or a heading marker (`#`), either of which would corrupt the
-bullet the aggregator renders around it
-(`changelog-fragment-hygiene-invalid`).
+A fragment's body must also be renderable as-is: no stray carriage-return
+bytes (CRLF line endings or a bare mid-line CR), and the first line must not
+itself start with a Markdown list marker (`- `, `* `, `+ `) or an ATX
+heading marker (`#` through `######` followed by a space), either of which
+would corrupt the bullet the aggregator renders around it
+(`changelog-fragment-hygiene-invalid`). A bare issue reference with no
+following space, e.g. a body starting `#737: …`, is not a heading and is
+fine.
 
 **Never hand-edit `CHANGELOG.md`'s `[Unreleased]` section.** Adding or
 deleting a line there directly is rejected pre-merge
