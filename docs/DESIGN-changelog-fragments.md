@@ -222,6 +222,19 @@ detects the failure it exists for, alongside its accepting fixture.
    The release-time net — aggregating an entirely empty `changelog.d/` → exit 1,
    `no-fragments-to-aggregate` — stays as a sanity floor only; it cannot see a single missing
    entry, which is control 5's job.
+
+   **Body hygiene (S4-4; review, #737, comment 2026-08-07).** A non-empty body can still
+   corrupt the rendered bullet once the aggregator's own "- "/"  " markers are added in front
+   of it: a body starting with `- `, `* `, or `+ ` doubles the list marker (`- - like this`); a
+   body starting with `#` renders as a bulleted heading (`- ### Added`) instead of the heading
+   it looks like it should have been; a CRLF line ending survives into the LF-only file as a
+   literal `\r`. `validate_fragment_hygiene` rejects all three → exit 1,
+   `changelog-fragment-hygiene-invalid: <file>`, at the same points `check`, `check-pr`, and
+   `release` already validate names and duplicates. This is content-scoped and therefore
+   distinct from control 5 (which only checks that content, whatever its shape, is conserved)
+   and this control's own emptiness check (which only checks that content exists) — neither
+   would catch a body that is well-formed non-empty text but starts with a marker the
+   aggregator's own markup collides with.
 2. **Duplicate id.** The duplicate key is the pair **(numeric id, section)**, where the id is
    the decimal integer parsed from the fragment filename's leading digits — `0691-…` and
    `691-…` therefore declare the same id, and control 3's sort key uses the same parsed
