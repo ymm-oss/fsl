@@ -348,6 +348,14 @@ jobs:
           name: release-unit
           path: release-assets
 
+      - name: Check no changelog fragments remain unaggregated
+        # Control 4's release-time half (docs/DESIGN-changelog-fragments.md):
+        # a fragment still present under changelog.d/ at tag time means
+        # docs/RELEASE.md step 7's aggregation was skipped or ran against the
+        # wrong tree. Fails loudly, before "Extract release notes" builds a
+        # notes file that would otherwise silently omit that entry.
+        run: ./tools/aggregate_changelog.sh check-stale
+
       - name: Extract release notes
         run: |
           version="${GITHUB_REF_NAME#v}"

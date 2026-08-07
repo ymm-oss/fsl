@@ -54,6 +54,15 @@ check_automation() {
   # cache for one of its shared keys must fail the audit, so removing that guard
   # cannot pass silently (docs/DESIGN-ci.md, "Actions cache budget").
   node --test .github/scripts/audit-cache-budget.test.mjs
+  # Accepting/rejecting controls for all six changelog-fragment fail-closed
+  # controls (docs/DESIGN-changelog-fragments.md): nonconforming fragment
+  # name, duplicate (id, category), nondeterministic/nonconforming order,
+  # unaggregated-at-release plus direct-edit-forbidden, and aggregation
+  # conservation. Pure, no BASE_SHA/HEAD_SHA needed here -- the real
+  # pull-request-diff checks run directly in merge-readiness.yml, the same
+  # split check-product-gate-scope.sh's own `selftest` versus its real
+  # `diff_scope` invocation uses.
+  ./tools/aggregate_changelog.sh selftest
 }
 
 case "${1:-all}" in

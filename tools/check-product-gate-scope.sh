@@ -35,13 +35,15 @@
 
 set -euo pipefail
 
-# Exempt paths: the five entries from the retired `paths-ignore` list.
-# `.claude/**` and `.agents/**` are directory prefixes; `CLAUDE.md`,
-# `AGENTS.md`, and `CHANGELOG.md` are exact repository-root filenames, not
-# prefixes -- "CLAUDE.md.d/x" must NOT match.
+# Exempt paths: the five entries from the retired `paths-ignore` list, plus
+# `changelog.d/` (docs/DESIGN-changelog-fragments.md, migration site 2).
+# `.claude/**`, `.agents/**`, and `changelog.d/*` are directory prefixes;
+# `CLAUDE.md`, `AGENTS.md`, and `CHANGELOG.md` are exact repository-root
+# filenames, not prefixes -- "CLAUDE.md.d/x" must NOT match, and neither
+# must "changelog.dx/y".
 is_exempt_path() {
   case "$1" in
-    .claude/*|.agents/*) return 0 ;;
+    .claude/*|.agents/*|changelog.d/*) return 0 ;;
     CLAUDE.md|AGENTS.md|CHANGELOG.md) return 0 ;;
     *) return 1 ;;
   esac
@@ -154,6 +156,10 @@ selftest() {
     "$(printf 'CLAUDE.md.d/x\n' | classify_diff)" || failures=$((failures + 1))
   check "empty input fail-closed" product \
     "$(printf '' | classify_diff)" || failures=$((failures + 1))
+  check "changelog.d/ fragment is exempt" exempt \
+    "$(printf 'changelog.d/691-a.added.md\n' | classify_diff)" || failures=$((failures + 1))
+  check "changelog.d/ directory-prefix near-miss" product \
+    "$(printf 'changelog.dx/y\n' | classify_diff)" || failures=$((failures + 1))
 
   if [ "$failures" -ne 0 ]; then
     echo "check-product-gate-scope.sh selftest: $failures assertion(s) failed" >&2
