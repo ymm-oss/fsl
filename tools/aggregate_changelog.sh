@@ -48,15 +48,26 @@
 # (`fixed`), a mechanism swap (`replaced`), or an undo (`reverted`) has
 # nowhere else in the declared set to put it. `DECLARED_CATEGORY_ORDER` below
 # is therefore eleven words, not ten, and `changelog.d/README.md` documents
-# `changed` on the same footing as the other ten. `Removed` (1 occurrence) is
-# left out: one occurrence four major versions ago is not "real, recurring
-# usage" the way 12 current-era occurrences are, and nothing in this
-# mechanism's post-Rust history has needed it. Growing the set further is
-# still a contract change to docs/DESIGN-changelog-fragments.md, the same way
-# growing tools/check-product-gate-scope.sh's exempt-path list is (see
+# `changed` on the same footing as the other ten.
+#
+# `Removed` (1 occurrence) is left out, but not on a frequency argument --
+# frequency alone does not separate the cases (review correction, #737,
+# comment 2026-08-07, second round): seven of the eleven admitted words each
+# occur exactly once in their own corpus (this mechanism's own post-Rust
+# fragment history) and zero times among `### ` headings, the same posture
+# `Removed`'s single `### ` occurrence has. What actually separates them is
+# **recency**: `### Changed` last appears in `## [4.0.0]`, the current major
+# version series (`## [4.2.0]` at measurement time); `### Removed`'s only
+# occurrence is in `## [2.0.0]`, two major versions back. A word whose most
+# recent use predates the current major is not "real, recurring usage" the
+# way one still in current-era use is, and nothing in this mechanism's
+# post-Rust history has needed `removed`. It can be added the same way, from
+# real recent usage, if that changes. Growing the set further is still a
+# contract change to docs/DESIGN-changelog-fragments.md, the same way growing
+# tools/check-product-gate-scope.sh's exempt-path list is (see
 # docs/DESIGN-ci.md, "Agent-configuration exemption"): name the new word,
-# show it is measured from real usage, and update changelog.d/README.md in
-# the same change.
+# show it is measured from real, recent usage, and update
+# changelog.d/README.md in the same change.
 #
 # DECLARED_CATEGORY_ORDER (the first sort-key component, control 3) groups
 # user-facing behavior changes first (added/changed/fixed/replaced/reverted),
@@ -173,31 +184,61 @@ list_fragment_files() {
   done
 }
 
-# Rejects any non-README `*.md` file under $1 that is not a direct child of
-# $1. Subdirectories are not a supported fragment shape: `changelog.d/*.md`
-# is a bash glob and `*` crosses `/`, so `changelog.d/sub/2-x.added.md`
-# satisfies is_top_level_fragment_path's caller-side sibling check in
-# control 1 (a naive `[[ path == changelog.d/*.md ]]`) while
-# `list_fragment_files` -- and therefore controls 2, 3, 6, `check-stale`, and
-# `release`'s aggregation -- never sees it at all. The entry would be
-# silently lost: the exact failure control 5 exists to prevent, happening
-# entirely outside control 5's reach (there is nothing to compare a
-# produced section against when the fragment was never enumerated). Reject
-# it here, at the same earliest point control 6 rejects a nonconforming
-# name, with its own diagnostic naming the actual defect.
-reject_nested_fragments() {
+# Rejects any regular file under $1 (at any depth) that `list_fragment_files`
+# will not enumerate, the top-level `README.md` excepted. Two shapes share
+# this one root cause and are both closed here in one place, not two
+# shape-specific checks: `changelog.d/sub/2-x.added.md` (a subdirectory --
+# `changelog.d/*.md` is a bash glob and `*` crosses `/`, so
+# is_top_level_fragment_path's caller-side sibling check in control 1
+# accepts it even though list_fragment_files' own glob, `"$dir"/*.md`, never
+# enumerates anything below $dir itself) and `changelog.d/.9-hidden.added.md`
+# (a top-level dotfile -- POSIX pathname expansion's bare `*` does not match
+# a leading dot, so list_fragment_files silently skips it too, even though
+# a `case` pattern match like is_top_level_fragment_path's is not pathname
+# expansion and does match it). Closing only the subdirectory instance
+# (review finding S2-3, #737, comment 2026-08-07) left the dotfile shape
+# free to reproduce the identical silent loss end to end: check-pr passes,
+# check and check-stale pass because they see an apparently-smaller (or
+# empty) changelog.d/, and release aggregates every fragment it *can* see
+# and reports success while the hidden one's entry never reaches
+# CHANGELOG.md -- exactly the failure control 5 exists to prevent, entirely
+# outside control 5's reach, because the fragment was never part of what
+# control 5 compares against (review finding S3-1, #737, comment
+# 2026-08-07, second round). Generalizing at the enumeration boundary
+# itself -- "anything under $dir that list_fragment_files will not
+# enumerate, README.md excepted" -- closes the whole class instead of one
+# more instance of it.
+reject_unenumerable_fragments() {
   local dir="$1" f rel
   [ -d "$dir" ] || return 0
+  # A newline-joined string, not an array: `"${arr[@]}"` on a zero-element
+  # array is an unbound-variable error under `set -u` on bash < 4.4 (macOS's
+  # default bash is 3.2), and this dir legitimately has zero enumerable
+  # fragments whenever every file under it is unenumerable (the exact case
+  # this function exists to catch) or the dir holds only README.md (which
+  # list_fragment_files itself always skips). `grep -qxF` below does exact
+  # whole-line membership testing against this string instead of iterating
+  # an array, so the empty case needs no special-casing at all.
+  local enumerated
+  enumerated="$(list_fragment_files "$dir")"
   while IFS= read -r -d '' f; do
+    # rel, not basename: a nested README.md ("sub/README.md") must not be
+    # mistaken for the top-level exemption -- only $dir/README.md itself is
+    # exempt, and it is already outside $dir/*.md in `find`'s own sense only
+    # by virtue of failing the `enumerated` membership test below like any
+    # other unenumerable path would, so the exemption is checked first, on
+    # the full relative path, not the last path component.
     rel="${f#"$dir"/}"
-    [ "$(basename "$f")" = "README.md" ] && continue
-    fail "changelog-fragment-path-invalid: $dir/$rel (fragments must be direct children of $dir/, not in a subdirectory)"
-  done < <(find "$dir" -mindepth 2 -name '*.md' -print0 2>/dev/null)
+    [ "$rel" = "README.md" ] && continue
+    if ! printf '%s\n' "$enumerated" | grep -qxF "$rel"; then
+      fail "changelog-fragment-path-invalid: $dir/$rel (not enumerable by list_fragment_files -- fragments must be direct, non-hidden children of $dir/ with a .md extension; only $dir/README.md is exempt)"
+    fi
+  done < <(find "$dir" -type f -print0 2>/dev/null)
 }
 
 validate_fragment_names() {
   local dir="$1"
-  reject_nested_fragments "$dir"
+  reject_unenumerable_fragments "$dir"
   local -a files=()
   local f
   while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$(list_fragment_files "$dir" | sort)"
@@ -292,18 +333,27 @@ fragment_is_empty() {
 # control 5 (which only checks that content is conserved) and control 1
 # (which only checks that content exists) rather than duplicating either.
 # Two shapes are named because they were observed as concrete rendering
-# hazards, not enumerated exhaustively: a CRLF line ending survives as a
-# literal `\r` inside the Markdown file (this repository's fragments and
-# CHANGELOG.md are LF-only); a body whose first line already starts with a
-# Markdown block marker renders wrong once the aggregator's own "- "/"  "
-# markers are added in front of it -- `- ` or `* ` doubles the list marker
-# (`- - like this`), and `#` turns a bullet into a bulleted heading
-# (`- ### Added`) instead of the heading the author's fragment content
-# looks like it should have been.
+# hazards, not enumerated exhaustively: a stray carriage-return byte
+# survives as a literal `\r` inside the Markdown file (this repository's
+# fragments and CHANGELOG.md are LF-only, whether the `\r` arrived as a
+# CRLF line ending or as a bare mid-line CR -- the byte, not its position,
+# is what corrupts a diff/rendered view); a body whose first line already
+# starts with a Markdown block marker renders wrong once the aggregator's
+# own "- "/"  " markers are added in front of it -- `- ` or `* ` doubles the
+# list marker (`- - like this`), and an ATX heading marker (`#` through
+# `######`, followed by a space -- CommonMark's own definition, not a bare
+# leading `#`) turns a bullet into a bulleted heading (`- ### Added`)
+# instead of the heading the author's fragment content looks like it should
+# have been. A bare `#NNN` issue reference with no following space (e.g. a
+# body starting `#737: ...`) is not an ATX heading and must not be rejected
+# on this basis (S4 correction; review, #737, comment 2026-08-07, second
+# round: an earlier version of this check rejected any leading `#`
+# regardless of a following space, which is broader than CommonMark's own
+# heading grammar and would have misfired on exactly that shape).
 validate_fragment_hygiene() {
   local file="$1" body first_line
   if LC_ALL=C grep -qU $'\r' "$file" 2>/dev/null; then
-    fail "changelog-fragment-hygiene-invalid: $file (contains a CRLF line ending; fragments must be LF-only)"
+    fail "changelog-fragment-hygiene-invalid: $file (contains a carriage-return byte; fragments must use LF-only line endings, not CRLF or a bare CR)"
   fi
   body="$(trimmed_fragment_body "$file")"
   [ -z "$body" ] && return 0
@@ -312,10 +362,10 @@ validate_fragment_hygiene() {
     '- '*|'* '*|'+ '*)
       fail "changelog-fragment-hygiene-invalid: $file (body starts with a Markdown list marker, which would double up under the aggregator's own '- ')"
       ;;
-    '#'*)
-      fail "changelog-fragment-hygiene-invalid: $file (body starts with a Markdown heading marker, which would render as a bulleted heading)"
-      ;;
   esac
+  if [[ "$first_line" =~ ^#{1,6}[[:space:]] ]]; then
+    fail "changelog-fragment-hygiene-invalid: $file (body starts with an ATX heading marker -- '#' through '######' followed by a space -- which would render as a bulleted heading)"
+  fi
 }
 
 validate_fragment_hygiene_all() {
@@ -467,8 +517,8 @@ is_product_surface_path() {
   esac
 }
 
-# A fragment path directly under $1 (top-level only -- see is_release_diff's
-# neighbor, reject_nested_fragments, for why `changelog.d/sub/x.added.md`
+# A fragment path directly under $1 (top-level only -- see this function's
+# neighbor, reject_unenumerable_fragments, for why `changelog.d/sub/x.added.md`
 # must NOT match here even though the bash glob `changelog.d/*.md` alone
 # would cross the `/`).
 is_top_level_fragment_path() {
@@ -483,34 +533,63 @@ is_top_level_fragment_path() {
 # Fails `changelog-fragment-missing: <paths>` if any changed path is a
 # product surface and no fragment was added; the caller checks emptiness of
 # each touched fragment separately (needs blob content, not just the diff).
+# $1 is the direct-edit classification control 4 (classify_direct_edit,
+# below) already computed for this same diff: "release-move" or "unchanged".
 #
-# Release exclusion (docs/DESIGN-changelog-fragments.md, control 1): the
-# release commit itself (docs/RELEASE.md steps 4-7, committed together in
-# step 10) bumps product-surface files (`rust/Cargo.toml`, `rust/Cargo.lock`,
-# the domain characterization baseline) and *deletes* the fragments it
-# aggregates -- it never *adds* one, so the rule as stated cannot be
-# satisfied by the release process it must not block. The exclusion is
-# exactly as narrow as that shape: it fires only when this same diff both
-# deletes at least one top-level fragment (something was actually consumed)
-# and modifies `CHANGELOG.md` (the aggregation target). It does not itself
-# decide the diff IS a conforming release move -- that content-level
-# question (does the [Unreleased] body really move verbatim under a new
-# version heading, with nothing else touched?) is control 4's job
-# (check_direct_edit, run immediately after this check in check_pr), so a
-# diff that merely deletes a fragment and edits CHANGELOG.md for some other
-# reason still fails check-pr, just under `changelog-direct-edit-forbidden`
-# instead of `changelog-fragment-missing`.
+# Release exclusion (docs/DESIGN-changelog-fragments.md, control 1;
+# corrected, review finding S2-1, #737, comment 2026-08-07, second round):
+# the release commit itself (docs/RELEASE.md steps 4-7, committed together
+# in step 10) bumps product-surface files (`rust/Cargo.toml`,
+# `rust/Cargo.lock`, the domain characterization baseline) and *deletes* the
+# fragments it aggregates -- it never *adds* one, so the rule as stated
+# cannot be satisfied by the release process it must not block. An earlier
+# version of this exclusion fired whenever the diff both deleted a top-level
+# fragment and left CHANGELOG.md with git status `M`, on the theory that
+# control 4 (classify_direct_edit) independently validates the edit is a
+# genuine release move. It does not: classify_direct_edit's very first
+# check returns "unchanged" the instant the `[Unreleased]` body's raw text
+# is byte-identical, and that check inspects *only* the body -- an edit to
+# CHANGELOG.md anywhere else (a stale link reference, a historical typo
+# fix, a fabricated version section, or merely a trailing newline) leaves
+# the body untouched and therefore "unchanged", while the old exclusion's
+# own test was just git status `M`, which every one of those edits also
+# satisfies. The two conditions never actually constrained each other; a
+# non-release diff that deletes a fragment and touches CHANGELOG.md
+# anywhere outside the body passed both, independently, every time.
+# Reproduced live before this fix: four such diffs (a past-section typo, a
+# link-reference-only edit, a bare trailing-newline append, and a
+# fabricated version section) all passed `check-pr` (rejecting fixtures
+# below).
+#
+# The fix removes the independent, weaker git-status test and makes this
+# exclusion consume classify_direct_edit's own classification directly, so
+# the two controls share one determination and cannot disagree: the
+# exclusion now fires exactly when $1 is "release-move" -- classify_direct_edit's
+# positive branch, reached only after it has confirmed the body was
+# actually emptied and a matching new version heading was added, with
+# nothing else in the file touched. A diff that deletes a fragment and
+# edits CHANGELOG.md for some other reason still leaves the body
+# byte-identical, classify_direct_edit still reports "unchanged", and this
+# exclusion still does not fire, so `check-pr` still fails
+# `changelog-fragment-missing`.
+#
+# The exclusion no longer additionally requires a deleted fragment (review
+# finding S3-2, #737, comment 2026-08-07, second round): a release with
+# zero fragments to aggregate is a legitimate release (a version-only
+# bump), and classify_direct_edit's "release-move" classification is
+# already the full, structurally-verified signal that a genuine release
+# move occurred -- requiring a fragment deletion on top of it would reject
+# exactly that legitimate zero-fragment case for no added safety, since
+# nothing about the release process's validity depends on how many
+# fragments happened to be waiting.
 classify_product_diff() {
+  local classification="${1:-unchanged}"
   local status path
-  local -a product=() added_fragments=() deleted_fragments=() check_fragments=()
-  local changelog_modified=0
+  local -a product=() added_fragments=() check_fragments=()
   while IFS=$'\t' read -r status path; do
     [ -z "${status:-}" ] && continue
     if is_product_surface_path "$path"; then
       product+=("$path")
-    fi
-    if [ "$path" = "CHANGELOG.md" ] && [ "$status" = "M" ]; then
-      changelog_modified=1
     fi
     if is_top_level_fragment_path "$path"; then
       case "$status" in
@@ -521,16 +600,11 @@ classify_product_diff() {
         M)
           check_fragments+=("$path")
           ;;
-        D)
-          deleted_fragments+=("$path")
-          ;;
       esac
     fi
   done
-  if [ "${#product[@]}" -gt 0 ] && [ "${#added_fragments[@]}" -eq 0 ]; then
-    if [ "${#deleted_fragments[@]}" -eq 0 ] || [ "$changelog_modified" -eq 0 ]; then
-      fail "changelog-fragment-missing: ${product[*]}"
-    fi
+  if [ "${#product[@]}" -gt 0 ] && [ "${#added_fragments[@]}" -eq 0 ] && [ "$classification" != "release-move" ]; then
+    fail "changelog-fragment-missing: ${product[*]}"
   fi
   # `"${arr[@]}"` on an empty array is an unbound-variable error under
   # `set -u` on bash < 4.4 (macOS's default bash is 3.2), so guard the
@@ -542,11 +616,36 @@ classify_product_diff() {
 
 # ---- control 4b: direct-edit-forbidden, with the single release exclusion -
 
-# Pure predicate over two whole-file CHANGELOG.md snapshots. See
+# Pure classifier over two whole-file CHANGELOG.md snapshots. See
 # docs/DESIGN-changelog-fragments.md, control 4, and the migration
 # correction: the only excluded diff shape left is the release move (the
-# migration pull request does not touch the body at all).
-check_direct_edit_files() {
+# migration pull request does not touch the body at all). Prints
+# "unchanged" on stdout if the `[Unreleased]` body's raw text and the
+# heading immediately following it are both byte-identical between $base
+# and $head (nothing about a release move happened -- this is the ordinary
+# non-release pull request); prints "release-move" if the full release-move
+# shape validates (body actually emptied, replaced by a new, correctly
+# formatted version heading whose section starts with that same body, with
+# nothing else in the file touched). Fails with
+# `changelog-direct-edit-forbidden` for any other edit shape. This
+# classification, not a pass/fail boolean, is the single source of truth
+# both this control and control 1's release exclusion (classify_product_diff,
+# above) consume (review finding S2-1, #737, comment 2026-08-07, second
+# round) -- see that function's own comment for what went wrong when they
+# were two independent tests instead.
+#
+# The "unchanged" test compares the heading immediately after `[Unreleased]`
+# in addition to the body, not the body alone (S3-2 correction, same
+# review): a genuine zero-fragment release, where the pre-existing body was
+# already empty, produces byte-identical *body* text before and after (both
+# are "nothing"), even though a real release move happened -- a new version
+# heading appears where the old one used to be immediately following
+# `[Unreleased]`. Comparing the body alone would misclassify that diff as
+# "unchanged" and reopen exactly the S3-2 gap this correction closes.
+# Comparing the heading too correctly reaches the release-move validation
+# branch below for that diff, and correctly stays "unchanged" for the
+# ordinary case where a pull request touches neither.
+classify_direct_edit() {
   local base="$1" head="$2"
 
   grep -qxF '## [Unreleased]' "$base" || fail "changelog-direct-edit-forbidden: '## [Unreleased]' heading missing from the base revision"
@@ -555,17 +654,6 @@ check_direct_edit_files() {
   local old_body new_body
   old_body="$(unreleased_raw_body "$base")"
   new_body="$(unreleased_raw_body "$head")"
-
-  [ "$old_body" = "$new_body" ] && return 0
-
-  local new_bullets
-  new_bullets="$(printf '%s\n' "$new_body" | trim_blank_edges)"
-  if [ -n "$new_bullets" ]; then
-    fail "changelog-direct-edit-forbidden: the [Unreleased] body was edited directly"
-  fi
-
-  local old_bullets
-  old_bullets="$(printf '%s\n' "$old_body" | trim_blank_edges)"
 
   local base_rest head_rest
   base_rest="$(after_unreleased "$base")"
@@ -578,6 +666,20 @@ check_direct_edit_files() {
   local head_first_heading base_first_heading
   head_first_heading="${head_rest%%$'\n'*}"
   base_first_heading="${base_rest%%$'\n'*}"
+
+  if [ "$old_body" = "$new_body" ] && [ "$head_first_heading" = "$base_first_heading" ]; then
+    echo "unchanged"
+    return 0
+  fi
+
+  local new_bullets
+  new_bullets="$(printf '%s\n' "$new_body" | trim_blank_edges)"
+  if [ -n "$new_bullets" ]; then
+    fail "changelog-direct-edit-forbidden: the [Unreleased] body was edited directly, or still holds content that was not moved into a new version section"
+  fi
+
+  local old_bullets
+  old_bullets="$(printf '%s\n' "$old_body" | trim_blank_edges)"
 
   if [ -z "$head_first_heading" ] || [ "$head_first_heading" = "$base_first_heading" ]; then
     fail "changelog-direct-edit-forbidden: [Unreleased] was emptied with no new version section added"
@@ -604,16 +706,33 @@ check_direct_edit_files() {
   if [ "$base_rest_stripped" != "$head_remainder_stripped" ]; then
     fail "changelog-direct-edit-forbidden: the release commit changed content outside the new version section"
   fi
+
+  echo "release-move"
 }
 
-check_direct_edit() {
+# Thin pass/fail wrapper over classify_direct_edit's classification, for
+# callers (most of selftest_control4's pure-predicate fixtures) that only
+# care whether the edit is allowed, not what it was classified as.
+check_direct_edit_files() {
+  classify_direct_edit "$1" "$2" >/dev/null
+}
+
+# git-blob-backed wrapper: resolves BASE_SHA/HEAD_SHA to CHANGELOG.md
+# snapshots at their merge base and HEAD_SHA, and returns
+# classify_direct_edit's classification on stdout. check_pr calls this
+# exactly once per invocation and feeds the result to both this control's
+# own fail-closed behavior (a bad edit fails here, before control 1 ever
+# runs) and control 1's release exclusion -- one computation, consumed
+# twice, so the two controls cannot disagree (review finding S2-1, #737,
+# comment 2026-08-07, second round).
+compute_direct_edit_classification() {
   local changelog="${1:-CHANGELOG.md}"
   : "${BASE_SHA:?BASE_SHA is required}"
   : "${HEAD_SHA:?HEAD_SHA is required}"
   # Diff against the merge base, not BASE_SHA's tip: this repository's own
   # convention for a pull-request/merge-group diff is three-dot
   # (`git diff "$BASE_SHA...$HEAD_SHA"`, used in `ci.yml` and by
-  # classify_product_diff's caller above), which compares against
+  # classify_product_diff's caller below), which compares against
   # `git merge-base BASE_SHA HEAD_SHA`, not BASE_SHA itself. BASE_SHA is
   # `github.event.pull_request.base.sha` -- the base branch's *current* tip,
   # which moves every time something else lands on it. Reading CHANGELOG.md
@@ -635,10 +754,14 @@ check_direct_edit() {
   trap 'rm -rf "$tmp"; trap - RETURN' RETURN
   git show "$base_sha:$changelog" >"$tmp/base.md" 2>/dev/null || fail "changelog-direct-edit-forbidden: cannot read $changelog at $base_sha"
   git show "$HEAD_SHA:$changelog" >"$tmp/head.md" 2>/dev/null || fail "changelog-direct-edit-forbidden: cannot read $changelog at $HEAD_SHA"
-  check_direct_edit_files "$tmp/base.md" "$tmp/head.md"
+  classify_direct_edit "$tmp/base.md" "$tmp/head.md"
 }
 
+# $1 is the direct-edit classification (see compute_direct_edit_classification
+# above); check_pr computes it once and passes it here.
 check_missing_or_empty_fragment() {
+  local classification="${1:-}"
+  [ -n "$classification" ] || fail "internal error: check_missing_or_empty_fragment requires a direct-edit classification"
   : "${BASE_SHA:?BASE_SHA is required}"
   : "${HEAD_SHA:?HEAD_SHA is required}"
   # `classify_product_diff` runs as the right side of a pipe inside this
@@ -651,7 +774,7 @@ check_missing_or_empty_fragment() {
   # missing/empty fragment silently passes instead of failing closed.
   local diff_output status
   set +e
-  diff_output="$(git diff --name-status "$BASE_SHA...$HEAD_SHA" | classify_product_diff)"
+  diff_output="$(git diff --name-status "$BASE_SHA...$HEAD_SHA" | classify_product_diff "$classification")"
   status=$?
   set -e
   [ "$status" -eq 0 ] || exit 1
@@ -692,13 +815,26 @@ check_pr() {
   validate_fragment_names "$dir"
   check_duplicates "$dir"
   validate_fragment_hygiene_all "$dir"
-  check_missing_or_empty_fragment
-  check_direct_edit
+  # Computed once, before either control that depends on it: control 4's own
+  # fail-closed check (an invalid direct edit fails right here) and control
+  # 1's release exclusion both consume this single classification, so they
+  # cannot disagree about whether this diff is a genuine release move (S2-1).
+  local classification status
+  set +e
+  classification="$(compute_direct_edit_classification)"
+  status=$?
+  set -e
+  [ "$status" -eq 0 ] || exit 1
+  check_missing_or_empty_fragment "$classification"
   echo "aggregate_changelog: check-pr PASS"
 }
 
 check_stale() {
   local dir="${1:-changelog.d}"
+  # Same enumeration-boundary guard as validate_fragment_names: a fragment
+  # `list_fragment_files` cannot see (a subdirectory, or a top-level
+  # dotfile) must not be able to reach tag time invisibly either (S3-1).
+  reject_unenumerable_fragments "$dir"
   local -a files=()
   local f
   while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$(list_fragment_files "$dir")"
@@ -730,13 +866,22 @@ release() {
   local -a sorted=()
   local f
   while IFS= read -r f; do [ -n "$f" ] && sorted+=("$f"); done <<<"$(sort_fragments "$fragdir")"
-  # Checked before the loop below: an empty `changelog.d/` must fail with
-  # `no-fragments-to-aggregate` rather than a bash unbound-variable error
-  # from iterating an empty array under `set -u` on bash < 4.4.
-  [ "${#sorted[@]}" -gt 0 ] || fail "no-fragments-to-aggregate"
-  for f in "${sorted[@]}"; do
-    fragment_is_empty "$fragdir/$f" && fail "changelog-fragment-empty: $fragdir/$f"
-  done
+  # An empty `changelog.d/` is a legitimate release, not an error (review
+  # finding S3-2, #737, comment 2026-08-07, second round): a version bump
+  # with no product-facing content since the previous release is a real
+  # release shape, and this command must agree with check-pr's release
+  # exclusion (classify_product_diff, tools/aggregate_changelog.sh), which
+  # no longer requires a deleted fragment either -- see docs/RELEASE.md,
+  # step 7. `no-fragments-to-aggregate` previously hard-failed here, which
+  # made step 7 impossible to run for that release shape at all. Guarded
+  # with `-gt 0` before the loop below (rather than only inside it) because
+  # `"${sorted[@]}"` on a zero-element array is an unbound-variable error
+  # under `set -u` on bash < 4.4 (macOS's default bash is 3.2).
+  if [ "${#sorted[@]}" -gt 0 ]; then
+    for f in "${sorted[@]}"; do
+      fragment_is_empty "$fragdir/$f" && fail "changelog-fragment-empty: $fragdir/$f"
+    done
+  fi
 
   local frag_block
   frag_block="$(aggregate_section_body "$fragdir")"
@@ -770,9 +915,11 @@ release() {
   } >"$changelog.new"
   mv "$changelog.new" "$changelog"
 
-  for f in "${sorted[@]}"; do
-    rm -f "$fragdir/$f"
-  done
+  if [ "${#sorted[@]}" -gt 0 ]; then
+    for f in "${sorted[@]}"; do
+      rm -f "$fragdir/$f"
+    done
+  fi
 
   echo "aggregate_changelog: released $version, aggregated ${#sorted[@]} fragment(s), '$fragdir' is now empty"
 }
@@ -845,15 +992,46 @@ selftest_control6() {
   # (review finding S2-3, #737, comment 2026-08-07). It satisfies control 1's
   # shallow diff-path check and parse_fragment_name itself would happily
   # accept its basename, but list_fragment_files never enumerates it, so
-  # without reject_nested_fragments it is invisible to controls 2, 3, and 6,
-  # to check-stale, and to release's aggregation -- the entry is silently
-  # lost with no diagnostic naming the cause.
+  # without reject_unenumerable_fragments it is invisible to controls 2, 3,
+  # and 6, to check-stale, and to release's aggregation -- the entry is
+  # silently lost with no diagnostic naming the cause.
   mkdir -p "$tmp/sub"
   st_setup_frag "$tmp/sub" "2-x.added.md" "Added (#2): x, hidden in a subdirectory."
   st_expect_fail "control6 rejecting: fragment in a subdirectory (changelog-fragment-path-invalid)" \
-    reject_nested_fragments "$tmp"
+    reject_unenumerable_fragments "$tmp"
   st_expect_fail "control6 rejecting: validate_fragment_names also rejects a subdirectory fragment" \
     validate_fragment_names "$tmp"
+  rm -rf "$tmp/sub"
+
+  # Rejecting (review finding S3-1, #737, comment 2026-08-07, second round):
+  # a *top-level* dotfile reproduces the identical silent loss through a
+  # completely different mechanism -- not a path crossing `/`, but POSIX
+  # pathname expansion's own exclusion of a leading dot from a bare `*`
+  # glob, which list_fragment_files' `"$dir"/*.md` relies on and
+  # is_top_level_fragment_path's `case` pattern match does not share (`case`
+  # patterns are not pathname expansion, so its `*` matches a leading dot
+  # fine). Closing only the subdirectory instance above left this sibling
+  # shape free to pass check-pr, check, and check-stale, and be silently
+  # skipped by release's aggregation -- generalizing
+  # reject_unenumerable_fragments to "anything list_fragment_files will not
+  # enumerate" (not just "anything in a subdirectory") closes this instance
+  # with the same one check, not a third shape-specific one.
+  st_setup_frag "$tmp" ".9-hidden.added.md" "Added (#9): a hidden dotfile fragment."
+  st_expect_fail "control6 rejecting: top-level dotfile fragment (changelog-fragment-path-invalid)" \
+    reject_unenumerable_fragments "$tmp"
+  st_expect_fail "control6 rejecting: validate_fragment_names also rejects a dotfile fragment" \
+    validate_fragment_names "$tmp"
+  st_expect_fail "control6 rejecting: check-stale also rejects a dotfile fragment left at tag time" \
+    check_stale "$tmp"
+  rm -f "$tmp"/.9-hidden.added.md
+
+  # Accepting: the top-level README.md itself is still exempt, not swept up
+  # by the generalization above.
+  printf '# README\n' >"$tmp/README.md"
+  st_expect_pass "control6 accepting: README.md alone is exempt from enumerability, not rejected" \
+    reject_unenumerable_fragments "$tmp"
+  rm -f "$tmp/README.md"
+
   rm -rf "$tmp"
 }
 
@@ -1038,18 +1216,46 @@ selftest_control1() {
   st_expect_pass "control1 accepting: non-product-surface diff needs no fragment" \
     bash -c 'printf "M\tdocs/README.md\n" | classify_product_diff'
 
-  # Release exclusion (review finding S2-1, #737, comment 2026-08-07): the
-  # release commit bumps product-surface files and only *deletes* fragments
-  # (docs/RELEASE.md steps 4-7, one commit per step 10); it never adds one.
-  st_expect_pass "control1 accepting: release shape (product bump + fragment deletion + CHANGELOG.md modified)" \
-    bash -c 'printf "M\trust/Cargo.toml\nM\trust/Cargo.lock\nD\tchangelog.d/2-x.added.md\nM\tCHANGELOG.md\n" | classify_product_diff'
-  # The exclusion must be exactly as narrow as the release shape: a fragment
-  # deletion with no CHANGELOG.md edit is not a release (nothing aggregated
-  # it), and a CHANGELOG.md edit with no fragment deletion is not a release
-  # either (nothing was consumed) -- both must still fail closed.
-  st_expect_fail "control1 rejecting: fragment deleted but CHANGELOG.md untouched (not a release, changelog-fragment-missing)" \
+  # Release exclusion (review finding S2-1, #737, comment 2026-08-07, second
+  # round): the release commit bumps product-surface files and only
+  # *deletes* fragments (docs/RELEASE.md steps 4-7, one commit per step 10);
+  # it never adds one. classify_product_diff no longer decides this for
+  # itself from the diff's file statuses -- it takes control 4's own
+  # classification (classify_direct_edit, via compute_direct_edit_classification)
+  # as an explicit argument, and grants the exclusion only when that
+  # classification is exactly "release-move". These fixtures exercise the
+  # classifier's own logic directly with a literal classification argument;
+  # the end-to-end fixtures below (selftest_release_exclusion) additionally
+  # prove that check-pr, driven by the real BASE_SHA/HEAD_SHA git-blob
+  # wrapper, actually computes that classification correctly and threads it
+  # through -- an isolated unit fixture like this one cannot, by itself,
+  # prove the two controls are wired together rather than merely both
+  # accepting the same literal string by coincidence.
+  st_expect_pass "control1 accepting: release shape, given a genuine release-move classification" \
+    bash -c 'printf "M\trust/Cargo.toml\nM\trust/Cargo.lock\nD\tchangelog.d/2-x.added.md\nM\tCHANGELOG.md\n" | classify_product_diff release-move'
+  # The regression case for the original S2-1 bug: the exact same file-status
+  # shape (fragment deleted, CHANGELOG.md modified) that the earlier,
+  # over-wide exclusion granted on git status alone, now given the
+  # classification an *unvalidated* edit actually produces ("unchanged" --
+  # classify_direct_edit's own early return whenever the [Unreleased] body
+  # is byte-identical, which every one of the four falsified variants in
+  # selftest_release_exclusion below produces). Must still fail.
+  st_expect_fail "control1 rejecting: release-shaped diff, but classification says the body was never touched (changelog-fragment-missing)" \
+    bash -c 'printf "M\trust/Cargo.toml\nM\trust/Cargo.lock\nD\tchangelog.d/2-x.added.md\nM\tCHANGELOG.md\n" | classify_product_diff unchanged'
+  # Zero-fragment release (review finding S3-2, #737, comment 2026-08-07,
+  # second round): the exclusion no longer requires a deleted fragment at
+  # all, only a validated release-move classification -- a version-only
+  # bump with nothing accumulated in changelog.d/ is still a legitimate
+  # release.
+  st_expect_pass "control1 accepting: release-move classification alone is sufficient, with zero fragments deleted (S3-2)" \
+    bash -c 'printf "M\trust/Cargo.toml\nM\trust/Cargo.lock\nM\tCHANGELOG.md\n" | classify_product_diff release-move'
+  # The exclusion must still be exactly as narrow as a validated release
+  # move: neither an unvalidated fragment deletion nor an unvalidated
+  # CHANGELOG.md touch, alone, satisfies it -- both must still fail closed
+  # with the default ("unchanged") classification.
+  st_expect_fail "control1 rejecting: fragment deleted but classification is not release-move (changelog-fragment-missing)" \
     bash -c 'printf "M\trust/Cargo.toml\nD\tchangelog.d/2-x.added.md\n" | classify_product_diff'
-  st_expect_fail "control1 rejecting: CHANGELOG.md touched but no fragment deleted (changelog-fragment-missing)" \
+  st_expect_fail "control1 rejecting: CHANGELOG.md touched but classification is not release-move (changelog-fragment-missing)" \
     bash -c 'printf "M\trust/Cargo.toml\nM\tCHANGELOG.md\n" | classify_product_diff'
   # A fragment hidden in a subdirectory must not count as coverage either
   # (review finding S2-3): is_top_level_fragment_path excludes it, so this
@@ -1079,12 +1285,29 @@ selftest_control1() {
   printf 'Added (#1): a line.\r\nAnother line.\r\n' >"$tmp/crlf.md"
   st_expect_fail "control1 rejecting: CRLF line ending (changelog-fragment-hygiene-invalid)" \
     validate_fragment_hygiene "$tmp/crlf.md"
+  # A bare mid-line CR, not a CRLF pair, must be caught by the same check
+  # (S4 correction; review, #737, comment 2026-08-07, second round): the
+  # rejection was always this broad (`grep -qU $'\r'` matches any CR byte),
+  # only the diagnostic wording claimed otherwise ("CRLF line ending"). This
+  # fixture proves the detection matches the now-corrected wording.
+  printf 'Added (#1): weird\rmid-line CR, not a CRLF pair.\n' >"$tmp/bare-cr.md"
+  st_expect_fail "control1 rejecting: bare mid-line CR, not CRLF (changelog-fragment-hygiene-invalid)" \
+    validate_fragment_hygiene "$tmp/bare-cr.md"
   printf -- '- Added (#1): looks like a bullet already.\n' >"$tmp/leading-dash.md"
   st_expect_fail "control1 rejecting: body starts with a list marker (changelog-fragment-hygiene-invalid)" \
     validate_fragment_hygiene "$tmp/leading-dash.md"
   printf '### Added\n' >"$tmp/leading-heading.md"
-  st_expect_fail "control1 rejecting: body starts with a heading marker (changelog-fragment-hygiene-invalid)" \
+  st_expect_fail "control1 rejecting: body starts with an ATX heading marker (changelog-fragment-hygiene-invalid)" \
     validate_fragment_hygiene "$tmp/leading-heading.md"
+  # Narrowing fixture (S4 correction, same review comment): a bare `#NNN`
+  # issue reference with no following space is not an ATX heading
+  # (CommonMark requires '#' through '######' followed by a space) and must
+  # be accepted, not rejected. An earlier version of this check rejected
+  # any leading '#' regardless of a following space, which would have
+  # misfired on exactly this ordinary fragment-body shape.
+  printf '#737: a bare issue reference, not a heading.\n' >"$tmp/hash-no-space.md"
+  st_expect_pass "control1 accepting: leading '#NNN' with no space is not an ATX heading" \
+    validate_fragment_hygiene "$tmp/hash-no-space.md"
   rm -rf "$tmp"
 }
 
@@ -1273,6 +1496,160 @@ selftest_control4() {
   rm -rf "$tmp"
 }
 
+# End-to-end coverage for the S2-1 release-exclusion fix and the S3-2
+# zero-fragment release decision (review, #737, comment 2026-08-07, second
+# round). selftest_control1's unit fixtures exercise classify_product_diff
+# directly with a literal classification argument; they cannot, by
+# themselves, prove check-pr's real BASE_SHA/HEAD_SHA git-blob wrapper
+# actually computes that classification from CHANGELOG.md's content and
+# threads the *same* value into both controls, rather than the two
+# happening to agree on a hand-picked string. These fixtures close that gap
+# by driving the real `check-pr` subcommand end to end in a throwaway git
+# repository, the same way selftest_control4's fixtures do.
+selftest_release_exclusion() {
+  local tmp; tmp="$(mktemp -d)"
+
+  # Shared base shape for the four rejecting variants below: a product
+  # change with no new fragment, a fragment *deletion* (the exact shape the
+  # original, over-wide exclusion granted on git status alone), and a
+  # CHANGELOG.md edit that never touches the [Unreleased] body or the
+  # heading immediately following it -- so classify_direct_edit reports
+  # "unchanged", not "release-move", for every one of them.
+  build_release_exclusion_base() {
+    local repo="$1"
+    mkdir -p "$repo/rust" "$repo/changelog.d"
+    (
+      cd "$repo"
+      git init -q
+      git config user.email "selftest@example.invalid"
+      git config user.name "selftest"
+      printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n- Added (#1): an existing pending entry, untouched by any variant below.\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n\n[Unreleased]: https://example/compare/v1.0.0...HEAD\n[1.0.0]: https://example/compare/v0.9.0...v1.0.0\n' >CHANGELOG.md
+      printf 'fn main() {}\n' >rust/lib.rs
+      printf 'Added (#2): a fragment about to be deleted, not aggregated.\n' >changelog.d/2-x.added.md
+      git add -A
+      git commit -q -m base
+    )
+  }
+
+  # Variant A: a typo fix inside a *past* version section's body -- not the
+  # [Unreleased] body, not the heading immediately following it.
+  local repo_a="$tmp/variant-a"
+  build_release_exclusion_base "$repo_a"
+  local a_base; a_base="$(cd "$repo_a" && git rev-parse HEAD)"
+  (
+    cd "$repo_a"
+    printf 'fn main() { /* unrelated product change, no fragment */ }\n' >rust/lib.rs
+    rm -f changelog.d/2-x.added.md
+    sed -i.bak 's/^- Old\.$/- Olde. (typo fix, unrelated to any release)./' CHANGELOG.md
+    rm -f CHANGELOG.md.bak
+    git add -A
+    git commit -q -m "variant A: typo fix in a past version section"
+  )
+  local a_head; a_head="$(cd "$repo_a" && git rev-parse HEAD)"
+  st_expect_fail "S2-1 rejecting, variant A: typo fix in a past version section (changelog-fragment-missing)" \
+    bash -c "cd '$repo_a' && BASE_SHA='$a_base' HEAD_SHA='$a_head' '$SELF' check-pr"
+
+  # Variant B: update the trailing "[Unreleased]:" link reference only.
+  local repo_b="$tmp/variant-b"
+  build_release_exclusion_base "$repo_b"
+  local b_base; b_base="$(cd "$repo_b" && git rev-parse HEAD)"
+  (
+    cd "$repo_b"
+    printf 'fn main() { /* unrelated product change, no fragment */ }\n' >rust/lib.rs
+    rm -f changelog.d/2-x.added.md
+    sed -i.bak 's#^\[Unreleased\]: https://example/compare/v1.0.0\.\.\.HEAD$#[Unreleased]: https://example/compare/v1.0.0...main#' CHANGELOG.md
+    rm -f CHANGELOG.md.bak
+    git add -A
+    git commit -q -m "variant B: update the [Unreleased]: link reference only"
+  )
+  local b_head; b_head="$(cd "$repo_b" && git rev-parse HEAD)"
+  st_expect_fail "S2-1 rejecting, variant B: [Unreleased]: link-reference-only edit (changelog-fragment-missing)" \
+    bash -c "cd '$repo_b' && BASE_SHA='$b_base' HEAD_SHA='$b_head' '$SELF' check-pr"
+
+  # Variant C (the sharpest): append a single trailing newline. The
+  # smallest possible CHANGELOG.md edit that still satisfies a git-status-only
+  # exclusion test.
+  local repo_c="$tmp/variant-c"
+  build_release_exclusion_base "$repo_c"
+  local c_base; c_base="$(cd "$repo_c" && git rev-parse HEAD)"
+  (
+    cd "$repo_c"
+    printf 'fn main() { /* unrelated product change, no fragment */ }\n' >rust/lib.rs
+    rm -f changelog.d/2-x.added.md
+    printf '\n' >>CHANGELOG.md
+    git add -A
+    git commit -q -m "variant C: append a single trailing newline to CHANGELOG.md"
+  )
+  local c_head; c_head="$(cd "$repo_c" && git rev-parse HEAD)"
+  st_expect_fail "S2-1 rejecting, variant C (sharpest): a single trailing newline appended to CHANGELOG.md (changelog-fragment-missing)" \
+    bash -c "cd '$repo_c' && BASE_SHA='$c_base' HEAD_SHA='$c_head' '$SELF' check-pr"
+
+  # Variant D: insert a fabricated version section immediately after
+  # [Unreleased], without actually emptying [Unreleased]'s own body into it
+  # -- an attempt to *look* like a release move without being one.
+  # classify_direct_edit rejects this outright (the body still holds
+  # content that was never moved), so check-pr fails via control 4's own
+  # check, before control 1 ever runs -- still an overall check-pr failure,
+  # which is what this fixture proves.
+  local repo_d="$tmp/variant-d"
+  build_release_exclusion_base "$repo_d"
+  local d_base; d_base="$(cd "$repo_d" && git rev-parse HEAD)"
+  (
+    cd "$repo_d"
+    printf 'fn main() { /* unrelated product change, no fragment */ }\n' >rust/lib.rs
+    rm -f changelog.d/2-x.added.md
+    printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n- Added (#1): an existing pending entry, untouched by any variant below.\n\n## [9.9.9] - 2026-01-01\n\n- Fake.\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n\n[Unreleased]: https://example/compare/v1.0.0...HEAD\n[1.0.0]: https://example/compare/v0.9.0...v1.0.0\n' >CHANGELOG.md
+    git add -A
+    git commit -q -m "variant D: insert a fabricated version section"
+  )
+  local d_head; d_head="$(cd "$repo_d" && git rev-parse HEAD)"
+  st_expect_fail "S2-1 rejecting, variant D: a fabricated version section, body never actually moved (changelog-direct-edit-forbidden)" \
+    bash -c "cd '$repo_d' && BASE_SHA='$d_base' HEAD_SHA='$d_head' '$SELF' check-pr"
+
+  # Controls E and F from the review's table, for completeness alongside
+  # the four variants above: a product change that does not touch
+  # CHANGELOG.md at all, and one that edits the [Unreleased] body directly,
+  # both already correctly rejected before this fix and still rejected
+  # after it (already covered by selftest_control1's basic fixtures and
+  # selftest_control4's direct-edit fixtures respectively; not repeated
+  # here as full end-to-end cases).
+
+  # S3-2: a version-only release with zero fragments in changelog.d/ must
+  # still merge. Both paths this finding named must agree: `release` itself
+  # must not hard-fail with `no-fragments-to-aggregate`, and the resulting
+  # diff must pass `check-pr` without a fragment, because a validated
+  # release-move classification alone is now sufficient (no deleted
+  # fragment required).
+  local relrepo="$tmp/zero-fragment-release"
+  mkdir -p "$relrepo/rust" "$relrepo/changelog.d"
+  (
+    cd "$relrepo"
+    git init -q
+    git config user.email "selftest@example.invalid"
+    git config user.name "selftest"
+    printf '[workspace.package]\nversion = "1.0.0"\n' >rust/Cargo.toml
+    printf 'lockfile v1\n' >rust/Cargo.lock
+    printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n' >CHANGELOG.md
+    git add -A
+    git commit -q -m base
+  )
+  local rel_base; rel_base="$(cd "$relrepo" && git rev-parse HEAD)"
+  (
+    cd "$relrepo"
+    printf '[workspace.package]\nversion = "1.1.0"\n' >rust/Cargo.toml
+    printf 'lockfile v1.1\n' >rust/Cargo.lock
+    "$SELF" release --version 1.1.0 --date 2026-08-07
+    git add -A
+    git commit -q -m "chore(release): v1.1.0 (version-only, zero fragments)"
+  )
+  local rel_head; rel_head="$(cd "$relrepo" && git rev-parse HEAD)"
+  st_expect_pass "S3-2 accepting: a version-only release with zero fragments merges" \
+    bash -c "cd '$relrepo' && BASE_SHA='$rel_base' HEAD_SHA='$rel_head' '$SELF' check-pr"
+
+  unset -f build_release_exclusion_base
+  rm -rf "$tmp"
+}
+
 selftest() {
   # Several fixtures below invoke `bash -c '... | classify_product_diff'`
   # (control 1) or `bash -c "... '$SELF' check-pr"` (the control 1/4b
@@ -1291,6 +1668,11 @@ selftest() {
   selftest_control2
   selftest_control3
   selftest_control4
+  # S2-1 (release exclusion over-widening) and S3-2 (zero-fragment release):
+  # end-to-end fixtures driven through the real check-pr/release subcommands,
+  # not just the pure classify_product_diff predicate (review, #737, comment
+  # 2026-08-07, second round).
+  selftest_release_exclusion
   selftest_control5
   # selftest_control6 was defined but never invoked here from this
   # subcommand's introduction onward -- found auditing this orchestrator
