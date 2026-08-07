@@ -279,7 +279,17 @@ detects the failure it exists for, alongside its accepting fixture.
    `changelog-direct-edit-forbidden`. Both directions are load-bearing: an added line
    duplicates authority, and a deleted line erases someone else's pending entry; the
    rejecting fixtures are one diff of each kind. This check is what keeps authority single
-   (next section).
+   (next section). The diff is read against the **merge base** of `BASE_SHA`/`HEAD_SHA`
+   (`git merge-base`), matching this repository's own three-dot-diff convention (`ci.yml`,
+   `tools/check-product-gate-scope.sh`) — not against `BASE_SHA`'s own tip. `BASE_SHA` is the
+   base branch's *current* tip, which moves every time something else lands on it; reading
+   `CHANGELOG.md` straight from it compares a pull request's untouched `[Unreleased]` body
+   against a *different* `[Unreleased]` body whenever a release has landed on `main` since the
+   branch forked, and misnames every such pull request `changelog-direct-edit-forbidden` for
+   an edit it never made (implementation correction, S2-2; review, #737, comment 2026-08-07:
+   an earlier version of this control read `BASE_SHA`'s tip directly). Accepting fixture: base
+   advanced by a release, a feature branch that never touched `CHANGELOG.md`, driven through
+   the real `BASE_SHA`/`HEAD_SHA` wrapper end to end.
 
    **Implementation correction (this pull request; #737, comment 2026-08-07): the migration
    pull request does not convert the existing body, so only one exclusion is needed, not two.**
