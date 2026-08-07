@@ -24,7 +24,15 @@ controls so they cannot disagree -- not merely CHANGELOG.md's git status,
 which a fragment deletion plus any unrelated CHANGELOG.md edit, down to a
 trailing newline, would also have satisfied -- and no longer requiring a
 deleted fragment at all, so a version-only release with nothing accumulated
-in `changelog.d/` also merges), and aggregation
+in `changelog.d/` also merges. The exclusion exempts only the fixed, measured
+set of paths a release commit actually bumps (`is_release_bump_path`:
+`rust/Cargo.toml`, `rust/Cargo.lock`, both VS Code extension manifest files,
+and the domain characterization baseline, byte-identical across all four
+releases in this repository's history), not every product-surface path in a
+release-move diff -- a validated release move that also carries an unrelated
+product change still demands a fragment for that change, so the exclusion
+cannot be triggered for free by one forged, empty version heading in a
+repository whose `[Unreleased]` body is otherwise always empty), and aggregation
 conservation checked by per-bullet identity, not substring containment
 (calibrated against a fragment-dropping sham, a first-line-only-truncating
 sham, and a sham that drops one fragment while duplicating another whose
@@ -32,7 +40,10 @@ entire rendered block is a byte-for-byte prefix of the dropped one's).
 Fragment bodies are also checked for hygiene (a stray carriage-return byte,
 a leading list marker, or a leading ATX heading marker -- `#` through
 `######` followed by a space, not a bare issue-reference `#`) before
-aggregation. The category vocabulary is eleven
+aggregation. `changelog.d/.DS_Store`, `.gitkeep`, and editor swap files are
+exempted from the nonconforming-name/enumerability check by exact name,
+alongside `README.md`, since none of them can ever be an attempted fragment.
+The category vocabulary is eleven
 words, not ten: `changed` joins the set, measured 12 times across
 `CHANGELOG.md`'s full history (more than seven of the other ten words),
 where an earlier version of this mechanism's own documentation called it
