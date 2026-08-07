@@ -109,8 +109,20 @@ It also rejects a dynamic dependency on `libz3`.
    directly in the version section (never in `[Unreleased]`, which control 4
    in `docs/DESIGN-changelog-fragments.md` protects even at this step, except
    for exactly this move).
+
+   **A version-only release with an empty `changelog.d/` is legitimate** (decided in review,
+   #737, comment 2026-08-07, second round): the command above succeeds on an empty
+   `changelog.d/` (holding only `README.md`), and the merge-readiness `check-pr` gate does not
+   require a deleted fragment either — only that this diff's `CHANGELOG.md` edit is a
+   structurally validated release move. Both paths agree on this; neither hard-fails a
+   product-only version bump for lacking a fragment that was never needed. If `[Unreleased]`
+   was also already empty, the produced `## [X.Y.Z]` section will have no bullets at all —
+   expected for that shape, not a defect to work around.
 8. Confirm the complete `X.Y.Z` changelog section is non-empty and suitable for
-   the GitHub Release body.
+   the GitHub Release body, **unless** step 7's zero-fragment case applies and `[Unreleased]`
+   was already empty, in which case the section legitimately has no bullets; state the release's
+   actual reason (e.g. a dependency or version-only bump) in the release commit message and the
+   promotion pull request instead of fabricating a placeholder bullet.
 9. Run the complete product gate:
 
    ```bash
