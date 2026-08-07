@@ -711,8 +711,9 @@ selftest_control2() {
 }
 
 # Control 3: nondeterministic or nonconforming order -- both sort-key
-# components, plus determinism/idempotence, plus calibration of the
-# determinism check itself against a sham that does not sort.
+# components, each calibrated against a real lexicographic-sort sham that
+# must fail the golden, plus determinism/idempotence under reversed physical
+# file-creation order.
 selftest_control3() {
   local tmp; tmp="$(mktemp -d)"
 
@@ -792,26 +793,24 @@ selftest_control3() {
   fi
   rm -rf "$tmp_a" "$tmp_b"
 
-  # (e) calibration: the determinism check above must actually be able to
-  # detect an enumeration-order-dependent implementation. A sham that
-  # passes its input straight through, unsorted, stands in for a
-  # `sorted(os.listdir())`-style bug at the boundary that matters here --
-  # its output tracks whatever order it is enumerated/fed in, which is
-  # exactly the defect class "aggregation-not-deterministic" exists to
-  # catch. Feeding it the same logical fragment set in two different
-  # orders must make it disagree with itself.
-  local sham_order1 sham_order2
-  sham_order1=$'100-gamma.added.md\n9-alpha.added.md\n10-beta.added.md'
-  sham_order2=$'9-alpha.added.md\n10-beta.added.md\n100-gamma.added.md'
-  local sham_out1 sham_out2
-  sham_out1="$(printf '%s\n' "$sham_order1")"
-  sham_out2="$(printf '%s\n' "$sham_order2")"
-  echo "selftest: rejecting fixture 'control3 rejecting: readdir-ordered sham fails the determinism check' run1=[$(printf '%s' "$sham_out1" | tr '\n' ' ')] run2=[$(printf '%s' "$sham_out2" | tr '\n' ' ')]"
-  if [ "$sham_out1" = "$sham_out2" ]; then
-    st_report "control3 rejecting: readdir-ordered sham fails the determinism check (aggregation-not-deterministic)" fail 0
-  else
-    st_report "control3 rejecting: readdir-ordered sham fails the determinism check (aggregation-not-deterministic)" fail 1
-  fi
+  # A former case (e) here compared two hard-coded, already-different string
+  # literals for equality as a stand-in for "a readdir-ordered sham fails the
+  # determinism check". It never called sort_fragments, list_fragment_files,
+  # or any other function this script defines, so its outcome was knowable
+  # from reading the two assignments -- it could not have failed regardless
+  # of this file's implementation, and its PASS was not evidence the
+  # determinism check works (review finding, #737, comment 2026-08-07).
+  # Removed rather than patched: bash's own pathname expansion always
+  # returns glob matches in sorted order (POSIX), so list_fragment_files
+  # cannot be driven into readdir order through this script's own primitives
+  # to build a genuine, non-fabricated sham here, and a synthetic one is what
+  # case (e) already tried and failed to be honestly. Cases (a) and (b) above
+  # already are genuine goldens with a real sham that sorts differently
+  # (lexicographic id order, lexicographic category order) and are
+  # confirmed, independently, to reject it; case (c)'s reversed-physical-
+  # creation-order fixture already exercises the real sort_fragments/
+  # list_fragment_files pair against actual filesystem enumeration order,
+  # which is the genuine version of what case (e) was reaching for.
 
   rm -rf "$tmp"
 }
