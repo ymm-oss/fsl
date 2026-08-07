@@ -24,30 +24,51 @@
 # contract and is never treated as a fragment.
 #
 # <category> is this repository's own vocabulary (the bullet lead word), not
-# Keep a Changelog's six names -- measured from the `[Unreleased]` body at
-# `CHANGELOG.md`'s current baseline: `Added`, `Decided`, `Documented`,
-# `Exempted`, `Fixed`, `Replaced`, `Required`, `Reverted`, `Sharded`,
-# `Unified` (ten, not six; `### ` subheadings: zero, so this aggregator emits
-# bullets only, never subheadings). DECLARED_CATEGORY_ORDER below is exactly
-# that measured set, lower-cased to match the filename suffix. Growing it is
-# a contract change to docs/DESIGN-changelog-fragments.md, the same way
+# Keep a Changelog's six names -- measured from `CHANGELOG.md`'s current
+# `[Unreleased]` body: `Added`, `Decided`, `Documented`, `Exempted`, `Fixed`,
+# `Replaced`, `Required`, `Reverted`, `Sharded`, `Unified` (ten; `### `
+# subheadings inside `[Unreleased]`: zero, so this aggregator emits bullets
+# only, never subheadings).
+#
+# `Changed` (review correction, #737, comment 2026-08-07): an earlier version
+# of this comment called `Changed` "unmeasured" and told authors not to add
+# it. That was wrong on this repository's own terms. `Changed` is measured --
+# 12 of `CHANGELOG.md`'s 77 `### ` subheadings across the file's full history
+# use it (`Fixed` 27, `Added` 21, `Changed` 12, `Documentation` 5, `Removed`
+# 1; `git grep -c '^### ' CHANGELOG.md` reproduces the 77). Those 12 predate
+# this mechanism's bullet-lead-word convention -- they are `### ` subheadings
+# from the file's earlier Keep-a-Changelog-style sections, not bullet lead
+# words inside a current, subheading-free section -- but the word itself
+# names a real, recurring category of change in this project's own history,
+# the same standing the other ten words have. Excluding a word the project
+# has actually used before, on the theory that its historical instances used
+# a different rendering mechanism, is exactly the "routine false positive"
+# reversal condition (a) below treats as grounds for no-go: a contributor
+# whose change modifies existing behavior without being a defect fix
+# (`fixed`), a mechanism swap (`replaced`), or an undo (`reverted`) has
+# nowhere else in the declared set to put it. `DECLARED_CATEGORY_ORDER` below
+# is therefore eleven words, not ten, and `changelog.d/README.md` documents
+# `changed` on the same footing as the other ten. `Removed` (1 occurrence) is
+# left out: one occurrence four major versions ago is not "real, recurring
+# usage" the way 12 current-era occurrences are, and nothing in this
+# mechanism's post-Rust history has needed it. Growing the set further is
+# still a contract change to docs/DESIGN-changelog-fragments.md, the same way
 # growing tools/check-product-gate-scope.sh's exempt-path list is (see
 # docs/DESIGN-ci.md, "Agent-configuration exemption"): name the new word,
 # show it is measured from real usage, and update changelog.d/README.md in
-# the same change. Do not force an unmeasured Keep-a-Changelog word (e.g.
-# "Changed", "Removed") into the set on the theory that it might be needed;
-# an unrecognized-but-reasonable lead word rejected by control 6 is exactly
-# the routine false positive the decision's reversal condition (a) treats as
-# grounds for no-go, so grow the set instead of arguing around it.
+# the same change.
 #
 # DECLARED_CATEGORY_ORDER (the first sort-key component, control 3) groups
-# user-facing behavior changes first (added/fixed/replaced/reverted), then
-# process/CI-shape changes (required/exempted/unified/sharded), then
-# documentation/decision records last (documented/decided). It is arbitrary
-# but fixed, is not derivable from the category names themselves (that is
-# the point -- a lexicographic order would silently pass every determinism
-# check while still being nonconforming), and is written down here, next to
-# the set, per the decision record.
+# user-facing behavior changes first (added/changed/fixed/replaced/reverted),
+# then process/CI-shape changes (required/exempted/unified/sharded), then
+# documentation/decision records last (documented/decided). `changed` sits
+# right after `added`, matching Keep a Changelog's own Added-then-Changed
+# convention, even though the rest of this vocabulary is not Keep a
+# Changelog's. The order is otherwise arbitrary but fixed, is not derivable
+# from the category names themselves (that is the point -- a lexicographic
+# order would silently pass every determinism check while still being
+# nonconforming), and is written down here, next to the set, per the
+# decision record.
 #
 # Usage:
 #   aggregate_changelog.sh check
@@ -88,6 +109,7 @@ SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 # This repository's bullet-lead-word vocabulary. See the header comment.
 DECLARED_CATEGORY_ORDER=(
   added
+  changed
   fixed
   replaced
   reverted
