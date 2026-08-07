@@ -183,6 +183,15 @@ def test_changelog_reminder_covers_rust_and_python_product_paths() -> None:
     assert needs_reminder(["src/fslc/model.py"])
     assert not needs_reminder(["rust/fsl-core/src/lib.rs", "CHANGELOG.md"])
     assert not needs_reminder(["docs/README.md"])
+    # A notable change now lands as a new changelog.d/ fragment
+    # (docs/DESIGN-changelog-fragments.md), not a direct CHANGELOG.md edit.
+    # Unmigrated, this reminder would misfire on every fragment-only product
+    # change -- exactly the routine false positive the decision's reversal
+    # condition (a) treats as grounds for no-go.
+    assert not needs_reminder(
+        ["rust/fsl-core/src/lib.rs", "changelog.d/691-x.added.md"]
+    )
+    assert needs_reminder(["rust/fsl-core/src/lib.rs", "changelog.dx/691-x.added.md"])
 
 
 def test_active_task_is_worktree_local() -> None:

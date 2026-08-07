@@ -78,7 +78,9 @@ inventory, and promotion changes run the `scheduled` tier.
   evidence contract. Do not allowlist verdict, location, assurance, or exit-code differences.
 - A language feature moves with its grammar/lowering, typed model, symbolic and concrete semantics,
   regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/reference.md`, a design
-  note, and `CHANGELOG.md`. A new declaration, binder, or reference form additionally moves with
+  note, and a `changelog.d/` fragment (see `changelog.d/README.md`; `CHANGELOG.md`'s `[Unreleased]`
+  body itself is aggregated from fragments at release time and must not be hand-edited). A new
+  declaration, binder, or reference form additionally moves with
   `rust/fsl-lsp/src/index.rs` and a targeted role/scope test, or it silently loses
   definition/references/rename/documentSymbol with no parse failure to surface the gap;
   `rust/fsl-lsp/tests/corpus.rs` only asserts that every identifier is indexed as something.
@@ -154,6 +156,7 @@ For non-trivial changes, use a dedicated branch/worktree so unrelated local stat
 the task. Use repository-relative paths in committed files and delegation briefs; never embed a
 developer's absolute path or username. Preserve unrelated user changes.
 
-Keep one topic per commit, use Conventional Commit-style subjects, and add notable changes under
-`CHANGELOG.md` `[Unreleased]`. A pull request should state the problem, contract change, test evidence,
-linked issue, and any documentation or skill updates.
+Keep one topic per commit, use Conventional Commit-style subjects, and add a notable change as a new
+`changelog.d/<id>-<slug>.<category>.md` fragment (see `changelog.d/README.md`) in the same pull
+request, rather than editing `CHANGELOG.md` directly. A pull request should state the problem,
+contract change, test evidence, linked issue, and any documentation or skill updates.

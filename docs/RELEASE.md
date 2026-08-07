@@ -49,8 +49,10 @@ It also rejects a dynamic dependency on `libz3`.
 
 1. Start from a clean, current `main`. Fetch `origin` and confirm local `HEAD`
    equals `origin/main`.
-2. Review the non-empty `CHANGELOG.md` `[Unreleased]` section and confirm it
-   describes every notable change since the previous tag.
+2. Review the `CHANGELOG.md` `[Unreleased]` section together with every fragment
+   under `changelog.d/` and confirm, across both, that every notable change
+   since the previous tag is described. Step 7 aggregates the two into one
+   version section; nothing here should be missing from either source.
 3. Choose `X.Y.Z` using SemVer. Confirm that local and remote tag `vX.Y.Z` and
    the corresponding GitHub Release do not exist.
 4. On a short-lived branch from `main`, change
@@ -89,10 +91,24 @@ It also rejects a dynamic dependency on `libz3`.
    Review the diff and require it to contain version strings only. A generated
    snapshot is regenerated, never hand-edited; any other change in that diff is
    a contract change that does not belong in a release commit.
-7. Move all current `[Unreleased]` entries under
-   `## [X.Y.Z] - YYYY-MM-DD`, leaving an empty `## [Unreleased]`. Update the
-   link references so `[Unreleased]` compares `vX.Y.Z...HEAD` and `[X.Y.Z]`
-   compares the previous tag with `vX.Y.Z`.
+7. Run the aggregator, which moves the current `[Unreleased]` body under
+   `## [X.Y.Z] - YYYY-MM-DD` verbatim, appends every `changelog.d/` fragment
+   sorted by the declared category/id order, verifies conservation (every
+   fragment's content reaches the section, byte for byte), and deletes the
+   consumed fragments in the same step, leaving `[Unreleased]` and
+   `changelog.d/` both empty:
+
+   ```bash
+   ./tools/aggregate_changelog.sh release --version X.Y.Z --date YYYY-MM-DD
+   ```
+
+   Update the link references so `[Unreleased]` compares `vX.Y.Z...HEAD` and
+   `[X.Y.Z]` compares the previous tag with `vX.Y.Z`. Review the produced
+   `## [X.Y.Z]` section before committing; this is the point of the "Extract
+   release notes" content, and the last chance to fix a wording issue
+   directly in the version section (never in `[Unreleased]`, which control 4
+   in `docs/DESIGN-changelog-fragments.md` protects even at this step, except
+   for exactly this move).
 8. Confirm the complete `X.Y.Z` changelog section is non-empty and suitable for
    the GitHub Release body.
 9. Run the complete product gate:
