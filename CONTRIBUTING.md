@@ -66,7 +66,8 @@ inventory and explicitly optional Python surfaces.
   (`docs/DESIGN-conformance-harness.md`) scans every `.fsl` under `specs/`/`examples/` and fails
   loudly on an unregistered construct instead of silently skipping it.
 - **Public Kernel contract:** update schemas, Rust exporter/consumer paths, conformance vectors,
-  agreement tests, `docs/DESIGN-kernel-contract.md`, language/reference docs, and changelog.
+  agreement tests, `docs/DESIGN-kernel-contract.md`, language/reference docs, and a new
+  `changelog.d/` fragment (see `changelog.d/README.md`) rather than editing `CHANGELOG.md` directly.
 - **CLI/JSON contract:** preserve field meanings, ordering requirements, raw-output modes, exit codes,
   locations, and replayable evidence. Any parity allowlist entry needs a nondeterminism rationale.
 - **Specs and examples:** run native `check`, bounded verification, induction where relevant, mutation,

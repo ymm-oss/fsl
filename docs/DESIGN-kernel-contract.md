@@ -402,7 +402,8 @@ shared by Kernel v1/v2 because v2 adds provenance without changing execution
 values; its complete tick/state contract is defined by
 [`DESIGN-replay-trace.md`](DESIGN-replay-trace.md). A schema change requires coupled updates to the schemas,
 golden vectors, Rust tests, this document, `docs/LANGUAGE.md`, the shared skill,
-and `CHANGELOG.md`.
+and a `changelog.d/<id>-<slug>.<category>.md` fragment (see `changelog.d/README.md`) --
+not a direct `CHANGELOG.md` edit, which is aggregated from fragments only at release time.
 
 Replay observation actions execute through `Monitor::attempt`. Solver-free BFS
 also uses Monitor transitions, while

@@ -467,8 +467,10 @@ rollback below trivial.
    - `AGENTS.md`, in **both** places: the commit convention ("add notable changes under
      `CHANGELOG.md` `[Unreleased]`") and the feature-moves list ("… a design note, and
      `CHANGELOG.md`") take the fragment wording.
-   - `CONTRIBUTING.md`, the same two shapes: the "Language or semantics" guideline and the
-     commits/pull-requests checklist.
+   - `CONTRIBUTING.md`, **three** shapes, not two: the "Language or semantics" guideline, the
+     "Public Kernel contract" guideline (found unmigrated in review, #737, comment 2026-08-07,
+     S3-1 — it sits right next to "Language or semantics" and was missed in the first pass),
+     and the commits/pull-requests checklist.
    - `.claude/hooks/changelog_reminder.py` — `needs_reminder` matches `path ==
      "CHANGELOG.md"` exactly. Unmigrated, every fragment-only product change would trip its
      "product source changed but CHANGELOG.md did not" reminder permanently, manufacturing
@@ -482,7 +484,14 @@ rollback below trivial.
    - `.claude/agents/fsl-coupled-change-reviewer.md` (a `CHANGELOG.md` dependency; it does
      not name `[Unreleased]`) and `.claude/skills/add-language-feature/SKILL.md` (which does)
      — both instruct a `CHANGELOG.md`
-     `[Unreleased]` entry and take the fragment wording.
+     `[Unreleased]` entry and take the fragment wording. `fsl-coupled-change-reviewer.md`'s
+     own "Public Kernel changes" coupling item was also found unmigrated (S3-1, same review
+     comment) and takes the fragment wording too.
+   - `docs/DESIGN-kernel-contract.md` (its Kernel-schema-change coupling sentence) and
+     `docs/DESIGN-saga-history.md` (its saga-implementation follow-up list) — both found
+     unmigrated in the same review pass (S3-1): a Kernel schema change or the saga
+     implementation necessarily touches `rust/`, so following either document's un-migrated
+     instruction would produce a diff control 4 rejects.
 5. `docs/DESIGN-ci.md` — amend the "Agent-configuration exemption" decision for site 2.
    That document states growing the exempt list "is a contract change to this decision, not a
    script tweak" and requires naming every path that reads the new entry with its unfiltered

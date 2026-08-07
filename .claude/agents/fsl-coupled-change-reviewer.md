@@ -20,7 +20,8 @@ together. Inspect staged and unstaged changes; do not modify them.
 3. Solver changes require the relevant backend tests and preservation of runtime solver independence.
 4. CLI/Worker changes require native/Worker envelope, exit-code, raw-output, and replay contracts.
 5. Public Kernel changes require schemas, exporters/consumers, conformance vectors, agreement tests,
-   `docs/DESIGN-kernel-contract.md`, language/reference docs, and changelog.
+   `docs/DESIGN-kernel-contract.md`, language/reference docs, and a `changelog.d/<id>-<slug>.<category>.md`
+   fragment (see `changelog.d/README.md`) -- not a direct `CHANGELOG.md` edit.
 6. Changes under `specs/` or `examples/` require native check/verify and non-vacuity evidence. Generated
    compatibility artifacts may change only through their owning generator.
 7. New source files require the repository SPDX header.
