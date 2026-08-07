@@ -186,7 +186,10 @@ candidate needs the same evidence sweep: name every path that reads it and show 
 unfiltered pre-merge or fail-loud coverage. `skills/**` and `docs/**` must never join it:
 `skills/fsl/reference.md` moves with language features under the coupled-change contract,
 `docs/LANGUAGE*.md` feeds the site-reference freshness gate, and product-gate literate
-doc-contract tests read documentation files directly.
+doc-contract tests read documentation files directly. One such growth is already accepted but
+not yet implemented: `docs/DESIGN-changelog-fragments.md` adds a `changelog.d/` directory
+prefix and names its readers' coverage (`release.yml` fail-loud, the merge-readiness fragment
+checker unfiltered); the amendment to this section lands with that implementation.
 
 ### Sharded pre-merge Linux evidence
 

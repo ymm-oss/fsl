@@ -5,6 +5,28 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Decided (#737): the shared-edit merge-conflict spike closes as **GO for CHANGELOG
+  fragments only (C1)** and **NO-GO for fragmenting the contract documents (C2)**, recorded
+  in the new accepted `docs/DESIGN-changelog-fragments.md`. The load-bearing evidence is a
+  replay of history at `d72ac8d`: of 22 genuinely concurrent branch pairs (interval overlap
+  plus `git merge-base --is-ancestor` false both ways, conflicts detected with
+  `git merge-tree --write-tree`), 16 conflict, `CHANGELOG.md` is a conflicting file in 16 of
+  16, and the three current-era conflicts have it as the *only* conflicting file — while
+  fragmenting `docs/LANGUAGE.md`/`docs/LANGUAGE.ja.md`/`skills/fsl/reference.md` resolves
+  zero additional pairs (every contract-document conflict co-occurs with an implementation
+  conflict in one early-Python cluster), which is #737's own no-go condition, and would put
+  a generated layer upstream of the required `site reference freshness` check. The record
+  carries the six fail-closed negative controls (missing or empty fragment, duplicate id,
+  order determinism plus conformance on **both** the category and id sort components,
+  unaggregated-at-release plus bidirectional direct-edit, aggregation conservation against
+  silent entry drops **and against truncation**, and fragment-name conformance), each with a
+  calibrated rejecting fixture and named diagnostic, the six migration sites, the rollback
+  method, and the reversal condition. `<category>` follows **this repository's** bullet
+  lead-word convention, not Keep a Changelog's: the measured `[Unreleased]` body has zero
+  `### ` subheadings and already uses `Documented` and `Decided`, so the aggregator emits
+  bullets rather than introducing subheadings. Implementation is deliberately not included. The `LANGUAGE.md` /
+  `LANGUAGE.ja.md` section-alignment enforcement is untouched by C1; a pre-existing
+  count-only gap in that enforcement found during the evaluation is tracked as #741.
 - Documented (#738): the command-family extraction spike's result as re-evaluation evidence in
   `docs/DESIGN-rust-components.md`. Section 10's first trigger — three unrelated command changes
   failing on `fslc` orchestration coupling — has fired (the exit-code chain alone supplies five)
