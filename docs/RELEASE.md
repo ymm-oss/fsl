@@ -91,6 +91,16 @@ It also rejects a dynamic dependency on `libz3`.
    Review the diff and require it to contain version strings only. A generated
    snapshot is regenerated, never hand-edited; any other change in that diff is
    a contract change that does not belong in a release commit.
+
+   **Steps 4–6 above touch exactly the paths `tools/aggregate_changelog.sh`'s
+   `is_release_bump_path` names** (`rust/Cargo.toml`, `rust/Cargo.lock`,
+   `editors/vscode/package.json`, `editors/vscode/package-lock.json`, and the domain
+   characterization baseline) — the fixed set the merge-readiness `check-pr` gate exempts from
+   needing a fragment once this diff's `CHANGELOG.md` edit is a validated release move (H1; review,
+   #737, comment 2026-08-07, third round; `docs/DESIGN-changelog-fragments.md`, control 1). If a
+   future release-commit step starts touching a different or additional product-surface path, add
+   that exact path to `is_release_bump_path` in the same pull request, or every subsequent release
+   commit will fail its own `changelog-fragment-missing` at merge time.
 7. Run the aggregator, which moves the current `[Unreleased]` body under
    `## [X.Y.Z] - YYYY-MM-DD` verbatim, appends every `changelog.d/` fragment
    sorted by the declared category/id order, verifies conservation (every
