@@ -218,10 +218,33 @@ detects the failure it exists for, alongside its accepting fixture.
    and `skills/fsl/reference.md` (`AGENTS.md`, "A language feature moves with …";
    `CONTRIBUTING.md`, "Language or semantics"). Rejecting fixture: exactly such a synthetic
    diff → exit 1, `changelog-fragment-missing: <changed paths>`. A fragment must also carry
-   content: a whitespace-only fragment body → exit 1, `changelog-fragment-empty: <file>`.
-   The release-time net — aggregating an entirely empty `changelog.d/` → exit 1,
-   `no-fragments-to-aggregate` — stays as a sanity floor only; it cannot see a single missing
-   entry, which is control 5's job.
+   content: a whitespace-only fragment body → exit 1, `changelog-fragment-empty: <file>`, and
+   this applies to a fragment this diff *modifies* down to whitespace, not only one it adds
+   empty — a status-`M` fragment is checked the same way a status-`A` one is (S4-3; review,
+   #737, comment 2026-08-07). A fragment counted toward this rule must also be a direct child
+   of `changelog.d/`: a name under a subdirectory (`changelog.d/sub/x.added.md`) does not count
+   as coverage and is separately rejected outright (control 6, below). The release-time net —
+   aggregating an entirely empty `changelog.d/` → exit 1, `no-fragments-to-aggregate` — stays
+   as a sanity floor only; it cannot see a single missing entry, which is control 5's job.
+
+   **Release exclusion (S2-1; review, #737, comment 2026-08-07).** As originally specified,
+   this control cannot be satisfied by the release process it must not block:
+   `docs/RELEASE.md` steps 4–7 bump product-surface files (`rust/Cargo.toml`,
+   `rust/Cargo.lock`, the domain characterization baseline) and the aggregator *deletes* the
+   fragments it consumes — the release commit never *adds* one, and control 4's `check-stale`
+   already forbids the workaround of leaving a never-aggregated dummy fragment behind (it
+   surfaces at tag time as `stale-fragments-present`). The exclusion is exactly as narrow as
+   that shape and no narrower: it fires only when the same diff both deletes at least one
+   top-level fragment and modifies `CHANGELOG.md`. It does not itself decide the diff *is* a
+   conforming release move — that remains control 4's job, run immediately afterward in the
+   same `check-pr` invocation — so a diff that deletes a fragment and edits `CHANGELOG.md`
+   for some unrelated reason still fails `check-pr`, under `changelog-direct-edit-forbidden`
+   instead. Accepting fixture: the full release shape, product-surface changes and fragment
+   deletions in one diff, produced by the real `release` subcommand and driven through the
+   real `BASE_SHA`/`HEAD_SHA` wrapper end to end. Rejecting fixtures: a fragment deletion
+   with no `CHANGELOG.md` edit, and a `CHANGELOG.md` edit with no fragment deletion — either
+   alone still fails `changelog-fragment-missing`, closing the direction a wider exclusion
+   would have reopened.
 
    **Body hygiene (S4-4; review, #737, comment 2026-08-07).** A non-empty body can still
    corrupt the rendered bullet once the aggregator's own "- "/"  " markers are added in front
@@ -298,11 +321,17 @@ detects the failure it exists for, alongside its accepting fixture.
    post-migration release moves whatever remains under a version heading. Both are deletions
    from the `[Unreleased]` body and both would be rejected by the rule as stated," and asked
    for two exclusions accordingly. Measured at implementation time, that migration cannot work:
-   of the `[Unreleased]` body's 27 top-level bullets (620 lines by then), only 11 are in
-   `- <Lead> (#NNN):` form, from which a fragment's required id can be parsed; the other 16 are
-   free prose with no `(#NNN)` at all (`- Fixed issue #697: …`, `- Sharded the two heaviest
-   pre-merge …`, and 14 more), so control 6 (nonconforming fragment name, which rejects a name
-   with no leading digits) would reject every fragment the conversion tried to produce for them.
+   of the `[Unreleased]` body's 27 top-level bullets (620 lines by then), 10 are in
+   `- <Lead> (#NNN):` form (counting the boundary case `- Fixed (#720 Finding 1): …`, whose
+   parenthesized id carries trailing text but still parses), from which a fragment's required
+   id can be parsed. Of the other 17, 3 carry an id outside that parenthesized-lead-word
+   position (two unparenthesized, e.g. `- Required the complete Linux evidence on \`main\`,
+   closing the gap #707`, plus `- Fixed issue #697: …`, which an earlier version of this
+   correction cited as an example of a bullet with *no* id at all — it is not one); **14 carry
+   no id of any kind** (id-count correction; review, #737, comment 2026-08-07, second round).
+   Those 14 alone are enough to make the conversion impossible: control 6 (nonconforming
+   fragment name, which rejects a name with no leading digits) would reject every fragment the
+   conversion tried to produce for them.
    **The migration pull request instead creates `changelog.d/` and routes only new entries
    through it, leaving the existing `[Unreleased]` body untouched**; the first post-migration
    release still moves that body under a version heading (`docs/RELEASE.md` step 7) in the same
@@ -366,6 +395,23 @@ detects the failure it exists for, alongside its accepting fixture.
    conforming name for each category in the declared set. Without this control both defects reach
    release and surface as `stale-fragments-present`, which fails loudly but late and names the
    wrong cause.
+
+   **Implementation correction (S2-3; review, #737, comment 2026-08-07): a fragment is not
+   permitted in a subdirectory of `changelog.d/`, and that must be enforced, not merely
+   assumed.** `changelog.d/sub/2-x.added.md` satisfies control 1's shallow path check (a bash
+   glob's `*` crosses `/`), because `parse_fragment_name` itself would accept its basename —
+   but `list_fragment_files` (and therefore controls 2 and 3, `check-stale`, and `release`'s
+   aggregation) globs only `"$dir"/*.md` and never enumerates it. Left unfixed, such a fragment
+   is silently lost: `check-pr` passes, `check-stale` passes because it sees an empty
+   `changelog.d/`, and `release` aggregates every fragment it *can* see and reports success —
+   exactly the failure control 5 exists to prevent, occurring entirely outside control 5's
+   reach, because the fragment was never part of what control 5 compares against. Decided:
+   subdirectories are not a supported fragment shape. `reject_nested_fragments` rejects any
+   non-`README.md` `*.md` file under `changelog.d/` that is not a direct child, at the same
+   earliest point (`validate_fragment_names`, shared by `check`, `check-pr`, and `release`) that
+   this control's own name-shape check runs, with its own diagnostic,
+   `changelog-fragment-path-invalid: <path>`, naming the actual defect rather than surfacing
+   later as a silently-smaller `stale-fragments-present` count or, worse, no failure at all.
 
 ### Single authoritative source, preserved
 
