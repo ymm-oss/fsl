@@ -184,6 +184,26 @@ list_fragment_files() {
   done
 }
 
+# Basenames exempted from reject_unenumerable_fragments (below), alongside
+# `README.md` (L3; review, #737, comment 2026-08-07, third round). Every one
+# of these is a routine, benign byproduct of a contributor's local
+# environment -- macOS Finder's `.DS_Store`, a directory-tracking
+# placeholder, or an editor swap file -- never an attempt at a fragment:
+# none end in `.md`, so none could ever match a declared category or be
+# mistaken for lost content. Left unexempted, any of them sitting in
+# `changelog.d/` fails local `check`/`check-pr`/`check-stale` with
+# `changelog-fragment-path-invalid`, a routine false positive round one's
+# reversal condition (a) treats as grounds for no-go. Git does not create or
+# track these on its own, so a CI checkout is never affected either way;
+# this exemption only changes local runs.
+is_known_non_fragment_artifact() {
+  case "$1" in
+    .DS_Store|.gitkeep) return 0 ;;
+    *.swp|*.swo) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Rejects any regular file under $1 (at any depth) that `list_fragment_files`
 # will not enumerate, the top-level `README.md` excepted. Two shapes share
 # this one root cause and are both closed here in one place, not two
@@ -208,6 +228,13 @@ list_fragment_files() {
 # itself -- "anything under $dir that list_fragment_files will not
 # enumerate, README.md excepted" -- closes the whole class instead of one
 # more instance of it.
+#
+# L3 exemption (review, #737, comment 2026-08-07, third round): a small,
+# named set of routine, benign local-environment artifacts is exempted
+# alongside README.md -- see is_known_non_fragment_artifact, below, for the
+# full reasoning. None of them can ever be an attempted fragment (none end
+# in `.md`), so exempting them costs this control nothing it exists to
+# catch.
 reject_unenumerable_fragments() {
   local dir="$1" f rel
   [ -d "$dir" ] || return 0
@@ -230,6 +257,7 @@ reject_unenumerable_fragments() {
     # the full relative path, not the last path component.
     rel="${f#"$dir"/}"
     [ "$rel" = "README.md" ] && continue
+    is_known_non_fragment_artifact "$(basename "$rel")" && continue
     if ! printf '%s\n' "$enumerated" | grep -qxF "$rel"; then
       fail "changelog-fragment-path-invalid: $dir/$rel (not enumerable by list_fragment_files -- fragments must be direct, non-hidden children of $dir/ with a .md extension; only $dir/README.md is exempt)"
     fi
@@ -517,6 +545,57 @@ is_product_surface_path() {
   esac
 }
 
+# The release-bump path set (H1; review, #737, comment 2026-08-07, third
+# round): the fixed, small set of product-surface paths a genuine release
+# commit legitimately touches without a fragment, and the *only* paths
+# classify_product_diff's release exclusion (below) may waive -- not "every
+# product-surface path in a diff classify_direct_edit labeled release-move",
+# which is what the exclusion did through round two and which made
+# "release-move" self-authorable: in the steady state this mechanism creates
+# (`[Unreleased]`'s body permanently empty -- every entry lives under
+# changelog.d/, and control 4 forbids editing the body directly), adding one
+# line -- an empty `## [X.Y.Z] - YYYY-MM-DD` heading immediately after
+# `## [Unreleased]` -- makes classify_direct_edit report "release-move" for
+# free (there is no body to move, so the forgery costs nothing), and the old,
+# diff-wide exclusion then waived every product-surface path in the same
+# diff at no cost. Reproduced live before this fix: that one-line forgery,
+# alongside an unrelated change to a new `rust/` file with no fragment,
+# passed `check-pr`. Two non-adversarial diffs reached the same gap: a
+# genuine release commit carrying an unrelated product change in the same
+# commit (`docs/RELEASE.md` bundles steps 4-10 into one), and a branch whose
+# `BASE_SHA` predates a release that has since landed on `main`.
+#
+# This set is deliberately not part of is_product_surface_path -- that
+# predicate answers "does this path need a fragment at all", a broader
+# question this control also relies on for ordinary (non-release) pull
+# requests; this one answers "is this specific path part of what a release
+# commit is allowed to bump for free", which only matters once
+# classify_direct_edit has already validated the diff as a release move.
+#
+# Measured directly against this repository's release history, `git show
+# --name-status --format= <sha>` on each of 56d5b1a (v4.2.0), 473239a
+# (v4.1.0), 7b8607a (v4.0.0), e1dfdcb (v3.1.0): the touched product-surface
+# path set is byte-identical across all four, every entry status `M` (no
+# release commit adds a file here), and is exactly the five paths below.
+# `CHANGELOG.md` itself is excluded from this set -- it is governed
+# separately, by classify_direct_edit/control 4, not by this control.
+# `7b8607a` additionally touched `docs/RELEASE.md`, which is not a product
+# surface under is_product_surface_path and so never entered this set.
+#
+# A maintainer who changes docs/RELEASE.md's release-commit steps to touch a
+# new product-surface path must add that exact path here, or every future
+# release commit will start failing its own `changelog-fragment-missing`.
+is_release_bump_path() {
+  case "$1" in
+    editors/vscode/package-lock.json) return 0 ;;
+    editors/vscode/package.json) return 0 ;;
+    rust/Cargo.lock) return 0 ;;
+    rust/Cargo.toml) return 0 ;;
+    rust/fslc/tests/fixtures/domain_characterization/baseline.v1.json) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # A fragment path directly under $1 (top-level only -- see this function's
 # neighbor, reject_unenumerable_fragments, for why `changelog.d/sub/x.added.md`
 # must NOT match here even though the bash glob `changelog.d/*.md` alone
@@ -582,14 +661,48 @@ is_top_level_fragment_path() {
 # exactly that legitimate zero-fragment case for no added safety, since
 # nothing about the release process's validity depends on how many
 # fragments happened to be waiting.
+#
+# Narrowed (H1; review, #737, comment 2026-08-07, third round): a
+# "release-move" classification alone no longer waives every product-surface
+# path in the diff -- only the ones in the fixed, measured set
+# is_release_bump_path names (above). Through round two, "release-move" was
+# self-authorable at zero cost: in the steady state this mechanism creates,
+# `[Unreleased]`'s body is permanently empty, so one forged empty
+# `## [X.Y.Z] - YYYY-MM-DD` heading right after `## [Unreleased]` makes
+# classify_direct_edit report "release-move" for free (there is nothing to
+# move, so nothing about the forgery costs anything), and the diff-wide
+# exclusion then waived every product-surface path riding along in that same
+# diff -- a genuinely unrelated `rust/` change with no fragment included.
+# Two non-adversarial diffs reached the identical gap without any forgery: a
+# real release commit that also carries an unrelated product change (docs/
+# RELEASE.md bundles steps 4-10 into one commit), and a branch whose
+# `BASE_SHA` predates a release that has since landed on `main`. Each
+# product-surface path is now checked against is_release_bump_path
+# individually: a path in that set is exempt exactly when $1 is
+# "release-move" (unchanged from before); a path outside it still demands a
+# fragment in the same diff, named individually in the same
+# `changelog-fragment-missing` diagnostic. The forgery above now buys
+# nothing -- the forged heading plus a change to, say,
+# `rust/fsl-core/src/lib.rs` still fails, because `lib.rs` is not a release
+# bump surface -- and both non-adversarial paths become correct rejections:
+# a release commit carrying an unrelated product change now needs a
+# fragment for that unrelated change, same as any other pull request would.
 classify_product_diff() {
   local classification="${1:-unchanged}"
   local status path
-  local -a product=() added_fragments=() check_fragments=()
+  local -a non_exempt=() added_fragments=() check_fragments=()
   while IFS=$'\t' read -r status path; do
     [ -z "${status:-}" ] && continue
     if is_product_surface_path "$path"; then
-      product+=("$path")
+      if [ "$classification" = "release-move" ] && is_release_bump_path "$path"; then
+        : # Exempt: part of the fixed, measured release-bump path set,
+          # and this diff is a validated release move. See this
+          # function's own comment above, and is_release_bump_path's,
+          # for why the exemption is scoped to that set rather than to
+          # every product-surface path in the diff.
+      else
+        non_exempt+=("$path")
+      fi
     fi
     if is_top_level_fragment_path "$path"; then
       case "$status" in
@@ -603,8 +716,8 @@ classify_product_diff() {
       esac
     fi
   done
-  if [ "${#product[@]}" -gt 0 ] && [ "${#added_fragments[@]}" -eq 0 ] && [ "$classification" != "release-move" ]; then
-    fail "changelog-fragment-missing: ${product[*]}"
+  if [ "${#non_exempt[@]}" -gt 0 ] && [ "${#added_fragments[@]}" -eq 0 ]; then
+    fail "changelog-fragment-missing: ${non_exempt[*]}"
   fi
   # `"${arr[@]}"` on an empty array is an unbound-variable error under
   # `set -u` on bash < 4.4 (macOS's default bash is 3.2), so guard the
@@ -1032,6 +1145,39 @@ selftest_control6() {
     reject_unenumerable_fragments "$tmp"
   rm -f "$tmp/README.md"
 
+  # Accepting (L3; review, #737, comment 2026-08-07, third round): routine,
+  # benign local-environment artifacts must not fail check/check-pr/check-stale
+  # -- none of them ends in `.md`, so none is an attempted fragment.
+  printf 'binary junk\n' >"$tmp/.DS_Store"
+  printf '' >"$tmp/.gitkeep"
+  printf 'swap file contents\n' >"$tmp/.2-x.added.md.swp"
+  st_expect_pass "control6 accepting (L3): .DS_Store, .gitkeep, and a vim .swp file are exempt, not rejected" \
+    reject_unenumerable_fragments "$tmp"
+  rm -f "$tmp/.DS_Store" "$tmp/.gitkeep" "$tmp/.2-x.added.md.swp"
+
+  # Rejecting: the L3 exemption is a small, closed, exact-match set -- it
+  # must not widen into anything that could actually hide a fragment. A file
+  # ending in `.md.bak` or a misspelled `.ds_store` is neither `README.md`
+  # nor in is_known_non_fragment_artifact's set, and must still be rejected.
+  printf 'Added (#9): hidden by a near-miss artifact name.\n' >"$tmp/9-x.added.md.bak"
+  st_expect_fail "control6 rejecting (L3): a near-miss artifact name is not exempted (changelog-fragment-path-invalid)" \
+    reject_unenumerable_fragments "$tmp"
+  rm -f "$tmp/9-x.added.md.bak"
+
+  # M2 (required; review, #737, comment 2026-08-07, third round): a mutant
+  # that loosens reject_unenumerable_fragments' README.md exemption test
+  # from `rel` (the full relative path under $dir) to `basename` left
+  # `selftest` fully green, even though the code comment right above the
+  # check explicitly argues for the `rel`/`basename` distinction: only
+  # `$dir/README.md` itself is exempt, not a same-named file nested in a
+  # subdirectory. The code already rejects `changelog.d/sub/README.md`;
+  # nothing in the suite proved it.
+  mkdir -p "$tmp/sub"
+  printf '# README\n' >"$tmp/sub/README.md"
+  st_expect_fail "control6 rejecting (M2): a nested README.md is not the top-level exemption (changelog-fragment-path-invalid)" \
+    reject_unenumerable_fragments "$tmp"
+  rm -rf "$tmp/sub"
+
   rm -rf "$tmp"
 }
 
@@ -1249,6 +1395,24 @@ selftest_control1() {
   # release.
   st_expect_pass "control1 accepting: release-move classification alone is sufficient, with zero fragments deleted (S3-2)" \
     bash -c 'printf "M\trust/Cargo.toml\nM\trust/Cargo.lock\nM\tCHANGELOG.md\n" | classify_product_diff release-move'
+  # Narrowed exclusion (H1; review, #737, comment 2026-08-07, third round):
+  # a "release-move" classification only waives the measured release-bump
+  # path set (is_release_bump_path), not every product-surface path riding
+  # along in the same diff. A path outside that set -- here,
+  # `rust/fsl-core/src/lib.rs`, an ordinary source file -- still demands a
+  # fragment even though the diff is a genuine, validated release move, and
+  # the diagnostic names only that path, not the exempt ones alongside it.
+  st_expect_fail "control1 rejecting: release-move classification does not exempt a product path outside the release-bump set (H1, changelog-fragment-missing)" \
+    bash -c 'printf "M\trust/Cargo.toml\nM\trust/Cargo.lock\nM\trust/fsl-core/src/lib.rs\nM\tCHANGELOG.md\n" | classify_product_diff release-move'
+  # The pre-H1-fix version of this exclusion made "release-move" itself
+  # self-authorable at zero cost, because the whole diff was waived once
+  # that one classification held. Confirm the diagnostic names exactly the
+  # non-exempt path and none of the exempt ones (this checks message
+  # content, so it must *pass*, not fail, when the diagnostic is correct).
+  # shellcheck disable=SC2016  # single-quoted on purpose: $out must expand
+  # inside the child `bash -c`, not this outer script, when it is parsed.
+  st_expect_pass "control1: the fragment-missing diagnostic for a mixed release-move diff names only the non-exempt path (H1)" \
+    bash -c 'out="$(printf "M\trust/Cargo.toml\nM\trust/Cargo.lock\nM\trust/fsl-core/src/lib.rs\nM\tCHANGELOG.md\n" | classify_product_diff release-move 2>&1)"; [ "$out" = "changelog-fragment-missing: rust/fsl-core/src/lib.rs" ]'
   # The exclusion must still be exactly as narrow as a validated release
   # move: neither an unvalidated fragment deletion nor an unvalidated
   # CHANGELOG.md touch, alone, satisfies it -- both must still fail closed
@@ -1340,6 +1504,17 @@ selftest_control4() {
 
   printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n## [2.0.0] - 2026-08-07\n\n- Added (#1): one.\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n\n[Unreleased]: https://example/compare/v2.0.0...HEAD\n[2.0.0]: https://example/compare/v1.0.0...v2.0.0\n[1.0.0]: https://example/compare/v0.9.0...v1.0.0\n' >"$head"
   st_expect_fail "control4b rejecting: release move that silently drops one bullet (changelog-direct-edit-forbidden)" check_direct_edit_files "$base" "$head"
+
+  # M2 (required; review, #737, comment 2026-08-07, third round): a mutant
+  # that deletes classify_direct_edit's version-heading regex
+  # (`[[ ... =~ ^\#\#\ \[[0-9]+\.[0-9]+\.[0-9]+\]\ -\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]`)
+  # left `selftest` fully green -- that regex is the *only* gate on the
+  # "release-move" shape, precisely the shape H1 forges. The code already
+  # rejects a non-version heading (`is not a version heading`); nothing in
+  # the suite exercised it. Body emptied (a real release-move attempt), but
+  # the new heading is not `## [X.Y.Z] - YYYY-MM-DD`.
+  printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n## [Next release, soon]\n\n- Added (#1): one.\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n\n[Unreleased]: https://example/compare/vNext...HEAD\n[1.0.0]: https://example/compare/v0.9.0...v1.0.0\n' >"$head"
+  st_expect_fail "control4b rejecting (M2): new heading is not a version heading (changelog-direct-edit-forbidden)" check_direct_edit_files "$base" "$head"
 
   printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n## [2.0.0] - 2026-08-07\n\n- Added (#1): one.\n- Fixed (#2): two.\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n\n[Unreleased]: https://example/compare/v2.0.0...HEAD\n[2.0.0]: https://example/compare/v1.0.0...v2.0.0\n[1.0.0]: https://example/compare/v0.9.0...v1.0.0\n' >"$head"
   st_expect_pass "control4b accepting: a valid release move (body preserved verbatim under a new version heading)" check_direct_edit_files "$base" "$head"
@@ -1605,6 +1780,95 @@ selftest_release_exclusion() {
   local d_head; d_head="$(cd "$repo_d" && git rev-parse HEAD)"
   st_expect_fail "S2-1 rejecting, variant D: a fabricated version section, body never actually moved (changelog-direct-edit-forbidden)" \
     bash -c "cd '$repo_d' && BASE_SHA='$d_base' HEAD_SHA='$d_head' '$SELF' check-pr"
+
+  # H1 (blocking; review, #737, comment 2026-08-07, third round): the
+  # exclusion S2-1/S3-2 built above turned out to be too wide in the other
+  # direction. In the steady state this mechanism creates -- `[Unreleased]`'s
+  # body permanently empty, every entry living under changelog.d/, and
+  # control 4 forbidding a direct body edit -- adding *one line*, an empty
+  # `## [X.Y.Z] - YYYY-MM-DD` heading immediately after `## [Unreleased]`,
+  # makes classify_direct_edit report "release-move" for free: there is no
+  # body to move, so the forgery costs nothing. Before this fix, that one
+  # line then exempted *every* product-surface path riding along in the same
+  # diff. Reproduced live, exit 0 (PASS -- the hole), before this fix; both
+  # now fail with exit 1 naming the actual non-exempt path, after it.
+  build_h1_steady_state_base() {
+    local repo="$1"
+    mkdir -p "$repo/rust" "$repo/changelog.d"
+    (
+      cd "$repo"
+      git init -q
+      git config user.email "selftest@example.invalid"
+      git config user.name "selftest"
+      printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n\n[Unreleased]: https://example/compare/v1.0.0...HEAD\n[1.0.0]: https://example/compare/v0.9.0...v1.0.0\n' >CHANGELOG.md
+      printf 'fn main() {}\n' >rust/lib.rs
+      git add -A
+      git commit -q -m base
+    )
+  }
+
+  # H1 variant a: forged heading plus a change to an existing tracked file.
+  local repo_h1a="$tmp/h1-forged-heading"
+  build_h1_steady_state_base "$repo_h1a"
+  local h1a_base; h1a_base="$(cd "$repo_h1a" && git rev-parse HEAD)"
+  (
+    cd "$repo_h1a"
+    printf 'fn main() { /* unrelated product change, no fragment, riding on a forged release heading */ }\n' >rust/lib.rs
+    printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n## [9.9.9] - 2026-08-07\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n\n[Unreleased]: https://example/compare/v1.0.0...HEAD\n[1.0.0]: https://example/compare/v0.9.0...v1.0.0\n' >CHANGELOG.md
+    git add -A
+    git commit -q -m "H1 forgery: empty version heading forged after [Unreleased], unrelated product change, no fragment"
+  )
+  local h1a_head; h1a_head="$(cd "$repo_h1a" && git rev-parse HEAD)"
+  st_expect_fail "H1 rejecting: a forged empty version heading no longer exempts an unrelated product-surface change (changelog-fragment-missing)" \
+    bash -c "cd '$repo_h1a' && BASE_SHA='$h1a_base' HEAD_SHA='$h1a_head' '$SELF' check-pr"
+
+  # H1 variant b: forged heading plus a brand-new rust/ file -- the shape an
+  # ordinary, non-adversarial feature commit takes once one stray heading is
+  # present anywhere in the same diff.
+  local repo_h1b="$tmp/h1-forged-heading-new-file"
+  build_h1_steady_state_base "$repo_h1b"
+  local h1b_base; h1b_base="$(cd "$repo_h1b" && git rev-parse HEAD)"
+  (
+    cd "$repo_h1b"
+    printf 'pub fn new_thing() {}\n' >rust/new_file.rs
+    printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n## [9.9.9] - 2026-08-07\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n\n[Unreleased]: https://example/compare/v1.0.0...HEAD\n[1.0.0]: https://example/compare/v0.9.0...v1.0.0\n' >CHANGELOG.md
+    git add -A
+    git commit -q -m "H1 forgery: forged heading plus a brand-new rust/ file, no fragment"
+  )
+  local h1b_head; h1b_head="$(cd "$repo_h1b" && git rev-parse HEAD)"
+  st_expect_fail "H1 rejecting: a forged empty version heading does not exempt a brand-new rust/ file either (changelog-fragment-missing)" \
+    bash -c "cd '$repo_h1b' && BASE_SHA='$h1b_base' HEAD_SHA='$h1b_head' '$SELF' check-pr"
+
+  # H1 variant c: not a forgery at all -- a genuinely valid, hand-verified
+  # full release move (body moved verbatim into the new section, exactly the
+  # shape classify_direct_edit's own validation requires) that also carries
+  # an unrelated product-surface change with no fragment in the same commit,
+  # the way docs/RELEASE.md steps 4-10 bundle a release into one commit.
+  local repo_h1c="$tmp/h1-handforged-release-plus-unrelated"
+  mkdir -p "$repo_h1c/rust" "$repo_h1c/changelog.d"
+  (
+    cd "$repo_h1c"
+    git init -q
+    git config user.email "selftest@example.invalid"
+    git config user.name "selftest"
+    printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n- Added (#1): a pending entry.\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n\n[Unreleased]: https://example/compare/v1.0.0...HEAD\n[1.0.0]: https://example/compare/v0.9.0...v1.0.0\n' >CHANGELOG.md
+    printf 'fn main() {}\n' >rust/lib.rs
+    git add -A
+    git commit -q -m base
+  )
+  local h1c_base; h1c_base="$(cd "$repo_h1c" && git rev-parse HEAD)"
+  (
+    cd "$repo_h1c"
+    printf 'fn main() { /* unrelated change riding along in a genuine release move */ }\n' >rust/lib.rs
+    printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n## [2.0.0] - 2026-08-07\n\n- Added (#1): a pending entry.\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n\n[Unreleased]: https://example/compare/v2.0.0...HEAD\n[2.0.0]: https://example/compare/v1.0.0...v2.0.0\n[1.0.0]: https://example/compare/v0.9.0...v1.0.0\n' >CHANGELOG.md
+    git add -A
+    git commit -q -m "H1: genuine release move, plus an unrelated rust/lib.rs change, no fragment"
+  )
+  local h1c_head; h1c_head="$(cd "$repo_h1c" && git rev-parse HEAD)"
+  st_expect_fail "H1 rejecting: a validated release move still demands a fragment for a product change outside the release-bump set (changelog-fragment-missing)" \
+    bash -c "cd '$repo_h1c' && BASE_SHA='$h1c_base' HEAD_SHA='$h1c_head' '$SELF' check-pr"
+
+  unset -f build_h1_steady_state_base
 
   # Controls E and F from the review's table, for completeness alongside
   # the four variants above: a product change that does not touch
