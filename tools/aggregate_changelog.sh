@@ -293,27 +293,47 @@ aggregate_section_body() {
   printf '%s' "$out"
 }
 
-# Control 5 (conservation): every fragment's rendered block must appear in
-# the produced text byte-for-byte, and the produced text must have exactly
-# one top-level bullet per fragment -- no more (concatenation into a single
-# entry), no fewer (a silent drop).
+# Splits $1 into its top-level bullet blocks, NUL-separated on stdout (a
+# block begins at a line matching `^- ` and continues through every line
+# before the next such line, or EOF). Used only by verify_conservation, to
+# turn "produced" back into the same per-bullet units render_fragment
+# produces, for an exact positional comparison.
+split_bullets() {
+  awk '
+    /^- / { if (started) printf "%s%c", block, 0; block = $0; started = 1; next }
+    { block = block "\n" $0 }
+    END { if (started) printf "%s%c", block, 0 }
+  ' <<<"$1"
+}
+
+# Control 5 (conservation): the produced text must contain exactly one
+# top-level bullet per fragment, and bullet *i* (in control 3's declared
+# order) must be byte-for-byte render_fragment's output for fragment *i* --
+# not merely "produced contains this block somewhere". A substring/
+# containment check (this function's previous shape) is satisfiable by an
+# aggregator that drops fragment A and emits fragment B twice, where A's
+# rendered block is a byte-for-byte prefix of B's: the bullet count still
+# matches and the substring scan still finds A's block -- inside the
+# duplicate, not in A's own position. Per-position identity closes that: the
+# dropped fragment's own position no longer holds its own block, so it
+# fails.
 verify_conservation() {
   local dir="$1" produced="$2"
   local -a sorted=()
   local f
   while IFS= read -r f; do [ -n "$f" ] && sorted+=("$f"); done <<<"$(sort_fragments "$dir")"
-  local expected="${#sorted[@]}"
-  local actual
-  actual=$(printf '%s\n' "$produced" | grep -c '^- ' || true)
-  if [ "$actual" -ne "$expected" ]; then
-    fail "fragment-dropped: bullet count mismatch (expected $expected fragment(s), produced $actual top-level bullet(s))"
+  local -a actual=()
+  local seg
+  while IFS= read -r -d '' seg; do actual+=("$seg"); done < <(split_bullets "$produced")
+  if [ "${#actual[@]}" -ne "${#sorted[@]}" ]; then
+    fail "fragment-dropped: bullet count mismatch (expected ${#sorted[@]} fragment(s), produced ${#actual[@]} top-level bullet(s))"
   fi
   [ "${#sorted[@]}" -eq 0 ] && return 0
-  for f in "${sorted[@]}"; do
-    local block
-    block="$(render_fragment "$dir/$f")"
-    if [[ "$produced" != *"$block"* ]]; then
-      fail "fragment-dropped: $f"
+  local i expected_block
+  for i in "${!sorted[@]}"; do
+    expected_block="$(render_fragment "$dir/${sorted[$i]}")"
+    if [ "${actual[$i]}" != "$expected_block" ]; then
+      fail "fragment-dropped: ${sorted[$i]}"
     fi
   done
 }
@@ -841,6 +861,22 @@ selftest_control5() {
   local truncated
   truncated="- Added (#1): first."$'\n'"- Fixed (#2): second, multi-line."$'\n'"- Added (#3): third."
   st_expect_fail "control5 rejecting: sham copies only each fragment's first line" verify_conservation "$tmp" "$truncated"
+  rm -f "$tmp"/*.md
+
+  # Rejecting (c): a sham that drops fragment A and emits fragment B twice,
+  # where A's entire rendered block is a byte-for-byte prefix of B's --
+  # review finding, #737, comment 2026-08-07. Bullet count still matches (2
+  # expected, 2 produced) and a *substring* scan still finds A's block
+  # (inside the first copy of B), which is exactly why the previous
+  # containment-based verify_conservation passed this: it never checked that
+  # the bullet in A's own *position* was A's own block. Per-bullet identity
+  # must reject it.
+  st_setup_frag "$tmp" "1-a.added.md" "Fixed (#1): a."
+  st_setup_frag "$tmp" "2-b.added.md" "Fixed (#1): a." "more detail."
+  local duplicated
+  duplicated="$(render_fragment "$tmp/2-b.added.md")"$'\n'"$(render_fragment "$tmp/2-b.added.md")"
+  st_expect_fail "control5 rejecting: sham drops fragment A and emits fragment B (whose block starts with A's) twice" \
+    verify_conservation "$tmp" "$duplicated"
 
   rm -rf "$tmp"
 }
