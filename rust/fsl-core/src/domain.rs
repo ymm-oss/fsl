@@ -66,6 +66,78 @@ fn map_key_value(type_name: &SyntaxTypeExpr) -> Option<(&SyntaxTypeExpr, &Syntax
     }
 }
 
+/// [`domain_type_default`]'s result: either a single value a field's
+/// initializer would render as `= value`, or -- for a top-level `Map<K, V>`
+/// field only -- the dense per-key `forall` init [`domain_kernel_source`]'s
+/// state-field loop builds directly, since a bare `Map` has no single
+/// default value of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DomainDefault {
+    /// A field initializer's right-hand side, e.g. `none`, `Set {}`, a bare
+    /// enum member, or a `value_object` struct literal.
+    Value(String),
+    /// The per-key value `field[k] = value` renders for every key, the only
+    /// supported default for a top-level `Map<K, V>` field
+    /// (`field: Map<K, V> = expr;` is always rejected).
+    MapPerKey(String),
+}
+
+/// The domain-*source* form of the renderer's default value for `type_name`
+/// in `domain` -- the same total dispatch [`domain_kernel_source`] uses via
+/// `Context::default_for_type` to choose every field's implicit value,
+/// exposed so the `implicit_initial_value` warning (issue #731) reports the
+/// value this function -- the single owner -- selects, rather than a second
+/// hand-rolled copy of the dispatch that can silently drift from it (as the
+/// pre-#731 warning did for every container type).
+///
+/// "Domain-source form" matters for one case: an enum default renders as the
+/// bare member name a domain-source initializer would accept (`Pending`),
+/// not `domain_kernel_source`'s kernel-scoped mangled identifier
+/// (`Status_Pending`), and that bare form is threaded through recursion --
+/// into a `value_object`'s struct-literal fields and a `Map`'s per-key value
+/// -- so an enum default is never mangled no matter how deep it is nested
+/// (issue #731 review, M1: an earlier version of this fix special-cased only
+/// a field's own top-level enum type in the warning, which still mangled an
+/// enum nested inside a `value_object` or a `Map` value).
+///
+/// # Errors
+///
+/// Returns [`CoreError`] wherever `Context::default_for_type` does: an
+/// unknown domain type name, an enum with no members, or a type shape it
+/// fails closed on -- including a `Map` nested as another `Map`'s value,
+/// which is never renderable (`"Map state requires explicit initialization
+/// through supported semantics"`).
+pub fn domain_type_default(
+    domain: &DomainSpec,
+    type_name: &SyntaxTypeExpr,
+    span: Span,
+) -> Result<DomainDefault, CoreError> {
+    let context = Context::new(domain);
+    if let Some((_key, value)) = map_key_value(type_name) {
+        return context
+            .default_for_type(value, span, &BTreeMap::new(), DefaultForm::DomainSource)
+            .map(DomainDefault::MapPerKey);
+    }
+    context
+        .default_for_type(type_name, span, &BTreeMap::new(), DefaultForm::DomainSource)
+        .map(DomainDefault::Value)
+}
+
+/// Which identifier form [`Context::default_for_type`] renders an enum
+/// member's default as. Every other arm (`Bool`, `Int`, range/external,
+/// `Option`, `Set`, `Map`) renders identically in both forms; only the enum
+/// leaf differs, so this is threaded through rather than duplicating the
+/// whole dispatch per form (issue #731 review, M1).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DefaultForm {
+    /// `domain_kernel_source`'s own flat kernel namespace, where enum
+    /// members are mangled (`Enum_Member`) to avoid cross-enum collisions.
+    Kernel,
+    /// The syntax a domain-source field initializer itself accepts, where an
+    /// enum member is referenced by its bare declared name.
+    DomainSource,
+}
+
 fn synthetic_num(value: i64, loc: DomainLoc) -> SyntaxExpr {
     let position = SourcePos {
         offset: 0,
@@ -325,6 +397,7 @@ impl<'a> Context<'a> {
         &self,
         field: &DomainField,
         type_env: &BTreeMap<String, String>,
+        form: DefaultForm,
     ) -> Result<String, CoreError> {
         if let Some(value) = &field.default {
             return Ok(self.normalize(
@@ -333,9 +406,10 @@ impl<'a> Context<'a> {
                 type_env,
                 Some(&field.type_name),
                 true,
+                form,
             ));
         }
-        self.default_for_type(&field.type_name, field.span, type_env)
+        self.default_for_type(&field.type_name, field.span, type_env, form)
     }
 
     /// Total dispatch over `SyntaxTypeExprKind` -- the same two-variant AST
@@ -345,12 +419,17 @@ impl<'a> Context<'a> {
     /// which returns [`CoreError`] (the same "unsupported domain type
     /// constructor" message `domain_lowering.rs`'s
     /// `logical_type`/`surface_type` already use for the identical case), not
-    /// a silently rendered `"0"`.
+    /// a silently rendered `"0"`. `form` selects only how the enum leaf
+    /// renders a selected member (see [`DefaultForm`]); every other arm is
+    /// identical in both forms and threads `form` through unchanged so a
+    /// nested enum -- inside a `value_object`'s fields or a `Map`'s value --
+    /// never mangles regardless of how deep it is (issue #731 review, M1).
     fn default_for_type(
         &self,
         type_name: &SyntaxTypeExpr,
         span: Span,
         type_env: &BTreeMap<String, String>,
+        form: DefaultForm,
     ) -> Result<String, CoreError> {
         match &type_name.kind {
             SyntaxTypeExprKind::Name(ident) => match ident.text.as_str() {
@@ -364,7 +443,10 @@ impl<'a> Context<'a> {
                                 span,
                             ));
                         };
-                        Ok(self.enum_value(&ty.name, member))
+                        Ok(match form {
+                            DefaultForm::Kernel => self.enum_value(&ty.name, member),
+                            DefaultForm::DomainSource => member.clone(),
+                        })
                     }
                     Some(ty) if matches!(ty.kind.as_str(), "range" | "external") => Ok(ty
                         .lo
@@ -378,7 +460,7 @@ impl<'a> Context<'a> {
                             .map(|field| Ok(format!(
                                 "{}: {}",
                                 field.name,
-                                self.default(field, type_env)?
+                                self.default(field, type_env, form)?
                             )))
                             .collect::<Result<Vec<_>, CoreError>>()?
                             .join(", ")
@@ -429,6 +511,19 @@ impl<'a> Context<'a> {
         }
     }
 
+    /// `form` governs only the `target_type`-driven bare-enum-member
+    /// mangling below: every kernel-text call site (guards, invariants,
+    /// evolve assignments) always passes [`DefaultForm::Kernel`], since
+    /// those render directly into `domain_kernel_source`'s output; only
+    /// [`Self::default`]'s explicit-default branch threads its caller's
+    /// `form` through, so a `value_object` field's own explicit enum
+    /// default (e.g. `status: OrderStatus = Draft;`) renders bare when the
+    /// whole struct literal is being computed in domain-source form (issue
+    /// #731 review, M1 follow-up: this is the second of two enum-mangling
+    /// sites -- [`Self::default_for_type`]'s own enum arm is the first --
+    /// that must both honor `form` for a nested `value_object` field's
+    /// explicit default to stay unmangled).
+    #[allow(clippy::too_many_lines)]
     fn normalize(
         &self,
         expression: &str,
@@ -436,6 +531,7 @@ impl<'a> Context<'a> {
         type_env: &BTreeMap<String, String>,
         target_type: Option<&str>,
         replace_state: bool,
+        form: DefaultForm,
     ) -> String {
         let mut output = compact(expression)
             .replace("&&", " and ")
@@ -465,7 +561,14 @@ impl<'a> Context<'a> {
                                 .iter()
                                 .map(|piece| format!(
                                     "({})",
-                                    self.normalize(piece, Some(aggregate), type_env, None, false)
+                                    self.normalize(
+                                        piece,
+                                        Some(aggregate),
+                                        type_env,
+                                        None,
+                                        false,
+                                        DefaultForm::Kernel,
+                                    )
                                 ))
                                 .collect::<Vec<_>>()
                                 .join(" and ")
@@ -514,7 +617,8 @@ impl<'a> Context<'a> {
                 output.replace_range(start..=end, &format!("({})", values.join(" or ")));
             }
         }
-        if let Some(target) = target_type
+        if form == DefaultForm::Kernel
+            && let Some(target) = target_type
             && self.ty(target).is_some_and(|ty| ty.kind == "enum")
             && output
                 .chars()
@@ -586,7 +690,8 @@ fn evolve_assignments(
                     Some(aggregate),
                     type_env,
                     None,
-                    true
+                    true,
+                    DefaultForm::Kernel,
                 )
             )
         })
@@ -608,6 +713,7 @@ fn evolve_assignments(
             type_env,
             state.get(root).copied(),
             true,
+            DefaultForm::Kernel,
         );
         format!("{target} = {expression}")
     }));
@@ -969,8 +1075,12 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
                             ));
                         }
                     };
-                    let value_default =
-                        context.default_for_type(value, field.span, &environment)?;
+                    let value_default = context.default_for_type(
+                        value,
+                        field.span,
+                        &environment,
+                        DefaultForm::Kernel,
+                    )?;
                     init.push(format!(
                         "    forall k: {key_type} {{ {name}[k] = {value_default} }}"
                     ));
@@ -978,7 +1088,7 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
                 None => {
                     init.push(format!(
                         "    {name} = {}",
-                        context.default(field, &environment)?
+                        context.default(field, &environment, DefaultForm::Kernel)?
                     ));
                 }
             }
@@ -1065,7 +1175,8 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
                         Some(aggregate),
                         &environment,
                         None,
-                        true
+                        true,
+                        DefaultForm::Kernel,
                     )
                 ));
             }
@@ -1077,7 +1188,8 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
                         Some(aggregate),
                         &environment,
                         None,
-                        true
+                        true,
+                        DefaultForm::Kernel,
                     )
                 ));
             }
@@ -1165,7 +1277,8 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
                     Some(aggregate),
                     &environment,
                     None,
-                    true
+                    true,
+                    DefaultForm::Kernel,
                 )
             ));
         }

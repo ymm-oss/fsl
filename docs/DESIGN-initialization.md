@@ -45,15 +45,48 @@ the same way.
 
 The current edition preserves already-existing implicit values but reports the
 stable warning code `implicit_initial_value`. Each finding contains the field
-source span, selected value, selection reason, current/next severity, canonical
-replacement, and a machine-applicable byte insertion edit.
+source span, selected value, selection reason, and current/next severity.
+Where a machine-applicable insertion is safe to offer (see below), a finding
+additionally carries a canonical replacement and a byte insertion edit; a
+finding without one is still reported, just not auto-fixable yet.
 
-Domain aggregate fields warn when omission selects:
+Domain aggregate fields warn whenever an omitted initializer selects an
+implicit default -- every shape `fsl_core::domain_type_default` (the same
+total dispatch `fslc domain expand`'s renderer uses) can select one for, not
+a separately maintained scalar subset (issue #731):
 
-- `false` for `Bool`;
-- the first declared enum member;
-- the lower bound of a range;
-- `0` for an external placeholder without a declared lower bound.
+- `false` for `Bool`, `0` for `Int`;
+- the first declared enum member (rendered as domain source itself would
+  accept, e.g. `Pending`, never the generated kernel's mangled
+  `Status_Pending` -- including when the enum is nested inside a
+  `value_object`'s struct literal or a `Map`'s per-key value);
+- the lower bound of a range, or `0` for an external placeholder without a
+  declared lower bound;
+- `none` for `Option<T>`;
+- `Set {}` for `Set<T>`;
+- a `value_object`'s own default struct literal, built from this same
+  selection recursively over its fields;
+- for a top-level `Map<K, V>` field, the dense per-key
+  `forall k: K { field[k] = <V's default> }` init `fslc domain expand`
+  renders directly -- `<V's default>` recurses through this same selection,
+  and `field: Map<K, V> = expr;` is always rejected
+  ("whole-Map domain defaults are not supported"), so this is the *only*
+  supported `Map` default.
+
+Two of those shapes do not currently carry a machine-applicable insertion,
+and consequently keep next-edition severity at `warning` rather than `error`
+(`check --edition next`/`migrate --edition next` cannot yet demand an
+initializer they have no safe way to insert): a top-level `Map<K, V>` field,
+which has no whole-field initializer syntax at all, and a `Set<T>` or
+`value_object`-typed field, whose brace-literal default (`Set { ... }`,
+`Name { ... }`) is valid FSL that `check` accepts but that the lossless
+formatter cannot yet round-trip through a reformat-and-reparse pass
+(issue #770, a pre-existing formatter defect discovered while adding
+container-type coverage, independent of this migration contract). Reporting
+the finding without the insertion is deliberate: `migrate --write` is
+fail-closed and would not write a corrupted file, but attempting the edit
+would trip #770's reformat failure and fail migration for the whole file,
+dropping every other, otherwise-safe edit in it too.
 
 Requirements process fields warn only when a `number` field omits its initializer
 and therefore selects the declared `verify.values` lower bound. Requirements
@@ -61,13 +94,14 @@ and therefore selects the declared `verify.values` lower bound. Requirements
 a check-time error. This preserves the accepted requirements contract instead of
 inventing a new implicit value.
 
-The edit inserts ` = <selected value>` immediately after the field type. Applying
-it preserves surrounding comments/trivia and yields the value already selected by
-the current semantics. The lossless formatter and edition migrator consume this
-diagnostic contract. `fslc migrate --edition next` inserts the selected value
-only after comparing the checked before/after Public Kernel; `--write` applies
-it with the other validated file edits.
+Where an edit exists, it inserts ` = <selected value>` immediately after the
+field type. Applying it preserves surrounding comments/trivia and yields the
+value already selected by the current semantics. The lossless formatter and
+edition migrator consume this diagnostic contract. `fslc migrate --edition next`
+inserts the selected value only after comparing the checked before/after Public
+Kernel; `--write` applies it with the other validated file edits.
 
-The next edition severity is `error`; `check --edition next` requires the
-initializer to be explicit. The current edition continues to parse the omitted
-form and report its warning.
+The next edition severity is `error` for every insertable finding;
+`check --edition next` requires that initializer to be explicit. The current
+edition continues to parse every omitted form and report its warning,
+including the two shapes above with no insertion yet.

@@ -198,9 +198,17 @@ remain a separate traceability relation.
 
 Aggregate state fields retain their typed explicit initializer when present. In
 the current edition, an omitted initializer keeps the established lowering
-choice for Bool (`false`), enum (first declared member), range (lower bound), or
-external placeholder (`0`) and emits `implicit_initial_value`. The warning names
-the chosen value and reason and carries a byte insertion edit. This makes the
+choice -- Bool (`false`), Int (`0`), enum (first declared member, rendered
+bare as domain source itself would accept), range (lower bound), external
+placeholder (`0`), `Option<T>` (`none`), `Set<T>` (`Set {}`), `value_object`
+(its own default struct literal), or a top-level `Map<K, V>` (the dense
+per-key `forall` init) -- and emits `implicit_initial_value` for every one of
+these shapes (issue #731), not only the four scalar ones. The warning names
+the chosen value and reason and, where the value's shape allows a safe
+insertion, carries a byte insertion edit; a top-level `Map<K, V>` field (no
+whole-field initializer syntax exists) and a `Set<T>`/`value_object` field
+(blocked by a pre-existing formatter round-trip defect, issue #770) warn
+without one and keep next-edition severity at `warning`. This makes the
 existing behavior migratable without treating an arbitrary default as newly
 inferred intent; the edition migrator consumes the edit contract described in
 [`DESIGN-initialization.md`](DESIGN-initialization.md).

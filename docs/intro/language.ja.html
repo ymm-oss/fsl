@@ -323,21 +323,33 @@ never-enabled action の警告として報告します。</p>
 バイト/行座標、ターゲットバインディング、ソースノードの逆引き、明示的な
 assurance/completeness を持つトップレベルの provenance グラフとして公開します。</p>
 <p>domain aggregate の状態フィールドが初期化子を省略した場合、現行エディションは
-確立された Bool <code>false</code>、enum 先頭メンバー、範囲下限、external-placeholder <code>0</code> の
-選択を維持し、<code>implicit_initial_value</code> を出力します。この警告には、選択された値、
-理由、current/next の深刻度、フィールドのスパン、機械適用可能な明示初期化子の挿入
-が含まれます。次のエディションでは初期化子の明示が必須になります。コンテナ型の
-フィールドにも暗黙の既定値があります — <code>Option&lt;T&gt;</code> は <code>none</code> を、<code>Set&lt;T&gt;</code> は
-<code>Set {}</code> を選び、トップレベルの <code>Map&lt;K, V&gt;</code> は密な per-key init
-(<code>forall k: K { field[k] = &lt;V の既定値&gt; }</code>)を選びます。<code>&lt;V の既定値&gt;</code> はこの同じ
-選択を再帰的に辿ります — ただし省略しても <code>implicit_initial_value</code> は
-<strong>出力されません</strong>。この警告のカバー範囲は上記の4つのスカラー形状で止まります。
-<code>Map</code> フィールドには、さらに2つの fail-closed ルールがあります: 明示の whole-<code>Map</code>
-既定値(<code>field: Map&lt;K, V&gt; = expr;</code>)は常に棄却されます(「whole-Map domain defaults
-are not supported」)。サポートされる <code>Map</code> の既定値は per-key 形式のみだからです。
-また、別の <code>Map</code> の値として nested された <code>Map</code> も棄却されます(「Map state requires
-explicit initialization through supported semantics」)。per-key init は <code>Map</code> 値型
-に対して選べる既定値を持たないからです。</p>
+確立された Bool <code>false</code>、Int <code>0</code>、enum 先頭メンバー(domain ソース自体が受理する
+bare な形で描画されます — <code>value_object</code> や <code>Map</code> の値としてどれだけ深く nested
+していても、<code>domain_kernel_source</code> の kernel 側 mangled 識別子には決してなりません)、
+範囲下限、external-placeholder <code>0</code>、<code>value_object</code> の構造体リテラル、<code>Option&lt;T&gt;</code> の
+<code>none</code>、<code>Set&lt;T&gt;</code> の <code>Set {}</code>、トップレベルの <code>Map&lt;K, V&gt;</code> の密な per-key init
+(<code>forall k: K { field[k] = &lt;V の既定値&gt; }</code>、<code>&lt;V の既定値&gt;</code> はこの同じ選択を再帰的に
+辿る)のいずれかの選択を維持し、これら<strong>すべて</strong>の形状について <code>implicit_initial_value</code>
+を出力します(#731)。この警告のカバー範囲は renderer の総当たり dispatch
+(<code>fsl_core::domain_type_default</code> — 警告と <code>domain_kernel_source</code> の双方が、選択値
+そのものと、その中の enum メンバーの綴り方を読み出す単一のオーナー)と一致しており、
+一部のスカラー形状だけではありません。この警告には、選択された値、理由、current/next
+の深刻度、フィールドのスパン、そして機械適用可能な挿入が存在する場合は
+<code>suggestion</code>/<code>canonical_replacement</code> が含まれます。2つのフィールド形状ではこの挿入が
+省略され、それに伴い <code>edition_severity.next</code> は <code>error</code> ではなく <code>warning</code> のままに
+なります(次のエディションは、安全に挿入する手段がない初期化子をまだ必須化できません):
+トップレベルの <code>Map&lt;K, V&gt;</code> フィールドには whole-field の既定値が一切なく
+(<code>field: Map&lt;K, V&gt; = expr;</code> は常に棄却されます、「whole-Map domain defaults are not
+supported」。サポートされる <code>Map</code> の既定値は per-key 形式のみだからです)、<code>Set&lt;T&gt;</code>
+または <code>value_object</code> 型フィールドの brace-literal な既定値(<code>Set { ... }</code>、
+<code>Name { ... }</code>)は、<code>fslc check</code> が明示的に書かれたものを受理するにもかかわらず、
+<code>fslc fmt</code> の reformat-and-reparse パスで現状 round-trip できません(issue #770)。
+<code>migrate --write</code> は fail-closed であり壊れたファイルを書き出すことはありませんが、
+挿入を提示すると #770 の reformat 失敗を誘発し、そのファイル全体の migration が
+失敗して、他の安全な編集まで一緒に失われます。別の <code>Map</code> の値として nested された
+<code>Map</code> は別途棄却されます(「Map state requires explicit initialization through
+supported semantics」)。per-key init は <code>Map</code> 値型に対して選べる既定値を持たないから
+です。</p>
 <p>安定した fsl-domain findings とネストされたカーネル結果(成功時は
 <code>verified_under_assumptions</code>)には <code>fslc domain check</code> を、aggregate/effect の
 サマリーには <code>fslc domain analyze</code> を、生成されたカーネル FSL のデバッグビューの

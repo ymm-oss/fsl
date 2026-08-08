@@ -357,6 +357,317 @@ fn domain_implicit_values_warn_with_selected_values_and_insertions() {
     }
 }
 
+fn characterization_fixture(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("tests/fixtures/domain_characterization/{name}"))
+}
+
+fn implicit_warnings(output: &Value) -> std::collections::BTreeMap<String, Value> {
+    output["warnings"]
+        .as_array()
+        .expect("warnings array")
+        .iter()
+        .filter(|warning| warning["code"] == "implicit_initial_value")
+        .map(|warning| {
+            (
+                warning["field"].as_str().expect("field").to_owned(),
+                warning.clone(),
+            )
+        })
+        .collect()
+}
+
+/// `fslc domain expand PATH` prints the generated kernel source as raw text
+/// (not JSON) whenever the command succeeds and no `--output` is given, so
+/// route through `--output` and read the written file back instead of
+/// reusing `run`'s JSON-only decoder. `output` is a [`Fixture`] purely for
+/// its `Drop`-based cleanup (issue #731 review, n3): it reserves the temp
+/// path up front so the file is removed even if an `assert!` below panics,
+/// matching every other temp file in this suite instead of a bare
+/// `remove_file` that a panic would skip.
+fn domain_expand_source(path_text: &str) -> String {
+    let output = Fixture::new("expand-output", "");
+    let (result, status) = run(&["domain", "expand", path_text, "--output", output.text()]);
+    assert_eq!(status, 0, "{result}");
+    std::fs::read_to_string(&output.0).expect("read expanded kernel source")
+}
+
+/// Issue #731: `implicit_initial_value` must fire for container-typed domain
+/// state fields (`Option<T>`, `Set<T>`, a top-level `Map<K, V>`), not just
+/// the four scalar shapes, because `domain_kernel_source`'s renderer already
+/// gives every one of these an implicit default. The `selected_value` this
+/// warning reports must match `fslc domain expand`'s rendered default at the
+/// string level -- both must come from the same `fsl_core::domain_type_default`
+/// owner, not a second hand-rolled copy of the dispatch.
+#[test]
+fn domain_container_fields_warn_and_match_the_renderer_default() {
+    let path = characterization_fixture("container_defaults_surface.fsl");
+    let path_text = path.to_str().expect("UTF-8 path");
+    let (output, status) = run(&["check", path_text]);
+    assert_eq!(status, 0, "{output}");
+    let implicit = implicit_warnings(&output);
+    assert_eq!(
+        implicit.keys().collect::<Vec<_>>(),
+        vec!["Basket.picked", "Basket.seen"],
+        "{output}"
+    );
+
+    let picked = &implicit["Basket.picked"];
+    assert_eq!(picked["selected_value"], "none");
+    assert_eq!(picked["suggestion"]["machine_applicable"], true);
+    assert_eq!(picked["edition_severity"]["next"], "error");
+
+    let seen = &implicit["Basket.seen"];
+    assert_eq!(seen["selected_value"], "Set {}");
+    // No machine-applicable insertion for a brace-literal default (issue
+    // #770 tracks the `fslc fmt` round-trip defect this withholds against);
+    // `--edition next` cannot yet demand an initializer it cannot safely
+    // insert.
+    assert!(seen.get("suggestion").is_none(), "{seen}");
+    assert!(seen.get("canonical_replacement").is_none(), "{seen}");
+    assert_eq!(seen["edition_severity"]["next"], "warning");
+
+    let expanded = domain_expand_source(path_text);
+    let picked_value = picked["selected_value"].as_str().expect("picked value");
+    let seen_value = seen["selected_value"].as_str().expect("seen value");
+    assert!(
+        expanded.contains(&format!("basket_picked = {picked_value}")),
+        "{expanded}"
+    );
+    assert!(
+        expanded.contains(&format!("basket_seen = {seen_value}")),
+        "{expanded}"
+    );
+}
+
+/// Companion to the Option/Set case above: a top-level `Map<K, V>` field has
+/// no whole-field default at all (only the per-key `forall` init the
+/// renderer builds), and a `value_object`-typed field's struct-literal
+/// default hits the same #770 formatter round-trip gap `Set {}` does. Both
+/// must still warn under `check` and both must stay excluded from
+/// `--edition next` enforcement, since neither has a safe insertion to
+/// demand.
+#[test]
+fn domain_map_and_value_object_fields_warn_without_a_next_edition_deadline() {
+    let path = characterization_fixture("lvalues_surface.fsl");
+    let path_text = path.to_str().expect("UTF-8 path");
+    let (output, status) = run(&["check", path_text]);
+    assert_eq!(status, 0, "{output}");
+    let implicit = implicit_warnings(&output);
+    assert_eq!(
+        implicit.keys().collect::<Vec<_>>(),
+        vec!["Inventory.counter", "Inventory.counts"],
+        "{output}"
+    );
+    // `total: Quantity = 0;` has an explicit default and must not warn.
+    assert!(!implicit.contains_key("Inventory.total"), "{output}");
+
+    let counts = &implicit["Inventory.counts"];
+    assert_eq!(counts["selected_value"], "0");
+    assert!(counts.get("suggestion").is_none(), "{counts}");
+    assert_eq!(counts["edition_severity"]["next"], "warning");
+
+    let counter = &implicit["Inventory.counter"];
+    assert_eq!(counter["selected_value"], "Counter { value: 0 }");
+    assert!(counter.get("suggestion").is_none(), "{counter}");
+    assert_eq!(counter["edition_severity"]["next"], "warning");
+
+    let expanded = domain_expand_source(path_text);
+    assert!(expanded.contains("inventory_counts[k] = 0"), "{expanded}");
+    assert!(
+        expanded.contains("inventory_counter = Counter { value: 0 }"),
+        "{expanded}"
+    );
+
+    let (next, next_status) = run(&["check", path_text, "--edition", "next"]);
+    assert_eq!(next_status, 0, "{next}");
+    assert_eq!(next["result"], "ok", "{next}");
+}
+
+/// Issue #731 review, M1: an enum nested one level below a field's own type
+/// -- inside a `value_object`'s struct literal, or as a top-level `Map`'s
+/// per-key value -- must still report the bare domain-source member name,
+/// not `domain_kernel_source`'s kernel-mangled `Enum_Member` identifier. An
+/// earlier version of this fix special-cased only a field's own top-level
+/// enum type in `frontend_output.rs`, which still mangled an enum nested one
+/// layer down; the fix now lives in `fsl_core::domain_type_default` itself
+/// (the single owner), so nesting depth cannot reintroduce the bug.
+#[test]
+fn domain_nested_enum_defaults_stay_bare_inside_value_object_and_map() {
+    let source = r"domain NestedEnumDefaults {
+  enum OrderStatus { Draft, Placed }
+  type ItemId = 0..1
+  value_object AuditStamp {
+    status: OrderStatus;
+    attempts: Int;
+  }
+  aggregate Order {
+    id ItemId
+    state {
+      audit: AuditStamp;
+      history: Map<ItemId, OrderStatus>;
+    }
+    command Touch {}
+    event Touched {}
+    decide Touch { emits Touched }
+    evolve Touched {}
+  }
+}
+";
+    let fixture = Fixture::new("nested-enum-defaults", source);
+    let path_text = fixture.text();
+    let (output, status) = run(&["check", path_text]);
+    assert_eq!(status, 0, "{output}");
+    let implicit = implicit_warnings(&output);
+
+    let audit = &implicit["Order.audit"];
+    assert_eq!(
+        audit["selected_value"], "AuditStamp { status: Draft, attempts: 0 }",
+        "{audit}"
+    );
+    assert!(
+        !audit["selected_value"]
+            .as_str()
+            .expect("audit value")
+            .contains("OrderStatus_"),
+        "{audit}"
+    );
+
+    let history = &implicit["Order.history"];
+    assert_eq!(history["selected_value"], "Draft", "{history}");
+    assert!(
+        !history["selected_value"]
+            .as_str()
+            .expect("history value")
+            .contains("OrderStatus_"),
+        "{history}"
+    );
+
+    // `AuditStamp { ... }` is itself a brace-literal value_object default
+    // (issue #770), so it must not be offered as a machine-applicable
+    // insertion regardless of the enum fix above.
+    assert!(audit.get("suggestion").is_none(), "{audit}");
+}
+
+/// Issue #731 review, M3: `Int` hit the exact defect class #731 fixed for
+/// containers -- the renderer (`Context::default_for_type`'s `"Int" => Ok("0")`
+/// arm) always selects `0` for an omitted `Int` field, but the warning
+/// carved `Int` out unconditionally. `0` contains no brace, so it is safe to
+/// offer as a machine-applicable insertion like every other scalar shape.
+#[test]
+fn domain_bare_int_fields_warn_like_every_other_scalar_shape() {
+    let source = r"domain BareIntDefault {
+  type ItemId = 0..1
+  aggregate Counter {
+    id ItemId
+    state {
+      raw: Int;
+      flag: Bool;
+    }
+    command Touch {}
+    event Touched {}
+    decide Touch { emits Touched }
+    evolve Touched {}
+  }
+}
+";
+    let fixture = Fixture::new("bare-int-default", source);
+    let path_text = fixture.text();
+    let (output, status) = run(&["check", path_text]);
+    assert_eq!(status, 0, "{output}");
+    let implicit = implicit_warnings(&output);
+    assert_eq!(
+        implicit.keys().collect::<Vec<_>>(),
+        vec!["Counter.flag", "Counter.raw"],
+        "{output}"
+    );
+    let raw = &implicit["Counter.raw"];
+    assert_eq!(raw["selected_value"], "0");
+    assert_eq!(raw["suggestion"]["machine_applicable"], true);
+    assert_eq!(raw["edition_severity"]["next"], "error");
+
+    let expanded = domain_expand_source(path_text);
+    assert!(expanded.contains("counter_raw = 0"), "{expanded}");
+}
+
+/// Issue #731 review, m2: a "defect witness" for #770, the pre-existing
+/// `fslc fmt` round-trip defect this PR discovered and withholds a
+/// machine-applicable insertion against for `Set<T>`/`value_object`
+/// defaults. This test does not exercise this PR's own code at all -- it
+/// pins #770's *symptom* directly. If #770 is ever fixed, this assertion
+/// starts failing, which is the intended signal to revisit
+/// `insertable_shape` in `frontend_output.rs` and re-enable the insertion
+/// these two shapes currently withhold, rather than #770's fix landing
+/// silently while the withholding logic here quietly outlives its reason.
+///
+/// #770 fixed is necessary but not sufficient for that re-enable: issue
+/// #785 (found independently during this PR's second review round, and not
+/// reachable through this PR's own withheld insertion) is a second,
+/// pre-existing defect on the same `Context::normalize` enum-mangling guard
+/// this PR's `DefaultForm` fix touches for M1 -- an *explicit* brace-literal
+/// default containing an enum member (e.g. a hand-written
+/// `audit: AuditStamp = AuditStamp { status: Red, attempts: 0 };`) never
+/// gets that member mangled for the generated kernel, because the guard
+/// only fires for a bare alnum/underscore identifier, not a member embedded
+/// in a larger expression; the resulting kernel text fails
+/// `fslc check`. Re-enabling the `value_object` insertion once #770 is
+/// fixed but #785 is not would let `migrate --write` insert exactly that
+/// shape -- a `value_object` struct literal whose bare enum members
+/// `fsl_core::domain_type_default` rendered correctly for the *warning*
+/// stay unmangled the next time `domain_kernel_source` re-renders that now
+/// explicit default, producing a file `check` accepts today but whose
+/// generated kernel `check` rejects after the edit. Confirm #785 is fixed
+/// too before flipping `insertable_shape`'s `value_object` arm.
+#[test]
+fn domain_brace_literal_defaults_still_fail_the_770_fmt_round_trip() {
+    for source in [
+        r"domain SetLiteralWitness {
+  type ItemId = 0..1
+  aggregate Basket {
+    id ItemId
+    state { seen: Set<ItemId> = Set {}; }
+    command Pick {}
+    event Picked {}
+    decide Pick { emits Picked }
+    evolve Picked {}
+  }
+}
+",
+        r"domain ValueObjectLiteralWitness {
+  type Quantity = 0..2
+  value_object Counter { value: Quantity = 0; }
+  aggregate Inventory {
+    id Quantity
+    state { counter: Counter = Counter { value: 0 }; }
+    command Adjust {}
+    event Adjusted {}
+    decide Adjust { emits Adjusted }
+    evolve Adjusted {}
+  }
+}
+",
+    ] {
+        let fixture = Fixture::new("770-witness", source);
+        let (output, status) = run(&["fmt", fixture.text(), "--check"]);
+        assert_eq!(
+            status, 2,
+            "issue #770 appears fixed -- {output}. Before re-enabling the \
+             machine-applicable insertion `insertable_shape` withholds for this \
+             shape in rust/fslc/src/frontend_output.rs, also confirm issue #785 \
+             is fixed (a second, pre-existing defect on the same \
+             `Context::normalize` enum-mangling guard in rust/fsl-core/src/domain.rs: \
+             an explicit brace-literal default containing an enum member never \
+             gets that member mangled for the generated kernel, so re-enabling \
+             only on #770's fix would let `migrate --write` insert a \
+             `value_object` default that `check` accepts today but whose \
+             generated kernel `check` rejects after the edit) -- then update \
+             docs/LANGUAGE.md, docs/LANGUAGE.ja.md, and skills/fsl/reference.md \
+             accordingly."
+        );
+        assert_eq!(output["kind"], "parse", "{output}");
+    }
+}
+
 #[test]
 fn requirements_number_default_warning_edit_preserves_comment_and_verdict() {
     let source = r"requirements Amounts {
