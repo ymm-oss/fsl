@@ -1,17 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Dialect corpus conformance harness — the CI gate for issue #167.
+"""Dialect corpus conformance harness for issue #167.
 
 Every ``.fsl`` under ``specs/`` and ``examples/`` is either driven through the
 full dual-evaluator safety net (``parse -> desugar -> build_spec -> Monitor
 load -> BMC/Monitor expression agreement -> verify-vs-oracle verdict
 agreement``) or excluded **loudly**, with a documented reason
 (``tests/dialect_registry.py``) that this file re-asserts on every run. A new
-dialect that nobody registers here is a CI failure, not a silent skip — see
-``docs/DESIGN-conformance-harness.md`` for the full design and the gap this
-closes (the 2026-07-08 fsl-db audit: 15/18 ``examples/db/*.fsl`` silently sat
-outside this net while ``pytest -q`` stayed green).
+dialect that nobody registers here is a failure of this file, not a silent
+skip — see ``docs/DESIGN-conformance-harness.md`` for the full design and the
+gap this closes (the 2026-07-08 fsl-db audit: 15/18 ``examples/db/*.fsl``
+silently sat outside this net while ``pytest -q`` stayed green).
+
+This file is itself a manual/reference check: no CI workflow and no
+``tools/check-native-integration.sh`` lane currently runs it (see the design
+doc's "Cost and CI wiring"), so it is not a CI gate — run it yourself when
+touching a dialect.
 
 No ``pytest.skip`` anywhere in this file: every non-conformance file is a
 *classified* parametrized case whose classification is itself asserted.

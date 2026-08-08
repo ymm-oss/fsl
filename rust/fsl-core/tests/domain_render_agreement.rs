@@ -946,6 +946,116 @@ fn unlowered_domain_constructs_fail_closed_on_both_paths() {
     }
 }
 
+/// #723 (1/4): `docs/DESIGN-effect.md` lists `Compensated` as a reachable
+/// member of the effect status lifecycle, but neither lowering path ever
+/// assigns it. `effect_outcome_member` (`domain_lowering.rs`) is a total
+/// function whose value set is exactly `{Succeeded, Failed, TimedOut,
+/// Cancelled}`, and the renderer (`domain.rs`) mirrors the same set;
+/// `effect.compensation_events` only feeds the presence-only
+/// `missing_compensation_for_irreversible_effect` finding
+/// (`fsl-tools/src/domain.rs`) and is never consumed as a status write. This
+/// pins that as a negative control over the two production lowering paths:
+/// it fails the day either path gains a writer for `Compensated`, which
+/// forces that change to update this test and `docs/DESIGN-effect.md`
+/// together rather than silently reviving a status the sticky-success
+/// invariant does not account for.
+#[test]
+fn effect_compensated_status_is_never_assigned_by_either_lowering_path() {
+    let root = repo_root();
+    for relative in VALID_DOMAIN_FIXTURES {
+        let source = fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|error| panic!("read {relative}: {error}"));
+        let domain = parse_domain_spec(&source).unwrap_or_else(|error| {
+            panic!("{relative}: expected a parseable domain document: {error}")
+        });
+        if domain.effects.is_empty() {
+            continue;
+        }
+
+        let (kernel_a, model_a) = match run_path_a(&domain) {
+            PipelineOutcome::Checked(kernel, model) => (kernel, model),
+            PipelineOutcome::Rejected(message) => {
+                panic!(
+                    "{relative}: lower_domain (path A) unexpectedly rejected a valid corpus spec: {message}"
+                );
+            }
+        };
+        let (kernel_b, model_b) = match run_path_b(&domain) {
+            PipelineOutcome::Checked(kernel, model) => (kernel, model),
+            PipelineOutcome::Rejected(message) => {
+                panic!(
+                    "{relative}: domain_kernel_source (path B) unexpectedly \
+                     rejected a valid corpus spec: {message}"
+                );
+            }
+        };
+
+        for (path_name, kernel, model) in [
+            ("path A", &kernel_a, &model_a),
+            ("path B", &kernel_b, &model_b),
+        ] {
+            let contract = public_kernel_contract(kernel, model, relative, "domain")
+                .unwrap_or_else(|error| {
+                    panic!("{relative}: project {path_name} contract: {error}")
+                });
+            let mut offending = Vec::new();
+            collect_compensated_assign_names(&contract, &mut offending);
+            assert!(
+                offending.is_empty(),
+                "{relative} ({path_name}): expected no action to assign an \
+                 *EffectStatus_Compensated member -- effect compensation is \
+                 presence-only design-review metadata (docs/DESIGN-effect.md), \
+                 not a status writer; found assignment(s) to {offending:?}"
+            );
+        }
+    }
+}
+
+/// Recursively collect every `"name"` string ending in `suffix` that
+/// appears anywhere inside the `"value"` side of a `"kind":"assign"`
+/// statement in a `public_kernel_contract` v1 JSON tree.
+fn collect_compensated_assign_names(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            if map.get("kind").and_then(Value::as_str) == Some("assign")
+                && let Some(assigned_value) = map.get("value")
+            {
+                collect_names_ending_with(assigned_value, "EffectStatus_Compensated", out);
+            }
+            for nested in map.values() {
+                collect_compensated_assign_names(nested, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_compensated_assign_names(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_names_ending_with(value: &Value, suffix: &str, out: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            if let Some(name) = map.get("name").and_then(Value::as_str)
+                && name.ends_with(suffix)
+            {
+                out.push(name.to_owned());
+            }
+            for nested in map.values() {
+                collect_names_ending_with(nested, suffix, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_names_ending_with(item, suffix, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[test]
 fn syntax_invalid_domain_fixtures_fail_to_parse() {
     let root = repo_root();
