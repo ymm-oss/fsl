@@ -1309,6 +1309,17 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `summary.by_source` exclude invalid records from their denominator, and each
   mutant carries `source:"builtin"|"external"`. `--max-mutants` applies only
   to the built-in catalog (`0` gives an external-only run).
+  `mutate` also accepts `domain` documents: it mutates the same rendered
+  kernel text `domain expand` emits, so `target`/`loc` use generated action
+  names and kernel-text line numbers rather than domain source lines, and
+  the envelope carries that text as `kernel_source` so a witness is
+  resolvable on its own. `--from` external mutants for a domain document
+  must target `kernel_source` text, not the `.fsl` domain source. Absolute
+  domain kill-rates are not comparable to other dialects (domain lowering
+  emits few properties); read the dead-note-carrying survivor set as the
+  primary signal instead — a saga whose compensations are structurally
+  unreachable at baseline should show all of their mutants surviving with
+  the existing dead-action note, not killed.
 - `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
   `reachable` declarations and checks only the named property kind in isolation.
   Under `--engine induction --property <trans>`, the named transition is the
