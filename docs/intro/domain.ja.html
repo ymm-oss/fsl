@@ -32,11 +32,11 @@
     <div class="syntax-grid reveal" style="margin-top:24px">
       <div class="syntax-card">
         <h3>純粋な core の完全性</h3>
-        <p>すべての command に <code>decide</code> が、すべての event に <code>evolve</code> があること、<code>evolve</code> が aggregate 外の状態を書かないことを検査します。</p>
+        <p><code>evolve</code> が aggregate 外の状態を書くと、Kernel lowering 自体が失敗します（fail-closed。finding ではありません）。command に <code>decide</code> が無い、event に <code>evolve</code> が無い場合はまだ native で検査されておらず、今日は静かに通過します。この検査は凍結 Python 参照にのみ存在します。</p>
       </div>
       <div class="syntax-card">
         <h3>correlation</h3>
-        <p>async effect の完了は、<code>correlation_id</code> で結ばれた pending なリクエストが先に存在することを要求します。宣言が欠ければ <code>uncorrelated_async_completion</code> です。</p>
+        <p>async effect の完了は、<code>correlation_id</code> で結ばれた pending なリクエストが先に存在することを要求します。宣言が欠ければ Kernel lowering 自体が失敗します（finding ではありません）。<code>uncorrelated_async_completion</code> は、runtime ログ上で先行リクエストのない完了を観測したときの、別物の <code>domain replay</code> finding です。</p>
       </div>
       <div class="syntax-card">
         <h3>idempotency</h3>
@@ -44,7 +44,7 @@
       </div>
       <div class="syntax-card">
         <h3>止まらない process</h3>
-        <p>pending のまま離脱手段がない effect、完了観測のない saga step、循環する wait を warning / error として報告します。</p>
+        <p>pending のまま <code>timeout</code> / <code>retry</code> による離脱手段がない effect は warning finding です。saga の dead end や wait の循環はまだ finding ではなく、現状もっとも近い native の信号は <code>fslc verify</code> の action-coverage warning 全般と、one-hot な trigger/after 二重 guard の compensation 形に限っては never-enabled-action warning です。どちらも dead-end saga や wait 循環そのものを狙った検査ではありません（<a href="https://github.com/ymm-oss/fsl/issues/769">#769 で追跡</a>）。</p>
       </div>
     </div>
   </div>
@@ -66,7 +66,7 @@
       <tr><td>saga の step / compensation</td><td>event flag で guard された kernel action と、完了を観測する observe action。</td><td><code>saga_order_fulfillment_capture_payment</code>、<code>saga_order_fulfillment_observe_payment_captured</code></td></tr>
     </table>
     <div class="callout reveal" style="margin-top:24px">
-      <p style="margin:0">effect の lifecycle は <code>correlation_id</code> を key とする有限状態機械 <code>NotStarted -&gt; Pending -&gt; Succeeded | Failed | TimedOut | Cancelled | Compensated</code> です。completion action は該当 correlation が <code>Pending</code> であることを要求し、retry action は <code>Failed / TimedOut</code> かつ <code>attempts &lt; max_attempts</code> を要求します。<code>Succeeded</code> は sticky で、生成 kernel の transition 検査 <code>CapturePayment_SuccessSticky</code> がそれを担保します。</p>
+      <p style="margin:0">effect の lifecycle は <code>correlation_id</code> を key とする有限状態機械 <code>NotStarted -&gt; Pending -&gt; Succeeded | Failed | TimedOut | Cancelled</code> です。completion action は該当 correlation が <code>Pending</code> であることを要求し、retry action は <code>Failed / TimedOut</code> かつ <code>attempts &lt; max_attempts</code> を要求します。<code>Succeeded</code> は sticky で、生成 kernel の transition 検査 <code>CapturePayment_SuccessSticky</code> がそれを担保します。生成される status enum には予約済みの <code>Compensated</code> member もありますが、現状どちらの lowering 経路もこれを書き込みません。effect の <code>compensation</code> ブロックは presence-only の design-review metadata であり、status writer ではありません。</p>
     </div>
   </div>
 </section>
@@ -242,21 +242,15 @@ fslc domain replay   examples/domain/order_async_effect.fsl --logs examples/doma
   <div class="wrap">
     <p class="kicker reveal">finding</p>
     <h2 class="reveal">error は検証を止め、warning は設計リスクを知らせる</h2>
-    <p class="lead narrow reveal">finding は <code>fsl-domain-finding.v0</code> schema の安定 JSON です。severity <code>error</code> は「このまま kernel を回すと保証を過大に主張してしまう」構造的欠陥で、kernel を実行せずに <code>violated</code> を返します。severity <code>warning</code> は設計レビュー上のリスクで、それ単体では kernel の実行を止めません。</p>
+    <p class="lead narrow reveal">finding は <code>fsl-domain-finding.v0</code> schema の安定 JSON です。severity <code>error</code> は「このまま kernel を回すと保証を過大に主張してしまう」構造的欠陥で、kernel を実行せずに <code>violated</code> を返します。severity <code>warning</code> は設計レビュー上のリスクで、それ単体では kernel の実行を止めません。native の <code>fslc domain check</code> が実装している finding kind は次の 4 種のみです。</p>
     <table class="matrix reveal">
       <tr><th>finding</th><th>severity</th><th>意味</th></tr>
-      <tr><td><code>missing_decide_for_command</code></td><td>error</td><td>command に対応する <code>decide</code> がありません。</td></tr>
-      <tr><td><code>missing_evolve_for_event</code></td><td>error</td><td>event に対応する <code>evolve</code> がありません。</td></tr>
-      <tr><td><code>aggregate_boundary_violation</code></td><td>error</td><td><code>evolve</code> が aggregate の外の状態を直接書いています。</td></tr>
-      <tr><td><code>uncorrelated_async_completion</code></td><td>error</td><td>async effect に <code>correlation_id</code> がありません。replay では「先行リクエストのない完了」も同じ kind で報告されます。</td></tr>
       <tr><td><code>irreversible_effect_without_idempotency_key</code></td><td>error</td><td>irreversible な effect に <code>idempotency_key</code> がありません。</td></tr>
-      <tr><td><code>process_wait_cycle</code></td><td>error</td><td>saga の wait graph が循環していて、外部の完了なしには進めません。</td></tr>
       <tr><td><code>pending_effect_without_timeout_or_fallback</code></td><td>warning</td><td>pending からの離脱手段（<code>timeout</code> / <code>retry</code>）がありません。</td></tr>
-      <tr><td><code>late_completion_without_stale_policy</code></td><td>warning</td><td>キャンセル後などに遅れて届く成功完了への stale policy がありません。</td></tr>
       <tr><td><code>missing_compensation_for_irreversible_effect</code></td><td>warning</td><td>irreversible な effect に compensation（effect 直付けまたは saga 側）がありません。</td></tr>
       <tr><td><code>reliable_effect_without_outbox_boundary</code></td><td>warning</td><td><code>reliable</code> 宣言に outbox 境界が伴っておらず、runtime の配送証拠を過大に主張しています。</td></tr>
-      <tr><td><code>saga_dead_end</code></td><td>warning</td><td>step のない saga、または完了観測（<code>awaits</code> / <code>timeout</code>）のない async step です。</td></tr>
     </table>
+    <p class="lead narrow reveal" style="margin-top:24px">関連する 2 つの構造的リスクは finding にならず、それより手前で fail-closed します。<code>evolve</code> が aggregate 外の状態を書く場合と、async effect に <code>correlation_id</code> が無い場合はどちらも、finding pass や kernel 実行が始まる前に Kernel lowering 自体が <code>result: "error"</code> / <code>kind: "semantics"</code> で拒否します。<code>uncorrelated_async_completion</code> は <code>domain replay</code> の finding としてのみ存在し、静的な <code>domain check</code> の finding ではありません。<code>missing_decide_for_command</code>・<code>missing_evolve_for_event</code>・<code>late_completion_without_stale_policy</code>・<code>saga_dead_end</code>・<code>process_wait_cycle</code> は native 未実装ですが、5 種すべてが凍結 Python 参照（<code>src/fslc/domain_expand.py</code>）に受理済みの意味論と通過中の回帰テストとともに存在します。<code>late_completion_without_stale_policy</code> はさらに native が fail-closed 棄却している <code>on_stale</code> policy を勧めることになるため設計どおりには復活できず、<code>saga_dead_end</code> / <code>process_wait_cycle</code> を native へ移植するかは<a href="https://github.com/ymm-oss/fsl/issues/769">issue #769</a> で検討中の未決事項です。詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-domain.md">DESIGN-domain.md</a> の Findings 節を参照してください（公開 schema の <code>kind</code> enum のうちどこにも実装が無い 5 種も含みます）。</p>
     <div class="callout reveal" style="margin-top:24px">
       <p style="margin:0">実例: <code>examples/domain/unsafe_irreversible_effect_without_idempotency.fsl</code> に <code>fslc domain check</code> を実行すると、error 1件（<code>irreversible_effect_without_idempotency_key</code>）と warning 2件（<code>pending_effect_without_timeout_or_fallback</code>、<code>missing_compensation_for_irreversible_effect</code>）が返り、error があるため <code>result: "violated"</code>、<code>formal_result: "not_run"</code> になります。各 finding には <code>repair_candidates</code>（例: <code>add idempotency_key &lt;stable key&gt; to irreversible effect CapturePayment</code>）が付き、LLM の write→verify→repair ループにそのまま渡せます。</p>
     </div>
