@@ -120,7 +120,13 @@ which `AGENTS.md` classifies as a soundness defect. They are now rejected at
 their declaration, with a located `semantics` diagnostic, by the shared
 `validate_lowerable_constructs` in `rust/fsl-core/src/domain_lowering.rs`,
 called from both `lower_domain_surface` (path A) and `domain_kernel_source`
-(path B) so neither path can accept what the other rejects:
+(path B) so neither path can accept what the other rejects. Any consumer of
+the raw, unlowered `DomainSpec` must itself reach one of those two calls (not
+walk the AST independently) or it silently regresses to accepting these
+constructs — the gap #726 found and closed for `fsl_tools::analyze_domain`,
+the structural projection behind `fslc domain analyze`, by having it call
+`domain_kernel_source` (path B) before projecting, discarding the rendered
+text and keeping only the fail-closed guard:
 
 - **top-level `await` routing** (#712). No accepted decision assigns routing a
   meaning; this document accepts only its grammar (see the Parse IR boundary
@@ -239,6 +245,29 @@ fslc domain replay examples/domain/order_async_effect.fsl --logs examples/domain
 Successful `domain check` returns `verified_under_assumptions` with the kernel
 result nested under `kernel`. Hard structural findings return `violated` with
 `formal_result:"not_run"`.
+
+`domain analyze` rejects a spec containing one of the three constructs listed
+above ("Rejected constructs") with the same `kind`/location/exit code
+`check` reports for it (#726). Because `analyze` now shares its guard with
+`domain expand` (both call `domain_kernel_source`), `analyze`'s accepted/
+rejected spec set is identical to `expand`'s, not limited to the three
+constructs above: `domain_kernel_source` also rejects a conflicting explicit
+effect-outcome role (`validate_effect_outcome_roles`), a duplicate or empty
+enum declaration (`validate_domain_enums`), and any failure its own
+kernel-text rendering step raises (for example an unsupported Map/container
+default shape, or a reference to an unknown domain type) — `analyze` now
+rejects all of these too, even though none of them is one of the three named
+constructs. Before this fix, `analyze`'s raw-AST projection was the only
+`fslc` surface that could still show the shape of such a spec; every other
+command (`check`, `domain check`, `domain expand`, `fslc fmt`) already
+rejected it before this fix. Closing that last window is a deliberate
+product choice, not an oversight: a spec containing one of these
+constructs is now opaque to every `fslc` command until the construct is
+removed or #723 gives it executable semantics, and no diagnostic-only
+"structural inventory of an unlowerable spec" surface is offered as a
+replacement. An author debugging why such a spec fails to lower falls back
+to reading the source and the `check` diagnostic's location, the same as for
+any other rejected construct.
 
 ## Findings
 
