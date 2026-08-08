@@ -97,11 +97,38 @@ domain ProgrammaticRole {
             .contains(&serde_json::json!("work_complete_finished"))
     );
     assert_eq!(
-        fsl_tools::analyze_domain(&domain)["effects"][0]["outcomes"],
+        fsl_tools::analyze_domain(&domain).expect("analyze programmatic explicit role")["effects"]
+            [0]["outcomes"],
         serde_json::json!(["Finished"])
     );
     assert_eq!(
         fsl_tools::domain_scaffold_metadata(&domain)["effects"][0]["outcomes"],
         serde_json::json!(["Finished"])
+    );
+}
+
+/// #726, N4: `fsl_tools::analyze_domain`'s public contract is
+/// `Result<Value, CoreError>`, not `Value` -- an unlowerable domain document
+/// must be rejected by the API itself, not only by the `fslc domain
+/// analyze` CLI integration test in `rust/fslc/tests/`. Without an
+/// `fsl-tools`-level negative control here, a future crate that stops going
+/// through the CLI (a second `analyze_domain` caller) would have no test at
+/// this layer protecting the type-level fail-closed guarantee the PR body
+/// claims.
+#[test]
+fn analyze_domain_rejects_an_unlowerable_construct() {
+    let source = include_str!("../../fslc/tests/fixtures/domain_await_routing_rejected.fsl");
+    let fsl_syntax::SurfaceDocument::Domain(domain) =
+        fsl_syntax::parse_surface_document(source).expect("parse domain with top-level await")
+    else {
+        panic!("expected domain document");
+    };
+    let error = fsl_tools::analyze_domain(&domain)
+        .expect_err("analyze_domain must reject a top-level await routing construct");
+    assert!(
+        error
+            .message
+            .contains("top-level await 'PaymentResult' has no executable lowering"),
+        "{error:?}"
     );
 }

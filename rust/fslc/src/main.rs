@@ -6818,7 +6818,14 @@ fn run_domain_check(
 
 fn run_domain_analyze(path: &Path) -> (Value, i32) {
     match parse_domain_document(path) {
-        Ok(domain) => wrap_specialized(fsl_tools::analyze_domain(&domain)),
+        // Issue #726: `fsl_tools::analyze_domain` itself is now fail-closed
+        // (it routes through the same lowerable-construct guard
+        // `check`/`domain expand` reach via `domain_kernel_source`), so this
+        // call site no longer needs its own guard call.
+        Ok(domain) => match fsl_tools::analyze_domain(&domain) {
+            Ok(result) => wrap_specialized(result),
+            Err(error) => (core_error_output(&error), 2),
+        },
         Err(error) => (semantic_error_output(&error), 2),
     }
 }
