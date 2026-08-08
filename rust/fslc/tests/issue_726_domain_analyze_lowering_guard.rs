@@ -15,6 +15,15 @@
 //! diagnostic shape (`kind`, `loc`, exit code) its guarded sibling
 //! `domain expand` already produces for them, and it must keep accepting a
 //! well-formed domain spec exactly as before.
+//!
+//! The guard `analyze` now shares with `expand` is `domain_kernel_source`,
+//! not only `validate_lowerable_constructs` in isolation: it also rejects a
+//! duplicate/empty enum declaration, a conflicting explicit effect-outcome
+//! role, and any kernel-rendering failure. `domain_analyze_rejection_set_
+//! matches_domain_expand_beyond_the_three_named_constructs` below pins that
+//! wider boundary with a fixture that is invalid for a reason other than the
+//! three named constructs, so `analyze`'s accepted/rejected set does not
+//! silently drift back out of sync with `expand`'s.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -122,6 +131,32 @@ fn domain_analyze_rejects_unlowerable_constructs_like_check() {
             case.fixture
         );
     }
+}
+
+/// Pins the wider rejection boundary #726's fix introduced as a side effect
+/// of sharing `domain_kernel_source` with `expand`: this fixture is rejected
+/// for a duplicate enum member, not one of the three #710/#711/#712
+/// constructs, so this is not covered by
+/// `domain_analyze_rejects_unlowerable_constructs_like_check` above. If a
+/// future change narrowed `analyze`'s guard back down to only the three
+/// named constructs, this fixture would start passing through to
+/// `result:"analyzed"`/exit 0 while `expand` kept rejecting it -- the same
+/// cross-command split #726 fixed, reappearing on a different fixture.
+#[test]
+fn domain_analyze_rejection_set_matches_domain_expand_beyond_the_three_named_constructs() {
+    let fixture = "rust/fslc/tests/fixtures/domain_characterization/invalid_duplicate_enum.fsl";
+    let (analyze, analyze_status) = run(&["domain", "analyze", fixture]);
+    let (expand, expand_status) = run(&["domain", "expand", fixture]);
+    assert_eq!(analyze_status, 2, "{analyze:#}");
+    assert_eq!(
+        analyze_status, expand_status,
+        "analyze={analyze:#} expand={expand:#}"
+    );
+    assert_eq!(
+        analyze, expand,
+        "analyze and expand must render an identical diagnostic for a \
+         non-construct lowering failure"
+    );
 }
 
 /// Positive control: a well-formed domain spec must keep succeeding through

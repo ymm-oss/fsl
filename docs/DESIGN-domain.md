@@ -248,13 +248,22 @@ result nested under `kernel`. Hard structural findings return `violated` with
 
 `domain analyze` rejects a spec containing one of the three constructs listed
 above ("Rejected constructs") with the same `kind`/location/exit code
-`check` reports for it (#726). Before that fix, `analyze`'s raw-AST
-projection was the only `fslc` surface that could still show the shape of
-such a spec; every other command (`check`, `domain check`, `domain expand`,
-`fslc fmt`) already rejected it before this fix. Closing that last window is
-a deliberate product choice, not an oversight: a spec containing one of
-these constructs is now opaque to every `fslc` command until the construct
-is removed or #723 gives it executable semantics, and no diagnostic-only
+`check` reports for it (#726). Because `analyze` now shares its guard with
+`domain expand` (both call `domain_kernel_source`), `analyze`'s accepted/
+rejected spec set is identical to `expand`'s, not limited to the three
+constructs above: `domain_kernel_source` also rejects a conflicting explicit
+effect-outcome role (`validate_effect_outcome_roles`), a duplicate or empty
+enum declaration (`validate_domain_enums`), and any failure its own
+kernel-text rendering step raises (for example an unsupported Map/container
+default shape, or a reference to an unknown domain type) — `analyze` now
+rejects all of these too, even though none of them is one of the three named
+constructs. Before this fix, `analyze`'s raw-AST projection was the only
+`fslc` surface that could still show the shape of such a spec; every other
+command (`check`, `domain check`, `domain expand`, `fslc fmt`) already
+rejected it before this fix. Closing that last window is a deliberate
+product choice, not an oversight: a spec containing one of these
+constructs is now opaque to every `fslc` command until the construct is
+removed or #723 gives it executable semantics, and no diagnostic-only
 "structural inventory of an unlowerable spec" surface is offered as a
 replacement. An author debugging why such a spec fails to lower falls back
 to reading the source and the `check` diagnostic's location, the same as for
