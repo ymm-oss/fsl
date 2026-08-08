@@ -159,7 +159,7 @@ Full pipeline per file (depth from the file's dialect entry, default 4):
 Two meta-tests close the structural hole: `test_corpus_fully_claimed` (no
 UNKNOWN construct anywhere under `SCAN_ROOTS`) and `test_registry_floors`
 (per-dialect scan count ≥ `min_files`; also asserts every `MONITOR_EXCLUSIONS`
-path exists). Regression for the gate itself: reverting `470c75c` locally makes
+path exists). Regression for the harness itself: reverting `470c75c` locally makes
 the db corpus fail stage 1 loudly (verified once at PR time; the assert-not-skip
 structure keeps it true).
 
@@ -182,7 +182,8 @@ else runs the full dual-evaluator pipeline over `specs/`/`examples/`, so a
 failing run must still be treated as a reviewable registration diff to land
 (a new dialect/example directory registered in `tests/dialect_registry.py`,
 or a stale exclusion/declared-error front matter removed), not left red
-indefinitely — see issue #476.
+indefinitely — see issue #786, which found this harness itself red on two
+cases precisely because nothing was watching it.
 
 Its narrower structural obligation — every `.fsl` under `specs/`/`examples/`
 either `check`s cleanly or is a declared/excluded error, so nothing rots

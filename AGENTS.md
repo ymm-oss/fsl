@@ -94,9 +94,14 @@ inventory, and promotion changes run the `scheduled` tier.
   loudly on an unregistered construct instead of silently excluding the corpus, but — unlike the
   `docs/LANGUAGE.ja.md` check above — **no CI workflow and no `./tools/check-native-integration.sh`
   lane currently invokes it**; it is a developer-run manual/reference check, not a machine-enforced
-  gate (see the design doc's "Cost and CI wiring"). This coupling rule has no mechanical enforcement
-  today: register the construct because the rule says so, not because something will catch you if
-  you don't.
+  gate (see the design doc's "Cost and CI wiring"). Scope that precisely: registering the construct
+  in `tests/dialect_registry.py` and the harness's dual-evaluator (Monitor/BMC/oracle) agreement
+  checks have no mechanical enforcement today. A narrower obligation is enforced regardless — every
+  `.fsl` under `specs/`/`examples/` must `check` cleanly or declare/exclude its error — by
+  `rust/fslc/tests/corpus_check_sweep.rs` inside the required `rust workspace` job
+  (`.github/workflows/ci.yml`). That native sweep will not catch a missing `tests/dialect_registry.py`
+  entry or a Monitor/native disagreement; register the construct because the rule says so, not
+  because something will always catch you if you don't.
 - Top-level dialect counts and parser parity do not establish nested semantic coverage. When porting
   or auditing an AST/enum sum type, inventory every behavior-bearing variant and bind each accepted
   variant to executable native semantics with accepting/rejecting controls, or to an explicit

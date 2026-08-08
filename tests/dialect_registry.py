@@ -84,7 +84,8 @@ EVIDENCE_CONSTRUCTS: dict[str, str] = {
 
 # repo-relative path -> reason. Individual files the Monitor legitimately
 # rejects. Re-asserted every run: a stale entry (the file starts loading)
-# fails the gate and must be deleted.
+# fails test_dialect_conformance.py (not CI-enforced; see this module's
+# docstring) and must be deleted.
 MONITOR_EXCLUSIONS: dict[str, str] = {
     "examples/self/no_actions.fsl": (
         "deliberate no-action edge fixture; Monitor requires >=1 action. "
