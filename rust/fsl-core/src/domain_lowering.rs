@@ -110,7 +110,16 @@ fn span_at(loc: DomainLoc) -> Span {
 /// This walks the raw parsed [`DomainSpec`], not a resolver context: these
 /// are `semantics`-class diagnostics (an accepted-but-unlowerable construct),
 /// not name-resolution failures.
-pub(crate) fn validate_lowerable_constructs(domain: &DomainSpec) -> Result<(), CoreError> {
+///
+/// `pub` (rather than `pub(crate)`) so a structural-only consumer of the raw
+/// [`DomainSpec`] outside this crate -- `fslc domain analyze`, issue #726 --
+/// can call this same guard instead of duplicating its rejection rules.
+///
+/// # Errors
+///
+/// Returns [`CoreError`] when the domain document contains a construct that
+/// parses but has no executable lowering on either consumer path.
+pub fn validate_lowerable_constructs(domain: &DomainSpec) -> Result<(), CoreError> {
     if let Some(awaited) = domain.awaits.first() {
         return Err(error_at(
             format!(

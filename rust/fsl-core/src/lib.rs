@@ -55,7 +55,7 @@ pub use dialect::{
     lower_governance, lower_requirements, requirements_trace_contract,
 };
 pub use domain::domain_kernel_source;
-pub use domain_lowering::domain_effect_owns_event;
+pub use domain_lowering::{domain_effect_owns_event, validate_lowerable_constructs};
 pub use expr_text::{binder_text, expr_text, source_binder_text, source_expr_text};
 pub use model::{
     ActionDef, ActionGuard, KernelModel, LeadsToDef, ModelError, ParamDef, PropertyDef, TypeDef,
