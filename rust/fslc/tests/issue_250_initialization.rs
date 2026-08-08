@@ -599,6 +599,25 @@ fn domain_bare_int_fields_warn_like_every_other_scalar_shape() {
 /// `insertable_shape` in `frontend_output.rs` and re-enable the insertion
 /// these two shapes currently withhold, rather than #770's fix landing
 /// silently while the withholding logic here quietly outlives its reason.
+///
+/// #770 fixed is necessary but not sufficient for that re-enable: issue
+/// #785 (found independently during this PR's second review round, and not
+/// reachable through this PR's own withheld insertion) is a second,
+/// pre-existing defect on the same `Context::normalize` enum-mangling guard
+/// this PR's `DefaultForm` fix touches for M1 -- an *explicit* brace-literal
+/// default containing an enum member (e.g. a hand-written
+/// `audit: AuditStamp = AuditStamp { status: Red, attempts: 0 };`) never
+/// gets that member mangled for the generated kernel, because the guard
+/// only fires for a bare alnum/underscore identifier, not a member embedded
+/// in a larger expression; the resulting kernel text fails
+/// `fslc check`. Re-enabling the `value_object` insertion once #770 is
+/// fixed but #785 is not would let `migrate --write` insert exactly that
+/// shape -- a `value_object` struct literal whose bare enum members
+/// `fsl_core::domain_type_default` rendered correctly for the *warning*
+/// stay unmangled the next time `domain_kernel_source` re-renders that now
+/// explicit default, producing a file `check` accepts today but whose
+/// generated kernel `check` rejects after the edit. Confirm #785 is fixed
+/// too before flipping `insertable_shape`'s `value_object` arm.
 #[test]
 fn domain_brace_literal_defaults_still_fail_the_770_fmt_round_trip() {
     for source in [
@@ -632,11 +651,18 @@ fn domain_brace_literal_defaults_still_fail_the_770_fmt_round_trip() {
         let (output, status) = run(&["fmt", fixture.text(), "--check"]);
         assert_eq!(
             status, 2,
-            "issue #770 appears fixed -- {output}. If `fslc fmt` now round-trips \
-             this brace-literal default, re-enable the machine-applicable insertion \
-             `insertable_shape` withholds for it in \
-             rust/fslc/src/frontend_output.rs and update docs/LANGUAGE.md, \
-             docs/LANGUAGE.ja.md, and skills/fsl/reference.md accordingly."
+            "issue #770 appears fixed -- {output}. Before re-enabling the \
+             machine-applicable insertion `insertable_shape` withholds for this \
+             shape in rust/fslc/src/frontend_output.rs, also confirm issue #785 \
+             is fixed (a second, pre-existing defect on the same \
+             `Context::normalize` enum-mangling guard in rust/fsl-core/src/domain.rs: \
+             an explicit brace-literal default containing an enum member never \
+             gets that member mangled for the generated kernel, so re-enabling \
+             only on #770's fix would let `migrate --write` insert a \
+             `value_object` default that `check` accepts today but whose \
+             generated kernel `check` rejects after the edit) -- then update \
+             docs/LANGUAGE.md, docs/LANGUAGE.ja.md, and skills/fsl/reference.md \
+             accordingly."
         );
         assert_eq!(output["kind"], "parse", "{output}");
     }

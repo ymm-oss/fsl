@@ -282,18 +282,27 @@ fn omitted_domain_value(
 }
 
 /// Whether `type_name`'s domain-source default is safe to offer as a
-/// machine-applicable `= value` insertion: `false` exactly for the two
-/// brace-literal shapes issue #770 blocks (`Set<T>` and a `value_object`),
-/// `true` for every other shape [`fsl_core::domain_type_default`] can select
-/// a value for (`Map<K, V>` never reaches this function; its caller returns
-/// `insertable: false` unconditionally for the separate, structural reason
-/// that no whole-field `Map` initializer syntax exists at all).
+/// machine-applicable `= value` insertion. An **allowlist**, not a denylist
+/// (issue #731 review round 2, m2): `Apply` constructors are explicitly
+/// enumerated (`Option` insertable, everything else -- currently only
+/// `Set`, but also any future brace-literal-rendering constructor
+/// `fsl_core::domain_type_default` grows -- not), rather than excluding
+/// `Set` by name and defaulting every other constructor to `true`. A
+/// denylist here would silently start offering a machine-applicable
+/// insertion for a brace-literal default the day `fsl_core` supports one
+/// beyond `Set`/`value_object`, walking straight into the same #770 defect
+/// class without anyone deciding it was safe; failing closed on an unknown
+/// shape until it is explicitly reviewed is the fail-closed posture this
+/// repository's soundness rules require. `Map<K, V>` never reaches this
+/// function; its caller returns `insertable: false` unconditionally for the
+/// separate, structural reason that no whole-field `Map` initializer syntax
+/// exists at all.
 fn insertable_shape(
     domain: &fsl_syntax::DomainSpec,
     type_name: &fsl_syntax::SyntaxTypeExpr,
 ) -> bool {
     match &type_name.kind {
-        fsl_syntax::SyntaxTypeExprKind::Apply { constructor, .. } => constructor.text != "Set",
+        fsl_syntax::SyntaxTypeExprKind::Apply { constructor, .. } => constructor.text == "Option",
         fsl_syntax::SyntaxTypeExprKind::Name(ident) => !domain
             .types
             .iter()
