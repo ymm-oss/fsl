@@ -25,14 +25,18 @@ which a fragment deletion plus any unrelated CHANGELOG.md edit, down to a
 trailing newline, would also have satisfied -- and no longer requiring a
 deleted fragment at all, so a version-only release with nothing accumulated
 in `changelog.d/` also merges. The exclusion exempts only the fixed, measured
-set of paths a release commit actually bumps (`is_release_bump_path`:
-`rust/Cargo.toml`, `rust/Cargo.lock`, both VS Code extension manifest files,
-and the domain characterization baseline, byte-identical across all four
-releases in this repository's history), not every product-surface path in a
-release-move diff -- a validated release move that also carries an unrelated
-product change still demands a fragment for that change, so the exclusion
-cannot be triggered for free by one forged, empty version heading in a
-repository whose `[Unreleased]` body is otherwise always empty), and aggregation
+set of *product-surface* paths a release commit actually bumps
+(`is_release_bump_path`: `rust/Cargo.toml`, `rust/Cargo.lock`, and the domain
+characterization baseline, byte-identical across all four releases in this
+repository's history), not every product-surface path in a release-move diff
+-- a validated release move that also carries an unrelated product change
+still demands a fragment for that change, so a forged, empty version heading
+in a repository whose `[Unreleased]` body is otherwise always empty buys an
+exemption for those three paths and nothing beyond them, a bound
+`docs/DESIGN-changelog-fragments.md` records and accepts explicitly. A
+product-surface path arriving by rename or copy is classified by its
+destination, so moving a file into `rust/`, `specs/`, or any other product
+surface owes a fragment exactly as a plain addition does), and aggregation
 conservation checked by per-bullet identity, not substring containment
 (calibrated against a fragment-dropping sham, a first-line-only-truncating
 sham, and a sham that drops one fragment while duplicating another whose
