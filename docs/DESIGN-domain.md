@@ -305,7 +305,8 @@ any other rejected construct.
 
 Findings use `schemas/fslc/domain/finding.v0.schema.json` and
 `fsl:"fsl-domain-effect.v0"`. The native `fslc domain check` implements
-exactly 4 finding kinds, all in `rust/fsl-tools/src/domain.rs:34-66`:
+exactly 4 finding kinds, all added by `effect_findings` in
+`rust/fsl-tools/src/domain.rs`:
 
 - `irreversible_effect_without_idempotency_key` (`error`)
 - `pending_effect_without_timeout_or_fallback` (`warning`)
@@ -333,13 +334,27 @@ kinds against a log, distinct from the static kinds above: `command_rejected_by_
 `rust/fslc/tests/issue_518_domain_replay_detection.rs`). See the Runtime
 Replay section.
 
+`schemas/fslc/domain/finding.v0.schema.json`'s `kind` enum lists 24 values —
+a superset of every kind on this page, reserved vocabulary the same way the
+generated effect-status enum keeps a reserved `Compensated` member that no
+lowering path writes (`docs/DESIGN-effect.md`). The 12 kinds above (4 static
++ 8 replay) are natively reachable; the other 12 are not. Of those 12, 7 have
+accepted semantics in the frozen Python reference — `aggregate_boundary_violation`
+(see the fail-closed note just below) plus the 6 kinds itemized further down
+this section; the remaining 5 — `unowned_domain_invariant`,
+`event_breaks_aggregate_invariant`, `rejected_command_mutates_state`,
+`non_idempotent_irreversible_effect`, and `async_step_before_await_satisfied`
+— have no implementation anywhere, native or frozen Python.
+
 Several structural risks are enforced but are **not** findings — they fail
 closed earlier, before the finding pass or the kernel run can start:
 
 - An `evolve` that writes state outside its aggregate never becomes a
   finding; `unknown domain lvalue '<name>'` fails Kernel lowering itself
   (`rust/fsl-core/src/domain_lowering.rs`), a stronger (fail-closed) guarantee
-  than a warning/error finding would give.
+  than a warning/error finding would give. (The frozen Python reference does
+  implement this as a finding, `aggregate_boundary_violation`; native chose
+  the stronger fail-closed form instead.)
 - An async effect with no `correlation_id` never becomes a finding either;
   `lower_domain` rejects it with `effect '<name>' requires correlation_id`
   during Kernel lowering, before the finding pass runs. The static and replay
@@ -349,9 +364,12 @@ closed earlier, before the finding pass or the kernel run can start:
   only the replay case (a completion observed with no matching prior request
   in a runtime log) is an actual `fsl-domain-finding.v0` finding.
 
-The following finding kinds are **not implemented natively** and exist only
-in the frozen Python compatibility reference (`src/fslc/domain_expand.py`),
-which is not a product surface (`AGENTS.md`):
+The following finding kinds are **not implemented natively** but do exist,
+with accepted semantics and executable regression coverage, in the frozen
+Python compatibility reference (`src/fslc/domain_expand.py`). `src/fslc` is
+not a product surface (`AGENTS.md`), so none of these are native contract —
+but a future native implementer has real prior art to port, not a blank
+page:
 
 - `missing_decide_for_command` (`src/fslc/domain_expand.py:843-855`): a
   command with no `decide` is silently accepted by native `domain check`
@@ -362,24 +380,25 @@ which is not a product surface (`AGENTS.md`):
 - `cross_aggregate_update_without_event` (`src/fslc/domain_expand.py:886-900`):
   present in the frozen Python reference but was never listed here; recorded
   for completeness alongside the above.
-
-The following finding kinds have been removed from this contract because
-native has no implementation and, in one case, reviving it would conflict
-with an already-accepted rejection:
-
-- `late_completion_without_stale_policy`: `on_stale` itself has no executable
-  lowering and is rejected fail-closed
-  (`on_stale '<name>' has no executable lowering; stale policies are not
-  supported`, `rust/fsl-core/src/domain_lowering.rs`, accepted in #711). A
-  finding that recommends adding an `on_stale` policy would recommend syntax
-  native rejects, so this finding kind must not be revived without first
-  reopening #711's rejection.
-- `saga_dead_end`, `process_wait_cycle`: not implemented natively. Whether to
-  implement them is tracked in
+- `late_completion_without_stale_policy` (`src/fslc/domain_expand.py:909`):
+  present in the frozen Python reference, but not revivable in native as
+  designed: `on_stale` itself has no executable lowering and is rejected
+  fail-closed (`on_stale '<name>' has no executable lowering; stale policies
+  are not supported`, `rust/fsl-core/src/domain_lowering.rs`, accepted in
+  #711). A finding that recommends adding an `on_stale` policy would
+  recommend syntax native rejects, so this finding kind must not be revived
+  without first reopening #711's rejection.
+- `saga_dead_end` (`src/fslc/domain_expand.py:993,1006`) and
+  `process_wait_cycle` (`src/fslc/domain_expand.py:1019`): both have a
+  currently-passing regression test against the frozen reference
+  (`tests/test_domain_dialect.py::test_domain_reports_process_wait_cycle`).
+  Whether to port them to native is an open decision tracked in
   [issue #769](https://github.com/ymm-oss/fsl/issues/769); until then, the
-  only native signal for a stuck saga is `fslc verify`'s action-coverage and
-  never-enabled-action warnings (see the Runtime Replay section), which are
-  indirect kernel-level evidence, not a targeted `fsl-domain` finding.
+  closest native signals for a stuck saga are `fslc verify`'s action-coverage
+  warnings in general, and — specifically for the one-hot dual trigger/after
+  compensation-guard shape — the never-enabled-action warning described in
+  the Runtime Replay section. Neither is a targeted `fsl-domain` finding for
+  a dead-end saga or a wait-graph cycle.
 
 ## Generation
 
