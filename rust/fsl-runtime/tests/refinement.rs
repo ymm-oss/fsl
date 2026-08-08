@@ -253,6 +253,68 @@ fn check_refinement_finds_a_self_violation_reachable_only_from_a_nondeterministi
     );
 }
 
+/// Coverage for issue #730's `trace::reconstruct_trace` generalization: the
+/// two tests above both violate at step 0 (inside the root-immediate-
+/// violation check, before any `ParentLink` is ever recorded), so neither
+/// exercises the walk-back-to-root path a violation found *after* BFS
+/// exploration starts takes. This impl has two nondeterministic-init roots
+/// (`choose = true`/`false`) that only diverge once exploration begins:
+/// `choose = true` can only call `inc_fast` (unconditionally enabled, `+2`
+/// per step) and walks `n` out of its declared `0..2` bound two steps in;
+/// `choose = false` can only call `inc_slow` (`+1`, guarded to at most one
+/// call), which reaches `n = 1` and then deadlocks without ever violating.
+/// `first_self_violation`'s shared `visited`/`queue`/`parents` therefore
+/// hold live entries from both roots at once when the violation is found,
+/// and reconstructing its trace must walk back through `inc_fast`'s own
+/// `ParentLink` to the `choose = true` root -- not the `choose = false`
+/// root, and not a caller-assumed single initial state.
+#[test]
+fn check_refinement_finds_a_self_violation_two_steps_into_one_of_two_nondeterministic_roots() {
+    let implementation = model(
+        "spec MRImplDeep { type IQty = 0..2 state { choose: Bool, n: IQty } \
+         init { if choose { n = 0 } else { n = 0 } } \
+         action inc_fast() { requires choose  n = n + 2 } \
+         action inc_slow() { requires not choose  requires n < 1  n = n + 1 } }",
+    );
+    let abstraction = model(
+        "spec MRAbsDeep { type AQty = 0..4 state { n: AQty } init { n = 0 } \
+         action inc_fast() { n = n + 2 } action inc_slow() { n = n + 1 } }",
+    );
+    let mapping = parse_refinement(
+        "refinement M { impl MRImplDeep abs MRAbsDeep maps auto }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("parse mapping");
+
+    let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 4)
+        .expect("check_refinement runs");
+
+    let (violation, trace) = checked
+        .impl_violation
+        .expect("the choose = true root's two-step-deep out-of-bounds walk must be reported");
+    assert_eq!(violation.kind, "type_bound");
+    assert_eq!(
+        trace.len(),
+        3,
+        "expected init + two inc_fast steps, not a step-0 shortcut: {trace:?}"
+    );
+    assert_eq!(
+        trace[0].state["choose"],
+        fsl_core::FslValue::Bool(true),
+        "the reconstructed trace's root must be the violating (choose = true) branch, not the \
+         other live root or a default initial state: {trace:?}"
+    );
+    assert_eq!(trace[0].state["n"], fsl_core::FslValue::Int(0));
+    assert_eq!(trace[1].state["n"], fsl_core::FslValue::Int(2));
+    assert_eq!(trace[2].state["n"], fsl_core::FslValue::Int(4));
+    assert!(
+        checked.failure.is_none(),
+        "impl_violation and failure must be mutually exclusive: {:?}",
+        checked.failure
+    );
+}
+
 const DIVMAP_ABS: &str = "spec DivMapAbs { state { q: 0..10 } init { q = 0 } \
      action go(v in 0..10) { q = v } }";
 

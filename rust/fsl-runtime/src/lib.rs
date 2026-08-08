@@ -2007,8 +2007,9 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
                 }
                 continue;
             }
-            if visited.insert(scratch.state.clone()) {
-                queue.push_back((scratch.state.clone(), step + 1));
+            let child_state = scratch.state.clone();
+            if visited.insert(child_state.clone()) {
+                queue.push_back((child_state, step + 1));
             }
         }
     }

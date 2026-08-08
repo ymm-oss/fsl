@@ -13,9 +13,11 @@
 //! 16,290 states for the `LabelCoreRepro` reproducer below at depth 3,
 //! identical before and after the fix, with peak memory footprint dropping
 //! from ~946 MB (`maximum resident set size`, pre-fix) to ~236 MB
-//! (post-fix). That identity is not re-asserted here (it is a one-time
-//! measurement, not something this binary can assert about a version of
-//! itself it is not built from); this file is the mechanical trip-wire
+//! (post-fix). This file's own `states_explored` assertion below re-checks
+//! that count on whatever binary CI actually runs (a cheap sanity check,
+//! not a substitute for the direct before/after comparison above, which
+//! this process alone cannot reproduce since it is only ever built from one
+//! side of the fix); the file's main purpose is the mechanical trip-wire
 //! against a *silent reintroduction* of the per-node model clone, the same
 //! shape as `rust/fslc/tests/issue_697_all_properties_memory.rs`'s Control
 //! D. Like that control, macOS does not enforce `RLIMIT_AS` (observed
@@ -23,13 +25,26 @@
 //! ceiling without being killed), so this only runs on Linux, where CI
 //! actually executes it.
 //!
-//! The ceiling is calibrated to have discriminating power, not just a
-//! coarse "still bounded" check: 500 MB sits comfortably above the
-//! measured post-fix baseline's normal variance (~236 MB) but below what
+//! The ceiling is calibrated to have discriminating power against this
+//! specific regression class, not just a coarse "still bounded" check the
+//! way Control D's own >=10x margin is (deliberately -- Control D's margin
+//! is wide enough that it would not reliably catch a regression back to
+//! this fix's own pre-fix cost on this fixture, which is exactly the gap
+//! this file exists to close): 550 MB sits above the measured post-fix
+//! baseline's normal variance (~236 MB, ~2.3x headroom) but below what
 //! reintroducing the pre-fix per-node `Monitor` clone would cost on this
-//! same fixture (~946 MB), so a regression back to cloning the model per
-//! queued state fails this test instead of only showing up as a memory
-//! regression under load.
+//! same fixture (~946 MB, ~1.7x margin below it). That said, the
+//! measurement this ceiling is calibrated from is `maximum resident set
+//! size`/`peak memory footprint` on macOS (`/usr/bin/time -l`), a different
+//! metric on a different platform than what `ulimit -v` actually enforces
+//! here (`RLIMIT_AS`, i.e. reserved virtual address space, which is `>=`
+//! RSS and can differ from it by an allocator- and platform-dependent
+//! amount) -- CI has run this test and passed at this ceiling, but no one
+//! has measured what the *pre-fix* binary's `ulimit -v` cost actually is on
+//! Linux, so the margin's safety rests on an unverified monotonicity
+//! assumption (RSS improvement on macOS implies a comparable VSZ
+//! improvement on Linux), not a second direct measurement. If this test
+//! flakes, widen `CEILING_KB` rather than tightening this comment's claim.
 #![cfg(target_os = "linux")]
 
 use std::path::PathBuf;
@@ -143,7 +158,7 @@ spec LabelCoreRepro {
 #[test]
 fn bfs_stays_under_a_calibrated_ceiling_for_the_branching_reproducer() {
     // ~236 MB measured post-fix baseline, ~946 MB measured pre-fix, in KiB.
-    const CEILING_KB: u64 = 500 * 1024;
+    const CEILING_KB: u64 = 550 * 1024;
 
     let fixture = Fixture::new("bfs-ceiling", LABEL_CORE_REPRO_SOURCE);
     let command = format!(
