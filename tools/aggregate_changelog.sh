@@ -574,21 +574,31 @@ is_product_surface_path() {
 #
 # Measured directly against this repository's release history, `git show
 # --name-status --format= <sha>` on each of 56d5b1a (v4.2.0), 473239a
-# (v4.1.0), 7b8607a (v4.0.0), e1dfdcb (v3.1.0): the touched product-surface
-# path set is byte-identical across all four, every entry status `M` (no
-# release commit adds a file here), and is exactly the five paths below.
-# `CHANGELOG.md` itself is excluded from this set -- it is governed
-# separately, by classify_direct_edit/control 4, not by this control.
-# `7b8607a` additionally touched `docs/RELEASE.md`, which is not a product
-# surface under is_product_surface_path and so never entered this set.
+# (v4.1.0), 7b8607a (v4.0.0), e1dfdcb (v3.1.0): the touched path set is
+# byte-identical across all four, every entry status `M` (no release commit
+# adds a file here). Filtering that set through is_product_surface_path --
+# the only paths this exemption can ever be consulted for, since
+# classify_product_diff reaches it exclusively inside the
+# `is_product_surface_path` branch -- leaves exactly the three paths below.
+# `CHANGELOG.md` is excluded because it is governed separately, by
+# classify_direct_edit/control 4, not by this control. `7b8607a`
+# additionally touched `docs/RELEASE.md`, and every release touches
+# `editors/vscode/package.json` and `editors/vscode/package-lock.json`; none
+# of those three is a product surface under is_product_surface_path, so none
+# of them ever reaches this predicate. Listing them here anyway would be
+# unreachable code that reads like coverage: an earlier version of this set
+# did list the two `editors/vscode/` paths, and deleting both left `selftest`
+# fully green because nothing could ever call them (review finding F3, #737,
+# comment 2026-08-08, fourth round).
 #
-# A maintainer who changes docs/RELEASE.md's release-commit steps to touch a
-# new product-surface path must add that exact path here, or every future
-# release commit will start failing its own `changelog-fragment-missing`.
+# A maintainer must add an exact path here whenever either side of that
+# filter moves: a docs/RELEASE.md release-commit step that starts touching a
+# new product-surface path, or an is_product_surface_path that widens to
+# cover a path releases already touch (`editors/vscode/*` is the live
+# candidate). Otherwise every future release commit starts failing its own
+# `changelog-fragment-missing`.
 is_release_bump_path() {
   case "$1" in
-    editors/vscode/package-lock.json) return 0 ;;
-    editors/vscode/package.json) return 0 ;;
     rust/Cargo.lock) return 0 ;;
     rust/Cargo.toml) return 0 ;;
     rust/fslc/tests/fixtures/domain_characterization/baseline.v1.json) return 0 ;;
@@ -689,10 +699,31 @@ is_top_level_fragment_path() {
 # fragment for that unrelated change, same as any other pull request would.
 classify_product_diff() {
   local classification="${1:-unchanged}"
-  local status path
+  local status path newpath
   local -a non_exempt=() added_fragments=() check_fragments=()
-  while IFS=$'\t' read -r status path; do
+  while IFS=$'\t' read -r status path newpath; do
     [ -z "${status:-}" ] && continue
+    # A rename or copy record has THREE tab-separated fields
+    # (`R100<TAB>old<TAB>new`), not two, and `diff.renames` is on by default,
+    # so this is the ordinary shape rather than an opt-in one. Read the third
+    # field and classify the DESTINATION: with only two `read` variables the
+    # trailing fields collapse into $path as `old<TAB>new`, and every
+    # predicate below then tests the source. A file moved into a product
+    # surface from outside it (`tools/x` -> `rust/x.rs`,
+    # `docs/note.md` -> `specs/note.fsl`) escaped control 1 entirely that
+    # way, with no forgery and no CHANGELOG.md edit -- whether control 1
+    # fired depended on git's similarity heuristic rather than on what
+    # changed, since the identical content change fails closed when git
+    # happens to render it as A/D (review finding F1, #737, comment
+    # 2026-08-08, fourth round). A rename *within* a product surface still
+    # failed closed, but named the tab-joined pair in its diagnostic instead
+    # of the destination. tools/check-product-gate-scope.sh, the sibling this
+    # tool is modelled on, is immune for free: `git diff --name-only` prints
+    # both sides of a rename on separate lines. This tool needs the status
+    # column, so it handles the third field explicitly instead.
+    case "$status" in
+      R*|C*) [ -n "${newpath:-}" ] && path="$newpath" ;;
+    esac
     if is_product_surface_path "$path"; then
       if [ "$classification" = "release-move" ] && is_release_bump_path "$path"; then
         : # Exempt: part of the fixed, measured release-bump path set,
@@ -1377,8 +1408,16 @@ selftest_control1() {
   # through -- an isolated unit fixture like this one cannot, by itself,
   # prove the two controls are wired together rather than merely both
   # accepting the same literal string by coincidence.
-  st_expect_pass "control1 accepting: release shape, given a genuine release-move classification" \
-    bash -c 'printf "M\trust/Cargo.toml\nM\trust/Cargo.lock\nD\tchangelog.d/2-x.added.md\nM\tCHANGELOG.md\n" | classify_product_diff release-move'
+  # Names every reachable is_release_bump_path entry, not just the two
+  # version-string files: the domain characterization baseline is the one
+  # entry in that set that is a generated product artifact rather than a
+  # version bump, and deleting it from the set used to leave `selftest` fully
+  # green -- a gutted mutant of this round's own new constant (review finding
+  # F2, #737, comment 2026-08-08, fourth round). Every entry in the set is
+  # exercised here and in the zero-fragment fixture below, so dropping any of
+  # them now fails closed with `changelog-fragment-missing`.
+  st_expect_pass "control1 accepting: release shape, given a genuine release-move classification (every release-bump path, F2)" \
+    bash -c 'printf "M\trust/Cargo.toml\nM\trust/Cargo.lock\nM\trust/fslc/tests/fixtures/domain_characterization/baseline.v1.json\nD\tchangelog.d/2-x.added.md\nM\tCHANGELOG.md\n" | classify_product_diff release-move'
   # The regression case for the original S2-1 bug: the exact same file-status
   # shape (fragment deleted, CHANGELOG.md modified) that the earlier,
   # over-wide exclusion granted on git status alone, now given the
@@ -1394,7 +1433,7 @@ selftest_control1() {
   # bump with nothing accumulated in changelog.d/ is still a legitimate
   # release.
   st_expect_pass "control1 accepting: release-move classification alone is sufficient, with zero fragments deleted (S3-2)" \
-    bash -c 'printf "M\trust/Cargo.toml\nM\trust/Cargo.lock\nM\tCHANGELOG.md\n" | classify_product_diff release-move'
+    bash -c 'printf "M\trust/Cargo.toml\nM\trust/Cargo.lock\nM\trust/fslc/tests/fixtures/domain_characterization/baseline.v1.json\nM\tCHANGELOG.md\n" | classify_product_diff release-move'
   # Narrowed exclusion (H1; review, #737, comment 2026-08-07, third round):
   # a "release-move" classification only waives the measured release-bump
   # path set (is_release_bump_path), not every product-surface path riding
@@ -1426,6 +1465,36 @@ selftest_control1() {
   # still fails exactly like the no-fragment case above.
   st_expect_fail "control1 rejecting: only a nested fragment was added (changelog-fragment-missing)" \
     bash -c 'printf "M\trust/fsl-core/src/lib.rs\nA\tchangelog.d/sub/2-x.added.md\n" | classify_product_diff'
+  # Rename/copy records carry three tab-separated fields, and the
+  # DESTINATION is what determines whether a fragment is owed (review
+  # finding F1, #737, comment 2026-08-08, fourth round). A file moved into a
+  # product surface from outside it must fail exactly like a plain addition;
+  # before the fix, $path held `old<TAB>new` and every predicate tested the
+  # source, so this passed.
+  st_expect_fail "control1 rejecting: a rename INTO a product surface still owes a fragment (F1, changelog-fragment-missing)" \
+    bash -c 'printf "R100\ttools/mover.txt\trust/moved.rs\n" | classify_product_diff'
+  st_expect_fail "control1 rejecting: a rename-with-edit into specs/ still owes a fragment (F1, changelog-fragment-missing)" \
+    bash -c 'printf "R084\tdocs/note.md\tspecs/note.fsl\n" | classify_product_diff'
+  st_expect_fail "control1 rejecting: a copy INTO a product surface still owes a fragment (F1, changelog-fragment-missing)" \
+    bash -c 'printf "C075\ttools/mover.txt\trust/copied.rs\n" | classify_product_diff'
+  # The diagnostic must name the destination alone, not the tab-joined pair
+  # the two-variable read produced. Checks message content, so it must pass.
+  # shellcheck disable=SC2016  # single-quoted on purpose: $out must expand
+  # inside the child `bash -c`, not this outer script, when it is parsed.
+  st_expect_pass "control1: the fragment-missing diagnostic for a rename names the destination, not the source (F1)" \
+    bash -c 'out="$(printf "R100\trust/keep.rs\trust/renamed.rs\n" | classify_product_diff 2>&1)"; [ "$out" = "changelog-fragment-missing: rust/renamed.rs" ]'
+  # The accepting half of the same pair: the identical rename WITH a
+  # conforming fragment in the same diff passes, so the rejecting fixtures
+  # above are calibrated against a real difference in the diff, not against
+  # rename records being rejected unconditionally.
+  st_expect_pass "control1 accepting: a rename INTO a product surface, with a fragment in the same diff (F1)" \
+    bash -c 'printf "R100\ttools/mover.txt\trust/moved.rs\nA\tchangelog.d/3-x.added.md\n" | classify_product_diff'
+  # A rename that leaves a product surface owes nothing: the destination is
+  # not a product surface, even though the source was. This is the direction
+  # the pre-fix code got accidentally "right" for the wrong reason, so pin
+  # it explicitly now that the field it reads has changed.
+  st_expect_pass "control1 accepting: a rename OUT of a product surface owes no fragment (F1)" \
+    bash -c 'printf "R100\trust/moved.rs\ttools/mover.txt\n" | classify_product_diff'
 
   local tmp; tmp="$(mktemp -d)"
   printf 'Added (#1): real content.\n' >"$tmp/nonempty.md"
@@ -1667,6 +1736,50 @@ selftest_control4() {
   local mb_emptied_sha; mb_emptied_sha="$(cd "$mbrepo" && git rev-parse HEAD)"
   st_expect_fail "control1 end-to-end rejecting: an existing fragment edited down to whitespace (changelog-fragment-empty)" \
     bash -c "cd '$mbrepo' && BASE_SHA='$mb_feature_sha' HEAD_SHA='$mb_emptied_sha' '$SELF' check-pr"
+
+  # End-to-end (review finding F1, #737, comment 2026-08-08, fourth round):
+  # a real `git mv` into a product surface, driven through the real check-pr,
+  # against real git rename detection -- the unit fixtures above feed
+  # classify_product_diff a hand-written `R100` line and so cannot prove git
+  # actually emits that shape here, nor that check-pr's own `git diff
+  # --name-status` invocation reaches this code with three fields. Both the
+  # rejecting case (no fragment) and its accepting control (the identical
+  # rename plus a fragment) run against the same base, so a green accepting
+  # case cannot come from the rename simply being ignored again.
+  local mvrepo="$tmp/rename-repo"
+  mkdir -p "$mvrepo/rust" "$mvrepo/tools" "$mvrepo/changelog.d"
+  (
+    cd "$mvrepo"
+    git init -q -b main
+    git config user.email "selftest@example.invalid"
+    git config user.name "selftest"
+    printf '# Changelog\n\nIntro.\n\n## [Unreleased]\n\n- Added (#1): one.\n\n## [1.0.0] - 2026-01-01\n\n- Old.\n' >CHANGELOG.md
+    printf 'fn main() {}\n' >rust/lib.rs
+    printf 'a helper that is about to move into the product surface\nline two\nline three\n' >tools/mover.txt
+    git add -A
+    git commit -q -m base
+  )
+  local mv_base_sha; mv_base_sha="$(cd "$mvrepo" && git rev-parse HEAD)"
+  (
+    cd "$mvrepo"
+    git checkout -q -b move-no-fragment
+    git mv tools/mover.txt rust/moved.rs
+    git commit -q -m "move a file into rust/ with no fragment"
+  )
+  local mv_head_sha; mv_head_sha="$(cd "$mvrepo" && git rev-parse HEAD)"
+  st_expect_fail "control1 end-to-end rejecting (F1): a real git mv into rust/ with no fragment (changelog-fragment-missing)" \
+    bash -c "cd '$mvrepo' && BASE_SHA='$mv_base_sha' HEAD_SHA='$mv_head_sha' '$SELF' check-pr"
+  (
+    cd "$mvrepo"
+    git checkout -q -b move-with-fragment "$mv_base_sha"
+    git mv tools/mover.txt rust/moved.rs
+    printf 'Changed (#6): moved the helper into the native workspace.\n' >changelog.d/6-move.changed.md
+    git add -A
+    git commit -q -m "move a file into rust/ with a fragment"
+  )
+  local mv_ok_sha; mv_ok_sha="$(cd "$mvrepo" && git rev-parse HEAD)"
+  st_expect_pass "control1 end-to-end accepting (F1): the same git mv, with a fragment in the same pull request" \
+    bash -c "cd '$mvrepo' && BASE_SHA='$mv_base_sha' HEAD_SHA='$mv_ok_sha' '$SELF' check-pr"
 
   rm -rf "$tmp"
 }
