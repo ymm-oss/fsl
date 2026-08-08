@@ -235,8 +235,7 @@ domain <Name> {
 エラー、純粋な `decide`/`evolve`、非同期エフェクトのライフサイクル、saga/プロセス
 マネージャの協調をモデル化します。各 command+decide+evolve のパスをカーネルの
 `action` へ、aggregate 状態をプレフィックス付きのカーネル状態へ、saga の step を
-イベントフラグでガードされ、かつ emit する各イベントの宣言済み `evolve` を同じ
-action 内で適用する action へ、エフェクトライフサイクル状態を有限の
+イベントフラグでガードされた action へ、エフェクトライフサイクル状態を有限の
 `Map<CorrelationId, EffectStatus>` / `Map<CorrelationId, Attempt>` マップへと
 lowering します。イベントの発生フラグを立てる action は、それを生成した構文
 (command、effect の完了、saga の observe、saga の step/timeout/compensation の

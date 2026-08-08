@@ -102,16 +102,35 @@ fn payment_pending_flips_to_violated() {
 /// loosened the compensation guard would not be caught by the two flip
 /// controls above.
 ///
-/// `--k 2` (rather than the default `--k 1`): post-fix, the two newly
-/// reachable evolves (`ReservationPending`, `PaymentPending`) widen the
-/// aggregate's reachable state space (#679's design-authority ruling on
-/// this issue: 825 states after #779, static upper bound), so `k=1`
-/// induction can no longer discharge this property on its own
-/// (`unknown_cti`) even though it is still true; `k=2` proves it. This is
-/// expected induction-depth growth from the state space widening the fix
-/// itself causes, not a guard change -- verified directly: pre-fix, `k=1`
-/// alone already proves this property (smaller reachable set); post-fix,
-/// `k=1` returns `unknown_cti` and `k=2` returns `proved`.
+/// `--k 2` (rather than the default `--k 1`): **not** induction-depth
+/// growth from a widened reachable state space (an earlier version of this
+/// comment claimed that; #779's independent review traced the actual `k=1`
+/// counterexample-to-induction and found it wrong). The real mechanism:
+///
+/// - **Pre-fix**, no action in the model could ever assign
+///   `order_inventory_status = ReleaseRequested` at all (the compensation
+///   action's `evolve` call was the exact thing missing), so the property
+///   was **vacuously** inductive at `k=1` -- there was no candidate
+///   transition for induction to even examine, let alone rule out. `k=1`
+///   `proved` pre-fix carried none of the "dual one-hot guard is
+///   unsatisfiable" evidence the control is meant to provide.
+/// - **Post-fix**, the compensation action's evolve now assigns that value
+///   for the first time, so induction must actually prove the one-hot
+///   `event_PaymentFailed`/`event_InventoryReserved` dual guard can never
+///   both hold -- and a single step of induction is not enough: the `k=1`
+///   counterexample-to-induction is the two-event one-hot state
+///   `{event_InventoryReserved: true, event_PaymentFailed: true,
+///   inventory_status: NotRequested}` stepping through the compensation
+///   action to `ReleaseRequested`, which is itself unreachable (one-hot
+///   flags are mutually exclusive) but `k=1` induction cannot rule out
+///   without a second step's history. `k=2` supplies that and proves it.
+///
+/// This makes the control **strictly stronger** than before, not weaker:
+/// pre-fix, `k=1` *and* `k=2` both trivially `proved` (vacuously,
+/// regardless of the guard), so the property carried near-zero evidentiary
+/// value. Post-fix `k=2` `proved` is the first point at which this property
+/// actually witnesses "the one-hot dual guard is structurally
+/// unsatisfiable" -- which is precisely the fact #679 must preserve.
 #[test]
 fn inventory_release_requested_stays_proved() {
     let (status, output) = run_cli(&[

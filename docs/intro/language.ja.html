@@ -276,7 +276,10 @@ fsl-domain findings を報告します):</p>
 <code>action</code> へ、aggregate 状態をプレフィックス付きのカーネル状態へ、saga の step を
 イベントフラグでガードされた action へ、エフェクトライフサイクル状態を有限の
 <code>Map&lt;CorrelationId, EffectStatus&gt;</code> / <code>Map&lt;CorrelationId, Attempt&gt;</code> マップへと
-lowering します。domain の enum メンバーは lowering 時に名前空間化されるので、
+lowering します。イベントの発生フラグを立てる action は、それを生成した構文
+(command、effect の完了、saga の observe、saga の step/timeout/compensation の
+いずれであっても)によらず、そのイベントの宣言済み <code>evolve</code> を同じ action 内で
+適用します。domain の enum メンバーは lowering 時に名前空間化されるので、
 2 つの domain enum が両方とも <code>Pending</code> を含んでもかまいません。domain の式では
 <code>X in [A, B]</code> と <code>can(Command)</code> が使えます。これらは型付き domain ツリーから解決
 され、カーネル式へ構造的に lowering されます。裸の enum メンバーは期待される論理型

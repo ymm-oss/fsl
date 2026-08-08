@@ -56,42 +56,51 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// `.fsl` files directly under `dir` (non-recursive), sorted for
-/// deterministic test output.
-fn fsl_files_in(dir: &Path) -> Vec<PathBuf> {
+/// Every `.fsl` file anywhere under `dir` (recursive), collected into `out`.
+/// Deliberately the same breadth `domain_render_agreement.rs`'s
+/// `walk_fsl_files`/`discover_domain_fixtures` use for its own corpus
+/// discovery: a narrower walk here silently exempts part of the domain
+/// fixture corpus from this sweep. #779's independent review caught exactly
+/// that gap in an earlier version of this file (only `examples/domain/` and
+/// `rust/fslc/tests/fixtures/domain_characterization/` were walked, so
+/// `rust/fslc/tests/fixtures/` files sitting outside `domain_characterization/`
+/// -- including `domain_saga_compensation_dual_guard.fsl`, which has a saga
+/// compensation action and, at the time, an unfixed instance of this exact
+/// evolve-pairing defect -- were never swept).
+fn walk_fsl_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
+        return;
     };
-    let mut files = entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "fsl"))
-        .collect::<Vec<_>>();
-    files.sort();
-    files
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            walk_fsl_files(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "fsl") {
+            out.push(path);
+        }
+    }
 }
 
-/// The #779 sweep corpus: every `.fsl` file under `examples/domain/` and
-/// `rust/fslc/tests/fixtures/domain_characterization/`, plus
-/// `examples/annotations/annotated_domain.fsl`. This is a glob, not a
-/// manually maintained registration list like
-/// `domain_render_agreement.rs`'s `VALID_DOMAIN_FIXTURES` (that list exists
-/// for a different purpose: pinning each fixture's *expected* A/B agreement
-/// outcome one by one). Per #779, this sweep must keep covering new domain
-/// fixtures automatically as they are added, without a second list to
-/// remember to update -- files that fail to parse as a `domain` document,
-/// or that fail to lower on a given path (several
-/// `domain_characterization/` fixtures are deliberately-invalid negative
-/// controls for other gates), are skipped for that path rather than
-/// failing this test; this sweep only asserts the pairing invariant over
-/// successfully produced kernel models.
+/// The #779 sweep corpus: every `.fsl` file anywhere under `examples/` and
+/// `rust/fslc/tests/fixtures/` -- the same two roots, walked with the same
+/// recursion, `domain_render_agreement.rs`'s `corpus_discovery_matches_registered_classification`
+/// uses to find every domain fixture in the repository. This is a glob, not
+/// a manually maintained registration list like that file's
+/// `VALID_DOMAIN_FIXTURES` (which exists for a different purpose: pinning
+/// each fixture's *expected* A/B agreement outcome one by one). Per #779,
+/// this sweep must keep covering new domain fixtures automatically as they
+/// are added, without a second list to remember to update -- files that do
+/// not parse as a `domain` document, or that fail to lower on a given path
+/// (several fixtures under `rust/fslc/tests/fixtures/` are
+/// deliberately-invalid negative controls for other gates), are skipped for
+/// that path rather than failing this test; this sweep only asserts the
+/// pairing invariant over successfully produced kernel models.
 fn sweep_corpus() -> Vec<PathBuf> {
     let root = repo_root();
-    let mut files = fsl_files_in(&root.join("examples/domain"));
-    files.extend(fsl_files_in(
-        &root.join("rust/fslc/tests/fixtures/domain_characterization"),
-    ));
-    files.push(root.join("examples/annotations/annotated_domain.fsl"));
+    let mut files = Vec::new();
+    walk_fsl_files(&root.join("examples"), &mut files);
+    walk_fsl_files(&root.join("rust/fslc/tests/fixtures"), &mut files);
+    files.sort();
     files
 }
 
