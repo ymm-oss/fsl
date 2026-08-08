@@ -910,18 +910,23 @@ declared type space rather than over the states reached within `--depth`, so
 their verdict never moves with the bound: `requires visits < 100` on
 `visits: 0..100` is a real guard and stays unreported even at a depth that
 never reaches 100. `--vacuity error` gives
-`result:"error"`; `--vacuity ignore` disables it (and, unlike the other six
-kinds, skips computing the `vacuous_implication`/`vacuous_leadsto`
-reachability probe entirely rather than computing then filtering it).
+`result:"error"`; `--vacuity ignore` disables it. For the two reachability
+kinds (`vacuous_implication`/`vacuous_leadsto`, next paragraph) and their
+`vacuity_probe_truncated` sibling, `ignore` additionally skips *computing*
+the shared reachability probe rather than computing it and filtering the
+result; the other four kinds (`always_true_requires`, `tautology_over_frozen`,
+`urgency_freeze`, `vacuous_deadline`) are solver-decided lanes that are
+still computed and then filtered.
 
 The `vacuous_implication`/`vacuous_leadsto` reachability probe shares one
 budgeted concrete BFS across every antecedent/trigger in the spec. A
 candidate that neither becomes true nor finishes exhausting its reachable
-state space before the internal state-count budget is hit reports
-`kind:"vacuity_probe_truncated"` instead — vacuity was never established
-either way, so it selects under `--vacuity` exactly like the other six
-kinds (`error` fails closed on it too). This is rare; a corpus-conservation
-test keeps the budget generous enough that no maintained spec hits it.
+state space before the internal state-count budget is hit (or whose
+expression fails to evaluate) reports `kind:"vacuity_probe_truncated"`
+instead — vacuity was never established either way, so it selects under
+`--vacuity` exactly like the other six kinds (`error` fails closed on it
+too). Budget exhaustion is rare; a corpus-conservation test keeps the
+budget generous enough that no maintained spec hits it.
 
 ## 7. CLI and JSON essentials
 

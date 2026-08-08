@@ -2,8 +2,9 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! Negative controls for #465: native `--vacuity` must select over the full
-//! documented 6-kind lane set (`docs/LANGUAGE.md` §15,
-//! `fsl_core::VACUITY_KINDS`), not just the two kinds spelled `vacuous_*`.
+//! documented 7-kind lane set (`docs/LANGUAGE.md` §15,
+//! `fsl_core::VACUITY_KINDS` -- `vacuity_probe_truncated` joined the other
+//! six in issue #729), not just the two kinds spelled `vacuous_*`.
 //! This file exercises the `vacuous_leadsto` lane end to end through the CLI
 //! (`warn`/`error`/`ignore`) — the lane that was entirely missing from
 //! native `verification_warnings` before the fix.

@@ -2261,14 +2261,21 @@ pub enum Reachability {
     /// error`'s `vacuous_implication`/`vacuous_leadsto` findings stay keyed
     /// on this variant, unchanged by this issue's budget.
     Unreachable,
-    /// The BFS stopped because it reached `budget` distinct states before
-    /// either finding the expression true or exhausting the reachable
-    /// state space within `depth`. Fail-closed by construction: a caller
-    /// must not fold this into `Unreachable` — reachability was never
-    /// decided, so treating it as "confirmed vacuous" would be a false
-    /// positive and treating it as "confirmed not vacuous" (silently
+    /// The BFS stopped, or a per-candidate evaluation failed, before either
+    /// finding the expression true or exhausting the reachable state space
+    /// within `depth` -- reachability was never decided. Reached two ways:
+    /// the shared budget was hit while this candidate was still pending, or
+    /// evaluating this candidate's expression in some visited state
+    /// returned an error (rare on a checked model). Fail-closed by
+    /// construction: a caller must not fold this into `Unreachable` for
+    /// either reason — treating it as "confirmed vacuous" would be a false
+    /// positive, and treating it as "confirmed not vacuous" (silently
     /// dropping it) would let `--vacuity error` pass a spec whose vacuity
-    /// was never actually established.
+    /// was never actually established. The two causes are deliberately not
+    /// distinguished in this type: both mean the same thing to a caller
+    /// ("no verdict"), and a per-candidate evaluation error and a shared
+    /// state-budget cutoff are two ways of reaching the identical
+    /// obligation, not two different obligations.
     Exhausted,
 }
 
@@ -2284,19 +2291,29 @@ pub enum Reachability {
 /// visited exactly like [`find_boundary_violation`]'s budget (state count
 /// checked right after insertion, before the state is queued): once the
 /// pending set is non-empty and the budget is reached, every still-pending
-/// candidate resolves [`Reachability::Exhausted`] rather than silently
-/// falling back to `Unreachable`.
+/// candidate resolves [`Reachability::Exhausted`].
 ///
 /// A per-expression evaluation error (rare on a checked model) resolves
-/// *only that expression* as [`Reachability::Reachable`], i.e. it silently
-/// contributes no finding for it. This matches the original
-/// `expression_reachable`, where a `Result::Err` for one property's
-/// antecedent produced no warning for that property alone; batching must
-/// not let one malformed candidate suppress every other candidate's
-/// vacuity evidence in the same run. A failure of the state-space walk
-/// itself (an action's `enabled`/`step` cannot be evaluated) is not a
-/// per-candidate condition and still propagates as `Err` for the whole
-/// call, matching every other BFS in this module.
+/// *only that expression* as [`Reachability::Exhausted`] rather than
+/// aborting the whole call: batching must not let one malformed candidate
+/// suppress every other candidate's vacuity evidence in the same run. This
+/// is a deliberate behavior change from the original `expression_reachable`,
+/// where a `Result::Err` for one property's antecedent produced no warning
+/// at all for that property (silently treated as "not vacuous"); resolving
+/// it `Exhausted` instead keeps every no-verdict outcome on the same
+/// fail-closed path regardless of *why* a verdict could not be reached, so
+/// `--vacuity error` cannot be defeated by causing a candidate's evaluation
+/// to error rather than causing its BFS to run long. A failure of the
+/// state-space walk itself (an action's `enabled`/`step` cannot be
+/// evaluated) is not a per-candidate condition and still propagates as
+/// `Err` for the whole call, matching every other BFS in this module —
+/// unlike a per-candidate evaluation error, there is no narrower unit to
+/// attribute it to. When that happens, every candidate still pending at
+/// that point (including ones that would otherwise have resolved
+/// `Exhausted` from the budget moments later) loses its finding entirely
+/// rather than being reported `Exhausted`; `verification_warnings` accepts
+/// this as a known, narrow gap (see its own doc comment) rather than
+/// threading partial results out of an `Err` path.
 ///
 /// # Errors
 ///
@@ -2333,10 +2350,15 @@ pub fn expression_reachability(
             })
             .and_then(as_bool);
             match truth {
-                Ok(true) | Err(_) => {
-                    // An error is absorbed here, not propagated: see the
-                    // doc comment above.
+                Ok(true) => {
                     results[index] = Some(Reachability::Reachable);
+                    resolved.push(index);
+                }
+                Err(_) => {
+                    // Absorbed per-candidate, not propagated: see the doc
+                    // comment above. Fail-closed, unlike the pre-#729
+                    // behavior this replaces.
+                    results[index] = Some(Reachability::Exhausted);
                     resolved.push(index);
                 }
                 Ok(false) => {}
@@ -2464,7 +2486,7 @@ fn vacuity_reachability_warning(
         "blocking": [],
         "faithfulness_class": if kind == "vacuity_probe_truncated" { "reachability_unknown" } else { "intent_unexercised" },
         "recommended_action": if kind == "vacuity_probe_truncated" {
-            format!("the {subject}'s reachability could not be established within the internal probe budget; this is unusual and typically means the state shape (e.g. an order-sensitive history variable) defeats BFS dedup -- simplify it or reduce --depth")
+            format!("the {subject}'s reachability could not be established by the probe; this is unusual and typically means either the state shape (e.g. an order-sensitive history variable) defeats BFS dedup and exhausts the internal budget -- simplify it or reduce --depth -- or the {subject} itself fails to evaluate in some reached state -- check it for a construct the concrete evaluator cannot represent")
         } else {
             "add a single-shot reachable for the action / raise --depth".to_owned()
         },
@@ -2514,10 +2536,26 @@ pub fn verification_warnings(
             .collect();
         probe_expressions.extend(leadsto_candidates.iter().cloned());
         // A `RuntimeError` from the state-space walk itself (see
-        // `expression_reachability`'s doc comment) loses both lanes for
-        // this run, exactly as a single antecedent's `Err` silently lost
-        // just that one property's warning before batching -- there is no
-        // narrower fallback to degrade to.
+        // `expression_reachability`'s doc comment -- distinct from a
+        // per-candidate evaluation error, which resolves `Exhausted`
+        // instead of propagating) loses every candidate's finding for this
+        // run, with no narrower fallback to degrade to: `.unwrap_or_default`
+        // yields an empty `Vec`, so `probe_results.get(_)` is `None` for
+        // every index below and no warning is emitted for any candidate.
+        // This is NOT observationally equivalent to the pre-#729 baseline,
+        // where each property's own independent `expression_reachable` call
+        // only lost that one property's warning on error -- it is a known,
+        // narrow gap against this issue's own fail-closed contract: a
+        // candidate that would have resolved `Exhausted` (budget truncation)
+        // moments after the walk-level error occurred loses its
+        // `vacuity_probe_truncated` finding entirely instead of reporting
+        // it. Accepted rather than threading partial results out of an
+        // `Err` path, because a walk-level `RuntimeError` here means an
+        // action's `enabled`/`step` itself could not be evaluated -- the
+        // same condition that already fails the surrounding BMC/explicit
+        // run before vacuity warnings are ever rendered, so this path is
+        // not reachable on any spec that reaches `verification_warnings` in
+        // the first place. See `docs/DESIGN-vacuity.md`.
         let probe_results =
             expression_reachability(model, &probe_expressions, depth, CONCRETE_PROBE_BUDGET)
                 .unwrap_or_default();
@@ -2540,9 +2578,9 @@ pub fn verification_warnings(
                     "implication antecedent",
                     &name,
                     &format!(
-                        "invariant '{name}' has an implication antecedent whose reachability probe was truncated by the internal state budget before reaching depth {depth}"
+                        "invariant '{name}' has an implication antecedent whose reachability the probe could not establish within depth {depth}"
                     ),
-                    "vacuity was not established either way for this antecedent; the probe stopped at a state-count budget, not at depth",
+                    "vacuity was not established either way for this antecedent; the probe either exhausted its internal state budget or failed to evaluate the antecedent in some reached state before reaching a verdict",
                     &property.span.python_loc(),
                 ),
                 Some(Reachability::Reachable) | None => continue,
@@ -2571,9 +2609,9 @@ pub fn verification_warnings(
                     "leadsTo trigger",
                     &name,
                     &format!(
-                        "leadsTo '{name}' has a trigger whose reachability probe was truncated by the internal state budget before reaching depth {depth}"
+                        "leadsTo '{name}' has a trigger whose reachability the probe could not establish within depth {depth}"
                     ),
-                    "vacuity was not established either way for this trigger; the probe stopped at a state-count budget, not at depth",
+                    "vacuity was not established either way for this trigger; the probe either exhausted its internal state budget or failed to evaluate the trigger in some reached state before reaching a verdict",
                     &property.span.python_loc(),
                 ),
                 Some(Reachability::Reachable) | None => continue,

@@ -7,7 +7,7 @@
 //! alone):
 //!
 //! 1. The ledger's summary prefix for `kind == "vacuity_probe_truncated"`
-//!    must read "空虚性未確立（到達性 probe が budget で打ち切り）"
+//!    must read "空虚性未確立（到達性 probe が判定に至らず）"
 //!    (vacuity *not established*), never "空虚性の疑い" (*suspected*
 //!    hollow) -- the two are different claims: a suspected finding says
 //!    something was proven vacuous; a truncated probe says nothing was
@@ -58,7 +58,7 @@ fn render(verification: &serde_json::Value) -> String {
 fn vacuity_probe_truncated_uses_the_not_established_prefix_not_the_suspected_prefix() {
     let rendered = render(&verification_with("vacuity_probe_truncated"));
     assert!(
-        rendered.contains("空虚性未確立（到達性 probe が budget で打ち切り）"),
+        rendered.contains("空虚性未確立（到達性 probe が判定に至らず）"),
         "expected the truncated-probe summary prefix: {rendered}"
     );
     assert!(

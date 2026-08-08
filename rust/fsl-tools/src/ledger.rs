@@ -367,13 +367,15 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             trace_type: "vacuity".to_owned(),
             name: name.to_owned(),
             // `vacuity_probe_truncated` (issue #729) is not itself a
-            // vacuity finding: it means the reachability probe was cut off
-            // by its state budget before it could decide either way. That
-            // is a distinct claim from "疑い" (suspected hollow), so it
-            // gets its own prefix -- "未確立" (not established), not
-            // "疑い" (suspected).
+            // vacuity finding: it means the reachability probe (state
+            // budget exhaustion, or a per-candidate evaluation failure --
+            // `fsl_runtime::Reachability::Exhausted` does not distinguish
+            // the two) never reached a verdict either way. That is a
+            // distinct claim from "疑い" (suspected hollow), so it gets its
+            // own prefix -- "未確立" (not established), not "疑い"
+            // (suspected).
             summary: if kind == "vacuity_probe_truncated" {
-                format!("空虚性未確立（到達性 probe が budget で打ち切り）: {message}")
+                format!("空虚性未確立（到達性 probe が判定に至らず）: {message}")
             } else {
                 format!("空虚性の疑い（{kind}）: {message}")
             },
