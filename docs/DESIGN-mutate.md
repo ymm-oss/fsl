@@ -20,13 +20,50 @@ is the external-only adjudication form.
 ## 2. Mutate the **dialect-expanded kernel AST**, not the spec dict
 
 It mutates the kernel AST `("spec", name, items)` returned by `parse_src` (with
-compose/requirements/business already expanded), and **re-runs `build_spec` for each mutant**
-before checking. Reasons:
+compose/requirements/business/domain already expanded), and **re-runs `build_spec` for each
+mutant** before checking. Reasons:
 1. **The type-bound ±1 mutation requires regenerating the `_bounds_*` invariants that
    `build_spec` produces** — directly mutating the spec dict leaves them stale and the mutation
    has no effect.
 2. Derived consistency such as `phys_vars` can be left to build_spec.
 3. Dialects are handled uniformly without mutation-specific grammar or verification semantics.
+
+### `domain` (#727): the rendered kernel path, not direct lowering
+
+Native `fslc mutate` accepts `domain` documents by rendering them through the same textual
+kernel path `fslc domain expand` uses (`fsl_tools::domain_kernel_source`, i.e.
+`fsl_core::domain_kernel_source`) and mutating the **re-parsed** kernel spec, rather than the
+`fsl-core::domain.rs` direct-lowering path `check`/`verify` use for domain. Direct lowering
+propagates a source span at only one site in its generated nodes, so a mutant span taken from
+that AST is effectively null — a `loc`-less witness degrades the mutation report from a review
+queue into an unusable list. Rendering to kernel text and re-parsing it as an ordinary spec gives
+every mutant a real span inside that text, which the output envelope also carries as
+`kernel_source` (the same field `domain expand`/`domain check` already emit) so a witness is
+resolvable from the envelope alone without re-deriving the rendering. The two lowering paths are
+kept in agreement by `fsl-core/tests/domain_render_agreement.rs`.
+
+Consequences that follow from mutating the rendered text rather than the domain source:
+
+- Witness `loc` and `target` values refer to the rendered kernel; `target` uses the generated
+  action names (e.g. `CapturePayment_SuccessSticky`) and does not map back to domain source lines.
+- Mutants inside actions that are dead in the verified baseline carry the existing "action dead at
+  baseline — survival expected" note (§3); for domain documents this note is a primary hollowness
+  signal — for example, a saga whose compensation actions are structurally unreachable reports
+  every compensation-targeting mutant surviving with this note, which is the intended negative
+  control, not a defect.
+- Absolute kill-rates are not comparable across dialects because domain lowering emits few
+  properties; read domain mutation evidence differentially against a base tree and through the
+  survivor/dead-note profile, not as a raw kill-rate threshold.
+- Unlowerable domain constructs (e.g. `on_stale` policies, top-level `await`, `value_object`
+  invariants — #710/#711/#712) are rejected by the shared lowering guard
+  (`validate_lowerable_constructs`, invoked inside `domain_kernel_source`) with a located
+  `kind:"semantics"` diagnostic before any mutant runs. In practice `mutate`'s own baseline gate
+  (§3) already rejects these first, since a domain document the guard would reject also fails
+  `run_verify`'s baseline check.
+- Aggregate invariants phrased over `can()` are expanded against the current guards at lowering
+  time; kernel-level mutants therefore never violate them, and their absence from the kill set
+  must not be read as hollowness. Their drift coverage is source-level: re-verification after a
+  guard edit re-expands `can()` and falsifies the invariant (measured in #771).
 
 ### Mutation operators (deterministic enumeration, no randomness)
 

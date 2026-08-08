@@ -10197,19 +10197,20 @@ fn run_mutate(
         Ok(model) => model,
         Err(error) => return mutate_error(spec_load_error_output(&error)),
     };
-    let source = match std::fs::read_to_string(path) {
+    let mut source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(error) => return mutate_error(error_output("io", &error.to_string())),
     };
     let trace_contract = match fsl_core::requirements_trace_contract(&source) {
         Ok(contract) => contract,
-        Err(error) => return mutate_error(semantic_error_output(&error.to_string())),
+        Err(error) => return mutate_error(core_error_output(&error)),
     };
     let document = match parse_surface_document(path) {
         Ok(document) => document,
         Err(error) => return mutate_error(semantic_error_output(&error)),
     };
     let action_labels = mutation_action_labels(&document);
+    let mut domain_kernel_source = None;
     let spec = match document {
         fsl_syntax::SurfaceDocument::Spec(spec) => spec,
         fsl_syntax::SurfaceDocument::Business(_)
@@ -10219,8 +10220,32 @@ fn run_mutate(
                 fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
             match fsl_core::parse_kernel_source(&source, &resolver) {
                 Ok(kernel) => kernel.into_syntax(),
-                Err(error) => return mutate_error(semantic_error_output(&error.to_string())),
+                Err(error) => return mutate_error(core_error_output(&error)),
             }
+        }
+        fsl_syntax::SurfaceDocument::Domain(domain) => {
+            // `fsl-core::domain.rs`'s direct lowering (the path `check`/`verify`
+            // use) has only one span-propagation site, so its generated nodes
+            // carry effectively null spans — unusable for mutation witnesses.
+            // Render through the same textual kernel path `domain expand` uses
+            // instead and re-parse that text, so mutant `loc` points at real
+            // `kernel_source` lines. The two lowering paths are kept in
+            // agreement by `fsl-core/tests/domain_render_agreement.rs`.
+            let rendered = match fsl_tools::domain_kernel_source(&domain) {
+                Ok(rendered) => rendered,
+                Err(error) => return mutate_error(core_error_output(&error)),
+            };
+            let Ok(fsl_syntax::SurfaceDocument::Spec(rendered_spec)) =
+                fsl_syntax::parse_surface_document(&rendered)
+            else {
+                return mutate_error(error_output(
+                    "internal",
+                    "rendered domain kernel source did not parse as a spec document",
+                ));
+            };
+            source.clone_from(&rendered);
+            domain_kernel_source = Some(rendered);
+            rendered_spec
         }
         _ => {
             return mutate_error(error_output(
@@ -10486,6 +10511,9 @@ fn run_mutate(
     output.insert("summary".to_owned(), mutation_summary(&public_mutants));
     output.insert("by_requirement".to_owned(), Value::Object(by_req));
     output.insert("notes".to_owned(), json!(notes));
+    if let Some(kernel_source) = domain_kernel_source {
+        output.insert("kernel_source".to_owned(), json!(kernel_source));
+    }
     (Value::Object(output), 0)
 }
 

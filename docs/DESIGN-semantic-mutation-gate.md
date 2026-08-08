@@ -19,7 +19,9 @@ The first pilot is P2 symbolic-witness/concrete-replay agreement. Mutation
 testing is a detector calibration method. It is not another observer, never
 promotes a public assurance class, and never changes a product process exit.
 Specification mutation through `fslc mutate` remains a separate user-facing
-domain.
+domain. (`fslc mutate`'s own `domain`-dialect acceptance normative text — issue
+#727 — lives in `docs/DESIGN-mutate.md` §2, not here, per that document's scope
+above.)
 
 ## Scope and anchors
 
