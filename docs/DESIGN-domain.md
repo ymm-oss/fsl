@@ -112,7 +112,7 @@ the responsibility of `fsl-core` and the public Kernel contract.
 
 ### Rejected constructs: parsed, never lowered, so rejected fail-closed
 
-Parsing a construct into the IR is not a promise that it means anything. Three
+Parsing a construct into the IR is not a promise that it means anything. Four
 constructs reached the parse IR, were type-checked there, and were then dropped
 by **both** lowering paths, so an author could write them and the executable
 model would not contain them — an accepted construct with hollow semantics,
@@ -145,8 +145,15 @@ text and keeping only the fail-closed guard:
   is not adopted as the contract: an author would believe every occurrence is
   checked while most are unconstrained. Value objects *without* invariants are
   unaffected and still lower as structs.
+- **effect `retry` `backoff`** (#723). This document (see "Effects" below)
+  pins only the `max_attempts` retry bound; no accepted decision assigns a
+  backoff strategy an execution meaning in the finite model, and neither
+  lowering path nor the frozen Python reference (`src/fslc/domain_parser.py`,
+  `src/fslc/domain_ir.py`) ever reads the parsed `backoff` value. `retry {
+  max_attempts N }` without a `backoff` clause is unaffected and still lowers
+  the existing `attempts < N` guard.
 
-Rejecting is deliberate rather than conservative: implementing any of the three
+Rejecting is deliberate rather than conservative: implementing any of the four
 would require inventing semantics inside a verifier, which is worse than
 refusing the construct. Each becomes implementable when an accepted amendment
 to this document settles the questions named above. Because the constructs never
@@ -202,7 +209,10 @@ inferred intent; the edition migrator consumes the edit contract described in
 
 An async `effect` declares the request event, completion events, correlation id,
 retry bound, timeout event, idempotency key, and optional reliable outbox/inbox
-boundary. The v0 implementation lowers the lifecycle to finite maps:
+boundary. `retry`'s `max_attempts` is the only lowered field; a `backoff`
+clause parses but has no execution meaning in the finite model and is
+rejected fail-closed (see "Rejected constructs" above, #723). The v0
+implementation lowers the lifecycle to finite maps:
 
 - `<effect>_status: Map<CorrelationId, EffectStatus>`
 - `<effect>_attempts: Map<CorrelationId, Attempt>`

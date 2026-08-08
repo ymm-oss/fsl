@@ -72,7 +72,6 @@ domain MinReplay {
     emits one_of [Delivered, DeliveryFailed]
     retry {
       max_attempts 2
-      backoff exponential
     }
     timeout after 5m emits DeliveryFailed
     compensation {

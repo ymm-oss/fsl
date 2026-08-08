@@ -93,7 +93,6 @@ domain OrderAsyncEffect {
     emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
     retry {
       max_attempts 3
-      backoff exponential
     }
     timeout after 10m emits PaymentCaptureTimedOut
     compensation {
