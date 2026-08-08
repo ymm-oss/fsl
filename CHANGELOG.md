@@ -5,6 +5,41 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed (#753): `git apply` silently skips every file in a patch, and exits zero, when the
+  fault-operator scratch checkout is not its own git repository root -- git resolves the
+  scratch to the enclosing repository, where everything under it lives beneath `rust/target/`
+  and is git-ignored (`Skipped patch '<path>'.`, exit 0). The scratch then compiled
+  **unfaulted**, every detector passed because there was nothing to detect, and the harness
+  recorded that as a detector gap. `sync_scratch` guarded this with `[ -e "$scratch/.git" ]`,
+  which tests the wrong property: an empty or partial `.git` from a restored CI cache
+  satisfies it and suppresses the repair, which is why the failure appeared only in CI and
+  varied run to run. The guard now requires `git rev-parse --show-toplevel` inside the scratch
+  to equal the scratch, and `git apply --verbose` turns a `Skipped patch` line into a nonzero
+  status.
+- Fixed (#753): the implementation fault-operator harness now **witnesses** that a fault
+  reached what it measured instead of inferring it. A `primary still passed under the
+  fault` verdict has two causes with different owners -- the detector does not cover the
+  seam (a real gap) or the detector never saw the fault (a harness defect) -- and
+  `tools/run-fault-operators.sh` previously reported the first whenever the second was
+  true, because it treated a zero-exit `git apply` plus a clean build as proof of arrival.
+  The symptom was the same operator returning different verdicts on different runs of one
+  revision, which made unrelated pull requests unmergeable through the `semantic mutation`
+  required context. Two fail-closed witnesses now run before any verdict: every file a
+  patch names must differ byte-for-byte from the pristine copy after the patch applies,
+  and, of the two artifacts a detector can execute -- the test harness binary, read back
+  from cargo's own `Executable <target> (<path>)` line, and the `fslc` executable a
+  detector may spawn via `env!("CARGO_BIN_EXE_fslc")` -- at least one must differ from the
+  digest recorded for it under the no-op control. Both are checked because an operator's
+  fault normally reaches exactly one: a patch under `rust/fslc/tests/**` changes the test
+  binary, a patch under `rust/fslc/src/**` changes `fslc`. A byte-identical pair cannot
+  arise from compilation nondeterminism, so the binary witness fires only on real artifact
+  reuse.
+  The source witness carries its own negative control,
+  `rust/fslc/tests/fault_operators/controls/identical-after-apply.patch`, a hunk that
+  applies cleanly while leaving the file unchanged and must be refused; the binary witness
+  is calibrated by live mutation and has no fixture, recorded as such in
+  `docs/DESIGN-conformance-harness.md`.
+
 - Decided (#737): the shared-edit merge-conflict spike closes as **GO for CHANGELOG
   fragments only (C1)** and **NO-GO for fragmenting the contract documents (C2)**, recorded
   in the new accepted `docs/DESIGN-changelog-fragments.md`. The load-bearing evidence is a

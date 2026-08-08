@@ -399,6 +399,92 @@ seam it targeted moved, and someone must confirm the fault is still possible
 there and re-target the patch. Silently skipping a stale operator is how a
 detector matrix rots into decoration.
 
+### The fault must be witnessed, not inferred (#753)
+
+**Root cause.** `git apply` silently skips every file in a patch, and exits zero, when
+the scratch checkout is not its own repository root. Git then resolves the scratch to the
+*enclosing* repository, where every path under it lives beneath `rust/target/` and is
+git-ignored:
+
+```
+$ git -C "$scratch" apply --verbose shared-observer-lineage.patch
+Skipped patch 'rust/fslc/tests/support/self_conformance_mapping.rs'.
+Skipped patch 'rust/fslc/tests/triangulated/p1_compound_outcome.rs'.
+$ echo $?
+0
+```
+
+`apply_operator_patch` saw success, the scratch compiled **unfaulted**, the detector
+passed because there was nothing to detect, and the harness recorded that as "the primary
+detector still passed under the fault" — a detector gap, when the fault had never been
+applied at all.
+
+`sync_scratch` had guarded this with `[ -e "$scratch/.git" ]`, which tests the wrong
+property: *something existing* at that path is not *git resolving the scratch as its own
+root*. An empty or partial `.git` left behind by a restored CI cache satisfies `-e` and
+suppresses the `git init` that would have repaired it. That is why the failure appeared
+only in CI, never locally — where the scratch's `.git` persists between runs — and why the
+same revision returned different verdicts on different runs, depending on what the cache
+happened to carry. The guard now requires `git rev-parse --show-toplevel`, run inside the
+scratch, to equal the scratch itself, and rebuilds `.git` when it does not. `apply_patch`
+additionally runs `git apply --verbose` and turns a `Skipped patch` line into a nonzero
+status, so the silent-skip path cannot return success again through some other route.
+
+Reproduced and calibrated locally by breaking the marker exactly as the cache did — an
+empty `$scratch/.git` directory — and running the same shard both ways: under the previous
+`[ -e ]` guard the run fails with the source witness naming
+`rust/fslc/tests/support/self_conformance_mapping.rs`; under the repaired guard all six
+operators calibrate and the run exits 0.
+
+
+A `primary still passed under the fault` verdict has two possible causes, and they
+belong to different owners: the detector genuinely does not cover the seam (a real,
+reportable gap), or the detector never saw the fault at all (a defect in this
+harness). Until #753 the harness could not tell them apart. It inferred that the
+fault had arrived from two weaker facts — `git apply` exited zero, and the scratch
+compiled — and reported the first cause whenever the second was true. The
+observable symptom was the same operator returning different verdicts on different
+runs of the same revision, which made an unrelated pull request unmergeable through
+the `semantic mutation` required context.
+
+Two fail-closed witnesses now stand between the patch and the verdict, both in
+`tools/run-fault-operators.sh`:
+
+- **Source.** After the patch applies, every file it names must differ,
+  byte-for-byte, from the pristine working-tree copy. `git apply` exiting zero says
+  the patch was *accepted*, not that the bytes the compiler will read changed.
+- **Binary.** Of the two artifacts a detector can execute — the test harness
+  binary, read back from cargo's own `Executable <target> (<path>)` line so it is
+  the binary that ran rather than an inference about it, and the `fslc` executable
+  a detector may spawn through `env!("CARGO_BIN_EXE_fslc")` — at least one must
+  differ from the digest recorded for it under the no-op control, the one point in
+  a run where the scratch is known to carry no fault. A byte-identical pair is
+  unambiguous: no compilation nondeterminism can make a genuinely faulted artifact
+  equal an unfaulted one, so this fires only on real artifact reuse, never on a
+  flaky digest.
+
+  **Both artifacts, not just the test binary.** An operator's fault normally
+  reaches exactly one of them: a patch under `rust/fslc/tests/**`
+  (`shared-observer-lineage`) changes the test harness binary and leaves `fslc`
+  untouched, while a patch under `rust/fslc/src/**` (`failure-verdict-exits-zero`,
+  whose detector spawns the CLI) changes `fslc` and leaves the test binary
+  untouched. The first version of this witness hashed only the test binary and so
+  called the second shape a harness defect on every shard. It passed locally
+  because local rebuilds happened to produce differing test binaries anyway — a
+  vacuous green — and CI caught it. Requiring *both* to be unchanged before firing
+  is what makes the witness sound in both directions.
+
+Both witnesses report through the harness's own failure path and name the cause, so
+a harness defect can no longer be recorded as a detector gap.
+
+The source witness has its own negative control,
+`controls/identical-after-apply.patch`, alongside the stale-seam and no-op controls:
+a hunk that removes a line and adds the identical line back applies cleanly and
+leaves the file unchanged, and the harness requires the witness to refuse it. The
+binary witness has no fixture of its own — a fault that reaches the source but not
+the linked binary cannot be constructed on demand — and is calibrated by live
+mutation instead. That asymmetry is recorded here rather than left implicit.
+
 Rebuild cost keeps this out of the ordinary Rust workspace lane, but M13 makes
 it part of the dedicated semantic-mutation lanes on every pull request and
 product-gate run — round-robin sharded three ways across the
