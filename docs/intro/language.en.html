@@ -326,23 +326,36 @@ unchanged. Opt-in Public Kernel v2 publishes the chain as a top-level provenance
 graph with portable source identities, exact byte/line coordinates,
 target bindings, source-node reverse lookup, and explicit assurance/completeness.</p>
 <p>When a domain aggregate state field omits its initializer, the current edition
-preserves the established Bool <code>false</code>, enum first-member, range lower-bound, or
-external-placeholder <code>0</code> choice and emits <code>implicit_initial_value</code>. The warning
-contains the selected value, reason, current/next severity, field span, and a
-machine-applicable explicit-initializer insertion. The next edition requires the
-initializer to be explicit. Container-typed fields also get an implicit
-default — <code>Option&lt;T&gt;</code> selects <code>none</code>, <code>Set&lt;T&gt;</code> selects <code>Set {}</code>, and a
-top-level <code>Map&lt;K, V&gt;</code> selects a dense per-key init
-(<code>forall k: K { field[k] = &lt;V's default&gt; }</code>), where <code>&lt;V's default&gt;</code> recurses
-through this same selection — but omitting one does <strong>not</strong> emit
-<code>implicit_initial_value</code>; that warning's coverage stops at the four scalar
-shapes above. <code>Map</code> fields carry two additional fail-closed rules: an explicit
-whole-<code>Map</code> default (<code>field: Map&lt;K, V&gt; = expr;</code>) is always rejected
-("whole-Map domain defaults are not supported") because the per-key form is the
-only supported <code>Map</code> default, and a <code>Map</code> nested as another <code>Map</code>'s value is
-rejected too ("Map state requires explicit initialization through supported
-semantics") because the per-key init has no default to select for a <code>Map</code>
-value type.</p>
+preserves the established Bool <code>false</code>, Int <code>0</code>, enum first-member (rendered
+bare, as domain source itself would accept — never <code>domain_kernel_source</code>'s
+kernel-scoped mangled identifier, no matter how deeply the enum is nested
+inside a <code>value_object</code> or a <code>Map</code>'s value), range lower-bound,
+external-placeholder <code>0</code>, <code>value_object</code> struct-literal, <code>Option&lt;T&gt;</code> <code>none</code>,
+<code>Set&lt;T&gt;</code> <code>Set {}</code>, or top-level <code>Map&lt;K, V&gt;</code> dense per-key
+(<code>forall k: K { field[k] = &lt;V's default&gt; }</code>, where <code>&lt;V's default&gt;</code> recurses
+through this same selection) choice, and emits <code>implicit_initial_value</code> for
+every one of these shapes (#731) — the warning's coverage matches the
+renderer's total dispatch (<code>fsl_core::domain_type_default</code>, the single owner
+both the warning and <code>domain_kernel_source</code> read the selected value, and how
+an enum member within it is spelled, from), not just a scalar subset. The
+warning contains the selected value, reason, current/next severity, field
+span, and — where a machine-applicable insertion exists — a
+<code>suggestion</code>/<code>canonical_replacement</code>. Two field shapes omit the insertion, and
+consequently keep <code>edition_severity.next</code> at <code>warning</code> rather than <code>error</code>
+(the next edition cannot yet demand an initializer it has no safe way to
+insert): a top-level <code>Map&lt;K, V&gt;</code> field has no whole-field default at all
+(<code>field: Map&lt;K, V&gt; = expr;</code> is always rejected, "whole-Map domain defaults are
+not supported", because the per-key form is the only supported <code>Map</code>
+default), and a <code>Set&lt;T&gt;</code> or <code>value_object</code>-typed field's brace-literal default
+(<code>Set { ... }</code>, <code>Name { ... }</code>) cannot currently be round-tripped by <code>fslc
+fmt</code>'s reformat-and-reparse pass (issue #770) even though <code>fslc check</code> accepts
+it when written explicitly; <code>migrate --write</code> is fail-closed and would not
+write a corrupted file, but offering the insertion would trip #770's reformat
+failure and fail migration for the whole file, dropping every other,
+otherwise-safe edit in it too. A <code>Map</code> nested as another <code>Map</code>'s value is
+separately rejected ("Map state requires explicit initialization through
+supported semantics") because the per-key init has no default to select for a
+<code>Map</code> value type.</p>
 <p>Use <code>fslc domain check</code> for stable fsl-domain findings and the nested kernel
 result (<code>verified_under_assumptions</code> on success), <code>fslc domain analyze</code> for the
 aggregate/effect summary, <code>fslc domain expand</code> to inspect a generated kernel FSL

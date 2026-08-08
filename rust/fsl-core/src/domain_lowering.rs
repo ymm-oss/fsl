@@ -101,7 +101,7 @@ fn span_at(loc: DomainLoc) -> Span {
 }
 
 /// Reject domain constructs that parse into a [`DomainSpec`] but have no
-/// executable lowering on either path (#710/#711/#712). Each of these
+/// executable lowering on either path (#710/#711/#712/#723). Each of these
 /// constructs is accepted by the grammar and, before this validation, was
 /// silently dropped by both `lower_domain` and `domain_kernel_source`: an
 /// author who wrote one believed it was checked when nothing consumed it.
@@ -128,6 +128,27 @@ pub(crate) fn validate_lowerable_constructs(domain: &DomainSpec) -> Result<(), C
                     stale.event
                 ),
                 span_at(stale.loc),
+            ));
+        }
+    }
+    for effect in &domain.effects {
+        if let Some(backoff) = &effect.retry.backoff {
+            return Err(error_at(
+                format!(
+                    "retry backoff '{backoff}' has no executable lowering; delete only the \
+                     `backoff` line, not the whole retry block -- `max_attempts` remains fully \
+                     lowered"
+                ),
+                // A `DomainRetry` only exists once the parser has read a `retry { ... }` block,
+                // and it always records that block's own loc at the same time (see
+                // `Parser::retry` in `rust/fsl-syntax/src/domain.rs`), so `backoff.is_some()`
+                // implies `loc.is_some()`.
+                span_at(
+                    effect
+                        .retry
+                        .loc
+                        .expect("a parsed retry block always records its own loc"),
+                ),
             ));
         }
     }

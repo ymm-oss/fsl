@@ -1937,34 +1937,43 @@ pub fn check_refinement(
 ///
 /// Returns [`RuntimeError`] if concrete evaluation or execution fails.
 pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> {
-    let initial = Monitor::new(model)?;
+    // The queue carries `State` only, not `Monitor` -- a full `Monitor`
+    // clone per explored state duplicates the whole `KernelModel` on every
+    // node (issue #730). `scratch` is re-pointed at each popped state
+    // instead; `BfsResult` never holds a trace, so there is no parent-link
+    // bookkeeping to do here (contrast `find_boundary_violation` and
+    // `first_self_violation`, which must reconstruct a trace on violation).
+    let mut scratch = Monitor::new(model)?;
+    let initial_state = scratch.state.clone();
     let mut result = BfsResult {
-        spec: initial.model.name.clone(),
+        spec: scratch.model.name.clone(),
         depth,
         states_explored: 0,
-        violation: initial.current_violation()?,
-        reachables: initial
+        violation: scratch.current_violation()?,
+        reachables: scratch
             .model
             .reachables
             .iter()
             .map(|property| (property.name.clone(), None))
             .collect(),
         deadlock_step: None,
-        action_coverage: initial
+        action_coverage: scratch
             .model
             .actions
             .iter()
             .map(|action| (action.name.clone(), false))
             .collect(),
     };
-    if let Some(violation) = record_reachables(&initial, 0, &mut result)? {
+    if let Some(violation) = record_reachables(&scratch, 0, &mut result)? {
         result.violation = Some(violation);
     }
-    let mut queue = VecDeque::from([(initial.clone(), 0_usize)]);
-    let mut visited = BTreeSet::from([initial.state.clone()]);
-    while let Some((monitor, step)) = queue.pop_front() {
+    let mut queue = VecDeque::from([(initial_state.clone(), 0_usize)]);
+    let mut visited = BTreeSet::from([initial_state]);
+    while let Some((state, step)) = queue.pop_front() {
         result.states_explored += 1;
-        let enabled = monitor.enabled()?;
+        scratch.state = state.clone();
+        scratch.step = step;
+        let enabled = scratch.enabled()?;
         if enabled.is_empty() {
             result.deadlock_step = Some(result.deadlock_step.map_or(step, |old| old.min(step)));
         }
@@ -1974,9 +1983,10 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
         if step >= depth {
             continue;
         }
-        for instance in enabled {
-            let mut child = monitor.clone();
-            let stepped = child.step(&instance)?;
+        for instance in &enabled {
+            scratch.state = state.clone();
+            scratch.step = step;
+            let stepped = scratch.step(instance)?;
             if let Some(violation) = stepped.violation {
                 if result
                     .violation
@@ -1987,7 +1997,7 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
                 }
                 continue;
             }
-            if let Some(violation) = record_reachables(&child, step + 1, &mut result)? {
+            if let Some(violation) = record_reachables(&scratch, step + 1, &mut result)? {
                 if result
                     .violation
                     .as_ref()
@@ -1997,8 +2007,9 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
                 }
                 continue;
             }
-            if visited.insert(child.state.clone()) {
-                queue.push_back((child, step + 1));
+            let child_state = scratch.state.clone();
+            if visited.insert(child_state.clone()) {
+                queue.push_back((child_state, step + 1));
             }
         }
     }
@@ -2099,8 +2110,7 @@ pub fn find_boundary_violation(
             let stepped = scratch.step(&instance)?;
             if let Some(violation) = stepped.violation.clone() {
                 if matches!(violation.kind.as_str(), "partial_op" | "type_bound") {
-                    let mut found_trace =
-                        trace::reconstruct_trace(&initial_state, &state, &parents);
+                    let mut found_trace = trace::reconstruct_trace(&state, &parents);
                     found_trace.push(trace_step_from_result(
                         step + 1,
                         &state,
@@ -2172,47 +2182,64 @@ fn first_self_violation(
     initial_states: &[State],
     depth: usize,
 ) -> Result<Option<(Violation, Vec<TraceStep>)>, RuntimeError> {
+    // Queue nodes carry `State` only; a scratch `Monitor` is re-pointed at
+    // each popped state instead of cloning the whole model per node, and the
+    // trace is reconstructed from parent links only when a violation is
+    // actually found instead of cloning the whole `Vec<TraceStep>` so far at
+    // every node (issue #730 -- worse than `find_boundary_violation` was
+    // before #697, since this cloned both the model *and* the trace).
+    //
+    // Multiple roots (issue #493: a nondeterministic init has more than one
+    // concrete initial state) are handled by leaving every root out of
+    // `parents` and letting `trace::reconstruct_trace` discover whichever
+    // root a given state actually descends from -- see its doc comment.
+    let mut scratch = Monitor::from_state(model.clone(), State::new());
     let mut queue = VecDeque::new();
     let mut visited = BTreeSet::new();
+    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
     for state in initial_states {
-        let initial = Monitor {
-            model: model.clone(),
-            state: state.clone(),
-            step: 0,
-        };
-        let initial_trace = vec![TraceStep {
-            step: 0,
-            state: initial.state.clone(),
-            action: None,
-            changes: BTreeMap::new(),
-        }];
-        if let Some(violation) = initial.current_violation()? {
-            return Ok(Some((violation, initial_trace)));
+        scratch.state = state.clone();
+        scratch.step = 0;
+        if let Some(violation) = scratch.current_violation()? {
+            return Ok(Some((violation, trace::reconstruct_trace(state, &parents))));
         }
-        if visited.insert(initial.state.clone()) {
-            queue.push_back((initial, initial_trace, 0_usize));
+        if visited.insert(state.clone()) {
+            queue.push_back((state.clone(), 0_usize));
         }
     }
-    while let Some((monitor, trace, step)) = queue.pop_front() {
+    while let Some((state, step)) = queue.pop_front() {
         if step >= depth {
             continue;
         }
-        for instance in monitor.enabled()? {
-            let mut child = monitor.clone();
-            let before = child.state.clone();
-            let stepped = child.step(&instance)?;
-            let mut child_trace = trace.clone();
-            child_trace.push(trace_step_from_result(
-                step + 1,
-                &before,
-                &instance,
-                &stepped,
-            ));
-            if let Some(violation) = stepped.violation {
-                return Ok(Some((violation, child_trace)));
+        scratch.state = state.clone();
+        scratch.step = step;
+        for instance in scratch.enabled()? {
+            scratch.state = state.clone();
+            scratch.step = step;
+            let stepped = scratch.step(&instance)?;
+            if let Some(violation) = stepped.violation.clone() {
+                let mut found_trace = trace::reconstruct_trace(&state, &parents);
+                found_trace.push(trace_step_from_result(
+                    step + 1,
+                    &state,
+                    &instance,
+                    &stepped,
+                ));
+                return Ok(Some((violation, found_trace)));
             }
-            if visited.insert(child.state.clone()) {
-                queue.push_back((child, child_trace, step + 1));
+            let child_state = scratch.state.clone();
+            if visited.insert(child_state.clone()) {
+                parents.insert(
+                    child_state.clone(),
+                    trace::ParentLink {
+                        parent: state.clone(),
+                        action: TraceAction {
+                            name: instance.action.clone(),
+                            params: instance.params.clone(),
+                        },
+                    },
+                );
+                queue.push_back((child_state, step + 1));
             }
         }
     }

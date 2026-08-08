@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use fsl_syntax::{DomainEffect, DomainSpec, SyntaxExpr};
+use fsl_syntax::{DomainEffect, DomainSaga, DomainSpec, SyntaxExpr};
 use serde_json::{Value, json};
 
 use crate::domain_naming::snake;
@@ -22,6 +22,42 @@ pub fn assumptions(domain: &DomainSpec) -> Vec<Value> {
     }
     values
 }
+/// The event that satisfies an effect's request, per `DESIGN-domain.md`'s
+/// `handles`-with-`request_event`-fallback contract.
+fn request_event(effect: &DomainEffect) -> Option<&str> {
+    effect
+        .handles
+        .as_deref()
+        .or(effect.request_event.as_deref())
+}
+
+/// Sagas that own `effect`: a step or a compensation `emits` the effect's
+/// request event (`docs/DESIGN-domain.md`'s canonical saga example emits a
+/// request event from a `compensation` block, e.g.
+/// `InventoryReleaseRequested`, so a compensation-only emitter must count as
+/// owning too). `DESIGN-effect.md` allows a `reliable` effect's outbox
+/// boundary to live on the effect *or its owning saga*; an unrelated saga's
+/// outbox must not silence the finding.
+fn owning_sagas<'a>(domain: &'a DomainSpec, effect: &DomainEffect) -> Vec<&'a DomainSaga> {
+    let Some(request_event) = request_event(effect) else {
+        return Vec::new();
+    };
+    let emits_request_event = |events: &[String]| events.iter().any(|event| event == request_event);
+    domain
+        .sagas
+        .iter()
+        .filter(|saga| {
+            saga.steps
+                .iter()
+                .any(|step| emits_request_event(&step.emits))
+                || saga
+                    .compensations
+                    .iter()
+                    .any(|compensation| emits_request_event(&compensation.emits))
+        })
+        .collect()
+}
+
 fn effect_findings(
     domain: &DomainSpec,
     effect: &DomainEffect,
@@ -57,12 +93,26 @@ fn effect_findings(
         );
     }
     if effect.reliable && effect.outbox.is_none() {
-        add(
-            "reliable_effect_without_outbox_boundary",
-            "warning",
-            "reliable_effect_has_outbox",
-            json!({"effect":effect.name}),
-        );
+        let owning = owning_sagas(domain, effect);
+        let covered = !owning.is_empty() && owning.iter().all(|saga| !saga.outboxes.is_empty());
+        if !covered {
+            let mut witness = json!({"effect":effect.name});
+            if !owning.is_empty() {
+                let mut uncovered_sagas = owning
+                    .iter()
+                    .filter(|saga| saga.outboxes.is_empty())
+                    .map(|saga| saga.name.clone())
+                    .collect::<Vec<_>>();
+                uncovered_sagas.sort_unstable();
+                witness["uncovered_sagas"] = json!(uncovered_sagas);
+            }
+            add(
+                "reliable_effect_without_outbox_boundary",
+                "warning",
+                "reliable_effect_has_outbox",
+                witness,
+            );
+        }
     }
     out
 }
@@ -171,15 +221,29 @@ pub fn check_domain(domain: &DomainSpec, kernel: &Value) -> Result<Value, fsl_co
 }
 
 /// Emit the stable structural domain analysis projection.
-#[must_use]
-pub fn analyze_domain(domain: &DomainSpec) -> Value {
+///
+/// # Errors
+///
+/// Returns an error when the domain document contains a construct that
+/// parses but has no executable lowering on either consumer path
+/// (#710/#711/#712): this walks the same guard `check_domain` reaches
+/// through `domain_kernel_source`, so every consumer of this raw-`DomainSpec`
+/// projection -- present or future -- rejects the same specs `check` does,
+/// instead of the guard living only in one caller's call site (#726).
+pub fn analyze_domain(domain: &DomainSpec) -> Result<Value, fsl_core::CoreError> {
+    // The rendered kernel source itself is not part of this projection's
+    // output (issue #723 owns giving these constructs represented
+    // semantics); this call exists solely for its fail-closed guard.
+    domain_kernel_source(domain)?;
     let assumptions = assumptions(domain);
     let findings = domain
         .effects
         .iter()
         .flat_map(|effect| effect_findings(domain, effect, &assumptions))
         .collect::<Vec<_>>();
-    json!({"result":"analyzed","dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"profile":domain.implementation_profile,"aggregates":domain.aggregates.iter().map(|a|json!({"name":a.name,"id_type":a.id_type,"state":a.state.iter().map(|f|json!({"name":f.name.text,"type":f.type_name.render_source()})).collect::<Vec<_>>(),"commands":a.commands.iter().map(|x|&x.name).collect::<Vec<_>>(),"events":a.events.iter().map(|x|&x.name).collect::<Vec<_>>(),"errors":a.errors.iter().map(|x|&x.name).collect::<Vec<_>>(),"invariants":a.invariants.iter().map(|x|&x.name.text).collect::<Vec<_>>() })).collect::<Vec<_>>(),"effects":domain.effects.iter().map(|e|json!({"name":e.name,"async":e.async_effect,"reliable":e.reliable,"irreversible":e.irreversible,"handles":e.handles.as_ref().or(e.request_event.as_ref()),"outcomes":e.outcome_events(),"correlation_id":e.correlation_id.as_ref().map(SyntaxExpr::render_source),"idempotency_key":e.idempotency_key.as_ref().map(SyntaxExpr::render_source),"retry_max_attempts":e.retry.max_attempts,"timeout_event":e.timeout_event,"outbox":e.outbox,"inbox":e.inbox})).collect::<Vec<_>>(),"sagas":domain.sagas.iter().map(|s|json!({"name":s.name,"starts_on":s.starts_on,"steps":s.steps.iter().map(|x|json!({"name":x.name,"async":x.async_step,"requires":x.requires.iter().map(SyntaxExpr::render_source).collect::<Vec<_>>(),"emits":x.emits,"awaits_mode":x.awaits_mode,"awaits":x.awaits,"timeout_event":x.timeout_event})).collect::<Vec<_>>(),"compensations":s.compensations.iter().map(|x|json!({"trigger_event":x.trigger_event,"after_event":x.after_event,"emits":x.emits})).collect::<Vec<_>>(),"outboxes":s.outboxes,"inboxes":s.inboxes,"invariants":s.invariants.iter().map(|x|&x.name.text).collect::<Vec<_>>() })).collect::<Vec<_>>(),"findings":findings,"assumptions":assumptions})
+    Ok(
+        json!({"result":"analyzed","dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"profile":domain.implementation_profile,"aggregates":domain.aggregates.iter().map(|a|json!({"name":a.name,"id_type":a.id_type,"state":a.state.iter().map(|f|json!({"name":f.name.text,"type":f.type_name.render_source()})).collect::<Vec<_>>(),"commands":a.commands.iter().map(|x|&x.name).collect::<Vec<_>>(),"events":a.events.iter().map(|x|&x.name).collect::<Vec<_>>(),"errors":a.errors.iter().map(|x|&x.name).collect::<Vec<_>>(),"invariants":a.invariants.iter().map(|x|&x.name.text).collect::<Vec<_>>() })).collect::<Vec<_>>(),"effects":domain.effects.iter().map(|e|json!({"name":e.name,"async":e.async_effect,"reliable":e.reliable,"irreversible":e.irreversible,"handles":e.handles.as_ref().or(e.request_event.as_ref()),"outcomes":e.outcome_events(),"correlation_id":e.correlation_id.as_ref().map(SyntaxExpr::render_source),"idempotency_key":e.idempotency_key.as_ref().map(SyntaxExpr::render_source),"retry_max_attempts":e.retry.max_attempts,"timeout_event":e.timeout_event,"outbox":e.outbox,"inbox":e.inbox})).collect::<Vec<_>>(),"sagas":domain.sagas.iter().map(|s|json!({"name":s.name,"starts_on":s.starts_on,"steps":s.steps.iter().map(|x|json!({"name":x.name,"async":x.async_step,"requires":x.requires.iter().map(SyntaxExpr::render_source).collect::<Vec<_>>(),"emits":x.emits,"awaits_mode":x.awaits_mode,"awaits":x.awaits,"timeout_event":x.timeout_event})).collect::<Vec<_>>(),"compensations":s.compensations.iter().map(|x|json!({"trigger_event":x.trigger_event,"after_event":x.after_event,"emits":x.emits})).collect::<Vec<_>>(),"outboxes":s.outboxes,"inboxes":s.inboxes,"invariants":s.invariants.iter().map(|x|&x.name.text).collect::<Vec<_>>() })).collect::<Vec<_>>(),"findings":findings,"assumptions":assumptions}),
+    )
 }
 
 /// Render a compact executable kernel catalog used by expand and review tools.

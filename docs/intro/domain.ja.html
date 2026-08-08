@@ -146,7 +146,6 @@
     emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
     retry {
       max_attempts 3
-      backoff exponential
     }
     timeout after 10m emits PaymentCaptureTimedOut
     compensation {
@@ -164,7 +163,7 @@
       <tr><td><code>handles</code> / <code>emits one_of [...]</code></td><td>受けるリクエスト event と、返しうる完了 event の集合。</td></tr>
       <tr><td><code>retry { max_attempts 3 }</code></td><td>失敗・タイムアウト後の再試行上限。kernel では <code>attempts &lt; 3</code> guard になります。</td></tr>
       <tr><td><code>timeout after 10m emits ...</code></td><td>pending からの離脱。<code>10m</code> は wall-clock ではなくモデル上の event です。</td></tr>
-      <tr><td><code>reliable</code> + <code>outbox</code></td><td>配送保証を主張する effect は outbox 境界とペアで書きます。なければ <code>reliable_effect_without_outbox_boundary</code> warning です。</td></tr>
+      <tr><td><code>reliable</code> + <code>outbox</code></td><td>配送保証を主張する effect は outbox 境界とペアで書きます — effect 自身か、その request event を step/compensation で emits する saga すべてに outbox が必要です。なければ <code>reliable_effect_without_outbox_boundary</code> warning です。</td></tr>
     </table>
   </div>
 </section>
