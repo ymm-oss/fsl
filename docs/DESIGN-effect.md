@@ -45,6 +45,9 @@ evidence the same way a bare `effect.outbox` omission does. An aggregate
 `decide` that emits the request event (the ordinary shape, e.g.
 `examples/domain/order_async_effect.fsl`) does not make any saga an owner;
 aggregates have no `outbox` construct, so only `effect.outbox` applies there.
+This is a surface-level design-review predicate; native lowering starts an
+effect's lifecycle only from an aggregate `decide`'s emits, not from a saga
+step or compensation emits (tracked: #784).
 
 Runtime evidence is handled by `fslc domain replay --logs <events.jsonl>`.
 Replay checks command acceptance, effect request/completion correlation,
