@@ -259,11 +259,35 @@ apply_operator_patch() {
   fi
 }
 
+hash_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
+# The path cargo linked for the target just built, read back from cargo's own
+# `--no-run` output rather than reconstructed from the target name: `cargo test
+# --no-run` prints one `Executable <target> (<path>)` line per selected target,
+# whether or not it relinked, so this is the binary the detector is about to
+# execute -- not an inference about it. CI colourizes cargo's output, so the
+# escapes come off first.
+executable_from_build_log() {
+  sed -e 's/'$'\x1b''\[[0-9;]*m//g' "$1" \
+    | sed -n 's/^ *Executable .*(\(.*\))$/\1/p' \
+    | tail -n 1
+}
+
 # Runs one named detector in the scratch checkout and reports "ok" or "failed"
 # in $detector_result. A detector that does not run at all is a loud failure,
 # never a pass: a renamed or deleted test must not read as green, and a
 # compile error must not be mistaken for the operator taking effect.
+# $detector_binary_hash carries the executed binary's digest back to the
+# caller, which is what lets run_operator prove the fault reached the thing it
+# measured instead of assuming it did (#753).
 detector_result=""
+detector_binary_hash=""
 run_detector() {
   local target="$1" name="$2" log="$3" status=0
   # `$target` is a cargo test-target selector ("--lib", "--test <name>") and
@@ -273,6 +297,12 @@ run_detector() {
     tail -40 "$log.build" >&2
     fail "the patched checkout does not compile (target: $target). Full log: $log.build"
   fi
+  local binary
+  binary="$(executable_from_build_log "$log.build")"
+  [ -n "$binary" ] && [ -f "$binary" ] || fail "cargo reported no executable for
+  target '$target', so nothing here can prove which binary the detector ran.
+  Full log: $log.build"
+  detector_binary_hash="$(hash_file "$binary")"
   # shellcheck disable=SC2086
   (cd "$scratch" && cargo test --manifest-path rust/Cargo.toml -p fslc-rust $target --locked -- --exact "$name") >"$log" 2>&1 || status=$?
   if ! grep -q -- "^test ${name} \.\.\. " "$log"; then
@@ -301,6 +331,26 @@ check_stale_seam_control() {
   echo "control stale-seam: refused, as required ($((SECONDS - started))s)"
 }
 
+# The source witness's own negative control (#753): a patch that applies
+# cleanly and changes nothing must be refused by assert_fault_reached_source.
+# Needs no build either, so it also runs before the expensive controls. The
+# subshell is load-bearing -- assert_fault_reached_source reports through
+# `fail`, which exits, and this control needs to observe that exit rather than
+# inherit it.
+check_source_witness_control() {
+  local started=$SECONDS control="$operators_dir/controls/identical-after-apply.patch"
+  sync_scratch
+  apply_operator_patch "$control" "$logs/identical-after-apply.apply.log"
+  if (assert_fault_reached_source "$control" "identical-after-apply") >/dev/null 2>&1; then
+    fail "the identical-after-apply control satisfied the source witness. A
+  patch that applies cleanly while leaving the bytes unchanged is now
+  indistinguishable from a real fault, so every 'primary still passed' verdict
+  below is ambiguous again between a detector gap and a fault that never
+  arrived."
+  fi
+  echo "control identical-after-apply: source witness refused it, as required ($((SECONDS - started))s)"
+}
+
 # Every named detector must be green under a patch that changes no behavior.
 check_no_op_control() {
   local started=$SECONDS index
@@ -309,6 +359,10 @@ check_no_op_control() {
   for index in "${assigned_indices[@]}"; do
     run_detector "${primary_targets[$index]}" "${primary_tests[$index]}" \
       "$logs/no-op.${names[$index]}.primary.log"
+    # The unfaulted digest of the exact binary this operator's primary detector
+    # will be measured on. Recorded here, under the no-op control, because that
+    # is the one point in the run where the scratch is known to carry no fault.
+    no_op_primary_hashes[index]="$detector_binary_hash"
     [ "$detector_result" = "ok" ] || fail "no-op control: primary detector
   '${primary_tests[$index]}' (operator ${names[$index]}) failed without any
   fault applied. Every cell in this matrix is meaningless until it passes.
@@ -323,14 +377,61 @@ check_no_op_control() {
 }
 
 failures=()
+no_op_primary_hashes=()
+
+# Two fail-closed witnesses that the fault this run reports on actually reached
+# the thing it measured (#753). Without them the harness infers that from a
+# clean `git apply` and a clean build, and a `primary=ok` verdict is then
+# ambiguous between the two things it must never conflate: a detector that
+# genuinely does not cover the seam (a real, reportable defect) and a detector
+# that never saw the fault at all (a harness defect reported as the former).
+# That ambiguity is exactly what made the same operator return different
+# verdicts on different runs of the same revision.
+#
+# Witness 1, source: every file the patch names must differ from the pristine
+# working-tree copy once the patch is applied. `git apply` exiting zero is not
+# that evidence -- it says the patch was accepted, not that the bytes under
+# the compiler changed.
+#
+# Witness 2, binary: the primary detector's executable must differ from the
+# digest recorded for the same target under the no-op control. A fault that
+# reaches the source but not the linked binary produces a byte-identical
+# executable, which is unambiguous: no compilation nondeterminism can make a
+# genuinely faulted binary equal the unfaulted one, so this only ever fires on
+# a real reuse, never on a flaky digest.
+assert_fault_reached_source() {
+  local file="$1" name="$2" patched seen=0
+  while IFS= read -r patched; do
+    [ -n "$patched" ] || continue
+    seen=$((seen + 1))
+    [ -f "$scratch/$patched" ] || fail "operator '$name': $patched is missing
+  from the scratch after its patch applied."
+    if cmp -s "$root/$patched" "$scratch/$patched"; then
+      fail "operator '$name': $patched in the scratch is byte-identical to the
+  working tree after \`git apply\` reported success, so the fault never reached
+  the source the detector is about to be built from. Any verdict below would be
+  a property of the harness, not of the fault."
+    fi
+  done < <(sed -n 's/^+++ b\///p' "$file" | sort -u)
+  [ "$seen" -gt 0 ] || fail "operator '$name': its patch names no files, so
+  there is nothing to verify reached the scratch."
+}
 
 run_operator() {
   local index="$1" name="${names[$1]}" started=$SECONDS
   sync_scratch
   apply_operator_patch "${patch_files[$index]}" "$logs/$name.apply.log"
+  assert_fault_reached_source "${patch_files[$index]}" "$name"
 
   run_detector "${primary_targets[$index]}" "${primary_tests[$index]}" \
     "$logs/$name.primary.log"
+  if [ "$detector_binary_hash" = "${no_op_primary_hashes[$index]}" ]; then
+    fail "operator '$name': the primary detector's binary is byte-identical to
+  the one built under the no-op control ($detector_binary_hash), so the fault
+  never reached the binary the verdict came from. This is a harness defect, not
+  a detector gap: do not record '$name' as uncalibrated on this evidence.
+  Full log: $logs/$name.primary.log.build"
+  fi
   local primary="$detector_result"
   run_detector "${blind_targets[$index]}" "${blind_tests[$index]}" \
     "$logs/$name.blind.log"
@@ -354,6 +455,7 @@ run_operator() {
 read_table
 assign_shard
 check_stale_seam_control
+check_source_witness_control
 check_no_op_control
 
 for index in "${assigned_indices[@]}"; do

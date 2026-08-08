@@ -399,6 +399,43 @@ seam it targeted moved, and someone must confirm the fault is still possible
 there and re-target the patch. Silently skipping a stale operator is how a
 detector matrix rots into decoration.
 
+### The fault must be witnessed, not inferred (#753)
+
+A `primary still passed under the fault` verdict has two possible causes, and they
+belong to different owners: the detector genuinely does not cover the seam (a real,
+reportable gap), or the detector never saw the fault at all (a defect in this
+harness). Until #753 the harness could not tell them apart. It inferred that the
+fault had arrived from two weaker facts — `git apply` exited zero, and the scratch
+compiled — and reported the first cause whenever the second was true. The
+observable symptom was the same operator returning different verdicts on different
+runs of the same revision, which made an unrelated pull request unmergeable through
+the `semantic mutation` required context.
+
+Two fail-closed witnesses now stand between the patch and the verdict, both in
+`tools/run-fault-operators.sh`:
+
+- **Source.** After the patch applies, every file it names must differ,
+  byte-for-byte, from the pristine working-tree copy. `git apply` exiting zero says
+  the patch was *accepted*, not that the bytes the compiler will read changed.
+- **Binary.** The primary detector's executable — read back from cargo's own
+  `Executable <target> (<path>)` line, so it is the binary that ran rather than an
+  inference about it — must differ from the digest recorded for the same target
+  under the no-op control, which is the one point in a run where the scratch is
+  known to carry no fault. A byte-identical executable is unambiguous: no
+  compilation nondeterminism can make a genuinely faulted binary equal an unfaulted
+  one, so this fires only on real artifact reuse, never on a flaky digest.
+
+Both witnesses report through the harness's own failure path and name the cause, so
+a harness defect can no longer be recorded as a detector gap.
+
+The source witness has its own negative control,
+`controls/identical-after-apply.patch`, alongside the stale-seam and no-op controls:
+a hunk that removes a line and adds the identical line back applies cleanly and
+leaves the file unchanged, and the harness requires the witness to refuse it. The
+binary witness has no fixture of its own — a fault that reaches the source but not
+the linked binary cannot be constructed on demand — and is calibrated by live
+mutation instead. That asymmetry is recorded here rather than left implicit.
+
 Rebuild cost keeps this out of the ordinary Rust workspace lane, but M13 makes
 it part of the dedicated semantic-mutation lanes on every pull request and
 product-gate run — round-robin sharded three ways across the
