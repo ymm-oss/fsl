@@ -283,11 +283,20 @@ executable_from_build_log() {
 # in $detector_result. A detector that does not run at all is a loud failure,
 # never a pass: a renamed or deleted test must not read as green, and a
 # compile error must not be mistaken for the operator taking effect.
-# $detector_binary_hash carries the executed binary's digest back to the
-# caller, which is what lets run_operator prove the fault reached the thing it
-# measured instead of assuming it did (#753).
+# $detector_binary_hash and $detector_cli_hash carry the digests of the two
+# artifacts a detector can execute back to the caller, which is what lets
+# run_operator prove the fault reached the thing it measured instead of
+# assuming it did (#753). Both are needed because an operator's fault reaches
+# exactly one of them in the common case: a patch to `rust/fslc/tests/**`
+# (shared-observer-lineage) changes the test harness binary and leaves `fslc`
+# untouched, while a patch to `rust/fslc/src/**` (failure-verdict-exits-zero,
+# whose detector spawns `env!("CARGO_BIN_EXE_fslc")`) changes `fslc` and leaves
+# the test binary untouched. Hashing only the test binary called the second
+# shape a harness defect on every shard -- the first version of this witness
+# did exactly that, and CI caught it.
 detector_result=""
 detector_binary_hash=""
+detector_cli_hash=""
 run_detector() {
   local target="$1" name="$2" log="$3" status=0
   # `$target` is a cargo test-target selector ("--lib", "--test <name>") and
@@ -303,6 +312,12 @@ run_detector() {
   target '$target', so nothing here can prove which binary the detector ran.
   Full log: $log.build"
   detector_binary_hash="$(hash_file "$binary")"
+  # The `fslc` executable the detector may spawn instead of, or in addition to,
+  # exercising the library in-process. `cargo test` builds the package's bins so
+  # `CARGO_BIN_EXE_fslc` resolves, but prints no `Executable` line for them, so
+  # this one is named directly rather than read back.
+  detector_cli_hash=""
+  [ -f "$CARGO_TARGET_DIR/debug/fslc" ] && detector_cli_hash="$(hash_file "$CARGO_TARGET_DIR/debug/fslc")"
   # shellcheck disable=SC2086
   (cd "$scratch" && cargo test --manifest-path rust/Cargo.toml -p fslc-rust $target --locked -- --exact "$name") >"$log" 2>&1 || status=$?
   if ! grep -q -- "^test ${name} \.\.\. " "$log"; then
@@ -363,6 +378,7 @@ check_no_op_control() {
     # will be measured on. Recorded here, under the no-op control, because that
     # is the one point in the run where the scratch is known to carry no fault.
     no_op_primary_hashes[index]="$detector_binary_hash"
+    no_op_cli_hashes[index]="$detector_cli_hash"
     [ "$detector_result" = "ok" ] || fail "no-op control: primary detector
   '${primary_tests[$index]}' (operator ${names[$index]}) failed without any
   fault applied. Every cell in this matrix is meaningless until it passes.
@@ -378,6 +394,7 @@ check_no_op_control() {
 
 failures=()
 no_op_primary_hashes=()
+no_op_cli_hashes=()
 
 # Two fail-closed witnesses that the fault this run reports on actually reached
 # the thing it measured (#753). Without them the harness infers that from a
@@ -425,11 +442,13 @@ run_operator() {
 
   run_detector "${primary_targets[$index]}" "${primary_tests[$index]}" \
     "$logs/$name.primary.log"
-  if [ "$detector_binary_hash" = "${no_op_primary_hashes[$index]}" ]; then
-    fail "operator '$name': the primary detector's binary is byte-identical to
-  the one built under the no-op control ($detector_binary_hash), so the fault
-  never reached the binary the verdict came from. This is a harness defect, not
-  a detector gap: do not record '$name' as uncalibrated on this evidence.
+  if [ "$detector_binary_hash" = "${no_op_primary_hashes[$index]}" ] \
+    && [ "$detector_cli_hash" = "${no_op_cli_hashes[$index]}" ]; then
+    fail "operator '$name': both artifacts its primary detector can execute are
+  byte-identical to the ones built under the no-op control (test binary
+  $detector_binary_hash, fslc ${detector_cli_hash:-absent}), so the fault
+  reached neither. This is a harness defect, not a detector gap: do not record
+  '$name' as uncalibrated on this evidence.
   Full log: $logs/$name.primary.log.build"
   fi
   local primary="$detector_result"

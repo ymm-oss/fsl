@@ -15,10 +15,14 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   revision, which made unrelated pull requests unmergeable through the `semantic mutation`
   required context. Two fail-closed witnesses now run before any verdict: every file a
   patch names must differ byte-for-byte from the pristine copy after the patch applies,
-  and the primary detector's executable -- read back from cargo's own
-  `Executable <target> (<path>)` line -- must differ from the digest recorded for that
-  target under the no-op control. A byte-identical executable cannot arise from
-  compilation nondeterminism, so the binary witness fires only on real artifact reuse.
+  and, of the two artifacts a detector can execute -- the test harness binary, read back
+  from cargo's own `Executable <target> (<path>)` line, and the `fslc` executable a
+  detector may spawn via `env!("CARGO_BIN_EXE_fslc")` -- at least one must differ from the
+  digest recorded for it under the no-op control. Both are checked because an operator's
+  fault normally reaches exactly one: a patch under `rust/fslc/tests/**` changes the test
+  binary, a patch under `rust/fslc/src/**` changes `fslc`. A byte-identical pair cannot
+  arise from compilation nondeterminism, so the binary witness fires only on real artifact
+  reuse.
   The source witness carries its own negative control,
   `rust/fslc/tests/fault_operators/controls/identical-after-apply.patch`, a hunk that
   applies cleanly while leaving the file unchanged and must be refused; the binary witness

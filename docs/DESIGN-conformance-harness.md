@@ -417,13 +417,26 @@ Two fail-closed witnesses now stand between the patch and the verdict, both in
 - **Source.** After the patch applies, every file it names must differ,
   byte-for-byte, from the pristine working-tree copy. `git apply` exiting zero says
   the patch was *accepted*, not that the bytes the compiler will read changed.
-- **Binary.** The primary detector's executable — read back from cargo's own
-  `Executable <target> (<path>)` line, so it is the binary that ran rather than an
-  inference about it — must differ from the digest recorded for the same target
-  under the no-op control, which is the one point in a run where the scratch is
-  known to carry no fault. A byte-identical executable is unambiguous: no
-  compilation nondeterminism can make a genuinely faulted binary equal an unfaulted
-  one, so this fires only on real artifact reuse, never on a flaky digest.
+- **Binary.** Of the two artifacts a detector can execute — the test harness
+  binary, read back from cargo's own `Executable <target> (<path>)` line so it is
+  the binary that ran rather than an inference about it, and the `fslc` executable
+  a detector may spawn through `env!("CARGO_BIN_EXE_fslc")` — at least one must
+  differ from the digest recorded for it under the no-op control, the one point in
+  a run where the scratch is known to carry no fault. A byte-identical pair is
+  unambiguous: no compilation nondeterminism can make a genuinely faulted artifact
+  equal an unfaulted one, so this fires only on real artifact reuse, never on a
+  flaky digest.
+
+  **Both artifacts, not just the test binary.** An operator's fault normally
+  reaches exactly one of them: a patch under `rust/fslc/tests/**`
+  (`shared-observer-lineage`) changes the test harness binary and leaves `fslc`
+  untouched, while a patch under `rust/fslc/src/**` (`failure-verdict-exits-zero`,
+  whose detector spawns the CLI) changes `fslc` and leaves the test binary
+  untouched. The first version of this witness hashed only the test binary and so
+  called the second shape a harness defect on every shard. It passed locally
+  because local rebuilds happened to produce differing test binaries anyway — a
+  vacuous green — and CI caught it. Requiring *both* to be unchanged before firing
+  is what makes the witness sound in both directions.
 
 Both witnesses report through the harness's own failure path and name the cause, so
 a harness defect can no longer be recorded as a detector gap.
