@@ -401,6 +401,42 @@ detector matrix rots into decoration.
 
 ### The fault must be witnessed, not inferred (#753)
 
+**Root cause.** `git apply` silently skips every file in a patch, and exits zero, when
+the scratch checkout is not its own repository root. Git then resolves the scratch to the
+*enclosing* repository, where every path under it lives beneath `rust/target/` and is
+git-ignored:
+
+```
+$ git -C "$scratch" apply --verbose shared-observer-lineage.patch
+Skipped patch 'rust/fslc/tests/support/self_conformance_mapping.rs'.
+Skipped patch 'rust/fslc/tests/triangulated/p1_compound_outcome.rs'.
+$ echo $?
+0
+```
+
+`apply_operator_patch` saw success, the scratch compiled **unfaulted**, the detector
+passed because there was nothing to detect, and the harness recorded that as "the primary
+detector still passed under the fault" — a detector gap, when the fault had never been
+applied at all.
+
+`sync_scratch` had guarded this with `[ -e "$scratch/.git" ]`, which tests the wrong
+property: *something existing* at that path is not *git resolving the scratch as its own
+root*. An empty or partial `.git` left behind by a restored CI cache satisfies `-e` and
+suppresses the `git init` that would have repaired it. That is why the failure appeared
+only in CI, never locally — where the scratch's `.git` persists between runs — and why the
+same revision returned different verdicts on different runs, depending on what the cache
+happened to carry. The guard now requires `git rev-parse --show-toplevel`, run inside the
+scratch, to equal the scratch itself, and rebuilds `.git` when it does not. `apply_patch`
+additionally runs `git apply --verbose` and turns a `Skipped patch` line into a nonzero
+status, so the silent-skip path cannot return success again through some other route.
+
+Reproduced and calibrated locally by breaking the marker exactly as the cache did — an
+empty `$scratch/.git` directory — and running the same shard both ways: under the previous
+`[ -e ]` guard the run fails with the source witness naming
+`rust/fslc/tests/support/self_conformance_mapping.rs`; under the repaired guard all six
+operators calibrate and the run exits 0.
+
+
 A `primary still passed under the fault` verdict has two possible causes, and they
 belong to different owners: the detector genuinely does not cover the seam (a real,
 reportable gap), or the detector never saw the fault at all (a defect in this

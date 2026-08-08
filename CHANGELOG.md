@@ -5,6 +5,17 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+- Fixed (#753): `git apply` silently skips every file in a patch, and exits zero, when the
+  fault-operator scratch checkout is not its own git repository root -- git resolves the
+  scratch to the enclosing repository, where everything under it lives beneath `rust/target/`
+  and is git-ignored (`Skipped patch '<path>'.`, exit 0). The scratch then compiled
+  **unfaulted**, every detector passed because there was nothing to detect, and the harness
+  recorded that as a detector gap. `sync_scratch` guarded this with `[ -e "$scratch/.git" ]`,
+  which tests the wrong property: an empty or partial `.git` from a restored CI cache
+  satisfies it and suppresses the repair, which is why the failure appeared only in CI and
+  varied run to run. The guard now requires `git rev-parse --show-toplevel` inside the scratch
+  to equal the scratch, and `git apply --verbose` turns a `Skipped patch` line into a nonzero
+  status.
 - Fixed (#753): the implementation fault-operator harness now **witnesses** that a fault
   reached what it measured instead of inferring it. A `primary still passed under the
   fault` verdict has two causes with different owners -- the detector does not cover the

@@ -199,7 +199,32 @@ sync_scratch() {
   # An infidelity like that makes a detector's verdict a property of the harness
   # rather than of the fault. `rsync --delete` leaves excluded paths alone, so
   # this survives the next sync.
-  [ -e "$scratch/.git" ] || git -C "$scratch" init --quiet
+  #
+  # Root cause of #753, and the reason this tests `rev-parse --show-toplevel`
+  # rather than `[ -e "$scratch/.git" ]` as it used to: *something existing* at
+  # that path is not the property this needs. When git resolves the scratch to
+  # the **enclosing** repository instead -- an empty or partial `.git` left by a
+  # restored CI cache satisfies `-e` and suppresses the `init` -- then every path
+  # in the scratch is under `rust/target/`, which the enclosing repository
+  # git-ignores, and `git apply` responds by *silently skipping every file and
+  # exiting zero*:
+  #
+  #     $ git -C "$scratch" apply --verbose shared-observer-lineage.patch
+  #     Skipped patch 'rust/fslc/tests/support/self_conformance_mapping.rs'.
+  #     Skipped patch 'rust/fslc/tests/triangulated/p1_compound_outcome.rs'.
+  #     $ echo $?
+  #     0
+  #
+  # `apply_operator_patch` sees success, the scratch compiles *unfaulted*, and
+  # every operator in the shard reports `primary=ok` -- read, correctly by the
+  # harness's own rules but wrongly in fact, as "the detector does not cover the
+  # seam". It reproduced only where the scratch's own `.git` was absent or
+  # unusable, which is why it appeared in CI and never locally, and why the same
+  # revision returned different verdicts on different runs.
+  if [ "$(cd "$scratch" && git rev-parse --show-toplevel 2>/dev/null || true)" != "$(cd "$scratch" && pwd -P)" ]; then
+    rm -rf "$scratch/.git"
+    git -C "$scratch" init --quiet
+  fi
   # Second scratch-fidelity defect this harness has had to close (the .git
   # marker above was the first): a *faulted* build can outlive the fault.
   # `rsync -a` preserves the worktree's mtimes, and after an operator run the
@@ -242,9 +267,18 @@ sync_scratch() {
 # preamble each patch file carries. The scratch already has a repository of its
 # own -- `sync_scratch` gives it one so `portable_cli_source_path` cannot walk
 # out into the enclosing tree -- so `git -C` has a work tree to apply into.
+# `--verbose` is not decoration: `git apply` reports a file it declined to touch
+# as `Skipped patch '<path>'.` on stdout and still exits zero (#753), so without
+# it the one line that distinguishes "applied" from "silently did nothing" is
+# never written to the log. The skip is turned into a nonzero status here so
+# every caller -- including the stale-seam control, which must keep observing a
+# genuine refusal -- sees it as the failure it is.
 apply_patch() {
   local file="$1" log="$2" status=0
-  git -C "$scratch" apply --whitespace=nowarn "$file" >"$log" 2>&1 || status=$?
+  git -C "$scratch" apply --verbose --whitespace=nowarn "$file" >"$log" 2>&1 || status=$?
+  if [ "$status" -eq 0 ] && grep -q '^Skipped patch ' "$log"; then
+    status=1
+  fi
   return "$status"
 }
 
