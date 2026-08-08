@@ -286,3 +286,70 @@ domain C5 {
 ";
     assert_eq!(reliable_effect_finding(source), None);
 }
+
+#[test]
+fn c6_compensation_only_owning_saga_without_outbox_fires() {
+    // `docs/DESIGN-domain.md`'s canonical saga example emits a request event
+    // (`InventoryReleaseRequested`) from a `compensation` block, not a step.
+    // `owning_sagas` must count that as owning, or a compensation-only
+    // emitter silently escapes the finding even without an outbox.
+    let source = r"
+domain C6a {
+  type Id = 0..0
+  aggregate Item {
+    event Kickoff { id: Id }
+    event Failed { id: Id }
+    event Requested { id: Id }
+  }
+  effect Ship {
+    reliable
+    handles Requested
+  }
+  saga Compensator {
+    step Watch {
+      emits Kickoff
+    }
+    compensation {
+      when Failed after Kickoff {
+        emits Requested
+      }
+    }
+  }
+}
+";
+    let finding = reliable_effect_finding(source).expect("finding must fire");
+    assert_eq!(
+        finding["witness"],
+        serde_json::json!({"effect":"Ship","uncovered_sagas":["Compensator"]})
+    );
+}
+
+#[test]
+fn c6_compensation_only_owning_saga_with_outbox_clears() {
+    let source = r"
+domain C6b {
+  type Id = 0..0
+  aggregate Item {
+    event Kickoff { id: Id }
+    event Failed { id: Id }
+    event Requested { id: Id }
+  }
+  effect Ship {
+    reliable
+    handles Requested
+  }
+  saga Compensator {
+    outbox CompensatorOutbox
+    step Watch {
+      emits Kickoff
+    }
+    compensation {
+      when Failed after Kickoff {
+        emits Requested
+      }
+    }
+  }
+}
+";
+    assert_eq!(reliable_effect_finding(source), None);
+}

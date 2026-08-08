@@ -35,7 +35,16 @@ Irreversible effects should also declare a compensation event or be compensated
 by a saga. If not, `fslc domain check` emits
 `missing_compensation_for_irreversible_effect` as a warning. A `reliable` effect
 must be paired with an `outbox` boundary on the effect or owning saga; otherwise
-`reliable_effect_without_outbox_boundary` is reported.
+`reliable_effect_without_outbox_boundary` is reported. A saga *owns* the effect
+when one of its steps or `compensation` blocks `emits` the effect's request
+event (`handles`, falling back to `request_event`); an unrelated saga's outbox
+does not count. When an effect has more than one owning saga, every owning
+saga must declare an outbox for the finding to clear — a single covered saga
+still leaves an uncovered delivery path and would overstate runtime delivery
+evidence the same way a bare `effect.outbox` omission does. An aggregate
+`decide` that emits the request event (the ordinary shape, e.g.
+`examples/domain/order_async_effect.fsl`) does not make any saga an owner;
+aggregates have no `outbox` construct, so only `effect.outbox` applies there.
 
 Runtime evidence is handled by `fslc domain replay --logs <events.jsonl>`.
 Replay checks command acceptance, effect request/completion correlation,

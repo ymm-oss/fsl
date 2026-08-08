@@ -31,21 +31,29 @@ fn request_event(effect: &DomainEffect) -> Option<&str> {
         .or(effect.request_event.as_deref())
 }
 
-/// Sagas that own `effect`: at least one step emits the effect's request
-/// event. `DESIGN-effect.md` allows a `reliable` effect's outbox boundary to
-/// live on the effect *or its owning saga*; an unrelated saga's outbox must
-/// not silence the finding.
+/// Sagas that own `effect`: a step or a compensation `emits` the effect's
+/// request event (`docs/DESIGN-domain.md`'s canonical saga example emits a
+/// request event from a `compensation` block, e.g.
+/// `InventoryReleaseRequested`, so a compensation-only emitter must count as
+/// owning too). `DESIGN-effect.md` allows a `reliable` effect's outbox
+/// boundary to live on the effect *or its owning saga*; an unrelated saga's
+/// outbox must not silence the finding.
 fn owning_sagas<'a>(domain: &'a DomainSpec, effect: &DomainEffect) -> Vec<&'a DomainSaga> {
     let Some(request_event) = request_event(effect) else {
         return Vec::new();
     };
+    let emits_request_event = |events: &[String]| events.iter().any(|event| event == request_event);
     domain
         .sagas
         .iter()
         .filter(|saga| {
             saga.steps
                 .iter()
-                .any(|step| step.emits.iter().any(|event| event == request_event))
+                .any(|step| emits_request_event(&step.emits))
+                || saga
+                    .compensations
+                    .iter()
+                    .any(|compensation| emits_request_event(&compensation.emits))
         })
         .collect()
 }

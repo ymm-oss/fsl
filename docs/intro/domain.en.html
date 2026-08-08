@@ -163,7 +163,7 @@
       <tr><td><code>handles</code> / <code>emits one_of [...]</code></td><td>The request event it consumes and the set of completion events it may produce.</td></tr>
       <tr><td><code>retry { max_attempts 3 }</code></td><td>The retry bound after failure or timeout. In the kernel it becomes an <code>attempts &lt; 3</code> guard.</td></tr>
       <tr><td><code>timeout after 10m emits ...</code></td><td>The exit from pending. <code>10m</code> is a modeled event, not wall-clock time.</td></tr>
-      <tr><td><code>reliable</code> + <code>outbox</code></td><td>An effect claiming delivery guarantees must be paired with an outbox boundary; otherwise <code>reliable_effect_without_outbox_boundary</code> is reported.</td></tr>
+      <tr><td><code>reliable</code> + <code>outbox</code></td><td>An effect claiming delivery guarantees must be paired with an outbox boundary — on the effect itself, or on every saga whose step or compensation emits its request event; otherwise <code>reliable_effect_without_outbox_boundary</code> is reported.</td></tr>
     </table>
   </div>
 </section>
