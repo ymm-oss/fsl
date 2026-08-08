@@ -311,6 +311,14 @@ Findings use `schemas/fslc/domain/finding.v0.schema.json` and
 kernel run. `error` findings block the run because the generated model would
 otherwise overstate the guarantee.
 
+`reliable_effect_without_outbox_boundary`'s `witness` carries the fixed
+`{"effect": <name>}` shape every finding's `witness` uses, plus an
+`uncovered_sagas` array (saga names, sorted) when the effect has at least one
+owning saga (see `DESIGN-effect.md`) and not every owning saga declares an
+outbox. `uncovered_sagas` is absent when the effect has no owning saga at
+all, so its presence distinguishes "no saga owns this effect" from "some
+owning saga is still missing its outbox".
+
 ## Generation
 
 `fslc domain generate --target typescript` emits Functional DDD scaffolds:
