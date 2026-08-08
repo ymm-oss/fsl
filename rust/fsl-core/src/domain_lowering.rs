@@ -135,9 +135,20 @@ pub(crate) fn validate_lowerable_constructs(domain: &DomainSpec) -> Result<(), C
         if let Some(backoff) = &effect.retry.backoff {
             return Err(error_at(
                 format!(
-                    "retry backoff '{backoff}' has no executable lowering; backoff strategies are not supported"
+                    "retry backoff '{backoff}' has no executable lowering; delete only the \
+                     `backoff` line, not the whole retry block -- `max_attempts` remains fully \
+                     lowered"
                 ),
-                span_at(effect.retry.loc.unwrap_or(effect.loc)),
+                // A `DomainRetry` only exists once the parser has read a `retry { ... }` block,
+                // and it always records that block's own loc at the same time (see
+                // `Parser::retry` in `rust/fsl-syntax/src/domain.rs`), so `backoff.is_some()`
+                // implies `loc.is_some()`.
+                span_at(
+                    effect
+                        .retry
+                        .loc
+                        .expect("a parsed retry block always records its own loc"),
+                ),
             ));
         }
     }

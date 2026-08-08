@@ -853,6 +853,16 @@ domain EmptyEnumContainers {
 /// Starts with the #712 top-level `await` case; #711's `on_stale`, #710's
 /// `value_object` invariant, and #723's `retry` `backoff` cases are added
 /// alongside their own fixes.
+///
+/// #723's `retry` `backoff` case breaks the "land on the block to delete"
+/// framing above: the located span is still the enclosing `retry { ... }`
+/// block (`DomainRetry` records no narrower span for its `backoff` field),
+/// but the correct migration deletes only the `backoff` line -- the
+/// `retry` block itself, and its `max_attempts` bound, stay and remain
+/// fully lowered. Deleting the whole block would silently shrink
+/// `max_attempts` to `domain_lowering.rs`'s `unwrap_or(1)` default instead
+/// of preserving the author's declared bound. The diagnostic message
+/// itself, not just its location, carries that distinction.
 struct UnlowerableConstructCase {
     fixture: &'static str,
     expected_message: &'static str,
@@ -891,14 +901,17 @@ const UNLOWERABLE_CONSTRUCT_CASES: &[UnlowerableConstructCase] = &[
     },
     UnlowerableConstructCase {
         fixture: "rust/fslc/tests/fixtures/domain_retry_backoff_rejected.fsl",
-        expected_message: "retry backoff 'exponential' has no executable lowering; backoff strategies are not supported",
+        expected_message: "retry backoff 'exponential' has no executable lowering; delete only the `backoff` line, not the whole retry block -- `max_attempts` remains fully lowered",
         location: |domain| {
             let effect = domain
                 .effects
                 .iter()
                 .find(|effect| effect.retry.backoff.is_some())
                 .expect("fixture declares an effect with a retry backoff");
-            let loc = effect.retry.loc.unwrap_or(effect.loc);
+            let loc = effect
+                .retry
+                .loc
+                .expect("a parsed retry block always records its own loc");
             (loc.line, loc.column)
         },
     },
