@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use fsl_syntax::{DomainEffect, DomainSpec, SyntaxExpr};
+use fsl_syntax::{DomainEffect, DomainSaga, DomainSpec, SyntaxExpr};
 use serde_json::{Value, json};
 
 use crate::domain_naming::snake;
@@ -22,6 +22,34 @@ pub fn assumptions(domain: &DomainSpec) -> Vec<Value> {
     }
     values
 }
+/// The event that satisfies an effect's request, per `DESIGN-domain.md`'s
+/// `handles`-with-`request_event`-fallback contract.
+fn request_event(effect: &DomainEffect) -> Option<&str> {
+    effect
+        .handles
+        .as_deref()
+        .or(effect.request_event.as_deref())
+}
+
+/// Sagas that own `effect`: at least one step emits the effect's request
+/// event. `DESIGN-effect.md` allows a `reliable` effect's outbox boundary to
+/// live on the effect *or its owning saga*; an unrelated saga's outbox must
+/// not silence the finding.
+fn owning_sagas<'a>(domain: &'a DomainSpec, effect: &DomainEffect) -> Vec<&'a DomainSaga> {
+    let Some(request_event) = request_event(effect) else {
+        return Vec::new();
+    };
+    domain
+        .sagas
+        .iter()
+        .filter(|saga| {
+            saga.steps
+                .iter()
+                .any(|step| step.emits.iter().any(|event| event == request_event))
+        })
+        .collect()
+}
+
 fn effect_findings(
     domain: &DomainSpec,
     effect: &DomainEffect,
@@ -57,12 +85,26 @@ fn effect_findings(
         );
     }
     if effect.reliable && effect.outbox.is_none() {
-        add(
-            "reliable_effect_without_outbox_boundary",
-            "warning",
-            "reliable_effect_has_outbox",
-            json!({"effect":effect.name}),
-        );
+        let owning = owning_sagas(domain, effect);
+        let covered = !owning.is_empty() && owning.iter().all(|saga| !saga.outboxes.is_empty());
+        if !covered {
+            let mut witness = json!({"effect":effect.name});
+            if !owning.is_empty() {
+                let mut uncovered_sagas = owning
+                    .iter()
+                    .filter(|saga| saga.outboxes.is_empty())
+                    .map(|saga| saga.name.clone())
+                    .collect::<Vec<_>>();
+                uncovered_sagas.sort_unstable();
+                witness["uncovered_sagas"] = json!(uncovered_sagas);
+            }
+            add(
+                "reliable_effect_without_outbox_boundary",
+                "warning",
+                "reliable_effect_has_outbox",
+                witness,
+            );
+        }
     }
     out
 }
