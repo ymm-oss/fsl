@@ -54,7 +54,7 @@ pub use dialect::{
     governance_contract, lower_ai_component, lower_business, lower_db, lower_domain,
     lower_governance, lower_requirements, requirements_trace_contract,
 };
-pub use domain::{domain_kernel_source, domain_type_default, map_key_value};
+pub use domain::{DomainDefault, domain_kernel_source, domain_type_default};
 pub use domain_lowering::domain_effect_owns_event;
 pub use expr_text::{binder_text, expr_text, source_binder_text, source_expr_text};
 pub use model::{

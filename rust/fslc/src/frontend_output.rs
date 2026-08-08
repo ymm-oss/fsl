@@ -206,8 +206,11 @@ struct SelectedDefault {
     ///   literal): the syntax itself is valid and `fslc check` accepts it,
     ///   but `fslc fmt`/`migrate --write`'s reformat-and-reparse step cannot
     ///   currently round-trip an `Ident { ... }` literal after a domain
-    ///   field declaration (issue #770). Offering a machine-applicable
-    ///   insertion here would make `migrate --write` corrupt the file.
+    ///   field declaration (issue #770). `migrate --write` is fail-closed --
+    ///   it would not write a corrupted file -- but offering a
+    ///   machine-applicable insertion here would make that field's edit
+    ///   trip the #770 defect, failing `migrate` for the *whole* file and
+    ///   silently dropping every other, otherwise-safe edit in it.
     ///
     /// `check` still reports the renderer's implicit choice in both cases;
     /// `migrate --edition next` cannot yet demand an initializer it cannot
@@ -223,9 +226,13 @@ struct SelectedDefault {
 /// than duplicating that diagnosis).
 ///
 /// The selected *value* always comes from [`fsl_core::domain_type_default`],
-/// the renderer's own total dispatch (issue #731) -- this function never
-/// re-derives what a type's default value is, only classifies *why* for the
-/// warning's `reason` text and whether that value is safe to offer as a
+/// the renderer's own total dispatch, already rendered in domain-source form
+/// (issue #731 review, M1: no local enum bypass here or anywhere else --
+/// `fsl_core` is the single owner of *both* which value is selected and how
+/// an enum member within it is spelled, including when nested inside a
+/// `value_object` or a `Map`'s value) -- this function never re-derives what
+/// a type's default value is, only classifies *why* for the warning's
+/// `reason` text and whether that value is safe to offer as a
 /// machine-applicable `= value` insertion.
 fn omitted_domain_value(
     domain: &fsl_syntax::DomainSpec,
@@ -235,52 +242,63 @@ fn omitted_domain_value(
         return None;
     }
     let type_name = field.type_name.render_source();
-    if type_name == "Int" {
-        return None;
-    }
-    if let Some((_key, value_type)) = fsl_core::map_key_value(&field.type_name) {
+    match fsl_core::domain_type_default(domain, &field.type_name, field.span).ok()? {
         // A top-level Map<K, V> has no defaultable value of its own: the
         // renderer's only supported default is the dense per-key
         // `forall k: K { field[k] = <V's default> }` init
-        // `domain_kernel_source`'s state-field loop builds directly, using
-        // this exact same `domain_type_default` call on `V`. Report that
-        // per-key value for informational parity with the renderer, but
-        // without a suggestion: no `= value` syntax for a whole Map field is
-        // ever accepted, so no insertion could be machine-applicable.
-        let value_default = fsl_core::domain_type_default(domain, value_type, field.span).ok()?;
-        return Some(SelectedDefault {
+        // `domain_kernel_source`'s state-field loop builds directly. Report
+        // that per-key value for informational parity with the renderer,
+        // but without a suggestion: no `= value` syntax for a whole Map
+        // field is ever accepted, so no insertion could be
+        // machine-applicable.
+        fsl_core::DomainDefault::MapPerKey(value_default) => Some(SelectedDefault {
             reason: format!(
                 "'{type_name}' has no whole-field default; each key implicitly defaults to '{value_default}' through the per-key forall init the renderer builds"
             ),
             value: value_default,
             insertable: false,
-        });
+        }),
+        fsl_core::DomainDefault::Value(value) => {
+            let reason = domain_default_reason(domain, &field.type_name, &type_name, &value);
+            Some(SelectedDefault {
+                value,
+                reason,
+                // A brace-literal value (`Set {}`, a value_object struct
+                // literal) is valid FSL that `fslc check` accepts, but issue
+                // #770 tracks that `fslc fmt` cannot yet reparse its own
+                // reformatting of an `Ident { ... }` literal placed after a
+                // domain field declaration. `migrate --write` is fail-closed
+                // (it would not write a corrupted file), but an edit here
+                // would trip #770's reformat failure and fail `migrate` for
+                // the whole file, silently dropping every other edit in it
+                // too -- withhold the insertion instead. Driven by the
+                // field's *type shape* (issue #731 review, m4), not the
+                // rendered value's text, so it stays correct regardless of
+                // what that text happens to contain.
+                insertable: insertable_shape(domain, &field.type_name),
+            })
+        }
     }
-    let value = match domain.types.iter().find(|ty| ty.name == type_name) {
-        // `Context::default_for_type` selects this same first-declared
-        // member, but renders it as `domain_kernel_source`'s mangled
-        // `Enum_Member` kernel identifier -- correct for the generated
-        // kernel text, not parseable as a domain-source field initializer.
-        // Read the member domain source itself would accept from the same
-        // `DomainSpec.types` the renderer's dispatch reads, rather than
-        // asking that dispatch for a kernel-scoped answer to a
-        // domain-source question.
-        Some(ty) if ty.kind == "enum" => ty.members.first()?.clone(),
-        _ => fsl_core::domain_type_default(domain, &field.type_name, field.span).ok()?,
-    };
-    let reason = domain_default_reason(domain, &field.type_name, &type_name, &value);
-    // A brace-literal value (`Set {}`, a value_object struct literal) is
-    // valid FSL that `fslc check` accepts, but issue #770 tracks that
-    // `fslc fmt` cannot yet reparse its own reformatting of an
-    // `Ident { ... }` literal placed after a domain field declaration.
-    // Withhold the insertion rather than emit an edit `migrate --write`
-    // would use to produce an unparseable file.
-    let insertable = !value.contains('{');
-    Some(SelectedDefault {
-        value,
-        reason,
-        insertable,
-    })
+}
+
+/// Whether `type_name`'s domain-source default is safe to offer as a
+/// machine-applicable `= value` insertion: `false` exactly for the two
+/// brace-literal shapes issue #770 blocks (`Set<T>` and a `value_object`),
+/// `true` for every other shape [`fsl_core::domain_type_default`] can select
+/// a value for (`Map<K, V>` never reaches this function; its caller returns
+/// `insertable: false` unconditionally for the separate, structural reason
+/// that no whole-field `Map` initializer syntax exists at all).
+fn insertable_shape(
+    domain: &fsl_syntax::DomainSpec,
+    type_name: &fsl_syntax::SyntaxTypeExpr,
+) -> bool {
+    match &type_name.kind {
+        fsl_syntax::SyntaxTypeExprKind::Apply { constructor, .. } => constructor.text != "Set",
+        fsl_syntax::SyntaxTypeExprKind::Name(ident) => !domain
+            .types
+            .iter()
+            .any(|ty| ty.name == ident.text && ty.kind == "value_object"),
+    }
 }
 
 /// Explanatory text for why [`fsl_core::domain_type_default`] selected
@@ -304,6 +322,9 @@ fn domain_default_reason(
         fsl_syntax::SyntaxTypeExprKind::Name(_) if type_name_text == "Bool" => {
             "Bool defaults to false".to_owned()
         }
+        fsl_syntax::SyntaxTypeExprKind::Name(_) if type_name_text == "Int" => {
+            "Int defaults to 0".to_owned()
+        }
         fsl_syntax::SyntaxTypeExprKind::Name(_) => {
             match domain.types.iter().find(|ty| ty.name == type_name_text) {
                 Some(ty) if ty.kind == "enum" => {
@@ -319,7 +340,7 @@ fn domain_default_reason(
                     "the default value_object literal for '{}' is selected",
                     ty.name
                 ),
-                _ => format!("external placeholder type '{type_name_text}' defaults to '{value}'"),
+                _ => format!("external placeholder type '{type_name_text}' defaults to {value}"),
             }
         }
     }

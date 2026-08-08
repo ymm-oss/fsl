@@ -1,21 +1,35 @@
 Fixed (#731): `implicit_initial_value` now fires for every domain aggregate
-state field the renderer already gives an implicit default -- `Option<T>`
-(`none`), `Set<T>` (`Set {}`), a top-level `Map<K, V>` (the dense per-key
-`forall` init), and `value_object`-typed fields (their struct-literal
-default) -- not just the four scalar shapes (`Bool`, enum, range,
+state field the renderer already gives an implicit default -- `Int` (`0`),
+`Option<T>` (`none`), `Set<T>` (`Set {}`), a top-level `Map<K, V>` (the dense
+per-key `forall` init), and `value_object`-typed fields (their struct-literal
+default) -- not just the original four scalar shapes (`Bool`, enum, range,
 external-placeholder). `rust/fslc/src/frontend_output.rs`'s warning now
 reads the selected value from `fsl_core::domain_type_default`, the same
 total dispatch `domain_kernel_source` already used
 (`rust/fsl-core/src/domain.rs`'s `Context::default_for_type`), instead of a
 second, non-exhaustive copy of the dispatch that silently excluded any type
-name containing `<`; a new `domain_expand`-vs-warning string-level parity
-check and container/`value_object` regression tests
-(`rust/fslc/tests/issue_250_initialization.rs`) cover the fix, alongside a
-negative control confirming an explicit default still suppresses the
-warning. A top-level `Map<K, V>` field (no whole-field initializer syntax
-exists) and a `Set<T>`/`value_object` field whose brace-literal default
-cannot yet round-trip through `fslc fmt` (issue #770, found and reproduced
-independently while implementing this fix) both still warn under `check`
-but omit the machine-applicable insertion and keep
-`edition_severity.next` at `warning` rather than `error`, since the next
-edition cannot yet demand an initializer it has no safe way to insert.
+name containing `<`. An enum default is rendered in domain-source form (the
+bare declared member, e.g. `Pending`) rather than `domain_kernel_source`'s
+kernel-scoped mangled identifier (`Status_Pending`); a `DefaultForm`
+threaded through `Context::default_for_type`/`default`/`normalize` selects
+the right form at every enum-rendering site, including a value_object's own
+explicit default field and an enum nested inside a value_object's struct
+literal or a top-level Map's per-key value, so nesting depth cannot bring
+the mangled form back. New regression tests
+(`rust/fslc/tests/issue_250_initialization.rs`) cover container/value_object
+coverage, `domain_expand`-vs-warning string-level parity, an explicit
+default still suppressing the warning, bare `Int` warning like every other
+scalar shape, and a nested enum inside a value_object/Map staying unmangled
+at any depth. A top-level `Map<K, V>` field (no whole-field initializer
+syntax exists at all) and a `Set<T>`/`value_object` field whose
+brace-literal default cannot yet round-trip through `fslc fmt`'s
+reformat-and-reparse pass (issue #770, found and reproduced independently
+while implementing this fix) both still warn under `check` but omit the
+machine-applicable insertion -- chosen by the field's type shape, not the
+rendered value's text -- and keep `edition_severity.next` at `warning`
+rather than `error`, since `migrate --write` is fail-closed (it would not
+write a corrupted file) but attempting that insertion would trip #770's
+reformat failure and fail migration for the whole file, dropping every
+other, otherwise-safe edit in it too. A "defect witness" test pins #770's
+`fslc fmt` symptom directly so a future fix to #770 turns it red instead of
+letting the withheld insertion silently outlive its reason.

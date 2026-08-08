@@ -350,22 +350,29 @@ traceability relation, not origin identities. Public Kernel v1 remains
 byte-compatible and does not expose the internal chain; publication belongs to
 v2 (#256).
 
-Omitted domain aggregate initializers retain the current Bool `false`, enum
-first-member, range lower-bound, external-placeholder `0`, `value_object`
-struct-literal, `Option<T>` -> `none`, `Set<T>` -> `Set {}`, or top-level
-`Map<K, V>` -> dense per-key `forall k: K { field[k] = <value default> }`
-behavior, and every one of those shapes emits `implicit_initial_value`
-(#731) -- the warning's dispatch matches the renderer's total dispatch
-(`fsl_core::domain_type_default`). The warning carries the selected value,
-reason, edition severities, source span, and -- where a safe insertion
-exists -- a machine-applicable edit. A top-level `Map<K, V>` field (no
-whole-field default exists at all) and a `Set<T>`/`value_object` field whose
-brace-literal default cannot yet round-trip through `fslc fmt`
-(issue #770) omit the insertion and keep `edition_severity.next` at
-`warning`. An explicit whole-`Map` default and a `Map` nested as another
-`Map`'s value are both rejected ("whole-Map domain defaults are not
-supported" / "Map state requires explicit initialization through supported
-semantics").
+Omitted domain aggregate initializers retain the current Bool `false`, Int
+`0`, enum first-member (rendered bare, as domain source itself accepts, no
+matter how deeply the enum is nested inside a `value_object` or a `Map`
+value -- never `domain_kernel_source`'s kernel-mangled identifier), range
+lower-bound, external-placeholder `0`, `value_object` struct-literal,
+`Option<T>` -> `none`, `Set<T>` -> `Set {}`, or top-level `Map<K, V>` ->
+dense per-key `forall k: K { field[k] = <value default> }` behavior, and
+every one of those shapes emits `implicit_initial_value` (#731) -- the
+warning's dispatch matches the renderer's total dispatch
+(`fsl_core::domain_type_default`, the single owner of both the selected
+value and how any enum member within it is spelled). The warning carries the
+selected value, reason, edition severities, source span, and -- where a safe
+insertion exists -- a machine-applicable edit. A top-level `Map<K, V>` field
+(no whole-field default exists at all) and a `Set<T>`/`value_object` field
+whose brace-literal default cannot yet round-trip through `fslc fmt`'s
+reformat-and-reparse pass (issue #770) omit the insertion and keep
+`edition_severity.next` at `warning`: `migrate --write` is fail-closed and
+would not write a corrupted file, but offering the insertion would trip
+#770's reformat failure and fail migration for the whole file, dropping
+every other edit in it too. An explicit whole-`Map` default and a `Map`
+nested as another `Map`'s value are both rejected ("whole-Map domain
+defaults are not supported" / "Map state requires explicit initialization
+through supported semantics").
 
 AI hard-contract dialect (expands to the same kernel for deterministic
 tool-boundary checks and reports stable fsl-ai findings for runtime replay):
