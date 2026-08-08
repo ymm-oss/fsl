@@ -17,8 +17,9 @@ typed Kernel behavior, evaluator semantics, CLI/report behavior, or public Kerne
 - `rust/fsl-tools` or `rust/fslc`: report/command/envelope behavior when applicable.
 - `rust/fsl-wasm`: only when Worker-visible behavior or shared envelopes require it.
 - Focused positive, negative, and boundary regression evidence.
-- `docs/LANGUAGE.md`, `skills/fsl/reference.md`, relevant `docs/DESIGN-*.md`, docs map, and
-  `CHANGELOG.md` `[Unreleased]`.
+- `docs/LANGUAGE.md`, `skills/fsl/reference.md`, relevant `docs/DESIGN-*.md`, docs map, and a new
+  `changelog.d/<id>-<slug>.<category>.md` fragment (see `changelog.d/README.md`) -- not a direct
+  `CHANGELOG.md` edit.
 - Schemas/conformance vectors when the public Kernel contract changes.
 
 Do not update `src/fslc` by default. Record the explicit compatibility or LSP contract before changing

@@ -49,8 +49,10 @@ It also rejects a dynamic dependency on `libz3`.
 
 1. Start from a clean, current `main`. Fetch `origin` and confirm local `HEAD`
    equals `origin/main`.
-2. Review the non-empty `CHANGELOG.md` `[Unreleased]` section and confirm it
-   describes every notable change since the previous tag.
+2. Review the `CHANGELOG.md` `[Unreleased]` section together with every fragment
+   under `changelog.d/` and confirm, across both, that every notable change
+   since the previous tag is described. Step 7 aggregates the two into one
+   version section; nothing here should be missing from either source.
 3. Choose `X.Y.Z` using SemVer. Confirm that local and remote tag `vX.Y.Z` and
    the corresponding GitHub Release do not exist.
 4. On a short-lived branch from `main`, change
@@ -89,12 +91,53 @@ It also rejects a dynamic dependency on `libz3`.
    Review the diff and require it to contain version strings only. A generated
    snapshot is regenerated, never hand-edited; any other change in that diff is
    a contract change that does not belong in a release commit.
-7. Move all current `[Unreleased]` entries under
-   `## [X.Y.Z] - YYYY-MM-DD`, leaving an empty `## [Unreleased]`. Update the
-   link references so `[Unreleased]` compares `vX.Y.Z...HEAD` and `[X.Y.Z]`
-   compares the previous tag with `vX.Y.Z`.
+
+   **Steps 4–6 above touch `rust/Cargo.toml`, `rust/Cargo.lock`, the domain characterization
+   baseline, `editors/vscode/package.json`, and `editors/vscode/package-lock.json`.** The first
+   three are product surfaces under `tools/aggregate_changelog.sh`'s `is_product_surface_path`,
+   and are exactly what `is_release_bump_path` names — the fixed set the merge-readiness
+   `check-pr` gate exempts from needing a fragment once this diff's `CHANGELOG.md` edit is a
+   validated release move (H1/F3; review, #737, comments 2026-08-07 third round and 2026-08-08
+   fourth round; `docs/DESIGN-changelog-fragments.md`, control 1). The two `editors/vscode/`
+   manifests are not product surfaces, so control 1 never asks about them and they are
+   deliberately absent from `is_release_bump_path`. Add an exact path to `is_release_bump_path`,
+   in the same pull request, whenever either side of that filter moves: a release-commit step
+   that starts touching a different or additional product-surface path, or an
+   `is_product_surface_path` that widens to cover a path releases already touch
+   (`editors/vscode/*` is the live candidate). Otherwise every subsequent release commit will
+   fail its own `changelog-fragment-missing` at merge time.
+7. Run the aggregator, which moves the current `[Unreleased]` body under
+   `## [X.Y.Z] - YYYY-MM-DD` verbatim, appends every `changelog.d/` fragment
+   sorted by the declared category/id order, verifies conservation (every
+   fragment's content reaches the section, byte for byte), and deletes the
+   consumed fragments in the same step, leaving `[Unreleased]` and
+   `changelog.d/` both empty:
+
+   ```bash
+   ./tools/aggregate_changelog.sh release --version X.Y.Z --date YYYY-MM-DD
+   ```
+
+   Update the link references so `[Unreleased]` compares `vX.Y.Z...HEAD` and
+   `[X.Y.Z]` compares the previous tag with `vX.Y.Z`. Review the produced
+   `## [X.Y.Z]` section before committing; this is the point of the "Extract
+   release notes" content, and the last chance to fix a wording issue
+   directly in the version section (never in `[Unreleased]`, which control 4
+   in `docs/DESIGN-changelog-fragments.md` protects even at this step, except
+   for exactly this move).
+
+   **A version-only release with an empty `changelog.d/` is legitimate** (decided in review,
+   #737, comment 2026-08-07, second round): the command above succeeds on an empty
+   `changelog.d/` (holding only `README.md`), and the merge-readiness `check-pr` gate does not
+   require a deleted fragment either — only that this diff's `CHANGELOG.md` edit is a
+   structurally validated release move. Both paths agree on this; neither hard-fails a
+   product-only version bump for lacking a fragment that was never needed. If `[Unreleased]`
+   was also already empty, the produced `## [X.Y.Z]` section will have no bullets at all —
+   expected for that shape, not a defect to work around.
 8. Confirm the complete `X.Y.Z` changelog section is non-empty and suitable for
-   the GitHub Release body.
+   the GitHub Release body, **unless** step 7's zero-fragment case applies and `[Unreleased]`
+   was already empty, in which case the section legitimately has no bullets; state the release's
+   actual reason (e.g. a dependency or version-only bump) in the release commit message and the
+   promotion pull request instead of fabricating a placeholder bullet.
 9. Run the complete product gate:
 
    ```bash

@@ -56,6 +56,12 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, not the default single commit: the changelog
+          # fragment checks below diff BASE_SHA...HEAD_SHA and read
+          # CHANGELOG.md at both revisions (docs/DESIGN-changelog-fragments.md,
+          # migration site 6).
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -63,6 +69,12 @@ jobs:
 
       - name: Test post-merge issue reconciliation
         run: ./tools/check-merge-readiness.sh automation
+
+      - name: Check changelog fragments (control 1, control 4)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: ./tools/aggregate_changelog.sh check-pr
 
   merge-readiness:
     name: merge readiness

@@ -2,7 +2,25 @@
 
 # Changelog fragments: reduce shared-edit merge conflicts on `CHANGELOG.md` only
 
-Status: Accepted (evaluation outcome of the #737 spike; implementation is a separate task)
+Status: Accepted (evaluation outcome of the #737 spike). Implementation lands in the pull
+request that also corrects this document's migration section below (#737, comment
+2026-08-07) — see that correction for what changed between acceptance and implementation.
+An independent review of that implementation found three blocking gaps between the controls
+as specified and as implemented (a release pull request could not merge; control 4's diff
+base disagreed with control 1's after any release landed on `main`; a fragment in a
+subdirectory was silently lost) plus several narrower corrections, addressed inline below
+under their "S2-N"/"S3-N"/"S4-N" labels (#737, comment 2026-08-07, second round).
+
+A **second** independent review of the resulting fixes found one blocking regression in the
+first fix itself (the release exclusion's fix over-widened it, and the argument offered for its
+safety was falsified by execution — a fragment deletion plus any unrelated `CHANGELOG.md` edit,
+down to appending a single newline, passed `check-pr`), one gap generalized to only one of its
+two instances (a fragment hidden by a subdirectory was closed; a fragment hidden by a leading
+dot at the top level was not), one merge-blocking omission (a legitimate zero-fragment release
+could not merge, on either the manual or automated path), and several precision corrections,
+addressed inline below and reusing the same "S2-N"/"S3-N"/"S4-N" label shorthand for the new
+review's own severity list — each callout below states explicitly whether it continues an
+existing label's topic or is a same-named but distinct finding from the second review round.
 
 ## Decision
 
@@ -143,7 +161,57 @@ Measured at the baseline: `## [Unreleased]`'s 460-line body contains **zero `###
 and `## [4.2.0]` contains zero as well. Categories are expressed as the **lead word of each
 bullet** — `- Added (#707):`, `- Fixed (#713):`, `- Documented (#722):`, `- Decided (…):` — and
 that vocabulary is already wider than Keep a Changelog's six, since `Documented` and `Decided`
-are not among them. Two consequences the specification must honour:
+are not among them.
+
+**Implementation correction (this pull request; #737, comment 2026-08-07).** The four examples
+above understated the set's actual size. Re-measured against the `[Unreleased]` body at
+implementation time (620 lines, 27 top-level bullets): the lead-word vocabulary is **ten** words,
+not four — `Added`, `Decided`, `Documented`, `Exempted`, `Fixed`, `Replaced`, `Required`,
+`Reverted`, `Sharded`, `Unified` — and `### ` subheadings remain zero, confirming the "bullets
+only" requirement below still holds. `tools/aggregate_changelog.sh`'s `DECLARED_CATEGORY_ORDER`
+and `changelog.d/README.md` are the implementation and the authoritative human-facing copy of
+this exact set and its declared order; growing it follows the same contract-change discipline
+as growing `tools/check-product-gate-scope.sh`'s exempt-path list (see `docs/DESIGN-ci.md`,
+"Agent-configuration exemption"). Two consequences the specification must honour:
+
+**Vocabulary correction (S3-3; review, #737, comment 2026-08-07): `Changed` belongs in the set,
+and the instruction telling authors not to add it was wrong on this repository's own terms.**
+The set above was measured only over `[Unreleased]`'s current, subheading-free body. Measured
+against `CHANGELOG.md`'s complete history instead (`git grep -c '^### ' CHANGELOG.md` → 77
+subheadings total), `Changed` accounts for 12 of them — more than seven of the ten words already
+in the set — with `Fixed` (27) and `Added` (21) the only more frequent ones; `Documentation` (5)
+and `Removed` (1) are the only other Keep-a-Changelog-shaped names present, and neither
+recurs the way `Changed` does. Those 12 predate this mechanism's bullet-lead-word convention —
+they are `### ` subheadings from the file's earlier Keep-a-Changelog-style sections, not bullet
+lead words inside a current, subheading-free section — but the word itself names a real,
+recurring category of change in this project's own history, on the same standing as the other
+ten. **Decision: widen the set.** `changed` joins `DECLARED_CATEGORY_ORDER`, positioned right
+after `added` (matching Keep a Changelog's own Added-then-Changed convention, even though the
+rest of this vocabulary is not Keep a Changelog's), for a contributor whose change modifies
+existing behavior without being a defect fix (`fixed`), a mechanism swap (`replaced`), or an
+undo (`reverted`). The alternative — keep excluding it — would need a criterion that reads
+honestly next to 12 real occurrences in this project's own file, and "unmeasured" is not that
+criterion: it is the fact this correction fixes. Excluding a word this repository has actually
+used before, solely because its past instances used a different rendering mechanism
+(subheadings, before this mechanism existed to render bullets instead), is exactly the "routine
+false positive" reversal condition (a) below treats as grounds for no-go — a reasonable,
+previously-used lead word rejected by control 6 for a reason no contributor filing that
+fragment would find legible.
+
+**Correction (review, #737, comment 2026-08-07, second round): the criterion separating
+`Changed` from `Removed` is recency, not frequency, and the earlier draft's "four major
+versions ago" figure for `Removed` was also wrong — it is two.** `Removed`'s only `### `
+occurrence is in `## [2.0.0]`; the current major at measurement time is `## [4.2.0]`, two majors
+later, not four. More importantly, frequency alone does not actually separate `Removed` from the
+eleven admitted words: seven of those eleven each occur exactly once in their own corpus (this
+mechanism's post-Rust fragment history) and zero times among `### ` headings — the same posture
+`Removed`'s single `### ` occurrence has, so "occurs more than once" cannot be the line being
+drawn. What does separate them is **recency**: `### Changed` last appears in `## [4.0.0]`, the
+current major version series; `### Removed`'s only occurrence is in `## [2.0.0]`, two majors
+back. A word whose most recent use predates the current major is not "real, recurring usage" the
+way one still in current-era use is. `Removed` is left out on that basis, restated: it can be
+added the same way, from real recent usage, if that changes. The set is therefore **eleven**
+words, and `changelog.d/README.md` documents `changed` on the same footing as the other ten.
 
 - `<category>` is the bullet lead word, and its permitted set is **this repository's**, extracted
   from the existing `[Unreleased]` and released sections rather than imported. Forcing a mapping
@@ -176,10 +244,260 @@ detects the failure it exists for, alongside its accepting fixture.
    and `skills/fsl/reference.md` (`AGENTS.md`, "A language feature moves with …";
    `CONTRIBUTING.md`, "Language or semantics"). Rejecting fixture: exactly such a synthetic
    diff → exit 1, `changelog-fragment-missing: <changed paths>`. A fragment must also carry
-   content: a whitespace-only fragment body → exit 1, `changelog-fragment-empty: <file>`.
-   The release-time net — aggregating an entirely empty `changelog.d/` → exit 1,
-   `no-fragments-to-aggregate` — stays as a sanity floor only; it cannot see a single missing
-   entry, which is control 5's job.
+   content: a whitespace-only fragment body → exit 1, `changelog-fragment-empty: <file>`, and
+   this applies to a fragment this diff *modifies* down to whitespace, not only one it adds
+   empty — a status-`M` fragment is checked the same way a status-`A` one is (S4-3; review,
+   #737, comment 2026-08-07). A fragment counted toward this rule must also be a direct child
+   of `changelog.d/`: a name under a subdirectory (`changelog.d/sub/x.added.md`) does not count
+   as coverage and is separately rejected outright (control 6, below).
+
+   **Correction (M1; review, #737, comment 2026-08-07, third round): this paragraph previously
+   said aggregating an entirely empty `changelog.d/` exits 1 with `no-fragments-to-aggregate` "as
+   a sanity floor". That behavior no longer exists, and the claim contradicted the zero-fragment
+   release decision recorded above (S3-2, second round): `release` accepts an empty
+   `changelog.d/` and moves whatever the `[Unreleased]` body already held — nothing, in the
+   ordinary post-migration steady state — under the new version heading, the same as any other
+   release. This control was never the mechanism that catches a single missing entry in any
+   case; that is control 5's job (byte conservation between the fragments present and the
+   rendered section), which cannot see an entry that was never filed as a fragment at all — no
+   release-time check in this mechanism can, by construction, since the fragment simply does not
+   exist for it to compare against. The actual backstop for "a product change with no fragment"
+   is control 1 itself, enforced at `check-pr` time, before the change ever reaches a release.
+
+   **Release exclusion (S2-1; review, #737, comment 2026-08-07).** As originally specified,
+   this control cannot be satisfied by the release process it must not block:
+   `docs/RELEASE.md` steps 4–7 bump product-surface files (`rust/Cargo.toml`,
+   `rust/Cargo.lock`, the domain characterization baseline) and the aggregator *deletes* the
+   fragments it consumes — the release commit never *adds* one, and control 4's `check-stale`
+   already forbids the workaround of leaving a never-aggregated dummy fragment behind (it
+   surfaces at tag time as `stale-fragments-present`).
+
+   **Correction (review, #737, comment 2026-08-07, second round): the first implementation of
+   this exclusion was over-wide, and the argument that it wasn't was falsified by execution.**
+   That version fired whenever the same diff both deleted at least one top-level fragment and
+   left `CHANGELOG.md` with git status `M`, on the claim that control 4
+   (`check_direct_edit`/`classify_direct_edit`) independently validates that the diff really is
+   a conforming release move. It does not: `classify_direct_edit`'s own first check returns
+   `"unchanged"` — imposing no constraint on anything else in the file — the instant the
+   `[Unreleased]` body's raw text is byte-identical between base and head, and a diff that
+   deletes a fragment and edits `CHANGELOG.md` **anywhere outside that body** (a historical typo
+   fix, a stale `[Unreleased]:` link reference, a fabricated version section, or merely a
+   trailing newline) leaves the body untouched while still satisfying the old exclusion's
+   git-status-only test. Four such non-release diffs — each changing a product surface,
+   deleting a fragment, and editing `CHANGELOG.md` outside the `[Unreleased]` body — all passed
+   `check-pr` under that version; one of them only appended a single newline. The exclusion is
+   now defined directly on `classify_direct_edit`'s own classification, computed once by
+   `compute_direct_edit_classification` and consumed by both this control and control 4, so
+   they cannot disagree: it fires exactly when that classification is `"release-move"` —
+   reached only after `classify_direct_edit` has confirmed the body was actually emptied and
+   replaced by a correctly formatted new version heading whose section starts with that same
+   body, with nothing else in the file touched. A diff that merely deletes a fragment and edits
+   `CHANGELOG.md` for an unrelated reason still leaves the body byte-identical, still
+   classifies as `"unchanged"`, and still fails `check-pr` — as `changelog-fragment-missing` if
+   the diff never emptied the body at all (typo fix, link-reference edit, trailing newline), or
+   as `changelog-direct-edit-forbidden` if it emptied the body without actually performing a
+   valid release move (a fabricated version section left in place). The exclusion also no
+   longer requires a deleted fragment (the zero-fragment-release correction just below): a
+   validated `"release-move"` classification is already the full, structurally verified signal,
+   and a release with zero fragments to aggregate is a legitimate release shape in its own
+   right. Accepting fixtures: the full release shape, product-surface changes and fragment
+   deletions in one diff, produced by the real `release` subcommand and driven through the real
+   `BASE_SHA`/`HEAD_SHA` wrapper end to end; and the same, with zero fragments. Rejecting
+   fixtures: the four falsifying variants above, each built as a real end-to-end diff and driven
+   through `check-pr`, plus the narrower shapes a wider exclusion would have reopened (a
+   fragment deletion with no `CHANGELOG.md` edit, and a `CHANGELOG.md` edit with no fragment
+   deletion).
+
+   **Correction (H1; review, #737, comment 2026-08-07, third round): the round-2 fix above was
+   itself too wide, and in the direction that matters more, because "release-move" turned out to
+   be self-authorable at zero cost.** In the steady state this mechanism creates — the
+   `[Unreleased]` body permanently empty, every entry living under `changelog.d/`, and control 4
+   forbidding a direct body edit — adding **one line**, an empty `## [X.Y.Z] - YYYY-MM-DD` heading
+   immediately after `## [Unreleased]`, makes `classify_direct_edit` report `"release-move"` for
+   free: there is no body to move, so the forgery costs nothing. The round-2 exclusion then waived
+   **every** product-surface path in the same diff once that one classification held, not only the
+   paths a genuine release commit actually bumps. Reproduced live before this fix: a control
+   (product change, no fragment, `CHANGELOG.md` untouched) correctly failed with exit 1
+   (`changelog-fragment-missing`); the same change plus one forged empty version heading passed
+   with exit 0; the same forgery against a brand-new `rust/` file also passed with exit 0; and a
+   non-adversarial, hand-verified full release move (body genuinely moved, matching
+   `classify_direct_edit`'s own validation) carrying an unrelated product change in the same
+   commit also passed with exit 0. Two non-adversarial paths reached the identical gap without any
+   forgery at all: a genuine release commit that also carries an unrelated product change in the
+   same commit (`docs/RELEASE.md` bundles steps 4–10 into one commit, so this applies to every
+   release), and a branch whose `BASE_SHA` predates a release that has since landed on `main`.
+
+   **Fix: the exclusion now names the exact, measured set of paths a release commit legitimately
+   bumps, and exempts only those, not every product-surface path in a release-move diff.** A new
+   function, `is_release_bump_path` (beside `classify_product_diff` in
+   `tools/aggregate_changelog.sh`), holds this fixed, small set. It was measured directly against
+   this repository's release history with `git show --name-status --format= <sha>` on each of
+   `56d5b1a` (v4.2.0), `473239a` (v4.1.0), `7b8607a` (v4.0.0), and `e1dfdcb` (v3.1.0): the touched
+   path set is byte-identical across all four, every entry status `M` (no release commit adds a
+   file here) —
+
+   ```
+   CHANGELOG.md
+   editors/vscode/package-lock.json
+   editors/vscode/package.json
+   rust/Cargo.lock
+   rust/Cargo.toml
+   rust/fslc/tests/fixtures/domain_characterization/baseline.v1.json
+   ```
+
+   — of which `is_release_bump_path` holds exactly the three that are product surfaces under
+   `is_product_surface_path`: `rust/Cargo.lock`, `rust/Cargo.toml`, and the domain
+   characterization baseline. `CHANGELOG.md` is excluded because it is governed separately, by
+   `classify_direct_edit`/control 4. `editors/vscode/package.json`,
+   `editors/vscode/package-lock.json`, and `docs/RELEASE.md` (which `7b8607a` also touched) are
+   excluded because none of them is a product surface, so control 1 never asks about them and
+   this predicate is never consulted for them.
+
+   **Correction (F3; review, #737, comment 2026-08-08, fourth round): the two `editors/vscode/`
+   paths were in the set, and were unreachable.** `classify_product_diff` reaches
+   `is_release_bump_path` only inside its `is_product_surface_path` branch, and
+   `editors/vscode/*` matches none of
+   `rust/*|src/fslc/*|specs/*|examples/*|docs/LANGUAGE*|skills/fsl/reference.md`. Deleting both
+   entries left `selftest` fully green — unreachable code that reads like coverage. The record
+   also described the measured set as the touched *product-surface* path set, applying that
+   filter explicitly to keep `docs/RELEASE.md` out while not applying it to these two. Both
+   entries are removed, and the measurement is now stated as the touched *path* set with the
+   product-surface filter applied afterward, in the open.
+
+   `classify_product_diff` checks each product-surface path individually: a path in
+   `is_release_bump_path`'s set is exempt exactly when the diff's classification is
+   `"release-move"` (unchanged from round 2); a path outside that set still demands a fragment in
+   the same diff, and the `changelog-fragment-missing` diagnostic names exactly the non-exempt
+   paths, not the exempt ones riding alongside them. **A maintainer must add an exact path to
+   `is_release_bump_path` whenever either side of that filter moves: a `docs/RELEASE.md`
+   release-commit step that starts touching a new product-surface path, or an
+   `is_product_surface_path` that widens to cover a path releases already touch (`editors/vscode/*`
+   is the live candidate). Otherwise every future release commit starts failing its own
+   `changelog-fragment-missing`.**
+
+   The forgery's blast radius is now bounded to those three paths. The forged heading plus a
+   change to, say, `rust/fsl-core/src/lib.rs` fails, because `lib.rs` is not a release-bump
+   surface. Both non-adversarial paths become correct rejections: a release commit carrying an
+   unrelated product change now needs a fragment for that unrelated change, the same as any other
+   pull request would; a branch whose base predates a landed release is unaffected by this
+   narrowing at all (it depends on the merge-base fix, S2-2/round 2, not on this exclusion).
+   Accepting fixtures: the full release shape and the zero-fragment release, both extended to name
+   every reachable `is_release_bump_path` entry (F2, below). Rejecting fixtures: a
+   `"release-move"`-classified diff carrying a product-surface path outside the release-bump set,
+   with the diagnostic checked to name only that path; and the forged-heading end-to-end shape
+   above in three variants (an existing tracked file, a brand-new `rust/` file, and a
+   hand-verified genuine release move), each built as a real end-to-end diff and driven through
+   `check-pr`.
+
+   **Accepted residual (F4; review, #737, comment 2026-08-08, fourth round). This narrowing
+   bounds the forgery; it does not close the class, and an earlier version of this record
+   overclaimed that it did ("the forgery above now buys nothing").** Measured on the fixed tree,
+   in the steady state: one added line — `## [9.9.9] - 2026-08-08` immediately after
+   `## [Unreleased]` — plus changes to `rust/Cargo.toml` and the domain characterization baseline
+   and no fragment passes `check-pr` with exit 0, where the identical diff without the forged
+   heading fails with `changelog-fragment-missing` naming both paths. `"release-move"` remains
+   self-authorable at zero cost, because a release move *is* structurally just that edit: nothing
+   inside `CHANGELOG.md` distinguishes a genuine one from a forged one, and a forger's diff shape
+   is a subset of a real release's. **Decided: accept the residual and state its exact bound here
+   rather than add a discriminator.** The bound is three paths, two of them version strings and
+   one a generated snapshot that `AGENTS.md` governs separately ("Do not hand-edit generated
+   compatibility snapshots"); the price of reaching it is a fabricated version heading committed
+   into `CHANGELOG.md`, which is visible in any review of the diff and is itself a
+   control-4-shaped lie rather than an omission. Reversal condition: if a release-commit step ever
+   adds a path to this set whose contents are not reviewable at a glance, close the class instead
+   — for example by requiring the new heading's version to match `rust/Cargo.toml`'s workspace
+   version at `HEAD_SHA`.
+
+   **Correction (F1; review, #737, comment 2026-08-08, fourth round): a rename into a product
+   surface escaped control 1 entirely.** `classify_product_diff` read `git diff --name-status`
+   with `while IFS=$'\t' read -r status path`, two variables. A rename or copy record carries
+   **three** tab-separated fields (`R100<TAB>old<TAB>new`), and `diff.renames` is on by default,
+   so the trailing fields collapsed into `$path` as `old<TAB>new` and every predicate tested the
+   *source*. Reproduced live, same base, no forgery and no `CHANGELOG.md` edit: `git mv
+   tools/mover.txt rust/moved.rs` with no fragment passed `check-pr` with exit 0, and so did a
+   `git mv docs/note.md specs/note.fsl` carrying an edit (`R084`). The calibrating control is
+   sharp — the *identical* content change, rendered by git as `A`/`D` because the contents were
+   dissimilar, failed closed with `changelog-fragment-missing`. Whether control 1 fired therefore
+   depended on git's similarity heuristic rather than on what changed. A rename *within* a
+   product surface still failed closed, but named the tab-joined pair
+   (`rust/keep.rs<TAB>rust/renamed.rs`) in its diagnostic instead of the destination.
+   `tools/check-product-gate-scope.sh`, the sibling this tool is modelled on, is immune for free
+   because `git diff --name-only` prints both sides of a rename on separate lines; this tool
+   needs the status column, so the divergence from the sibling is where the defect entered.
+   **Fix:** read a third field and, for a status beginning `R` or `C`, classify the destination.
+   Rejecting fixtures: the rename into `rust/`, the rename-with-edit into `specs/`, and a copy
+   into `rust/`, each as a unit fixture over `classify_product_diff`, plus a real `git mv` driven
+   end to end through `check-pr` against real git rename detection — the unit fixtures feed a
+   hand-written `R100` line and so cannot prove git emits that shape here. Accepting controls:
+   the identical rename *with* a fragment in the same diff, a rename *out* of a product surface
+   (which correctly owes nothing), and a content assertion that the diagnostic names the
+   destination alone. Reverting the fix fails 6 assertions.
+
+   **Correction (F2; review, #737, comment 2026-08-08, fourth round): this round's own new
+   constant had a surviving gutted mutant.** `is_release_bump_path`'s membership is load-bearing
+   in both directions — remove an entry and every future release commit fails its own
+   `changelog-fragment-missing`; add one and it becomes forgeable for free under the residual
+   above — yet the accepting fixtures named only `rust/Cargo.toml` and `rust/Cargo.lock`.
+   Deleting `rust/fslc/tests/fixtures/domain_characterization/baseline.v1.json` from the set left
+   `selftest` fully green: the one entry that is a generated product artifact rather than a
+   version string was pinned by nothing. Same class as the two M2 survivors this document records
+   above, shipped in the same round's new code. **Fix:** both the full-release and zero-fragment
+   accepting fixtures now name every reachable entry, so deleting any of them fails closed
+   (2 assertions for the baseline, 5 for `rust/Cargo.lock`).
+
+   **M2, third mutant (review, #737, comment 2026-08-07, third round; decided, not covered): the
+   `release` subcommand's own empty-fragment guard (`fragment_is_empty "$fragdir/$f" && fail
+   "changelog-fragment-empty: …"`, checked against every fragment about to be aggregated) is a
+   duplicate of `check_missing_or_empty_fragment`'s check on the `check-pr` side — the same
+   underlying defect (an empty fragment reaching a release) is already caught earlier, at merge
+   time, on every path that matters, before a release commit is ever produced by a conforming
+   process. Deleting `release`'s own guard would only be reachable by driving `release` directly
+   against a `changelog.d/` that never passed `check-pr` at merge time. **Decided:** left
+   uncovered by its own rejecting fixture; the `check-pr`-side coverage (S4-3, above) is the
+   fixture that matters for the reachable path, and duplicating it here would test the same
+   assertion against the same underlying function twice.
+
+   **Zero-fragment release (review, #737, comment 2026-08-07, second round — this is a distinct
+   finding from the "Record correction (S3-2; …)" paragraph below, which corrected this same
+   document's description of control 4's exclusion scope; the second review round happened to
+   assign the label "S3-2" to this different finding too, in its own severity list): a version
+   bump with no product-facing content since the previous release is a legitimate release, and
+   both the manual and automated paths must agree on that.** Before this correction they did
+   not: `aggregate_changelog.sh release` hard-failed `no-fragments-to-aggregate` on an empty
+   `changelog.d/`, so `docs/RELEASE.md` step 7 could not even run for that release shape; and
+   performing the move by hand and running `check-pr` still failed `changelog-fragment-missing`,
+   because the (now-corrected) release exclusion additionally required at least one deleted
+   fragment. **Decided:** `release` no longer requires a non-empty `changelog.d/` — an empty one
+   aggregates to an unchanged (already-empty, or whatever it already held) `[Unreleased]` body
+   moved under the new version heading, same as any other release, just with nothing appended —
+   and `check-pr`'s release exclusion no longer requires a deleted fragment, only the validated
+   `"release-move"` classification above. `docs/RELEASE.md` step 7 records this.
+
+   **Body hygiene (S4-4; review, #737, comment 2026-08-07).** A non-empty body can still
+   corrupt the rendered bullet once the aggregator's own "- "/"  " markers are added in front
+   of it: a body starting with `- `, `* `, or `+ ` doubles the list marker (`- - like this`); a
+   body starting with an ATX heading marker renders as a bulleted heading (`- ### Added`)
+   instead of the heading it looks like it should have been; a stray carriage-return byte
+   survives into the LF-only file as a literal `\r`. `validate_fragment_hygiene` rejects all
+   three → exit 1, `changelog-fragment-hygiene-invalid: <file>`, at the same points `check`,
+   `check-pr`, and `release` already validate names and duplicates. This is content-scoped and
+   therefore distinct from control 5 (which only checks that content, whatever its shape, is
+   conserved) and this control's own emptiness check (which only checks that content exists) —
+   neither would catch a body that is well-formed non-empty text but starts with a marker the
+   aggregator's own markup collides with.
+
+   **Precision correction (round-2 findings, S4; review, #737, comment 2026-08-07, second
+   round).** Two wording gaps in the paragraph above, both fixed in `validate_fragment_hygiene`
+   without changing which bodies are rejected except where noted: (a) the heading check is
+   CommonMark's own ATX-heading grammar, `#` through `######` **followed by a space** — not a
+   bare leading `#` — so a body starting with a bare issue reference like `#737: …` (no space
+   after the `#`) is not an ATX heading and must be accepted, not rejected; an earlier version
+   of this check rejected any leading `#` regardless of a following space, which is strictly
+   broader than the heading shape it exists to catch. (b) the CRLF diagnostic's wording claimed
+   to detect "a CRLF line ending", but the underlying check (`grep -qU $'\r'`) matches any
+   carriage-return byte, including a bare mid-line CR that is not part of a CRLF pair; the
+   rejection was always this broad, only the message was narrower than the check — the message
+   now says "a carriage-return byte" and the CRLF/bare-CR distinction is no longer implied.
 2. **Duplicate id.** The duplicate key is the pair **(numeric id, section)**, where the id is
    the decimal integer parsed from the fragment filename's leading digits — `0691-…` and
    `691-…` therefore declare the same id, and control 3's sort key uses the same parsed
@@ -224,18 +542,81 @@ detects the failure it exists for, alongside its accepting fixture.
    `changelog-direct-edit-forbidden`. Both directions are load-bearing: an added line
    duplicates authority, and a deleted line erases someone else's pending entry; the
    rejecting fixtures are one diff of each kind. This check is what keeps authority single
-   (next section).
+   (next section). The diff is read against the **merge base** of `BASE_SHA`/`HEAD_SHA`
+   (`git merge-base`), matching this repository's own three-dot-diff convention (`ci.yml`,
+   `tools/check-product-gate-scope.sh`) — not against `BASE_SHA`'s own tip. `BASE_SHA` is the
+   base branch's *current* tip, which moves every time something else lands on it; reading
+   `CHANGELOG.md` straight from it compares a pull request's untouched `[Unreleased]` body
+   against a *different* `[Unreleased]` body whenever a release has landed on `main` since the
+   branch forked, and misnames every such pull request `changelog-direct-edit-forbidden` for
+   an edit it never made (implementation correction, S2-2; review, #737, comment 2026-08-07:
+   an earlier version of this control read `BASE_SHA`'s tip directly). Accepting fixture: base
+   advanced by a release, a feature branch that never touched `CHANGELOG.md`, driven through
+   the real `BASE_SHA`/`HEAD_SHA` wrapper end to end.
 
-   **Two diffs must be excluded, or the check blocks its own rollout.** The migration pull
-   request converts the existing `[Unreleased]` body — 442 lines at the measurement
-   revision — into fragments, and the first post-migration release moves whatever remains
-   under a version heading. Both are deletions from the `[Unreleased]` body and both would
-   be rejected by the rule as stated. The exclusion must be explicit and narrow: a diff
-   that empties the `[Unreleased]` body while adding the same content under `changelog.d/`
-   or under a new `## [X.Y.Z]` heading, and nothing else. Anything broader reopens the
+   **Implementation correction (this pull request; #737, comment 2026-08-07): the migration
+   pull request does not convert the existing body, so only one exclusion is needed, not two.**
+   This section originally read: "The migration pull request converts the existing
+   `[Unreleased]` body — 442 lines at the measurement revision — into fragments, and the first
+   post-migration release moves whatever remains under a version heading. Both are deletions
+   from the `[Unreleased]` body and both would be rejected by the rule as stated," and asked
+   for two exclusions accordingly. Measured at implementation time, that migration cannot work:
+   of the `[Unreleased]` body's 27 top-level bullets (620 lines by then), 10 are in
+   `- <Lead> (#NNN):` form, from which a fragment's required id can be parsed. Of the other 17,
+   3 carry an id outside that parenthesized-lead-word position: the boundary case `- Fixed
+   (#720 Finding 1): …` (parenthesized, but with trailing text after the number, so it does not
+   match the strict `(#NNN)` shape and is one of the 3, not one of the 10), and two unparenthesized
+   ids, `- Required the complete Linux evidence on \`main\`, closing the gap #707` and `- Fixed
+   issue #697: …`. **14 carry no id of any kind.**
+
+   **Correction (id-count correction; review, #737, comment 2026-08-07, second round; further
+   corrected, second review round): the bare split above — 10 / 17 (3 + 14) — is correct and is
+   the only form used here; two earlier drafts of this same paragraph were not.** The first draft
+   said 11 in `- <Lead> (#NNN):` form and 16 with no id at all — wrong. A later draft fixed the
+   totals to 10 and 17 but introduced a parenthetical claiming the 10 was "counting the boundary
+   case `- Fixed (#720 Finding 1): …`" — which contradicts the same paragraph's own "3" figure:
+   the boundary case's parenthesized id carries trailing text (`Finding 1`) after the number, so
+   it does not match the strict `(#NNN)` shape and cannot be one of the 10 without shrinking the
+   3-carrying-an-id-outside-position bucket to 2, which the paragraph never did. That draft also
+   named `#697` as if it were both one of "two unparenthesized" examples and a separate "plus"
+   example, effectively citing the same bullet twice while never actually naming the boundary
+   case as the third member of the 3. The wording above fixes both: the boundary case is
+   explicitly the third member of the 3, and `#697` and `#707` are named once each, as the two
+   distinct unparenthesized examples they are. The conclusion is unchanged throughout: those 14
+   alone are enough to make the conversion impossible: control 6 (nonconforming fragment name,
+   which rejects a name with no leading digits) would reject every fragment the conversion tried
+   to produce for them.
+   **The migration pull request instead creates `changelog.d/` and routes only new entries
+   through it, leaving the existing `[Unreleased]` body untouched**; the first post-migration
+   release still moves that body under a version heading (`docs/RELEASE.md` step 7) in the same
+   step that aggregates whatever has accumulated under `changelog.d/` by then, which is exactly
+   the second of the two diffs this section originally named. Only that one exclusion is needed:
+   a diff that empties the `[Unreleased]` body while adding the same content under a new
+   `## [X.Y.Z]` heading, and nothing else. The first exclusion (emptying the body into
+   `changelog.d/`) is removed rather than kept unused — a narrower exclusion reopens less of the
+   direction this control closes than a broader one that this implementation never exercises.
+   Anything broader than the one remaining exclusion reopens the
    direction this control exists to close. The `## [Unreleased]` heading line itself is
    outside the body and therefore unprotected; deleting or renaming it would unanchor every
    later check, so the rule must reject a diff that touches that line too.
+
+   **Record correction (S3-2; review, #737, comment 2026-08-07): the implemented exclusion is
+   wider than "release move, and nothing else" as this section states it, and the
+   implementation is right; this paragraph was narrower than the code.** `check_direct_edit`
+   additionally (a) drops a trailing contiguous block of `[X]: url` Markdown link-reference
+   lines from both the base and head snapshots before comparing everything after the moved
+   section (`strip_link_ref_tail`), and (b) never compares anything **before** the
+   `## [Unreleased]` heading at all — only the body inside it and everything from the next
+   `## [` heading onward are checked. Both are necessary, not scope creep: `docs/RELEASE.md`
+   lines 105–106 require updating the `[Unreleased]`/`[X.Y.Z]` link references in the same
+   release commit that moves the body, which is itself a change to content after the moved
+   section — without (a), every real release would fail this control on its own required
+   link-reference update. (b) is unexercised in practice (nothing precedes `[Unreleased]`
+   except the file's title and intro, which no migration or release step touches) but is a
+   real gap: a diff that only edits the file's title or intro line is not checked by this
+   control at all. Neither weakens what this control exists to stop — a fragment's authority
+   still cannot be duplicated or erased by a direct `[Unreleased]` edit — so this record, not
+   the implementation, is the thing corrected here: the code was already right.
 5. **Silent drop at aggregation (conservation).** Controls 1–4 leave one direction open: an
    aggregation that deletes a fragment whose content never reaches the version section. At
    release `changelog.d/` ends up empty, so `stale-fragments-present` stays silent, and the
@@ -264,6 +645,18 @@ detects the failure it exists for, alongside its accepting fixture.
    three fragments must be rejected with `fragment-dropped` naming the dropped file; a sham that
    copies only each fragment's first line must be rejected too. The accepting fixture is the
    faithful aggregation of the same three, including one multi-line fragment.
+
+   **Implementation correction (S4-1; review, #737, comment 2026-08-07): "reaches" must mean
+   per-bullet identity, not substring containment.** The original predicate checked only that
+   each fragment's rendered block appeared *somewhere* in the produced text and that the
+   top-level bullet count matched the fragment count. Both hold for an aggregator that drops
+   fragment A (body `Fixed (#1): a.`) and emits fragment B (body `Fixed (#1): a.\nmore
+   detail.`) **twice**: the bullet count is still 2-for-2, and A's entire rendered block is a
+   byte-for-byte prefix of B's, so the substring scan finds it — inside the duplicate, not in
+   A's own position. `verify_conservation` now compares bullet *i* of the produced text against
+   `render_fragment` of fragment *i* in the declared sort order, position for position; the
+   dropped fragment's own position no longer holds its own block, so it fails. This sham is a
+   third required rejecting fixture, alongside the dropping and truncating ones above.
 6. **Nonconforming fragment name.** The only shape control the set otherwise lacks. A file under
    `changelog.d/` whose name has no leading digits, or whose `<category>` is outside the
    declared set, has no defined id and no defined sort position — controls 2 and 3 are both
@@ -274,6 +667,105 @@ detects the failure it exists for, alongside its accepting fixture.
    conforming name for each category in the declared set. Without this control both defects reach
    release and surface as `stale-fragments-present`, which fails loudly but late and names the
    wrong cause.
+
+   **Implementation correction (S2-3; review, #737, comment 2026-08-07): a fragment is not
+   permitted in a subdirectory of `changelog.d/`, and that must be enforced, not merely
+   assumed.** `changelog.d/sub/2-x.added.md` satisfies control 1's shallow path check (a bash
+   glob's `*` crosses `/`), because `parse_fragment_name` itself would accept its basename —
+   but `list_fragment_files` (and therefore controls 2 and 3, `check-stale`, and `release`'s
+   aggregation) globs only `"$dir"/*.md` and never enumerates it. Left unfixed, such a fragment
+   is silently lost: `check-pr` passes, `check-stale` passes because it sees an empty
+   `changelog.d/`, and `release` aggregates every fragment it *can* see and reports success —
+   exactly the failure control 5 exists to prevent, occurring entirely outside control 5's
+   reach, because the fragment was never part of what control 5 compares against. Decided:
+   subdirectories are not a supported fragment shape, at the same earliest point
+   (`validate_fragment_names`, shared by `check`, `check-pr`, and `release`) that this control's
+   own name-shape check runs, with its own diagnostic, `changelog-fragment-path-invalid: <path>`,
+   naming the actual defect rather than surfacing later as a silently-smaller
+   `stale-fragments-present` count or, worse, no failure at all.
+
+   **Generalization (round-2 finding S3-1; review, #737, comment 2026-08-07, second round —
+   distinct from the S3-1 `CONTRIBUTING.md` coupled-change gap noted under migration site 4
+   below; the second review round assigned "S3-1" to this finding too, in its own severity
+   list): the subdirectory fix above closed one instance, not the class.** A top-level
+   **dotfile**, `changelog.d/.9-hidden.added.md`, reproduces the identical silent loss through a
+   completely different mechanism: `is_top_level_fragment_path`'s `case`-pattern path check is
+   not pathname expansion, so its `*` matches a leading dot fine and the diff-level check counts
+   it as coverage, but `list_fragment_files`' own glob, `"$dir"/*.md`, is pathname expansion, and
+   POSIX pathname expansion's bare `*` does not match a leading dot — so `list_fragment_files`
+   silently skips it, exactly as it silently skipped the nested case. `check-pr` passed,
+   `check`/`check-stale` passed because they saw the fragment as absent, and `release` aggregated
+   every fragment it could see and reported success while the hidden entry's content never
+   reached `CHANGELOG.md` — the identical root cause (control 1's path predicate and
+   `list_fragment_files`' enumeration are two independently glob-shaped questions that can each
+   accept a shape the other silently drops) reproducing the identical failure through a sibling
+   shape. The fix generalizes at the enumeration boundary itself rather than adding a third
+   shape-specific check: `reject_unenumerable_fragments` rejects **any** file under
+   `changelog.d/` (at any depth) that `list_fragment_files` will not enumerate, the top-level
+   `README.md` excepted — this single function now does the job `reject_nested_fragments` did
+   (the subdirectory case is one instance of "not enumerable") and closes the dotfile case with
+   it, in one place. `check_stale` also calls it directly, so a fragment invisible to
+   `list_fragment_files` cannot reach tag time invisibly either — closing the `check`/`check-stale`
+   half of the original finding, not only `check-pr`'s. Rejecting fixture: the dotfile above,
+   checked against `reject_unenumerable_fragments`, `validate_fragment_names`, and `check_stale`
+   directly. Accepting fixture: a directory holding only `README.md` remains valid — the
+   generalization does not sweep up the one file it must still exempt.
+
+   **L3 exemption (review, #737, comment 2026-08-07, third round): a small, named set of routine,
+   local-environment artifacts is exempted alongside `README.md`.** `changelog.d/.DS_Store`
+   (routine on macOS), `.gitkeep`, and an editor swap file (`*.swp`, `*.swo`) all fail local
+   `check`/`check-pr`/`check-stale` under the blanket dotfile/unenumerable-file rejection above,
+   measured exit 1 (`changelog-fragment-path-invalid`) in every case — a routine false positive
+   round one's reversal condition (a) treats as grounds for no-go. None of them can ever be an
+   attempted fragment (none end in `.md`), so exempting them by exact basename
+   (`is_known_non_fragment_artifact`) costs this control nothing it exists to catch; a near-miss
+   name outside that exact set (`9-x.added.md.bak`) is still rejected, so the exemption does not
+   widen into a new hiding place. Git does not create or track any of these on its own, so a CI
+   checkout is unaffected either way — measured, the same as round two's dotfile finding was, not
+   asserted. **Decided:** exempt.
+
+   **L1 (review, #737, comment 2026-08-07, third round; decided, not fixed): the enumeration
+   boundary this control patrols is regular files only, and the record should say so plainly
+   rather than imply total coverage.** `reject_unenumerable_fragments` walks with
+   `find "$dir" -type f`, which does not see non-regular files. Measured invisible to it
+   (`reject_unenumerable_fragments`'s own exit code is 0 — it does not even see these paths to
+   reject them): a broken symlink with a conforming fragment name (no content behind it, so no
+   loss — `list_fragment_files`' glob still matches it by name and enumerates it, same as any
+   other `*.md` path) and a symlink to a directory that itself contains real fragment files (a
+   genuine silent loss: `find`'s default physical mode does not descend into a symlinked
+   directory, so nothing under it is ever seen by this control, `check-stale`, or `release`'s
+   aggregation). Constructing the second case requires deliberately committing a symlink into
+   `changelog.d/` pointing at another in-repo directory that itself holds fragment-shaped files —
+   a shape with no plausible accidental origin, unlike the subdirectory and dotfile cases round
+   two closed (an ordinary `mkdir`/save-as with no unusual intent). **Decided:** left unhandled;
+   this paragraph itself is the correction to the record, which previously implied
+   `reject_unenumerable_fragments` rejects everything `list_fragment_files` will not enumerate
+   without qualification. It rejects everything of that description among **regular files**;
+   extending it to symlinks, if ever warranted, is a `find -type l` (or `-type f -o -type l`)
+   addition to the same one function, not a design change.
+
+   **L2 (review, #737, comment 2026-08-07, third round; decided, not fixed): a directory shaped
+   like a fragment name fails closed, but without a control-specific diagnostic.**
+   `changelog.d/3-x.added.md/` — a directory, not a file, sharing a fragment's name — passes `-e`
+   in `list_fragment_files`' loop (which tests existence, not regular-file-ness), so
+   `list_fragment_files` enumerates it as if it were a fragment, and the first place that tries to
+   read its content as text (`awk`, inside `check`/`release`'s aggregation) dies with
+   `awk: i/o error` and exit 2, measured. This is fail-closed — `CHANGELOG.md` is never rewritten,
+   nothing is silently lost — it simply surfaces as an `awk` error rather than a named
+   `changelog-fragment-*` diagnostic naming the actual defect. Committing a directory under this
+   name into git requires the directory to hold at least one file itself (git does not track empty
+   directories), a shape with no ordinary accidental origin. **Decided:** left as an unlabeled but
+   fail-closed exit 2, not given a dedicated diagnostic; the cost of a defect this contrived and
+   this loudly (if not legibly) fail-closed does not currently justify a seventh named failure
+   mode.
+
+   **L4 (review, #737, comment 2026-08-07, third round; decided, not fixed): a zero-fragment
+   release emits one stray blank line.** Measured: aggregating an empty (or already-empty-bodied)
+   `[Unreleased]` into a new version heading leaves three newlines between the new heading and the
+   next section instead of the two every other section boundary in this file uses. It has no
+   effect on idempotence, on `classify_direct_edit`'s classification, or on any control's verdict
+   — purely cosmetic. **Decided:** left as is; worth a one-line fix if `release` is touched again
+   for another reason, not on its own.
 
 ### Single authoritative source, preserved
 
@@ -306,8 +798,10 @@ rollback below trivial.
    - `AGENTS.md`, in **both** places: the commit convention ("add notable changes under
      `CHANGELOG.md` `[Unreleased]`") and the feature-moves list ("… a design note, and
      `CHANGELOG.md`") take the fragment wording.
-   - `CONTRIBUTING.md`, the same two shapes: the "Language or semantics" guideline and the
-     commits/pull-requests checklist.
+   - `CONTRIBUTING.md`, **three** shapes, not two: the "Language or semantics" guideline, the
+     "Public Kernel contract" guideline (found unmigrated in review, #737, comment 2026-08-07,
+     S3-1 — it sits right next to "Language or semantics" and was missed in the first pass),
+     and the commits/pull-requests checklist.
    - `.claude/hooks/changelog_reminder.py` — `needs_reminder` matches `path ==
      "CHANGELOG.md"` exactly. Unmigrated, every fragment-only product change would trip its
      "product source changed but CHANGELOG.md did not" reminder permanently, manufacturing
@@ -321,7 +815,14 @@ rollback below trivial.
    - `.claude/agents/fsl-coupled-change-reviewer.md` (a `CHANGELOG.md` dependency; it does
      not name `[Unreleased]`) and `.claude/skills/add-language-feature/SKILL.md` (which does)
      — both instruct a `CHANGELOG.md`
-     `[Unreleased]` entry and take the fragment wording.
+     `[Unreleased]` entry and take the fragment wording. `fsl-coupled-change-reviewer.md`'s
+     own "Public Kernel changes" coupling item was also found unmigrated (S3-1, same review
+     comment) and takes the fragment wording too.
+   - `docs/DESIGN-kernel-contract.md` (its Kernel-schema-change coupling sentence) and
+     `docs/DESIGN-saga-history.md` (its saga-implementation follow-up list) — both found
+     unmigrated in the same review pass (S3-1): a Kernel schema change or the saga
+     implementation necessarily touches `rust/`, so following either document's un-migrated
+     instruction would produce a diff control 4 rejects.
 5. `docs/DESIGN-ci.md` — amend the "Agent-configuration exemption" decision for site 2.
    That document states growing the exempt list "is a contract change to this decision, not a
    script tweak" and requires naming every path that reads the new entry with its unfiltered

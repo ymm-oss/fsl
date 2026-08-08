@@ -55,7 +55,8 @@ language/lowering implementation, including:
   control;
 - concrete/symbolic agreement, dialect registry, LSP indexing where syntax
   changes, English/Japanese language documentation, skill reference, examples,
-  and changelog.
+  and a `changelog.d/<id>-<slug>.<category>.md` fragment (see `changelog.d/README.md`)
+  rather than a direct `CHANGELOG.md` edit.
 
 Until that follow-up lands, `domain check` warnings for structurally disabled
 saga actions remain valid evidence. They must not be suppressed or replaced by
