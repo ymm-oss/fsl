@@ -6818,15 +6818,12 @@ fn run_domain_check(
 
 fn run_domain_analyze(path: &Path) -> (Value, i32) {
     match parse_domain_document(path) {
-        // Issue #726: `analyze` is the last raw-`DomainSpec` consumer that did
-        // not route through the shared lowerable-construct guard, so it
-        // accepted specs that `check`/`domain expand` reject fail-closed.
-        // Route through the same guard those sibling paths already call
-        // (`fsl_core::validate_lowerable_constructs`, shared by `lower_domain`
-        // and `domain_kernel_source`) instead of re-deriving its rejection
-        // rules here.
-        Ok(domain) => match fsl_core::validate_lowerable_constructs(&domain) {
-            Ok(()) => wrap_specialized(fsl_tools::analyze_domain(&domain)),
+        // Issue #726: `fsl_tools::analyze_domain` itself is now fail-closed
+        // (it routes through the same lowerable-construct guard
+        // `check`/`domain expand` reach via `domain_kernel_source`), so this
+        // call site no longer needs its own guard call.
+        Ok(domain) => match fsl_tools::analyze_domain(&domain) {
+            Ok(result) => wrap_specialized(result),
             Err(error) => (core_error_output(&error), 2),
         },
         Err(error) => (semantic_error_output(&error), 2),

@@ -137,3 +137,25 @@ fn domain_analyze_still_accepts_a_well_formed_domain_spec() {
     assert_eq!(status, 0, "{analyze:#}");
     assert_eq!(analyze["result"], "analyzed");
 }
+
+/// Positive control: a lowerable spec that also produces non-empty
+/// `findings` (an irreversible effect without an idempotency key), so this
+/// regression covers the projection path beyond the all-empty-findings shape
+/// `order_fulfillment_saga.fsl` exercises above.
+#[test]
+fn domain_analyze_still_accepts_a_spec_with_findings() {
+    let (analyze, status) = run(&[
+        "domain",
+        "analyze",
+        "examples/domain/unsafe_irreversible_effect_without_idempotency.fsl",
+    ]);
+    assert_eq!(status, 0, "{analyze:#}");
+    assert_eq!(analyze["result"], "analyzed");
+    assert!(
+        !analyze["findings"]
+            .as_array()
+            .expect("findings array")
+            .is_empty(),
+        "{analyze:#}"
+    );
+}

@@ -97,7 +97,8 @@ domain ProgrammaticRole {
             .contains(&serde_json::json!("work_complete_finished"))
     );
     assert_eq!(
-        fsl_tools::analyze_domain(&domain)["effects"][0]["outcomes"],
+        fsl_tools::analyze_domain(&domain).expect("analyze programmatic explicit role")["effects"]
+            [0]["outcomes"],
         serde_json::json!(["Finished"])
     );
     assert_eq!(
