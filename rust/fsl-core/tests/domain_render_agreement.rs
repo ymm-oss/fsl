@@ -141,8 +141,9 @@ const VALID_DOMAIN_FIXTURES: &[&str] = &[
 /// `domain_kernel_source` -> `parse_kernel_source` -> `build_model`) because
 /// they are semantically invalid (type mismatch / unknown symbol) OR because
 /// they use a construct that parses but has no executable lowering on either
-/// path and is therefore rejected fail-closed (#710/#711/#712: `value_object`
-/// invariants, aggregate `on_stale`, and top-level `await` routing).
+/// path and is therefore rejected fail-closed (#710/#711/#712/#723:
+/// `value_object` invariants, aggregate `on_stale`, top-level `await`
+/// routing, and effect `retry` `backoff`).
 const SEMANTICALLY_INVALID_DOMAIN_FIXTURES: &[&str] = &[
     "rust/fslc/tests/fixtures/domain_await_routing_rejected.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_duplicate_enum.fsl",
@@ -150,6 +151,7 @@ const SEMANTICALLY_INVALID_DOMAIN_FIXTURES: &[&str] = &[
     "rust/fslc/tests/fixtures/domain_characterization/invalid_type_mismatch.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_member.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl",
+    "rust/fslc/tests/fixtures/domain_retry_backoff_rejected.fsl",
     "rust/fslc/tests/fixtures/domain_stale_policy_rejected.fsl",
     "rust/fslc/tests/fixtures/domain_value_object_invariant_rejected.fsl",
 ];
@@ -839,16 +841,18 @@ domain EmptyEnumContainers {
 }
 
 /// One case per accepted-but-unlowerable domain construct fail-closed by
-/// `validate_lowerable_constructs` (#710/#711/#712). Both paths must reject
-/// with the exact same message and the same `line`/`column`, located at the
-/// construct's own declaration, not some downstream position -- an author
-/// debugging the rejection needs to land on the block to delete, and a
-/// located-diagnostic regression on only one path would otherwise slip past
+/// `validate_lowerable_constructs` (#710/#711/#712/#723). Both paths must
+/// reject with the exact same message and the same `line`/`column`, located
+/// at the construct's own declaration, not some downstream position -- an
+/// author debugging the rejection needs to land on the block to delete, and
+/// a located-diagnostic regression on only one path would otherwise slip
+/// past
 /// `semantically_invalid_domain_fixtures_are_rejected_by_both_lowering_paths`
 /// (which only checks *that* both reject, not *where*).
 ///
-/// Starts with the #712 top-level `await` case; #711's `on_stale` and #710's
-/// `value_object` invariant cases are added alongside their own fixes.
+/// Starts with the #712 top-level `await` case; #711's `on_stale`, #710's
+/// `value_object` invariant, and #723's `retry` `backoff` cases are added
+/// alongside their own fixes.
 struct UnlowerableConstructCase {
     fixture: &'static str,
     expected_message: &'static str,
@@ -883,6 +887,19 @@ const UNLOWERABLE_CONSTRUCT_CASES: &[UnlowerableConstructCase] = &[
                 .expect("fixture declares a value_object");
             let span = value_object.invariants[0].span;
             (span.start.line, span.start.column)
+        },
+    },
+    UnlowerableConstructCase {
+        fixture: "rust/fslc/tests/fixtures/domain_retry_backoff_rejected.fsl",
+        expected_message: "retry backoff 'exponential' has no executable lowering; backoff strategies are not supported",
+        location: |domain| {
+            let effect = domain
+                .effects
+                .iter()
+                .find(|effect| effect.retry.backoff.is_some())
+                .expect("fixture declares an effect with a retry backoff");
+            let loc = effect.retry.loc.unwrap_or(effect.loc);
+            (loc.line, loc.column)
         },
     },
 ];
