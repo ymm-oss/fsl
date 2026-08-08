@@ -1049,16 +1049,21 @@ inherit both automatically. Vacuity findings (`vacuous_implication` /
 `over_constrained`) and `blocking` (the other invariants making the
 antecedent/trigger impossible, empty when it's merely unreached within
 depth) — same shape as `reachable_failed`'s `unreached[].blocking_requires`.
+`vacuity_probe_truncated` (§15) is a distinct claim — the reachability
+probe was cut off by its state budget, not by depth — and carries its own
+`classification: "probe_truncated"` rather than either of the above.
 Blame identifies; it never proposes a repair (weakening a guard, dropping a
 conjunct) — that would cut against the anti-hollowing principle. All of this
 is strictly additive to the JSON contract.
 
 Diagnostics that identify a faithfulness/intent gap may also carry
 `faithfulness_class` plus `recommended_action`. Current classes are:
-`partial_op_unguarded`, `frozen_only_invariant`, `intent_unexercised`, and
-`liveness_not_refined`. The tag is derived from existing `result` / `kind` /
-`violation_kind` fields and is additive; consumers should keep reading the
-original classification fields for detail.
+`partial_op_unguarded`, `frozen_only_invariant`, `intent_unexercised`,
+`liveness_not_refined`, and `reachability_unknown` (`vacuity_probe_truncated`
+only — the reachability probe was budget-cut, not merely intent-unexercised).
+The tag is derived from existing `result` / `kind` / `violation_kind` fields
+and is additive; consumers should keep reading the original classification
+fields for detail.
 
 Progress-preserving refinement failures are reported as `refinement_failed` with
 `kind:"progress_lost"`, `violation_kind:"leadsTo"`, `impl_trace`,
@@ -2664,9 +2669,20 @@ DESIGN-*.md).
   (a guard that is always true under the context of preceding clauses),
   `tautology_over_frozen` (a dynamically tautological invariant over state no
   action changes), `urgency_freeze` (a generated deadline `tick` proven dead
-  because urgency freezes time), and `vacuous_deadline` (a generated deadline
-  whose age is proven to remain zero across every transition). `error` exits 2. →
+  because urgency freezes time), `vacuous_deadline` (a generated deadline
+  whose age is proven to remain zero across every transition), and
+  `vacuity_probe_truncated`†. `error` exits 2. →
   [`DESIGN-vacuity.md`](DESIGN-vacuity.md)
+
+  † `vacuity_probe_truncated`: the `vacuous_implication`/`vacuous_leadsto`
+  reachability probe shares one budgeted concrete BFS across every
+  antecedent/trigger in the spec; a candidate that neither becomes true nor
+  finishes exhausting its reachable state space before the state-count
+  budget is hit reports this kind instead of `vacuous_implication`/
+  `vacuous_leadsto` — vacuity was never established either way, so treating
+  it as confirmed-vacuous would be a false positive and dropping it would
+  let `--vacuity error` pass a spec whose vacuity was never actually
+  decided. Selected by `--vacuity` exactly like the other six kinds.
 - **`--strict-tags`** — warns on success results about untagged declarations
   (fabrication candidates) and unreferenced requirements (omission candidates,
   including empty requirement blocks). Existence-level matching. → [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md)

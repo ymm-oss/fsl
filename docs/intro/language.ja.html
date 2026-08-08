@@ -1113,13 +1113,18 @@ holds, violating_bindings?}</code>)は、invariant が複数の AND 連言肢か
 (<code>insufficient_depth</code> | <code>over_constrained</code>)と <code>blocking</code>(前件/トリガーを不可能に
 している他の invariant。深さ内で単に未到達なだけのときは空)を得ます —
 <code>reachable_failed</code> の <code>unreached[].blocking_requires</code> と同じ形です。
+<code>vacuity_probe_truncated</code>(§15)は別の主張です — 到達性 probe が深さではなく
+state の budget で打ち切られた、というもので、上記のどちらでもなく独自の
+<code>classification: "probe_truncated"</code> を持ちます。
 blame は特定するだけで、修復(ガードの弱化、連言肢の削除)を提案することは決して
 ありません — それは anti-hollowing の原則に反するからです。これらはすべて JSON
 コントラクトへの厳密に追加的な変更です。</p>
 <p>忠実性/意図のギャップを特定する診断は、<code>faithfulness_class</code> と
 <code>recommended_action</code> も運ぶことがあります。現在のクラスは
 <code>partial_op_unguarded</code>、<code>frozen_only_invariant</code>、<code>intent_unexercised</code>、
-<code>liveness_not_refined</code> です。このタグは既存の <code>result</code> / <code>kind</code> /
+<code>liveness_not_refined</code>、<code>reachability_unknown</code>(<code>vacuity_probe_truncated</code>
+専用 — 到達性 probe が budget で打ち切られたのであって、単に意図が未行使
+なのではありません)です。このタグは既存の <code>result</code> / <code>kind</code> /
 <code>violation_kind</code> フィールドから導出される追加的なものです。消費者は詳細のために
 元の分類フィールドを読み続けるべきです。</p>
 <p>進行を保存する refinement の失敗は、<code>refinement_failed</code> として、
@@ -2584,14 +2589,24 @@ DESIGN-*.md があります)。</p>
   <code>tautology_over_frozen</code>(どの action も変えない状態の上の、動的に
   トートロジーである invariant)、<code>urgency_freeze</code>(urgency が時間を凍結するために
   死んでいると証明された、生成された deadline の <code>tick</code>)、
-  <code>vacuous_deadline</code>(生成 deadline の age が全遷移で 0 のままと証明される)を
-  警告します。
+  <code>vacuous_deadline</code>(生成 deadline の age が全遷移で 0 のままと証明される)、
+  <code>vacuity_probe_truncated</code>†を警告します。
   <code>error</code> は exit 2 です。→
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
-<li><strong><code>--strict-tags</code></strong> — 成功の結果の上で、タグのない宣言(捏造の候補)と、参照
+</ul>
+<p>† <code>vacuity_probe_truncated</code>: <code>vacuous_implication</code>/<code>vacuous_leadsto</code> の
+  到達性 probe は、spec 内の全 antecedent/trigger にまたがって 1 回の
+  budget 付き concrete BFS を共有します。ある候補が、真になることも
+  到達可能な状態空間を使い切ることもないまま state 数の budget に
+  到達した場合、<code>vacuous_implication</code>/<code>vacuous_leadsto</code> の代わりにこの
+  kind を報告します — 空虚性はどちら向きにも確立されていないため、
+  「空虚性確定」として扱えば偽陽性になり、単に握りつぶせば
+  <code>--vacuity error</code> が空虚性を一度も判定していない spec を通過させて
+  しまいます。他の 6 kind と全く同様に <code>--vacuity</code> で選択されます。
+- <strong><code>--strict-tags</code></strong> — 成功の結果の上で、タグのない宣言(捏造の候補)と、参照
   されない要件(欠落の候補。空の requirement ブロックを含む)を警告します。存在
-  レベルの突合です。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a></li>
-<li><strong><code>fslc mutate</code></strong> — spec を機械的に変異させ、各ミュータントが既存の検査の網に
+  レベルの突合です。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a>
+- <strong><code>fslc mutate</code></strong> — spec を機械的に変異させ、各ミュータントが既存の検査の網に
   よって殺されるかを測定します。スコアは<strong>有界ミュータント集合への感度
   (bounded mutant-set sensitivity)</strong>です: 選択された有限のミュータント集合・
   選択された <code>--depth</code>・verify/acceptance/forbidden/refinement オラクルの下での
@@ -2617,15 +2632,15 @@ DESIGN-*.md があります)。</p>
   観測された下界です。acceptance と forbidden の kill は、失敗した trace 宣言の
   明示的な requirement annotation を使います。AC/FB case ID は暗黙の requirement
   ではなく、trace case ID は宣言種別ごとに一意です。→
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
-<li><strong><code>fslc explain --readable</code></strong> — 骨格の列挙(状態、action の誰が/いつ/何を変える
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
+- <strong><code>fslc explain --readable</code></strong> — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement
   マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で
   それを壊せる」)+ witness のナレーションの上のテキストビュー。人間のレビューを、
   論理式を読むことから、具体例を裁定することへ移します。<code>--readable</code> なしでは
   JSON モードが引き続き利用できます。→
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-explain.md"><code>DESIGN-explain.md</code></a></li>
-<li><strong><code>fslc analyze</code></strong> — 構造的な観測 JSON を出力します。<code>--projection tsg</code> は、
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
+- <strong><code>fslc analyze</code></strong> — 構造的な観測 JSON を出力します。<code>--projection tsg</code> は、
   要件、action、状態、プロパティ、シナリオの Typed Semantic Graph を返します。
   グラフの射影は、連結成分、SCC、代表的なサイクル、次数、そしてサイクルランクや
   ファンイン/ファンアウトのハブのような構造メトリクスを返します。
@@ -2674,14 +2689,13 @@ DESIGN-*.md があります)。</p>
   これらの findings は <code>formal_status: "not_a_violation"</code> を運びます。構造的な
   サイクルや非連結の成分は、証明の失敗ではありません。TSG、グラフの射影、findings
   のバージョン付きスキーマは <code>schemas/fslc/analysis/</code> の下で公開されています。→
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md"><code>DESIGN-analysis.md</code></a></li>
-<li><strong><code>fslc html</code></strong> — 同じ explain/verify のエビデンスの上の、自己完結の HTML
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md"><code>DESIGN-analysis.md</code></a>
+- <strong><code>fslc html</code></strong> — 同じ explain/verify のエビデンスの上の、自己完結の HTML
   レポート: ステータスのサマリー、state/action/プロパティのテーブル、action から
   状態への書き込みグラフ、トレースのタイムライン、witness の例、counterfactual、
   ソース、生の JSON。読み手に CLI の実行を要求することなく、PR、設計レビュー、
   非専門家によるプロジェクトレビューに使うためのものです。→
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></li>
-</ul>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></p>
 <p>書く前の規律(形式化メモ、自然言語→構文の逆引き、推奨プラクティス)は
 <code>skills/</code> の下の AI エージェントスキルにあり、共有の言語リファレンスは
 <code>skills/fsl/SKILL.md</code> にあります。保守される実例は

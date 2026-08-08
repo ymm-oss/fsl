@@ -99,13 +99,24 @@ pub fn insert_requirement_metadata(
 /// not share that prefix, so a prefix check silently exempts them from both
 /// `--vacuity ignore` (they would stay in `warnings`) and `--vacuity error`
 /// (a hollow spec carrying only one of these kinds would never fail closed).
-pub const VACUITY_KINDS: [&str; 6] = [
+///
+/// `vacuity_probe_truncated` (issue #729) is not itself a vacuity finding --
+/// it means the concrete `vacuous_implication`/`vacuous_leadsto`
+/// reachability probe was cut off by its state budget before it could
+/// establish either verdict. It belongs in this set for the same reason
+/// the four kinds above do: `--vacuity error`'s contract is "vacuity
+/// evidence is clean," and a spec whose probe never completed has not
+/// earned that claim -- gating it as an informational, non-selected kind
+/// would let `--vacuity error` pass a spec without ever having established
+/// non-vacuity, which is a strictly weaker contract than today's.
+pub const VACUITY_KINDS: [&str; 7] = [
     "vacuous_implication",
     "vacuous_leadsto",
     "tautology_over_frozen",
     "urgency_freeze",
     "vacuous_deadline",
     "always_true_requires",
+    "vacuity_probe_truncated",
 ];
 
 /// Whether `kind` is one of the closed [`VACUITY_KINDS`] `--vacuity` selects over.

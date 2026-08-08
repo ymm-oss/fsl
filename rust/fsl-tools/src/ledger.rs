@@ -359,16 +359,24 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             .and_then(Value::as_str)
             .unwrap_or("");
         let metadata = requirement(warning);
+        let kind = warning.get("kind").and_then(Value::as_str).unwrap_or("");
+        let message = warning.get("message").and_then(Value::as_str).unwrap_or("");
         findings.push(Finding {
             requirement_id: metadata.0,
             requirement_text: metadata.1,
             trace_type: "vacuity".to_owned(),
             name: name.to_owned(),
-            summary: format!(
-                "空虚性の疑い（{}）: {}",
-                warning.get("kind").and_then(Value::as_str).unwrap_or(""),
-                warning.get("message").and_then(Value::as_str).unwrap_or("")
-            ),
+            // `vacuity_probe_truncated` (issue #729) is not itself a
+            // vacuity finding: it means the reachability probe was cut off
+            // by its state budget before it could decide either way. That
+            // is a distinct claim from "疑い" (suspected hollow), so it
+            // gets its own prefix -- "未確立" (not established), not
+            // "疑い" (suspected).
+            summary: if kind == "vacuity_probe_truncated" {
+                format!("空虚性未確立（到達性 probe が budget で打ち切り）: {message}")
+            } else {
+                format!("空虚性の疑い（{kind}）: {message}")
+            },
             next_action: warning
                 .get("hint")
                 .and_then(Value::as_str)

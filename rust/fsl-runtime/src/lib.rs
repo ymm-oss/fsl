@@ -2246,44 +2246,133 @@ fn first_self_violation(
     Ok(None)
 }
 
-/// Return whether a Boolean expression holds in any concrete state up to `depth`.
+/// The outcome of a budgeted vacuity-reachability probe for one
+/// antecedent/trigger expression (issue #729).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Reachability {
+    /// The expression became true in some concretely reached state within
+    /// `depth`.
+    Reachable,
+    /// The BFS enumerated every state reachable within `depth` (or
+    /// exhausted the frontier before `depth`) without the expression ever
+    /// becoming true — a completed, not merely truncated, empty search.
+    /// This is the verdict the former `expression_reachable` reported as a
+    /// plain `false`, and it keeps meaning the same thing: `--vacuity
+    /// error`'s `vacuous_implication`/`vacuous_leadsto` findings stay keyed
+    /// on this variant, unchanged by this issue's budget.
+    Unreachable,
+    /// The BFS stopped because it reached `budget` distinct states before
+    /// either finding the expression true or exhausting the reachable
+    /// state space within `depth`. Fail-closed by construction: a caller
+    /// must not fold this into `Unreachable` — reachability was never
+    /// decided, so treating it as "confirmed vacuous" would be a false
+    /// positive and treating it as "confirmed not vacuous" (silently
+    /// dropping it) would let `--vacuity error` pass a spec whose vacuity
+    /// was never actually established.
+    Exhausted,
+}
+
+/// Evaluate the reachability of every expression in `expressions` with one
+/// shared, budgeted BFS over `model`'s concrete state space (issue #729).
+///
+/// Sharing one BFS across every candidate removes the per-antecedent/
+/// per-trigger multiplier the former per-expression `expression_reachable`
+/// paid (a full BFS per property): each candidate still pending is
+/// evaluated against every popped state, drops out of the pending set the
+/// instant it is found true, and the walk stops early once every candidate
+/// has resolved. `budget` bounds the number of distinct concrete states
+/// visited exactly like [`find_boundary_violation`]'s budget (state count
+/// checked right after insertion, before the state is queued): once the
+/// pending set is non-empty and the budget is reached, every still-pending
+/// candidate resolves [`Reachability::Exhausted`] rather than silently
+/// falling back to `Unreachable`.
+///
+/// A per-expression evaluation error (rare on a checked model) resolves
+/// *only that expression* as [`Reachability::Reachable`], i.e. it silently
+/// contributes no finding for it. This matches the original
+/// `expression_reachable`, where a `Result::Err` for one property's
+/// antecedent produced no warning for that property alone; batching must
+/// not let one malformed candidate suppress every other candidate's
+/// vacuity evidence in the same run. A failure of the state-space walk
+/// itself (an action's `enabled`/`step` cannot be evaluated) is not a
+/// per-candidate condition and still propagates as `Err` for the whole
+/// call, matching every other BFS in this module.
 ///
 /// # Errors
 ///
-/// Returns [`RuntimeError`] when the expression or a reachable action cannot be
-/// evaluated concretely.
-pub fn expression_reachable(
-    model: KernelModel,
-    expression: &Expr,
+/// Returns [`RuntimeError`] when the state-space walk itself fails.
+pub fn expression_reachability(
+    model: &KernelModel,
+    expressions: &[Expr],
     depth: usize,
-) -> Result<bool, RuntimeError> {
-    let initial = Monitor::new(model)?;
-    let mut queue = VecDeque::from([(initial.clone(), 0_usize)]);
-    let mut visited = BTreeSet::from([initial.state.clone()]);
-    while let Some((monitor, step)) = queue.pop_front() {
-        if as_bool(with_total_division(|| {
-            eval(
-                expression,
-                &monitor.state,
-                &mut Bindings::new(),
-                &monitor.model,
-                None,
-            )
-        })?)? {
-            return Ok(true);
+    budget: usize,
+) -> Result<Vec<Reachability>, RuntimeError> {
+    if expressions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut scratch = Monitor::new(model.clone())?;
+    let initial_state = scratch.state.clone();
+    let mut queue = VecDeque::from([(initial_state.clone(), 0_usize)]);
+    let mut visited = BTreeSet::from([initial_state]);
+    let mut results: Vec<Option<Reachability>> = vec![None; expressions.len()];
+    let mut pending: BTreeSet<usize> = (0..expressions.len()).collect();
+
+    'walk: while let Some((state, step)) = queue.pop_front() {
+        scratch.state = state.clone();
+        scratch.step = step;
+        let mut resolved = Vec::new();
+        for &index in &pending {
+            let truth = with_total_division(|| {
+                eval(
+                    &expressions[index],
+                    &scratch.state,
+                    &mut Bindings::new(),
+                    &scratch.model,
+                    None,
+                )
+            })
+            .and_then(as_bool);
+            match truth {
+                Ok(true) | Err(_) => {
+                    // An error is absorbed here, not propagated: see the
+                    // doc comment above.
+                    results[index] = Some(Reachability::Reachable);
+                    resolved.push(index);
+                }
+                Ok(false) => {}
+            }
+        }
+        for index in resolved {
+            pending.remove(&index);
+        }
+        if pending.is_empty() {
+            break 'walk;
         }
         if step >= depth {
             continue;
         }
-        for instance in monitor.enabled()? {
-            let mut child = monitor.clone();
-            let stepped = child.step(&instance)?;
-            if stepped.violation.is_none() && visited.insert(child.state.clone()) {
-                queue.push_back((child, step + 1));
+        for instance in scratch.enabled()? {
+            scratch.state = state.clone();
+            scratch.step = step;
+            let stepped = scratch.step(&instance)?;
+            if stepped.violation.is_some() {
+                continue;
+            }
+            if visited.insert(stepped.state.clone()) {
+                if visited.len() >= budget {
+                    for &index in &pending {
+                        results[index] = Some(Reachability::Exhausted);
+                    }
+                    break 'walk;
+                }
+                queue.push_back((stepped.state, step + 1));
             }
         }
     }
-    Ok(false)
+    Ok(results
+        .into_iter()
+        .map(|result| result.unwrap_or(Reachability::Unreachable))
+        .collect())
 }
 
 /// Wrap `expr` in a nested `exists` quantifier over `binders`, outermost
@@ -2301,34 +2390,22 @@ fn exists_wrap(binders: &[Binder], expr: Expr) -> Expr {
         })
 }
 
-/// Build the verification warnings shared by native and browser frontends.
-///
-/// The two reachability vacuity lanes are computed here and stay
-/// solver-independent. `solver_vacuity` carries the already-rendered
-/// `docs/DESIGN-vacuity.md` §2 lanes 3–6 that only `fsl-verifier` can decide;
-/// passing them in keeps the documented warning order (model → vacuity →
-/// deadlock → action coverage) owned by one function without giving
-/// `fsl-runtime` a solver dependency.
+/// The existentially-closed antecedent of each user invariant shaped
+/// `forall* P => Q` (`docs/DESIGN-vacuity.md` lane 1), paired with the
+/// index of the source invariant in `model.invariants`. An invariant
+/// without that shape (after peeling leading `forall`s) contributes no
+/// candidate, so the index travels with the expression rather than being
+/// assumed to line up with position.
 #[must_use]
-pub fn verification_warnings(
-    model: &KernelModel,
-    depth: usize,
-    warn_deadlock: bool,
-    deadlock_step: Option<usize>,
-    deadlock_state: Option<&State>,
-    action_coverage: &BTreeMap<String, bool>,
-    solver_vacuity: &[JsonValue],
-) -> Vec<JsonValue> {
-    let mut warnings = model_warnings(model);
-    for property in &model.invariants {
-        // `docs/DESIGN-vacuity.md`'s primary `vacuous_implication` shape is a
-        // single `=>` directly under `forall*`: peel every leading `forall`
-        // (nested foralls included, matching the frozen Python reference's
-        // `_implication_antecedent_candidate`), then existentially close the
-        // antecedent over the collected binders before checking
-        // reachability. With zero leading foralls this is a no-op
-        // (`exists_wrap` over an empty slice returns the antecedent
-        // unchanged), so the original top-level-`=>` shape still works.
+pub fn vacuous_implication_candidates(model: &KernelModel) -> Vec<(usize, Expr)> {
+    let mut candidates = Vec::new();
+    for (index, property) in model.invariants.iter().enumerate() {
+        // `forall* => ...` shape: peel every leading `forall` (nested
+        // foralls included, matching the frozen Python reference's
+        // `_implication_antecedent_candidate`), then existentially close
+        // the antecedent over the collected binders. With zero leading
+        // foralls this is a no-op, so the original top-level-`=>` shape
+        // still works.
         let mut binders = Vec::new();
         let mut inner = &property.expr;
         while let Expr::Quantified {
@@ -2349,45 +2426,158 @@ pub fn verification_warnings(
         if op != "=>" {
             continue;
         }
-        let antecedent = exists_wrap(&binders, (**left).clone());
-        if matches!(
-            expression_reachable(model.clone(), &antecedent, depth),
-            Ok(false)
-        ) {
-            let mut warning = json!({
-                "kind": "vacuous_implication",
-                "name": display_name(&property.name),
-                "message": format!("invariant '{}' has an implication antecedent that is unreachable within depth {depth}", display_name(&property.name)),
-                "hint": "the antecedent is not reachable within this depth; check whether an action that should establish it is missing, or whether the antecedent expression is wrong",
-                "loc": property.span.python_loc(),
-                "classification": "insufficient_depth",
-                "blocking": [],
-                "faithfulness_class": "intent_unexercised",
-                "recommended_action": "add a single-shot reachable for the action / raise --depth",
-            });
+        candidates.push((index, exists_wrap(&binders, (**left).clone())));
+    }
+    candidates
+}
+
+/// The existentially-closed trigger of each `leadsTo` property
+/// (`docs/DESIGN-vacuity.md` lane 2), one per `model.leadstos` entry in
+/// declaration order.
+#[must_use]
+pub fn vacuous_leadsto_candidates(model: &KernelModel) -> Vec<Expr> {
+    model
+        .leadstos
+        .iter()
+        .map(|property| exists_wrap(&property.binders, property.before.clone()))
+        .collect()
+}
+
+/// One `vacuous_implication`/`vacuous_leadsto` reachability finding shy of
+/// its `kind`, shared by the two lanes below so the truncated variant
+/// (`vacuity_probe_truncated`) does not need to duplicate the JSON shape.
+fn vacuity_reachability_warning(
+    kind: &str,
+    subject: &str,
+    name: &str,
+    message: &str,
+    hint: &str,
+    loc: &JsonValue,
+) -> JsonValue {
+    json!({
+        "kind": kind,
+        "name": name,
+        "message": message,
+        "hint": hint,
+        "loc": loc,
+        "classification": if kind == "vacuity_probe_truncated" { "probe_truncated" } else { "insufficient_depth" },
+        "blocking": [],
+        "faithfulness_class": if kind == "vacuity_probe_truncated" { "reachability_unknown" } else { "intent_unexercised" },
+        "recommended_action": if kind == "vacuity_probe_truncated" {
+            format!("the {subject}'s reachability could not be established within the internal probe budget; this is unusual and typically means the state shape (e.g. an order-sensitive history variable) defeats BFS dedup -- simplify it or reduce --depth")
+        } else {
+            "add a single-shot reachable for the action / raise --depth".to_owned()
+        },
+    })
+}
+
+/// Build the verification warnings shared by native and browser frontends.
+///
+/// The two reachability vacuity lanes are computed here, with one shared,
+/// budgeted BFS (issue #729) over every antecedent/trigger candidate
+/// (`CONCRETE_PROBE_BUDGET`, the same constant/calibration
+/// `find_boundary_violation` uses), and stay solver-independent.
+/// `solver_vacuity` carries the already-rendered `docs/DESIGN-vacuity.md`
+/// §2 lanes 3–6 that only `fsl-verifier` can decide; passing them in keeps
+/// the documented warning order (model → vacuity → deadlock → action
+/// coverage) owned by one function without giving `fsl-runtime` a solver
+/// dependency.
+///
+/// `skip_vacuity_probe` skips the whole reachability BFS (neither
+/// `vacuous_implication`/`vacuous_leadsto` nor `vacuity_probe_truncated` is
+/// computed or emitted) rather than computing it and filtering the result.
+/// INVARIANT (issue #729): only the `verify`/`sweep` CLI option parsing for
+/// `--vacuity ignore` may pass `true` here. Every other caller -- the
+/// `ledger`/`html`/`mutate` baseline, the wasm Worker surface (which has no
+/// `--vacuity` option at all), induction's internal BMC base pass, and
+/// tests -- must pass `false` so the probe always runs and `--vacuity
+/// error` never silently loses evidence it would otherwise catch.
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn verification_warnings(
+    model: &KernelModel,
+    depth: usize,
+    warn_deadlock: bool,
+    deadlock_step: Option<usize>,
+    deadlock_state: Option<&State>,
+    action_coverage: &BTreeMap<String, bool>,
+    solver_vacuity: &[JsonValue],
+    skip_vacuity_probe: bool,
+) -> Vec<JsonValue> {
+    let mut warnings = model_warnings(model);
+    if !skip_vacuity_probe {
+        let implication_candidates = vacuous_implication_candidates(model);
+        let leadsto_candidates = vacuous_leadsto_candidates(model);
+        let mut probe_expressions: Vec<Expr> = implication_candidates
+            .iter()
+            .map(|(_, expression)| expression.clone())
+            .collect();
+        probe_expressions.extend(leadsto_candidates.iter().cloned());
+        // A `RuntimeError` from the state-space walk itself (see
+        // `expression_reachability`'s doc comment) loses both lanes for
+        // this run, exactly as a single antecedent's `Err` silently lost
+        // just that one property's warning before batching -- there is no
+        // narrower fallback to degrade to.
+        let probe_results =
+            expression_reachability(model, &probe_expressions, depth, CONCRETE_PROBE_BUDGET)
+                .unwrap_or_default();
+        for (candidate_index, (property_index, _)) in implication_candidates.iter().enumerate() {
+            let property = &model.invariants[*property_index];
+            let name = display_name(&property.name);
+            let mut warning = match probe_results.get(candidate_index) {
+                Some(Reachability::Unreachable) => vacuity_reachability_warning(
+                    "vacuous_implication",
+                    "implication antecedent",
+                    &name,
+                    &format!(
+                        "invariant '{name}' has an implication antecedent that is unreachable within depth {depth}"
+                    ),
+                    "the antecedent is not reachable within this depth; check whether an action that should establish it is missing, or whether the antecedent expression is wrong",
+                    &property.span.python_loc(),
+                ),
+                Some(Reachability::Exhausted) => vacuity_reachability_warning(
+                    "vacuity_probe_truncated",
+                    "implication antecedent",
+                    &name,
+                    &format!(
+                        "invariant '{name}' has an implication antecedent whose reachability probe was truncated by the internal state budget before reaching depth {depth}"
+                    ),
+                    "vacuity was not established either way for this antecedent; the probe stopped at a state-count budget, not at depth",
+                    &property.span.python_loc(),
+                ),
+                Some(Reachability::Reachable) | None => continue,
+            };
             if let JsonValue::Object(warning) = &mut warning {
                 insert_requirement_metadata(warning, &property.annotations, property.meta.as_ref());
             }
             warnings.push(warning);
         }
-    }
-    for property in &model.leadstos {
-        let trigger = exists_wrap(&property.binders, property.before.clone());
-        if matches!(
-            expression_reachable(model.clone(), &trigger, depth),
-            Ok(false)
-        ) {
-            let mut warning = json!({
-                "kind": "vacuous_leadsto",
-                "name": display_name(&property.name),
-                "message": format!("leadsTo '{}' has a trigger that is unreachable within depth {depth}", display_name(&property.name)),
-                "hint": "the trigger is not reachable within this depth; check whether an action that should establish it is missing, or whether the trigger expression is wrong",
-                "loc": property.span.python_loc(),
-                "classification": "insufficient_depth",
-                "blocking": [],
-                "faithfulness_class": "intent_unexercised",
-                "recommended_action": "add a single-shot reachable for the action / raise --depth",
-            });
+        let leadsto_offset = implication_candidates.len();
+        for (offset, property) in model.leadstos.iter().enumerate() {
+            let name = display_name(&property.name);
+            let mut warning = match probe_results.get(leadsto_offset + offset) {
+                Some(Reachability::Unreachable) => vacuity_reachability_warning(
+                    "vacuous_leadsto",
+                    "leadsTo trigger",
+                    &name,
+                    &format!(
+                        "leadsTo '{name}' has a trigger that is unreachable within depth {depth}"
+                    ),
+                    "the trigger is not reachable within this depth; check whether an action that should establish it is missing, or whether the trigger expression is wrong",
+                    &property.span.python_loc(),
+                ),
+                Some(Reachability::Exhausted) => vacuity_reachability_warning(
+                    "vacuity_probe_truncated",
+                    "leadsTo trigger",
+                    &name,
+                    &format!(
+                        "leadsTo '{name}' has a trigger whose reachability probe was truncated by the internal state budget before reaching depth {depth}"
+                    ),
+                    "vacuity was not established either way for this trigger; the probe stopped at a state-count budget, not at depth",
+                    &property.span.python_loc(),
+                ),
+                Some(Reachability::Reachable) | None => continue,
+            };
             if let JsonValue::Object(warning) = &mut warning {
                 insert_requirement_metadata(warning, &property.annotations, property.meta.as_ref());
             }

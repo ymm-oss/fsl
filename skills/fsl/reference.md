@@ -910,7 +910,18 @@ declared type space rather than over the states reached within `--depth`, so
 their verdict never moves with the bound: `requires visits < 100` on
 `visits: 0..100` is a real guard and stays unreported even at a depth that
 never reaches 100. `--vacuity error` gives
-`result:"error"`; `--vacuity ignore` disables it.
+`result:"error"`; `--vacuity ignore` disables it (and, unlike the other six
+kinds, skips computing the `vacuous_implication`/`vacuous_leadsto`
+reachability probe entirely rather than computing then filtering it).
+
+The `vacuous_implication`/`vacuous_leadsto` reachability probe shares one
+budgeted concrete BFS across every antecedent/trigger in the spec. A
+candidate that neither becomes true nor finishes exhausting its reachable
+state space before the internal state-count budget is hit reports
+`kind:"vacuity_probe_truncated"` instead — vacuity was never established
+either way, so it selects under `--vacuity` exactly like the other six
+kinds (`error` fails closed on it too). This is rare; a corpus-conservation
+test keeps the budget generous enough that no maintained spec hits it.
 
 ## 7. CLI and JSON essentials
 

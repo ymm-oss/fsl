@@ -512,7 +512,8 @@ interpretation trigger even though commit/rollback policy remains centralized. R
 each observed step through a Monitor.
 
 Search ownership is broader than two BFS functions. `check_refinement`, `find_boundary_violation`,
-`expression_reachable`, `action_cover_traces`, and `leadsto_response_traces` each own a distinct
+`expression_reachability` (renamed and budgeted from `expression_reachable`, issue #729),
+`action_cover_traces`, and `leadsto_response_traces` each own a distinct
 solver-free queue/result contract and reuse Monitor transitions. The public legacy BFS does the
 same. The product explicit engine additionally owns deterministic-initialization and eligibility
 gates plus frontier, parent, closure, coverage, and state budget in `explicit.rs`; these APIs are
