@@ -294,23 +294,29 @@ graph with portable source identities, exact byte/line coordinates,
 target bindings, source-node reverse lookup, and explicit assurance/completeness.
 
 When a domain aggregate state field omits its initializer, the current edition
-preserves the established Bool `false`, enum first-member, range lower-bound, or
-external-placeholder `0` choice and emits `implicit_initial_value`. The warning
-contains the selected value, reason, current/next severity, field span, and a
-machine-applicable explicit-initializer insertion. The next edition requires the
-initializer to be explicit. Container-typed fields also get an implicit
-default — `Option<T>` selects `none`, `Set<T>` selects `Set {}`, and a
-top-level `Map<K, V>` selects a dense per-key init
-(`forall k: K { field[k] = <V's default> }`), where `<V's default>` recurses
-through this same selection — but omitting one does **not** emit
-`implicit_initial_value`; that warning's coverage stops at the four scalar
-shapes above. `Map` fields carry two additional fail-closed rules: an explicit
-whole-`Map` default (`field: Map<K, V> = expr;`) is always rejected
-("whole-Map domain defaults are not supported") because the per-key form is the
-only supported `Map` default, and a `Map` nested as another `Map`'s value is
-rejected too ("Map state requires explicit initialization through supported
-semantics") because the per-key init has no default to select for a `Map`
-value type.
+preserves the established Bool `false`, enum first-member, range lower-bound,
+external-placeholder `0`, `value_object` struct-literal, `Option<T>` `none`,
+`Set<T>` `Set {}`, or top-level `Map<K, V>` dense per-key
+(`forall k: K { field[k] = <V's default> }`, where `<V's default>` recurses
+through this same selection) choice, and emits `implicit_initial_value` for
+every one of these shapes (#731) — the warning's coverage matches the
+renderer's total dispatch (`fsl_core::domain_type_default`, the single owner
+both the warning and `domain_kernel_source` read the selected value from), not
+just the four scalar forms. The warning contains the selected value, reason,
+current/next severity, field span, and — where a machine-applicable insertion
+exists — a `suggestion`/`canonical_replacement`. Two field shapes omit the
+insertion, and consequently keep `edition_severity.next` at `warning` rather
+than `error` (the next edition cannot yet demand an initializer it has no safe
+way to insert): a top-level `Map<K, V>` field has no whole-field default at
+all (`field: Map<K, V> = expr;` is always rejected,
+"whole-Map domain defaults are not supported", because the per-key form is the
+only supported `Map` default), and a `Set<T>` or `value_object`-typed field's
+brace-literal default (`Set { ... }`, `Name { ... }`) cannot currently be
+round-tripped by `fslc fmt`/`migrate --write` (issue #770) even though `fslc
+check` accepts it when written explicitly. A `Map` nested as another `Map`'s
+value is separately rejected ("Map state requires explicit initialization
+through supported semantics") because the per-key init has no default to
+select for a `Map` value type.
 
 Use `fslc domain check` for stable fsl-domain findings and the nested kernel
 result (`verified_under_assumptions` on success), `fslc domain analyze` for the

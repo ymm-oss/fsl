@@ -351,15 +351,21 @@ byte-compatible and does not expose the internal chain; publication belongs to
 v2 (#256).
 
 Omitted domain aggregate initializers retain the current Bool `false`, enum
-first-member, range lower-bound, or external-placeholder `0` behavior while
-emitting `implicit_initial_value`. The warning carries the selected value,
-reason, edition severities, source span, and a machine-applicable insertion.
-Container-typed fields default too but do **not** trigger that warning:
-`Option<T>` -> `none`, `Set<T>` -> `Set {}`, top-level `Map<K, V>` -> dense
-per-key `forall k: K { field[k] = <value default> }`. An explicit whole-`Map`
-default and a `Map` nested as another `Map`'s value are both rejected
-("whole-Map domain defaults are not supported" / "Map state requires explicit
-initialization through supported semantics").
+first-member, range lower-bound, external-placeholder `0`, `value_object`
+struct-literal, `Option<T>` -> `none`, `Set<T>` -> `Set {}`, or top-level
+`Map<K, V>` -> dense per-key `forall k: K { field[k] = <value default> }`
+behavior, and every one of those shapes emits `implicit_initial_value`
+(#731) -- the warning's dispatch matches the renderer's total dispatch
+(`fsl_core::domain_type_default`). The warning carries the selected value,
+reason, edition severities, source span, and -- where a safe insertion
+exists -- a machine-applicable edit. A top-level `Map<K, V>` field (no
+whole-field default exists at all) and a `Set<T>`/`value_object` field whose
+brace-literal default cannot yet round-trip through `fslc fmt`
+(issue #770) omit the insertion and keep `edition_severity.next` at
+`warning`. An explicit whole-`Map` default and a `Map` nested as another
+`Map`'s value are both rejected ("whole-Map domain defaults are not
+supported" / "Map state requires explicit initialization through supported
+semantics").
 
 AI hard-contract dialect (expands to the same kernel for deterministic
 tool-boundary checks and reports stable fsl-ai findings for runtime replay):

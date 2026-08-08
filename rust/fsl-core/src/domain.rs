@@ -53,7 +53,13 @@ fn error_at(message: impl Into<String>, span: Span) -> CoreError {
 /// `Map` arity, which falls through to [`Context::default_for_type`]'s
 /// generic "unsupported domain type constructor" rejection instead of being
 /// treated as a renderable Map here).
-fn map_key_value(type_name: &SyntaxTypeExpr) -> Option<(&SyntaxTypeExpr, &SyntaxTypeExpr)> {
+///
+/// `pub` (issue #731): the `implicit_initial_value` warning needs the same
+/// top-level-`Map` classification `domain_kernel_source`'s state-field loop
+/// uses, so it can report the renderer's per-key value default instead of
+/// re-deriving what counts as a top-level `Map` shape.
+#[must_use]
+pub fn map_key_value(type_name: &SyntaxTypeExpr) -> Option<(&SyntaxTypeExpr, &SyntaxTypeExpr)> {
     match &type_name.kind {
         SyntaxTypeExprKind::Apply {
             constructor,
@@ -64,6 +70,35 @@ fn map_key_value(type_name: &SyntaxTypeExpr) -> Option<(&SyntaxTypeExpr, &Syntax
         },
         _ => None,
     }
+}
+
+/// The renderer's default value for `type_name` in `domain` -- the same
+/// total dispatch [`domain_kernel_source`] uses via `Context::default_for_type`
+/// to choose every field's implicit value, exposed so the
+/// `implicit_initial_value` warning (issue #731) reports the value this
+/// function -- the single owner -- selects, rather than a second hand-rolled
+/// copy of the dispatch that can silently drift from it (as the pre-#731
+/// warning did for every container type).
+///
+/// A caller holding a top-level `Map<K, V>` field type calls [`map_key_value`]
+/// first and passes the value type `V` here instead: a bare `Map` has no
+/// single default value of its own (see the `Err` case below), only the
+/// per-key `forall` init `domain_kernel_source`'s state-field loop builds
+/// directly.
+///
+/// # Errors
+///
+/// Returns [`CoreError`] wherever `Context::default_for_type` does: an
+/// unknown domain type name, an enum with no members, or a type shape it
+/// fails closed on -- including a bare top-level `Map`, which is never a
+/// valid argument here (`"Map state requires explicit initialization
+/// through supported semantics"`).
+pub fn domain_type_default(
+    domain: &DomainSpec,
+    type_name: &SyntaxTypeExpr,
+    span: Span,
+) -> Result<String, CoreError> {
+    Context::new(domain).default_for_type(type_name, span, &BTreeMap::new())
 }
 
 fn synthetic_num(value: i64, loc: DomainLoc) -> SyntaxExpr {

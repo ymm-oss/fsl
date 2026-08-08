@@ -357,6 +357,139 @@ fn domain_implicit_values_warn_with_selected_values_and_insertions() {
     }
 }
 
+fn characterization_fixture(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("tests/fixtures/domain_characterization/{name}"))
+}
+
+fn implicit_warnings(output: &Value) -> std::collections::BTreeMap<String, Value> {
+    output["warnings"]
+        .as_array()
+        .expect("warnings array")
+        .iter()
+        .filter(|warning| warning["code"] == "implicit_initial_value")
+        .map(|warning| {
+            (
+                warning["field"].as_str().expect("field").to_owned(),
+                warning.clone(),
+            )
+        })
+        .collect()
+}
+
+/// `fslc domain expand PATH` prints the generated kernel source as raw text
+/// (not JSON) whenever the command succeeds and no `--output` is given, so
+/// route through `--output` and read the written file back instead of
+/// reusing `run`'s JSON-only decoder.
+fn domain_expand_source(path_text: &str) -> String {
+    let output_path = std::env::temp_dir().join(format!(
+        "fsl-issue-731-expand-{}-{}.fsl",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos()
+    ));
+    let output_path_text = output_path.to_str().expect("UTF-8 temporary path");
+    let (result, status) = run(&["domain", "expand", path_text, "--output", output_path_text]);
+    assert_eq!(status, 0, "{result}");
+    let source = std::fs::read_to_string(&output_path).expect("read expanded kernel source");
+    let _ = std::fs::remove_file(&output_path);
+    source
+}
+
+/// Issue #731: `implicit_initial_value` must fire for container-typed domain
+/// state fields (`Option<T>`, `Set<T>`, a top-level `Map<K, V>`), not just
+/// the four scalar shapes, because `domain_kernel_source`'s renderer already
+/// gives every one of these an implicit default. The `selected_value` this
+/// warning reports must match `fslc domain expand`'s rendered default at the
+/// string level -- both must come from the same `fsl_core::domain_type_default`
+/// owner, not a second hand-rolled copy of the dispatch.
+#[test]
+fn domain_container_fields_warn_and_match_the_renderer_default() {
+    let path = characterization_fixture("container_defaults_surface.fsl");
+    let path_text = path.to_str().expect("UTF-8 path");
+    let (output, status) = run(&["check", path_text]);
+    assert_eq!(status, 0, "{output}");
+    let implicit = implicit_warnings(&output);
+    assert_eq!(
+        implicit.keys().collect::<Vec<_>>(),
+        vec!["Basket.picked", "Basket.seen"],
+        "{output}"
+    );
+
+    let picked = &implicit["Basket.picked"];
+    assert_eq!(picked["selected_value"], "none");
+    assert_eq!(picked["suggestion"]["machine_applicable"], true);
+    assert_eq!(picked["edition_severity"]["next"], "error");
+
+    let seen = &implicit["Basket.seen"];
+    assert_eq!(seen["selected_value"], "Set {}");
+    // No machine-applicable insertion for a brace-literal default (issue
+    // #770 tracks the `fslc fmt` round-trip defect this withholds against);
+    // `--edition next` cannot yet demand an initializer it cannot safely
+    // insert.
+    assert!(seen.get("suggestion").is_none(), "{seen}");
+    assert!(seen.get("canonical_replacement").is_none(), "{seen}");
+    assert_eq!(seen["edition_severity"]["next"], "warning");
+
+    let expanded = domain_expand_source(path_text);
+    let picked_value = picked["selected_value"].as_str().expect("picked value");
+    let seen_value = seen["selected_value"].as_str().expect("seen value");
+    assert!(
+        expanded.contains(&format!("basket_picked = {picked_value}")),
+        "{expanded}"
+    );
+    assert!(
+        expanded.contains(&format!("basket_seen = {seen_value}")),
+        "{expanded}"
+    );
+}
+
+/// Companion to the Option/Set case above: a top-level `Map<K, V>` field has
+/// no whole-field default at all (only the per-key `forall` init the
+/// renderer builds), and a `value_object`-typed field's struct-literal
+/// default hits the same #770 formatter round-trip gap `Set {}` does. Both
+/// must still warn under `check` and both must stay excluded from
+/// `--edition next` enforcement, since neither has a safe insertion to
+/// demand.
+#[test]
+fn domain_map_and_value_object_fields_warn_without_a_next_edition_deadline() {
+    let path = characterization_fixture("lvalues_surface.fsl");
+    let path_text = path.to_str().expect("UTF-8 path");
+    let (output, status) = run(&["check", path_text]);
+    assert_eq!(status, 0, "{output}");
+    let implicit = implicit_warnings(&output);
+    assert_eq!(
+        implicit.keys().collect::<Vec<_>>(),
+        vec!["Inventory.counter", "Inventory.counts"],
+        "{output}"
+    );
+    // `total: Quantity = 0;` has an explicit default and must not warn.
+    assert!(!implicit.contains_key("Inventory.total"), "{output}");
+
+    let counts = &implicit["Inventory.counts"];
+    assert_eq!(counts["selected_value"], "0");
+    assert!(counts.get("suggestion").is_none(), "{counts}");
+    assert_eq!(counts["edition_severity"]["next"], "warning");
+
+    let counter = &implicit["Inventory.counter"];
+    assert_eq!(counter["selected_value"], "Counter { value: 0 }");
+    assert!(counter.get("suggestion").is_none(), "{counter}");
+    assert_eq!(counter["edition_severity"]["next"], "warning");
+
+    let expanded = domain_expand_source(path_text);
+    assert!(expanded.contains("inventory_counts[k] = 0"), "{expanded}");
+    assert!(
+        expanded.contains("inventory_counter = Counter { value: 0 }"),
+        "{expanded}"
+    );
+
+    let (next, next_status) = run(&["check", path_text, "--edition", "next"]);
+    assert_eq!(next_status, 0, "{next}");
+    assert_eq!(next["result"], "ok", "{next}");
+}
+
 #[test]
 fn requirements_number_default_warning_edit_preserves_comment_and_verdict() {
     let source = r"requirements Amounts {

@@ -170,71 +170,159 @@ pub fn implicit_initial_value_warnings(source: &str, source_file: &str) -> Vec<V
 }
 
 fn domain_implicit_warnings(path: &str, domain: &fsl_syntax::DomainSpec) -> Vec<Value> {
-    let declared = domain
-        .types
-        .iter()
-        .map(|ty| (ty.name.as_str(), ty))
-        .collect::<std::collections::BTreeMap<_, _>>();
     domain
         .aggregates
         .iter()
         .flat_map(|aggregate| {
             aggregate.state.iter().filter_map(|field| {
-                let type_name = field.type_name.render_source();
-                let selected = omitted_domain_value(&type_name, field.default.as_ref(), &declared)?;
+                let selected = omitted_domain_value(domain, field)?;
                 Some(implicit_initial_value_warning(
                     path,
                     &format!("{}.{}", aggregate.name, field.name.text),
                     field.span,
                     field.type_name.span.end.offset,
-                    &selected.0,
-                    &selected.1,
+                    &selected.value,
+                    &selected.reason,
+                    selected.insertable,
                 ))
             })
         })
         .collect()
 }
 
+/// A field's implicit default, as chosen by [`fsl_core::domain_type_default`]
+/// -- the same renderer dispatch `domain_kernel_source` uses -- plus whether
+/// an explicit `= value` initializer can be safely offered as a
+/// machine-applicable edit for this field's shape.
+struct SelectedDefault {
+    value: String,
+    reason: String,
+    /// `false` in two distinct cases, both explained in `reason`:
+    ///
+    /// - A top-level `Map<K, V>` field: an explicit whole-`Map` default is
+    ///   unconditionally rejected ("whole-Map domain defaults are not
+    ///   supported"), so no single-expression insertion exists at all.
+    /// - A brace-literal value (`Set { ... }`, a `value_object` struct
+    ///   literal): the syntax itself is valid and `fslc check` accepts it,
+    ///   but `fslc fmt`/`migrate --write`'s reformat-and-reparse step cannot
+    ///   currently round-trip an `Ident { ... }` literal after a domain
+    ///   field declaration (issue #770). Offering a machine-applicable
+    ///   insertion here would make `migrate --write` corrupt the file.
+    ///
+    /// `check` still reports the renderer's implicit choice in both cases;
+    /// `migrate --edition next` cannot yet demand an initializer it cannot
+    /// safely insert (see `docs/LANGUAGE.md`).
+    insertable: bool,
+}
+
+/// The value [`omitted_domain_value`]'s caller must warn about for `field`,
+/// or `None` when `field` already has an explicit default (nothing implicit
+/// to report) or the renderer itself cannot choose a default (an unknown
+/// type, an empty enum, etc. -- the full `check` pipeline reports that
+/// failure separately; a syntax-only warning pass degrades to silence rather
+/// than duplicating that diagnosis).
+///
+/// The selected *value* always comes from [`fsl_core::domain_type_default`],
+/// the renderer's own total dispatch (issue #731) -- this function never
+/// re-derives what a type's default value is, only classifies *why* for the
+/// warning's `reason` text and whether that value is safe to offer as a
+/// machine-applicable `= value` insertion.
 fn omitted_domain_value(
-    type_name: &str,
-    default: Option<&fsl_syntax::SyntaxExpr>,
-    declared: &std::collections::BTreeMap<&str, &fsl_syntax::DomainType>,
-) -> Option<(String, String)> {
-    if default.is_some() {
+    domain: &fsl_syntax::DomainSpec,
+    field: &fsl_syntax::DomainField,
+) -> Option<SelectedDefault> {
+    if field.default.is_some() {
         return None;
     }
-    if type_name == "Bool" {
-        return Some(("false".to_owned(), "Bool defaults to false".to_owned()));
-    }
+    let type_name = field.type_name.render_source();
     if type_name == "Int" {
         return None;
     }
-    if let Some(definition) = declared.get(type_name) {
-        return match definition.kind.as_str() {
-            "enum" => definition.members.first().map(|member| {
-                (
-                    member.clone(),
+    if let Some((_key, value_type)) = fsl_core::map_key_value(&field.type_name) {
+        // A top-level Map<K, V> has no defaultable value of its own: the
+        // renderer's only supported default is the dense per-key
+        // `forall k: K { field[k] = <V's default> }` init
+        // `domain_kernel_source`'s state-field loop builds directly, using
+        // this exact same `domain_type_default` call on `V`. Report that
+        // per-key value for informational parity with the renderer, but
+        // without a suggestion: no `= value` syntax for a whole Map field is
+        // ever accepted, so no insertion could be machine-applicable.
+        let value_default = fsl_core::domain_type_default(domain, value_type, field.span).ok()?;
+        return Some(SelectedDefault {
+            reason: format!(
+                "'{type_name}' has no whole-field default; each key implicitly defaults to '{value_default}' through the per-key forall init the renderer builds"
+            ),
+            value: value_default,
+            insertable: false,
+        });
+    }
+    let value = match domain.types.iter().find(|ty| ty.name == type_name) {
+        // `Context::default_for_type` selects this same first-declared
+        // member, but renders it as `domain_kernel_source`'s mangled
+        // `Enum_Member` kernel identifier -- correct for the generated
+        // kernel text, not parseable as a domain-source field initializer.
+        // Read the member domain source itself would accept from the same
+        // `DomainSpec.types` the renderer's dispatch reads, rather than
+        // asking that dispatch for a kernel-scoped answer to a
+        // domain-source question.
+        Some(ty) if ty.kind == "enum" => ty.members.first()?.clone(),
+        _ => fsl_core::domain_type_default(domain, &field.type_name, field.span).ok()?,
+    };
+    let reason = domain_default_reason(domain, &field.type_name, &type_name, &value);
+    // A brace-literal value (`Set {}`, a value_object struct literal) is
+    // valid FSL that `fslc check` accepts, but issue #770 tracks that
+    // `fslc fmt` cannot yet reparse its own reformatting of an
+    // `Ident { ... }` literal placed after a domain field declaration.
+    // Withhold the insertion rather than emit an edit `migrate --write`
+    // would use to produce an unparseable file.
+    let insertable = !value.contains('{');
+    Some(SelectedDefault {
+        value,
+        reason,
+        insertable,
+    })
+}
+
+/// Explanatory text for why [`fsl_core::domain_type_default`] selected
+/// `value` for `type_name` -- classification only, kept separate from value
+/// selection so a wording gap here can never make the *reported* value
+/// disagree with the renderer's.
+fn domain_default_reason(
+    domain: &fsl_syntax::DomainSpec,
+    type_name: &fsl_syntax::SyntaxTypeExpr,
+    type_name_text: &str,
+    value: &str,
+) -> String {
+    match &type_name.kind {
+        fsl_syntax::SyntaxTypeExprKind::Apply { constructor, .. } => {
+            match constructor.text.as_str() {
+                "Option" => format!("'{type_name_text}' defaults to none"),
+                "Set" => format!("'{type_name_text}' defaults to an empty set"),
+                _ => format!("'{type_name_text}' defaults to '{value}'"),
+            }
+        }
+        fsl_syntax::SyntaxTypeExprKind::Name(_) if type_name_text == "Bool" => {
+            "Bool defaults to false".to_owned()
+        }
+        fsl_syntax::SyntaxTypeExprKind::Name(_) => {
+            match domain.types.iter().find(|ty| ty.name == type_name_text) {
+                Some(ty) if ty.kind == "enum" => {
                     format!(
                         "the first declared member of enum '{}' is selected",
-                        definition.name
-                    ),
-                )
-            }),
-            "range" => definition.lo.as_ref().map(|lo| {
-                (
-                    lo.render_source(),
-                    format!("the lower bound of range '{}' is selected", definition.name),
-                )
-            }),
-            _ => None,
-        };
+                        ty.name
+                    )
+                }
+                Some(ty) if ty.kind == "range" => {
+                    format!("the lower bound of range '{}' is selected", ty.name)
+                }
+                Some(ty) if ty.kind == "value_object" => format!(
+                    "the default value_object literal for '{}' is selected",
+                    ty.name
+                ),
+                _ => format!("external placeholder type '{type_name_text}' defaults to '{value}'"),
+            }
+        }
     }
-    (!type_name.contains('<')).then(|| {
-        (
-            "0".to_owned(),
-            format!("external placeholder type '{type_name}' defaults to 0"),
-        )
-    })
 }
 
 fn requirements_implicit_warnings(
@@ -283,6 +371,7 @@ fn requirements_implicit_warnings(
                         "the lower bound of number '{}' is selected",
                         field.type_name.name
                     ),
+                    true,
                 ))
             })
         })
@@ -296,14 +385,23 @@ fn implicit_initial_value_warning(
     insertion_offset: usize,
     selected: &str,
     reason: &str,
+    insertable: bool,
 ) -> Value {
-    let replacement = format!(" = {selected}");
-    json!({
+    let next_severity = if insertable { "error" } else { "warning" };
+    let message = if insertable {
+        format!("field '{field}' implicitly selects {selected}; add an explicit initializer")
+    } else {
+        format!(
+            "field '{field}' implicitly selects {selected}; \
+             no machine-applicable initializer edit is offered for this field yet"
+        )
+    };
+    let mut warning = json!({
         "kind": "implicit_initial_value",
         "code": "implicit_initial_value",
         "severity": "warning",
-        "edition_severity": {"current": "warning", "next": "error"},
-        "message": format!("field '{field}' implicitly selects {selected}; add an explicit initializer"),
+        "edition_severity": {"current": "warning", "next": next_severity},
+        "message": message,
         "field": field,
         "selected_value": selected,
         "reason": reason,
@@ -314,12 +412,20 @@ fn implicit_initial_value_warning(
             "end_line": span.end.line,
             "end_column": span.end.column,
         },
-        "canonical_replacement": replacement,
-        "suggestion": {
-            "kind": "insert",
-            "replacement": replacement,
-            "span": {"start": insertion_offset, "end": insertion_offset},
-            "machine_applicable": true,
-        },
-    })
+    });
+    if insertable {
+        let replacement = format!(" = {selected}");
+        let object = warning.as_object_mut().expect("warning is a JSON object");
+        object.insert("canonical_replacement".to_owned(), json!(replacement));
+        object.insert(
+            "suggestion".to_owned(),
+            json!({
+                "kind": "insert",
+                "replacement": replacement,
+                "span": {"start": insertion_offset, "end": insertion_offset},
+                "machine_applicable": true,
+            }),
+        );
+    }
+    warning
 }
