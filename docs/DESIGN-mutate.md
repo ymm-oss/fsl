@@ -32,15 +32,23 @@ mutant** before checking. Reasons:
 
 Native `fslc mutate` accepts `domain` documents by rendering them through the same textual
 kernel path `fslc domain expand` uses (`fsl_tools::domain_kernel_source`, i.e.
-`fsl_core::domain_kernel_source`) and mutating the **re-parsed** kernel spec, rather than the
-`fsl-core::domain.rs` direct-lowering path `check`/`verify` use for domain. Direct lowering
-propagates a source span at only one site in its generated nodes, so a mutant span taken from
-that AST is effectively null — a `loc`-less witness degrades the mutation report from a review
-queue into an unusable list. Rendering to kernel text and re-parsing it as an ordinary spec gives
-every mutant a real span inside that text, which the output envelope also carries as
-`kernel_source` (the same field `domain expand`/`domain check` already emit) so a witness is
-resolvable from the envelope alone without re-deriving the rendering. The two lowering paths are
-kept in agreement by `fsl-core/tests/domain_render_agreement.rs`.
+`fsl_core::domain_kernel_source` in `fsl-core/src/domain.rs`) and mutating the **re-parsed**
+kernel spec, rather than the direct-lowering path `check`/`verify` use for domain
+(`fsl_core::lower_domain`, `fsl-core/src/dialect.rs:2575`, which delegates to
+`fsl-core/src/domain_lowering.rs`). Direct lowering does propagate real spans into the domain
+source file at many sites, not one — measured across the public kernel contract for
+`examples/domain/order_async_effect.fsl`, both paths emit 409 spans with 16 null (an unrelated,
+equal-across-both-paths class), but direct lowering resolves to only 23 distinct non-null source
+positions against 90 for the rendered path, so it collapses many distinct mutants onto the same
+witness location. The rendered path is chosen for that ~4x finer discrimination, at the cost that
+its `loc` points into the rendered `kernel_source` text rather than a line of the domain source
+file on disk (direct lowering's `loc` does resolve against the real file). That cost is why
+`kernel_source` is embedded in the output envelope (the same field `domain expand`/`domain check`
+already emit), so a witness is resolvable from the envelope alone without re-deriving the
+rendering. The two lowering paths' span behavior — including the shared 16-null-of-409 count and
+the 23-vs-90 discrimination gap — is measured, not merely asserted, and kept from silently
+drifting by `fsl-core/tests/domain_render_agreement.rs`, which compares both paths' output while
+excluding only `span` itself.
 
 Consequences that follow from mutating the rendered text rather than the domain source:
 
@@ -63,7 +71,18 @@ Consequences that follow from mutating the rendered text rather than the domain 
 - Aggregate invariants phrased over `can()` are expanded against the current guards at lowering
   time; kernel-level mutants therefore never violate them, and their absence from the kill set
   must not be read as hollowness. Their drift coverage is source-level: re-verification after a
-  guard edit re-expands `can()` and falsifies the invariant (measured in #771).
+  guard edit re-expands `can()` and falsifies the invariant (measured in #771). For the same
+  reason, `--by-requirement`'s `DOMAIN-INVARIANT` bucket reports `kills:0` with an
+  `empty_formalization` warning for every domain spec with a `can()` invariant (confirmed on
+  `order_async_effect.fsl`) — that warning is this same structural blind spot surfacing through a
+  machine-readable field rather than prose, and must not be read as evidence the invariant is
+  hollow either.
+- `--from` external mutants are adjudicated against the rendered kernel text, not the domain
+  source: a `replace:{target,...}` instruction whose `target` is domain source text matches
+  nothing in `source` (which mutate's domain arm has already replaced with `kernel_source`) and is
+  reported `invalid`, fail-closed. External domain mutants must therefore be written against the
+  `kernel_source` a prior `mutate`/`domain expand` run on the same file emitted, not the `.fsl`
+  domain document.
 
 ### Mutation operators (deterministic enumeration, no randomness)
 

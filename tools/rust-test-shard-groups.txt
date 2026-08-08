@@ -62,7 +62,7 @@
 #   corpus_check_sweep                  192.5s  [224.5s total,  2 tests]
 #   issue_697_corpus_probe_budget        76.7s  [ 76.7s total,  1 test]
 #   explain_cli                          69.5s  [439.7s total, 13 tests]
-# Nothing else exceeds 62s. `explain_cli` is the instructive case: 439.7s sequential
+# Nothing else in that run exceeded 62s. `explain_cli` is the instructive case: 439.7s sequential
 # but only a 69.5s slowest test. It is pinned to drain that 439.7s from the
 # duration-blind leftover, and the trade is not free -- it raises shard 3's sum from
 # 690.7s to 1130.4s, which is what moves that shard's model term from max(275.6, 230)
@@ -81,8 +81,28 @@
 # 12.2 / 10.85 / 10.46 min. The slowest shard -- which is what `rust workspace`
 # waits on -- fell from 15.6 min to 12.2 min, and the spread from 3.1x to 1.17x.
 # `tools/check-shard-union.sh` reported a clean union on that run.
+#
+# `fslc-rust::issue_727_mutate_domain_rendered_kernel` arrived with #727 and
+# exceeds the roughly-a-minute threshold DESIGN-ci.md's "When to update
+# tools/rust-test-shard-groups.txt" names: local debug-profile,
+# `--test-threads=1`, slowest single test (`mutate_domain_positive_oracle_
+# kills_capture_payment_success_sticky`) 115.80s, binary sequential total
+# 152.72s over 4 tests. It enumerates the full 200/198-mutant builtin set at
+# `--depth 4` because the specific kills it asserts sit late in enumeration
+# order (see the test file's own doc comment), so it cannot be shrunk with
+# `--max-mutants` without losing the assertions. 115.80s is below every
+# existing shard's current slowest-single-test pin (458.8s / 371.8s /
+# 275.6s), so per the "faster than an existing pin's slowest test" case this
+# pin is nearly free wherever it lands; shard 1 is chosen because its pinned
+# sum (683.4s) stays under the sum/3 crossover against its 458.8s slowest
+# test even after adding this binary's 152.72s (836.1s / 3 = 278.7s <
+# 458.8s), so shard 1's pinned-phase model term is unchanged and only the
+# duration-blind leftover shrinks. Not yet re-measured against a live CI run
+# (no CI numbers for this binary exist before this pull request merges); the
+# actual shard totals above predate this pin.
 1 fslc-rust::refine_corpus_parity
 1 fslc-rust::corpus_check_sweep
+1 fslc-rust::issue_727_mutate_domain_rendered_kernel
 2 fslc-rust::issue_697_all_properties_memory
 2 fslc-rust::explicit_engine
 3 fslc-rust::injection_detector_matrix

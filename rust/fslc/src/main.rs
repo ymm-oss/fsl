@@ -10224,13 +10224,21 @@ fn run_mutate(
             }
         }
         fsl_syntax::SurfaceDocument::Domain(domain) => {
-            // `fsl-core::domain.rs`'s direct lowering (the path `check`/`verify`
-            // use) has only one span-propagation site, so its generated nodes
-            // carry effectively null spans — unusable for mutation witnesses.
-            // Render through the same textual kernel path `domain expand` uses
-            // instead and re-parse that text, so mutant `loc` points at real
-            // `kernel_source` lines. The two lowering paths are kept in
-            // agreement by `fsl-core/tests/domain_render_agreement.rs`.
+            // Direct lowering (`fsl_core::lower_domain`, `dialect.rs` ->
+            // `domain_lowering.rs`; the path `check`/`verify` use) does
+            // propagate real spans into the domain source file at many
+            // sites, not zero — but measured across the public kernel
+            // contract it resolves to only 23 distinct source positions,
+            // against 90 for the rendered path below, so it collapses many
+            // distinct mutants onto the same witness location. Render
+            // through the same textual kernel path `domain expand` uses
+            // instead (`fsl_tools::domain_kernel_source`, i.e.
+            // `fsl_core::domain.rs`) and re-parse that text: the resulting
+            // `loc` is ~4x more discriminating, at the cost that it points
+            // into `kernel_source` text rather than a line of the domain
+            // source file on disk, which is why `kernel_source` is embedded
+            // in the output envelope below. The two lowering paths are kept
+            // in agreement by `fsl-core/tests/domain_render_agreement.rs`.
             let rendered = match fsl_tools::domain_kernel_source(&domain) {
                 Ok(rendered) => rendered,
                 Err(error) => return mutate_error(core_error_output(&error)),

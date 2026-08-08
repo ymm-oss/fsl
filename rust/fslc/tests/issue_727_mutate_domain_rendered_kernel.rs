@@ -73,6 +73,11 @@ fn mutate_domain_positive_oracle_kills_capture_payment_success_sticky() {
     ]);
     assert_eq!(status, 0, "{output:#}");
     assert_eq!(output["result"], "mutated", "{output:#}");
+    // 200 is the default `--max-mutants` cap (`mutate cap 200 reached: 52
+    // dropped`), not the full builtin catalog (252 for this fixture): this
+    // pins the CLI's default-cap behavior on a domain document, and would
+    // need updating if `DEFAULT_MAX_MUTANTS` ever changes for an unrelated
+    // reason.
     assert_eq!(output["summary"]["total"], 200, "{}", output["summary"]);
     assert_eq!(output["summary"]["killed"], 14, "{}", output["summary"]);
     assert_eq!(
