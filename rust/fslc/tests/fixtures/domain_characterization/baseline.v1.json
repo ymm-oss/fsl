@@ -2417,6 +2417,18 @@
                 false
               ],
               "<location>"
+            ],
+            [
+              "assign",
+              [
+                "var",
+                "order_status"
+              ],
+              [
+                "var",
+                "Status_Approved"
+              ],
+              "<location>"
             ]
           ],
           "ensures": [],
@@ -2505,6 +2517,18 @@
               [
                 "bool",
                 true
+              ],
+              "<location>"
+            ],
+            [
+              "assign",
+              [
+                "var",
+                "order_status"
+              ],
+              [
+                "var",
+                "Status_Failed"
               ],
               "<location>"
             ]
@@ -7101,6 +7125,49 @@
                 },
                 "value": false
               }
+            },
+            {
+              "kind": "assign",
+              "type": {
+                "kind": "statement"
+              },
+              "span": {
+                "file": "effect_saga_valid.fsl",
+                "line": 32,
+                "column": 31,
+                "end_line": 32,
+                "end_column": 48
+              },
+              "target": {
+                "kind": "var",
+                "type": {
+                  "kind": "named",
+                  "name": "Status"
+                },
+                "span": {
+                  "file": "effect_saga_valid.fsl",
+                  "line": 32,
+                  "column": 31,
+                  "end_line": 32,
+                  "end_column": 48
+                },
+                "name": "order_status"
+              },
+              "value": {
+                "kind": "var",
+                "type": {
+                  "kind": "named",
+                  "name": "Status"
+                },
+                "span": {
+                  "file": "effect_saga_valid.fsl",
+                  "line": 32,
+                  "column": 31,
+                  "end_line": 32,
+                  "end_column": 48
+                },
+                "name": "Status_Approved"
+              }
             }
           ],
           "origin": {
@@ -7792,7 +7859,181 @@
             "saga_payment_flow_capture_timeout": true
           },
           "deadlock": {
-            "found": false
+            "found": true,
+            "at_step": 2,
+            "trace": [
+              {
+                "step": 0,
+                "state": {
+                  "capture_payment_attempts": {
+                    "0": 0,
+                    "1": 0
+                  },
+                  "capture_payment_status": {
+                    "0": "CapturePaymentEffectStatus_NotStarted",
+                    "1": "CapturePaymentEffectStatus_NotStarted"
+                  },
+                  "event_Approved": false,
+                  "event_PaymentCaptured": false,
+                  "event_PaymentFailed": false,
+                  "event_PaymentRequested": false,
+                  "event_PaymentTimedOut": false,
+                  "order_status": "Status_Draft"
+                }
+              },
+              {
+                "step": 1,
+                "state": {
+                  "capture_payment_attempts": {
+                    "0": 0,
+                    "1": 0
+                  },
+                  "capture_payment_status": {
+                    "0": "CapturePaymentEffectStatus_NotStarted",
+                    "1": "CapturePaymentEffectStatus_NotStarted"
+                  },
+                  "event_Approved": true,
+                  "event_PaymentCaptured": false,
+                  "event_PaymentFailed": false,
+                  "event_PaymentRequested": false,
+                  "event_PaymentTimedOut": false,
+                  "order_status": "Status_Approved"
+                },
+                "action": {
+                  "name": "Approve",
+                  "generated_name": "order_approve",
+                  "origin": {
+                    "identity": "domain:DomainEffectSagaCharacterization/aggregate/Order/decide/Approve:687:693:22:5",
+                    "dialect": "domain",
+                    "primary": {
+                      "source_file": "rust/fslc/tests/fixtures/domain_characterization/effect_saga_valid.fsl",
+                      "span": {
+                        "start": {
+                          "offset": 687,
+                          "line": 22,
+                          "column": 5
+                        },
+                        "end": {
+                          "offset": 693,
+                          "line": 22,
+                          "column": 11
+                        }
+                      },
+                      "dialect": "domain",
+                      "declaration_path": [
+                        "DomainEffectSagaCharacterization",
+                        "aggregate",
+                        "Order",
+                        "decide",
+                        "Approve"
+                      ]
+                    },
+                    "secondary": [
+                      {
+                        "source_file": "rust/fslc/tests/fixtures/domain_characterization/effect_saga_valid.fsl",
+                        "span": {
+                          "start": {
+                            "offset": 305,
+                            "line": 13,
+                            "column": 5
+                          },
+                          "end": {
+                            "offset": 312,
+                            "line": 13,
+                            "column": 12
+                          }
+                        },
+                        "dialect": "domain",
+                        "declaration_path": [
+                          "DomainEffectSagaCharacterization",
+                          "aggregate",
+                          "Order",
+                          "command",
+                          "Approve"
+                        ]
+                      }
+                    ],
+                    "lowering_steps": [
+                      {
+                        "kind": "lower_decision_to_action",
+                        "detail": null
+                      }
+                    ],
+                    "generated": true
+                  },
+                  "params": {},
+                  "loc": {
+                    "line": 22,
+                    "column": 5
+                  }
+                },
+                "changes": {
+                  "event_Approved": {
+                    "from": false,
+                    "to": true
+                  },
+                  "order_status": {
+                    "from": "Status_Draft",
+                    "to": "Status_Approved"
+                  }
+                }
+              },
+              {
+                "step": 2,
+                "state": {
+                  "capture_payment_attempts": {
+                    "0": 0,
+                    "1": 0
+                  },
+                  "capture_payment_status": {
+                    "0": "CapturePaymentEffectStatus_NotStarted",
+                    "1": "CapturePaymentEffectStatus_NotStarted"
+                  },
+                  "event_Approved": false,
+                  "event_PaymentCaptured": false,
+                  "event_PaymentFailed": false,
+                  "event_PaymentRequested": false,
+                  "event_PaymentTimedOut": true,
+                  "order_status": "Status_Failed"
+                },
+                "action": {
+                  "name": "saga_payment_flow_capture_timeout",
+                  "generated_name": "saga_payment_flow_capture_timeout",
+                  "origin": {
+                    "identity": "domain:generated:action:saga_payment_flow_capture_timeout",
+                    "dialect": "domain",
+                    "primary": null,
+                    "secondary": [],
+                    "lowering_steps": [
+                      {
+                        "kind": "generated",
+                        "detail": null
+                      }
+                    ],
+                    "generated": true
+                  },
+                  "params": {},
+                  "loc": {
+                    "line": 52,
+                    "column": 5
+                  }
+                },
+                "changes": {
+                  "event_Approved": {
+                    "from": true,
+                    "to": false
+                  },
+                  "event_PaymentTimedOut": {
+                    "from": false,
+                    "to": true
+                  },
+                  "order_status": {
+                    "from": "Status_Approved",
+                    "to": "Status_Failed"
+                  }
+                }
+              }
+            ]
           },
           "versions": {
             "verifier": {

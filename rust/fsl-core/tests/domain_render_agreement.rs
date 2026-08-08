@@ -134,6 +134,7 @@ const VALID_DOMAIN_FIXTURES: &[&str] = &[
     "rust/fslc/tests/fixtures/issue_518_domain_replay.fsl",
     "rust/fslc/tests/fixtures/issue_641_domain_clean.fsl",
     "rust/fslc/tests/fixtures/issue_641_domain_unreachable_decide.fsl",
+    "rust/fslc/tests/fixtures/issue_779_saga_emit_evolve_negative_controls.fsl",
 ];
 
 /// Domain specs that parse into a [`DomainSpec`] but must be rejected by

@@ -235,8 +235,13 @@ domain <Name> {
 events, domain errors, pure `decide`/`evolve`, async effect lifecycles, and
 saga/process-manager coordination. It lowers each command+decide+evolve path to
 a kernel `action`, aggregate state to prefixed kernel state, saga steps to
-event-flag guarded actions, and effect lifecycle state to finite
-`Map<CorrelationId, EffectStatus>` / `Map<CorrelationId, Attempt>` maps. Domain
+event-flag guarded actions that also apply each emitted event's declared
+`evolve` in the same action, and effect lifecycle state to finite
+`Map<CorrelationId, EffectStatus>` / `Map<CorrelationId, Attempt>` maps. Every
+action that raises an event's occurrence flag applies that event's declared
+`evolve` in the same action, whichever construct generated the action
+(command, effect completion, saga observe, or saga step/timeout/compensation).
+Domain
 enum members are namespaced during lowering, so two domain enums may both contain
 `Pending`. Domain expressions may use `X in [A, B]` and `can(Command)`; these are
 resolved from the typed domain tree and lowered structurally to kernel

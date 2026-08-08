@@ -207,11 +207,23 @@ fn lower_name(name: &str) -> String {
     safe(&output)
 }
 
-fn state_name(aggregate: &DomainAggregate, field: &str) -> String {
+/// The kernel state variable name a domain aggregate field lowers to
+/// (`{aggregate}_{field}`). Exported so an external corpus sweep can compute
+/// an `evolve` assignment's kernel target from the `DomainSpec` alone,
+/// instead of guessing from generated names (see `event_flag`).
+#[must_use]
+pub fn state_name(aggregate: &DomainAggregate, field: &str) -> String {
     format!("{}_{}", lower_name(&aggregate.name), safe(field))
 }
 
-fn event_flag(event: &str) -> String {
+/// The kernel one-hot event-occurrence flag name a domain event lowers to
+/// (`event_{event}`). Exported so an external corpus sweep (the #779 saga
+/// step/timeout/compensation "evolve pairing" gate) can compute which kernel
+/// variable an event's occurrence flag is from the `DomainSpec` alone,
+/// rather than pattern-matching generated action bodies for an `event_`
+/// prefix — the latter has no `DomainSpec`-side referent to check against.
+#[must_use]
+pub fn event_flag(event: &str) -> String {
     format!("event_{}", safe(event))
 }
 
@@ -2068,6 +2080,32 @@ impl<'a> Resolver<'a> {
         }
         Ok(items)
     }
+
+    /// Apply the declared `evolve` for each event a saga step/timeout/compensation
+    /// action emits, pairing with `event_assignments`: an action that raises
+    /// `event_<E>` for an occurring event must apply E's declared evolve in the
+    /// same action (docs/DESIGN-domain.md's saga step pairing invariant).
+    fn saga_emit_evolve(
+        &self,
+        loc: DomainLoc,
+        events: &[String],
+    ) -> Result<(Vec<ActionItem>, Annotations), CoreError> {
+        let mut items = Vec::new();
+        let mut annotations = Annotations::default();
+        for event_name in events {
+            let (aggregate, event) = self.event(event_name, loc)?;
+            let mut scope = self.scope_for_aggregate(aggregate)?;
+            self.extend_fields(&mut scope, &event.fields)?;
+            items.extend(self.evolve_items(aggregate, event_name, &scope)?);
+            annotations.extend(
+                evolve_annotations(aggregate, event_name)
+                    .source_order()
+                    .iter()
+                    .cloned(),
+            );
+        }
+        Ok((items, annotations))
+    }
 }
 
 fn metadata(id: impl Into<String>, text: impl Into<String>) -> MetaTag {
@@ -2785,13 +2823,18 @@ fn lower_saga_actions(
                     .into_iter()
                     .map(ActionItem::Statement),
             );
+            let (evolve_items, evolve_annotations) =
+                resolver.saga_emit_evolve(step.loc, &step.emits)?;
+            action_items.extend(evolve_items);
+            let mut annotations = step.annotations.clone();
+            annotations.extend(evolve_annotations.source_order().iter().cloned());
             let action_name = format!("saga_{}_{}", lower_name(&saga.name), lower_name(&step.name));
             items.push(action(
                 action_name.clone(),
                 Vec::new(),
                 action_items,
                 span,
-                step.annotations.clone(),
+                annotations,
             ));
             if let Some(timeout) = &step.timeout_event {
                 let mut timeout_items = guards
@@ -2804,12 +2847,18 @@ fn lower_saga_actions(
                         .into_iter()
                         .map(ActionItem::Statement),
                 );
+                let (timeout_evolve_items, timeout_evolve_annotations) =
+                    resolver.saga_emit_evolve(step.loc, std::slice::from_ref(timeout))?;
+                timeout_items.extend(timeout_evolve_items);
+                let mut timeout_annotations = step.annotations.clone();
+                timeout_annotations
+                    .extend(timeout_evolve_annotations.source_order().iter().cloned());
                 items.push(action(
                     format!("{action_name}_timeout"),
                     Vec::new(),
                     timeout_items,
                     span,
-                    step.annotations.clone(),
+                    timeout_annotations,
                 ));
             }
         }
@@ -2827,6 +2876,9 @@ fn lower_saga_actions(
                     .into_iter()
                     .map(ActionItem::Statement),
             );
+            let (evolve_items, evolve_annotations) =
+                resolver.saga_emit_evolve(compensation.loc, &compensation.emits)?;
+            action_items.extend(evolve_items);
             items.push(action(
                 format!(
                     "saga_{}_compensate_{}_after_{}",
@@ -2837,7 +2889,7 @@ fn lower_saga_actions(
                 Vec::new(),
                 action_items,
                 span,
-                Annotations::default(),
+                evolve_annotations,
             ));
         }
     }
