@@ -1,4 +1,4 @@
-# FSL — dialect corpus conformance harness (Monitor / oracle / agreement CI gate)
+# FSL — dialect corpus conformance harness (Monitor / oracle / agreement safety net)
 
 ## Goal
 
@@ -6,8 +6,9 @@ Every `.fsl` under `specs/` and `examples/` is either (a) driven through the ful
 dual-evaluator safety net — `parse → desugar → build_spec → Monitor load →
 BMC/Monitor expression agreement → verify-vs-oracle verdict agreement` — or (b)
 excluded **loudly**, with a documented reason that the harness re-asserts on every
-run. A new dialect (or a new example directory) that nobody registers is a CI
-failure, not a silent skip.
+run. A new dialect (or a new example directory) that nobody registers is a harness
+failure, not a silent skip — see "Cost and CI wiring" below for what actually
+invokes this harness today (no CI workflow does; it is a manual/reference check).
 
 ## The gap (issue #167)
 
@@ -158,7 +159,7 @@ Full pipeline per file (depth from the file's dialect entry, default 4):
 Two meta-tests close the structural hole: `test_corpus_fully_claimed` (no
 UNKNOWN construct anywhere under `SCAN_ROOTS`) and `test_registry_floors`
 (per-dialect scan count ≥ `min_files`; also asserts every `MONITOR_EXCLUSIONS`
-path exists). Regression for the gate itself: reverting `470c75c` locally makes
+path exists). Regression for the harness itself: reverting `470c75c` locally makes
 the db corpus fail stage 1 loudly (verified once at PR time; the assert-not-skip
 structure keeps it true).
 
@@ -181,7 +182,8 @@ else runs the full dual-evaluator pipeline over `specs/`/`examples/`, so a
 failing run must still be treated as a reviewable registration diff to land
 (a new dialect/example directory registered in `tests/dialect_registry.py`,
 or a stale exclusion/declared-error front matter removed), not left red
-indefinitely — see issue #476.
+indefinitely — see issue #786, which found this harness itself red on two
+cases precisely because nothing was watching it.
 
 Its narrower structural obligation — every `.fsl` under `specs/`/`examples/`
 either `check`s cleanly or is a declared/excluded error, so nothing rots
@@ -722,7 +724,8 @@ for the variant rows.
 `CONTRIBUTING.md` "Adding a language feature" gains: register any new dialect's
 construct and example corpus in `tests/dialect_registry.py` (and any new example
 directory is claimed automatically by the scan — the harness fails until its
-construct is registered).
+construct is registered, on the manual/reference runs described in "Cost and CI
+wiring" above; no CI lane currently runs it for you).
 
 `CONTRIBUTING.md` "Guidelines for changes" gains: a fixed escaped defect gains
 an entry in `rust/fslc/tests/fault_operators/` when its defect class can recur

@@ -6,9 +6,11 @@
 ``tests/test_dialect_conformance.py`` scans every ``.fsl`` under
 ``SCAN_ROOTS`` and classifies it; this module is the data side of that
 classification, not logic. A new dialect (or a new example directory) that
-nobody registers here fails the conformance gate loudly, instead of the
-corpus silently sitting outside the dual-evaluator safety net (the failure
-mode the 2026-07-08 fsl-db audit found).
+nobody registers here fails ``test_dialect_conformance.py`` loudly when that
+file is run, instead of the corpus silently sitting outside the
+dual-evaluator safety net (the failure mode the 2026-07-08 fsl-db audit
+found). That file is a manual/reference check, not a CI gate: no workflow
+and no ``tools/check-native-integration.sh`` lane currently invokes it.
 """
 from __future__ import annotations
 
@@ -82,7 +84,8 @@ EVIDENCE_CONSTRUCTS: dict[str, str] = {
 
 # repo-relative path -> reason. Individual files the Monitor legitimately
 # rejects. Re-asserted every run: a stale entry (the file starts loading)
-# fails the gate and must be deleted.
+# fails test_dialect_conformance.py (not CI-enforced; see this module's
+# docstring) and must be deleted.
 MONITOR_EXCLUSIONS: dict[str, str] = {
     "examples/self/no_actions.fsl": (
         "deliberate no-action edge fixture; Monitor requires >=1 action. "
