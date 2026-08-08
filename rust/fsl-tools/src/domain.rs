@@ -171,15 +171,29 @@ pub fn check_domain(domain: &DomainSpec, kernel: &Value) -> Result<Value, fsl_co
 }
 
 /// Emit the stable structural domain analysis projection.
-#[must_use]
-pub fn analyze_domain(domain: &DomainSpec) -> Value {
+///
+/// # Errors
+///
+/// Returns an error when the domain document contains a construct that
+/// parses but has no executable lowering on either consumer path
+/// (#710/#711/#712): this walks the same guard `check_domain` reaches
+/// through `domain_kernel_source`, so every consumer of this raw-`DomainSpec`
+/// projection -- present or future -- rejects the same specs `check` does,
+/// instead of the guard living only in one caller's call site (#726).
+pub fn analyze_domain(domain: &DomainSpec) -> Result<Value, fsl_core::CoreError> {
+    // The rendered kernel source itself is not part of this projection's
+    // output (issue #723 owns giving these constructs represented
+    // semantics); this call exists solely for its fail-closed guard.
+    domain_kernel_source(domain)?;
     let assumptions = assumptions(domain);
     let findings = domain
         .effects
         .iter()
         .flat_map(|effect| effect_findings(domain, effect, &assumptions))
         .collect::<Vec<_>>();
-    json!({"result":"analyzed","dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"profile":domain.implementation_profile,"aggregates":domain.aggregates.iter().map(|a|json!({"name":a.name,"id_type":a.id_type,"state":a.state.iter().map(|f|json!({"name":f.name.text,"type":f.type_name.render_source()})).collect::<Vec<_>>(),"commands":a.commands.iter().map(|x|&x.name).collect::<Vec<_>>(),"events":a.events.iter().map(|x|&x.name).collect::<Vec<_>>(),"errors":a.errors.iter().map(|x|&x.name).collect::<Vec<_>>(),"invariants":a.invariants.iter().map(|x|&x.name.text).collect::<Vec<_>>() })).collect::<Vec<_>>(),"effects":domain.effects.iter().map(|e|json!({"name":e.name,"async":e.async_effect,"reliable":e.reliable,"irreversible":e.irreversible,"handles":e.handles.as_ref().or(e.request_event.as_ref()),"outcomes":e.outcome_events(),"correlation_id":e.correlation_id.as_ref().map(SyntaxExpr::render_source),"idempotency_key":e.idempotency_key.as_ref().map(SyntaxExpr::render_source),"retry_max_attempts":e.retry.max_attempts,"timeout_event":e.timeout_event,"outbox":e.outbox,"inbox":e.inbox})).collect::<Vec<_>>(),"sagas":domain.sagas.iter().map(|s|json!({"name":s.name,"starts_on":s.starts_on,"steps":s.steps.iter().map(|x|json!({"name":x.name,"async":x.async_step,"requires":x.requires.iter().map(SyntaxExpr::render_source).collect::<Vec<_>>(),"emits":x.emits,"awaits_mode":x.awaits_mode,"awaits":x.awaits,"timeout_event":x.timeout_event})).collect::<Vec<_>>(),"compensations":s.compensations.iter().map(|x|json!({"trigger_event":x.trigger_event,"after_event":x.after_event,"emits":x.emits})).collect::<Vec<_>>(),"outboxes":s.outboxes,"inboxes":s.inboxes,"invariants":s.invariants.iter().map(|x|&x.name.text).collect::<Vec<_>>() })).collect::<Vec<_>>(),"findings":findings,"assumptions":assumptions})
+    Ok(
+        json!({"result":"analyzed","dialect":"fsl-domain-effect.v0","finding_schema_version":"fsl-domain-finding.v0","domain":domain.name,"profile":domain.implementation_profile,"aggregates":domain.aggregates.iter().map(|a|json!({"name":a.name,"id_type":a.id_type,"state":a.state.iter().map(|f|json!({"name":f.name.text,"type":f.type_name.render_source()})).collect::<Vec<_>>(),"commands":a.commands.iter().map(|x|&x.name).collect::<Vec<_>>(),"events":a.events.iter().map(|x|&x.name).collect::<Vec<_>>(),"errors":a.errors.iter().map(|x|&x.name).collect::<Vec<_>>(),"invariants":a.invariants.iter().map(|x|&x.name.text).collect::<Vec<_>>() })).collect::<Vec<_>>(),"effects":domain.effects.iter().map(|e|json!({"name":e.name,"async":e.async_effect,"reliable":e.reliable,"irreversible":e.irreversible,"handles":e.handles.as_ref().or(e.request_event.as_ref()),"outcomes":e.outcome_events(),"correlation_id":e.correlation_id.as_ref().map(SyntaxExpr::render_source),"idempotency_key":e.idempotency_key.as_ref().map(SyntaxExpr::render_source),"retry_max_attempts":e.retry.max_attempts,"timeout_event":e.timeout_event,"outbox":e.outbox,"inbox":e.inbox})).collect::<Vec<_>>(),"sagas":domain.sagas.iter().map(|s|json!({"name":s.name,"starts_on":s.starts_on,"steps":s.steps.iter().map(|x|json!({"name":x.name,"async":x.async_step,"requires":x.requires.iter().map(SyntaxExpr::render_source).collect::<Vec<_>>(),"emits":x.emits,"awaits_mode":x.awaits_mode,"awaits":x.awaits,"timeout_event":x.timeout_event})).collect::<Vec<_>>(),"compensations":s.compensations.iter().map(|x|json!({"trigger_event":x.trigger_event,"after_event":x.after_event,"emits":x.emits})).collect::<Vec<_>>(),"outboxes":s.outboxes,"inboxes":s.inboxes,"invariants":s.invariants.iter().map(|x|&x.name.text).collect::<Vec<_>>() })).collect::<Vec<_>>(),"findings":findings,"assumptions":assumptions}),
+    )
 }
 
 /// Render a compact executable kernel catalog used by expand and review tools.
