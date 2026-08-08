@@ -333,9 +333,11 @@ detects the failure it exists for, alongside its accepting fixture.
    `tools/aggregate_changelog.sh`), holds this fixed, small set. It was measured directly against
    this repository's release history with `git show --name-status --format= <sha>` on each of
    `56d5b1a` (v4.2.0), `473239a` (v4.1.0), `7b8607a` (v4.0.0), and `e1dfdcb` (v3.1.0): the touched
-   product-surface path set is byte-identical across all four —
+   path set is byte-identical across all four, every entry status `M` (no release commit adds a
+   file here) —
 
    ```
+   CHANGELOG.md
    editors/vscode/package-lock.json
    editors/vscode/package.json
    rust/Cargo.lock
@@ -343,31 +345,105 @@ detects the failure it exists for, alongside its accepting fixture.
    rust/fslc/tests/fixtures/domain_characterization/baseline.v1.json
    ```
 
-   — every entry status `M` in all four (no release commit adds a file here). `CHANGELOG.md`
-   itself is not in this set; it is governed separately, by `classify_direct_edit`/control 4.
-   `7b8607a` additionally touched `docs/RELEASE.md`, which is not a product surface under
-   `is_product_surface_path` and so never entered this set. `classify_product_diff` now checks
-   each product-surface path individually: a path in `is_release_bump_path`'s set is exempt
-   exactly when the diff's classification is `"release-move"` (unchanged from round 2); a path
-   outside that set still demands a fragment in the same diff, and the
-   `changelog-fragment-missing` diagnostic names exactly the non-exempt paths, not the exempt ones
-   riding alongside them. **A maintainer who changes `docs/RELEASE.md`'s release-commit steps to
-   touch a new product-surface path must add that exact path to `is_release_bump_path`, or every
-   future release commit will start failing its own `changelog-fragment-missing`.**
+   — of which `is_release_bump_path` holds exactly the three that are product surfaces under
+   `is_product_surface_path`: `rust/Cargo.lock`, `rust/Cargo.toml`, and the domain
+   characterization baseline. `CHANGELOG.md` is excluded because it is governed separately, by
+   `classify_direct_edit`/control 4. `editors/vscode/package.json`,
+   `editors/vscode/package-lock.json`, and `docs/RELEASE.md` (which `7b8607a` also touched) are
+   excluded because none of them is a product surface, so control 1 never asks about them and
+   this predicate is never consulted for them.
 
-   The forgery above now buys nothing: the forged heading plus a change to, say,
-   `rust/fsl-core/src/lib.rs` still fails, because `lib.rs` is not a release-bump surface. Both
-   non-adversarial paths become correct rejections: a release commit carrying an unrelated product
-   change now needs a fragment for that unrelated change, the same as any other pull request
-   would; a branch whose base predates a landed release is unaffected by this narrowing at all
-   (it depends on the merge-base fix, S2-2/round 2, not on this exclusion). Accepting fixtures:
-   unchanged from round 2 (the full release shape and the zero-fragment release, both still exempt
-   in full because every product-surface path they touch is in the release-bump set). Rejecting
-   fixtures: a `"release-move"`-classified diff carrying a product-surface path outside the
-   release-bump set, with the diagnostic checked to name only that path; and the forged-heading
-   end-to-end shape above in three variants (an existing tracked file, a brand-new `rust/` file,
-   and a hand-verified genuine release move), each built as a real end-to-end diff and driven
-   through `check-pr`.
+   **Correction (F3; review, #737, comment 2026-08-08, fourth round): the two `editors/vscode/`
+   paths were in the set, and were unreachable.** `classify_product_diff` reaches
+   `is_release_bump_path` only inside its `is_product_surface_path` branch, and
+   `editors/vscode/*` matches none of
+   `rust/*|src/fslc/*|specs/*|examples/*|docs/LANGUAGE*|skills/fsl/reference.md`. Deleting both
+   entries left `selftest` fully green — unreachable code that reads like coverage. The record
+   also described the measured set as the touched *product-surface* path set, applying that
+   filter explicitly to keep `docs/RELEASE.md` out while not applying it to these two. Both
+   entries are removed, and the measurement is now stated as the touched *path* set with the
+   product-surface filter applied afterward, in the open.
+
+   `classify_product_diff` checks each product-surface path individually: a path in
+   `is_release_bump_path`'s set is exempt exactly when the diff's classification is
+   `"release-move"` (unchanged from round 2); a path outside that set still demands a fragment in
+   the same diff, and the `changelog-fragment-missing` diagnostic names exactly the non-exempt
+   paths, not the exempt ones riding alongside them. **A maintainer must add an exact path to
+   `is_release_bump_path` whenever either side of that filter moves: a `docs/RELEASE.md`
+   release-commit step that starts touching a new product-surface path, or an
+   `is_product_surface_path` that widens to cover a path releases already touch (`editors/vscode/*`
+   is the live candidate). Otherwise every future release commit starts failing its own
+   `changelog-fragment-missing`.**
+
+   The forgery's blast radius is now bounded to those three paths. The forged heading plus a
+   change to, say, `rust/fsl-core/src/lib.rs` fails, because `lib.rs` is not a release-bump
+   surface. Both non-adversarial paths become correct rejections: a release commit carrying an
+   unrelated product change now needs a fragment for that unrelated change, the same as any other
+   pull request would; a branch whose base predates a landed release is unaffected by this
+   narrowing at all (it depends on the merge-base fix, S2-2/round 2, not on this exclusion).
+   Accepting fixtures: the full release shape and the zero-fragment release, both extended to name
+   every reachable `is_release_bump_path` entry (F2, below). Rejecting fixtures: a
+   `"release-move"`-classified diff carrying a product-surface path outside the release-bump set,
+   with the diagnostic checked to name only that path; and the forged-heading end-to-end shape
+   above in three variants (an existing tracked file, a brand-new `rust/` file, and a
+   hand-verified genuine release move), each built as a real end-to-end diff and driven through
+   `check-pr`.
+
+   **Accepted residual (F4; review, #737, comment 2026-08-08, fourth round). This narrowing
+   bounds the forgery; it does not close the class, and an earlier version of this record
+   overclaimed that it did ("the forgery above now buys nothing").** Measured on the fixed tree,
+   in the steady state: one added line — `## [9.9.9] - 2026-08-08` immediately after
+   `## [Unreleased]` — plus changes to `rust/Cargo.toml` and the domain characterization baseline
+   and no fragment passes `check-pr` with exit 0, where the identical diff without the forged
+   heading fails with `changelog-fragment-missing` naming both paths. `"release-move"` remains
+   self-authorable at zero cost, because a release move *is* structurally just that edit: nothing
+   inside `CHANGELOG.md` distinguishes a genuine one from a forged one, and a forger's diff shape
+   is a subset of a real release's. **Decided: accept the residual and state its exact bound here
+   rather than add a discriminator.** The bound is three paths, two of them version strings and
+   one a generated snapshot that `AGENTS.md` governs separately ("Do not hand-edit generated
+   compatibility snapshots"); the price of reaching it is a fabricated version heading committed
+   into `CHANGELOG.md`, which is visible in any review of the diff and is itself a
+   control-4-shaped lie rather than an omission. Reversal condition: if a release-commit step ever
+   adds a path to this set whose contents are not reviewable at a glance, close the class instead
+   — for example by requiring the new heading's version to match `rust/Cargo.toml`'s workspace
+   version at `HEAD_SHA`.
+
+   **Correction (F1; review, #737, comment 2026-08-08, fourth round): a rename into a product
+   surface escaped control 1 entirely.** `classify_product_diff` read `git diff --name-status`
+   with `while IFS=$'\t' read -r status path`, two variables. A rename or copy record carries
+   **three** tab-separated fields (`R100<TAB>old<TAB>new`), and `diff.renames` is on by default,
+   so the trailing fields collapsed into `$path` as `old<TAB>new` and every predicate tested the
+   *source*. Reproduced live, same base, no forgery and no `CHANGELOG.md` edit: `git mv
+   tools/mover.txt rust/moved.rs` with no fragment passed `check-pr` with exit 0, and so did a
+   `git mv docs/note.md specs/note.fsl` carrying an edit (`R084`). The calibrating control is
+   sharp — the *identical* content change, rendered by git as `A`/`D` because the contents were
+   dissimilar, failed closed with `changelog-fragment-missing`. Whether control 1 fired therefore
+   depended on git's similarity heuristic rather than on what changed. A rename *within* a
+   product surface still failed closed, but named the tab-joined pair
+   (`rust/keep.rs<TAB>rust/renamed.rs`) in its diagnostic instead of the destination.
+   `tools/check-product-gate-scope.sh`, the sibling this tool is modelled on, is immune for free
+   because `git diff --name-only` prints both sides of a rename on separate lines; this tool
+   needs the status column, so the divergence from the sibling is where the defect entered.
+   **Fix:** read a third field and, for a status beginning `R` or `C`, classify the destination.
+   Rejecting fixtures: the rename into `rust/`, the rename-with-edit into `specs/`, and a copy
+   into `rust/`, each as a unit fixture over `classify_product_diff`, plus a real `git mv` driven
+   end to end through `check-pr` against real git rename detection — the unit fixtures feed a
+   hand-written `R100` line and so cannot prove git emits that shape here. Accepting controls:
+   the identical rename *with* a fragment in the same diff, a rename *out* of a product surface
+   (which correctly owes nothing), and a content assertion that the diagnostic names the
+   destination alone. Reverting the fix fails 6 assertions.
+
+   **Correction (F2; review, #737, comment 2026-08-08, fourth round): this round's own new
+   constant had a surviving gutted mutant.** `is_release_bump_path`'s membership is load-bearing
+   in both directions — remove an entry and every future release commit fails its own
+   `changelog-fragment-missing`; add one and it becomes forgeable for free under the residual
+   above — yet the accepting fixtures named only `rust/Cargo.toml` and `rust/Cargo.lock`.
+   Deleting `rust/fslc/tests/fixtures/domain_characterization/baseline.v1.json` from the set left
+   `selftest` fully green: the one entry that is a generated product artifact rather than a
+   version string was pinned by nothing. Same class as the two M2 survivors this document records
+   above, shipped in the same round's new code. **Fix:** both the full-release and zero-fragment
+   accepting fixtures now name every reachable entry, so deleting any of them fails closed
+   (2 assertions for the baseline, 5 for `rust/Cargo.lock`).
 
    **M2, third mutant (review, #737, comment 2026-08-07, third round; decided, not covered): the
    `release` subcommand's own empty-fragment guard (`fragment_is_empty "$fragdir/$f" && fail

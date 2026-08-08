@@ -92,15 +92,20 @@ It also rejects a dynamic dependency on `libz3`.
    snapshot is regenerated, never hand-edited; any other change in that diff is
    a contract change that does not belong in a release commit.
 
-   **Steps 4–6 above touch exactly the paths `tools/aggregate_changelog.sh`'s
-   `is_release_bump_path` names** (`rust/Cargo.toml`, `rust/Cargo.lock`,
-   `editors/vscode/package.json`, `editors/vscode/package-lock.json`, and the domain
-   characterization baseline) — the fixed set the merge-readiness `check-pr` gate exempts from
-   needing a fragment once this diff's `CHANGELOG.md` edit is a validated release move (H1; review,
-   #737, comment 2026-08-07, third round; `docs/DESIGN-changelog-fragments.md`, control 1). If a
-   future release-commit step starts touching a different or additional product-surface path, add
-   that exact path to `is_release_bump_path` in the same pull request, or every subsequent release
-   commit will fail its own `changelog-fragment-missing` at merge time.
+   **Steps 4–6 above touch `rust/Cargo.toml`, `rust/Cargo.lock`, the domain characterization
+   baseline, `editors/vscode/package.json`, and `editors/vscode/package-lock.json`.** The first
+   three are product surfaces under `tools/aggregate_changelog.sh`'s `is_product_surface_path`,
+   and are exactly what `is_release_bump_path` names — the fixed set the merge-readiness
+   `check-pr` gate exempts from needing a fragment once this diff's `CHANGELOG.md` edit is a
+   validated release move (H1/F3; review, #737, comments 2026-08-07 third round and 2026-08-08
+   fourth round; `docs/DESIGN-changelog-fragments.md`, control 1). The two `editors/vscode/`
+   manifests are not product surfaces, so control 1 never asks about them and they are
+   deliberately absent from `is_release_bump_path`. Add an exact path to `is_release_bump_path`,
+   in the same pull request, whenever either side of that filter moves: a release-commit step
+   that starts touching a different or additional product-surface path, or an
+   `is_product_surface_path` that widens to cover a path releases already touch
+   (`editors/vscode/*` is the live candidate). Otherwise every subsequent release commit will
+   fail its own `changelog-fragment-missing` at merge time.
 7. Run the aggregator, which moves the current `[Unreleased]` body under
    `## [X.Y.Z] - YYYY-MM-DD` verbatim, appends every `changelog.d/` fragment
    sorted by the declared category/id order, verifies conservation (every
