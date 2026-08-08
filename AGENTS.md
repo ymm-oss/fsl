@@ -86,11 +86,17 @@ inventory, and promotion changes run the `scheduled` tier.
   `rust/fsl-lsp/tests/corpus.rs` only asserts that every identifier is indexed as something.
   `docs/LANGUAGE.ja.md` is a second canonical source kept section-aligned
   1:1 with `docs/LANGUAGE.md` (same count/order of `## ` sections) — `tools/build_site_reference.py`
-  fails loudly on drift; see `docs/DESIGN-docs-site.md` D7. A new dialect's top-level construct (and
-  any new `examples/`/`specs/` directory) additionally moves with `tests/dialect_registry.py`
-  (`DIALECTS`, `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS`), or the conformance harness
-  (`docs/DESIGN-conformance-harness.md`) fails loudly with an unregistered-construct error instead
-  of silently excluding the corpus.
+  fails loudly on drift; see `docs/DESIGN-docs-site.md` D7 (this one *is* a required CI check:
+  `.github/workflows/site-reference-freshness.yml`). A new dialect's top-level construct (and any new
+  `examples/`/`specs/` directory) additionally moves with `tests/dialect_registry.py` (`DIALECTS`,
+  `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS`). The frozen-Python conformance harness
+  (`docs/DESIGN-conformance-harness.md`, `tests/test_dialect_conformance.py`) is written to fail
+  loudly on an unregistered construct instead of silently excluding the corpus, but — unlike the
+  `docs/LANGUAGE.ja.md` check above — **no CI workflow and no `./tools/check-native-integration.sh`
+  lane currently invokes it**; it is a developer-run manual/reference check, not a machine-enforced
+  gate (see the design doc's "Cost and CI wiring"). This coupling rule has no mechanical enforcement
+  today: register the construct because the rule says so, not because something will catch you if
+  you don't.
 - Top-level dialect counts and parser parity do not establish nested semantic coverage. When porting
   or auditing an AST/enum sum type, inventory every behavior-bearing variant and bind each accepted
   variant to executable native semantics with accepting/rejecting controls, or to an explicit

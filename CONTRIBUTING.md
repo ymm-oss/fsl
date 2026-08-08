@@ -63,8 +63,10 @@ inventory and explicitly optional Python surfaces.
   and any new `examples/`/`specs/`
   directory it lands in, must also be registered in `tests/dialect_registry.py` (`DIALECTS`,
   `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS` with a reason) — the conformance harness
-  (`docs/DESIGN-conformance-harness.md`) scans every `.fsl` under `specs/`/`examples/` and fails
-  loudly on an unregistered construct instead of silently skipping it.
+  (`docs/DESIGN-conformance-harness.md`) scans every `.fsl` under `specs/`/`examples/` and is written
+  to fail loudly on an unregistered construct instead of silently skipping it. That harness is a
+  manual/reference check that no CI lane currently invokes (see the design doc's "Cost and CI
+  wiring") — register the construct regardless of that gap.
 - **Public Kernel contract:** update schemas, Rust exporter/consumer paths, conformance vectors,
   agreement tests, `docs/DESIGN-kernel-contract.md`, language/reference docs, and a new
   `changelog.d/` fragment (see `changelog.d/README.md`) rather than editing `CHANGELOG.md` directly.

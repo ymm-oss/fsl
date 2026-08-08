@@ -1,4 +1,4 @@
-# FSL — dialect corpus conformance harness (Monitor / oracle / agreement CI gate)
+# FSL — dialect corpus conformance harness (Monitor / oracle / agreement safety net)
 
 ## Goal
 
@@ -6,8 +6,9 @@ Every `.fsl` under `specs/` and `examples/` is either (a) driven through the ful
 dual-evaluator safety net — `parse → desugar → build_spec → Monitor load →
 BMC/Monitor expression agreement → verify-vs-oracle verdict agreement` — or (b)
 excluded **loudly**, with a documented reason that the harness re-asserts on every
-run. A new dialect (or a new example directory) that nobody registers is a CI
-failure, not a silent skip.
+run. A new dialect (or a new example directory) that nobody registers is a harness
+failure, not a silent skip — see "Cost and CI wiring" below for what actually
+invokes this harness today (no CI workflow does; it is a manual/reference check).
 
 ## The gap (issue #167)
 
@@ -722,7 +723,8 @@ for the variant rows.
 `CONTRIBUTING.md` "Adding a language feature" gains: register any new dialect's
 construct and example corpus in `tests/dialect_registry.py` (and any new example
 directory is claimed automatically by the scan — the harness fails until its
-construct is registered).
+construct is registered, on the manual/reference runs described in "Cost and CI
+wiring" above; no CI lane currently runs it for you).
 
 `CONTRIBUTING.md` "Guidelines for changes" gains: a fixed escaped defect gains
 an entry in `rust/fslc/tests/fault_operators/` when its defect class can recur
