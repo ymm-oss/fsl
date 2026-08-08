@@ -237,12 +237,26 @@ The completion assignment is the single classification point; retry guards and
 the success-sticky transition consume its resulting status rather than
 reclassifying the event.
 
-The checker reports hard structural errors before running the kernel when an
-async effect has no `correlation_id`, or an irreversible effect lacks an
-`idempotency_key`.
+The checker reports two structurally different hard failures before a formal
+proof can run:
 
-Irreversible effects that lack compensation are reported as warnings. Reliable
-effects without an outbox boundary are also warnings because they overstate
+- an irreversible effect that lacks `idempotency_key` is the
+  `irreversible_effect_without_idempotency_key` finding (`error` severity,
+  `rust/fsl-tools/src/domain.rs`): `domain check` returns
+  `result:"violated"`, `formal_result:"not_run"`, and the finding is in
+  `findings`, per the Findings section below.
+- an async effect with no `correlation_id` is not a finding at all.
+  `lower_domain` rejects it during Kernel lowering itself
+  (`rust/fsl-core/src/domain_lowering.rs`), before the domain checker's
+  finding pass runs, so the top-level envelope is `result:"error"`,
+  `kind:"semantics"` — there is no `dialect`, `findings`, or
+  `finding_schema_version` key, because this error is outside the finding
+  schema entirely.
+
+Irreversible effects that lack compensation are reported as the
+`missing_compensation_for_irreversible_effect` warning. Reliable effects
+without an outbox boundary are reported as the
+`reliable_effect_without_outbox_boundary` warning, because they overstate
 runtime delivery evidence.
 
 ## Commands
@@ -290,22 +304,13 @@ any other rejected construct.
 ## Findings
 
 Findings use `schemas/fslc/domain/finding.v0.schema.json` and
-`fsl:"fsl-domain-effect.v0"`. Implemented finding kinds include:
+`fsl:"fsl-domain-effect.v0"`. The native `fslc domain check` implements
+exactly 4 finding kinds, all in `rust/fsl-tools/src/domain.rs:34-66`:
 
-- `missing_decide_for_command`
-- `missing_evolve_for_event`
-- `aggregate_boundary_violation`
-- `uncorrelated_async_completion`
-- `irreversible_effect_without_idempotency_key`
-- `pending_effect_without_timeout_or_fallback`
-- `late_completion_without_stale_policy`
-- `missing_compensation_for_irreversible_effect`
-- `reliable_effect_without_outbox_boundary`
-- `saga_dead_end`
-- `process_wait_cycle`
-- runtime replay findings such as `command_rejected_by_model`,
-  `uncorrelated_async_completion`, and
-  `effect_completion_rejected_by_model`
+- `irreversible_effect_without_idempotency_key` (`error`)
+- `pending_effect_without_timeout_or_fallback` (`warning`)
+- `missing_compensation_for_irreversible_effect` (`warning`)
+- `reliable_effect_without_outbox_boundary` (`warning`)
 
 `warning` findings are design review findings. They do not block the formal
 kernel run. `error` findings block the run because the generated model would
@@ -318,6 +323,63 @@ owning saga (see `DESIGN-effect.md`) and not every owning saga declares an
 outbox. `uncovered_sagas` is absent when the effect has no owning saga at
 all, so its presence distinguishes "no saga owns this effect" from "some
 owning saga is still missing its outbox".
+
+`fslc domain replay` additionally reports its own runtime-observation finding
+kinds against a log, distinct from the static kinds above: `command_rejected_by_model`,
+`uncorrelated_async_completion`, `duplicate_irreversible_effect_commit`,
+`effect_completion_rejected_by_model`, `unknown_domain_event`, `unknown_effect`,
+`effect_completion_event_not_declared`, and `unknown_runtime_event_kind`
+(`rust/fslc/src/main.rs`, tested by
+`rust/fslc/tests/issue_518_domain_replay_detection.rs`). See the Runtime
+Replay section.
+
+Several structural risks are enforced but are **not** findings — they fail
+closed earlier, before the finding pass or the kernel run can start:
+
+- An `evolve` that writes state outside its aggregate never becomes a
+  finding; `unknown domain lvalue '<name>'` fails Kernel lowering itself
+  (`rust/fsl-core/src/domain_lowering.rs`), a stronger (fail-closed) guarantee
+  than a warning/error finding would give.
+- An async effect with no `correlation_id` never becomes a finding either;
+  `lower_domain` rejects it with `effect '<name>' requires correlation_id`
+  during Kernel lowering, before the finding pass runs. The static and replay
+  forms of `uncorrelated_async_completion` are therefore different
+  mechanisms with the same name: the static case is a hard
+  `result:"error"`/`kind:"semantics"` failure outside the finding schema, and
+  only the replay case (a completion observed with no matching prior request
+  in a runtime log) is an actual `fsl-domain-finding.v0` finding.
+
+The following finding kinds are **not implemented natively** and exist only
+in the frozen Python compatibility reference (`src/fslc/domain_expand.py`),
+which is not a product surface (`AGENTS.md`):
+
+- `missing_decide_for_command` (`src/fslc/domain_expand.py:843-855`): a
+  command with no `decide` is silently accepted by native `domain check`
+  today (`verified_under_assumptions`, empty `findings`) rather than
+  reported.
+- `missing_evolve_for_event` (`src/fslc/domain_expand.py:856-868`): same gap
+  for an event with no `evolve`.
+- `cross_aggregate_update_without_event` (`src/fslc/domain_expand.py:886-900`):
+  present in the frozen Python reference but was never listed here; recorded
+  for completeness alongside the above.
+
+The following finding kinds have been removed from this contract because
+native has no implementation and, in one case, reviving it would conflict
+with an already-accepted rejection:
+
+- `late_completion_without_stale_policy`: `on_stale` itself has no executable
+  lowering and is rejected fail-closed
+  (`on_stale '<name>' has no executable lowering; stale policies are not
+  supported`, `rust/fsl-core/src/domain_lowering.rs`, accepted in #711). A
+  finding that recommends adding an `on_stale` policy would recommend syntax
+  native rejects, so this finding kind must not be revived without first
+  reopening #711's rejection.
+- `saga_dead_end`, `process_wait_cycle`: not implemented natively. Whether to
+  implement them is tracked in
+  [issue #769](https://github.com/ymm-oss/fsl/issues/769); until then, the
+  only native signal for a stuck saga is `fslc verify`'s action-coverage and
+  never-enabled-action warnings (see the Runtime Replay section), which are
+  indirect kernel-level evidence, not a targeted `fsl-domain` finding.
 
 ## Generation
 
