@@ -2586,7 +2586,8 @@ DESIGN-*.md があります)。</p>
   これについて沈黙します)。<code>acceptance</code>(must-allow)の双対です。
   → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>
 <li><strong>Vacuity 検査(<code>--vacuity</code>)</strong> — verified/proved のパスの上で、
-  <code>vacuous_implication</code>(含意の前件が到達不能)、
+  <code>never_enabled_action</code>(検査した深さ内で action の enabled な instance がない。
+  恒久的な死を証明するものではない有界の証拠)、<code>vacuous_implication</code>(含意の前件が到達不能)、
   <code>vacuous_leadsto</code>(トリガーが到達不能)、<code>always_true_requires</code>
   (先行する節の文脈の下で常に真であるガード)、
   <code>tautology_over_frozen</code>(どの action も変えない状態の上の、動的に
@@ -2605,7 +2606,7 @@ DESIGN-*.md があります)。</p>
   kind を報告します — 空虚性はどちら向きにも確立されていないため、
   「空虚性確定」として扱えば偽陽性になり、単に握りつぶせば
   <code>--vacuity error</code> が空虚性を一度も判定していない spec を通過させて
-  しまいます。他の 6 kind と全く同様に <code>--vacuity</code> で選択されます。
+  しまいます。他の 7 kind と全く同様に <code>--vacuity</code> で選択されます。
 - <strong><code>--strict-tags</code></strong> — 成功の結果の上で、タグのない宣言(捏造の候補)と、参照
   されない要件(欠落の候補。空の requirement ブロックを含む)を警告します。存在
   レベルの突合です。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a>

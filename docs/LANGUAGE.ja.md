@@ -2608,7 +2608,8 @@ DESIGN-*.md があります)。
   これについて沈黙します)。`acceptance`(must-allow)の双対です。
   → [`DESIGN-forbidden.md`](DESIGN-forbidden.md)
 - **Vacuity 検査(`--vacuity`)** — verified/proved のパスの上で、
-  `vacuous_implication`(含意の前件が到達不能)、
+  `never_enabled_action`(検査した深さ内で action の enabled な instance がない。
+  恒久的な死を証明するものではない有界の証拠)、`vacuous_implication`(含意の前件が到達不能)、
   `vacuous_leadsto`(トリガーが到達不能)、`always_true_requires`
   (先行する節の文脈の下で常に真であるガード)、
   `tautology_over_frozen`(どの action も変えない状態の上の、動的に
@@ -2627,7 +2628,7 @@ DESIGN-*.md があります)。
   kind を報告します — 空虚性はどちら向きにも確立されていないため、
   「空虚性確定」として扱えば偽陽性になり、単に握りつぶせば
   `--vacuity error` が空虚性を一度も判定していない spec を通過させて
-  しまいます。他の 6 kind と全く同様に `--vacuity` で選択されます。
+  しまいます。他の 7 kind と全く同様に `--vacuity` で選択されます。
 - **`--strict-tags`** — 成功の結果の上で、タグのない宣言(捏造の候補)と、参照
   されない要件(欠落の候補。空の requirement ブロックを含む)を警告します。存在
   レベルの突合です。→ [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md)

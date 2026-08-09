@@ -7,6 +7,7 @@ spec ScenarioBlockedAction {
   state { x: Int }
   init { x = 0 }
 
+  @requirement("REQ-SCENARIO-BAD", "blocked action is reported accurately")
   action bad() {
     requires x == 0
     requires x == 1

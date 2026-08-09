@@ -69,6 +69,41 @@ fn vacuous_leadsto_is_reported_when_the_trigger_is_unreachable() {
     );
 }
 
+/// #728's public warning envelope must identify the covered action exactly as
+/// other vacuity findings identify their blamed declaration. This direct
+/// runtime control keeps the native CLI and the Worker honest because both
+/// render this shared warning list.
+#[test]
+fn never_enabled_action_carries_name_location_and_requirement_metadata() {
+    let blocked = model(
+        "spec TypedNeverEnabled { state { x: Bool } init { x = false } \
+         @requirement(\"REQ-BLOCKED\", \"blocked action\") \
+         action blocked() { requires x x = false } invariant Trivial { true } }",
+    );
+    let warnings = fsl_runtime::verification_warnings(
+        &blocked,
+        2,
+        false,
+        None,
+        None,
+        &BTreeMap::from([("blocked".to_owned(), false)]),
+        &[],
+        false,
+    );
+    let warning = warnings
+        .iter()
+        .find(|warning| warning["kind"] == "never_enabled_action")
+        .expect("typed never-enabled warning");
+    assert_eq!(warning["name"], "blocked", "{warning:#}");
+    assert!(warning["loc"].is_object(), "{warning:#}");
+    assert_eq!(warning["requirement"]["id"], "REQ-BLOCKED", "{warning:#}");
+    assert_eq!(
+        warning["requirements"].as_array().map(Vec::len),
+        Some(1),
+        "{warning:#}"
+    );
+}
+
 /// Digit-growth model (same trick as
 /// `rust/fsl-runtime/tests/boundary_probe_budget.rs`): `count = count * 10 +
 /// x` is injective per level, so the distinct reachable state count grows

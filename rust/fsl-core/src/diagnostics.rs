@@ -100,6 +100,11 @@ pub fn insert_requirement_metadata(
 /// `--vacuity ignore` (they would stay in `warnings`) and `--vacuity error`
 /// (a hollow spec carrying only one of these kinds would never fail closed).
 ///
+/// `never_enabled_action` is bounded action-coverage evidence: it means that
+/// no instance of an action was enabled through the checked depth. It belongs
+/// in this set so callers can explicitly require clean bounded coverage with
+/// `--vacuity error`, while the default remains a warning.
+///
 /// `vacuity_probe_truncated` (issue #729) is not itself a vacuity finding --
 /// it means the concrete `vacuous_implication`/`vacuous_leadsto`
 /// reachability probe was cut off by its state budget before it could
@@ -109,7 +114,8 @@ pub fn insert_requirement_metadata(
 /// earned that claim -- gating it as an informational, non-selected kind
 /// would let `--vacuity error` pass a spec without ever having established
 /// non-vacuity, which is a strictly weaker contract than today's.
-pub const VACUITY_KINDS: [&str; 7] = [
+pub const VACUITY_KINDS: [&str; 8] = [
+    "never_enabled_action",
     "vacuous_implication",
     "vacuous_leadsto",
     "tautology_over_frozen",

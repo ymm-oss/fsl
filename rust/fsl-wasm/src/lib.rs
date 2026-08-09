@@ -772,6 +772,7 @@ mod tests {
     fn verified_result_contains_shared_warnings() {
         let model = model_from(
             "spec Warnings { state { x: Bool } init { x = false } \
+             @requirement(\"REQ-BLOCKED\", \"blocked action\") \
              action blocked() { requires x x = false } \
              invariant Vacuous \"REQ-WARN: vacuous warning\" { x => x } }",
         );
@@ -829,6 +830,17 @@ mod tests {
         assert_eq!(
             warnings[1]["message"],
             json!("deadlock reachable at step 0 (state: x=false)")
+        );
+        assert_eq!(warnings[2]["kind"], json!("never_enabled_action"));
+        assert_eq!(warnings[2]["name"], json!("blocked"));
+        assert!(warnings[2]["loc"].is_object());
+        assert_eq!(
+            warnings[2]["requirement"],
+            json!({"id": "REQ-BLOCKED", "text": "blocked action"})
+        );
+        assert_eq!(
+            warnings[2]["requirements"].as_array().map(Vec::len),
+            Some(1)
         );
         assert!(
             warnings[2]["message"]

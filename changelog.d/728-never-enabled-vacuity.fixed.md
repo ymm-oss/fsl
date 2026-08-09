@@ -1,0 +1,1 @@
+Fixed (#728): typed bounded never-enabled action coverage as `never_enabled_action`, so native `verify` and `sweep` select it with `--vacuity error|ignore`, while WASM and mode-less scenarios preserve the diagnostic.

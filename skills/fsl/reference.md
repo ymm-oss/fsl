@@ -895,8 +895,10 @@ An **intended terminal state** (processing complete, etc. — a state where stop
 is correct) is declared with `terminal { <predicate> }` — a stop satisfying the
 predicate is excluded from the deadlock check, while other unexpected deadlocks
 continue to be detected (more precise than `--deadlock ignore`, which uniformly
-ignores all stops). vacuity is a warning only on the verified/proved path:
-an unreached antecedent of an implication invariant (`vacuous_implication`), an
+ignores all stops). `verify`/`sweep` vacuity selection is a warning only on the
+verified/proved path: an action
+with no enabled instance through the checked depth (`never_enabled_action`; bounded
+evidence that can disappear at a larger depth), an unreached antecedent of an implication invariant (`vacuous_implication`), an
 unreached leadsTo trigger (`vacuous_leadsto`), a requires clause always true under
 the context of the preceding requires (`always_true_requires` — actions with
 coverage false and compose synchronized actions are excluded; a synchronized
@@ -916,7 +918,14 @@ kinds (`vacuous_implication`/`vacuous_leadsto`, next paragraph) and their
 the shared reachability probe rather than computing it and filtering the
 result; the other four kinds (`always_true_requires`, `tautology_over_frozen`,
 `urgency_freeze`, `vacuous_deadline`) are solver-decided lanes that are
-still computed and then filtered.
+still computed and then filtered. `never_enabled_action` is emitted from the
+existing action-coverage exploration, then selected or removed by the same mode;
+the structured `action_coverage` evidence remains a separate ledger projection and
+does not change assurance.
+
+`fslc scenarios` has no `--vacuity` mode and never escalates this finding to
+exit 2. It independently retains the same typed `never_enabled_action`
+coverage diagnostic so a generated scaffold cannot call a blocked action covered.
 
 The `vacuous_implication`/`vacuous_leadsto` reachability probe shares one
 budgeted concrete BFS across every antecedent/trigger in the spec. A
@@ -924,7 +933,7 @@ candidate that neither becomes true nor finishes exhausting its reachable
 state space before the internal state-count budget is hit (or whose
 expression fails to evaluate) reports `kind:"vacuity_probe_truncated"`
 instead — vacuity was never established either way, so it selects under
-`--vacuity` exactly like the other six kinds (`error` fails closed on it
+`--vacuity` exactly like the other seven kinds (`error` fails closed on it
 too). Budget exhaustion is rare; a corpus-conservation test keeps the
 budget generous enough that no maintained spec hits it.
 

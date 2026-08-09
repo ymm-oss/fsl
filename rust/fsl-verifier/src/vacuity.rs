@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Solver-dependent vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes 3–6).
+//! Solver-dependent vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes 4–7).
 //!
 //! The two reachability lanes (`vacuous_implication`, `vacuous_leadsto`) are
 //! solver-independent and live in `fsl-runtime`. The four lanes here need Z3,
@@ -365,7 +365,7 @@ fn all_bounds<S: SmtSolver>(
         .collect()
 }
 
-/// Lane 4 — `tautology_over_frozen`.
+/// Lane 5 — `tautology_over_frozen`.
 ///
 /// Sound because every reachable state agrees with some init state on the
 /// frozen variables (nothing assigns them) and satisfies the declared type
@@ -600,7 +600,7 @@ async fn deadlines_never_advance<S: SmtSolver>(
     Ok(findings)
 }
 
-/// Lane 5 — `urgency_freeze`.
+/// Lane 6 — `urgency_freeze`.
 ///
 /// Sound because `urgent && type bounds` is proven to be a genuine inductive
 /// invariant: it holds in every init state and every action preserves it. The
@@ -679,13 +679,13 @@ fn strengthened_urgent<S: SmtSolver>(
     Ok(solver.and(&terms)?)
 }
 
-/// Lane 3 — `always_true_requires`.
+/// Lane 4 — `always_true_requires`.
 ///
 /// For clause `j` of an action, ask whether `type bounds && clauses[..j] &&
 /// not clauses[j]` is unsatisfiable. The declared type space is a superset of
 /// the reachable states, so an unsatisfiable answer means the clause cannot be
 /// false in any reachable state at any depth — the property
-/// `docs/DESIGN-vacuity.md` §2 lane 3 actually asks for. The frozen Python
+/// `docs/DESIGN-vacuity.md` §2 lane 4 actually asks for. The frozen Python
 /// reference instead discharges the clause from states witnessed within
 /// `--depth`, which reports a guard as dead merely because the bound was too
 /// small (issue #465: `examples/causal/funnel.fsl`'s `requires visits < 100`
@@ -792,7 +792,7 @@ async fn proven_unsat<S: SmtSolver>(
 }
 
 /// Drop `always_true_requires` findings for actions that were never enabled
-/// within the explored bound. `docs/DESIGN-vacuity.md` §2 lane 3 puts
+/// within the explored bound. `docs/DESIGN-vacuity.md` §2 lane 4 puts
 /// coverage-false actions out of scope: they already carry their own
 /// never-enabled warning, and every clause of a dead action is trivially
 /// redundant given the preceding ones.

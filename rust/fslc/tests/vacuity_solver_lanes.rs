@@ -309,9 +309,31 @@ fn depth_does_not_change_the_verdict() {
 #[test]
 fn a_coverage_false_action_does_not_produce_always_true_requires() {
     let (output, status) = verify(COVERAGE_FALSE_REQUIRES, "2", "error");
-    assert_eq!(status, 0, "{output:#}");
-    assert_eq!(output["result"], "verified");
-    assert_ne!(output["action_coverage"]["impossible"], true);
+    assert_eq!(status, 2, "{output:#}");
+    assert_eq!(output["result"], "error", "{output:#}");
+    assert_eq!(output["kind"], "never_enabled_action", "{output:#}");
+    let findings = output["findings"].as_array().expect("findings array");
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding["kind"] == "never_enabled_action"),
+        "coverage-false action must retain its own finding: {output:#}"
+    );
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding["kind"] != "always_true_requires"),
+        "coverage-false action must not add an always-true-requires finding: {output:#}"
+    );
+
+    let (warned, warned_status) = verify(COVERAGE_FALSE_REQUIRES, "2", "warn");
+    assert_eq!(warned_status, 0, "{warned:#}");
+    assert_eq!(warned["result"], "verified", "{warned:#}");
+    assert_eq!(
+        warning_kinds(&warned),
+        vec!["never_enabled_action"],
+        "coverage-false action must emit only its bounded coverage finding: {warned:#}"
+    );
 }
 
 /// Non-firing control: a compose-synchronized action inherits `a > 0` from

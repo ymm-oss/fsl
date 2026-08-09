@@ -2645,7 +2645,9 @@ DESIGN-*.md).</p>
   under-constraint = a missing guard, which a safety invariant stays silent
   about). The dual of <code>acceptance</code> (must-allow). → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>
 <li><strong>Vacuity check (<code>--vacuity</code>)</strong> — on the verified/proved path, warns about
-  <code>vacuous_implication</code> (the antecedent of an implication is unreachable),
+  <code>never_enabled_action</code> (an action has no enabled instance through the checked
+  depth; bounded evidence, not a permanent-dead proof), <code>vacuous_implication</code>
+  (the antecedent of an implication is unreachable),
   <code>vacuous_leadsto</code> (the trigger is unreachable), <code>always_true_requires</code>
   (a guard that is always true under the context of preceding clauses),
   <code>tautology_over_frozen</code> (a dynamically tautological invariant over state no
@@ -2663,7 +2665,7 @@ DESIGN-*.md).</p>
   <code>vacuous_leadsto</code> — vacuity was never established either way, so treating
   it as confirmed-vacuous would be a false positive and dropping it would
   let <code>--vacuity error</code> pass a spec whose vacuity was never actually
-  decided. Selected by <code>--vacuity</code> exactly like the other six kinds.
+  decided. Selected by <code>--vacuity</code> exactly like the other seven kinds.
 - <strong><code>--strict-tags</code></strong> — warns on success results about untagged declarations
   (fabrication candidates) and unreferenced requirements (omission candidates,
   including empty requirement blocks). Existence-level matching. → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a>
