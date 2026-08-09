@@ -51,6 +51,131 @@ bugs. Conventionally `kind:"vacuous"` referred only to init unsatisfiability.
    reset age to zero and catches state-changing urgent handlers that disable
    their own guards. A `tick` transition that advances age is the rejecting
    control and suppresses the finding.
+7. **`vacuity_probe_truncated`** (issue #729): lanes 1–2's shared reachability
+   probe stopped at its state budget before deciding a candidate either way.
+   See the subsection immediately below.
+
+### Lanes 1–2: budgeted reachability probe and `vacuity_probe_truncated` (issue #729)
+
+`fsl-runtime::verification_warnings` used to run one **unbudgeted** concrete BFS
+(`expression_reachable`) per implication antecedent and per leadsTo trigger: a
+property count multiplier on top of a per-candidate search with no ceiling, so
+a spec whose state space defeats BFS dedup (e.g. an order-sensitive history
+`Seq`, the reproducer in `rust/fslc/tests/issue_697_all_properties_memory.rs`'s
+`LabelCoreRepro`) could consume gigabytes verifying a single property in
+isolation, and `--vacuity ignore` did not help: `apply_vacuity_mode`
+(`rust/fslc/src/verification.rs`) only filtered the rendered `warnings` array
+after the (already paid) computation.
+
+The fix follows the in-repo precedent `docs/DESIGN-explicit-engine.md`
+established for the same shape of problem (`--engine explicit`'s
+`unknown_budget` verdict): give the search a budget, and make "the search was
+cut off before it could decide" its own reportable outcome rather than
+silently reusing the closed-search verdict.
+
+- **One shared, budgeted BFS.** `fsl_runtime::expression_reachability` takes
+  every implication-antecedent and leadsTo-trigger candidate for a model at
+  once (built by `vacuous_implication_candidates`/`vacuous_leadsto_candidates`)
+  and walks the concrete state space once, checking every still-pending
+  candidate against each popped state and dropping it from `pending` the
+  instant it is found true. This removes the per-property multiplier: N
+  candidates no longer pay N full BFS traversals. It reuses `find_boundary_
+  violation`'s established scratch-`Monitor`/no-per-node-clone pattern
+  (issue #730/#776) rather than inventing a new search mechanism.
+- **Budget.** Reuses `CONCRETE_PROBE_BUDGET` (50,000 states) — the same
+  constant and calibration `find_boundary_violation` uses, protected by the
+  same style of corpus-conservation test
+  (`rust/fslc/tests/issue_729_vacuity_probe_corpus_budget.rs`, mirroring
+  `issue_697_corpus_probe_budget.rs`).
+- **Tri-state result, fail-closed.** `Reachability::{Reachable, Unreachable,
+  Exhausted}`. `Unreachable` means the same thing it always did — full
+  enumeration within `--depth` completed and the candidate never became
+  true — and keeps producing `vacuous_implication`/`vacuous_leadsto` exactly
+  as before; depth-bounded non-closure was already reported this way and is
+  unchanged. `Exhausted` is the new state: no verdict was ever reached for
+  this candidate, either because the shared budget was hit while it was
+  still pending or because evaluating its expression in some visited state
+  returned an error. Folding `Exhausted` into `Unreachable` would be
+  fail-open (a false "confirmed vacuous" claim); silently dropping it would
+  let `--vacuity error` pass a spec whose vacuity was never actually
+  established. Both are unacceptable weakenings of `--vacuity error`'s
+  contract ("vacuity evidence is clean"), so `Exhausted` gets its own kind,
+  `vacuity_probe_truncated`, added to `fsl_core::VACUITY_KINDS` — selected by
+  `--vacuity` exactly like the other six kinds (`warn` shows it, `error`
+  fails closed on it, `ignore` discards it). An informational, non-selected
+  kind was considered and rejected for the same reason: it would make
+  `--vacuity error` strictly weaker than before #729, letting a
+  never-decided spec through silently.
+- **A per-candidate evaluation error also resolves `Exhausted`, not
+  `Reachable`.** The pre-#729 `expression_reachable` silently treated an
+  evaluation `Result::Err` for one property's antecedent as "no warning" for
+  that property alone (`matches!(expression_reachable(...), Ok(false))` is
+  `false` on `Err` too) — a pre-existing, out-of-scope-for-#729 fail-open on
+  an already-rare path. Batching forced a choice: fold that per-candidate
+  `Err` into `Reachable` (preserving the old silent-drop byte-for-byte) or
+  into `Exhausted` (fail-closed, consistent with the new budget-truncation
+  path). Chosen: `Exhausted`. Rationale — this issue's whole point is "never
+  silently pass a probe that could not decide," and a caller downstream
+  (`--vacuity error`) cannot tell *why* a candidate has no verdict, so the
+  two causes (budget cutoff, evaluation error) should not be allowed to
+  produce different fail-open/fail-closed outcomes; letting a candidate's
+  evaluation fail must not become a way to defeat `--vacuity error` that a
+  budget cutoff cannot. The `message`/`hint`/`recommended_action` text for
+  `vacuity_probe_truncated` is written cause-neutral ("the probe either
+  exhausted its internal state budget or failed to evaluate the candidate")
+  rather than claiming budget truncation specifically, since `Reachability`
+  does not (and need not) distinguish the two internally.
+- **Known gap: a whole-walk `RuntimeError` still loses every candidate's
+  finding for that run**, exactly as the pre-#729 per-property calls did for
+  their one property each (`verification_warnings`'s
+  `.unwrap_or_default()`). Unlike the per-candidate case above, this is not
+  attributable to one candidate — it means an action's `enabled`/`step`
+  itself could not be evaluated, the same condition that already fails the
+  surrounding BMC/explicit run before vacuity warnings are ever rendered, so
+  this path is not reachable on any spec that reaches `verification_warnings`
+  in the first place. Accepted as a narrow, practically-unreachable gap
+  rather than threading partial results out of an `Err` path (see the doc
+  comment on `expression_reachability`'s `unwrap_or_default` call site).
+- **`--vacuity ignore` skips the computation, not just the output.** Consumer
+  audit (issue #729) found exactly one product call site that ever applies a
+  vacuity mode (`rust/fslc/src/verification.rs`'s `execute_cli_verification`,
+  reached by both the `verify` and `sweep` CLI commands — `sweep` funnels
+  through the same `run_verify_cli`); `ledger`/`html`/`mutate` share a
+  mode-less baseline (`rust/fslc/src/main.rs`'s `run_verify`, whose signature
+  has no vacuity parameter at all) and the wasm Worker request surface has no
+  `--vacuity` option either. So `skip_vacuity_probe`
+  (`BmcOutputOptions`/`BmcRequest`/`InductionRequest`/`ExplicitRequest` in
+  `rust/fslc/src/verification*.rs`) is an explicit argument threaded only
+  from that one derivation point (`options.vacuity == "ignore"`, plus its
+  `--lemma`-path twin in `run_induction_with_lemmas`); every other caller
+  passes `false`. Skipping is proved observationally equivalent to
+  computing-then-filtering by
+  `rust/fslc/tests/issue_729_vacuity_ignore_skip.rs`, which asserts the
+  `--vacuity ignore` envelope equals the `--vacuity warn` envelope with every
+  `is_vacuity_kind` warning removed (cost/timing fields excluded, since
+  skipping legitimately does less work).
+- **Ledger wording.** `rust/fsl-tools/src/ledger.rs`'s summary prefix
+  distinguishes the two: an ordinary vacuity finding reads "空虚性の疑い"
+  (suspected hollow — something was proven), while
+  `kind == "vacuity_probe_truncated"` reads "空虚性未確立（到達性 probe が
+  判定に至らず）" (vacuity not established — the probe never reached a
+  verdict; deliberately cause-neutral, matching `Reachability::Exhausted`
+  not distinguishing budget cutoff from an evaluation error). `html.rs`
+  renders `kind`/`message` generically and needed no change.
+  `assurance_token` never reads `warnings`, so a truncated-probe finding
+  cannot move a requirement's assurance class
+  (`rust/fsl-tools/tests/issue_729_vacuity_probe_truncated_ledger.rs`).
+- **End-to-end truncation coverage.**
+  `rust/fslc/tests/issue_729_vacuity_probe_truncated_e2e.rs` drives the
+  `vacuity_probe_truncated` emission arm through the real CLI end to end
+  (not just at the `expression_reachability`/`render_ledger` unit level):
+  a `count = count * 10 + x` digit-growth model whose reachable state count
+  is unbounded and grows `10^level` per BFS level genuinely exhausts
+  `CONCRETE_PROBE_BUDGET` within a few seconds, so `--vacuity error` exits 2
+  with `kind:"vacuity_probe_truncated"` — proving the whole path from a real
+  budget exhaustion through `is_vacuity_kind` selection to the CLI exit code
+  actually fires, not just that its helper functions are individually
+  correct.
 
 ### Native lanes 3–6: "over all reachable states" is decided over the type space
 

@@ -363,6 +363,7 @@ fn add_frontend_metadata(
     output
 }
 
+#[allow(clippy::too_many_lines)]
 async fn verify(request: &Request, solver_version: &str) -> Value {
     let started = performance_now();
     if let Err(failure) = fsl_syntax::parse_surface_document(&request.source) {
@@ -417,6 +418,9 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
                             checked_bounds: None,
                             elapsed_s: (performance_now() - started) / 1000.0,
                             statistics: &statistics,
+                            // The Worker request surface has no `--vacuity`
+                            // option at all (issue #729): always compute.
+                            skip_vacuity_probe: false,
                         },
                     )
                     .0;
@@ -464,6 +468,9 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             checked_bounds: None,
             elapsed_s: (performance_now() - started) / 1000.0,
             statistics: &statistics,
+            // The Worker request surface has no `--vacuity` option at all
+            // (issue #729): always compute.
+            skip_vacuity_probe: false,
         },
     );
     prepend_compose_warnings(&mut output, compose_warnings);
@@ -597,6 +604,7 @@ mod tests {
                 checked_bounds: None,
                 elapsed_s,
                 statistics,
+                skip_vacuity_probe: false,
             },
         )
         .0

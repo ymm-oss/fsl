@@ -15128,12 +15128,18 @@ fn run_verify(
         property: None,
         excluded: &[],
     };
+    // This is the `ledger`/`html`/`mutate` baseline (`run_verify` has no
+    // `--vacuity` option at all): per the invariant recorded on
+    // `BmcOutputOptions::skip_vacuity_probe` (issue #729), it must always
+    // compute the reachability probe.
+    let skip_vacuity_probe = false;
     let (mut output, status) = match VerificationEngine::parse(engine) {
         Ok(VerificationEngine::Bmc) => run_bmc_filtered(BmcRequest {
             selection,
             depth,
             deadlock,
             initial_state: None,
+            skip_vacuity_probe,
         }),
         Ok(VerificationEngine::Induction) => run_induction_filtered(InductionRequest {
             selection,
@@ -15141,18 +15147,21 @@ fn run_verify(
             deadlock,
             k: k_ind,
             auxiliary: &[],
+            skip_vacuity_probe,
         }),
         Ok(VerificationEngine::Explicit) => run_explicit_filtered(ExplicitRequest {
             selection,
             depth,
             deadlock,
             budget: explicit_budget,
+            skip_vacuity_probe,
         }),
         Ok(VerificationEngine::Auto) => run_auto_filtered(ExplicitRequest {
             selection,
             depth,
             deadlock,
             budget: explicit_budget,
+            skip_vacuity_probe,
         }),
         Err(error) => return (error_output("usage", &error), 2),
     };

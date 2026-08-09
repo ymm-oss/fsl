@@ -53,6 +53,10 @@ pub(super) struct BmcRequest<'a> {
     pub(super) depth: usize,
     pub(super) deadlock: DeadlockMode,
     pub(super) initial_state: Option<&'a std::collections::BTreeMap<String, FslValue>>,
+    /// See `BmcOutputOptions::skip_vacuity_probe` (issue #729): only
+    /// `execute_cli_verification`'s `--vacuity ignore` handling may set
+    /// this `true`.
+    pub(super) skip_vacuity_probe: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -62,6 +66,8 @@ pub(super) struct InductionRequest<'a> {
     pub(super) deadlock: DeadlockMode,
     pub(super) k: usize,
     pub(super) auxiliary: &'a [(String, KernelExpr)],
+    /// See `BmcRequest::skip_vacuity_probe`.
+    pub(super) skip_vacuity_probe: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -70,6 +76,8 @@ pub(super) struct ExplicitRequest<'a> {
     pub(super) depth: usize,
     pub(super) deadlock: DeadlockMode,
     pub(super) budget: usize,
+    /// See `BmcRequest::skip_vacuity_probe`.
+    pub(super) skip_vacuity_probe: bool,
 }
 
 type CommandResult = (Value, i32);
@@ -182,6 +190,7 @@ fn selected_transition_induction_model(
     Ok(Some(model))
 }
 
+#[allow(clippy::too_many_lines)]
 pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i32) {
     let InductionRequest {
         selection,
@@ -189,6 +198,7 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         deadlock,
         k,
         auxiliary,
+        skip_vacuity_probe,
     } = request;
     let selected_transition_model = match selected_transition_induction_model(selection) {
         Ok(model) => model,
@@ -209,6 +219,7 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         depth,
         deadlock,
         initial_state: None,
+        skip_vacuity_probe,
     };
     let (base_prepared, base_solved) = match execute_bmc(&base_request, started) {
         Ok(execution) => execution,
@@ -224,6 +235,7 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
             checked_bounds: base_prepared.checked_bounds.as_ref(),
             elapsed_s: started.elapsed().as_secs_f64(),
             statistics: &base_solved.statistics,
+            skip_vacuity_probe: base_request.skip_vacuity_probe,
         },
     );
     let Value::Object(base) = &base_value else {
@@ -876,6 +888,7 @@ pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32
         started.elapsed().as_secs_f64(),
         &vacuity,
         &reachable_diagnostics,
+        request.skip_vacuity_probe,
     ))
 }
 
@@ -935,6 +948,7 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
             started.elapsed().as_secs_f64(),
             &vacuity,
             &reachable_diagnostics,
+            request.skip_vacuity_probe,
         ));
     if output.get("result").and_then(Value::as_str) == Some("unknown_budget") {
         return auto_fallback_to_bmc(request, &budget_fallback_reason(&output), "budget");
@@ -948,6 +962,7 @@ fn auto_fallback_to_bmc(request: ExplicitRequest<'_>, reason: &str, kind: &str) 
         depth: request.depth,
         deadlock: request.deadlock,
         initial_state: None,
+        skip_vacuity_probe: request.skip_vacuity_probe,
     });
     annotate_auto_fallback(&mut output, reason, kind);
     (output, status)
@@ -1008,6 +1023,7 @@ pub(super) fn run_bmc_filtered(request: BmcRequest<'_>) -> (Value, i32) {
             checked_bounds: prepared.checked_bounds.as_ref(),
             elapsed_s: started.elapsed().as_secs_f64(),
             statistics: &solved.statistics,
+            skip_vacuity_probe: request.skip_vacuity_probe,
         },
     )
 }
@@ -1058,6 +1074,10 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
                             checked_bounds: None,
                             elapsed_s: started.elapsed().as_secs_f64(),
                             statistics: &statistics,
+                            // This branch renders `render_boundary_output`,
+                            // which never emits `warnings`, so this value is
+                            // inert here; threaded through for consistency.
+                            skip_vacuity_probe: request.skip_vacuity_probe,
                         },
                     ));
                 }
@@ -1345,6 +1365,11 @@ fn run_induction_with_lemmas(
         }
         entries.push(entry);
     }
+    // See `execute_cli_verification`'s matching comment: this is the
+    // `--lemma` path's own derivation of the same CLI `--vacuity` option,
+    // since `run_induction_with_lemmas` is called directly from
+    // `run_verify_cli` rather than through `execute_cli_verification`.
+    let skip_vacuity_probe = options.vacuity == "ignore";
     let (mut result, status) = loop {
         let (current, status) = run_induction_filtered(InductionRequest {
             selection,
@@ -1352,6 +1377,7 @@ fn run_induction_with_lemmas(
             deadlock,
             k: options.k_ind,
             auxiliary: &auxiliary,
+            skip_vacuity_probe,
         });
         if current.get("result").and_then(Value::as_str) != Some("unknown_cti")
             || current.get("violation_kind").and_then(Value::as_str) == Some("leadsTo_rank")
@@ -2171,12 +2197,25 @@ fn execute_cli_verification(
         property: options.property.as_deref(),
         excluded: &options.exclude_properties,
     };
+    // INVARIANT (issue #729): together with `run_induction_with_lemmas`'
+    // matching derivation (the `--lemma` path bypasses this function), this
+    // is the *only* place in the product that may set `skip_vacuity_probe`
+    // to `true`. It is derived directly from the CLI's own `--vacuity`
+    // option parsing, which both `verify` and `sweep` funnel through
+    // `run_verify_cli` -- `sweep` builds its own `CliVerifyOptions` per
+    // grid cell and calls `run_verify_cli` exactly like `verify` does.
+    // Every other constructor of `BmcRequest`/`InductionRequest`/
+    // `ExplicitRequest` in this codebase (the `ledger`/`html`/`mutate`
+    // baseline in `rust/fslc/src/main.rs`'s `run_verify`, and tests) must
+    // pass `false`.
+    let skip_vacuity_probe = options.vacuity == "ignore";
     let (mut output, status) = match VerificationEngine::parse(&options.engine) {
         Ok(VerificationEngine::Bmc) => run_bmc_filtered(BmcRequest {
             selection,
             depth: options.depth,
             deadlock,
             initial_state: prepared.initial_state.as_ref(),
+            skip_vacuity_probe,
         }),
         Ok(VerificationEngine::Induction) => run_induction_filtered(InductionRequest {
             selection,
@@ -2184,18 +2223,21 @@ fn execute_cli_verification(
             deadlock,
             k: options.k_ind,
             auxiliary: &[],
+            skip_vacuity_probe,
         }),
         Ok(VerificationEngine::Explicit) => run_explicit_filtered(ExplicitRequest {
             selection,
             depth: options.depth,
             deadlock,
             budget: options.explicit_budget,
+            skip_vacuity_probe,
         }),
         Ok(VerificationEngine::Auto) => run_auto_filtered(ExplicitRequest {
             selection,
             depth: options.depth,
             deadlock,
             budget: options.explicit_budget,
+            skip_vacuity_probe,
         }),
         Err(error) => return (error_output("usage", &error), 2),
     };
@@ -2370,6 +2412,7 @@ mod tests {
             depth: 4,
             deadlock: DeadlockMode::Ignore,
             initial_state: None,
+            skip_vacuity_probe: false,
         });
         assert_eq!(status, 0);
         assert_eq!(output["result"], "verified");
@@ -2392,6 +2435,7 @@ mod tests {
             deadlock: DeadlockMode::Ignore,
             k: 1,
             auxiliary: &[],
+            skip_vacuity_probe: false,
         });
         assert_eq!(status, 1);
         assert_eq!(output["result"], "unknown_cti");
@@ -2454,6 +2498,7 @@ mod tests {
             0.0,
             &[],
             &std::collections::BTreeMap::new(),
+            false,
         );
         let (output, status) = finish_explicit_output(rendered);
         assert_eq!(status, 3);

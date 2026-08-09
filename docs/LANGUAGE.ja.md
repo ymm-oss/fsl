@@ -1018,6 +1018,9 @@ holds, violating_bindings?}`)は、invariant が複数の AND 連言肢から構
 (`insufficient_depth` | `over_constrained`)と `blocking`(前件/トリガーを不可能に
 している他の invariant。深さ内で単に未到達なだけのときは空)を得ます —
 `reachable_failed` の `unreached[].blocking_requires` と同じ形です。
+`vacuity_probe_truncated`(§15)は別の主張です — 到達性 probe が深さではなく
+state の budget で打ち切られた、というもので、上記のどちらでもなく独自の
+`classification: "probe_truncated"` を持ちます。
 blame は特定するだけで、修復(ガードの弱化、連言肢の削除)を提案することは決して
 ありません — それは anti-hollowing の原則に反するからです。これらはすべて JSON
 コントラクトへの厳密に追加的な変更です。
@@ -1025,7 +1028,9 @@ blame は特定するだけで、修復(ガードの弱化、連言肢の削除)
 忠実性/意図のギャップを特定する診断は、`faithfulness_class` と
 `recommended_action` も運ぶことがあります。現在のクラスは
 `partial_op_unguarded`、`frozen_only_invariant`、`intent_unexercised`、
-`liveness_not_refined` です。このタグは既存の `result` / `kind` /
+`liveness_not_refined`、`reachability_unknown`(`vacuity_probe_truncated`
+専用 — 到達性 probe が budget で打ち切られたのであって、単に意図が未行使
+なのではありません)です。このタグは既存の `result` / `kind` /
 `violation_kind` フィールドから導出される追加的なものです。消費者は詳細のために
 元の分類フィールドを読み続けるべきです。
 
@@ -2609,10 +2614,20 @@ DESIGN-*.md があります)。
   `tautology_over_frozen`(どの action も変えない状態の上の、動的に
   トートロジーである invariant)、`urgency_freeze`(urgency が時間を凍結するために
   死んでいると証明された、生成された deadline の `tick`)、
-  `vacuous_deadline`(生成 deadline の age が全遷移で 0 のままと証明される)を
-  警告します。
+  `vacuous_deadline`(生成 deadline の age が全遷移で 0 のままと証明される)、
+  `vacuity_probe_truncated`†を警告します。
   `error` は exit 2 です。→
   [`DESIGN-vacuity.md`](DESIGN-vacuity.md)
+
+  † `vacuity_probe_truncated`: `vacuous_implication`/`vacuous_leadsto` の
+  到達性 probe は、spec 内の全 antecedent/trigger にまたがって 1 回の
+  budget 付き concrete BFS を共有します。ある候補が、真になることも
+  到達可能な状態空間を使い切ることもないまま state 数の budget に
+  到達した場合、`vacuous_implication`/`vacuous_leadsto` の代わりにこの
+  kind を報告します — 空虚性はどちら向きにも確立されていないため、
+  「空虚性確定」として扱えば偽陽性になり、単に握りつぶせば
+  `--vacuity error` が空虚性を一度も判定していない spec を通過させて
+  しまいます。他の 6 kind と全く同様に `--vacuity` で選択されます。
 - **`--strict-tags`** — 成功の結果の上で、タグのない宣言(捏造の候補)と、参照
   されない要件(欠落の候補。空の requirement ブロックを含む)を警告します。存在
   レベルの突合です。→ [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md)

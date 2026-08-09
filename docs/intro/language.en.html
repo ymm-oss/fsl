@@ -1150,15 +1150,20 @@ inherit both automatically. Vacuity findings (<code>vacuous_implication</code> /
 <code>over_constrained</code>) and <code>blocking</code> (the other invariants making the
 antecedent/trigger impossible, empty when it's merely unreached within
 depth) — same shape as <code>reachable_failed</code>'s <code>unreached[].blocking_requires</code>.
+<code>vacuity_probe_truncated</code> (§15) is a distinct claim — the reachability
+probe was cut off by its state budget, not by depth — and carries its own
+<code>classification: "probe_truncated"</code> rather than either of the above.
 Blame identifies; it never proposes a repair (weakening a guard, dropping a
 conjunct) — that would cut against the anti-hollowing principle. All of this
 is strictly additive to the JSON contract.</p>
 <p>Diagnostics that identify a faithfulness/intent gap may also carry
 <code>faithfulness_class</code> plus <code>recommended_action</code>. Current classes are:
-<code>partial_op_unguarded</code>, <code>frozen_only_invariant</code>, <code>intent_unexercised</code>, and
-<code>liveness_not_refined</code>. The tag is derived from existing <code>result</code> / <code>kind</code> /
-<code>violation_kind</code> fields and is additive; consumers should keep reading the
-original classification fields for detail.</p>
+<code>partial_op_unguarded</code>, <code>frozen_only_invariant</code>, <code>intent_unexercised</code>,
+<code>liveness_not_refined</code>, and <code>reachability_unknown</code> (<code>vacuity_probe_truncated</code>
+only — the reachability probe was budget-cut, not merely intent-unexercised).
+The tag is derived from existing <code>result</code> / <code>kind</code> / <code>violation_kind</code> fields
+and is additive; consumers should keep reading the original classification
+fields for detail.</p>
 <p>Progress-preserving refinement failures are reported as <code>refinement_failed</code> with
 <code>kind:"progress_lost"</code>, <code>violation_kind:"leadsTo"</code>, <code>impl_trace</code>,
 <code>progress:{leadsTo, actions}</code>, and <code>faithfulness_class:"liveness_not_refined"</code>.</p>
@@ -2645,13 +2650,24 @@ DESIGN-*.md).</p>
   (a guard that is always true under the context of preceding clauses),
   <code>tautology_over_frozen</code> (a dynamically tautological invariant over state no
   action changes), <code>urgency_freeze</code> (a generated deadline <code>tick</code> proven dead
-  because urgency freezes time), and <code>vacuous_deadline</code> (a generated deadline
-  whose age is proven to remain zero across every transition). <code>error</code> exits 2. →
+  because urgency freezes time), <code>vacuous_deadline</code> (a generated deadline
+  whose age is proven to remain zero across every transition), and
+  <code>vacuity_probe_truncated</code>†. <code>error</code> exits 2. →
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
-<li><strong><code>--strict-tags</code></strong> — warns on success results about untagged declarations
+</ul>
+<p>† <code>vacuity_probe_truncated</code>: the <code>vacuous_implication</code>/<code>vacuous_leadsto</code>
+  reachability probe shares one budgeted concrete BFS across every
+  antecedent/trigger in the spec; a candidate that neither becomes true nor
+  finishes exhausting its reachable state space before the state-count
+  budget is hit reports this kind instead of <code>vacuous_implication</code>/
+  <code>vacuous_leadsto</code> — vacuity was never established either way, so treating
+  it as confirmed-vacuous would be a false positive and dropping it would
+  let <code>--vacuity error</code> pass a spec whose vacuity was never actually
+  decided. Selected by <code>--vacuity</code> exactly like the other six kinds.
+- <strong><code>--strict-tags</code></strong> — warns on success results about untagged declarations
   (fabrication candidates) and unreferenced requirements (omission candidates,
-  including empty requirement blocks). Existence-level matching. → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a></li>
-<li><strong><code>fslc mutate</code></strong> — mechanically mutates the spec and measures whether each
+  including empty requirement blocks). Existence-level matching. → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a>
+- <strong><code>fslc mutate</code></strong> — mechanically mutates the spec and measures whether each
   mutant is killed by the existing net of checks. The score is <strong>bounded
   mutant-set sensitivity</strong>: <code>kill_rate = killed / (killed + survived)</code> over a
   selected finite mutant set, at the selected <code>--depth</code>, under the
@@ -2678,15 +2694,15 @@ DESIGN-*.md).</p>
   kills use explicit requirement annotations on the failed trace declaration;
   AC/FB case IDs are not implicit requirements. Trace case IDs are unique
   within each declaration kind.
-  → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
-<li><strong><code>fslc explain --readable</code></strong> — a text view over skeleton enumeration (state,
+  → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
+- <strong><code>fslc explain --readable</code></strong> — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,
   branch lowering, synthesized refinement mappings, automatic checks, tags) +
   counterfactuals ("without this rule, this procedure could break it") + witness
   narration. Moves human review from reading logical formulas to adjudicating
   concrete examples. JSON mode remains available without <code>--readable</code>. →
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-explain.md"><code>DESIGN-explain.md</code></a></li>
-<li><strong><code>fslc analyze</code></strong> — emits structural observation JSON. <code>--projection tsg</code>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
+- <strong><code>fslc analyze</code></strong> — emits structural observation JSON. <code>--projection tsg</code>
   returns the Typed Semantic Graph of requirements, actions, state, properties,
   and scenarios. Graph projections return connected components, SCCs,
   representative cycles, degree, and structural metrics such as cycle rank and
@@ -2732,14 +2748,13 @@ DESIGN-*.md).</p>
   These findings carry <code>formal_status: "not_a_violation"</code>; a structural cycle or
   disconnected component is not a proof failure. Versioned schemas for the TSG,
   graph projections, and findings are published under <code>schemas/fslc/analysis/</code>. →
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md"><code>DESIGN-analysis.md</code></a></li>
-<li><strong><code>fslc html</code></strong> — a self-contained HTML report over the same explain/verify
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md"><code>DESIGN-analysis.md</code></a>
+- <strong><code>fslc html</code></strong> — a self-contained HTML report over the same explain/verify
   evidence: status summary, state/action/property tables, an action-to-state
   write graph, trace timelines, witness examples, counterfactuals, source, and
   raw JSON. It is meant for PRs, design reviews, and non-specialist project
   review without requiring the reader to run the CLI. →
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></li>
-</ul>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></p>
 <p>The discipline before writing (the formalization memo, the NL→syntax reverse
 lookup, recommended practices) is in the AI-agent skills under <code>skills/</code>, with
 the shared language reference in <code>skills/fsl/SKILL.md</code>. A maintained worked example
