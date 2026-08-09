@@ -175,9 +175,18 @@ fn all_five_public_kernel_domain_targets_match_pre_migration_goldens() {
 
 #[test]
 fn domain_testgen_adapter_and_effects_match_the_typestate_contract_golden() {
+    // #779 intentionally regenerated this golden: with the fix, the saga
+    // capture-payment timeout action now applies `PaymentTimedOut`'s
+    // declared `evolve { status = Failed }` in the same action that sets
+    // its event flag, instead of leaving `Order.status` frozen at
+    // `Approved` after the timeout. `domain testgen`'s scenario exploration
+    // picks a different, now-correct trace through the widened reachable
+    // state space as a result (reviewed diff: pre-fix scenarios show
+    // `Order.status: "Status_Approved"` surviving `event.PaymentTimedOut:
+    // true`; post-fix scenarios correctly show `"Status_Failed"`).
     assert_eq!(
         domain_testgen_digest(),
-        "334724c8b917a5789eacfeb9076b6d7ab10c5d994880954ba404708e7908a76f"
+        "162a3acd293591147d84dff8a57c4b27038557ebcfdd02c9b938c91a58b6dbf3"
     );
 }
 

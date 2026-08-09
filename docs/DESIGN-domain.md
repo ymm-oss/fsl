@@ -68,7 +68,25 @@ Each aggregate becomes kernel state and actions:
 - aggregate invariant -> kernel `invariant`
 - event occurrence -> per-step `event_<Event>` Bool flags
 - saga step -> kernel action guarded by `starts_on`, `requires`, or awaited
-  event flags
+  event flags. **Evolve pairing invariant** (#779): an `evolve` is 1:1 with
+  the *occurrence* of its event, so any generated action that raises
+  `event_<Event> := true` — a command/decide action, an effect-completion
+  action, a saga observe action, or a saga step/timeout/compensation action —
+  must apply that event's declared `evolve` assignments in the same action, in
+  emit order, if the domain declares one for it. Before #779, saga
+  step/timeout/compensation actions called only the shared `event_assignments`
+  helper and never the paired `evolve_items`/`saga_emit_evolve` call, so a step
+  could raise its emitted event's flag while leaving the aggregate state that
+  event was declared to evolve frozen — an accepted-but-unreachable-transition
+  soundness defect in the same class PR #725 (#713) closed for the
+  compensation guard. Both lowering paths now call the paired helper for every
+  saga action kind; `rust/fsl-core/tests/domain_saga_evolve_pairing.rs` sweeps
+  every action in the domain corpus and fails if any future lowering change
+  (e.g. #679's saga-history rewrite) drops the pairing again. If the same
+  event appears in both a step's `emits` and its (or a later step's) `awaits`,
+  the evolve is applied twice — once per occurrence (emit, then observe) —
+  which is the correct event-sourcing reading, not a defect: applied count
+  equals `event_assignments` execution count equals occurrence count.
 - saga compensation -> kernel action guarded by trigger/after event flags
   (#713: both lowering paths, `lower_saga_actions` in `domain_lowering.rs` and
   `render_saga_actions` in `domain.rs`, emit a `requires` for the trigger

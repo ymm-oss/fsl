@@ -237,7 +237,10 @@ domain <Name> {
 `action` へ、aggregate 状態をプレフィックス付きのカーネル状態へ、saga の step を
 イベントフラグでガードされた action へ、エフェクトライフサイクル状態を有限の
 `Map<CorrelationId, EffectStatus>` / `Map<CorrelationId, Attempt>` マップへと
-lowering します。domain の enum メンバーは lowering 時に名前空間化されるので、
+lowering します。イベントの発生フラグを立てる action は、それを生成した構文
+(command、effect の完了、saga の observe、saga の step/timeout/compensation の
+いずれであっても)によらず、そのイベントの宣言済み `evolve` を同じ action 内で
+適用します。domain の enum メンバーは lowering 時に名前空間化されるので、
 2 つの domain enum が両方とも `Pending` を含んでもかまいません。domain の式では
 `X in [A, B]` と `can(Command)` が使えます。これらは型付き domain ツリーから解決
 され、カーネル式へ構造的に lowering されます。裸の enum メンバーは期待される論理型
