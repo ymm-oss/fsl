@@ -104,6 +104,39 @@ fn never_enabled_action_carries_name_location_and_requirement_metadata() {
     );
 }
 
+/// Generated-only lowering sentinels have neither an authored origin nor a
+/// source-backed action span. Their coverage remains internal evidence, but it
+/// must not become a public vacuity finding with a fabricated `0:0` location.
+#[test]
+fn zero_span_internal_action_is_not_a_never_enabled_finding() {
+    let mut sentinel = model(
+        "spec InternalSentinel { state { ok: Bool } init { ok = true } \
+         action sentinel() { requires false ok = true } invariant Stable { ok } }",
+    );
+    sentinel.actions[0].span.start.offset = 0;
+    sentinel.actions[0].span.start.line = 0;
+    sentinel.actions[0].span.start.column = 0;
+    sentinel.actions[0].span.end.offset = 0;
+    sentinel.actions[0].span.end.line = 0;
+    sentinel.actions[0].span.end.column = 0;
+    let warnings = fsl_runtime::verification_warnings(
+        &sentinel,
+        2,
+        false,
+        None,
+        None,
+        &BTreeMap::from([("sentinel".to_owned(), false)]),
+        &[],
+        false,
+    );
+    assert!(
+        warnings
+            .iter()
+            .all(|warning| warning["kind"] != "never_enabled_action"),
+        "zero-span internal sentinel must not become a public finding: {warnings:#?}"
+    );
+}
+
 /// Digit-growth model (same trick as
 /// `rust/fsl-runtime/tests/boundary_probe_budget.rs`): `count = count * 10 +
 /// x` is injective per level, so the distinct reachable state count grows

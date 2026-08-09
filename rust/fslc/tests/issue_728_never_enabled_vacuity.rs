@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 const FIXTURE: &str = "rust/fslc/tests/fixtures/never_enabled_depth_boundary.fsl";
 const ORIGIN_FIXTURE: &str = "rust/fslc/tests/fixtures/issue_641_domain_unreachable_decide.fsl";
+const GOVERNANCE_FIXTURE: &str = "examples/consulting/governance_controls.fsl";
 
 fn repository_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -203,6 +204,47 @@ fn never_enabled_lowered_action_uses_its_origin_primary_location() {
     assert_eq!(
         warning["loc"]["column"], warning["origin"]["primary"]["span"]["start"]["column"],
         "warning location must use origin.primary.span.start.column: {warning:#}"
+    );
+}
+
+#[test]
+fn generated_only_governance_sentinel_is_not_a_public_finding() {
+    let (verified, status) = run_cli(&[
+        "verify",
+        GOVERNANCE_FIXTURE,
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore",
+        "--vacuity",
+        "error",
+        "--no-cache",
+    ]);
+    assert_eq!(status, 0, "{verified:#}");
+    assert_eq!(verified["result"], "verified", "{verified:#}");
+    assert_eq!(
+        verified["action_coverage"]["_governance_noop"]["covered"], false,
+        "the calibration must retain the generated sentinel as coverage-false: {verified:#}"
+    );
+    assert!(
+        verified["warnings"]
+            .as_array()
+            .is_some_and(|warnings| warnings
+                .iter()
+                .all(|warning| warning["name"] != "_governance_noop")),
+        "generated-only sentinel must not become a public warning: {verified:#}"
+    );
+
+    let (scenarios, scenario_status) = run_cli(&["scenarios", GOVERNANCE_FIXTURE, "--depth", "2"]);
+    assert_eq!(scenario_status, 0, "{scenarios:#}");
+    assert_eq!(scenarios["result"], "scenarios", "{scenarios:#}");
+    assert!(
+        scenarios["warnings"]
+            .as_array()
+            .is_some_and(|warnings| warnings
+                .iter()
+                .all(|warning| warning["name"] != "_governance_noop")),
+        "generated-only sentinel must not leak through scenarios: {scenarios:#}"
     );
 }
 

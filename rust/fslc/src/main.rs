@@ -5133,19 +5133,19 @@ fn run_scenarios_mode(
         .actions
         .iter()
         .filter(|action| !covers.contains_key(&action.name))
-        .map(|action| {
+        .filter_map(|action| {
             if result.action_coverage.get(&action.name) == Some(&false) {
                 // Never enabled (blocked by an unsatisfiable `requires`), not merely
                 // uncovered — say so, matching `fsl_runtime::verification_warnings`'s
                 // wording for the same diagnosis on the verify path.
                 fsl_runtime::never_enabled_action_warning(&model, action, depth)
             } else {
-                json!({
+                Some(json!({
                     "message": format!(
                         "action '{}' was enabled but no cover trace could be built within depth {depth}",
                         display(&action.name)
                     ),
-                })
+                }))
             }
         }))
         .collect::<Vec<_>>();

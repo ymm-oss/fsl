@@ -2634,32 +2634,38 @@ pub fn verification_warnings(
     }
     for (name, covered) in action_coverage {
         if !covered && let Some(action) = model.actions.iter().find(|action| action.name == *name) {
-            warnings.push(never_enabled_action_warning(model, action, depth));
+            warnings.extend(never_enabled_action_warning(model, action, depth));
         }
     }
     warnings
 }
 
 /// Render the public, bounded action-coverage finding shared by verification
-/// and `scenarios`. The action origin is the sole authority for a lowered
-/// action's display name; the executable name remains only as
-/// `generated_name` alongside the origin chain.
+/// and `scenarios`. Returns `None` for internal scaffolding without an authored
+/// origin or a source-backed action span. The action origin is the sole
+/// authority for a lowered action's display name; the executable name remains
+/// only as `generated_name` alongside the origin chain.
 #[must_use]
 pub fn never_enabled_action_warning(
     model: &KernelModel,
     action: &ActionDef,
     depth: usize,
-) -> JsonValue {
+) -> Option<JsonValue> {
     let origin = model.action_origin(&action.name);
     let name = origin
         .and_then(origin_display_name)
         .map_or_else(|| display_name(&action.name), str::to_owned);
     // Keep this public diagnostic aligned with all other action JSON: a
     // source-backed lowered action reports the authored primary location,
-    // while a kernel action retains its own declaration span.
-    let loc = origin
+    // while a kernel action retains its own declaration span. Zero spans are
+    // reserved for generated-only sentinels and are not public findings.
+    let source_span = origin
         .and_then(|origin| origin.primary.as_ref().and_then(|site| site.span))
-        .map_or_else(|| action.span.python_loc(), fsl_core::Span::python_loc);
+        .filter(|span| span.start.line > 0 && span.start.column > 0)
+        .or_else(|| {
+            (action.span.start.line > 0 && action.span.start.column > 0).then_some(action.span)
+        })?;
+    let loc = source_span.python_loc();
     let mut warning = json!({
         "kind": "never_enabled_action",
         "name": name,
@@ -2678,7 +2684,7 @@ pub fn never_enabled_action_warning(
             entry.insert("origin".to_owned(), internal_origin_json(origin));
         }
     }
-    warning
+    Some(warning)
 }
 
 /// Remove bounded deadlock findings from warnings promoted to an induction proof.
