@@ -720,6 +720,39 @@ fn evolve_assignments(
     output
 }
 
+/// Render the declared `evolve` for each event a saga step/timeout/compensation
+/// action emits, pairing with `event_assignments`: an action that raises
+/// `event_<E>` for an occurring event must apply E's declared evolve in the
+/// same action (docs/DESIGN-domain.md's saga step pairing invariant).
+fn saga_emit_evolve_lines(context: &Context<'_>, events: &[String]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for event_name in events {
+        let Some((aggregate, event)) = context.event(event_name) else {
+            continue;
+        };
+        let environment = aggregate
+            .state
+            .iter()
+            .chain(&event.fields)
+            .map(|field| (field.name.text.clone(), field.type_name.render_source()))
+            .collect();
+        lines.extend(
+            evolve_assignments(
+                context,
+                aggregate,
+                aggregate
+                    .evolves
+                    .iter()
+                    .find(|item| item.event == *event_name),
+                &environment,
+            )
+            .into_iter()
+            .map(|line| format!("  {line}")),
+        );
+    }
+    lines
+}
+
 fn render_effect_actions(context: &Context<'_>, effect: &DomainEffect) -> Vec<String> {
     let Some(correlation) = Context::correlation_field(effect) else {
         return Vec::new();
@@ -865,6 +898,7 @@ fn saga_guards(
     guards
 }
 
+#[allow(clippy::too_many_lines)]
 fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> {
     let mut lines = Vec::new();
     let mut observed = BTreeSet::new();
@@ -929,6 +963,7 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
                 .into_iter()
                 .map(|line| format!("  {line}")),
         );
+        lines.extend(saga_emit_evolve_lines(context, &step.emits));
         lines.push("}".to_owned());
         if let Some(timeout) = &step.timeout_event {
             lines.push(format!("action {action}_timeout() {{"));
@@ -938,6 +973,10 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
                     .into_iter()
                     .map(|line| format!("  {line}")),
             );
+            lines.extend(saga_emit_evolve_lines(
+                context,
+                std::slice::from_ref(timeout),
+            ));
             lines.push("}".to_owned());
         }
     }
@@ -961,6 +1000,7 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
                 .into_iter()
                 .map(|line| format!("  {line}")),
         );
+        lines.extend(saga_emit_evolve_lines(context, &compensation.emits));
         lines.push("}".to_owned());
     }
     lines

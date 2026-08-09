@@ -273,9 +273,13 @@ events, domain errors, pure <code>decide</code>/<code>evolve</code>, async effec
 saga/process-manager coordination. It lowers each command+decide+evolve path to
 a kernel <code>action</code>, aggregate state to prefixed kernel state, saga steps to
 event-flag guarded actions, and effect lifecycle state to finite
-<code>Map&lt;CorrelationId, EffectStatus&gt;</code> / <code>Map&lt;CorrelationId, Attempt&gt;</code> maps. Domain
-enum members are namespaced during lowering, so two domain enums may both contain
-<code>Pending</code>. Domain expressions may use <code>X in [A, B]</code> and <code>can(Command)</code>; these are
+<code>Map&lt;CorrelationId, EffectStatus&gt;</code> / <code>Map&lt;CorrelationId, Attempt&gt;</code> maps. Every
+action that raises an event's occurrence flag applies that event's declared
+<code>evolve</code> in the same action, whichever construct generated the action
+(command, effect completion, saga observe, or saga step/timeout/compensation).
+Domain enum members are namespaced during lowering, so two domain enums may
+both contain <code>Pending</code>. Domain expressions may use <code>X in [A, B]</code> and
+<code>can(Command)</code>; these are
 resolved from the typed domain tree and lowered structurally to kernel
 expressions. Bare enum members use the expected logical type; an untyped member
 shared by multiple enums is an error. Finite membership becomes an equality

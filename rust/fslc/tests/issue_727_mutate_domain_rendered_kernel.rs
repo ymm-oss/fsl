@@ -135,18 +135,31 @@ fn mutate_domain_positive_oracle_kills_capture_payment_success_sticky() {
 /// would then be reporting evidence without a working evidence channel.
 #[test]
 fn mutate_domain_negative_control_saga_compensation_dead_at_baseline() {
+    // #779 adds a new mutable evolve assignment to the compensation action
+    // itself (`order_inventory_status = InventoryStatus_ReleaseRequested`)
+    // in addition to the five other saga step/timeout actions the fix
+    // touches, growing the uncapped mutant count from 198 to 226. At the
+    // default 200-mutant cap this pushed the entire compensation-targeting
+    // mutant set (this test's own load-bearing evidence) past the cap and
+    // out of the report, so `--max-mutants` is raised here to a value
+    // comfortably above 226 to keep this test's actual subject --
+    // compensation mutants -- present to assert on; T1
+    // (`mutate_domain_positive_oracle_kills_capture_payment_success_sticky`,
+    // a different fixture) still exercises the untouched default cap path.
     let (output, status) = run(&[
         "mutate",
         "examples/domain/order_fulfillment_saga.fsl",
         "--depth",
         "4",
+        "--max-mutants",
+        "300",
     ]);
     assert_eq!(status, 0, "{output:#}");
     assert_eq!(output["result"], "mutated", "{output:#}");
-    assert_eq!(output["summary"]["total"], 198, "{}", output["summary"]);
+    assert_eq!(output["summary"]["total"], 226, "{}", output["summary"]);
     assert_eq!(output["summary"]["killed"], 3, "{}", output["summary"]);
     assert_eq!(
-        output["summary"]["kill_rate"], 0.0152,
+        output["summary"]["kill_rate"], 0.0133,
         "{}",
         output["summary"]
     );
@@ -162,8 +175,10 @@ fn mutate_domain_negative_control_saga_compensation_dead_at_baseline() {
         .collect::<Vec<_>>();
     assert_eq!(
         compensation_mutants.len(),
-        14,
-        "expected 14 compensation-targeting mutants, output={output:#}"
+        19,
+        "expected 19 compensation-targeting mutants (14 pre-#779, plus 5 new \
+         mutants from the compensation action's now-applied evolve \
+         assignment), output={output:#}"
     );
     for mutant in &compensation_mutants {
         assert_eq!(
