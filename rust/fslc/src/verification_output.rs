@@ -1852,7 +1852,7 @@ fn shared_warnings(
 }
 
 /// Render the solver-decided vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes
-/// 3–5) that `fsl-verifier` proved for this model.
+/// 4–7) that `fsl-verifier` proved for this model.
 ///
 /// None of the messages mention `--depth`: unlike the two reachability lanes,
 /// these judgments quantify over the declared type space and therefore hold at

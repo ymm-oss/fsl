@@ -19,30 +19,45 @@ bugs. Conventionally `kind:"vacuous"` referred only to init unsatisfiability.
 
 ## 2. Vacuity lanes (only on the verified / proved path)
 
-1. **`vacuous_implication`**: the antecedent of a **user invariant** with a single `=>`
+The `--vacuity warn|error|ignore` selection contract applies only to `verify`
+and `sweep` results on their verified/proved path. `scenarios` has no
+`--vacuity` mode and does not promote a vacuity finding to exit 2; it
+independently preserves the typed `never_enabled_action` diagnostic from its
+bounded action-coverage result so generated integration scaffolds do not
+misdescribe a blocked action as covered.
+
+1. **`never_enabled_action`**: bounded action-coverage evidence that no instance of an
+   action was enabled through depth K. The warning names K and is deliberately not a
+   proof that the action is permanently dead: it can disappear at K+1 when a delayed
+   enabling path is reached. The existing structured `action_coverage` projection and
+   this `--vacuity`-selectable warning remain distinct; neither changes assurance. Only
+   actions with an authored primary origin or a non-zero source span become public
+   findings; generated-only zero-span lowering sentinels remain visible in coverage but
+   do not produce a fabricated location or fail `--vacuity error`.
+2. **`vacuous_implication`**: the antecedent of a **user invariant** with a single `=>`
    directly under `forall*` does not become sat within depth K. The existential closure of the
    antecedent is fed to the existing `eval_expr` by wrapping the AST with
    `("exists", binder, A)` (no new evaluator). Implicit `_bounds_*` are out of scope (Seq
    live-prefix is in implication form, and warnings on auto-generated items would be noise).
-2. **`vacuous_leadsto`**: check the leadsTo trigger P with the same existential closure.
-3. **`always_true_requires`**: for each requires clause j, warn if **with the context of the
+3. **`vacuous_leadsto`**: check the leadsTo trigger P with the same existential closure.
+4. **`always_true_requires`**: for each requires clause j, warn if **with the context of the
    preceding clauses** `sat(clause 1..j-1 ∧ ¬clause j)` is unsat over all reachable states ×
    all instances. The reasons for using context are (a) consistency with Monitor short-circuit
    (BUG-020), (b) detecting redundant clauses too (`st!=Cancelled` after `st==Paid`), and
    (c) spurious sat from the whole-domain Z3 encoding of a let-internal partial op works only in
    the "do not emit a warning" direction and is safe. **Coverage-false actions** (already warned
    never-enabled) and **compose-synchronized actions** are out of scope.
-4. **`tautology_over_frozen`**: a user invariant that depends only on state variables no action
+5. **`tautology_over_frozen`**: a user invariant that depends only on state variables no action
    ever assigns to, and is dynamically always true over those frozen values, is a hollow
    invariant. This is a static pre-filter plus Z3 check; it remains pending until final warning
    emission.
-5. **`urgency_freeze`**: for requirements `time`/`deadline`, warn only when the generated
+6. **`urgency_freeze`**: for requirements `time`/`deadline`, warn only when the generated
    deadline invariants exist, the generated `tick` action has the structural guard
    `requires not(urgent_enabled)`, the deadline age variables are not assigned by non-`tick`
    actions, and Z3 proves `urgent_enabled` holds in every initial state and is preserved by
    every action. This is depth-independent and intentionally incomplete: if the initial or
    inductive proof fails, no warning is emitted.
-6. **`vacuous_deadline`**: for each generated deadline, derive the predicate
+7. **`vacuous_deadline`**: for each generated deadline, derive the predicate
    that all entries of its age state equal zero. Warn when Z3 proves that
    predicate for every initial state and proves it is preserved by every
    transition. Unlike `urgency_freeze`, this does not claim that `tick` is
@@ -51,11 +66,11 @@ bugs. Conventionally `kind:"vacuous"` referred only to init unsatisfiability.
    reset age to zero and catches state-changing urgent handlers that disable
    their own guards. A `tick` transition that advances age is the rejecting
    control and suppresses the finding.
-7. **`vacuity_probe_truncated`** (issue #729): lanes 1–2's shared reachability
+8. **`vacuity_probe_truncated`** (issue #729): lanes 2–3's shared reachability
    probe stopped at its state budget before deciding a candidate either way.
    See the subsection immediately below.
 
-### Lanes 1–2: budgeted reachability probe and `vacuity_probe_truncated` (issue #729)
+### Lanes 2–3: budgeted reachability probe and `vacuity_probe_truncated` (issue #729)
 
 `fsl-runtime::verification_warnings` used to run one **unbudgeted** concrete BFS
 (`expression_reachable`) per implication antecedent and per leadsTo trigger: a
@@ -101,7 +116,7 @@ silently reusing the closed-search verdict.
   established. Both are unacceptable weakenings of `--vacuity error`'s
   contract ("vacuity evidence is clean"), so `Exhausted` gets its own kind,
   `vacuity_probe_truncated`, added to `fsl_core::VACUITY_KINDS` — selected by
-  `--vacuity` exactly like the other six kinds (`warn` shows it, `error`
+  `--vacuity` exactly like the other seven kinds (`warn` shows it, `error`
   fails closed on it, `ignore` discards it). An informational, non-selected
   kind was considered and rejected for the same reason: it would make
   `--vacuity error` strictly weaker than before #729, letting a
@@ -177,9 +192,9 @@ silently reusing the closed-search verdict.
   actually fires, not just that its helper functions are individually
   correct.
 
-### Native lanes 3–6: "over all reachable states" is decided over the type space
+### Native lanes 4–7: "over all reachable states" is decided over the type space
 
-The frozen Python reference discharges lane 3 from the states an unrolling actually witnesses:
+The frozen Python reference discharges lane 4 from the states an unrolling actually witnesses:
 a clause survives to a warning when nothing within depth K falsified it. That reports a real
 guard as dead merely because the bound was too small. `examples/causal/funnel.fsl` declares
 `state { visits: 0..100 }` and `requires visits < 100`; at depth 8 `visits` reaches only 8, so
@@ -193,10 +208,10 @@ reachable state at any depth. `visits == 100` is inside `0..100`, so `funnel.fsl
 silent. Every lane is a bounded number of one-shot queries over freshly named states, and each
 verdict is therefore independent of `--depth`.
 
-This is sound and deliberately incomplete in the same direction as lane 5: a clause that is dead
+This is sound and deliberately incomplete in the same direction as lane 6: a clause that is dead
 for a reason the type space cannot see goes unreported, and an `unknown` backend verdict yields
 no finding. The exploration contributes exactly one input, action coverage, and only to suppress
-lane 3 for actions that were never enabled.
+lane 4 for actions that were never enabled.
 
 Two exclusions keep the lanes pointed at authored text. Generated declarations are skipped, and
 so is any declaration without a source location: some dialect lowerings synthesize an entire
@@ -223,8 +238,9 @@ so there is zero detection loss.
   preceding clauses over the type space" (`_requires_clause_locally_implied`), excluding bounded
   false positives from capacity-guard families.
 - Output: `{kind, name(display name), loc, requirement, message, hint}` in warnings. prove()
-  passes warnings through transparently from the base verify. scenarios uses
-  `vacuity_mode="ignore"`.
+  passes warnings through transparently from the base verify. Native `scenarios`
+  does not select a vacuity mode; it emits its own typed `never_enabled_action`
+  coverage diagnostic and keeps its existing exit behavior.
 - Successful BMC output remains explicitly bounded via `completeness:"bounded"`
   and `checked_to_depth`. When normal exploration first witnesses a
   reachable/vacuity/coverage fact at the final depth K, `verified` includes a

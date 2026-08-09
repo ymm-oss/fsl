@@ -11,7 +11,8 @@ use fsl_core::{
     KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
     KernelLValue as LValue, KernelModel, KernelStatement as Statement, ModelError, ParamDef,
     Refinement, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef, display_name,
-    insert_requirement_metadata, model_warnings, state_summary, static_leadsto_bindings,
+    insert_requirement_metadata, internal_origin_json, model_warnings, origin_display_name,
+    state_summary, static_leadsto_bindings,
 };
 use serde_json::{Value as JsonValue, json};
 
@@ -2413,7 +2414,7 @@ fn exists_wrap(binders: &[Binder], expr: Expr) -> Expr {
 }
 
 /// The existentially-closed antecedent of each user invariant shaped
-/// `forall* P => Q` (`docs/DESIGN-vacuity.md` lane 1), paired with the
+/// `forall* P => Q` (`docs/DESIGN-vacuity.md` lane 2), paired with the
 /// index of the source invariant in `model.invariants`. An invariant
 /// without that shape (after peeling leading `forall`s) contributes no
 /// candidate, so the index travels with the expression rather than being
@@ -2454,7 +2455,7 @@ pub fn vacuous_implication_candidates(model: &KernelModel) -> Vec<(usize, Expr)>
 }
 
 /// The existentially-closed trigger of each `leadsTo` property
-/// (`docs/DESIGN-vacuity.md` lane 2), one per `model.leadstos` entry in
+/// (`docs/DESIGN-vacuity.md` lane 3), one per `model.leadstos` entry in
 /// declaration order.
 #[must_use]
 pub fn vacuous_leadsto_candidates(model: &KernelModel) -> Vec<Expr> {
@@ -2500,7 +2501,7 @@ fn vacuity_reachability_warning(
 /// (`CONCRETE_PROBE_BUDGET`, the same constant/calibration
 /// `find_boundary_violation` uses), and stay solver-independent.
 /// `solver_vacuity` carries the already-rendered `docs/DESIGN-vacuity.md`
-/// §2 lanes 3–6 that only `fsl-verifier` can decide; passing them in keeps
+/// §2 lanes 4–7 that only `fsl-verifier` can decide; passing them in keeps
 /// the documented warning order (model → vacuity → deadlock → action
 /// coverage) owned by one function without giving `fsl-runtime` a solver
 /// dependency.
@@ -2632,14 +2633,58 @@ pub fn verification_warnings(
         }));
     }
     for (name, covered) in action_coverage {
-        if !covered {
-            warnings.push(json!({
-                "message": format!("action '{}' is never enabled within depth {depth} — the spec may be vacuous (check its requires clauses)", display_name(name)),
-                "hint": format!("these requires clauses are unsatisfiable at every step up to depth {depth}; weaken one of them, add an action that establishes them, or increase --depth"),
-            }));
+        if !covered && let Some(action) = model.actions.iter().find(|action| action.name == *name) {
+            warnings.extend(never_enabled_action_warning(model, action, depth));
         }
     }
     warnings
+}
+
+/// Render the public, bounded action-coverage finding shared by verification
+/// and `scenarios`. Returns `None` for internal scaffolding without an authored
+/// origin or a source-backed action span. The action origin is the sole
+/// authority for a lowered action's display name; the executable name remains
+/// only as `generated_name` alongside the origin chain.
+#[must_use]
+pub fn never_enabled_action_warning(
+    model: &KernelModel,
+    action: &ActionDef,
+    depth: usize,
+) -> Option<JsonValue> {
+    let origin = model.action_origin(&action.name);
+    let name = origin
+        .and_then(origin_display_name)
+        .map_or_else(|| display_name(&action.name), str::to_owned);
+    // Keep this public diagnostic aligned with all other action JSON: a
+    // source-backed lowered action reports the authored primary location,
+    // while a kernel action retains its own declaration span. Zero spans are
+    // reserved for generated-only sentinels and are not public findings.
+    let source_span = origin
+        .and_then(|origin| origin.primary.as_ref().and_then(|site| site.span))
+        .filter(|span| span.start.line > 0 && span.start.column > 0)
+        .or_else(|| {
+            (action.span.start.line > 0 && action.span.start.column > 0).then_some(action.span)
+        })?;
+    let loc = source_span.python_loc();
+    let mut warning = json!({
+        "kind": "never_enabled_action",
+        "name": name,
+        "loc": loc,
+        "message": format!("action '{name}' is never enabled within depth {depth} — the spec may be vacuous (check its requires clauses)"),
+        "hint": format!("these requires clauses are unsatisfiable at every step up to depth {depth}; weaken one of them, add an action that establishes them, or increase --depth"),
+        "blocking_requires": [],
+    });
+    if let JsonValue::Object(entry) = &mut warning {
+        insert_requirement_metadata(entry, &action.annotations, action.meta.as_ref());
+        if let Some(origin) = origin {
+            entry.insert(
+                "generated_name".to_owned(),
+                json!(display_name(&action.name)),
+            );
+            entry.insert("origin".to_owned(), internal_origin_json(origin));
+        }
+    }
+    Some(warning)
 }
 
 /// Remove bounded deadlock findings from warnings promoted to an induction proof.

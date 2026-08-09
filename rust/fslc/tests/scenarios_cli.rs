@@ -107,6 +107,18 @@ fn scenarios_never_enabled_action_is_not_reported_as_enabled() {
         })
         .unwrap_or_else(|| panic!("a warning naming 'bad' in {value}"));
     let message = warning["message"].as_str().expect("message string");
+    assert_eq!(warning["kind"], "never_enabled_action", "{warning}");
+    assert_eq!(warning["name"], "bad", "{warning}");
+    assert!(warning["loc"].is_object(), "{warning}");
+    assert_eq!(
+        warning["requirement"]["id"], "REQ-SCENARIO-BAD",
+        "{warning}"
+    );
+    assert_eq!(
+        warning["requirements"].as_array().map(Vec::len),
+        Some(1),
+        "{warning}"
+    );
     assert!(
         message.contains("is never enabled"),
         "must say the action was never enabled: {message}"

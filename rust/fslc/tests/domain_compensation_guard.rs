@@ -20,9 +20,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use fsl_core::{FsResolver, build_model, domain_kernel_source, lower_domain, parse_kernel_source};
-use fsl_runtime::Monitor;
+use fsl_runtime::{Monitor, bfs, verification_warnings};
 use fsl_syntax::{DomainSpec, SurfaceDocument, parse_surface_document};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -203,7 +203,7 @@ fn run_cli(args: &[&str]) -> (i32, Value) {
 /// trigger and after events differ
 /// (`examples/domain/order_fulfillment_saga.fsl`: `when PaymentFailed after
 /// InventoryReserved`) must still reach the same verdict class, but its
-/// warnings must now include the never-enabled warning naming the
+/// warnings must now include the typed never-enabled warning naming the
 /// compensation action -- because under one-hot `event_*` flags, a
 /// trigger != `after_event` compensation is structurally disabled by the dual
 /// guard (accepted interim state, `docs/DESIGN-saga-history.md:60-62`).
@@ -222,16 +222,96 @@ fn order_fulfillment_saga_verify_surfaces_never_enabled_compensation_warning() {
     let warnings = output["warnings"]
         .as_array()
         .expect("verify output carries a warnings array");
-    let messages = warnings
-        .iter()
-        .map(|warning| warning["message"].as_str().unwrap_or_default())
-        .collect::<Vec<_>>();
     let expected_action =
         "saga_order_fulfillment_compensate_payment_failed_after_inventory_reserved";
+    let warning = warnings
+        .iter()
+        .find(|warning| warning["generated_name"] == expected_action)
+        .unwrap_or_else(|| panic!("expected warning for '{expected_action}', got: {warnings:?}"));
+    assert_eq!(warning["kind"], "never_enabled_action", "{warning}");
+    assert!(warning["name"].is_string(), "{warning}");
+    assert!(warning["origin"].is_object(), "{warning}");
+    assert_eq!(
+        warning["loc"],
+        json!({"line": 102, "column": 7}),
+        "the lowered action must report its authored compensation location: {warning}"
+    );
     assert!(
-        messages
-            .iter()
-            .any(|message| message.contains(expected_action) && message.contains("never enabled")),
-        "expected a never-enabled warning naming '{expected_action}', got: {messages:?}"
+        warning["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("never enabled")),
+        "expected a never-enabled warning: {warning}"
+    );
+}
+
+/// Calibration for #728: this detector must stop reporting the compensation
+/// action when the trigger-side event guard is mechanically removed. The
+/// after-event still makes the weakened action reachable, so this is a real
+/// detector-sensitivity control rather than merely asserting a warning exists.
+#[test]
+fn compensation_never_enabled_detector_changes_when_trigger_guard_is_removed() {
+    let source_path = repo_root().join("examples/domain/order_fulfillment_saga.fsl");
+    let source = std::fs::read_to_string(source_path).expect("read order saga fixture");
+    let SurfaceDocument::Domain(domain) =
+        parse_surface_document(&source).expect("parse order saga fixture")
+    else {
+        panic!("expected a domain document");
+    };
+    let kernel_source = domain_kernel_source(&domain).expect("render order saga kernel");
+    let expected_action =
+        "saga_order_fulfillment_compensate_payment_failed_after_inventory_reserved";
+    let block_start = kernel_source
+        .find(&format!("action {expected_action}("))
+        .unwrap_or_else(|| panic!("rendered kernel is missing {expected_action}"));
+    let block_end = kernel_source[block_start..]
+        .find('}')
+        .map(|offset| block_start + offset)
+        .expect("compensation action block must close");
+    let block = &kernel_source[block_start..block_end];
+    let trigger_requires = block
+        .lines()
+        .find(|line| line.trim() == "requires event_PaymentFailed")
+        .expect("locate trigger-side compensation guard");
+    let weakened_block = block.replacen(trigger_requires, "", 1);
+    let weakened_source = format!(
+        "{}{}{}",
+        &kernel_source[..block_start],
+        weakened_block,
+        &kernel_source[block_end..]
+    );
+    assert_ne!(
+        weakened_source, kernel_source,
+        "calibration must remove a guard"
+    );
+
+    let weakened = build_model(
+        parse_kernel_source(&weakened_source, &FsResolver::new("."))
+            .expect("parse weakened rendered kernel"),
+    )
+    .expect("build weakened rendered kernel");
+    let result = bfs(weakened.clone(), 3).expect("explore weakened rendered kernel");
+    assert_eq!(
+        result.action_coverage.get(expected_action),
+        Some(&true),
+        "removing the trigger guard must make the after-event path cover the compensation"
+    );
+    let warnings = verification_warnings(
+        &weakened,
+        3,
+        false,
+        result.deadlock_step,
+        None,
+        &result.action_coverage,
+        &[],
+        false,
+    );
+    assert!(
+        !warnings.iter().any(|warning| {
+            warning["kind"] == "never_enabled_action"
+                && warning["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains(expected_action))
+        }),
+        "the detector must clear once the action has coverage: {warnings:?}"
     );
 }

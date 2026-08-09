@@ -2668,7 +2668,9 @@ DESIGN-*.md).
   under-constraint = a missing guard, which a safety invariant stays silent
   about). The dual of `acceptance` (must-allow). → [`DESIGN-forbidden.md`](DESIGN-forbidden.md)
 - **Vacuity check (`--vacuity`)** — on the verified/proved path, warns about
-  `vacuous_implication` (the antecedent of an implication is unreachable),
+  `never_enabled_action` (an action has no enabled instance through the checked
+  depth; bounded evidence, not a permanent-dead proof), `vacuous_implication`
+  (the antecedent of an implication is unreachable),
   `vacuous_leadsto` (the trigger is unreachable), `always_true_requires`
   (a guard that is always true under the context of preceding clauses),
   `tautology_over_frozen` (a dynamically tautological invariant over state no
@@ -2686,7 +2688,7 @@ DESIGN-*.md).
   `vacuous_leadsto` — vacuity was never established either way, so treating
   it as confirmed-vacuous would be a false positive and dropping it would
   let `--vacuity error` pass a spec whose vacuity was never actually
-  decided. Selected by `--vacuity` exactly like the other six kinds.
+  decided. Selected by `--vacuity` exactly like the other seven kinds.
 - **`--strict-tags`** — warns on success results about untagged declarations
   (fabrication candidates) and unreferenced requirements (omission candidates,
   including empty requirement blocks). Existence-level matching. → [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md)

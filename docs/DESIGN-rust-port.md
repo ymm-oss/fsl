@@ -261,7 +261,7 @@ solver-independent crates used by both delivery surfaces:
   out of the verifier as `BmcResult.vacuity`. The frontend renders that into
   warning JSON and passes it back into `verification_warnings`, which keeps
   the documented warning order in one place without giving `fsl-runtime` a
-  solver dependency. `--vacuity` selects over the closed 7-kind set in
+  solver dependency. `--vacuity` selects over the closed 8-kind set in
   `fsl-core::VACUITY_KINDS` (issue #729 added `vacuity_probe_truncated`),
   not a `"vacuous_"` name-prefix check.
 - The solver-dependent lanes run after every witness, reachable, and deadlock
