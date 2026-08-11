@@ -322,7 +322,21 @@ jobs:
       github.base_ref == 'production' ||
       vars.FSL_OPTIMISTIC_CI != 'enabled'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    # Raised rather than narrowed, for the same reason `production-native-z3-linux`
+    # below gives: a gate that runs out of wall clock reports a failure it did not
+    # observe. Warm measured: 32m56s / 32m45s (2026-08-04), 31m49s / 29m44s / 26m56s
+    # (2026-08-05) -- comfortably inside the old 40-minute budget. The scheduled
+    # `windows-latest` run then hit exactly 40m0x and was cancelled on every one of
+    # six consecutive occasions from 2026-08-07 00:23 through 2026-08-11: a step
+    # change, not gradual drift, and neither a regression nor added test volume. The
+    # decisive contrast is the `Swatinem/rust-cache` restore step itself: the last
+    # success (2026-08-05) reported `Cache hit for: v0-rust-rust-native-z3-Windows_NT-x64-...`
+    # and restored 591 MiB; the 2026-08-11 cancellation reported `No cache found.`
+    # instead. The cache had been evicted by pull-request-scoped caches this same
+    # commit's other changes close off (see the `Swatinem/rust-cache` step below and
+    # `merge-readiness.yml`); 60 minutes covers a genuine cold vendored-Z3 build on
+    # this matrix, matching the headroom already given to the Linux promotion lane.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -345,6 +359,21 @@ jobs:
           # branch. See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
+          # Save even when the job fails or is cancelled by the timeout above. Without
+          # this the lane cannot recover from a cold start: a cold scratch build exceeds
+          # the job budget, the job is cancelled, `rust-cache`'s post step is skipped
+          # (`9 skipped Post Run Swatinem/rust-cache@v2`, observed on run 31527197290),
+          # and the next run is cold again -- the cache can then only be created by a
+          # run that succeeds, and a run can only succeed once the cache exists. This is
+          # the same fix already applied to the `semantic-mutation` lanes below for an
+          # identical deadlock; confirmed here from the action's own `post-if:
+          # success() || env.CACHE_ON_FAILURE == 'true'` (does not distinguish a
+          # cancelled conclusion from a failed one) and from this repository's own
+          # history: issues #721 and #678 both recurred with `Conclusion: cancelled`
+          # repeatedly before commit 877fe8c (#752) added this flag to those lanes, and
+          # neither showed `cancelled` again afterward -- only an unrelated `failure`
+          # that was fixed separately. See docs/DESIGN-ci.md, "Actions cache budget".
+          cache-on-failure: true
 
       - name: Test pinned native solver and BMC crates
         working-directory: rust

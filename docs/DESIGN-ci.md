@@ -543,9 +543,21 @@ because `main` is the default branch and therefore readable from every ref. What
 gives up is a warm second run of itself; what it gains is that `main`'s caches stay resident, which
 is the only cache any pull request could ever share.
 
-`merge-readiness.yml` is deliberately **not** changed. Its two keys total about 131 MiB, they are not
-the pressure, and its lanes are the sub-minute fast path — making them cold would defeat the reason
-that workflow exists.
+`merge-readiness.yml` was deliberately left unchanged at that point: its two keys total about
+131 MiB, they were not *that* incident's pressure, and its lanes are the sub-minute fast path —
+making them cold would defeat the reason that workflow exists. That reasoning held for concurrent
+pressure from a handful of pull requests at once; it did not hold over time. `merge-readiness.yml`
+runs on every pull request and had no `save-if` guard, so every pull request saved its own
+ref-scoped copy of both keys and none of them ever expired quickly, because each restore refreshes
+a cache's last-accessed time even without resaving it. By 2026-08-11 this had accumulated to 15 open
+pull requests holding 29 cache entries — about 1.90 GiB — entirely on the merge-readiness keys, on
+top of pull-request-scoped residue that predated PR #752's `ci.yml`-only fix, for **38 entries /
+10.03 GiB** total against the 10 GiB budget. The LRU evictor does not distinguish "small but many"
+from "few but large": it evicted `refs/heads/main`'s `native Z3 4.16 (windows-latest)` cache down to
+**zero entries**, observed via `gh api actions/caches`. `merge-readiness.yml` now carries the same
+`save-if: ${{ github.event_name != 'pull_request' }}` guard as every `ci.yml` step, closing the
+eviction path PR #752 left open. Its lanes still restore on every pull request from `main`'s copy,
+same as before; only the self-multiplying save on pull requests stops.
 
 This also qualifies a claim made elsewhere in this document. Cache hit rates were measured to have
 no headroom for `rust workspace` — compile is only ~3.5 min of ~33 min **on a warm cache**. That
@@ -577,6 +589,32 @@ This is also the most likely explanation for `main`'s standing post-merge failur
 (`mutation mutants`) and #678 (`semantic mutation (complete)`), whose cancellations sit exactly at
 the old budgets. Whether they clear once this lands is the test of that reading, and #747's
 acceptance criteria record it as such.
+
+**That test resolved, and confirms `cache-on-failure` saves through a timeout-driven cancellation,
+not only an ordinary step failure.** Both issues recurred with `Conclusion: cancelled` repeatedly
+before commit `877fe8c` (#752, which added `cache-on-failure: true` to both semantic-mutation
+lanes) — and neither recurred as `cancelled` again afterward; their remaining occurrences before
+final recovery were `Conclusion: failure`, an unrelated test defect fixed separately. This matches
+`Swatinem/rust-cache`'s own `action.yml`: the save (post) step's condition is `post-if: success() ||
+env.CACHE_ON_FAILURE == 'true'`, which does not distinguish a cancelled job from a failed one —
+whenever the flag is set, the save runs regardless of which non-success conclusion the job reaches.
+
+**The same closed loop was independently live in `rust-native-z3`'s `windows-latest`/`macos-15`
+matrix, and is fixed the same way.** That job's `Swatinem/rust-cache` step carried `save-if` but not
+`cache-on-failure`. Warm runs measured 32m56s / 32m45s (2026-08-04) and 31m49s / 29m44s / 26m56s
+(2026-08-05), comfortably inside the 40-minute budget; the scheduled `windows-latest` run then hit
+exactly 40m0x and was cancelled on all six consecutive scheduled runs from 2026-08-07 00:23 through
+2026-08-11 — a step change coincident with the cache-budget eviction above, not gradual drift, a
+regression, or added test volume. The last successful run (2026-08-05) restored the cache
+(`Cache hit for: v0-rust-rust-native-z3-Windows_NT-x64-...`, 591 MiB); the 2026-08-11 cancellation
+reported `No cache found.` instead, and its job steps show
+`9 skipped Post Run Swatinem/rust-cache@v2` (run 31527197290) — the same cancel-skips-save mechanism
+documented above, independently confirmed on a different job. `rust-native-z3` now carries
+`cache-on-failure: true` as well, and its `timeout-minutes` is raised from 40 to 60 for the same
+reason `production-native-z3-linux`'s budget was raised rather than narrowed: a gate that runs out
+of wall clock reports a failure it did not observe, and 60 minutes covers a genuine cold vendored-Z3
+build on this matrix without approaching the Linux promotion lane's 90-minute allowance for the same
+build from scratch.
 
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,

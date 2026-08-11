@@ -27,6 +27,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          # Saving is restricted to non-pull-request events, matching every
+          # `Swatinem/rust-cache` step in `ci.yml`. This workflow runs on every pull
+          # request, so before this guard existed it saved a fresh ref-scoped cache on
+          # every one of them -- measured at 15 open pull requests holding 29 entries /
+          # about 1.90 GiB (roughly 134 MiB per pull request across this job and
+          # `core-contracts` below) against the repository's shared 10 GiB budget. PR
+          # #752 closed this same eviction path in `ci.yml` but left this workflow open,
+          # so its accumulation kept crowding out `main`'s caches -- including the
+          # `native Z3 4.16 (windows-latest)` cache, observed evicted to zero entries.
+          # See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
 
       - name: Check the native-Z3-free Rust surface
@@ -45,6 +56,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          # Saving is restricted to non-pull-request events, matching every
+          # `Swatinem/rust-cache` step in `ci.yml`. This workflow runs on every pull
+          # request, so before this guard existed it saved a fresh ref-scoped cache on
+          # every one of them -- measured at 15 open pull requests holding 29 entries /
+          # about 1.90 GiB (roughly 134 MiB per pull request across this job and
+          # `rust-compile` above) against the repository's shared 10 GiB budget. PR
+          # #752 closed this same eviction path in `ci.yml` but left this workflow open,
+          # so its accumulation kept crowding out `main`'s caches -- including the
+          # `native Z3 4.16 (windows-latest)` cache, observed evicted to zero entries.
+          # See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
 
       - name: Check solver-independent contracts
