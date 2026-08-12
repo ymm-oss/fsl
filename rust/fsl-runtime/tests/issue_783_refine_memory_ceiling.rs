@@ -310,8 +310,8 @@ fn first_self_violation_stays_under_a_calibrated_ceiling_for_the_branching_repro
 /// rather than an imprecise mutant; `monitor.clone()` count inside
 /// `check_refinement` itself: 2) passes at 2020 MiB
 /// and fails at 2000 MiB -- boundary in `(2000, 2020]` MiB, consistent with
-/// issue #783's own reported ~1.72 GB order of magnitude. `CEILING_KB = 950
-/// * 1024` (950 MiB) therefore sits 1.89-1.90x above the post-removal
+/// issue #783's own reported ~1.72 GB order of magnitude. `CEILING_KB = 950 * 1024`
+/// (950 MiB) therefore sits 1.89-1.90x above the post-removal
 /// boundary and 2.11-2.13x below the pre-removal boundary (ratios computed
 /// against each boundary's FAIL/PASS endpoints, as above). See this file's
 /// top comment for the remaining `x86_64`-CI-vs-`aarch64`-measurement
