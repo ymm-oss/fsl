@@ -20,13 +20,17 @@
 // rejecting fixtures in audit-cache-budget.test.mjs possible, and it is the
 // same shape as audit-ruleset-drift.mjs.
 //
-// `merge-readiness.yml` and `ci.yml`'s own `fsl-logic` job are both
+// `merge-readiness.yml`'s `rust-compile` job, `merge-readiness.yml`'s
+// `core-contracts` job, and `ci.yml`'s own `fsl-logic` job are each
 // restore-only against `ci.yml`'s `rust-workspace` key (`save-if: false`) and
-// therefore own no shared key of their own to add here. As of the
-// `merge-readiness.yml` fix, no workflow in this repository ever saves a rust
-// cache on a pull-request event -- rule 4 below is the general form of that
-// invariant, covering any future workflow's rust-cache step as well as the
-// keys `CI_SHARED_KEYS` declares.
+// therefore own no shared key of their own to add here. `ci.yml`'s
+// `semantic-mutation-mutants` job is also restore-only (`save-if: false`),
+// but reads `semantic-mutation` instead -- the key `semantic-mutation-operators`
+// owns and saves, not `rust-workspace`. As of the `merge-readiness.yml` fix,
+// no workflow in this repository ever saves a rust cache on a pull-request
+// event -- rule 4 below is the general form of that invariant, covering any
+// future workflow's rust-cache step as well as the keys `CI_SHARED_KEYS`
+// declares.
 
 export const GIB = 1024 ** 3;
 

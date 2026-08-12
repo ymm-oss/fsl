@@ -544,16 +544,19 @@ in `ci.yml` carried `save-if: ${{ github.event_name != 'pull_request' }}`. Pull 
 request gives up is a warm second run of itself; what it gains is that `main`'s caches stay resident,
 which is the only cache any pull request could ever share.
 
-**That is no longer a description of every step -- the current contract has two shapes, not one.**
-Later decisions in this branch (below) took `ci.yml`'s `fsl-logic` and `semantic-mutation-mutants`
-jobs, and both of `merge-readiness.yml`'s jobs, restore-only: each carries `save-if: false`
-unconditionally and saves nothing, ever, reading `rust-workspace`'s cache instead of owning a key of
-its own. The two shapes present today are: a step that saves its own declared key carries the
-event guard above (`save-if: ${{ github.event_name != 'pull_request' }}`); a step that is
-restore-only carries `save-if: false` and never saves under any event. `CI_SHARED_KEYS` in
-`audit-cache-budget.mjs` lists the keys actually saved this way: `rust-workspace`, `wasm`,
-`semantic-mutation` -- three, not the four this section originally measured, since `fsl-logic`'s
-dedicated key was retired when that job went restore-only.
+**That is no longer a description of every step -- the current contract has two shapes, not one, and
+which key a restore-only step reads is not the same for all of them.** A step that saves its own
+declared key still carries the event guard above (`save-if: ${{ github.event_name != 'pull_request'
+}}`); a step below carries `save-if: false` unconditionally and saves nothing, ever, instead. Naming
+each: `merge-readiness.yml`'s `rust-compile` job reads `rust-workspace` (`shared-key: rust-workspace`,
+`save-if: false`). `merge-readiness.yml`'s `core-contracts` job reads `rust-workspace` the same way.
+`ci.yml`'s `fsl-logic` job reads `rust-workspace` the same way again. `ci.yml`'s
+`semantic-mutation-mutants` job is different: it reads `semantic-mutation`
+(`shared-key: semantic-mutation`, `save-if: false`), the key `semantic-mutation-operators` owns and
+saves (below), not `rust-workspace`. `CI_SHARED_KEYS` in `audit-cache-budget.mjs` lists the keys
+actually saved today: `rust-workspace`, `wasm`, `semantic-mutation` -- three, not the four this
+section originally measured, since `fsl-logic`'s dedicated key was retired when that job went
+restore-only.
 
 `merge-readiness.yml` was deliberately left unchanged at that point: its two keys total about
 131 MiB, they were not *that* incident's pressure, and its lanes are the sub-minute fast path —
