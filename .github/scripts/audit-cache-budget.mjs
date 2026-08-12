@@ -43,12 +43,18 @@ export const CACHE_LIMIT_BYTES = 10 * GIB;
 // observed failure had usage at 9.96 GiB, i.e. 99.6%.
 export const BUDGET_WARN_FRACTION = 0.85;
 
-// The shared keys `ci.yml` declares. A `refs/pull/*` entry for any of these
-// means the `save-if` guard regressed -- this is the calibrated rejecting
-// signal for the fix itself, not merely a hygiene check. `fsl-logic` is not
-// one of these: that job went restore-only against `rust-workspace` (see
-// docs/DESIGN-ci.md, "Actions cache budget") and no longer saves a key of its
-// own, the same way `merge-readiness.yml`'s jobs do not appear here either.
+// The identities rule 3 below attributes by name: the keys `ci.yml` declares
+// through the `shared-key:` input specifically. A `refs/pull/*` entry for any
+// of these means the `save-if` guard regressed -- this is the calibrated
+// rejecting signal for the fix itself, not merely a hygiene check. This is
+// not every key any workflow actually saves: `ci.yml`'s `rust-native-z3` job
+// saves through `Swatinem/rust-cache`'s default per-job naming (no
+// `shared-key:` input) and is covered separately, by `REQUIRED_MAIN_ENTRIES`
+// below and by rule 4's generic detection, not by name here. `fsl-logic` is
+// not one of these either: that job went restore-only against
+// `rust-workspace` (see docs/DESIGN-ci.md, "Actions cache budget") and no
+// longer saves a key of its own, the same way `merge-readiness.yml`'s jobs do
+// not appear here.
 export const CI_SHARED_KEYS = [
   "rust-workspace",
   "wasm",

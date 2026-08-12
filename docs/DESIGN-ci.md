@@ -553,10 +553,15 @@ each: `merge-readiness.yml`'s `rust-compile` job reads `rust-workspace` (`shared
 `ci.yml`'s `fsl-logic` job reads `rust-workspace` the same way again. `ci.yml`'s
 `semantic-mutation-mutants` job is different: it reads `semantic-mutation`
 (`shared-key: semantic-mutation`, `save-if: false`), the key `semantic-mutation-operators` owns and
-saves (below), not `rust-workspace`. `CI_SHARED_KEYS` in `audit-cache-budget.mjs` lists the keys
-actually saved today: `rust-workspace`, `wasm`, `semantic-mutation` -- three, not the four this
-section originally measured, since `fsl-logic`'s dedicated key was retired when that job went
-restore-only.
+saves (below), not `rust-workspace`. `CI_SHARED_KEYS` in `audit-cache-budget.mjs` lists the
+identities rule 3 attributes by name today: `rust-workspace`, `wasm`, `semantic-mutation` -- three,
+not the four this section originally measured, since `fsl-logic`'s dedicated key was retired when
+that job went restore-only. That is not the complete list of keys any workflow actually saves:
+`ci.yml`'s own `rust-native-z3` job also saves, on non-pull-request events, one key per platform
+(`Windows_NT` and `Darwin`) -- it just is not one of `CI_SHARED_KEYS`' three named identities. Its
+presence on `main` is required separately, by `REQUIRED_MAIN_ENTRIES`'s per-`{key, platform}` check;
+a leak of it onto a pull-request ref is caught separately too, by rule 4's generic `/^v\d+-rust-/`
+detection rather than rule 3's name-based one.
 
 `merge-readiness.yml` was deliberately left unchanged at that point: its two keys total about
 131 MiB, they were not *that* incident's pressure, and its lanes are the sub-minute fast path —
