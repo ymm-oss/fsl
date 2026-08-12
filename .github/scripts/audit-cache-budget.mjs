@@ -10,8 +10,10 @@
 // `rust-workspace`, see below) stored about 6.9 GiB per ref, so two concurrent
 // pull requests exceeded the limit and evicted `main`'s caches. Every run then
 // built cold -- measured +8 to +16 min per shard -- and each cold run saved a
-// fresh ref-scoped copy, evicting more. `ci.yml` now restricts saving to
-// non-pull-request events, which is what this audit protects.
+// fresh ref-scoped copy, evicting more. Every step that still saves its own
+// key now restricts that save to non-pull-request events; a step that never
+// saves at all is restore-only (`save-if: false`) instead (see below). Rules 3
+// and 4 below are what this audit uses to protect both shapes.
 //
 // This module is pure: it takes an already-fetched cache listing and returns
 // findings. The workflow does the fetching. That split is what makes the
@@ -180,7 +182,7 @@ export function auditCacheBudget({
 
   // 4. Repository invariant since #752 and the `merge-readiness.yml`
   //    restore-only fix: no workflow saves a rust cache on a pull-request
-  //    event, full stop -- not just the four keys `ci.yml` declares. Any
+  //    event, full stop -- not just `CI_SHARED_KEYS`' three declared keys. Any
   //    `v0-rust-*` key on a `refs/pull/*` ref means that invariant broke
   //    somewhere, whether in a known shared key (already reported by rule 3
   //    above, and skipped here to avoid a duplicate finding) or a new one.

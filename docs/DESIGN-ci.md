@@ -517,7 +517,8 @@ that is exceeded. Caches are also **ref-scoped**: a run restores only its own re
 default branch's, so a pull request's cache is worthless to a sibling pull request while still
 counting against the shared limit.
 
-`ci.yml` declares four shared keys, measured: `semantic-mutation` 2.72 GiB, `rust-workspace`
+`ci.yml` declared four shared keys at the time (`fsl-logic` was one of them; it does not declare one
+today, see below), measured: `semantic-mutation` 2.72 GiB, `rust-workspace`
 1.50 GiB, `fsl-logic` 1.37 GiB, `wasm` 1.35 GiB — about **6.9 GiB per ref**. Two concurrent pull
 requests therefore exceed the limit on their own, and on 2026-08-06 they did: usage stood at
 9.96 GiB across 12 entries, every large cache belonged to `refs/pull/743/merge` or
@@ -537,11 +538,22 @@ The consequence is measured, not inferred. Two runs of the same commit on the sa
 ref-scoped copy, which evicts more. `main` can heal — a miss there does save — but the pressure
 from concurrent pull requests outran the healing.
 
-**Decision: only non-pull-request events save.** Every `Swatinem/rust-cache` step in `ci.yml`
-carries `save-if: ${{ github.event_name != 'pull_request' }}`. Pull requests still *restore*,
-because `main` is the default branch and therefore readable from every ref. What a pull request
-gives up is a warm second run of itself; what it gains is that `main`'s caches stay resident, which
-is the only cache any pull request could ever share.
+**Decision (#747): only non-pull-request events save.** At the time, every `Swatinem/rust-cache` step
+in `ci.yml` carried `save-if: ${{ github.event_name != 'pull_request' }}`. Pull requests still
+*restore*, because `main` is the default branch and therefore readable from every ref. What a pull
+request gives up is a warm second run of itself; what it gains is that `main`'s caches stay resident,
+which is the only cache any pull request could ever share.
+
+**That is no longer a description of every step -- the current contract has two shapes, not one.**
+Later decisions in this branch (below) took `ci.yml`'s `fsl-logic` and `semantic-mutation-mutants`
+jobs, and both of `merge-readiness.yml`'s jobs, restore-only: each carries `save-if: false`
+unconditionally and saves nothing, ever, reading `rust-workspace`'s cache instead of owning a key of
+its own. The two shapes present today are: a step that saves its own declared key carries the
+event guard above (`save-if: ${{ github.event_name != 'pull_request' }}`); a step that is
+restore-only carries `save-if: false` and never saves under any event. `CI_SHARED_KEYS` in
+`audit-cache-budget.mjs` lists the keys actually saved this way: `rust-workspace`, `wasm`,
+`semantic-mutation` -- three, not the four this section originally measured, since `fsl-logic`'s
+dedicated key was retired when that job went restore-only.
 
 `merge-readiness.yml` was deliberately left unchanged at that point: its two keys total about
 131 MiB, they were not *that* incident's pressure, and its lanes are the sub-minute fast path —
@@ -647,12 +659,14 @@ entry (a separate, human-authorized deletion) and re-adding Windows native-z3 (h
 spare. `rust-workspace` and the former dedicated `fsl-logic` key already share the same
 `Linux-x64-e8b3ee54-09fbaf53` suffix, so `shared-key: rust-workspace` is expected to hit exactly, not
 merely restore a compatible prefix -- an exact-hit restore is expected to cost about what `fsl-logic`'s
-own key already did. If the shared `rust-workspace` cache were ever missing or evicted on some future
-run, that run would build cold instead; how long that would take is not observed here (this job has
-never run cold under this configuration), so the baseline warm duration of 2m48s-2m53s (scheduled
-runs 2026-08-09/10/11) is cited only as this job's typical wall-clock cost, not as a bound on cold-run
-time. Either way the risk is contained by the job's existing 30-minute budget. A `cache-targets: false`
-lever on the
+own key already did. If the shared `rust-workspace` cache were ever missing or evicted instead, this
+job would build cold under the existing 30-minute timeout. That timeout bounds resource consumption,
+not job success: past it, the job is killed and reported as a failed required context, the same
+outcome this whole section exists to stop happening to a different job. Whether a cold build here
+would finish inside 30 minutes is not observed -- this job has never run cold under this
+configuration, so its baseline warm duration (2m48s-2m53s, scheduled runs 2026-08-09/10/11) describes
+only the typical exact-hit case, not a cold-run bound, and is not evidence that a cold run would
+succeed rather than time out. A `cache-targets: false` lever on the
 mutation lanes was considered and rejected: it would cost the operators shards a cold build every
 run (~35 min measured cold vs. ~5 min warm) for less budget relief than `fsl-logic` gives for
 near-zero cost.
@@ -748,7 +762,8 @@ is corrected (`Windows_NT` tried before the `Windows` it is a strict superset of
 
 The general pull-request-rust-cache rule exists because `merge-readiness.yml`'s restore-only fix
 (above) makes "no workflow saves a rust cache on a pull-request event" a repository-wide invariant,
-not something scoped to `ci.yml`'s four declared keys. Before this rule, `merge-readiness.yml`'s own
+not something scoped to `CI_SHARED_KEYS`' three declared keys (`rust-workspace`, `wasm`,
+`semantic-mutation`). Before this rule, `merge-readiness.yml`'s own
 now-removed per-job keys (`rust-compile`, `core-contracts`) were invisible to this audit for the same
 reason `rust-native-z3` was: an unlisted shared key is never attributed, so a pull-request-scoped
 entry for it was silently treated as normal. The general rule catches that shape regardless of
