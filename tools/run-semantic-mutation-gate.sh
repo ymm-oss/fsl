@@ -62,6 +62,21 @@ case "$mode" in
     ;;
 esac
 
+# Prior invocations' evidence directories and scratch build trees can survive
+# into this checkout by way of a restored `Swatinem/rust-cache` entry: the
+# cache saves `rust/target` wholesale, so anything left there by a past run
+# reappears here before this run creates its own differently-named copy.
+# Clear them before either lane does anything else, not just before the
+# mutants lane's own evidence generation: the `semantic-mutation` key's saver
+# is whichever operators shard reaches its post step first
+# (`Swatinem/rust-cache` saves once per key, first writer wins, and operators
+# always wins the timing race against mutants), so unless the operators lane
+# itself clears this dead weight before restoring, it is carried forward and
+# resaved forever regardless of what the mutants lane below does with its own
+# `CARGO_TARGET_DIR`. This runs once per invocation, including the unsharded
+# local path that runs operators then mutants in the same process.
+rm -rf "$root"/rust/target/semantic-mutation.* "$root/rust/target/semantic-mutation-build"
+
 run_manifest_test() {
   # Validates the operator inventory, the P2 scope/equivalents manifests, and
   # the mutation runner config together. Cheap (compile-dominated, ~1 min)
@@ -100,15 +115,6 @@ fi
 if [ "$lane" != "mutants" ]; then
   run_operators_lane
 fi
-
-# Prior invocations' evidence directories and scratch build trees can survive
-# into this checkout by way of a restored `Swatinem/rust-cache` entry: the
-# cache saves `rust/target` wholesale, so anything left there by a past run
-# reappears here before this run creates its own differently-named copy.
-# Clear them before this run's own evidence exists, so a restored cache never
-# carries more than one run's worth of this script's output forward into the
-# next save (docs/DESIGN-ci.md, "Actions cache budget").
-rm -rf "$root"/rust/target/semantic-mutation.* "$root/rust/target/semantic-mutation-build"
 
 mkdir -p "$root/rust/target"
 output="$(mktemp -d "$root/rust/target/semantic-mutation.${mode}.XXXXXX")"

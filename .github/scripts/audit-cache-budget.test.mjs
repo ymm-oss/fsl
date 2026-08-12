@@ -18,6 +18,8 @@ import {
   formatReport,
   CACHE_LIMIT_BYTES,
   GIB,
+  REQUIRED_MAIN_ENTRIES,
+  SINGLE_ENTRY_WARN_BYTES,
 } from "./audit-cache-budget.mjs";
 
 const MAIN = "refs/heads/main";
@@ -31,7 +33,13 @@ function healthyListing() {
     cache("v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1.495),
     cache("v0-rust-wasm-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1.352),
     cache("v0-rust-fsl-logic-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1.369),
-    cache("v0-rust-semantic-mutation-Linux-x64-e8b3ee54-09fbaf53", MAIN, 2.721),
+    // The designed floor for this key is ~2.2 GiB (two build trees --
+    // `rust/target/debug` and `rust/target/fault-operators/target` -- plus
+    // `~/.cargo`), not the 2.719 GiB it was observed holding once a scratch
+    // build tree and stale evidence directories accumulated inside the cached
+    // path (fixed elsewhere in this branch). This value represents the
+    // corrected healthy state, below `SINGLE_ENTRY_WARN_BYTES`.
+    cache("v0-rust-semantic-mutation-Linux-x64-e8b3ee54-09fbaf53", MAIN, 2.2),
     // `rust-native-z3` is one shared key across a `[macos-15, windows-latest]`
     // matrix (`ci.yml`), so it needs one entry per platform to be healthy.
     cache("v0-rust-rust-native-z3-Darwin-arm64-e8b3ee54-09fbaf53", MAIN, 0.6),
@@ -95,6 +103,9 @@ test("rejecting: the 2026-08-06 listing that caused the outage", () => {
   // 3 above does not see them -- this is exactly the gap the generic
   // pull-request-rust-cache rule (rule 4) closes.
   assert.equal(codes.filter((code) => code === "pull-request-rust-cache-present").length, 2);
+  // The 2.721 GiB `semantic-mutation` entry also trips the single-entry
+  // control independently of everything else wrong with this listing.
+  assert.ok(codes.includes("entry-oversized"), formatReport(result));
 });
 
 test("rejecting: a non-ci.yml rust cache on a pull-request ref still fires the generic rule", () => {
@@ -137,6 +148,61 @@ test("rejecting: main missing the Darwin half of rust-native-z3 is not hidden by
   assert.equal(missing.length, 1, formatReport(result));
   assert.match(missing[0].message, /`rust-native-z3`/);
   assert.match(missing[0].message, /`Darwin`/);
+});
+
+test("accepting: no healthy entry approaches the single-entry warning threshold", () => {
+  const caches = healthyListing();
+  for (const entry of caches) {
+    assert.ok(
+      entry.size_in_bytes < SINGLE_ENTRY_WARN_BYTES,
+      `${entry.key} is ${entry.size_in_bytes} bytes, at or above SINGLE_ENTRY_WARN_BYTES`,
+    );
+  }
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+  assert.equal(
+    result.findings.some((finding) => finding.code === "entry-oversized"),
+    false,
+    formatReport(result),
+  );
+});
+
+test("rejecting: a single oversized entry fires independently of the total budget", () => {
+  // 2.72 GiB reproduces the observed defect value for `semantic-mutation`
+  // before the scratch-build-tree fix elsewhere in this branch.
+  const caches = [
+    cache("v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1.495),
+    cache("v0-rust-semantic-mutation-Linux-x64-e8b3ee54-09fbaf53", MAIN, 2.72),
+  ];
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+  assert.equal(result.ok, false);
+  const finding = result.findings.find((f) => f.code === "entry-oversized");
+  assert.ok(finding, formatReport(result));
+  assert.match(finding.message, /semantic-mutation/);
+  // Total usage here is well under the 85% budget threshold -- this control
+  // must not depend on `budget-exhausted` also having fired.
+  assert.equal(
+    result.findings.some((f) => f.code === "budget-exhausted"),
+    false,
+    formatReport(result),
+  );
+});
+
+test("accepting: a shared key containing an earlier platform-like substring is parsed from the tail, not misattributed", () => {
+  // A lazy `(.+?)` stops at the *first* platform-like substring, so a shared
+  // key such as `foo-Linux-bar` (hypothetical, but the bug class is real) would
+  // misparse as shared key `foo` -- a reviewer reproduced this causing a real,
+  // present main-branch entry to be reported `main-cache-absent`. Parsing
+  // greedily from the tail (anchored at `$`) fixes it.
+  const caches = [
+    ...healthyListing(),
+    cache("v0-rust-foo-Linux-bar-Linux-x64-aaaaaaaa-bbbbbbbb", MAIN, 0.01),
+  ];
+  const result = auditCacheBudget({
+    caches,
+    usageBytes: usageOf(caches),
+    requiredMainEntries: [...REQUIRED_MAIN_ENTRIES, { key: "foo-Linux-bar", platform: "Linux" }],
+  });
+  assert.equal(result.ok, true, formatReport(result));
 });
 
 test("rejecting: budget at or above the threshold, even with a healthy ref layout", () => {

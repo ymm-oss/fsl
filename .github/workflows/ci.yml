@@ -514,24 +514,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while `ci.yml`'s four shared
-          # keys together store about 6.9 GiB per pull request against a 10 GiB repository
-          # limit. Two concurrent pull requests therefore evicted `main`'s caches, after
-          # which every run built cold: measured +8 to +16 min per shard. Only `main`
-          # saves now, and every pull request can read `main` because it is the default
-          # branch. See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          # Restore-only: this job never saves the `semantic-mutation` key.
+          # `Swatinem/rust-cache` saves a key once, and whichever job reaches its
+          # post step first wins -- for this key that is always one of the
+          # `semantic-mutation-operators` shards below, which run in parallel and
+          # finish in single-digit minutes against this job's own tens of
+          # minutes, so this job has never actually won that race and its
+          # `cache-on-failure: true` was accordingly dead configuration. This
+          # job's only rust/target-scoped output is its evidence directory
+          # (`rust/target/semantic-mutation.*`, kept under `rust/target` solely
+          # because the artifact-upload glob below requires it), which must not
+          # enter the cache at all. The one thing this job could gain from its
+          # own save -- a warm `~/.cargo/bin/cargo-mutants` -- it already does not
+          # have today, since the operators shards' save always wins first; going
+          # restore-only changes nothing about that and removes the possibility
+          # of this job's evidence directory leaking into a future save. See
+          # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          save-if: false
           workspaces: rust -> target
           shared-key: semantic-mutation
-          # Save even when the job fails. Without this the lane cannot recover from a
-          # cold start: a cold scratch build exceeds the job budget, the job is
-          # cancelled, `rust-cache` skips saving, and the next run is cold again. The
-          # cache can then only be created by a run that succeeds, and a run can only
-          # succeed once the cache exists. Measured on `main` and on three pull
-          # requests; see docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          cache-on-failure: true
 
       - name: Install pinned semantic mutation runner
         if: steps.scope.outputs.run == 'true'

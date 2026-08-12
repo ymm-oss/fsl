@@ -593,14 +593,60 @@ be reused by anything; it was pure accumulation. The evidence directory
 `rust/target/semantic-mutation.*/**` in `ci.yml` requires to stay under `rust/target`) compounded
 this the same way: it holds a full rsynced checkout copy, and old runs' copies survived a cache
 restore into the working tree right alongside the new run's own. The scratch build tree now lives
-under `${RUNNER_TEMP:-${TMPDIR:-/tmp}}` instead, outside anything `Swatinem/rust-cache` saves, and
-the script clears any leftover `rust/target/semantic-mutation.*` and
-`rust/target/semantic-mutation-build` directories from a restored cache before creating its own new
-evidence directory, so at most one run's evidence is ever present at save time. This does not shrink
-the existing `semantic-mutation` cache entry by itself — `Swatinem/rust-cache` does not resave a
-key that still primary-matches — so the reduction only lands once that entry is deleted (a separate,
-human-authorized action) and re-created by a subsequent run; the predicted size after that point is
-not asserted here as measured.
+under `${RUNNER_TEMP:-${TMPDIR:-/tmp}}` instead, outside anything `Swatinem/rust-cache` saves.
+
+**The first fix for the leftover-evidence cleanup was necessary but not sufficient, because it ran
+after the wrong lane's early exit.** `Swatinem/rust-cache` saves a key once, and whichever job
+reaches its post step first wins the save for that key -- measured on product-gate run
+`31527197290`, all three `semantic-mutation-operators` shards reached their post step
+(19:23:20 / 19:23:34 / 19:23:55) well before `semantic-mutation-mutants` did (20:33:31), so the
+`semantic-mutation` key's saver is always an operators shard, never the mutants job. The cleanup
+that clears leftover `rust/target/semantic-mutation.*`/`semantic-mutation-build` directories was
+first placed only in the mutants lane's own path, below `run_operators_lane`'s early `exit 0` for
+`--lane operators` invocations -- so the one lane that actually saves the key never ran the cleanup
+at all, restored the old dead weight every time, and resaved it unchanged. The cleanup now runs
+unconditionally right after mode validation, before either lane does anything, so it applies
+regardless of which lane -- or, unsharded, which order of both lanes -- ends up saving.
+
+**`rust/target/fault-operators` (`tools/run-fault-operators.sh:74-79`) is not dead weight and must
+not be removed.** It is a deliberately persistent scratch checkout and dedicated `CARGO_TARGET_DIR`
+that survives between runs by design -- the comment there says so explicitly -- and is the actual
+mechanism that runs the operators shards in ~5 minutes instead of a 15-20 minute cold build each.
+Combined with the dependency build every lane produces under `rust/target/debug` via
+`run_manifest_test`, `semantic-mutation`'s legitimate steady-state content is **two build trees**
+(`rust/target/debug`'s deps and `rust/target/fault-operators/target`'s deps) plus `~/.cargo` --
+structurally larger than any single-tree shared key such as `rust-workspace` (1.495 GiB). The
+corrected floor is **~2.2 GiB (predicted)**, not the ~0.9-1.4 GiB this section previously predicted;
+that earlier number came from treating `fault-operators`' persistent tree as removable dead weight,
+which it is not. `SINGLE_ENTRY_WARN_BYTES` in `audit-cache-budget.mjs` is calibrated to this
+corrected floor. Confirming the actual post-fix size, not just the mechanism, requires a `main` save
+after the stale `semantic-mutation` entry is deleted (a separate, human-authorized action) --
+nothing in this branch asserts that number as already measured.
+
+**Ownership: the operators shards are this key's only saver; the mutants job is restore-only.**
+`semantic-mutation-mutants`'s `Swatinem/rust-cache` step carries `save-if: false`. It never wins the
+save race today (see the timing measurement above), so this changes nothing about what actually gets
+cached; it only makes explicit that the mutants job's sole `rust/target`-scoped output -- its
+evidence directory, kept under `rust/target` solely because the artifact-upload glob requires it --
+must never be allowed into a future save if the timing ever changed. `cache-on-failure: true` was
+removed from the same step: `Swatinem/rust-cache`'s `save.ts` returns before evaluating it once
+`save-if` is `false`, so it was already inert. `semantic-mutation-operators` is unchanged
+(`save-if` on non-pull-request events, `cache-on-failure: true`) and remains this key's sole owner
+and recovery path. Splitting the key so each lane has its own (`shared-key` per job) was considered
+and rejected: it would add a second entry (~1 GiB predicted for the mutants-only content) for no
+warm-value gain, since the mutants job has essentially none of its own -- `~/.cargo/bin/cargo-mutants`
+is already rebuilt every run today because operators always wins the race first, so restore-only
+changes nothing there either.
+
+**Budget with the corrected floor**: 8.130 (main-only, post-#752-residue-cleanup) − 2.719
+(defect `semantic-mutation`) + 1.8-2.2 (corrected floor, predicted) + 0.577 (Windows native-z3) =
+**7.79-8.19 GiB (78-82%)**, still under the 8.5 GiB warn threshold but with only 0.31-0.71 GiB of
+headroom -- thinner than this section previously predicted. Two levers are recorded here for if that
+headroom is ever exhausted, neither exercised now: (i) `fsl-logic` could go restore-only against
+`rust-workspace` the same way `merge-readiness.yml` did (its build set is a near-subset -- see
+`tools/check-native-integration.sh:285,310` -- saving ~1.369 GiB), or (ii) `cache-targets: false` on
+the mutation lanes (saving ~1.5 GiB-class, at the cost of the operators shards going cold every run,
++10-15 min/shard). Both are deferred until the budget actually needs them, not applied speculatively.
 
 **Eviction started this; `cache-on-failure: false` made it unrecoverable.** The
 `semantic mutation` lane fell into a closed loop, measured on `main` and on three pull requests:

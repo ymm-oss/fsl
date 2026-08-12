@@ -23,16 +23,32 @@ checkout, so the derived cache key is expected to match, confirmed from the
 first post-merge run's `full match: true` restore log rather than asserted
 from an unverifiable prior observation. `tools/run-semantic-mutation-gate.sh`'s
 mutants lane also moves its per-run scratch `CARGO_TARGET_DIR` out from under
-`rust/target` (to `${RUNNER_TEMP:-${TMPDIR:-/tmp}}`) and now clears any
-`rust/target/semantic-mutation.*`/`semantic-mutation-build` left by a restored
-cache before creating its own evidence directory: both were previously
-uniquely named per run and never reused, so each cache save accumulated them
-as dead weight, measured at `semantic-mutation` 2.719 GiB against sibling
-shared keys around 1.3-1.5 GiB. This does not shrink that cache entry by
-itself -- `Swatinem/rust-cache` will not resave a still-matching key -- so the
-reduction only takes effect once the entry is deleted (a separate,
-human-authorized action) and a run resaves it; the resulting size is not
-reported here as measured. Separately, `rust-native-z3`'s
+`rust/target` (to `${RUNNER_TEMP:-${TMPDIR:-/tmp}}`), and the script now
+clears any `rust/target/semantic-mutation.*`/`semantic-mutation-build` left by
+a restored cache unconditionally, right after mode validation, before either
+lane runs. That placement matters: `Swatinem/rust-cache` saves a key once and
+whichever job reaches its post step first wins, and measured on product-gate
+run `31527197290` all three `semantic-mutation-operators` shards reach their
+post step tens of minutes before `semantic-mutation-mutants` does -- the
+operators shards are this key's only actual saver. An earlier version of this
+cleanup ran only in the mutants lane's own path, after the operators lane's
+early exit, so the one lane that saves the key never ran it and kept
+resaving the same dead weight. `semantic-mutation-mutants`'s
+`Swatinem/rust-cache` step is now `save-if: false` (with `cache-on-failure`
+removed, since `save-if: false` already makes it inert) to make that
+ownership explicit; `semantic-mutation-operators` is unchanged. Both
+uniquely-per-run-named directories were never reused once restored, so each
+save accumulated them as dead weight on top of this key's legitimate content,
+which is larger than initially estimated: `rust/target/fault-operators`
+(`tools/run-fault-operators.sh`) is a *deliberately persistent* scratch
+checkout and build tree, not removable dead weight, so the corrected floor is
+two build trees plus `~/.cargo` (~2.2 GiB predicted, not the ~0.9-1.4 GiB
+first predicted, which mistakenly treated that persistent tree as part of the
+dead weight) against the observed defect value of 2.719 GiB. This does not
+shrink that cache entry by itself -- `Swatinem/rust-cache` will not resave a
+still-matching key -- so the reduction only takes effect once the entry is
+deleted (a separate, human-authorized action) and a run resaves it; the
+resulting size is not reported here as measured. Separately, `rust-native-z3`'s
 `windows-latest`/`macos-15` matrix had the same cancel-skips-save deadlock
 already fixed for the `semantic-mutation` lanes: a cold build (measured warm
 at 27–33 min) exceeded the 40-minute budget, the job was cancelled on all six
@@ -65,5 +81,16 @@ any `v0-rust-*`-prefixed cache on a pull-request ref regardless of whether its
 shared key is one `ci.yml` declares, closing the same blind spot for any
 future workflow's unguarded `Swatinem/rust-cache` step (and, retroactively,
 for `merge-readiness.yml`'s own now-removed per-job keys, which this audit
-never flagged for the same reason). See `docs/DESIGN-ci.md`,
-"Actions cache budget".
+never flagged for the same reason).
+
+A single oversized cache entry is now its own finding (`entry-oversized`,
+`SINGLE_ENTRY_WARN_BYTES = 2.5 GiB`, calibrated between `semantic-mutation`'s
+corrected ~2.2 GiB floor and its observed 2.719 GiB defect value) rather than
+waiting for the whole-budget `budget-exhausted` check to trip -- an added
+control, not a change to `BUDGET_WARN_FRACTION`. Separately, the shared-key
+regex now parses from the tail of the cache key (anchored at the end) instead
+of lazily from the head: a reviewer reproduced a case where a shared key
+containing a platform-like substring earlier in its name (e.g. a hypothetical
+`foo-Linux-bar`) misparsed into the wrong shared key, which caused a real,
+present main-branch entry to be reported `main-cache-absent`. See
+`docs/DESIGN-ci.md`, "Actions cache budget".

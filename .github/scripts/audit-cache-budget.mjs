@@ -35,6 +35,19 @@ export const CACHE_LIMIT_BYTES = 10 * GIB;
 // observed failure had usage at 9.96 GiB, i.e. 99.6%.
 export const BUDGET_WARN_FRACTION = 0.85;
 
+// A single entry above this size is a standing risk to the whole budget
+// regardless of the total, so it gets its own control rather than waiting for
+// `BUDGET_WARN_FRACTION` to trip. Calibrated between the `semantic-mutation`
+// key's designed floor (~2.2 GiB, predicted: two build trees --
+// `rust/target/debug`'s deps and `rust/target/fault-operators/target`'s deps,
+// both from `~/.cargo` -- structurally larger than any single-tree shared key
+// such as `rust-workspace` at 1.495 GiB) and the defect value this key was
+// actually observed holding, 2.719 GiB, once dead weight from a scratch build
+// tree and stale evidence directories accumulated inside the cached path
+// (fixed elsewhere in this branch). This is an added control, not a
+// replacement for `BUDGET_WARN_FRACTION`, and does not change that threshold.
+export const SINGLE_ENTRY_WARN_BYTES = 2.5 * GIB;
+
 // The shared keys `ci.yml` declares. A `refs/pull/*` entry for any of these
 // means the `save-if` guard regressed -- this is the calibrated rejecting
 // signal for the fix itself, not merely a hygiene check.
@@ -61,14 +74,22 @@ export const REQUIRED_MAIN_ENTRIES = [
 ];
 
 function entryIdentity(key) {
-  // Swatinem/rust-cache composes `v0-rust-<shared-key>-<platform>-<hashes>`.
-  // `platform` is `os.type()`'s actual output, which is `Linux`, `Darwin`, or
-  // `Windows_NT` -- never the GitHub Actions `runner.os` spellings `Linux`,
-  // `macOS`, `Windows`. `Windows_NT` must be tried before the bare `Windows`
-  // alternative below: `Windows_NT` contains `Windows` as a prefix, so
-  // matching `Windows` first would capture it and strand `_NT` on the
-  // shared-key group instead of the platform group.
-  const match = /^v\d+-rust-(.+?)-(Linux|Darwin|Windows_NT|macOS|Windows)-/.exec(key ?? "");
+  // Swatinem/rust-cache composes `v0-rust-<shared-key>-<platform>-<arch>-<hash>-<hash>`.
+  // Parsed from the tail, not the head: a lazy `(.+?)` stops at the *first*
+  // platform-like substring it finds, so a shared key that happens to contain
+  // one -- e.g. a hypothetical `foo-Linux-bar` -- would misparse as shared key
+  // `foo`, and a reviewer reproduced this causing a real, present main-branch
+  // entry to be reported `main-cache-absent` even though its cache existed in
+  // the same listing. A greedy `(.+)` anchored at `$` instead finds the *last*
+  // occurrence of the real trailing structure, which is the one
+  // `Swatinem/rust-cache` actually appends. `platform` is `os.type()`'s actual
+  // output, `Linux`/`Darwin`/`Windows_NT` -- never the GitHub Actions
+  // `runner.os` spellings `Linux`/`macOS`/`Windows`. `Windows_NT` is tried
+  // before the bare `Windows` it is a superset of, though the trailing anchor
+  // below no longer strictly depends on that ordering to be correct.
+  const match = /^v\d+-rust-(.+)-(Linux|Darwin|Windows_NT|macOS|Windows)-[^-]+-[0-9a-f]+-[0-9a-f]+$/.exec(
+    key ?? "",
+  );
   return match ? { sharedKey: match[1], platform: match[2] } : { sharedKey: null, platform: null };
 }
 
@@ -83,7 +104,8 @@ function formatGiB(bytes) {
  *          warnFraction?: number,
  *          requiredMainEntries?: {key: string, platform: string}[],
  *          ciSharedKeys?: string[],
- *          defaultBranchRef?: string}} input
+ *          defaultBranchRef?: string,
+ *          singleEntryWarnBytes?: number}} input
  * @returns {{findings: Array<{code: string, message: string}>, ok: boolean}}
  */
 export function auditCacheBudget({
@@ -94,6 +116,7 @@ export function auditCacheBudget({
   requiredMainEntries = REQUIRED_MAIN_ENTRIES,
   ciSharedKeys = CI_SHARED_KEYS,
   defaultBranchRef = "refs/heads/main",
+  singleEntryWarnBytes = SINGLE_ENTRY_WARN_BYTES,
 }) {
   const findings = [];
 
@@ -180,6 +203,23 @@ export function auditCacheBudget({
       message: `\`${entry.ref}\` holds a rust cache \`${entry.key}\` (${formatGiB(
         entry.size_in_bytes ?? 0,
       )}). No workflow may save a rust cache on a pull-request event; see docs/DESIGN-ci.md, "Actions cache budget".`,
+    });
+  }
+
+  // 5. No single entry should approach the whole repository's budget by
+  //    itself. This is independent of rules 1-4: a key can be entirely
+  //    legitimate (declared, present only where expected, never on a
+  //    pull-request ref) and still be silently regrowing into the same
+  //    accumulation failure `semantic-mutation` had, before `budget-exhausted`
+  //    would ever trip.
+  for (const entry of caches) {
+    const size = entry.size_in_bytes ?? 0;
+    if (size < singleEntryWarnBytes) continue;
+    findings.push({
+      code: "entry-oversized",
+      message: `\`${entry.key}\` on \`${entry.ref}\` is ${formatGiB(size)}, at or above the ${formatGiB(
+        singleEntryWarnBytes,
+      )} single-entry warning threshold. A key this size is a standing risk to the shared budget on its own, independent of the total.`,
     });
   }
 
