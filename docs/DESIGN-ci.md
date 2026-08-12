@@ -665,10 +665,15 @@ cache exists.** Measured budgets against measured durations:
 | `mutation operators (K/3)` | 30 min | 18.0–19.5 min | **>30** (cancelled at 30.2) | **50 min** |
 | `mutation mutants` | 60 min | 17.2–34.2 min | **>60** (cancelled at ~61) | **90 min** |
 
-Both semantic-mutation cache steps now carry `cache-on-failure: true`, so a cold run that runs out
-of budget still leaves a warm cache behind, and both budgets are raised past a measured cold run.
-Raised rather than narrowed, for the reason this document already gives for the promotion-only
-native-Z3 job: a gate that runs out of wall clock reports a failure it did not observe.
+The `semantic-mutation` key has exactly one class of savers: the three `semantic-mutation-operators`
+shards (`save-if` on non-pull-request events, `cache-on-failure: true` -- the owner keeps the
+recovery path for a cold start that fails or times out). `semantic-mutation-mutants` is restore-only
+(`save-if: false`); it carries no `cache-on-failure`, which would be meaningless there, since
+`Swatinem/rust-cache`'s save step exits on `save-if` before that flag is ever consulted. Both
+budgets are raised past a measured cold run regardless, for the reason this document already gives
+for the promotion-only native-Z3 job: a gate that runs out of wall clock reports a failure it did not
+observe. (`rust-native-z3`'s own `cache-on-failure: true` and 60-minute budget, discussed elsewhere
+in this section, are a separate lane and a separate decision.)
 
 This is also the most likely explanation for `main`'s standing post-merge failures #721
 (`mutation mutants`) and #678 (`semantic mutation (complete)`), whose cancellations sit exactly at
