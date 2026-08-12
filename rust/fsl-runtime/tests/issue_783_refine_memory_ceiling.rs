@@ -33,24 +33,41 @@
 //! "cannot modify limit: Invalid argument" before `fsl-refine` ever runs,
 //! rather than merely not being enforced once it does. Both tests below are
 //! therefore Linux-only and report zero tests run on macOS by design -- not
-//! a skipped failure, and not evidence either test's `ulimit`-capped
-//! assertion has ever actually been observed to fail on a mutant binary.
-//! Every "measured" figure in this file's calibration comments is a peak
-//! *memory* comparison (`/usr/bin/time -l`'s `peak memory footprint`),
-//! taken on macOS outside the `ulimit -v` gate entirely -- it is evidence
-//! that the two builds' memory use differs by roughly the stated amount,
-//! not evidence that the `ulimit`-capped assertion below has been observed
-//! to pass on one build and fail on the other. That direct observation
-//! (running both the fixed and a per-node-clone-reintroduced mutant on
-//! Linux under the actual `ulimit -v` cap and recording which assertion
-//! fails, the way #776's own review required) has not been taken and is
-//! deliberately deferred -- whether to rely on CI for it or set up a Linux
-//! environment for this repository's own development is still an open,
-//! human decision as of this file's current revision. As with the existing
-//! `issue_730_*` ceiling tests, macOS RSS improving is assumed, but not
-//! independently verified, to imply a comparable Linux `RLIMIT_AS` (`ulimit
-//! -v`) improvement; if a `CEILING_KB` below flakes on Linux CI, widen it
-//! rather than tightening this comment's claim.
+//! a skipped failure.
+//!
+//! **Both `CEILING_KB` values below are calibrated from a direct Linux
+//! measurement, not a macOS peak-memory estimate.** Using a `rust:1-bookworm`
+//! Docker container (`aarch64`, `ulimit -v` confirmed to actually enforce
+//! `RLIMIT_AS` there -- unlike macOS), each test's `ulimit`-capped assertion
+//! was run under a binary search of `CEILING_KB` values against both the
+//! fixed build (this branch) and a per-node-Monitor-clone mutant, until the
+//! PASS/FAIL boundary on each side was pinned to within 20-50 MiB and
+//! confirmed reproducible by repeating both boundary points. That is the
+//! direct observation #776's own review asked for and #783-round2 deferred:
+//! each per-test comment below cites the exact boundary window measured on
+//! each side, and the mutant side's FAIL is a real `SIGABRT` (Rust's
+//! allocator aborting the process, `status=...unix_wait_status(134)`,
+//! `stderr="memory allocation of N bytes failed"`) under the `ulimit -v`
+//! cap, not a timeout or a different failure mode.
+//!
+//! Two assumptions still remain, stated precisely so they are not confused
+//! with what was actually measured:
+//! - The measurement above is `aarch64` Linux (an Apple Silicon Mac's
+//!   `colima`/Docker VM); this repository's actual CI runs GitHub Actions'
+//!   `ubuntu-latest`, which is `x86_64`. Cross-architecture allocator and
+//!   address-space-layout differences could shift the true PASS/FAIL
+//!   boundary on `x86_64` from what was measured here -- this has not been
+//!   independently checked on `x86_64`, and is the one monotonicity
+//!   assumption this file still carries.
+//! - The mutant used for each lane is a hand-restored reversion of exactly
+//!   that lane's per-node clone (verified below each `#[test]`'s doc comment
+//!   by a `monitor.clone()` occurrence count inside the function), not an
+//!   independently-authored regression -- it demonstrates this specific
+//!   defect class is caught, not every conceivable regression shape.
+//!
+//! If a `CEILING_KB` below flakes on Linux CI regardless, widen it rather
+//! than tightening this comment's claim -- the `x86_64` assumption above is
+//! the most likely reason a widening would ever be needed.
 #![cfg(target_os = "linux")]
 
 use std::process::Command;
@@ -168,15 +185,25 @@ fn run_capped(ceiling_kb: u64, args: &[&str]) -> std::process::Output {
 /// run). PR #776 fixed this lane's per-node `(Monitor, Vec<TraceStep>)`
 /// clone but deferred adding a ceiling regression test for it to this issue.
 ///
-/// Calibration (release build, `/usr/bin/time -l`'s `peak memory
-/// footprint`, this repo's macOS development environment, `depth 4`, the
-/// shared `support::LABEL_CORE_REPRO_SOURCE` fixture plus `overflow`):
-/// reintroducing the pre-#776 per-node clone (temporarily, for this
-/// measurement only) measured ~2,101 MB; the current fix measures ~492 MB.
-/// 1000 * 1024 KiB sits ~2.03x above the fixed measurement and ~2.10x below
-/// the reintroduced-clone one. This is a peak-memory comparison, not an
-/// observation of the `ulimit`-capped assertion below actually failing on
-/// Linux against either build -- see this file's top comment.
+/// Calibration (`rust:1-bookworm` Docker, `aarch64` Linux, `depth 4`, the
+/// shared `support::LABEL_CORE_REPRO_SOURCE` fixture plus `overflow`;
+/// `CEILING_KB` swept in binary-search steps against `--exact` runs of this
+/// test, both boundary points repeated twice and reproducing identically):
+/// the fixed build (`monitor.clone()` count inside `first_self_violation`:
+/// 0) passes down to a `CEILING_KB` of 505 MiB and fails at 500 MiB
+/// (`status=...unix_wait_status(134)`, `stderr="memory allocation of 5
+/// bytes failed"`) -- boundary in `(500, 505]` MiB. A mutant with the
+/// pre-#776 per-node clone hand-restored into `first_self_violation` only
+/// (`monitor.clone()` count: 1; every other lane, including
+/// `check_refinement`, left identical to the fixed build) passes at 2150
+/// MiB and fails at 2120 MiB -- boundary in `(2120, 2150]` MiB. `CEILING_KB
+/// = 1000 * 1024` (1000 MiB) therefore sits 1.98-2.00x above the fixed
+/// boundary and 2.12-2.15x below the mutant boundary (both ratios computed
+/// against the boundary's FAIL and PASS endpoints respectively, so the true
+/// margin is somewhere in each stated range). See this file's top comment
+/// for the two assumptions this measurement still rests on (`x86_64` CI vs.
+/// this `aarch64` measurement; this specific mutant vs. every conceivable
+/// regression shape).
 #[test]
 fn first_self_violation_stays_under_a_calibrated_ceiling_for_the_branching_reproducer() {
     const CEILING_KB: u64 = 1000 * 1024;
@@ -216,16 +243,22 @@ fn first_self_violation_stays_under_a_calibrated_ceiling_for_the_branching_repro
 /// `check_refinement`'s own correspondence walk -- the lane this issue's
 /// clone removal actually changes.
 ///
-/// Calibration (release build, `/usr/bin/time -l`'s `peak memory
-/// footprint`, this repo's macOS development environment, `depth 3`, the
-/// shared `support::LABEL_CORE_REPRO_SOURCE` fixture): the pre-removal
-/// commit (`6012c00`, `fsl-refine` present but the per-node clone not yet
-/// removed) measured ~1,728 MB, consistent with issue #783's own reported
-/// ~1.72 GB; the post-removal commit (this branch) measures ~491 MB. 950 *
-/// 1024 KiB sits ~2.03x above the post-removal measurement and ~1.73x below
-/// the pre-removal one. As above, this is a peak-memory comparison, not an
-/// observation of the `ulimit`-capped assertion below actually failing on
-/// Linux against the pre-removal build -- see this file's top comment.
+/// Calibration (`rust:1-bookworm` Docker, `aarch64` Linux, `depth 3`, the
+/// shared `support::LABEL_CORE_REPRO_SOURCE` fixture; same binary-search
+/// sweep methodology as `first_self_violation`'s test above, both boundary
+/// points repeated twice and reproducing identically): the post-removal
+/// build (this branch; `monitor.clone()` count inside `check_refinement`:
+/// 0) passes down to a `CEILING_KB` of 502 MiB and fails at 500 MiB
+/// (`status=...unix_wait_status(134)`, `stderr="memory allocation of 6
+/// bytes failed"`) -- boundary in `(500, 502]` MiB. The pre-removal commit
+/// (`6012c00`, `fsl-refine` present but the per-node clone not yet removed;
+/// `monitor.clone()` count inside `check_refinement`: 2) passes at 2020 MiB
+/// and fails at 2000 MiB -- boundary in `(2000, 2020]` MiB, consistent with
+/// issue #783's own reported ~1.72 GB order of magnitude. `CEILING_KB = 950
+/// * 1024` (950 MiB) therefore sits 1.89-1.90x above the post-removal
+/// boundary and 2.11-2.13x below the pre-removal boundary (ratios computed
+/// against each boundary's FAIL/PASS endpoints, as above). See this file's
+/// top comment for the two assumptions this measurement still rests on.
 #[test]
 fn check_refinement_stays_under_a_calibrated_ceiling_for_the_branching_reproducer() {
     const CEILING_KB: u64 = 950 * 1024;
