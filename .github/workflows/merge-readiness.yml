@@ -27,6 +27,39 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          # Restore-only against `ci.yml`'s `rust-workspace` key, not a `save-if` guard.
+          # (a) This workflow has no `push` trigger (see `on:` above) and never gains one
+          # from `pull_request`/`merge_group` alone, so it has no path of its own to ever
+          # save a main-branch copy. Guarding this step's own key with
+          # `save-if: ${{ github.event_name != 'pull_request' }}`, as `ci.yml` does, would
+          # leave every pull request permanently cold instead: the earlier fix in this
+          # branch made that mistake (see git history) before independent review caught
+          # it. This job never saves at all and instead reads `ci.yml`'s `rust-workspace`
+          # entry, which the `push: branches: [main]` trigger there keeps warm.
+          # (b) Key derivation: `Swatinem/rust-cache` (`src/config.ts`) ignores `key` and
+          # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
+          # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace
+          # lockfiles. This job and `ci.yml`'s `rust workspace` job both run
+          # `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same checkout,
+          # so an exact key match is expected -- not asserted as observed here, because
+          # the pull-request-scoped cache entries that could have confirmed a full-key
+          # match were deleted 2026-08-12 during unrelated cache cleanup and cannot be
+          # re-measured retroactively. Confirm from the first post-merge run's own log:
+          # `Restored from cache key "v0-rust-rust-workspace-Linux-x64-..." full match:
+          # true.` Even on a lockfile-hash mismatch, `src/restore.ts` falls back to the
+          # shared `restoreKey` prefix, so this degrades to a partial restore rather than
+          # a cold build.
+          # (c) This job's `cargo check --workspace --no-default-features` differs in
+          # feature resolution from `rust workspace`'s default-feature build
+          # (`tools/check-merge-readiness.sh:15-22`), so even a full key match leaves some
+          # dependency crates rebuilding -- a partial warm, not a guaranteed full one. The
+          # floor is still strictly better than history: `main` has never held a cache
+          # under this workflow's own former key (no `push` trigger ever existed for it),
+          # so every pull request's first run has always been cold. Restore-only turns
+          # that same first run into a partial warm instead.
+          # See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          shared-key: rust-workspace
+          save-if: false
           workspaces: rust -> target
 
       - name: Check the native-Z3-free Rust surface
@@ -45,6 +78,39 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          # Restore-only against `ci.yml`'s `rust-workspace` key, not a `save-if` guard.
+          # (a) This workflow has no `push` trigger (see `on:` above) and never gains one
+          # from `pull_request`/`merge_group` alone, so it has no path of its own to ever
+          # save a main-branch copy. Guarding this step's own key with
+          # `save-if: ${{ github.event_name != 'pull_request' }}`, as `ci.yml` does, would
+          # leave every pull request permanently cold instead: the earlier fix in this
+          # branch made that mistake (see git history) before independent review caught
+          # it. This job never saves at all and instead reads `ci.yml`'s `rust-workspace`
+          # entry, which the `push: branches: [main]` trigger there keeps warm.
+          # (b) Key derivation: `Swatinem/rust-cache` (`src/config.ts`) ignores `key` and
+          # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
+          # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace
+          # lockfiles. This job and `ci.yml`'s `rust workspace` job both run
+          # `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same checkout,
+          # so an exact key match is expected -- not asserted as observed here, because
+          # the pull-request-scoped cache entries that could have confirmed a full-key
+          # match were deleted 2026-08-12 during unrelated cache cleanup and cannot be
+          # re-measured retroactively. Confirm from the first post-merge run's own log:
+          # `Restored from cache key "v0-rust-rust-workspace-Linux-x64-..." full match:
+          # true.` Even on a lockfile-hash mismatch, `src/restore.ts` falls back to the
+          # shared `restoreKey` prefix, so this degrades to a partial restore rather than
+          # a cold build.
+          # (c) This job builds `cargo fmt --check` plus a default-feature test build of a
+          # subset of `rust workspace`'s crates (`tools/check-merge-readiness.sh:25-33`),
+          # which is close enough to `rust workspace`'s own build to expect a near-full
+          # warm restore, unlike `rust-compile`'s `--no-default-features` lane above. The
+          # floor is still strictly better than history either way: `main` has never held
+          # a cache under this workflow's own former key (no `push` trigger ever existed
+          # for it), so every pull request's first run has always been cold. Restore-only
+          # turns that same first run into a warm or partially warm one instead.
+          # See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          shared-key: rust-workspace
+          save-if: false
           workspaces: rust -> target
 
       - name: Check solver-independent contracts

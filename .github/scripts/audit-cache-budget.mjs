@@ -6,16 +6,31 @@
 // the default branch's, so a pull request's cache is worthless to a sibling
 // pull request while still counting against the shared limit.
 //
-// `ci.yml`'s four shared keys store about 6.9 GiB per ref, so two concurrent
+// `ci.yml`'s shared keys (originally four; `fsl-logic` was later folded into
+// `rust-workspace`, see below) stored about 6.9 GiB per ref, so two concurrent
 // pull requests exceeded the limit and evicted `main`'s caches. Every run then
 // built cold -- measured +8 to +16 min per shard -- and each cold run saved a
-// fresh ref-scoped copy, evicting more. `ci.yml` now restricts saving to
-// non-pull-request events, which is what this audit protects.
+// fresh ref-scoped copy, evicting more. Every step that still saves its own
+// key now restricts that save to non-pull-request events; a step that never
+// saves at all is restore-only (`save-if: false`) instead (see below). Rules 3
+// and 4 below are what this audit uses to protect both shapes.
 //
 // This module is pure: it takes an already-fetched cache listing and returns
 // findings. The workflow does the fetching. That split is what makes the
 // rejecting fixtures in audit-cache-budget.test.mjs possible, and it is the
 // same shape as audit-ruleset-drift.mjs.
+//
+// `merge-readiness.yml`'s `rust-compile` job, `merge-readiness.yml`'s
+// `core-contracts` job, and `ci.yml`'s own `fsl-logic` job are each
+// restore-only against `ci.yml`'s `rust-workspace` key (`save-if: false`) and
+// therefore own no shared key of their own to add here. `ci.yml`'s
+// `semantic-mutation-mutants` job is also restore-only (`save-if: false`),
+// but reads `semantic-mutation` instead -- the key `semantic-mutation-operators`
+// owns and saves, not `rust-workspace`. As of the `merge-readiness.yml` fix,
+// no workflow in this repository ever saves a rust cache on a pull-request
+// event -- rule 4 below is the general form of that invariant, covering any
+// future workflow's rust-cache step as well as the keys `CI_SHARED_KEYS`
+// declares.
 
 export const GIB = 1024 ** 3;
 
@@ -28,24 +43,64 @@ export const CACHE_LIMIT_BYTES = 10 * GIB;
 // observed failure had usage at 9.96 GiB, i.e. 99.6%.
 export const BUDGET_WARN_FRACTION = 0.85;
 
-// The shared keys `ci.yml` declares. A `refs/pull/*` entry for any of these
-// means the `save-if` guard regressed -- this is the calibrated rejecting
-// signal for the fix itself, not merely a hygiene check.
+// The three identities rule 3 below diagnoses by name: `rust-workspace`,
+// `wasm`, `semantic-mutation`. This list is not derived from any single
+// mechanism -- the three do not share a common origin (how each key is
+// declared, whether it is "shared" in the same technical sense, or any other
+// generation rule); it is simply the enumerated set rule 3 checks. Do not
+// infer a rule for membership from the list's current contents. A
+// `refs/pull/*` entry for one of these three means the `save-if` guard
+// regressed -- this is the calibrated rejecting signal for the fix itself,
+// not merely a hygiene check.
+//
+// Every other `v0-rust-*` key, including `rust-native-z3` and `fsl-logic`, is
+// still covered against appearing on a `refs/pull/*` ref -- by rule 4 below,
+// which matches on the raw key prefix and does not consult this list at all.
+// What is *not* covered for a key outside this list is rule 2's default-branch
+// presence requirement, which checks only the `{key, platform}` pairs in
+// `REQUIRED_MAIN_ENTRIES`: `rust-native-z3` is in that list (so its absence
+// from `main` is still caught); `fsl-logic` is not (it went restore-only and
+// never saves a `main` copy of its own to require).
 export const CI_SHARED_KEYS = [
   "rust-workspace",
   "wasm",
-  "fsl-logic",
   "semantic-mutation",
 ];
 
-// Keys whose absence on the default branch makes every pull request build cold.
-// A subset of CI_SHARED_KEYS: these are the ones on the pre-merge critical path.
-export const REQUIRED_MAIN_KEYS = ["rust-workspace", "wasm", "fsl-logic"];
+// Entries whose absence on the default branch makes every pull request build
+// cold. Per-platform, not just per-key: `rust-native-z3` is a single shared
+// key across a `[macos-15, windows-latest]` matrix (`ci.yml`), so a key-only
+// set would let the Darwin entry's presence hide a missing Windows_NT one --
+// exactly the failure this audit never reported when the Windows cache was
+// evicted to zero (issue #747). `rust-workspace`/`wasm` only ever run on
+// `ubuntu-latest`, hence `Linux` for both. `fsl-logic` is deliberately absent:
+// it is restore-only against `rust-workspace` and never saves its own key, so
+// requiring one here would always fail.
+export const REQUIRED_MAIN_ENTRIES = [
+  { key: "rust-workspace", platform: "Linux" },
+  { key: "wasm", platform: "Linux" },
+  { key: "rust-native-z3", platform: "Windows_NT" },
+  { key: "rust-native-z3", platform: "Darwin" },
+];
 
-function sharedKeyOf(key) {
-  // Swatinem/rust-cache composes `v0-rust-<shared-key>-<platform>-<hashes>`.
-  const match = /^v\d+-rust-(.+?)-(?:Linux|macOS|Windows)-/.exec(key ?? "");
-  return match ? match[1] : null;
+function entryIdentity(key) {
+  // Swatinem/rust-cache composes `v0-rust-<shared-key>-<platform>-<arch>-<hash>-<hash>`.
+  // Parsed from the tail, not the head: a lazy `(.+?)` stops at the *first*
+  // platform-like substring it finds, so a shared key that happens to contain
+  // one -- e.g. a hypothetical `foo-Linux-bar` -- would misparse as shared key
+  // `foo`, and a reviewer reproduced this causing a real, present main-branch
+  // entry to be reported `main-cache-absent` even though its cache existed in
+  // the same listing. A greedy `(.+)` anchored at `$` instead finds the *last*
+  // occurrence of the real trailing structure, which is the one
+  // `Swatinem/rust-cache` actually appends. `platform` is `os.type()`'s actual
+  // output, `Linux`/`Darwin`/`Windows_NT` -- never the GitHub Actions
+  // `runner.os` spellings `Linux`/`macOS`/`Windows`. `Windows_NT` is tried
+  // before the bare `Windows` it is a superset of, though the trailing anchor
+  // below no longer strictly depends on that ordering to be correct.
+  const match = /^v\d+-rust-(.+)-(Linux|Darwin|Windows_NT|macOS|Windows)-[^-]+-[0-9a-f]+-[0-9a-f]+$/.exec(
+    key ?? "",
+  );
+  return match ? { sharedKey: match[1], platform: match[2] } : { sharedKey: null, platform: null };
 }
 
 function formatGiB(bytes) {
@@ -57,7 +112,7 @@ function formatGiB(bytes) {
  *          usageBytes: number|null,
  *          limitBytes?: number,
  *          warnFraction?: number,
- *          requiredMainKeys?: string[],
+ *          requiredMainEntries?: {key: string, platform: string}[],
  *          ciSharedKeys?: string[],
  *          defaultBranchRef?: string}} input
  * @returns {{findings: Array<{code: string, message: string}>, ok: boolean}}
@@ -67,7 +122,7 @@ export function auditCacheBudget({
   usageBytes,
   limitBytes = CACHE_LIMIT_BYTES,
   warnFraction = BUDGET_WARN_FRACTION,
-  requiredMainKeys = REQUIRED_MAIN_KEYS,
+  requiredMainEntries = REQUIRED_MAIN_ENTRIES,
   ciSharedKeys = CI_SHARED_KEYS,
   defaultBranchRef = "refs/heads/main",
 }) {
@@ -102,18 +157,23 @@ export function auditCacheBudget({
     });
   }
 
-  // 2. The default branch must hold every key on the pre-merge critical path.
-  const mainKeys = new Set(
+  // 2. The default branch must hold every {key, platform} pair on the
+  //    pre-merge critical path. Per-platform, not per-key: a shared key backed
+  //    by a matrix job (`rust-native-z3`) can have one platform's entry
+  //    present and another's absent, and a key-only set would let the former
+  //    hide the latter.
+  const mainEntries = new Set(
     caches
       .filter((entry) => entry.ref === defaultBranchRef)
-      .map((entry) => sharedKeyOf(entry.key))
-      .filter(Boolean),
+      .map((entry) => entryIdentity(entry.key))
+      .filter(({ sharedKey, platform }) => sharedKey && platform)
+      .map(({ sharedKey, platform }) => `${sharedKey}::${platform}`),
   );
-  for (const key of requiredMainKeys) {
-    if (!mainKeys.has(key)) {
+  for (const { key, platform } of requiredMainEntries) {
+    if (!mainEntries.has(`${key}::${platform}`)) {
       findings.push({
         code: "main-cache-absent",
-        message: `no \`${defaultBranchRef}\` cache for shared key \`${key}\`. Actions caches are ref-scoped, so the default branch is the only cache every pull request can read; without it each pull request builds cold.`,
+        message: `no \`${defaultBranchRef}\` cache for shared key \`${key}\` on platform \`${platform}\`. Actions caches are ref-scoped, so the default branch is the only cache every pull request can read; without it each pull request (or, for a matrix job, that platform's shard) builds cold.`,
       });
     }
   }
@@ -121,17 +181,37 @@ export function auditCacheBudget({
   // 3. No pull-request-scoped cache for a `ci.yml` shared key. This is the
   //    rejecting control for `save-if`: if the guard is removed, these reappear.
   const ciKeys = new Set(ciSharedKeys);
+  const attributedPullRequestEntries = new Set();
   for (const entry of caches) {
     if (!/^refs\/pull\//.test(entry.ref ?? "")) continue;
-    const key = sharedKeyOf(entry.key);
-    if (key && ciKeys.has(key)) {
+    const { sharedKey } = entryIdentity(entry.key);
+    if (sharedKey && ciKeys.has(sharedKey)) {
+      attributedPullRequestEntries.add(entry);
       findings.push({
         code: "pull-request-cache-present",
-        message: `\`${entry.ref}\` holds a cache for \`ci.yml\`'s shared key \`${key}\` (${formatGiB(
+        message: `\`${entry.ref}\` holds a cache for \`ci.yml\`'s shared key \`${sharedKey}\` (${formatGiB(
           entry.size_in_bytes ?? 0,
         )}). \`ci.yml\` restricts saving to non-pull-request events precisely so this cannot happen; its presence means that guard regressed.`,
       });
     }
+  }
+
+  // 4. Repository invariant since #752 and the `merge-readiness.yml`
+  //    restore-only fix: no workflow saves a rust cache on a pull-request
+  //    event, full stop -- not just `CI_SHARED_KEYS`' three declared keys. Any
+  //    `v0-rust-*` key on a `refs/pull/*` ref means that invariant broke
+  //    somewhere, whether in a known shared key (already reported by rule 3
+  //    above, and skipped here to avoid a duplicate finding) or a new one.
+  for (const entry of caches) {
+    if (attributedPullRequestEntries.has(entry)) continue;
+    if (!/^refs\/pull\//.test(entry.ref ?? "")) continue;
+    if (!/^v\d+-rust-/.test(entry.key ?? "")) continue;
+    findings.push({
+      code: "pull-request-rust-cache-present",
+      message: `\`${entry.ref}\` holds a rust cache \`${entry.key}\` (${formatGiB(
+        entry.size_in_bytes ?? 0,
+      )}). No workflow may save a rust cache on a pull-request event; see docs/DESIGN-ci.md, "Actions cache budget".`,
+    });
   }
 
   return { findings, ok: findings.length === 0 };

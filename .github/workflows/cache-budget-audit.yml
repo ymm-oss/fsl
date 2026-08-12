@@ -33,6 +33,7 @@ on:
       - .github/scripts/run-cache-budget-audit.mjs
       - .github/workflows/cache-budget-audit.yml
       - .github/workflows/ci.yml
+      - .github/workflows/merge-readiness.yml
 
 permissions:
   actions: read

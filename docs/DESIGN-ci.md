@@ -517,7 +517,8 @@ that is exceeded. Caches are also **ref-scoped**: a run restores only its own re
 default branch's, so a pull request's cache is worthless to a sibling pull request while still
 counting against the shared limit.
 
-`ci.yml` declares four shared keys, measured: `semantic-mutation` 2.72 GiB, `rust-workspace`
+`ci.yml` declared four shared keys at the time (`fsl-logic` was one of them; it does not declare one
+today, see below), measured: `semantic-mutation` 2.72 GiB, `rust-workspace`
 1.50 GiB, `fsl-logic` 1.37 GiB, `wasm` 1.35 GiB — about **6.9 GiB per ref**. Two concurrent pull
 requests therefore exceed the limit on their own, and on 2026-08-06 they did: usage stood at
 9.96 GiB across 12 entries, every large cache belonged to `refs/pull/743/merge` or
@@ -537,20 +538,146 @@ The consequence is measured, not inferred. Two runs of the same commit on the sa
 ref-scoped copy, which evicts more. `main` can heal — a miss there does save — but the pressure
 from concurrent pull requests outran the healing.
 
-**Decision: only non-pull-request events save.** Every `Swatinem/rust-cache` step in `ci.yml`
-carries `save-if: ${{ github.event_name != 'pull_request' }}`. Pull requests still *restore*,
-because `main` is the default branch and therefore readable from every ref. What a pull request
-gives up is a warm second run of itself; what it gains is that `main`'s caches stay resident, which
-is the only cache any pull request could ever share.
+**Decision (#747): only non-pull-request events save.** At the time, every `Swatinem/rust-cache` step
+in `ci.yml` carried `save-if: ${{ github.event_name != 'pull_request' }}`. Pull requests still
+*restore*, because `main` is the default branch and therefore readable from every ref. What a pull
+request gives up is a warm second run of itself; what it gains is that `main`'s caches stay resident,
+which is the only cache any pull request could ever share.
 
-`merge-readiness.yml` is deliberately **not** changed. Its two keys total about 131 MiB, they are not
-the pressure, and its lanes are the sub-minute fast path — making them cold would defeat the reason
-that workflow exists.
+**That is no longer a description of every step -- the current contract has two shapes, not one, and
+which key a restore-only step reads is not the same for all of them.** A step that saves its own
+declared key still carries the event guard above (`save-if: ${{ github.event_name != 'pull_request'
+}}`); a step below carries `save-if: false` unconditionally and saves nothing, ever, instead. Naming
+each: `merge-readiness.yml`'s `rust-compile` job reads `rust-workspace` (`shared-key: rust-workspace`,
+`save-if: false`). `merge-readiness.yml`'s `core-contracts` job reads `rust-workspace` the same way.
+`ci.yml`'s `fsl-logic` job reads `rust-workspace` the same way again. `ci.yml`'s
+`semantic-mutation-mutants` job is different: it reads `semantic-mutation`
+(`shared-key: semantic-mutation`, `save-if: false`), the key `semantic-mutation-operators` owns and
+saves (below), not `rust-workspace`. `CI_SHARED_KEYS` in `audit-cache-budget.mjs` lists the
+identities rule 3 attributes by name today: `rust-workspace`, `wasm`, `semantic-mutation` -- three,
+not the four this section originally measured, since `fsl-logic`'s dedicated key was retired when
+that job went restore-only. That is not the complete list of keys any workflow actually saves:
+`ci.yml`'s own `rust-native-z3` job also saves, on non-pull-request events, one key per platform
+(`Windows_NT` and `Darwin`) -- it just is not one of `CI_SHARED_KEYS`' three named identities. Its
+presence on `main` is required separately, by `REQUIRED_MAIN_ENTRIES`'s per-`{key, platform}` check;
+a leak of it onto a pull-request ref is caught separately too, by rule 4's generic `/^v\d+-rust-/`
+detection rather than rule 3's name-based one.
+
+`merge-readiness.yml` was deliberately left unchanged at that point: its two keys total about
+131 MiB, they were not *that* incident's pressure, and its lanes are the sub-minute fast path —
+making them cold would defeat the reason that workflow exists. That reasoning held for concurrent
+pressure from a handful of pull requests at once; it did not hold over time. `merge-readiness.yml`
+runs on every pull request and had no `save-if` guard, so every pull request saved its own
+ref-scoped copy of both keys. By 2026-08-11 this had accumulated to 15 pull-request refs (#743-#792,
+all closed or merged by measurement time) holding 29 cache entries — about 1.90 GiB — entirely on
+the merge-readiness keys, on top of pull-request-scoped residue that predated PR #752's
+`ci.yml`-only fix, for **38 entries / 10.03 GiB** total against the 10 GiB budget. None of these
+refs were being re-run any longer to refresh their own last-accessed time; they persisted simply
+because GitHub only evicts a cache for staleness after **7 days without a read**, and measurement
+landed inside that window for refs that closed more recently than that. The LRU evictor does not
+distinguish "small but many" from "few but large": it evicted `refs/heads/main`'s
+`native Z3 4.16 (windows-latest)` cache down to **zero entries**, observed via
+`gh api actions/caches`. **The `save-if` guard `ci.yml` uses is the wrong fix here and was
+reverted before merging**: that guard only stops saving on `pull_request` events, and it relies on
+some other event on the same workflow saving a `main`-branch copy to restore from. `ci.yml` has a
+`push: branches: [main]` trigger to do that; `merge-readiness.yml` has none (`on:` above lists only
+`pull_request` and `merge_group`), so adding the same guard here would not close the eviction path,
+it would make every pull request permanently cold — the workflow would never save a cache under its
+own key, from any event. `merge-readiness.yml`'s two `Swatinem/rust-cache` steps instead go
+**restore-only against `ci.yml`'s own `rust-workspace` key** (`shared-key: rust-workspace`,
+`save-if: false`): both jobs run `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same
+checkout as `ci.yml`'s `rust workspace` job, and `Swatinem/rust-cache` derives its key from the
+rustc version, `CARGO`/`CC`/`CFLAGS`/`CXX`/`CMAKE`/`RUST`-prefixed env vars, and the workspace
+lockfiles — none of which differ between the two workflows — so an exact key match is expected, but
+this is a mechanism-derived expectation, not something observed yet: the pull-request-scoped entries
+that could have confirmed a full match were deleted 2026-08-12 during unrelated cleanup, and this
+branch has not been merged, so no post-merge run of `merge-readiness.yml` exists to have logged one.
+**This paragraph records an expectation pending confirmation, not a confirmed result.** The first
+post-merge run's own log is the actual evidence: it must show
+`Restored from cache key "..." full match: true.` before this claim is treated as confirmed; if it
+instead shows a prefix-restore fallback or a miss, this paragraph needs updating, not the code (a
+mismatch degrades only to `Swatinem/rust-cache`'s ordinary prefix-restore fallback rather than a cold
+build, so it would not be a functional regression, only a correction to this expectation). Neither
+job ever writes to this key: only `ci.yml`'s `push`-triggered job does, so no `pull_request` event
+anywhere can grow it, and merge-readiness gains no eviction pressure of its own to reintroduce.
 
 This also qualifies a claim made elsewhere in this document. Cache hit rates were measured to have
 no headroom for `rust workspace` — compile is only ~3.5 min of ~33 min **on a warm cache**. That
 remains true warm, and it is exactly the premise that fails under concurrency: the question is not
 how much a better hit rate buys, but whether a hit happens at all.
+
+**`semantic-mutation`'s measured 2.719 GiB is an observed clean size, not accumulated dead weight --
+two successive size predictions to the contrary were both wrong, and this document previously
+carried both.** Direct measurement settled it: on product-gate run `31210570118`, job `92972117510`
+(`mutation operators (3/3)`) restored with `No cache found.` at 19:14:17Z -- a fully cold start, so it
+carried forward nothing from any prior run -- built for ~35 minutes, and saved the cache at 19:48:12Z.
+`gh api actions/caches` shows the resulting entry, `v0-rust-semantic-mutation-Linux-x64-...`, created
+at exactly `2026-08-07T19:48:56Z` and sized 2,919,716,751 bytes (2.719 GiB). That run never ran the
+mutants lane's scratch build or evidence generation at all, so neither could have contributed a
+single byte to this entry: there is no dead weight here to recover, and both the ~0.9-1.4 GiB and
+~2.2 GiB sizes this document previously predicted (attributing the size to, respectively, an
+accumulating scratch-build tree and to `fault-operators`' persistent build tree as a designed
+minimum size) do not describe what this entry actually is. This one cold-start save on one shard is
+evidence of what this key *can* legitimately hold, not a proven minimum across every shard and every
+future revision -- `semantic-mutation` is not touched by this fix and is not a lever in the budget
+arithmetic below.
+
+**The scratch-build-tree and evidence-path changes in this branch are a closed-ingress-path fix, not
+a size fix, and are kept for that reason alone.** `tools/run-semantic-mutation-gate.sh`'s mutants
+lane's scratch `CARGO_TARGET_DIR` (isolated per run so a stale mutant artifact's timestamp can never
+look newer than a freshly copied baseline checkout) used to be created under
+`rust/target/semantic-mutation-build/run.XXXXXX`, inside the tree `Swatinem/rust-cache` saves
+wholesale, and now lives under `${RUNNER_TEMP:-${TMPDIR:-/tmp}}` instead. The script also clears any
+`rust/target/semantic-mutation.*`/`semantic-mutation-build` a restored cache may carry forward,
+unconditionally and before either lane does anything -- an earlier version of this cleanup ran only
+in the mutants lane's own path, below `run_operators_lane`'s early `exit 0` for `--lane operators`
+invocations, so the one lane that actually saves this key (see below) never ran it. Both changes
+close a path by which a *future* run could let leftover scratch/evidence ride into a save; neither
+changes what the entry, as actually observed, already contains.
+
+**Ownership: the operators shards are this key's only saver; the mutants job is restore-only.**
+`Swatinem/rust-cache` saves a key once, and whichever job reaches its post step first wins --
+measured on product-gate run `31527197290`, all three `semantic-mutation-operators` shards reached
+their post step (19:23:20 / 19:23:34 / 19:23:55) well before `semantic-mutation-mutants` did
+(20:33:31), so the saver is always an operators shard, never the mutants job.
+`semantic-mutation-mutants`'s `Swatinem/rust-cache` step carries `save-if: false`, which changes
+nothing about what actually gets cached today (it never won the race) but makes explicit that its
+sole `rust/target`-scoped output -- its evidence directory, kept under `rust/target` solely because
+the artifact-upload glob requires it -- must never be allowed into a future save if the timing ever
+changed. `semantic-mutation-operators` is unchanged (`save-if` on non-pull-request events,
+`cache-on-failure: true`) and remains this key's sole owner and recovery path. Splitting the key so
+each lane has its own was considered and rejected: the mutants job has essentially no warm value of
+its own to protect -- `~/.cargo/bin/cargo-mutants` is already rebuilt every run today because
+operators always wins the race first -- so a second entry would cost budget for no gain.
+
+**Budget lever: `fsl-logic` goes restore-only against `rust-workspace`, taking its dedicated key out
+of the budget entirely (measured, not predicted).** `fsl-logic`'s entire build is
+`cargo test -p fslc-rust --test typed_agreement --locked` (`tools/run-fsl-logic-test.sh:19-22`), one
+test target that is a strict subset of what `rust workspace`'s shards already build.
+`Swatinem/rust-cache` prunes workspace-member build artifacts at save time and keeps only external
+dependency output (upstream `src/cleanup.ts`), so every lane's cache is substantively "the same
+lockfile's external deps" regardless of which job saved it -- restoring `rust-workspace` here loses
+nothing `fsl-logic` needed a dedicated key for. Measured main-branch entries (2026-08-12,
+`gh api actions/caches`): `rust-workspace` 1,605,761,517 B, `fsl-logic` 1,470,489,603 B (1.369 GiB),
+`wasm` 1,452,450,563 B, `rust-native-z3` Darwin 1,239,235,056 B, `semantic-mutation` 2,919,716,751 B,
+plus ~41 MB of small tool-binary caches -- **8.130 GiB total**. Removing the now-orphaned `fsl-logic`
+entry (a separate, human-authorized deletion) and re-adding Windows native-z3 (historical size
+0.577 GiB, to be re-measured after recreation) gives
+**8.130 − 1.369 + 0.577 = 7.338 GiB (73.4%)**, under the 8.5 GiB warn threshold with headroom to
+spare. `rust-workspace` and the former dedicated `fsl-logic` key already share the same
+`Linux-x64-e8b3ee54-09fbaf53` suffix, so `shared-key: rust-workspace` is expected to hit exactly, not
+merely restore a compatible prefix -- an exact-hit restore is expected to cost about what `fsl-logic`'s
+own key already did. If the shared `rust-workspace` cache were ever missing or evicted instead, this
+job would build cold under the existing 30-minute timeout. That timeout bounds resource consumption,
+not job success: past it, the job is killed and reported as a failed required context, the same
+outcome this whole section exists to stop happening to a different job. Whether a cold build here
+would finish inside 30 minutes is not observed -- this job has never run cold under this
+configuration, so its baseline warm duration (2m48s-2m53s, scheduled runs 2026-08-09/10/11) describes
+only the typical exact-hit case, not a cold-run bound, and is not evidence that a cold run would
+succeed rather than time out. A `cache-targets: false` lever on the
+mutation lanes was considered and rejected: it would cost the operators shards a cold build every
+run (~35 min measured cold vs. ~5 min warm) for less budget relief than `fsl-logic` gives for
+near-zero cost.
 
 **Eviction started this; `cache-on-failure: false` made it unrecoverable.** The
 `semantic mutation` lane fell into a closed loop, measured on `main` and on three pull requests:
@@ -568,30 +695,96 @@ cache exists.** Measured budgets against measured durations:
 | `mutation operators (K/3)` | 30 min | 18.0–19.5 min | **>30** (cancelled at 30.2) | **50 min** |
 | `mutation mutants` | 60 min | 17.2–34.2 min | **>60** (cancelled at ~61) | **90 min** |
 
-Both semantic-mutation cache steps now carry `cache-on-failure: true`, so a cold run that runs out
-of budget still leaves a warm cache behind, and both budgets are raised past a measured cold run.
-Raised rather than narrowed, for the reason this document already gives for the promotion-only
-native-Z3 job: a gate that runs out of wall clock reports a failure it did not observe.
+The `semantic-mutation` key has exactly one class of savers: the three `semantic-mutation-operators`
+shards (`save-if` on non-pull-request events, `cache-on-failure: true` -- the owner keeps the
+recovery path for a cold start that fails or times out). `semantic-mutation-mutants` is restore-only
+(`save-if: false`); it carries no `cache-on-failure`, which would be meaningless there, since
+`Swatinem/rust-cache`'s save step exits on `save-if` before that flag is ever consulted. Both
+budgets are raised past a measured cold run regardless, for the reason this document already gives
+for the promotion-only native-Z3 job: a gate that runs out of wall clock reports a failure it did not
+observe. (`rust-native-z3`'s own `cache-on-failure: true` and 60-minute budget, discussed elsewhere
+in this section, are a separate lane and a separate decision.)
 
 This is also the most likely explanation for `main`'s standing post-merge failures #721
 (`mutation mutants`) and #678 (`semantic mutation (complete)`), whose cancellations sit exactly at
 the old budgets. Whether they clear once this lands is the test of that reading, and #747's
 acceptance criteria record it as such.
 
+**That test resolved, but what it establishes is narrower than a direct confirmation that
+`cache-on-failure` saves through a timeout-driven cancellation.** Both issues recurred with
+`Conclusion: cancelled` repeatedly before commit `877fe8c` (#752, which added
+`cache-on-failure: true` to both semantic-mutation lanes) and neither recurred as `cancelled` again
+afterward; their remaining occurrences before final recovery were `Conclusion: failure`, an
+unrelated test defect fixed separately. But `877fe8c` raised those lanes' timeouts in the same
+commit, so the disappearance of `cancelled` conclusions is confounded with more budget and does not
+isolate `cache-on-failure`'s contribution. The eventual recovery run (`31097824729`) also saved its
+cache after the job reached `success`, which is `post-if`'s ordinary `success()` branch, not a
+saved-after-cancellation case. No run in this repository's observed history has a cache written
+specifically following a timeout-triggered cancellation. What supports `cache-on-failure` working
+for cancellation, not just ordinary failure, is a reading of `Swatinem/rust-cache`'s own
+`action.yml`: the save (post) step's condition is
+`post-if: success() || env.CACHE_ON_FAILURE == 'true'`, and that expression's `env.CACHE_ON_FAILURE`
+branch does not itself test which non-success conclusion the job reached. That is inference from the
+condition's text, not an observed cancel-then-save run, and is recorded as such.
+
+**The same closed loop appeared independently in `rust-native-z3`'s `windows-latest`/`macos-15`
+matrix, and is addressed the same way, on the same inference-not-observation basis above.** That
+job's `Swatinem/rust-cache` step carried `save-if` but not `cache-on-failure`. Warm runs measured
+32m56s / 32m45s (2026-08-04) and 31m49s / 29m44s / 26m56s (2026-08-05), comfortably inside the
+40-minute budget; the scheduled `windows-latest` run then hit exactly 40m0x and was cancelled on all
+six consecutive scheduled runs from 2026-08-07 00:23 through 2026-08-11 — a step change coincident
+with the cache-budget eviction above, not gradual drift, a regression, or added test volume. The
+last successful run (2026-08-05) restored the cache
+(`Cache hit for: v0-rust-rust-native-z3-Windows_NT-x64-...`, 591 MiB); the 2026-08-11 cancellation
+reported `No cache found.` instead, and its job steps show
+`9 skipped Post Run Swatinem/rust-cache@v2` (run 31527197290) — the same cancel-skips-save mechanism
+as the semantic-mutation lanes, on a different job. `rust-native-z3` now carries
+`cache-on-failure: true` as well; whether it actually saves through the next timeout cancellation
+(if any) is unobserved and is a live run's evidence to produce, not something claimed here. Its
+`timeout-minutes` is raised from 40 to 60 for a reason independent of that open question:
+`production-native-z3-linux`'s budget was raised rather than narrowed for the same stated reason —
+a gate that runs out of wall clock reports a failure it did not observe — and 60 minutes covers a
+genuine cold vendored-Z3 build on this matrix without approaching the Linux promotion lane's
+90-minute allowance for the same build from scratch.
+
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,
-and on `main` pushes that touch it or `ci.yml`. It fails closed on three states: usage at or above
-85% of the limit, a missing `refs/heads/main` cache for any critical-path shared key, and — the
-rejecting control for the `save-if` guard itself — **any pull-request-scoped cache for one of
-`ci.yml`'s shared keys**, which can only appear if that guard is removed. An unreadable listing or
-an absent usage total fail closed too; neither is read as headroom.
+and on `main` pushes that touch it, `ci.yml`, or `merge-readiness.yml`. It fails closed on four
+states: usage at or above 85% of the limit, a missing `refs/heads/main` cache for any critical-path
+`{key, platform}` pair, — the rejecting control for the `save-if` guard itself — any pull-request-
+scoped cache for one of `ci.yml`'s shared keys, and — the general form of that same control — any
+`v0-rust-*`-prefixed cache on a pull-request ref at all, whether or not its shared key is one
+`ci.yml` declares. An unreadable listing or an absent usage total fail closed too; neither is read
+as headroom.
+
+The critical-path check is per-`{key, platform}` pair, not per-key, because `rust-native-z3` is one
+shared key backed by a `[macos-15, windows-latest]` matrix in `ci.yml`: a key-only set lets either
+platform's presence on `main` hide the other's absence. That was a live blind spot, not a
+hypothetical one -- `sharedKeyOf`'s regex matched `Linux`/`macOS`/`Windows` (the GitHub Actions
+`runner.os` spellings), but `Swatinem/rust-cache` composes its key from `os.type()`, which reports
+`Linux`, `Darwin`, and `Windows_NT`. `Darwin` and `Windows_NT` never matched, so both `rust-native-z3`
+entries were invisible to every rule in this audit -- including the one that would have reported
+`main`'s Windows cache evicted to zero entries during the incident this section documents. The regex
+is corrected (`Windows_NT` tried before the `Windows` it is a strict superset of) and
+`REQUIRED_MAIN_ENTRIES` now requires `rust-native-z3` on both `Windows_NT` and `Darwin` explicitly.
+
+The general pull-request-rust-cache rule exists because `merge-readiness.yml`'s restore-only fix
+(above) makes "no workflow saves a rust cache on a pull-request event" a repository-wide invariant,
+not something scoped to `CI_SHARED_KEYS`' three declared keys (`rust-workspace`, `wasm`,
+`semantic-mutation`). Before this rule, `merge-readiness.yml`'s own
+now-removed per-job keys (`rust-compile`, `core-contracts`) were invisible to this audit for the same
+reason `rust-native-z3` was: an unlisted shared key is never attributed, so a pull-request-scoped
+entry for it was silently treated as normal. The general rule catches that shape regardless of
+whether the key is one this file has ever heard of, so a future workflow's unguarded
+`Swatinem/rust-cache` step cannot reopen the same blind spot under a new name.
 
 `.github/scripts/audit-cache-budget.test.mjs` calibrates all of it offline, including a fixture that
-reproduces the 2026-08-06 listing verbatim and must fail. `tools/check-merge-readiness.sh`'s
-`check_automation` lane runs that suite on every pull request, so a change to the checker is covered
-pre-merge even though the live audit deliberately is not a required context: the shared cache state
-can change after a pull request's own checks pass, so gating a merge on it would gate on something
-outside the change under review.
+reproduces the 2026-08-06 listing verbatim and must fail, and rejecting fixtures for a non-`ci.yml`
+rust cache on a pull-request ref and for each half of `rust-native-z3` missing from `main`.
+`tools/check-merge-readiness.sh`'s `check_automation` lane runs that suite on every pull request, so
+a change to the checker is covered pre-merge even though the live audit deliberately is not a
+required context: the shared cache state can change after a pull request's own checks pass, so
+gating a merge on it would gate on something outside the change under review.
 
 Issue #747 records the incident. Issue #720's Finding 2 — warming the fault-operator scratch build —
 **adds** a cache and therefore depends on this budget holding first.
