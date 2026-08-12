@@ -48,15 +48,19 @@ export const BUDGET_WARN_FRACTION = 0.85;
 // mechanism -- the three do not share a common origin (how each key is
 // declared, whether it is "shared" in the same technical sense, or any other
 // generation rule); it is simply the enumerated set rule 3 checks. Do not
-// infer a rule for membership from the list's current contents. Everything
-// else -- `rust-native-z3`, and formerly `fsl-logic` -- is deliberately
-// handled elsewhere instead of being added here: `rust-native-z3` by
-// `REQUIRED_MAIN_ENTRIES`'s per-`{key, platform}` presence check and rule 4's
-// generic `refs/pull/*` detection below; `fsl-logic`, since it went
-// restore-only, by neither (see docs/DESIGN-ci.md, "Actions cache budget").
-// A `refs/pull/*` entry for one of these three means the `save-if` guard
+// infer a rule for membership from the list's current contents. A
+// `refs/pull/*` entry for one of these three means the `save-if` guard
 // regressed -- this is the calibrated rejecting signal for the fix itself,
 // not merely a hygiene check.
+//
+// Every other `v0-rust-*` key, including `rust-native-z3` and `fsl-logic`, is
+// still covered against appearing on a `refs/pull/*` ref -- by rule 4 below,
+// which matches on the raw key prefix and does not consult this list at all.
+// What is *not* covered for a key outside this list is rule 2's default-branch
+// presence requirement, which checks only the `{key, platform}` pairs in
+// `REQUIRED_MAIN_ENTRIES`: `rust-native-z3` is in that list (so its absence
+// from `main` is still caught); `fsl-logic` is not (it went restore-only and
+// never saves a `main` copy of its own to require).
 export const CI_SHARED_KEYS = [
   "rust-workspace",
   "wasm",
