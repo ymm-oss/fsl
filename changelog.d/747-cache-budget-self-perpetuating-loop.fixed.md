@@ -12,9 +12,16 @@ them, but because GitHub only evicts an unused cache after 7 days without a
 read, and measurement landed inside that window. The LRU evictor does not
 distinguish "small but many" from "few but large": it had removed
 `refs/heads/main`'s `native Z3 4.16 (windows-latest)` cache down to zero
-entries. `merge-readiness.yml` now carries the same
-`save-if: ${{ github.event_name != 'pull_request' }}` guard as every
-`Swatinem/rust-cache` step in `ci.yml`. Separately, `rust-native-z3`'s
+entries. `merge-readiness.yml` has no `push` trigger, so the `ci.yml`-style
+`save-if: ${{ github.event_name != 'pull_request' }}` guard would not close
+this path -- it would leave every pull request permanently cold, since
+nothing would ever save a `main` copy under this workflow's own key for it to
+restore. Both `Swatinem/rust-cache` steps instead go restore-only against
+`ci.yml`'s own `rust-workspace` key (`shared-key: rust-workspace`,
+`save-if: false`): the two workflows' jobs share a toolchain, runner, and
+checkout, so the derived cache key is expected to match, confirmed from the
+first post-merge run's `full match: true` restore log rather than asserted
+from an unverifiable prior observation. Separately, `rust-native-z3`'s
 `windows-latest`/`macos-15` matrix had the same cancel-skips-save deadlock
 already fixed for the `semantic-mutation` lanes: a cold build (measured warm
 at 27–33 min) exceeded the 40-minute budget, the job was cancelled on all six

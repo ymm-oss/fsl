@@ -557,10 +557,24 @@ because GitHub only evicts a cache for staleness after **7 days without a read**
 landed inside that window for refs that closed more recently than that. The LRU evictor does not
 distinguish "small but many" from "few but large": it evicted `refs/heads/main`'s
 `native Z3 4.16 (windows-latest)` cache down to **zero entries**, observed via
-`gh api actions/caches`. `merge-readiness.yml` now carries the same
-`save-if: ${{ github.event_name != 'pull_request' }}` guard as every `ci.yml` step, closing the
-eviction path PR #752 left open. Its lanes still restore on every pull request from `main`'s copy,
-same as before; only the self-multiplying save on pull requests stops.
+`gh api actions/caches`. **The `save-if` guard `ci.yml` uses is the wrong fix here and was
+reverted before merging**: that guard only stops saving on `pull_request` events, and it relies on
+some other event on the same workflow saving a `main`-branch copy to restore from. `ci.yml` has a
+`push: branches: [main]` trigger to do that; `merge-readiness.yml` has none (`on:` above lists only
+`pull_request` and `merge_group`), so adding the same guard here would not close the eviction path,
+it would make every pull request permanently cold — the workflow would never save a cache under its
+own key, from any event. `merge-readiness.yml`'s two `Swatinem/rust-cache` steps instead go
+**restore-only against `ci.yml`'s own `rust-workspace` key** (`shared-key: rust-workspace`,
+`save-if: false`): both jobs run `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same
+checkout as `ci.yml`'s `rust workspace` job, and `Swatinem/rust-cache` derives its key from the
+rustc version, `CARGO`/`CC`/`CFLAGS`/`CXX`/`CMAKE`/`RUST`-prefixed env vars, and the workspace
+lockfiles — none of which differ between the two workflows — so an exact key match is expected, not
+directly observed here (the pull-request-scoped entries that could have confirmed a full match were
+deleted 2026-08-12 during unrelated cleanup); it is confirmed instead from the first post-merge run's
+own `Restored from cache key "..." full match: true.` log line, and even a hash mismatch degrades
+only to `Swatinem/rust-cache`'s ordinary prefix-restore fallback rather than a cold build. Neither
+job ever writes to this key: only `ci.yml`'s `push`-triggered job does, so no `pull_request` event
+anywhere can grow it, and merge-readiness gains no eviction pressure of its own to reintroduce.
 
 This also qualifies a claim made elsewhere in this document. Cache hit rates were measured to have
 no headroom for `rust workspace` — compile is only ~3.5 min of ~33 min **on a warm cache**. That
