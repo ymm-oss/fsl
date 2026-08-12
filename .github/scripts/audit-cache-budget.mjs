@@ -43,18 +43,20 @@ export const CACHE_LIMIT_BYTES = 10 * GIB;
 // observed failure had usage at 9.96 GiB, i.e. 99.6%.
 export const BUDGET_WARN_FRACTION = 0.85;
 
-// The identities rule 3 below attributes by name: the keys `ci.yml` declares
-// through the `shared-key:` input specifically. A `refs/pull/*` entry for any
-// of these means the `save-if` guard regressed -- this is the calibrated
-// rejecting signal for the fix itself, not merely a hygiene check. This is
-// not every key any workflow actually saves: `ci.yml`'s `rust-native-z3` job
-// saves through `Swatinem/rust-cache`'s default per-job naming (no
-// `shared-key:` input) and is covered separately, by `REQUIRED_MAIN_ENTRIES`
-// below and by rule 4's generic detection, not by name here. `fsl-logic` is
-// not one of these either: that job went restore-only against
-// `rust-workspace` (see docs/DESIGN-ci.md, "Actions cache budget") and no
-// longer saves a key of its own, the same way `merge-readiness.yml`'s jobs do
-// not appear here.
+// The three identities rule 3 below diagnoses by name: `rust-workspace`,
+// `wasm`, `semantic-mutation`. This list is not derived from any single
+// mechanism -- the three do not share a common origin (how each key is
+// declared, whether it is "shared" in the same technical sense, or any other
+// generation rule); it is simply the enumerated set rule 3 checks. Do not
+// infer a rule for membership from the list's current contents. Everything
+// else -- `rust-native-z3`, and formerly `fsl-logic` -- is deliberately
+// handled elsewhere instead of being added here: `rust-native-z3` by
+// `REQUIRED_MAIN_ENTRIES`'s per-`{key, platform}` presence check and rule 4's
+// generic `refs/pull/*` detection below; `fsl-logic`, since it went
+// restore-only, by neither (see docs/DESIGN-ci.md, "Actions cache budget").
+// A `refs/pull/*` entry for one of these three means the `save-if` guard
+// regressed -- this is the calibrated rejecting signal for the fix itself,
+// not merely a hygiene check.
 export const CI_SHARED_KEYS = [
   "rust-workspace",
   "wasm",
