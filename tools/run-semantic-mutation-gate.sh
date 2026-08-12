@@ -62,19 +62,22 @@ case "$mode" in
     ;;
 esac
 
-# Prior invocations' evidence directories and scratch build trees can survive
-# into this checkout by way of a restored `Swatinem/rust-cache` entry: the
-# cache saves `rust/target` wholesale, so anything left there by a past run
-# reappears here before this run creates its own differently-named copy.
-# Clear them before either lane does anything else, not just before the
-# mutants lane's own evidence generation: the `semantic-mutation` key's saver
-# is whichever operators shard reaches its post step first
-# (`Swatinem/rust-cache` saves once per key, first writer wins, and operators
-# always wins the timing race against mutants), so unless the operators lane
-# itself clears this dead weight before restoring, it is carried forward and
-# resaved forever regardless of what the mutants lane below does with its own
-# `CARGO_TARGET_DIR`. This runs once per invocation, including the unsharded
-# local path that runs operators then mutants in the same process.
+# This clears leftover evidence/scratch directories a restored cache may carry
+# forward, but it does not shrink the `semantic-mutation` cache entry itself.
+# Measured directly (run 31210570118, `mutation operators (3/3)`, job
+# 92972117510): that entry's current 2.719 GiB was created by a *cold*
+# operators run (`No cache found.` at 19:14:17Z, `Saving cache` at 19:48:12Z)
+# that never touched the mutants lane's scratch build tree or evidence
+# directory at all -- those paths cannot have contributed to this entry's
+# size, so there is no dead weight here for this line to recover. This is a
+# closed-ingress-path fix, not a size fix: it stops a *future* run of either
+# lane from ever letting a restored evidence/scratch leftover ride along into
+# a save, which was possible before because the cleanup this line replaces
+# used to run only in the mutants lane's own path, below the point where
+# `--lane operators` already exits (see git history) -- the one lane that
+# actually saves this key never ran it. Cleared before either lane does
+# anything else, once per invocation, including the unsharded local path that
+# runs operators then mutants in the same process.
 rm -rf "$root"/rust/target/semantic-mutation.* "$root/rust/target/semantic-mutation-build"
 
 run_manifest_test() {
@@ -131,10 +134,13 @@ mkdir -p "$scratch/rust/target"
 # mutation. This scratch tree is disposable working state, not evidence: it
 # sits outside `rust/target` (unlike the `$output` evidence directory above,
 # which the artifact-upload glob `rust/target/semantic-mutation.*/**` in
-# ci.yml requires), so `Swatinem/rust-cache` never saves it and a run-scoped
-# name here does not accumulate as cache dead weight the way it did living
-# under `rust/target/semantic-mutation-build` (docs/DESIGN-ci.md, "Actions
-# cache budget").
+# ci.yml requires), so `Swatinem/rust-cache` never saves it. This closes a
+# path by which a run-scoped directory here *could* have ridden into a future
+# save while it lived under `rust/target/semantic-mutation-build` -- it is not
+# known to have actually done so: the `semantic-mutation` cache entry's
+# measured size is fully accounted for by a cold `mutation operators` run that
+# never created this directory at all (docs/DESIGN-ci.md, "Actions cache
+# budget").
 export CARGO_TARGET_DIR
 CARGO_TARGET_DIR="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/fsl-semantic-mutation-build.XXXXXX")"
 args=(

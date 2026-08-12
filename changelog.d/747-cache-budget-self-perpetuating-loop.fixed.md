@@ -35,23 +35,23 @@ run `31527197290` all three `semantic-mutation-operators` shards reach their
 post step tens of minutes before `semantic-mutation-mutants` does -- the
 operators shards are this key's only actual saver. An earlier version of this
 cleanup ran only in the mutants lane's own path, after the operators lane's
-early exit, so the one lane that saves the key never ran it and kept
-resaving the same dead weight. `semantic-mutation-mutants`'s
-`Swatinem/rust-cache` step is now `save-if: false` (with `cache-on-failure`
-removed, since `save-if: false` already makes it inert) to make that
-ownership explicit; `semantic-mutation-operators` is unchanged. Both
-uniquely-per-run-named directories were never reused once restored, so each
-save accumulated them as dead weight on top of this key's legitimate content,
-which is larger than initially estimated: `rust/target/fault-operators`
-(`tools/run-fault-operators.sh`) is a *deliberately persistent* scratch
-checkout and build tree, not removable dead weight, so the corrected floor is
-two build trees plus `~/.cargo` (~2.2 GiB predicted, not the ~0.9-1.4 GiB
-first predicted, which mistakenly treated that persistent tree as part of the
-dead weight) against the observed defect value of 2.719 GiB. This does not
-shrink that cache entry by itself -- `Swatinem/rust-cache` will not resave a
-still-matching key -- so the reduction only takes effect once the entry is
-deleted (a separate, human-authorized action) and a run resaves it; the
-resulting size is not reported here as measured. Separately, `rust-native-z3`'s
+early exit, so the one lane that saves the key never ran it.
+`semantic-mutation-mutants`'s `Swatinem/rust-cache` step is now
+`save-if: false` (with `cache-on-failure` removed, since `save-if: false`
+already makes it inert) to make that ownership explicit;
+`semantic-mutation-operators` is unchanged. **This is a closed-ingress-path
+fix, not a size fix**: measured directly (product-gate run `31210570118`, job
+`92972117510`, `mutation operators (3/3)`), the `semantic-mutation` entry's
+current 2.719 GiB was created by a *cold* operators run (`No cache found.` at
+19:14:17Z, saved at 19:48:12Z) that never touched the mutants lane's scratch
+build or evidence paths at all -- neither could have contributed to this
+entry's size, so there was no dead weight to recover, and two earlier
+predictions in this fragment and in `docs/DESIGN-ci.md` (a ~0.9-1.4 GiB floor
+from an assumed accumulating scratch tree, then a ~2.2 GiB floor from
+`rust/target/fault-operators`' deliberately persistent build tree treated as
+a designed minimum) were both wrong about what this entry actually is.
+`semantic-mutation` is not resized by this change and is not touched by the
+budget lever below. Separately, `rust-native-z3`'s
 `windows-latest`/`macos-15` matrix had the same cancel-skips-save deadlock
 already fixed for the `semantic-mutation` lanes: a cold build (measured warm
 at 27–33 min) exceeded the 40-minute budget, the job was cancelled on all six
@@ -86,11 +86,29 @@ future workflow's unguarded `Swatinem/rust-cache` step (and, retroactively,
 for `merge-readiness.yml`'s own now-removed per-job keys, which this audit
 never flagged for the same reason).
 
-A single oversized cache entry is now its own finding (`entry-oversized`,
-`SINGLE_ENTRY_WARN_BYTES = 2.5 GiB`, calibrated between `semantic-mutation`'s
-corrected ~2.2 GiB floor and its observed 2.719 GiB defect value) rather than
-waiting for the whole-budget `budget-exhausted` check to trip -- an added
-control, not a change to `BUDGET_WARN_FRACTION`. Separately, the shared-key
+An earlier revision of this change added an `entry-oversized` finding
+(`SINGLE_ENTRY_WARN_BYTES = 2.5 GiB`) calibrated against the wrong ~2.2 GiB
+floor above; since the real floor is 2.719 GiB, that control would have fired
+on a healthy `semantic-mutation` entry and has been removed rather than
+recalibrated, since no measured defect signature exists to calibrate it
+against (raising the threshold to paper over this would only be guessing at
+an unmeasured defect). The actual budget lever is `ci.yml`'s `fsl-logic` job,
+which now goes restore-only against `rust-workspace`
+(`shared-key: rust-workspace`, `save-if: false`) instead of saving its own
+key: its entire build (`cargo test -p fslc-rust --test typed_agreement
+--locked`) is a strict subset of what `rust workspace` already builds, and
+`Swatinem/rust-cache` prunes workspace-member artifacts at save time regardless
+of which job saves, so every lane's cache is substantively the same external
+dependency set. Measured main-branch entries (2026-08-12): `rust-workspace`
+1,605,761,517 B, `fsl-logic` 1,470,489,603 B, `wasm` 1,452,450,563 B,
+`rust-native-z3` Darwin 1,239,235,056 B, `semantic-mutation` 2,919,716,751 B,
+plus ~41 MB of tool-binary caches -- 8.130 GiB total. Deleting the now-orphaned
+`fsl-logic` entry (separate, human-authorized) and re-adding Windows
+native-z3 (historical 0.577 GiB) gives 8.130 − 1.369 + 0.577 = **7.338 GiB
+(73.4%)**, under the 8.5 GiB warn threshold. `CI_SHARED_KEYS` and
+`REQUIRED_MAIN_ENTRIES` both drop `fsl-logic` accordingly; the generic
+pull-request-rust-cache rule covers any regression the same way it already
+covers `merge-readiness.yml`'s former per-job keys. Separately, the shared-key
 regex now parses from the tail of the cache key (anchored at the end) instead
 of lazily from the head: a reviewer reproduced a case where a shared key
 containing a platform-like substring earlier in its name (e.g. a hypothetical

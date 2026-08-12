@@ -19,7 +19,6 @@ import {
   CACHE_LIMIT_BYTES,
   GIB,
   REQUIRED_MAIN_ENTRIES,
-  SINGLE_ENTRY_WARN_BYTES,
 } from "./audit-cache-budget.mjs";
 
 const MAIN = "refs/heads/main";
@@ -28,22 +27,29 @@ function cache(key, ref, gib) {
   return { key, ref, size_in_bytes: Math.round(gib * GIB) };
 }
 
+function cacheBytes(key, ref, bytes) {
+  return { key, ref, size_in_bytes: bytes };
+}
+
 function healthyListing() {
+  // Exact bytes from `gh api actions/caches` (2026-08-12; see
+  // analyst-report-07-cache-budget-redesign.md), not predicted or rounded
+  // values -- `semantic-mutation`'s clean floor in particular was previously
+  // miscalibrated from an unverified prediction (2.2 GiB) that a reviewer's
+  // real-world measurement (run 31210570118 / job 92972117510: a cold
+  // `mutation operators` run that never touched the mutants lane's
+  // scratch/evidence paths still created this exact entry) showed was wrong.
+  // No `fsl-logic` entry: that job is restore-only against `rust-workspace`
+  // (see docs/DESIGN-ci.md, "Actions cache budget") and a healthy state after
+  // that change has no dedicated `fsl-logic` key at all.
   return [
-    cache("v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1.495),
-    cache("v0-rust-wasm-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1.352),
-    cache("v0-rust-fsl-logic-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1.369),
-    // The designed floor for this key is ~2.2 GiB (two build trees --
-    // `rust/target/debug` and `rust/target/fault-operators/target` -- plus
-    // `~/.cargo`), not the 2.719 GiB it was observed holding once a scratch
-    // build tree and stale evidence directories accumulated inside the cached
-    // path (fixed elsewhere in this branch). This value represents the
-    // corrected healthy state, below `SINGLE_ENTRY_WARN_BYTES`.
-    cache("v0-rust-semantic-mutation-Linux-x64-e8b3ee54-09fbaf53", MAIN, 2.2),
+    cacheBytes("v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1_605_761_517),
+    cacheBytes("v0-rust-wasm-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1_452_450_563),
+    cacheBytes("v0-rust-semantic-mutation-Linux-x64-e8b3ee54-09fbaf53", MAIN, 2_919_716_751),
     // `rust-native-z3` is one shared key across a `[macos-15, windows-latest]`
     // matrix (`ci.yml`), so it needs one entry per platform to be healthy.
-    cache("v0-rust-rust-native-z3-Darwin-arm64-e8b3ee54-09fbaf53", MAIN, 0.6),
-    cache("v0-rust-rust-native-z3-Windows_NT-x64-e8b3ee54-09fbaf53", MAIN, 0.577),
+    cacheBytes("v0-rust-rust-native-z3-Darwin-arm64-f9b08cb2-09fbaf53", MAIN, 1_239_235_056),
+    cacheBytes("v0-rust-rust-native-z3-Windows_NT-x64-e8b3ee54-09fbaf53", MAIN, 619_501_189),
   ];
 }
 
@@ -93,19 +99,19 @@ test("rejecting: the 2026-08-06 listing that caused the outage", () => {
   const codes = result.findings.map((finding) => finding.code);
   assert.ok(codes.includes("budget-exhausted"), formatReport(result));
   // Every required {key, platform} pair is missing from the default branch:
-  // the three Linux critical-path keys (this listing predates rust-native-z3
-  // joining REQUIRED_MAIN_ENTRIES) plus both native-z3 platforms, absent here
+  // the two Linux critical-path keys (`rust-workspace`, `wasm`; this listing
+  // predates rust-native-z3 joining REQUIRED_MAIN_ENTRIES and `fsl-logic` is
+  // not a required key at all) plus both native-z3 platforms, absent here
   // entirely rather than merely missing from `main`.
-  assert.equal(codes.filter((code) => code === "main-cache-absent").length, 5);
-  // Every ci.yml key on a pull-request ref is flagged: 3 + 4 across two refs.
-  assert.equal(codes.filter((code) => code === "pull-request-cache-present").length, 7);
-  // `core-contracts` and `rust-compile` are not `ci.yml` shared keys, so rule
-  // 3 above does not see them -- this is exactly the gap the generic
-  // pull-request-rust-cache rule (rule 4) closes.
-  assert.equal(codes.filter((code) => code === "pull-request-rust-cache-present").length, 2);
-  // The 2.721 GiB `semantic-mutation` entry also trips the single-entry
-  // control independently of everything else wrong with this listing.
-  assert.ok(codes.includes("entry-oversized"), formatReport(result));
+  assert.equal(codes.filter((code) => code === "main-cache-absent").length, 4);
+  // `ci.yml` shared keys (`wasm`, `rust-workspace`, `semantic-mutation`) on a
+  // pull-request ref are flagged by rule 3: 2 + 3 across the two refs.
+  assert.equal(codes.filter((code) => code === "pull-request-cache-present").length, 5);
+  // `core-contracts`, `rust-compile`, and `fsl-logic` (not a `ci.yml` shared
+  // key) are not covered by rule 3 -- this is exactly the gap the generic
+  // pull-request-rust-cache rule (rule 4) closes: 2 `fsl-logic` + 1
+  // `core-contracts` + 1 `rust-compile`.
+  assert.equal(codes.filter((code) => code === "pull-request-rust-cache-present").length, 4);
 });
 
 test("rejecting: a non-ci.yml rust cache on a pull-request ref still fires the generic rule", () => {
@@ -148,43 +154,6 @@ test("rejecting: main missing the Darwin half of rust-native-z3 is not hidden by
   assert.equal(missing.length, 1, formatReport(result));
   assert.match(missing[0].message, /`rust-native-z3`/);
   assert.match(missing[0].message, /`Darwin`/);
-});
-
-test("accepting: no healthy entry approaches the single-entry warning threshold", () => {
-  const caches = healthyListing();
-  for (const entry of caches) {
-    assert.ok(
-      entry.size_in_bytes < SINGLE_ENTRY_WARN_BYTES,
-      `${entry.key} is ${entry.size_in_bytes} bytes, at or above SINGLE_ENTRY_WARN_BYTES`,
-    );
-  }
-  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
-  assert.equal(
-    result.findings.some((finding) => finding.code === "entry-oversized"),
-    false,
-    formatReport(result),
-  );
-});
-
-test("rejecting: a single oversized entry fires independently of the total budget", () => {
-  // 2.72 GiB reproduces the observed defect value for `semantic-mutation`
-  // before the scratch-build-tree fix elsewhere in this branch.
-  const caches = [
-    cache("v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1.495),
-    cache("v0-rust-semantic-mutation-Linux-x64-e8b3ee54-09fbaf53", MAIN, 2.72),
-  ];
-  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
-  assert.equal(result.ok, false);
-  const finding = result.findings.find((f) => f.code === "entry-oversized");
-  assert.ok(finding, formatReport(result));
-  assert.match(finding.message, /semantic-mutation/);
-  // Total usage here is well under the 85% budget threshold -- this control
-  // must not depend on `budget-exhausted` also having fired.
-  assert.equal(
-    result.findings.some((f) => f.code === "budget-exhausted"),
-    false,
-    formatReport(result),
-  );
 });
 
 test("accepting: a shared key containing an earlier platform-like substring is parsed from the tail, not misattributed", () => {

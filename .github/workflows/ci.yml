@@ -669,15 +669,22 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while `ci.yml`'s four shared
-          # keys together store about 6.9 GiB per pull request against a 10 GiB repository
-          # limit. Two concurrent pull requests therefore evicted `main`'s caches, after
-          # which every run built cold: measured +8 to +16 min per shard. Only `main`
-          # saves now, and every pull request can read `main` because it is the default
-          # branch. See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          # Restore-only against `rust workspace`'s own `rust-workspace` key, not a
+          # dedicated `fsl-logic` key. This job's entire build is
+          # `cargo test -p fslc-rust --test typed_agreement --locked`
+          # (`tools/run-fsl-logic-test.sh:19-22`), one test target that is a strict
+          # subset of what the `rust workspace` shards already build -- `Swatinem/rust-cache`
+          # prunes workspace-member build artifacts at save time and keeps only external
+          # dependency output (upstream `src/cleanup.ts`), so every lane's cache is
+          # substantively "the same lockfile's external deps" regardless of which job
+          # saved it; restoring `rust-workspace` here loses nothing this job needed a
+          # dedicated key for. This removes the dedicated `fsl-logic` key from the shared
+          # budget -- measured at 1,470,489,603 B (1.369 GiB) before this change -- once a
+          # human deletes the now-orphaned entry. Baseline warm duration: 2m48s-2m53s
+          # (scheduled runs 2026-08-09/10/11); TODO: record this job's first post-change
+          # run duration here once observed.
+          shared-key: rust-workspace
+          save-if: false
           workspaces: rust -> target
 
       - name: Run bounded pull-request generation
