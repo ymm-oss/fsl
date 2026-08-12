@@ -36,38 +36,87 @@
 //! a skipped failure.
 //!
 //! **Both `CEILING_KB` values below are calibrated from a direct Linux
-//! measurement, not a macOS peak-memory estimate.** Using a `rust:1-bookworm`
-//! Docker container (`aarch64`, `ulimit -v` confirmed to actually enforce
-//! `RLIMIT_AS` there -- unlike macOS), each test's `ulimit`-capped assertion
-//! was run under a binary search of `CEILING_KB` values against both the
-//! fixed build (this branch) and a per-node-Monitor-clone mutant, until the
-//! PASS/FAIL boundary on each side was pinned to within 20-50 MiB and
-//! confirmed reproducible by repeating both boundary points. That is the
-//! direct observation #776's own review asked for and #783-round2 deferred:
-//! each per-test comment below cites the exact boundary window measured on
-//! each side, and the mutant side's FAIL is a real `SIGABRT` (Rust's
-//! allocator aborting the process, `status=...unix_wait_status(134)`,
-//! `stderr="memory allocation of N bytes failed"`) under the `ulimit -v`
-//! cap, not a timeout or a different failure mode.
+//! measurement, not a macOS peak-memory estimate.** That is the direct
+//! observation #776's own review asked for and #783-round2 deferred; a
+//! third-party reproduction needs no machine-specific path, only the
+//! container image, the two commits below, and the commands in this
+//! comment.
 //!
-//! Two assumptions still remain, stated precisely so they are not confused
-//! with what was actually measured:
-//! - The measurement above is `aarch64` Linux (an Apple Silicon Mac's
-//!   `colima`/Docker VM); this repository's actual CI runs GitHub Actions'
-//!   `ubuntu-latest`, which is `x86_64`. Cross-architecture allocator and
-//!   address-space-layout differences could shift the true PASS/FAIL
-//!   boundary on `x86_64` from what was measured here -- this has not been
-//!   independently checked on `x86_64`, and is the one monotonicity
-//!   assumption this file still carries.
-//! - The mutant used for each lane is a hand-restored reversion of exactly
-//!   that lane's per-node clone (verified below each `#[test]`'s doc comment
-//!   by a `monitor.clone()` occurrence count inside the function), not an
-//!   independently-authored regression -- it demonstrates this specific
-//!   defect class is caught, not every conceivable regression shape.
+//! **Container**: `docker run --rm -v <repo>:/w -w /w rust:1-bookworm bash`,
+//! where `<repo>` is a checkout of this repository (any path; the container
+//! only needs `/w/rust` to exist inside it). Confirmed directly in that
+//! container: `sh -c 'ulimit -v 500000 && ...'` really does enforce
+//! `RLIMIT_AS` there (unlike macOS, where the identical command fails
+//! outright with "cannot modify limit: Invalid argument" before anything
+//! else runs) -- a capped process that exceeds it is killed with `SIGABRT`
+//! (`status=...unix_wait_status(134)`, `stderr="memory allocation of N
+//! bytes failed"`), not merely slowed down or left unenforced.
 //!
-//! If a `CEILING_KB` below flakes on Linux CI regardless, widen it rather
-//! than tightening this comment's claim -- the `x86_64` assumption above is
-//! the most likely reason a widening would ever be needed.
+//! **Mutants**, each built by editing a checkout of this branch (`HEAD` at
+//! the time of the #783-linux measurement) and reconstructed from a named
+//! commit rather than a machine-local tree -- **not from the same commit**,
+//! and precise to a different degree, which the next section explains:
+//! - For `check_refinement`'s test: replace `rust/fsl-runtime/src/lib.rs`
+//!   and `rust/fsl-runtime/src/trace.rs` with their content at commit
+//!   `6012c00` (`feat(runtime): add fsl-refine driver for check_refinement
+//!   memory measurement (#783)` -- the commit immediately before this
+//!   issue's own clone-removal commit, i.e. all three #783 lanes still
+//!   carry their pre-fix per-node `Monitor` clone).
+//! - For `first_self_violation`'s test: on an unmodified checkout of this
+//!   branch, replace only the body of the `first_self_violation` function
+//!   in `rust/fsl-runtime/src/lib.rs` with its content at commit
+//!   `20d0a9b^` (the parent of `20d0a9b`, `fix(runtime): drop per-node
+//!   model clones from the three lanes issue #730 enumerates (#730)
+//!   (#776)` -- i.e. `first_self_violation`'s form immediately before PR
+//!   #776 fixed it). Every other function is left exactly as it is on this
+//!   branch.
+//!
+//! **These two mutants are built to two different degrees of precision, and
+//! that difference is deliberate, not an inconsistency:**
+//! `check_refinement`'s mutant is the coarser of the two -- restoring all of
+//! `lib.rs`/`trace.rs` to `6012c00` reverts `action_cover_traces` and
+//! `leadsto_response_traces` as well, not `check_refinement` alone. That is
+//! still sound teeth for this specific test because `fsl-refine` (the
+//! driver `run_capped` below invokes) only ever calls
+//! `fsl_runtime::check_refinement`; `action_cover_traces` and
+//! `leadsto_response_traces` are reachable only from `fslc scenarios`,
+//! which this measurement's path never touches, so their state at
+//! measurement time cannot affect either binary's peak memory. A
+//! function-only mutant was **not** available for `check_refinement`
+//! itself at the time of this measurement (its function was rewritten by
+//! this issue's own clone-removal commit in a way a single hand-edit could
+//! not cheaply invert to an equivalent pre-fix form), so the whole-file
+//! revert was the pragmatic choice, justified by the argument above rather
+//! than by precision. `first_self_violation`'s mutant is the surgical one:
+//! only that one function's body is replaced (verified in each `#[test]`'s
+//! doc comment below by a `monitor.clone()` occurrence count inside the
+//! function, checked to differ from the fixed build's count *before* any
+//! measurement was taken -- an earlier, invalid attempt at this measurement
+//! used a mutant where that count was accidentally unchanged, i.e. no real
+//! contrast, and was caught and discarded specifically by this count).
+//!
+//! **Commands** (run inside the container, from `/w/rust`, once per side
+//! -- fixed checkout and each mutant checkout in turn):
+//! ```sh
+//! cargo test -p fsl-runtime --test issue_783_refine_memory_ceiling --locked \
+//!   -- --exact <test name>
+//! ```
+//! **Boundary search**: with the target test's `const CEILING_KB` edited to
+//! successive candidate values (a coarse pass across roughly one order of
+//! magnitude, then a binary search narrowing the bracket), the PASS/FAIL
+//! boundary on each side was pinned to a 20-50 MiB window and confirmed
+//! reproducible by rerunning both endpoints of that window. Each per-test
+//! comment below cites the exact window measured on each side.
+//!
+//! One assumption remains, stated precisely so it is not confused with what
+//! was actually measured: the container above runs `aarch64` (an Apple
+//! Silicon Mac's Docker VM); this repository's actual CI runs GitHub
+//! Actions' `ubuntu-latest`, which is `x86_64`. Cross-architecture allocator
+//! and address-space-layout differences could shift the true PASS/FAIL
+//! boundary on `x86_64` from what was measured here -- this has not been
+//! independently checked on `x86_64`. If a `CEILING_KB` below flakes on
+//! Linux CI regardless, that gap is the most likely explanation, and
+//! widening `CEILING_KB` is the fix, not tightening this comment's claim.
 #![cfg(target_os = "linux")]
 
 use std::process::Command;
@@ -200,10 +249,12 @@ fn run_capped(ceiling_kb: u64, args: &[&str]) -> std::process::Output {
 /// = 1000 * 1024` (1000 MiB) therefore sits 1.98-2.00x above the fixed
 /// boundary and 2.12-2.15x below the mutant boundary (both ratios computed
 /// against the boundary's FAIL and PASS endpoints respectively, so the true
-/// margin is somewhere in each stated range). See this file's top comment
-/// for the two assumptions this measurement still rests on (`x86_64` CI vs.
-/// this `aarch64` measurement; this specific mutant vs. every conceivable
-/// regression shape).
+/// margin is somewhere in each stated range). This mutant demonstrates this
+/// specific defect class is caught, not every conceivable regression
+/// shape. See this file's top comment for the remaining `x86_64`-CI-vs-
+/// `aarch64`-measurement assumption, the exact commits both mutants are
+/// reconstructed from, and the container/command needed to reproduce this
+/// measurement.
 #[test]
 fn first_self_violation_stays_under_a_calibrated_ceiling_for_the_branching_reproducer() {
     const CEILING_KB: u64 = 1000 * 1024;
@@ -251,14 +302,21 @@ fn first_self_violation_stays_under_a_calibrated_ceiling_for_the_branching_repro
 /// 0) passes down to a `CEILING_KB` of 502 MiB and fails at 500 MiB
 /// (`status=...unix_wait_status(134)`, `stderr="memory allocation of 6
 /// bytes failed"`) -- boundary in `(500, 502]` MiB. The pre-removal commit
-/// (`6012c00`, `fsl-refine` present but the per-node clone not yet removed;
-/// `monitor.clone()` count inside `check_refinement`: 2) passes at 2020 MiB
+/// (`6012c00`, `fsl-refine` present but the per-node clone not yet removed
+/// in any of #783's three lanes, not `check_refinement` alone --
+/// `action_cover_traces`/`leadsto_response_traces` are unreachable from the
+/// `fsl-refine` binary this measurement runs, so their reverted state is
+/// inert here; see this file's top comment for why that is sound teeth
+/// rather than an imprecise mutant; `monitor.clone()` count inside
+/// `check_refinement` itself: 2) passes at 2020 MiB
 /// and fails at 2000 MiB -- boundary in `(2000, 2020]` MiB, consistent with
 /// issue #783's own reported ~1.72 GB order of magnitude. `CEILING_KB = 950
 /// * 1024` (950 MiB) therefore sits 1.89-1.90x above the post-removal
 /// boundary and 2.11-2.13x below the pre-removal boundary (ratios computed
 /// against each boundary's FAIL/PASS endpoints, as above). See this file's
-/// top comment for the two assumptions this measurement still rests on.
+/// top comment for the remaining `x86_64`-CI-vs-`aarch64`-measurement
+/// assumption, the exact commits both mutants are reconstructed from, and
+/// the container/command needed to reproduce this measurement.
 #[test]
 fn check_refinement_stays_under_a_calibrated_ceiling_for_the_branching_reproducer() {
     const CEILING_KB: u64 = 950 * 1024;
