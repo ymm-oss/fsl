@@ -48,5 +48,22 @@ cancellation: the semantic-mutation lanes' `cancelled` recurrences (issues
 commit simultaneously raised those lanes' timeouts, confounding the two
 causes, and the eventual recovery run saved after reaching `success`, not
 after a cancellation. `timeout-minutes` is separately raised from 40 to 60,
-diagnosed from measured warm/cold durations rather than raised blind. See
-`docs/DESIGN-ci.md`, "Actions cache budget".
+diagnosed from measured warm/cold durations rather than raised blind.
+
+`.github/scripts/audit-cache-budget.mjs`'s `sharedKeyOf` regex matched the
+GitHub Actions `runner.os` platform spellings (`Linux`/`macOS`/`Windows`), but
+`Swatinem/rust-cache` derives its key from `os.type()`, which reports
+`Linux`/`Darwin`/`Windows_NT` -- so `rust-native-z3`'s cache, on either
+platform, was invisible to every rule in this audit, including the one that
+should have reported `main`'s Windows entry evicted to zero during this
+incident. The regex is corrected (matching `Windows_NT` before the `Windows`
+it is a strict superset of), and the default-branch requirement is now
+per-`{key, platform}` pair rather than per-key, so `rust-native-z3` must be
+present on both `Windows_NT` and `Darwin` independently -- one platform's
+cache can no longer hide the other's absence. A new general rule also flags
+any `v0-rust-*`-prefixed cache on a pull-request ref regardless of whether its
+shared key is one `ci.yml` declares, closing the same blind spot for any
+future workflow's unguarded `Swatinem/rust-cache` step (and, retroactively,
+for `merge-readiness.yml`'s own now-removed per-job keys, which this audit
+never flagged for the same reason). See `docs/DESIGN-ci.md`,
+"Actions cache budget".

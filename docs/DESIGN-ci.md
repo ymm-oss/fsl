@@ -667,18 +667,41 @@ genuine cold vendored-Z3 build on this matrix without approaching the Linux prom
 
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,
-and on `main` pushes that touch it or `ci.yml`. It fails closed on three states: usage at or above
-85% of the limit, a missing `refs/heads/main` cache for any critical-path shared key, and — the
-rejecting control for the `save-if` guard itself — **any pull-request-scoped cache for one of
-`ci.yml`'s shared keys**, which can only appear if that guard is removed. An unreadable listing or
-an absent usage total fail closed too; neither is read as headroom.
+and on `main` pushes that touch it, `ci.yml`, or `merge-readiness.yml`. It fails closed on four
+states: usage at or above 85% of the limit, a missing `refs/heads/main` cache for any critical-path
+`{key, platform}` pair, — the rejecting control for the `save-if` guard itself — any pull-request-
+scoped cache for one of `ci.yml`'s shared keys, and — the general form of that same control — any
+`v0-rust-*`-prefixed cache on a pull-request ref at all, whether or not its shared key is one
+`ci.yml` declares. An unreadable listing or an absent usage total fail closed too; neither is read
+as headroom.
+
+The critical-path check is per-`{key, platform}` pair, not per-key, because `rust-native-z3` is one
+shared key backed by a `[macos-15, windows-latest]` matrix in `ci.yml`: a key-only set lets either
+platform's presence on `main` hide the other's absence. That was a live blind spot, not a
+hypothetical one -- `sharedKeyOf`'s regex matched `Linux`/`macOS`/`Windows` (the GitHub Actions
+`runner.os` spellings), but `Swatinem/rust-cache` composes its key from `os.type()`, which reports
+`Linux`, `Darwin`, and `Windows_NT`. `Darwin` and `Windows_NT` never matched, so both `rust-native-z3`
+entries were invisible to every rule in this audit -- including the one that would have reported
+`main`'s Windows cache evicted to zero entries during the incident this section documents. The regex
+is corrected (`Windows_NT` tried before the `Windows` it is a strict superset of) and
+`REQUIRED_MAIN_ENTRIES` now requires `rust-native-z3` on both `Windows_NT` and `Darwin` explicitly.
+
+The general pull-request-rust-cache rule exists because `merge-readiness.yml`'s restore-only fix
+(above) makes "no workflow saves a rust cache on a pull-request event" a repository-wide invariant,
+not something scoped to `ci.yml`'s four declared keys. Before this rule, `merge-readiness.yml`'s own
+now-removed per-job keys (`rust-compile`, `core-contracts`) were invisible to this audit for the same
+reason `rust-native-z3` was: an unlisted shared key is never attributed, so a pull-request-scoped
+entry for it was silently treated as normal. The general rule catches that shape regardless of
+whether the key is one this file has ever heard of, so a future workflow's unguarded
+`Swatinem/rust-cache` step cannot reopen the same blind spot under a new name.
 
 `.github/scripts/audit-cache-budget.test.mjs` calibrates all of it offline, including a fixture that
-reproduces the 2026-08-06 listing verbatim and must fail. `tools/check-merge-readiness.sh`'s
-`check_automation` lane runs that suite on every pull request, so a change to the checker is covered
-pre-merge even though the live audit deliberately is not a required context: the shared cache state
-can change after a pull request's own checks pass, so gating a merge on it would gate on something
-outside the change under review.
+reproduces the 2026-08-06 listing verbatim and must fail, and rejecting fixtures for a non-`ci.yml`
+rust cache on a pull-request ref and for each half of `rust-native-z3` missing from `main`.
+`tools/check-merge-readiness.sh`'s `check_automation` lane runs that suite on every pull request, so
+a change to the checker is covered pre-merge even though the live audit deliberately is not a
+required context: the shared cache state can change after a pull request's own checks pass, so
+gating a merge on it would gate on something outside the change under review.
 
 Issue #747 records the incident. Issue #720's Finding 2 — warming the fault-operator scratch build —
 **adds** a cache and therefore depends on this budget holding first.
