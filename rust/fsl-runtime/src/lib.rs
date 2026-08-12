@@ -1719,64 +1719,70 @@ pub fn check_refinement(
             ));
             return Ok(check);
         }
-        queue.push_back((
-            Monitor {
-                model: implementation.clone(),
-                state: impl_state,
-                step: 0,
-            },
-            0_usize,
-            initial_trace,
-        ));
+        queue.push_back((impl_state, 0_usize));
     }
 
+    // The frontier carries `State` only, not `Monitor` -- a full `Monitor`
+    // clone per candidate transition duplicates the whole `KernelModel`
+    // repeatedly at every layer (issue #783's 1.72 GB @ depth 3). `scratch`
+    // is re-pointed at each state instead, following `first_self_violation`
+    // and `bfs`'s established pattern. Traces are no longer carried in the
+    // queue either; `parents` -- left empty for every root, per
+    // `trace::reconstruct_trace`'s multi-root contract -- reconstructs one
+    // only when a failure is about to be reported.
     let mut visited = BTreeSet::new();
-    while let Some((_, step, _)) = queue.front() {
+    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+    let mut scratch = Monitor::from_state(implementation.clone(), State::new());
+    while let Some((_, step)) = queue.front() {
         let step = *step;
         let mut layer = Vec::new();
         while queue
             .front()
-            .is_some_and(|(_, queued_step, _)| *queued_step == step)
+            .is_some_and(|(_, queued_step)| *queued_step == step)
         {
-            let Some((monitor, _, trace)) = queue.pop_front() else {
+            let Some((state, _)) = queue.pop_front() else {
                 unreachable!("queue front was present");
             };
-            if visited.insert(monitor.state.clone()) && step < depth {
-                layer.push((monitor, trace));
+            if visited.insert(state.clone()) && step < depth {
+                layer.push(state);
             }
         }
-        let mut candidates = Vec::new();
-        for (state_index, (monitor, trace)) in layer.into_iter().enumerate() {
-            let alpha_before = alpha_state(
-                &monitor.state,
+        // `alpha_before` for each layer state is computed once here, in
+        // layer order, and looked up by index below -- not recomputed per
+        // candidate -- to keep both the values and their computation order
+        // identical to the pre-#783 per-node walk.
+        let mut alphas = Vec::with_capacity(layer.len());
+        for state in &layer {
+            alphas.push(alpha_state(
+                state,
                 implementation,
                 abstraction,
                 mapping,
                 &eval_model,
-            )?;
-            for enabled in monitor.enabled()? {
+            )?);
+        }
+        let mut candidates = Vec::new();
+        for (state_index, state) in layer.iter().enumerate() {
+            scratch.state = state.clone();
+            scratch.step = step;
+            for enabled in scratch.enabled()? {
                 let action_index = implementation
                     .actions
                     .iter()
                     .position(|action| action.name == enabled.action)
                     .unwrap_or(usize::MAX);
-                candidates.push((
-                    action_index,
-                    enabled.params.clone(),
-                    state_index,
-                    monitor.clone(),
-                    trace.clone(),
-                    alpha_before.clone(),
-                    enabled,
-                ));
+                candidates.push((action_index, enabled.params.clone(), state_index, enabled));
             }
         }
         candidates.sort_by(|left, right| {
             (&left.0, &left.1, &left.2).cmp(&(&right.0, &right.1, &right.2))
         });
-        for (_, _, _, monitor, trace, alpha_before, enabled) in candidates {
-            let mut child = monitor.clone();
-            let stepped = child.step(&enabled)?;
+        for (_, _, state_index, enabled) in candidates {
+            let state = &layer[state_index];
+            let alpha_before = &alphas[state_index];
+            scratch.state = state.clone();
+            scratch.step = step;
+            let stepped = scratch.step(&enabled)?;
             if stepped.violation.is_some() {
                 // Unreachable in practice: `first_self_violation` above
                 // already proved the impl has no self-violation within
@@ -1786,15 +1792,9 @@ pub fn check_refinement(
                 // panic — would resurrect the false-green #466 fixes.
                 continue;
             }
-            let mut child_trace = trace.clone();
-            child_trace.push(trace_step_from_result(
-                step + 1,
-                &monitor.state,
-                &enabled,
-                &stepped,
-            ));
+            let child_state = stepped.state.clone();
             let alpha_after = alpha_state(
-                &child.state,
+                &child_state,
                 implementation,
                 abstraction,
                 mapping,
@@ -1803,7 +1803,9 @@ pub fn check_refinement(
             let action_map = &mapping.action_correspondences[&enabled.action];
             match &action_map.target {
                 ActionCorrespondenceTarget::Stutter => {
-                    if alpha_before != alpha_after {
+                    if alpha_before != &alpha_after {
+                        let child_trace =
+                            refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
                         check.failure = Some(refinement_failure(
                             "stutter_changed_abs",
                             Some("step"),
@@ -1828,7 +1830,7 @@ pub fn check_refinement(
                     let mut bindings = enabled.params.clone();
                     let values = match args
                         .iter()
-                        .map(|expr| eval(expr, &monitor.state, &mut bindings, &eval_model, None))
+                        .map(|expr| eval(expr, state, &mut bindings, &eval_model, None))
                         .collect::<Result<Vec<_>, _>>()
                     {
                         Ok(values) => values,
@@ -1845,6 +1847,13 @@ pub fn check_refinement(
                         // located refinement finding, not an unclassified
                         // internal error that the CLI defaults to `kind:"type"`.
                         Err(error) if is_partial_operation_error(&error.message) => {
+                            let child_trace = refinement_child_trace(
+                                state,
+                                &parents,
+                                step + 1,
+                                &enabled,
+                                &stepped,
+                            );
                             check.failure = Some(refinement_failure(
                                 "map_partial_op",
                                 Some("step"),
@@ -1868,7 +1877,7 @@ pub fn check_refinement(
                     // state is already fully computed, so there is nothing
                     // for `abstraction.init` to determine here either.
                     let abs_state = abstract_action_state(
-                        &alpha_before,
+                        alpha_before,
                         abstraction,
                         abs_action,
                         &expected_params,
@@ -1877,6 +1886,8 @@ pub fn check_refinement(
                     let Some(abs_enabled) =
                         refinement_action_instance(&abs_monitor, abs_action, expected_params)?
                     else {
+                        let child_trace =
+                            refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
                         check.failure = Some(refinement_failure(
                             "abs_requires_failed",
                             Some("step"),
@@ -1891,6 +1902,8 @@ pub fn check_refinement(
                     let abs_step = abs_monitor.step(&abs_enabled)?;
                     let expected_state = project_abstract_state(&abs_step.state, abstraction)?;
                     if expected_state != alpha_after {
+                        let child_trace =
+                            refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
                         check.failure = Some(refinement_failure(
                             "abs_state_mismatch",
                             Some("step"),
@@ -1911,6 +1924,8 @@ pub fn check_refinement(
                 } else {
                     "abs_state_mismatch"
                 };
+                let child_trace =
+                    refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
                 check.failure = Some(refinement_failure(
                     kind,
                     Some("step"),
@@ -1922,12 +1937,39 @@ pub fn check_refinement(
                 ));
                 return Ok(check);
             }
-            if !visited.contains(&child.state) {
-                queue.push_back((child, step + 1, child_trace));
+            if !visited.contains(&child_state) {
+                parents
+                    .entry(child_state.clone())
+                    .or_insert_with(|| trace::ParentLink {
+                        parent: state.clone(),
+                        action: TraceAction {
+                            name: enabled.action.clone(),
+                            params: enabled.params.clone(),
+                        },
+                    });
+                queue.push_back((child_state, step + 1));
             }
         }
     }
     Ok(check)
+}
+
+/// The replayable trace ending at the step just taken from `state`, built by
+/// walking `parents` back to the walk's root and appending that one step --
+/// reconstructed only when a refinement failure is about to be reported,
+/// mirroring `find_boundary_violation`'s and `first_self_violation`'s
+/// on-demand trace construction (issue #783) instead of carrying a growing
+/// `Vec<TraceStep>` clone in every queued frontier node.
+fn refinement_child_trace(
+    state: &State,
+    parents: &BTreeMap<State, trace::ParentLink>,
+    next_step: usize,
+    enabled: &EnabledAction,
+    stepped: &StepResult,
+) -> Vec<TraceStep> {
+    let mut child_trace = trace::reconstruct_trace(state, parents);
+    child_trace.push(trace_step_from_result(next_step, state, enabled, stepped));
+    child_trace
 }
 
 /// Exhaustively explore concrete reachable states to a bounded depth.
@@ -2833,37 +2875,49 @@ pub fn action_cover_traces(
     model: KernelModel,
     depth: usize,
 ) -> Result<BTreeMap<String, Vec<TraceStep>>, RuntimeError> {
-    let initial = Monitor::new(model)?;
-    let initial_trace = vec![TraceStep {
-        step: 0,
-        state: initial.state.clone(),
-        action: None,
-        changes: BTreeMap::new(),
-    }];
+    // `scratch` re-pointed per state, `parents` reconstructed only on
+    // witness discovery -- the same #783 pattern as `check_refinement`'s
+    // walk. The witness for a covered action is built from the *parent*
+    // state's own reconstructed trace plus the covering step, not from the
+    // child's `parents` entry: the witness registration below fires even
+    // when the child was already visited by an earlier path (it runs before
+    // the `visited` check), so it cannot depend on the child having a
+    // `ParentLink` at all.
+    let mut scratch = Monitor::new(model)?;
+    let initial_state = scratch.state.clone();
     let mut covered = BTreeMap::new();
-    let mut visited = BTreeSet::from([initial.state.clone()]);
-    let mut queue = VecDeque::from([(initial, initial_trace, 0_usize)]);
-    while let Some((monitor, trace, step)) = queue.pop_front() {
+    let mut visited = BTreeSet::from([initial_state.clone()]);
+    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+    let mut queue = VecDeque::from([(initial_state, 0_usize)]);
+    while let Some((state, step)) = queue.pop_front() {
         if step >= depth {
             continue;
         }
-        let enabled = monitor.enabled()?;
+        scratch.state = state.clone();
+        scratch.step = step;
+        let enabled = scratch.enabled()?;
         for instance in enabled {
-            let mut child = monitor.clone();
-            let result = child.step(&instance)?;
-            let mut child_trace = trace.clone();
-            child_trace.push(trace_step_from_result(
-                step + 1,
-                &monitor.state,
-                &instance,
-                &result,
-            ));
+            scratch.state = state.clone();
+            scratch.step = step;
+            let result = scratch.step(&instance)?;
             if result.violation.is_none() {
-                covered
-                    .entry(instance.action.clone())
-                    .or_insert_with(|| child_trace.clone());
-                if visited.insert(child.state.clone()) {
-                    queue.push_back((child, child_trace, step + 1));
+                let child_state = result.state.clone();
+                if !covered.contains_key(&instance.action) {
+                    let mut witness = trace::reconstruct_trace(&state, &parents);
+                    witness.push(trace_step_from_result(step + 1, &state, &instance, &result));
+                    covered.insert(instance.action.clone(), witness);
+                }
+                if visited.insert(child_state.clone()) {
+                    parents
+                        .entry(child_state.clone())
+                        .or_insert_with(|| trace::ParentLink {
+                            parent: state.clone(),
+                            action: TraceAction {
+                                name: instance.action.clone(),
+                                params: instance.params.clone(),
+                            },
+                        });
+                    queue.push_back((child_state, step + 1));
                 }
             }
         }
@@ -2906,28 +2960,37 @@ pub fn leadsto_response_traces(
     if model.leadstos.is_empty() {
         return Ok((Vec::new(), Vec::new()));
     }
-    let initial = Monitor::new(model.clone())?;
+    // Only the per-node `Monitor` clone (a whole `KernelModel` clone) is
+    // removed here, via a re-pointed `scratch` -- issue #783 scoped this
+    // lane to that clone alone. The per-node `Vec<TraceStep>` clone stays:
+    // this walk has no `visited` dedup (a `pending`/response history is
+    // path-dependent, so two routes to the same state must stay distinct
+    // path-trees, not merge behind a shared `ParentLink`), and a
+    // `reconstruct_trace`-style backward walk has no well-defined single
+    // parent to walk back through when routes fork and rejoin.
+    let mut scratch = Monitor::new(model.clone())?;
+    let initial_state = scratch.state.clone();
     let bindings = model
         .leadstos
         .iter()
         .map(|property| {
             Ok((
                 property.name.clone(),
-                leadsto_bindings(property, &initial.state, model)?,
+                leadsto_bindings(property, &initial_state, model)?,
             ))
         })
         .collect::<Result<BTreeMap<_, _>, RuntimeError>>()?;
     let target_count = bindings.values().map(Vec::len).sum::<usize>();
     let initial_trace = vec![TraceStep {
         step: 0,
-        state: initial.state.clone(),
+        state: initial_state.clone(),
         action: None,
         changes: BTreeMap::new(),
     }];
     let mut responses = BTreeMap::<(String, Bindings), LeadstoResponse>::new();
     let mut triggered = BTreeSet::<(String, Bindings)>::new();
-    let mut queue = VecDeque::from([(initial, initial_trace, 0_usize)]);
-    while let Some((monitor, trace, step)) = queue.pop_front() {
+    let mut queue = VecDeque::from([(initial_state, initial_trace, 0_usize)]);
+    while let Some((state, trace, step)) = queue.pop_front() {
         for property in &model.leadstos {
             for binding in &bindings[&property.name] {
                 let key = (property.name.clone(), binding.clone());
@@ -2965,20 +3028,18 @@ pub fn leadsto_response_traces(
         if responses.len() == target_count || step >= depth {
             continue;
         }
-        for instance in monitor.enabled()? {
-            let mut child = monitor.clone();
-            let result = child.step(&instance)?;
+        scratch.state = state.clone();
+        scratch.step = step;
+        for instance in scratch.enabled()? {
+            scratch.state = state.clone();
+            scratch.step = step;
+            let result = scratch.step(&instance)?;
             if result.violation.is_some() {
                 continue;
             }
             let mut child_trace = trace.clone();
-            child_trace.push(trace_step_from_result(
-                step + 1,
-                &monitor.state,
-                &instance,
-                &result,
-            ));
-            queue.push_back((child, child_trace, step + 1));
+            child_trace.push(trace_step_from_result(step + 1, &state, &instance, &result));
+            queue.push_back((result.state.clone(), child_trace, step + 1));
         }
     }
     let missing = bindings
