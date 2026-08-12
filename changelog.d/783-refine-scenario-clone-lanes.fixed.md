@@ -29,22 +29,27 @@ its `LabelCoreRepro` fixture shared with the `issue_730_*` ceiling tests via
 `tests/support/mod.rs`) adds a calibrated memory ceiling for
 `check_refinement`'s walk and, as PR #776 deferred to this issue, one for
 `first_self_violation`'s own frontier. Both ceilings are calibrated from a
-direct Linux measurement (`rust:1-bookworm` Docker, `aarch64`): a
-binary-search sweep of `CEILING_KB` against the fixed build and, per lane, a
-mutant with that lane's pre-fix per-node `Monitor` clone hand-restored,
-confirmed the `ulimit -v`-capped assertion actually passes on the fixed
-build and actually fails (`SIGABRT`, `status=...unix_wait_status(134)`,
-`stderr="memory allocation of N bytes failed"`) on the corresponding
-mutant, with both PASS/FAIL boundaries reproduced twice. `check_refinement`:
-fixed boundary `(500, 502]` MiB, pre-removal-commit boundary `(2000, 2020]`
-MiB, `CEILING_KB = 950 * 1024` (1.89-1.90x headroom, 2.11-2.13x margin).
-`first_self_violation`: fixed boundary `(500, 505]` MiB, pre-#776-clone
-boundary `(2120, 2150]` MiB, `CEILING_KB = 1000 * 1024` (1.98-2.00x
-headroom, 2.12-2.15x margin). The one remaining assumption is architecture:
-this measurement is `aarch64`, while this repository's CI runs `x86_64`; if
-either ceiling flakes on CI, that cross-architecture gap is the most likely
-cause, and widening `CEILING_KB` is the fix, not tightening the test's
-claim. No public contract changed:
+direct Linux measurement (`rust:1-bookworm` Docker, `aarch64`; exact
+commands, mutant source commits, and reasoning are recorded in the test
+file's own top comment, not only here): a binary-search sweep of
+`CEILING_KB` against the fixed build and a mutant confirmed the `ulimit
+-v`-capped assertion actually passes on the fixed build and actually fails
+(`SIGABRT`, `status=...unix_wait_status(134)`, `stderr="memory allocation
+of N bytes failed"`) on the corresponding mutant, with both PASS/FAIL
+boundaries reproduced twice. The two mutants differ in precision: commit
+`6012c00` (all three #783 lanes reverted) stands in for `check_refinement`'s
+mutant, sound teeth there because the measurement's driver never reaches
+`action_cover_traces`/`leadsto_response_traces`; `first_self_violation`'s
+mutant restores only that function to its pre-#776 form (commit
+`20d0a9b^`). `check_refinement`: fixed boundary `(500, 502]` MiB,
+`6012c00` boundary `(2000, 2020]` MiB, `CEILING_KB = 950 * 1024`
+(1.89-1.90x headroom, 2.11-2.13x margin). `first_self_violation`: fixed
+boundary `(500, 505]` MiB, pre-#776-clone boundary `(2120, 2150]` MiB,
+`CEILING_KB = 1000 * 1024` (1.98-2.00x headroom, 2.12-2.15x margin). The one
+remaining assumption is architecture: this measurement is `aarch64`, while
+this repository's CI runs `x86_64`; if either ceiling flakes on CI, that
+cross-architecture gap is the most likely cause, and widening `CEILING_KB`
+is the fix, not tightening the test's claim. No public contract changed:
 `RefinementCheck`/`LeadstoResponse` fields, JSON envelopes, exit codes, and
 verdicts/trace/state-count output are identical before and after, checked
 directly across every `specs`/`examples` corpus refinement mapping (`fslc
