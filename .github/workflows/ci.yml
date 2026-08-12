@@ -366,13 +366,18 @@ jobs:
           # and the next run is cold again -- the cache can then only be created by a
           # run that succeeds, and a run can only succeed once the cache exists. This is
           # the same fix already applied to the `semantic-mutation` lanes below for an
-          # identical deadlock; confirmed here from the action's own `post-if:
-          # success() || env.CACHE_ON_FAILURE == 'true'` (does not distinguish a
-          # cancelled conclusion from a failed one) and from this repository's own
-          # history: issues #721 and #678 both recurred with `Conclusion: cancelled`
-          # repeatedly before commit 877fe8c (#752) added this flag to those lanes, and
-          # neither showed `cancelled` again afterward -- only an unrelated `failure`
-          # that was fixed separately. See docs/DESIGN-ci.md, "Actions cache budget".
+          # identical deadlock. The action's own `post-if: success() ||
+          # env.CACHE_ON_FAILURE == 'true'` does not distinguish a cancelled conclusion
+          # from a failed one, which reads as support for this saving through a timeout
+          # cancellation and not only an ordinary step failure -- but that reading is
+          # inference from the condition text, not a direct observation: commit 877fe8c
+          # (#752), which added this same flag to the semantic-mutation lanes, also
+          # raised those lanes' timeouts in the same commit, so the `cancelled`
+          # conclusions on issues #721/#678 stopping afterward is confounded with more
+          # budget, not isolated evidence for `cache-on-failure` alone. No run in this
+          # repository's history has been observed saving specifically after a
+          # timeout-triggered cancellation; see docs/DESIGN-ci.md, "Actions cache
+          # budget", for what is and is not established here.
           cache-on-failure: true
 
       - name: Test pinned native solver and BMC crates

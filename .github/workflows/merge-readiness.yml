@@ -30,12 +30,14 @@ jobs:
           # Saving is restricted to non-pull-request events, matching every
           # `Swatinem/rust-cache` step in `ci.yml`. This workflow runs on every pull
           # request, so before this guard existed it saved a fresh ref-scoped cache on
-          # every one of them -- measured at 15 open pull requests holding 29 entries /
-          # about 1.90 GiB (roughly 134 MiB per pull request across this job and
-          # `core-contracts` below) against the repository's shared 10 GiB budget. PR
-          # #752 closed this same eviction path in `ci.yml` but left this workflow open,
-          # so its accumulation kept crowding out `main`'s caches -- including the
-          # `native Z3 4.16 (windows-latest)` cache, observed evicted to zero entries.
+          # every one of them -- measured at 15 pull-request refs (#743-#792, all closed
+          # or merged by measurement time, still resident within GitHub's 7-day
+          # no-access retention window) holding 29 entries / about 1.90 GiB (roughly
+          # 134 MiB per ref across this job and `core-contracts` below) against the
+          # repository's shared 10 GiB budget. PR #752 closed this same eviction path in
+          # `ci.yml` but left this workflow open, so its accumulation kept crowding out
+          # `main`'s caches -- including the `native Z3 4.16 (windows-latest)` cache,
+          # observed evicted to zero entries.
           # See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -59,12 +61,14 @@ jobs:
           # Saving is restricted to non-pull-request events, matching every
           # `Swatinem/rust-cache` step in `ci.yml`. This workflow runs on every pull
           # request, so before this guard existed it saved a fresh ref-scoped cache on
-          # every one of them -- measured at 15 open pull requests holding 29 entries /
-          # about 1.90 GiB (roughly 134 MiB per pull request across this job and
-          # `rust-compile` above) against the repository's shared 10 GiB budget. PR
-          # #752 closed this same eviction path in `ci.yml` but left this workflow open,
-          # so its accumulation kept crowding out `main`'s caches -- including the
-          # `native Z3 4.16 (windows-latest)` cache, observed evicted to zero entries.
+          # every one of them -- measured at 15 pull-request refs (#743-#792, all closed
+          # or merged by measurement time, still resident within GitHub's 7-day
+          # no-access retention window) holding 29 entries / about 1.90 GiB (roughly
+          # 134 MiB per ref across this job and `rust-compile` above) against the
+          # repository's shared 10 GiB budget. PR #752 closed this same eviction path in
+          # `ci.yml` but left this workflow open, so its accumulation kept crowding out
+          # `main`'s caches -- including the `native Z3 4.16 (windows-latest)` cache,
+          # observed evicted to zero entries.
           # See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
