@@ -60,6 +60,40 @@ impl LeanFrontier {
     }
 }
 
+/// A step-ordered BFS frontier for a lane whose per-node `Vec<TraceStep>`
+/// is semantically required -- a path-dependent search with no `visited`
+/// dedup, where two routes reaching the same state must stay distinct
+/// path-trees rather than merge behind a shared [`ParentLink`]
+/// (`leadsto_response_traces`'s `pending`/response history is exactly this:
+/// it is a property of the *route*, not the state) -- but which must still
+/// never carry a whole `Monitor` per node. Holds only `(State,
+/// Vec<TraceStep>, usize)`; adding a `Monitor` back is exactly the
+/// #730/#783 regression this type exists to make harder.
+///
+/// Same caveat as [`LeanFrontier`]: this is a type-level guardrail for the
+/// *consuming* lane's own queue declaration, not a compile-time proof that
+/// no lane anywhere clones a `Monitor` per node.
+#[derive(Debug, Default)]
+pub(crate) struct PathFrontier {
+    queue: VecDeque<(State, Vec<TraceStep>, usize)>,
+}
+
+impl PathFrontier {
+    pub(crate) fn new() -> Self {
+        Self {
+            queue: VecDeque::new(),
+        }
+    }
+
+    pub(crate) fn push(&mut self, state: State, trace: Vec<TraceStep>, step: usize) {
+        self.queue.push_back((state, trace, step));
+    }
+
+    pub(crate) fn pop(&mut self) -> Option<(State, Vec<TraceStep>, usize)> {
+        self.queue.pop_front()
+    }
+}
+
 /// One step back from a state to its BFS parent and the action that produced it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ParentLink {

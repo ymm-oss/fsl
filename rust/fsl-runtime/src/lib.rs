@@ -2986,8 +2986,9 @@ pub fn leadsto_response_traces(
     }];
     let mut responses = BTreeMap::<(String, Bindings), LeadstoResponse>::new();
     let mut triggered = BTreeSet::<(String, Bindings)>::new();
-    let mut queue = VecDeque::from([(initial_state, initial_trace, 0_usize)]);
-    while let Some((state, trace, step)) = queue.pop_front() {
+    let mut queue = trace::PathFrontier::new();
+    queue.push(initial_state, initial_trace, 0);
+    while let Some((state, trace, step)) = queue.pop() {
         for property in &model.leadstos {
             for binding in &bindings[&property.name] {
                 let key = (property.name.clone(), binding.clone());
@@ -3036,7 +3037,7 @@ pub fn leadsto_response_traces(
             }
             let mut child_trace = trace.clone();
             child_trace.push(trace_step_from_result(step + 1, &state, &instance, &result));
-            queue.push_back((result.state.clone(), child_trace, step + 1));
+            queue.push(result.state.clone(), child_trace, step + 1);
         }
     }
     let missing = bindings
