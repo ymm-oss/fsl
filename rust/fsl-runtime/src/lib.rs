@@ -1665,7 +1665,7 @@ pub fn check_refinement(
     // failure reported is stable). Every candidate that passes seeds its
     // own root below, so the walk explores the full reachable set of every
     // nondeterministic initial branch, not just one.
-    let mut queue = VecDeque::new();
+    let mut queue = trace::LeanFrontier::new();
     for impl_state in impl_initial_states {
         let alpha_initial = alpha_state(
             &impl_state,
@@ -1719,7 +1719,7 @@ pub fn check_refinement(
             ));
             return Ok(check);
         }
-        queue.push_back((impl_state, 0_usize));
+        queue.push(impl_state, 0);
     }
 
     // The frontier carries `State` only, not `Monitor` -- a full `Monitor`
@@ -1733,14 +1733,10 @@ pub fn check_refinement(
     let mut visited = BTreeSet::new();
     let mut parents = BTreeMap::<State, trace::ParentLink>::new();
     let mut scratch = Monitor::from_state(implementation.clone(), State::new());
-    while let Some((_, step)) = queue.front() {
-        let step = *step;
+    while let Some(step) = queue.front_step() {
         let mut layer = Vec::new();
-        while queue
-            .front()
-            .is_some_and(|(_, queued_step)| *queued_step == step)
-        {
-            let Some((state, _)) = queue.pop_front() else {
+        while queue.front_step() == Some(step) {
+            let Some((state, _)) = queue.pop() else {
                 unreachable!("queue front was present");
             };
             if visited.insert(state.clone()) && step < depth {
@@ -1947,7 +1943,7 @@ pub fn check_refinement(
                             params: enabled.params.clone(),
                         },
                     });
-                queue.push_back((child_state, step + 1));
+                queue.push(child_state, step + 1);
             }
         }
     }
@@ -2888,8 +2884,9 @@ pub fn action_cover_traces(
     let mut covered = BTreeMap::new();
     let mut visited = BTreeSet::from([initial_state.clone()]);
     let mut parents = BTreeMap::<State, trace::ParentLink>::new();
-    let mut queue = VecDeque::from([(initial_state, 0_usize)]);
-    while let Some((state, step)) = queue.pop_front() {
+    let mut queue = trace::LeanFrontier::new();
+    queue.push(initial_state, 0);
+    while let Some((state, step)) = queue.pop() {
         if step >= depth {
             continue;
         }
@@ -2917,7 +2914,7 @@ pub fn action_cover_traces(
                                 params: instance.params.clone(),
                             },
                         });
-                    queue.push_back((child_state, step + 1));
+                    queue.push(child_state, step + 1);
                 }
             }
         }

@@ -13,11 +13,52 @@
 //! originated this pattern for `verify_explicit_selected`; `find_boundary_violation`
 //! reuses it rather than duplicating it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use fsl_core::{TraceAction, TraceChange, TraceStep};
 
 use super::State;
+
+/// A step-ordered BFS frontier holding only `(State, usize)` per queued
+/// node -- never a `Monitor` (a whole `KernelModel` clone) or a
+/// `Vec<TraceStep>` (a per-node trace clone). Adding either back to a
+/// lane's frontier is exactly the #730/#697/#783 regression this type
+/// exists to make harder: a lane that starts needing more than a state and
+/// a depth should reach for `ParentLink`/[`reconstruct_trace`] plus a
+/// re-pointed scratch `Monitor`, not a wider queue element here.
+///
+/// This is a type-level guardrail for the *consuming* lane's own queue
+/// declaration, not a compile-time proof that no lane anywhere clones a
+/// `Monitor` per node: a lane that declares its own `VecDeque<(Monitor,
+/// ..)>` instead of using this type is not stopped by it. Pair any change
+/// to a lane using `LeanFrontier` with its ceiling regression test
+/// (`tests/issue_730_bfs_memory_ceiling.rs`'s pattern) in review.
+#[derive(Debug, Default)]
+pub(crate) struct LeanFrontier {
+    queue: VecDeque<(State, usize)>,
+}
+
+impl LeanFrontier {
+    pub(crate) fn new() -> Self {
+        Self {
+            queue: VecDeque::new(),
+        }
+    }
+
+    pub(crate) fn push(&mut self, state: State, step: usize) {
+        self.queue.push_back((state, step));
+    }
+
+    pub(crate) fn pop(&mut self) -> Option<(State, usize)> {
+        self.queue.pop_front()
+    }
+
+    /// The step of the node at the front of the queue, or `None` when the
+    /// queue is empty.
+    pub(crate) fn front_step(&self) -> Option<usize> {
+        self.queue.front().map(|(_, step)| *step)
+    }
+}
 
 /// One step back from a state to its BFS parent and the action that produced it.
 #[derive(Clone, Debug, Eq, PartialEq)]
