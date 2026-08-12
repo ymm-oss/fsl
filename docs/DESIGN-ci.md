@@ -663,17 +663,20 @@ the deletion, measured `rust-workspace` at 1,605,761,517 B, `fsl-logic` at 1,470
 `semantic-mutation` at 2,919,716,751 B, plus ~41 MB of small tool-binary caches -- **8.130 GiB
 total**. After the human-authorized deletion of the now-orphaned `fsl-logic` entry and the observed
 recreation of the Windows native-z3 entry, the cache listing measured **7.469 GiB**, below the
-8.500 GiB warning threshold; the cache-budget audit passed. On run `31570480618`, the restore-only
-`FSL Logic Test` job completed in **3m02s**, compared with 2m48s / 2m53s / 2m48s for warm runs with
-its former dedicated key on 2026-08-09/10/11. That is the observed post-change duration; it does not
-establish a cold-build duration or prove a full-match restore. If the shared `rust-workspace` cache
-were ever missing or evicted instead, this job would build cold under the existing 30-minute timeout.
-That timeout bounds resource consumption, not job success: past it, the job is killed and reported as
-a failed required context, the same outcome this whole section exists to stop happening to a different
-job. Whether a cold build here would finish inside 30 minutes is not observed -- this job has never
-run cold under this configuration, so its baseline warm duration describes only the typical cached
-case, not a cold-run bound, and is not evidence that a cold run would succeed rather than time out. A
-`cache-targets: false` lever on the
+8.500 GiB warning threshold; the cache-budget audit passed. The restore-only `FSL Logic Test` job on
+run `31570480618` directly logged a cache hit for
+`v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53` at 06:34:15Z, then
+`Restored from cache key "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.` at
+06:34:36Z. Separately, that job completed in **3m02s**, compared with 2m48s / 2m53s / 2m51s for
+warm runs with its former dedicated key on 2026-08-09/10/11. The cache log, rather than duration, establishes the observed
+full match; the duration alone does not establish a cold-build duration. If the shared
+`rust-workspace` cache were ever missing or evicted instead, this job would build cold under the
+existing 30-minute timeout. That timeout bounds resource consumption, not job success: past it, the
+job is killed and reported as a failed required context, the same outcome this whole section exists to
+stop happening to a different job. Whether a cold build here would finish inside 30 minutes is not
+observed -- this job has never run cold under this configuration, so its baseline warm duration
+describes only the typical cached case, not a cold-run bound, and is not evidence that a cold run
+would succeed rather than time out. A `cache-targets: false` lever on the
 mutation lanes was considered and rejected: it would cost the operators shards a cold build every
 run (~35 min measured cold vs. ~5 min warm) for less budget relief than `fsl-logic` gives for
 near-zero cost.
@@ -743,13 +746,16 @@ The post-merge Windows runs directly observe the recovery path. In run `31565897
 and BMC crates, but its `Post Run Swatinem/rust-cache@v2` step succeeded and created
 `v0-rust-rust-native-z3-Windows_NT-x64-af4551b0-09fbaf53` at 619,429,238 B. This is a direct comparison
 with run `31527197290`'s cancelled Windows job, whose corresponding post step was skipped: under the
-same cancelled-job condition, the corrected run's `cache-on-failure: true` save ran. The corrected
-run took 61m46s (05:14:37–06:16:23), so a 60-minute budget did **not** make this cold vendored-Z3
-build complete; a successful cold-build duration remains unobserved. The saved entry made the next
-Windows run warm: run `31570480618` completed the job in 34m39s (06:34:04–07:08:43), and the run
-concluded successfully. Thus `cache-on-failure` recovers from one timeout-driven
-failure; it does not turn a 60-minute cold build into a passing run. The 60-minute budget remains a
-resource bound, while the saved cache provides the recovery path.
+same timeout-cancelled condition, the corrected run's `cache-on-failure: true` post step ran. This
+comparison does not isolate that flag as the cause: the same changeset also raised this job's timeout
+from 40 to 60 minutes. The corrected run took 61m46s (05:14:37–06:16:23), so a 60-minute budget did
+**not** make this cold vendored-Z3 build complete; a successful cold-build duration remains
+unobserved. The saved entry made the next Windows run warm: run `31570480618` completed the job in
+34m39s (06:34:04–07:08:43), and the run concluded successfully. These runs observe a recovery path
+after the combined change: a timeout-cancelled run saved a cache and the subsequent warm run
+completed. They do not attribute that save to `cache-on-failure` alone or make a 60-minute cold build
+pass. The 60-minute budget remains a resource bound, while the saved cache provides the recovery
+path.
 
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,
