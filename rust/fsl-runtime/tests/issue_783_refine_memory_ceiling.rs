@@ -7,173 +7,74 @@
 //! #730/#697 already fixed and issue #776 documented as bisected apart from
 //! this one.
 //!
-//! Both tests below use the same `LabelCoreRepro` reproducer
-//! `issue_730_bfs_memory_ceiling.rs` uses (copied rather than shared across
-//! test binaries, for the same reason that file gives): its
-//! `audit: Seq<LabelId, 10>` records push order, so the same *set* of pushed
-//! values in a different *order* is a different `Seq` value, `visited` dedup
-//! never collapses the branching, and a BFS/correspondence-walk frontier
-//! grows like branching^depth.
+//! Both tests below build on the shared `LabelCoreRepro` reproducer in
+//! `support::LABEL_CORE_REPRO_SOURCE` (also used by
+//! `issue_730_bfs_memory_ceiling.rs` and `issue_730_explicit_memory_ceiling.rs`):
+//! its `audit: Seq<LabelId, 10>` records push order, so the same *set* of
+//! pushed values in a different *order* is a different `Seq` value,
+//! `visited` dedup never collapses the branching, and a BFS/correspondence-
+//! walk frontier grows like branching^depth. An independent review of an
+//! earlier version of this file found it had drifted from that shared
+//! reproducer -- missing `invariant`/`trans`/`reachable` declarations,
+//! which changes the `KernelModel`'s clone size and therefore the pre-fix
+//! calibration numbers below -- while claiming to be "the same" copy.
+//! Sharing the fixture via `support` makes that specific drift impossible
+//! to reintroduce by construction, not just by discipline.
 //!
-//! Like that file, macOS does not enforce `RLIMIT_AS` the way `ulimit -v`
-//! expects (observed directly on this repo's own macOS development
-//! environment: `sh -c 'ulimit -v N'` itself fails with "cannot modify
-//! limit: Invalid argument", not merely silently unenforced), so both tests
-//! are Linux-only and report zero tests run on macOS -- that is expected,
-//! not a skipped failure.
+//! `rust/fslc/tests/issue_697_all_properties_memory.rs` carries a fourth
+//! copy of this same reproducer, in a different crate that a `tests/`-local
+//! module cannot reach. Consolidating that one too is an explicit follow-up
+//! (tracked in the #783 pull request), not folded into this fix's scope.
+//!
+//! Like `issue_730_bfs_memory_ceiling.rs`, macOS does not enforce
+//! `RLIMIT_AS` the way `ulimit -v` expects -- observed directly on this
+//! repo's own macOS development environment, and more bluntly than that
+//! file's own caveat: here `sh -c 'ulimit -v N'` fails outright with
+//! "cannot modify limit: Invalid argument" before `fsl-refine` ever runs,
+//! rather than merely not being enforced once it does. Both tests below are
+//! therefore Linux-only and report zero tests run on macOS by design -- not
+//! a skipped failure, and not evidence either test's `ulimit`-capped
+//! assertion has ever actually been observed to fail on a mutant binary.
+//! Every "measured" figure in this file's calibration comments is a peak
+//! *memory* comparison (`/usr/bin/time -l`'s `peak memory footprint`),
+//! taken on macOS outside the `ulimit -v` gate entirely -- it is evidence
+//! that the two builds' memory use differs by roughly the stated amount,
+//! not evidence that the `ulimit`-capped assertion below has been observed
+//! to pass on one build and fail on the other. That direct observation
+//! (running both the fixed and a per-node-clone-reintroduced mutant on
+//! Linux under the actual `ulimit -v` cap and recording which assertion
+//! fails, the way #776's own review required) has not been taken and is
+//! deliberately deferred -- whether to rely on CI for it or set up a Linux
+//! environment for this repository's own development is still an open,
+//! human decision as of this file's current revision. As with the existing
+//! `issue_730_*` ceiling tests, macOS RSS improving is assumed, but not
+//! independently verified, to imply a comparable Linux `RLIMIT_AS` (`ulimit
+//! -v`) improvement; if a `CEILING_KB` below flakes on Linux CI, widen it
+//! rather than tightening this comment's claim.
 #![cfg(target_os = "linux")]
 
-use std::path::PathBuf;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
-struct Fixture(PathBuf);
+#[path = "support/mod.rs"]
+mod support;
+use support::{Fixture, LABEL_CORE_REPRO_SOURCE, insert_before_closing_brace};
 
-impl Fixture {
-    fn new(name: &str, source: &str) -> Self {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock after epoch")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "fsl-issue-783-{name}-{}-{nonce}.fsl",
-            std::process::id()
-        ));
-        std::fs::write(&path, source).expect("write fixture");
-        Self(path)
-    }
-
-    fn text(&self) -> &str {
-        self.0.to_str().expect("UTF-8 temporary path")
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
-
-/// The plain, internally-consistent `LabelCoreRepro` implementation --
-/// identical to `issue_730_bfs_memory_ceiling.rs`'s copy, with no self-
-/// violating action added, so `check_refinement`'s `first_self_violation`
-/// precondition passes and the correspondence walk below actually runs to
-/// `depth`.
-const LABEL_CORE_REPRO_SOURCE: &str = r"
-spec LabelCoreRepro {
-  type LabelId = 0..3
-  type Qty     = 0..8
-  enum Phase { Draft, Review, Approved, Published, Retired }
-  struct Label { phase: Phase, weight: Qty, pinned: Bool }
-  state {
-    labels: Map<LabelId, Label>, audit: Seq<LabelId, 10>,
-    reviewed: Set<LabelId>, published: Set<LabelId>,
-    draft_count: Qty, total: Int, epoch: 0..16, quota: Qty, frozen: Bool
-  }
-  init {
-    forall l: LabelId { labels[l] = Label { phase: Draft, weight: 0, pinned: false } }
-    audit = Seq {} reviewed = Set {} published = Set {}
-    draft_count = 4 total = 0 epoch = 0 quota = 8 frozen = false
-  }
-  action review(l: LabelId, w: Qty) {
-    requires audit.size() < 10
-    requires not frozen
-    requires labels[l].phase == Draft
-    requires w > 0 and w <= quota
-    labels[l].phase = Review
-    labels[l].weight = w
-    reviewed = reviewed.add(l)
-    draft_count = draft_count - 1
-    audit = audit.push(l)
-  }
-  action approve(l: LabelId) {
-    requires audit.size() < 10
-    requires labels[l].phase == Review
-    labels[l].phase = Approved
-    total = total + labels[l].weight
-    audit = audit.push(l)
-  }
-  action publish(l: LabelId) {
-    requires audit.size() < 10
-    requires labels[l].phase == Approved
-    labels[l].phase = Published
-    published = published.add(l)
-    epoch = epoch + 1
-    audit = audit.push(l)
-  }
-  action retire(l: LabelId) {
-    requires audit.size() < 10
-    requires labels[l].phase == Published
-    labels[l].phase = Retired
-    total = total - labels[l].weight
-    audit = audit.push(l)
-  }
-  action freeze() { requires not frozen  frozen = true }
-}
-";
-
-/// The same reproducer plus one extra action that self-violates: `quota` is
-/// bounded `0..8`, so `quota + 8` once `quota` has reached its own bound
-/// overflows the type. `check_refinement`'s `first_self_violation`
-/// precondition (`rust/fsl-runtime/src/lib.rs:1615-1627`) finds this before
-/// the correspondence walk ever starts, so this fixture isolates
+/// The extra self-violating action, generated as a diff against
+/// [`LABEL_CORE_REPRO_SOURCE`] rather than duplicated inside a second full
+/// copy of the spec: `quota` is bounded `0..8`, so `quota + 8` once `quota`
+/// has reached its own bound overflows the type. `check_refinement`'s
+/// `first_self_violation` precondition finds this before the
+/// correspondence walk ever starts, so this fixture isolates
 /// `first_self_violation`'s own frontier -- the ceiling PR #776 deferred to
-/// this issue -- in isolation from the walk the other test below covers.
-const LABEL_CORE_REPRO_SELF_VIOLATING_SOURCE: &str = r"
-spec LabelCoreReproSelfViolating {
-  type LabelId = 0..3
-  type Qty     = 0..8
-  enum Phase { Draft, Review, Approved, Published, Retired }
-  struct Label { phase: Phase, weight: Qty, pinned: Bool }
-  state {
-    labels: Map<LabelId, Label>, audit: Seq<LabelId, 10>,
-    reviewed: Set<LabelId>, published: Set<LabelId>,
-    draft_count: Qty, total: Int, epoch: 0..16, quota: Qty, frozen: Bool
-  }
-  init {
-    forall l: LabelId { labels[l] = Label { phase: Draft, weight: 0, pinned: false } }
-    audit = Seq {} reviewed = Set {} published = Set {}
-    draft_count = 4 total = 0 epoch = 0 quota = 8 frozen = false
-  }
-  action review(l: LabelId, w: Qty) {
-    requires audit.size() < 10
-    requires not frozen
-    requires labels[l].phase == Draft
-    requires w > 0 and w <= quota
-    labels[l].phase = Review
-    labels[l].weight = w
-    reviewed = reviewed.add(l)
-    draft_count = draft_count - 1
-    audit = audit.push(l)
-  }
-  action approve(l: LabelId) {
-    requires audit.size() < 10
-    requires labels[l].phase == Review
-    labels[l].phase = Approved
-    total = total + labels[l].weight
-    audit = audit.push(l)
-  }
-  action publish(l: LabelId) {
-    requires audit.size() < 10
-    requires labels[l].phase == Approved
-    labels[l].phase = Published
-    published = published.add(l)
-    epoch = epoch + 1
-    audit = audit.push(l)
-  }
-  action retire(l: LabelId) {
-    requires audit.size() < 10
-    requires labels[l].phase == Published
-    labels[l].phase = Retired
-    total = total - labels[l].weight
-    audit = audit.push(l)
-  }
-  action freeze() { requires not frozen  frozen = true }
-  action overflow() { requires audit.size() >= 3  quota = quota + 8 }
+/// this issue -- from the walk the other test below covers.
+const OVERFLOW_ACTION: &str =
+    "  action overflow() { requires audit.size() >= 3  quota = quota + 8 }\n";
+
+fn label_core_repro_self_violating_source() -> String {
+    insert_before_closing_brace(LABEL_CORE_REPRO_SOURCE, OVERFLOW_ACTION)
 }
-";
 
 /// An abstraction with the same state declarations as `LabelCoreRepro`, but
 /// no actions -- paired below with a mapping that maps every impl state
@@ -231,34 +132,20 @@ refinement LabelCoreReproStutter {
 }
 ";
 
-/// The same all-stutter mapping, covering the self-violating implementation's
-/// six actions (the five above plus `overflow`). Never actually evaluated --
-/// `first_self_violation` returns before the correspondence walk starts --
-/// but `fsl_core::parse_refinement` still requires a correspondence entry for
-/// every impl action to parse at all.
-const LABEL_CORE_REPRO_SELF_VIOLATING_STUTTER_MAPPING_SOURCE: &str = r"
-refinement LabelCoreReproSelfViolatingStutter {
-  impl LabelCoreReproSelfViolating
-  abs  LabelCoreReproAbs
+/// The extra `overflow -> stutter` correspondence, generated as a diff
+/// against [`LABEL_CORE_REPRO_ALL_STUTTER_MAPPING_SOURCE`] the same way
+/// [`label_core_repro_self_violating_source`] generates its spec. Never
+/// actually evaluated -- `first_self_violation` returns before the
+/// correspondence walk starts -- but `fsl_core::parse_refinement` still
+/// requires a correspondence entry for every impl action to parse at all.
+const OVERFLOW_STUTTER_CORRESPONDENCE: &str = "  action overflow()   -> stutter\n";
 
-  map labels[l: LabelId] = Label { phase: Draft, weight: 0, pinned: false }
-  map audit = Seq {}
-  map reviewed = Set {}
-  map published = Set {}
-  map draft_count = 4
-  map total = 0
-  map epoch = 0
-  map quota = 8
-  map frozen = false
-
-  action review(l, w) -> stutter
-  action approve(l)   -> stutter
-  action publish(l)   -> stutter
-  action retire(l)    -> stutter
-  action freeze()     -> stutter
-  action overflow()   -> stutter
+fn label_core_repro_self_violating_stutter_mapping_source() -> String {
+    insert_before_closing_brace(
+        LABEL_CORE_REPRO_ALL_STUTTER_MAPPING_SOURCE,
+        OVERFLOW_STUTTER_CORRESPONDENCE,
+    )
 }
-";
 
 fn run_capped(ceiling_kb: u64, args: &[&str]) -> std::process::Output {
     let command = format!(
@@ -281,20 +168,24 @@ fn run_capped(ceiling_kb: u64, args: &[&str]) -> std::process::Output {
 /// run). PR #776 fixed this lane's per-node `(Monitor, Vec<TraceStep>)`
 /// clone but deferred adding a ceiling regression test for it to this issue.
 ///
-/// Calibration (release build, `/usr/bin/time -l`, this repo's macOS
-/// development environment, `depth 4`): reintroducing the pre-#776 per-node
-/// clone measured ~1,926 MB peak memory footprint on this exact fixture;
-/// the current fix measures ~492 MB. 1000 * 1024 KiB sits about 2x above
-/// the fixed measurement and clearly below the reintroduced-clone one.
+/// Calibration (release build, `/usr/bin/time -l`'s `peak memory
+/// footprint`, this repo's macOS development environment, `depth 4`, the
+/// shared `support::LABEL_CORE_REPRO_SOURCE` fixture plus `overflow`):
+/// reintroducing the pre-#776 per-node clone (temporarily, for this
+/// measurement only) measured ~2,101 MB; the current fix measures ~492 MB.
+/// 1000 * 1024 KiB sits ~2.03x above the fixed measurement and ~2.10x below
+/// the reintroduced-clone one. This is a peak-memory comparison, not an
+/// observation of the `ulimit`-capped assertion below actually failing on
+/// Linux against either build -- see this file's top comment.
 #[test]
 fn first_self_violation_stays_under_a_calibrated_ceiling_for_the_branching_reproducer() {
     const CEILING_KB: u64 = 1000 * 1024;
 
-    let implementation = Fixture::new("fsv-impl", LABEL_CORE_REPRO_SELF_VIOLATING_SOURCE);
+    let implementation = Fixture::new("fsv-impl", &label_core_repro_self_violating_source());
     let abstraction = Fixture::new("fsv-abs", LABEL_CORE_REPRO_ABSTRACTION_SOURCE);
     let mapping = Fixture::new(
         "fsv-map",
-        LABEL_CORE_REPRO_SELF_VIOLATING_STUTTER_MAPPING_SOURCE,
+        &label_core_repro_self_violating_stutter_mapping_source(),
     );
     let output = run_capped(
         CEILING_KB,
@@ -325,13 +216,16 @@ fn first_self_violation_stays_under_a_calibrated_ceiling_for_the_branching_repro
 /// `check_refinement`'s own correspondence walk -- the lane this issue's
 /// clone removal actually changes.
 ///
-/// Calibration (release build, `/usr/bin/time -l`, this repo's macOS
-/// development environment, `depth 3`, this exact fixture): the pre-removal
+/// Calibration (release build, `/usr/bin/time -l`'s `peak memory
+/// footprint`, this repo's macOS development environment, `depth 3`, the
+/// shared `support::LABEL_CORE_REPRO_SOURCE` fixture): the pre-removal
 /// commit (`6012c00`, `fsl-refine` present but the per-node clone not yet
-/// removed) measured ~1,557 MB peak memory footprint, consistent with issue
-/// #783's own reported ~1.72 GB; the post-removal commit measures ~491 MB.
-/// 950 * 1024 KiB sits about 2x above the post-removal measurement (~1.98x)
-/// and clearly below the pre-removal one (~1.60x margin).
+/// removed) measured ~1,728 MB, consistent with issue #783's own reported
+/// ~1.72 GB; the post-removal commit (this branch) measures ~491 MB. 950 *
+/// 1024 KiB sits ~2.03x above the post-removal measurement and ~1.73x below
+/// the pre-removal one. As above, this is a peak-memory comparison, not an
+/// observation of the `ulimit`-capped assertion below actually failing on
+/// Linux against the pre-removal build -- see this file's top comment.
 #[test]
 fn check_refinement_stays_under_a_calibrated_ceiling_for_the_branching_reproducer() {
     const CEILING_KB: u64 = 950 * 1024;
