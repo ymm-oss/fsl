@@ -19,9 +19,12 @@ nothing would ever save a `main` copy under this workflow's own key for it to
 restore. Both `Swatinem/rust-cache` steps instead go restore-only against
 `ci.yml`'s own `rust-workspace` key (`shared-key: rust-workspace`,
 `save-if: false`): the two workflows' jobs share a toolchain, runner, and
-checkout, so the derived cache key is expected to match, confirmed from the
-first post-merge run's `full match: true` restore log rather than asserted
-from an unverifiable prior observation. `tools/run-semantic-mutation-gate.sh`'s
+checkout, so the derived cache key is expected to match -- an expectation
+still pending confirmation from a post-merge run's own `full match: true`
+restore log, not something already observed, since this branch had not yet
+merged as of this writing and the pull-request-scoped entries that could have
+confirmed it were deleted 2026-08-12 during unrelated cleanup.
+`tools/run-semantic-mutation-gate.sh`'s
 mutants lane also moves its per-run scratch `CARGO_TARGET_DIR` out from under
 `rust/target` (to `${RUNNER_TEMP:-${TMPDIR:-/tmp}}`), and the script now
 clears any `rust/target/semantic-mutation.*`/`semantic-mutation-build` left by

@@ -568,11 +568,16 @@ own key, from any event. `merge-readiness.yml`'s two `Swatinem/rust-cache` steps
 `save-if: false`): both jobs run `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same
 checkout as `ci.yml`'s `rust workspace` job, and `Swatinem/rust-cache` derives its key from the
 rustc version, `CARGO`/`CC`/`CFLAGS`/`CXX`/`CMAKE`/`RUST`-prefixed env vars, and the workspace
-lockfiles — none of which differ between the two workflows — so an exact key match is expected, not
-directly observed here (the pull-request-scoped entries that could have confirmed a full match were
-deleted 2026-08-12 during unrelated cleanup); it is confirmed instead from the first post-merge run's
-own `Restored from cache key "..." full match: true.` log line, and even a hash mismatch degrades
-only to `Swatinem/rust-cache`'s ordinary prefix-restore fallback rather than a cold build. Neither
+lockfiles — none of which differ between the two workflows — so an exact key match is expected, but
+this is a mechanism-derived expectation, not something observed yet: the pull-request-scoped entries
+that could have confirmed a full match were deleted 2026-08-12 during unrelated cleanup, and this
+branch has not been merged, so no post-merge run of `merge-readiness.yml` exists to have logged one.
+**This paragraph records an expectation pending confirmation, not a confirmed result.** The first
+post-merge run's own log is the actual evidence: it must show
+`Restored from cache key "..." full match: true.` before this claim is treated as confirmed; if it
+instead shows a prefix-restore fallback or a miss, this paragraph needs updating, not the code (a
+mismatch degrades only to `Swatinem/rust-cache`'s ordinary prefix-restore fallback rather than a cold
+build, so it would not be a functional regression, only a correction to this expectation). Neither
 job ever writes to this key: only `ci.yml`'s `push`-triggered job does, so no `pull_request` event
 anywhere can grow it, and merge-readiness gains no eviction pressure of its own to reintroduce.
 
