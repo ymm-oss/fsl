@@ -32,16 +32,17 @@ function cacheBytes(key, ref, bytes) {
 }
 
 function healthyListing() {
-  // Exact bytes from `gh api actions/caches` (2026-08-12; see
-  // analyst-report-07-cache-budget-redesign.md), not predicted or rounded
-  // values -- `semantic-mutation`'s clean floor in particular was previously
-  // miscalibrated from an unverified prediction (2.2 GiB) that a reviewer's
-  // real-world measurement (run 31210570118 / job 92972117510: a cold
-  // `mutation operators` run that never touched the mutants lane's
-  // scratch/evidence paths still created this exact entry) showed was wrong.
-  // No `fsl-logic` entry: that job is restore-only against `rust-workspace`
-  // (see docs/DESIGN-ci.md, "Actions cache budget") and a healthy state after
-  // that change has no dedicated `fsl-logic` key at all.
+  // Exact bytes from `gh api actions/caches` (2026-08-12), not predicted or
+  // rounded values -- `semantic-mutation`'s observed clean size in particular
+  // was previously miscalibrated from an unverified prediction (2.2 GiB).
+  // Product-gate run 31210570118, job 92972117510 (`mutation operators`)
+  // restored `No cache found.` (a fully cold start, so it never touched the
+  // mutants lane's scratch/evidence paths at all) and still saved this exact
+  // 2,919,716,751-byte entry, showing that prediction was wrong; see
+  // docs/DESIGN-ci.md, "Actions cache budget", for the full account. No
+  // `fsl-logic` entry: that job is restore-only against `rust-workspace`
+  // (same section) and a healthy state after that change has no dedicated
+  // `fsl-logic` key at all.
   return [
     cacheBytes("v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1_605_761_517),
     cacheBytes("v0-rust-wasm-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1_452_450_563),

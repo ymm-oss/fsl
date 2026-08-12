@@ -45,13 +45,15 @@ fix, not a size fix**: measured directly (product-gate run `31210570118`, job
 current 2.719 GiB was created by a *cold* operators run (`No cache found.` at
 19:14:17Z, saved at 19:48:12Z) that never touched the mutants lane's scratch
 build or evidence paths at all -- neither could have contributed to this
-entry's size, so there was no dead weight to recover, and two earlier
-predictions in this fragment and in `docs/DESIGN-ci.md` (a ~0.9-1.4 GiB floor
-from an assumed accumulating scratch tree, then a ~2.2 GiB floor from
+entry's size, so there was no dead weight to recover, and two earlier size
+predictions in this fragment and in `docs/DESIGN-ci.md` (~0.9-1.4 GiB from an
+assumed accumulating scratch tree, then ~2.2 GiB from
 `rust/target/fault-operators`' deliberately persistent build tree treated as
-a designed minimum) were both wrong about what this entry actually is.
-`semantic-mutation` is not resized by this change and is not touched by the
-budget lever below. Separately, `rust-native-z3`'s
+a designed minimum size) were both wrong about what this entry actually is.
+This one cold-start save is evidence of what this key can legitimately hold,
+not a proven minimum across every shard and revision. `semantic-mutation` is
+not resized by this change and is not touched by the budget lever below.
+Separately, `rust-native-z3`'s
 `windows-latest`/`macos-15` matrix had the same cancel-skips-save deadlock
 already fixed for the `semantic-mutation` lanes: a cold build (measured warm
 at 27–33 min) exceeded the 40-minute budget, the job was cancelled on all six
@@ -88,8 +90,8 @@ never flagged for the same reason).
 
 An earlier revision of this change added an `entry-oversized` finding
 (`SINGLE_ENTRY_WARN_BYTES = 2.5 GiB`) calibrated against the wrong ~2.2 GiB
-floor above; since the real floor is 2.719 GiB, that control would have fired
-on a healthy `semantic-mutation` entry and has been removed rather than
+size above; since the observed clean size is 2.719 GiB, that control would
+have fired on a healthy `semantic-mutation` entry and has been removed rather than
 recalibrated, since no measured defect signature exists to calibrate it
 against (raising the threshold to paper over this would only be guessing at
 an unmeasured defect). The actual budget lever is `ci.yml`'s `fsl-logic` job,

@@ -586,19 +586,21 @@ no headroom for `rust workspace` — compile is only ~3.5 min of ~33 min **on a 
 remains true warm, and it is exactly the premise that fails under concurrency: the question is not
 how much a better hit rate buys, but whether a hit happens at all.
 
-**`semantic-mutation`'s measured 2.719 GiB is a clean floor, not accumulated dead weight -- two
-successive predictions to the contrary were both wrong, and this document previously carried both.**
-Direct measurement settled it: on product-gate run `31210570118`, job `92972117510`
+**`semantic-mutation`'s measured 2.719 GiB is an observed clean size, not accumulated dead weight --
+two successive size predictions to the contrary were both wrong, and this document previously
+carried both.** Direct measurement settled it: on product-gate run `31210570118`, job `92972117510`
 (`mutation operators (3/3)`) restored with `No cache found.` at 19:14:17Z -- a fully cold start, so it
 carried forward nothing from any prior run -- built for ~35 minutes, and saved the cache at 19:48:12Z.
 `gh api actions/caches` shows the resulting entry, `v0-rust-semantic-mutation-Linux-x64-...`, created
 at exactly `2026-08-07T19:48:56Z` and sized 2,919,716,751 bytes (2.719 GiB). That run never ran the
 mutants lane's scratch build or evidence generation at all, so neither could have contributed a
 single byte to this entry: there is no dead weight here to recover, and both the ~0.9-1.4 GiB and
-~2.2 GiB floors this document previously predicted (attributing the size to, respectively, an
+~2.2 GiB sizes this document previously predicted (attributing the size to, respectively, an
 accumulating scratch-build tree and to `fault-operators`' persistent build tree as a designed
-minimum) do not describe what this entry actually is. `semantic-mutation` is not touched by this
-fix and is not a lever in the budget arithmetic below.
+minimum size) do not describe what this entry actually is. This one cold-start save on one shard is
+evidence of what this key *can* legitimately hold, not a proven minimum across every shard and every
+future revision -- `semantic-mutation` is not touched by this fix and is not a lever in the budget
+arithmetic below.
 
 **The scratch-build-tree and evidence-path changes in this branch are a closed-ingress-path fix, not
 a size fix, and are kept for that reason alone.** `tools/run-semantic-mutation-gate.sh`'s mutants
@@ -642,9 +644,15 @@ plus ~41 MB of small tool-binary caches -- **8.130 GiB total**. Removing the now
 entry (a separate, human-authorized deletion) and re-adding Windows native-z3 (historical size
 0.577 GiB, to be re-measured after recreation) gives
 **8.130 − 1.369 + 0.577 = 7.338 GiB (73.4%)**, under the 8.5 GiB warn threshold with headroom to
-spare. `fsl-logic`'s own job goes cold on its first restore-only run; baseline warm duration is
-2m48s-2m53s (scheduled runs 2026-08-09/10/11) against a 30-minute budget, so the risk is bounded even
-if the first run underperforms the ±seconds this predicts. A `cache-targets: false` lever on the
+spare. `rust-workspace` and the former dedicated `fsl-logic` key already share the same
+`Linux-x64-e8b3ee54-09fbaf53` suffix, so `shared-key: rust-workspace` is expected to hit exactly, not
+merely restore a compatible prefix -- an exact-hit restore is expected to cost about what `fsl-logic`'s
+own key already did. If the shared `rust-workspace` cache were ever missing or evicted on some future
+run, that run would build cold instead; how long that would take is not observed here (this job has
+never run cold under this configuration), so the baseline warm duration of 2m48s-2m53s (scheduled
+runs 2026-08-09/10/11) is cited only as this job's typical wall-clock cost, not as a bound on cold-run
+time. Either way the risk is contained by the job's existing 30-minute budget. A `cache-targets: false`
+lever on the
 mutation lanes was considered and rejected: it would cost the operators shards a cold build every
 run (~35 min measured cold vs. ~5 min warm) for less budget relief than `fsl-logic` gives for
 near-zero cost.
