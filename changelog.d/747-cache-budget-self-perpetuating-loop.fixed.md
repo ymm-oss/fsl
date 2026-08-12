@@ -21,7 +21,18 @@ restore. Both `Swatinem/rust-cache` steps instead go restore-only against
 `save-if: false`): the two workflows' jobs share a toolchain, runner, and
 checkout, so the derived cache key is expected to match, confirmed from the
 first post-merge run's `full match: true` restore log rather than asserted
-from an unverifiable prior observation. Separately, `rust-native-z3`'s
+from an unverifiable prior observation. `tools/run-semantic-mutation-gate.sh`'s
+mutants lane also moves its per-run scratch `CARGO_TARGET_DIR` out from under
+`rust/target` (to `${RUNNER_TEMP:-${TMPDIR:-/tmp}}`) and now clears any
+`rust/target/semantic-mutation.*`/`semantic-mutation-build` left by a restored
+cache before creating its own evidence directory: both were previously
+uniquely named per run and never reused, so each cache save accumulated them
+as dead weight, measured at `semantic-mutation` 2.719 GiB against sibling
+shared keys around 1.3-1.5 GiB. This does not shrink that cache entry by
+itself -- `Swatinem/rust-cache` will not resave a still-matching key -- so the
+reduction only takes effect once the entry is deleted (a separate,
+human-authorized action) and a run resaves it; the resulting size is not
+reported here as measured. Separately, `rust-native-z3`'s
 `windows-latest`/`macos-15` matrix had the same cancel-skips-save deadlock
 already fixed for the `semantic-mutation` lanes: a cold build (measured warm
 at 27–33 min) exceeded the 40-minute budget, the job was cancelled on all six

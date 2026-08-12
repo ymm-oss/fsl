@@ -101,6 +101,15 @@ if [ "$lane" != "mutants" ]; then
   run_operators_lane
 fi
 
+# Prior invocations' evidence directories and scratch build trees can survive
+# into this checkout by way of a restored `Swatinem/rust-cache` entry: the
+# cache saves `rust/target` wholesale, so anything left there by a past run
+# reappears here before this run creates its own differently-named copy.
+# Clear them before this run's own evidence exists, so a restored cache never
+# carries more than one run's worth of this script's output forward into the
+# next save (docs/DESIGN-ci.md, "Actions cache budget").
+rm -rf "$root"/rust/target/semantic-mutation.* "$root/rust/target/semantic-mutation-build"
+
 mkdir -p "$root/rust/target"
 output="$(mktemp -d "$root/rust/target/semantic-mutation.${mode}.XXXXXX")"
 scratch="$output/checkout"
@@ -112,11 +121,16 @@ git -C "$scratch" init --quiet
 mkdir -p "$scratch/rust/target"
 # A target shared by disposable checkouts can retain a mutant artifact whose
 # source timestamp is newer than the freshly copied baseline. Give each run a
-# fresh build directory outside the retained evidence glob, so the baseline
-# can never reuse another run's mutation and CI does not upload build objects.
-mkdir -p "$root/rust/target/semantic-mutation-build"
+# fresh build directory, so the baseline can never reuse another run's
+# mutation. This scratch tree is disposable working state, not evidence: it
+# sits outside `rust/target` (unlike the `$output` evidence directory above,
+# which the artifact-upload glob `rust/target/semantic-mutation.*/**` in
+# ci.yml requires), so `Swatinem/rust-cache` never saves it and a run-scoped
+# name here does not accumulate as cache dead weight the way it did living
+# under `rust/target/semantic-mutation-build` (docs/DESIGN-ci.md, "Actions
+# cache budget").
 export CARGO_TARGET_DIR
-CARGO_TARGET_DIR="$(mktemp -d "$root/rust/target/semantic-mutation-build/run.XXXXXX")"
+CARGO_TARGET_DIR="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/fsl-semantic-mutation-build.XXXXXX")"
 args=(
   --config .cargo/mutants.toml
   --in-place

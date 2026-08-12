@@ -581,6 +581,27 @@ no headroom for `rust workspace` — compile is only ~3.5 min of ~33 min **on a 
 remains true warm, and it is exactly the premise that fails under concurrency: the question is not
 how much a better hit rate buys, but whether a hit happens at all.
 
+**The cache-object path and the disposable-build-tree path must stay separated, or the cached path
+absorbs dead weight it can never reuse.** `tools/run-semantic-mutation-gate.sh`'s mutants lane needs
+a scratch `CARGO_TARGET_DIR` per run, isolated from the real workspace `target` so a stale mutant
+artifact's timestamp can never look newer than a freshly copied baseline checkout. That scratch
+directory used to be created under `rust/target/semantic-mutation-build/run.XXXXXX` — inside the
+same tree `ci.yml`'s `Swatinem/rust-cache` step (`workspaces: rust -> target`) saves wholesale — and
+because each run's `mktemp` name is unique, a restored copy of a past run's scratch tree could never
+be reused by anything; it was pure accumulation. The evidence directory
+(`rust/target/semantic-mutation.${mode}.XXXXXX`, which the artifact-upload glob
+`rust/target/semantic-mutation.*/**` in `ci.yml` requires to stay under `rust/target`) compounded
+this the same way: it holds a full rsynced checkout copy, and old runs' copies survived a cache
+restore into the working tree right alongside the new run's own. The scratch build tree now lives
+under `${RUNNER_TEMP:-${TMPDIR:-/tmp}}` instead, outside anything `Swatinem/rust-cache` saves, and
+the script clears any leftover `rust/target/semantic-mutation.*` and
+`rust/target/semantic-mutation-build` directories from a restored cache before creating its own new
+evidence directory, so at most one run's evidence is ever present at save time. This does not shrink
+the existing `semantic-mutation` cache entry by itself — `Swatinem/rust-cache` does not resave a
+key that still primary-matches — so the reduction only lands once that entry is deleted (a separate,
+human-authorized action) and re-created by a subsequent run; the predicted size after that point is
+not asserted here as measured.
+
 **Eviction started this; `cache-on-failure: false` made it unrecoverable.** The
 `semantic mutation` lane fell into a closed loop, measured on `main` and on three pull requests:
 
