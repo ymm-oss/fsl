@@ -18,6 +18,7 @@ import {
   formatReport,
   CACHE_LIMIT_BYTES,
   GIB,
+  REQUIRED_MAIN_ENTRIES,
 } from "./audit-cache-budget.mjs";
 
 const MAIN = "refs/heads/main";
@@ -26,14 +27,30 @@ function cache(key, ref, gib) {
   return { key, ref, size_in_bytes: Math.round(gib * GIB) };
 }
 
+function cacheBytes(key, ref, bytes) {
+  return { key, ref, size_in_bytes: bytes };
+}
+
 function healthyListing() {
+  // Exact bytes from `gh api actions/caches` (2026-08-12), not predicted or
+  // rounded values -- `semantic-mutation`'s observed clean size in particular
+  // was previously miscalibrated from an unverified prediction (2.2 GiB).
+  // Product-gate run 31210570118, job 92972117510 (`mutation operators`)
+  // restored `No cache found.` (a fully cold start, so it never touched the
+  // mutants lane's scratch/evidence paths at all) and still saved this exact
+  // 2,919,716,751-byte entry, showing that prediction was wrong; see
+  // docs/DESIGN-ci.md, "Actions cache budget", for the full account. No
+  // `fsl-logic` entry: that job is restore-only against `rust-workspace`
+  // (same section) and a healthy state after that change has no dedicated
+  // `fsl-logic` key at all.
   return [
-    cache("v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1.495),
-    cache("v0-rust-wasm-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1.352),
-    cache("v0-rust-fsl-logic-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1.369),
-    cache("v0-rust-semantic-mutation-Linux-x64-e8b3ee54-09fbaf53", MAIN, 2.721),
-    cache("v0-rust-rust-compile-Linux-x64-e8b3ee54-09fbaf53", "refs/pull/900/merge", 0.081),
-    cache("v0-rust-core-contracts-Linux-x64-e8b3ee54-09fbaf53", "refs/pull/900/merge", 0.05),
+    cacheBytes("v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1_605_761_517),
+    cacheBytes("v0-rust-wasm-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1_452_450_563),
+    cacheBytes("v0-rust-semantic-mutation-Linux-x64-e8b3ee54-09fbaf53", MAIN, 2_919_716_751),
+    // `rust-native-z3` is one shared key across a `[macos-15, windows-latest]`
+    // matrix (`ci.yml`), so it needs one entry per platform to be healthy.
+    cacheBytes("v0-rust-rust-native-z3-Darwin-arm64-f9b08cb2-09fbaf53", MAIN, 1_239_235_056),
+    cacheBytes("v0-rust-rust-native-z3-Windows_NT-x64-e8b3ee54-09fbaf53", MAIN, 619_501_189),
   ];
 }
 
@@ -46,18 +63,6 @@ test("accepting: default-branch caches present, budget below threshold, no pull-
   const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
   assert.equal(result.ok, true, formatReport(result));
   assert.deepEqual(result.findings, []);
-});
-
-test("accepting: merge-readiness's own small keys may live on a pull-request ref", () => {
-  // `merge-readiness.yml` deliberately keeps saving from pull requests: its two
-  // keys total ~131 MiB and its lanes are the sub-minute fast path. Only
-  // `ci.yml`'s four shared keys are guarded, so these must not be flagged.
-  const caches = healthyListing();
-  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
-  assert.equal(
-    result.findings.some((finding) => finding.code === "pull-request-cache-present"),
-    false,
-  );
 });
 
 test("rejecting: a pull-request-scoped ci.yml cache means the save-if guard regressed", () => {
@@ -94,10 +99,80 @@ test("rejecting: the 2026-08-06 listing that caused the outage", () => {
   assert.equal(result.ok, false);
   const codes = result.findings.map((finding) => finding.code);
   assert.ok(codes.includes("budget-exhausted"), formatReport(result));
-  // All three critical-path keys are missing from the default branch.
-  assert.equal(codes.filter((code) => code === "main-cache-absent").length, 3);
-  // Every ci.yml key on a pull-request ref is flagged: 3 + 4 across two refs.
-  assert.equal(codes.filter((code) => code === "pull-request-cache-present").length, 7);
+  // Every required {key, platform} pair is missing from the default branch:
+  // the two Linux critical-path keys (`rust-workspace`, `wasm`; this listing
+  // predates rust-native-z3 joining REQUIRED_MAIN_ENTRIES and `fsl-logic` is
+  // not a required key at all) plus both native-z3 platforms, absent here
+  // entirely rather than merely missing from `main`.
+  assert.equal(codes.filter((code) => code === "main-cache-absent").length, 4);
+  // `ci.yml` shared keys (`wasm`, `rust-workspace`, `semantic-mutation`) on a
+  // pull-request ref are flagged by rule 3: 2 + 3 across the two refs.
+  assert.equal(codes.filter((code) => code === "pull-request-cache-present").length, 5);
+  // `core-contracts`, `rust-compile`, and `fsl-logic` (not a `ci.yml` shared
+  // key) are not covered by rule 3 -- this is exactly the gap the generic
+  // pull-request-rust-cache rule (rule 4) closes: 2 `fsl-logic` + 1
+  // `core-contracts` + 1 `rust-compile`.
+  assert.equal(codes.filter((code) => code === "pull-request-rust-cache-present").length, 4);
+});
+
+test("rejecting: a non-ci.yml rust cache on a pull-request ref still fires the generic rule", () => {
+  // `rust-compile` is not one of `CI_SHARED_KEYS`, so rule 3 alone would miss
+  // it -- this is the exact shape `merge-readiness.yml` used to produce
+  // before it went restore-only, and the shape any future workflow's
+  // unguarded `Swatinem/rust-cache` step would produce again.
+  const caches = [
+    ...healthyListing(),
+    cache("v0-rust-rust-compile-Linux-x64-aaaaaaaa-bbbbbbbb", "refs/pull/9/merge", 0.08),
+  ];
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+  assert.equal(result.ok, false);
+  const finding = result.findings.find((f) => f.code === "pull-request-rust-cache-present");
+  assert.ok(finding, formatReport(result));
+  assert.match(finding.message, /refs\/pull\/9\/merge/);
+  assert.match(finding.message, /rust-compile/);
+  // Rule 3 must not also fire for the same entry -- one finding, not two.
+  assert.equal(
+    result.findings.filter((f) => f.code === "pull-request-cache-present").length,
+    0,
+  );
+});
+
+test("rejecting: main missing the Windows_NT half of rust-native-z3 is not hidden by Darwin's presence", () => {
+  const caches = healthyListing().filter((entry) => !entry.key.includes("-Windows_NT-"));
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+  assert.equal(result.ok, false);
+  const missing = result.findings.filter((finding) => finding.code === "main-cache-absent");
+  assert.equal(missing.length, 1, formatReport(result));
+  assert.match(missing[0].message, /`rust-native-z3`/);
+  assert.match(missing[0].message, /`Windows_NT`/);
+});
+
+test("rejecting: main missing the Darwin half of rust-native-z3 is not hidden by Windows_NT's presence", () => {
+  const caches = healthyListing().filter((entry) => !entry.key.includes("-Darwin-"));
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+  assert.equal(result.ok, false);
+  const missing = result.findings.filter((finding) => finding.code === "main-cache-absent");
+  assert.equal(missing.length, 1, formatReport(result));
+  assert.match(missing[0].message, /`rust-native-z3`/);
+  assert.match(missing[0].message, /`Darwin`/);
+});
+
+test("accepting: a shared key containing an earlier platform-like substring is parsed from the tail, not misattributed", () => {
+  // A lazy `(.+?)` stops at the *first* platform-like substring, so a shared
+  // key such as `foo-Linux-bar` (hypothetical, but the bug class is real) would
+  // misparse as shared key `foo` -- a reviewer reproduced this causing a real,
+  // present main-branch entry to be reported `main-cache-absent`. Parsing
+  // greedily from the tail (anchored at `$`) fixes it.
+  const caches = [
+    ...healthyListing(),
+    cache("v0-rust-foo-Linux-bar-Linux-x64-aaaaaaaa-bbbbbbbb", MAIN, 0.01),
+  ];
+  const result = auditCacheBudget({
+    caches,
+    usageBytes: usageOf(caches),
+    requiredMainEntries: [...REQUIRED_MAIN_ENTRIES, { key: "foo-Linux-bar", platform: "Linux" }],
+  });
+  assert.equal(result.ok, true, formatReport(result));
 });
 
 test("rejecting: budget at or above the threshold, even with a healthy ref layout", () => {
