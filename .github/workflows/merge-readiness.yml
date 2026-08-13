@@ -35,15 +35,15 @@ jobs:
           # leave every pull request permanently cold instead: the earlier fix in this
           # branch made that mistake (see git history) before independent review caught
           # it. This job never saves at all and instead reads `ci.yml`'s `rust-workspace`
-          # entry, which the `push: branches: [main]` trigger there keeps warm.
+          # entry, which successful non-pull-request `ci.yml` runs can populate.
           # (b) Key derivation: `Swatinem/rust-cache` (`src/config.ts`) ignores `key` and
           # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
           # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace
           # lockfiles. This job and `ci.yml`'s `rust workspace` job both run
           # `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same checkout.
           # The expected exact key match is directly observed in four pull-request logs:
-          # run 31581715093 logged it for core contracts at 09:11:00.77Z and Rust compile
-          # at 09:11:04.76Z; run 31583381471 logged it at 09:33:03.06Z and 09:33:05.55Z,
+          # run 31581715093 attempt 1 logged it for core contracts at 09:11:00.77Z and Rust compile
+          # at 09:11:04.76Z; run 31583381471 attempt 1 logged it at 09:33:03.06Z and 09:33:05.55Z,
           # respectively. Each says `Restored from cache key
           # "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.`
           # These logs establish the full-key restore; on a future lockfile-hash mismatch,
@@ -87,15 +87,15 @@ jobs:
           # leave every pull request permanently cold instead: the earlier fix in this
           # branch made that mistake (see git history) before independent review caught
           # it. This job never saves at all and instead reads `ci.yml`'s `rust-workspace`
-          # entry, which the `push: branches: [main]` trigger there keeps warm.
+          # entry, which successful non-pull-request `ci.yml` runs can populate.
           # (b) Key derivation: `Swatinem/rust-cache` (`src/config.ts`) ignores `key` and
           # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
           # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace
           # lockfiles. This job and `ci.yml`'s `rust workspace` job both run
           # `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same checkout.
           # The expected exact key match is directly observed in four pull-request logs:
-          # run 31581715093 logged it for core contracts at 09:11:00.77Z and Rust compile
-          # at 09:11:04.76Z; run 31583381471 logged it at 09:33:03.06Z and 09:33:05.55Z,
+          # run 31581715093 attempt 1 logged it for core contracts at 09:11:00.77Z and Rust compile
+          # at 09:11:04.76Z; run 31583381471 attempt 1 logged it at 09:33:03.06Z and 09:33:05.55Z,
           # respectively. Each says `Restored from cache key
           # "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.`
           # These logs establish the full-key restore; on a future lockfile-hash mismatch,

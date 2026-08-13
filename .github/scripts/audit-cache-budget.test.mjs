@@ -20,7 +20,7 @@ import {
   GIB,
   REQUIRED_MAIN_ENTRIES,
 } from "./audit-cache-budget.mjs";
-import { fetchAllCaches, observedUsageBytes } from "./run-cache-budget-audit.mjs";
+import { fetchAllCaches, observedUsageBytes, observedUsageCount } from "./run-cache-budget-audit.mjs";
 
 const MAIN = "refs/heads/main";
 
@@ -113,12 +113,16 @@ test("rejecting: pagination finds a forbidden PR Rust cache beyond the first 100
     if (path.endsWith("page=2")) {
       return { total_count: 101, actions_caches: secondPage };
     }
+    if (path.endsWith("page=3")) {
+      return { total_count: 101, actions_caches: [] };
+    }
     throw new Error(`unexpected path: ${path}`);
   });
 
   assert.deepEqual(requested, [
     "/actions/caches?per_page=100&page=1",
     "/actions/caches?per_page=100&page=2",
+    "/actions/caches?per_page=100&page=3",
   ]);
   assert.equal(caches.length, 101);
   const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
@@ -199,6 +203,64 @@ test("rejecting: pagination rejects entries beyond the fixed maximum-page capaci
       throw new Error(`the fixed two-page bound must prevent page ${path}`);
     }),
     /page 2 has 2 entries; expected 1 from total_count 101/,
+  );
+});
+
+test("rejecting: a static underreported total_count cannot hide a later forbidden cache", async () => {
+  const firstPage = withCacheIds(healthyListing(), 1);
+  const hiddenCache = withCacheIds(
+    [cache("v0-rust-rust-compile-Linux-x64-aaaaaaaa-bbbbbbbb", "refs/pull/9/merge", 0.08)],
+    6,
+  );
+  const requested = [];
+
+  await assert.rejects(
+    fetchAllCaches(async (path) => {
+      requested.push(path);
+      if (path.endsWith("page=1")) return { total_count: 5, actions_caches: firstPage };
+      if (path.endsWith("page=2")) return { total_count: 5, actions_caches: hiddenCache };
+      throw new Error(`unexpected path: ${path}`);
+    }, 6),
+    /sentinel page 2 has 1 entries beyond total_count 5/,
+  );
+  assert.deepEqual(requested, [
+    "/actions/caches?per_page=100&page=1",
+    "/actions/caches?per_page=100&page=2",
+  ]);
+});
+
+test("rejecting: a same-count page-boundary replacement cannot hide a forbidden cache", async () => {
+  const firstPage = withCacheIds(
+    [...healthyListing(), ...Array.from({ length: 95 }, (_, index) => cache(`tool-cache-${index}`, MAIN, 0.001))],
+    1,
+  );
+  const replacement = withCacheIds(
+    [cache("v0-rust-rust-compile-Linux-x64-aaaaaaaa-bbbbbbbb", "refs/pull/9/merge", 0.08)],
+    101,
+  );
+
+  await assert.rejects(
+    fetchAllCaches(async (path) => {
+      if (path.endsWith("page=1")) return { total_count: 100, actions_caches: firstPage };
+      // The repository can remain at 100 active caches while one first-page
+      // entry is deleted and this forbidden cache becomes the next page.
+      if (path.endsWith("page=2")) return { total_count: 100, actions_caches: replacement };
+      throw new Error(`unexpected path: ${path}`);
+    }, 100),
+    /sentinel page 2 has 1 entries beyond total_count 100/,
+  );
+});
+
+test("rejecting: a listing whose IDs disagree with active_caches_count is unreadable", async () => {
+  const firstPage = withCacheIds(healthyListing(), 1);
+
+  await assert.rejects(
+    fetchAllCaches(async (path) => {
+      if (path.endsWith("page=1")) return { total_count: 5, actions_caches: firstPage };
+      if (path.endsWith("page=2")) return { total_count: 5, actions_caches: [] };
+      throw new Error(`unexpected path: ${path}`);
+    }, 6),
+    /contains 5 unique ids; cache usage reports active_caches_count 6/,
   );
 });
 
@@ -335,7 +397,7 @@ test("rejecting: a missing default-branch key is reported per key", () => {
 
 test("rejecting: an absent usage total is never read as headroom", () => {
   const caches = healthyListing();
-  const result = auditCacheBudget({ caches, usageBytes: null });
+  const result = auditCacheBudget({ caches, usageBytes: observedUsageBytes({}) });
   assert.equal(result.ok, false);
   assert.ok(result.findings.some((finding) => finding.code === "usage-unobserved"));
 });
@@ -346,6 +408,22 @@ test("rejecting: malformed cache-usage totals cannot be reported as observed usa
       () => observedUsageBytes({ active_caches_size_in_bytes: value }),
       /no valid active_caches_size_in_bytes/,
       `${value} must be rejected`,
+    );
+  }
+});
+
+test("rejecting: missing or malformed active cache counts are never accepted", () => {
+  for (const usage of [
+    {},
+    { active_caches_count: -1 },
+    { active_caches_count: 1.5 },
+    { active_caches_count: Number.POSITIVE_INFINITY },
+    { active_caches_count: Number.NaN },
+  ]) {
+    assert.throws(
+      () => observedUsageCount(usage),
+      /no valid active_caches_count/,
+      `${JSON.stringify(usage)} must be rejected`,
     );
   }
 });

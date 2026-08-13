@@ -20,8 +20,8 @@ restore. Both `Swatinem/rust-cache` steps instead go restore-only against
 `ci.yml`'s own `rust-workspace` key (`shared-key: rust-workspace`,
 `save-if: false`). The shared toolchain, runner, and checkout predict an exact
 derived-key match, and four direct pull-request restore logs confirm it: run
-`31581715093` logged `full match: true` for core contracts at 09:11:00.77Z
-and Rust compile at 09:11:04.76Z; run `31583381471` logged the same result at
+`31581715093` attempt 1 logged `full match: true` for core contracts at 09:11:00.77Z
+and Rust compile at 09:11:04.76Z; run `31583381471` attempt 1 logged the same result at
 09:33:03.06Z and 09:33:05.55Z. Each identified
 `v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53`; the logs, rather than
 the mechanism, establish the observed full-key match.
@@ -43,7 +43,7 @@ early exit, so the then-save-enabled operators lane never ran it.
 `save-if: false` (with `cache-on-failure` removed, since `save-if: false`
 already makes it inert), closing its historically observed save path; the
 operators shards remain the only save-enabled path. **This is a
-closed-ingress-path fix, not a size fix**: measured directly (product-gate run `31210570118`, job
+closed-ingress-path fix, not a size fix**: measured directly (product-gate run `31210570118` attempt 1, job
 `92972117510`, `mutation operators (3/3)`), the `semantic-mutation` entry's
 current 2.719 GiB was created by a *cold* operators run (`No cache found.` at
 19:14:17Z, saved at 19:48:12Z). That operators job did not run the mutants
@@ -63,13 +63,13 @@ Separately, `rust-native-z3`'s
 already fixed for the `semantic-mutation` lanes: a cold build (measured warm
 at 27–33 min) exceeded the 40-minute budget, the job was cancelled on all six
 consecutive scheduled runs from 2026-08-07 through 2026-08-11
-(`9 skipped Post Run Swatinem/rust-cache@v2`, run 31527197290), and the
+(`9 skipped Post Run Swatinem/rust-cache@v2`, run 31527197290 attempt 1), and the
 skipped post step meant no cache was ever written to recover from. That step
-now carries `cache-on-failure: true`. On run `31565897267`, the cancelled
+now carries `cache-on-failure: true`. On run `31565897267` attempt 1, the cancelled
 Windows job's `Post Run Swatinem/rust-cache@v2` step succeeded and created
 `v0-rust-rust-native-z3-Windows_NT-x64-af4551b0-09fbaf53` at
 2026-08-12T06:16:19.271024Z (619,429,238 B), four seconds before the job
-completed; this directly contrasts with run `31527197290`, whose cancelled
+completed; this directly contrasts with run `31527197290` attempt 1, whose cancelled
 job logged `9 skipped Post Run Swatinem/rust-cache@v2`. This is an observed
 cache save after timeout cancellation under the combined change, not isolated
 proof that `cache-on-failure` alone caused it: that changeset also raised this
@@ -92,12 +92,17 @@ shared key is one `ci.yml` declares, closing the same blind spot for any
 future workflow's unguarded `Swatinem/rust-cache` step (and, retroactively,
 for `merge-readiness.yml`'s own now-removed per-job keys, which this audit
 never flagged for the same reason). Its runner now fetches every cache-list
-page through the API's `total_count`: the per-entry rules cannot treat the
-first 100 entries as a complete listing. The runner requires that every page
-repeat the initial safe `total_count`, fixes the resulting page bound, rejects
-short intermediate or over-capacity final pages, and requires unique cache
-IDs; the calibration suite rejects each malformed listing as well as a
-forbidden pull-request Rust cache placed on page two.
+page through the API's `total_count`, plus one empty sentinel page: the
+per-entry rules cannot treat the first 100 entries as a complete listing. The
+runner requires every listed page to repeat the initial safe `total_count`,
+fixes the resulting page shape, requires unique safe cache IDs, and requires
+the usage endpoint's safe `active_caches_count` to equal those IDs. It rejects
+short or over-capacity pages, a static underreported count, a same-count
+page-boundary replacement exposed by the sentinel, and a count mismatch. This
+does not establish an atomic GitHub snapshot: a same-count replacement after a
+page was read remains undetectable unless a later response exposes it. Missing
+or malformed active counts and malformed usage bytes exit as `api-unreadable`;
+absent usage bytes become non-PASS `usage-unobserved`.
 
 An earlier revision of this change added an `entry-oversized` finding
 (`SINGLE_ENTRY_WARN_BYTES = 2.5 GiB`) calibrated against the wrong ~2.2 GiB
@@ -120,13 +125,14 @@ plus ~41 MB of tool-binary caches -- 8.130 GiB total. Deleting the now-orphaned
 native-z3 (historical 0.577 GiB) estimated 7.338 GiB (73.4%), under the
 8.5 GiB warn threshold. The 7.469 GiB listing was measured only after the
 six audit failures and was never itself audited. Four scheduled audits
-(`31239888526` through `31459843075`, 2026-08-08 through 2026-08-11) reported
-only `budget-exhausted`; the two 2026-08-12 failures (`31565897238`, push, and
-`31566055925`, schedule) reported both two orphaned `refs/pull/793/merge` Rust
+(`31239888526`, `31295386890`, `31357678690`, and `31459843075`, each attempt 1,
+2026-08-08 through 2026-08-11) reported only `budget-exhausted`; the two
+2026-08-12 failures (`31565897238` attempt 1, push, and `31566055925` attempt 1,
+schedule) reported both two orphaned `refs/pull/793/merge` Rust
 entries and `main-cache-absent` for `rust-native-z3`. Recreating the Windows
 entry at 2026-08-12T06:16:19Z resolved the latter; human-authorized deletion of
 the two PR entries on 2026-08-13 resolved the remaining findings. The listing
-was then 7.337 GiB and audit run `31654305398` succeeded. `CI_SHARED_KEYS` and
+was then 7.337 GiB and audit run `31654305398` attempt 1 succeeded. `CI_SHARED_KEYS` and
 `REQUIRED_MAIN_ENTRIES` both drop `fsl-logic` accordingly; the generic
 pull-request-rust-cache rule covers any regression the same way it already
 covers `merge-readiness.yml`'s former per-job keys. Separately, the shared-key

@@ -340,12 +340,12 @@ jobs:
     # and restored 591 MiB; the 2026-08-11 cancellation reported `No cache found.`
     # instead. The cache had been evicted by pull-request-scoped caches this same
     # commit's other changes close off (see the `Swatinem/rust-cache` step below and
-    # `merge-readiness.yml`). Run 31565897267 then ran cold from 05:14:37Z to
+    # `merge-readiness.yml`). Run 31565897267 attempt 1 then ran cold from 05:14:37Z to
     # 06:16:23Z (61m46s) and was cancelled, so 60 minutes did not cover this cold
     # vendored-Z3 build at the current tree and test volume. A prior cold success,
-    # run 30156566539 / job 89675360913, completed in 37m08s on 2026-07-25, but
+    # run 30156566539 attempt 1 / job 89675360913, completed in 37m08s on 2026-07-25, but
     # that is a different tree and test volume. Its post step saved a cache, and
-    # the next Windows run (31570480618) was warm and completed in 34m39s; this
+    # the next Windows run (31570480618 attempt 1) was warm and completed in 34m39s; this
     # is a recovery path, not evidence that the current tree has a successful
     # cold-build duration within 60 minutes.
     timeout-minutes: 60
@@ -373,11 +373,11 @@ jobs:
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
-          # Run 31527197290's old 40-minute cold Windows job was cancelled and its
+          # Run 31527197290 attempt 1's old 40-minute cold Windows job was cancelled and its
           # post step was skipped (`9 skipped Post Run Swatinem/rust-cache@v2`).
           # `cache-on-failure: true` enables rust-cache's non-success post-save path;
           # `post-if: success() || env.CACHE_ON_FAILURE == 'true'` is mechanism
-          # evidence that it includes cancellation. Run 31565897267's cancelled
+          # evidence that it includes cancellation. Run 31565897267 attempt 1's cancelled
           # Windows job's step 9
           # (`Post Run Swatinem/rust-cache@v2`) succeeded and created
           # `v0-rust-rust-native-z3-Windows_NT-x64-af4551b0-09fbaf53` at
@@ -689,11 +689,11 @@ jobs:
           # dedicated key for. This removes the dedicated `fsl-logic` key from the shared
           # budget -- measured at 1,470,489,603 B (1.369 GiB) before this change -- once a
           # human deletes the now-orphaned entry. The first observed post-change run was the
-          # scheduled FSL Logic Test job in push run 31565897267: it completed in 2m54s after
+          # scheduled FSL Logic Test job in push run 31565897267 attempt 1: it completed in 2m54s after
           # logging `Cache hit for: v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53` at
           # 05:14:43Z and `Restored from cache key
           # "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.` at
-          # 05:15:05Z. Run 31570480618 was a second observed full match, completing in 3m02s
+          # 05:15:05Z. Run 31570480618 attempt 1 was a second observed full match, completing in 3m02s
           # after logging `Cache hit for:
           # v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53` at 06:34:15Z and
           # `Restored from cache key "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53"

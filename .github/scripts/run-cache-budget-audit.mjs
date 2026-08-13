@@ -17,19 +17,13 @@ function validNonNegativeSafeInteger(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
-export async function fetchAllCaches(api) {
+export async function fetchAllCaches(api, expectedCacheCount) {
   const caches = [];
   const cacheIds = new Set();
   let totalCount;
   let maximumPages;
 
   for (let page = 1; ; page += 1) {
-    if (maximumPages !== undefined && page > maximumPages) {
-      throw new Error(
-        `cache listing exceeded its fixed ${maximumPages}-page bound from total_count ${totalCount}`,
-      );
-    }
-
     const listing = await api(`/actions/caches?per_page=${CACHE_PAGE_SIZE}&page=${page}`);
     if (!Array.isArray(listing.actions_caches)) {
       throw new Error(`cache listing page ${page} has no actions_caches array`);
@@ -67,7 +61,34 @@ export async function fetchAllCaches(api) {
       caches.push(cache);
     }
 
-    if (page === maximumPages) return caches;
+    if (page === maximumPages) {
+      const sentinelPage = page + 1;
+      const sentinel = await api(
+        `/actions/caches?per_page=${CACHE_PAGE_SIZE}&page=${sentinelPage}`,
+      );
+      if (!Array.isArray(sentinel.actions_caches)) {
+        throw new Error(`cache listing sentinel page ${sentinelPage} has no actions_caches array`);
+      }
+      if (!validNonNegativeSafeInteger(sentinel.total_count)) {
+        throw new Error(`cache listing sentinel page ${sentinelPage} has no valid total_count`);
+      }
+      if (sentinel.total_count !== totalCount) {
+        throw new Error(
+          `cache listing total_count changed from ${totalCount} to ${sentinel.total_count} on sentinel page ${sentinelPage}`,
+        );
+      }
+      if (sentinel.actions_caches.length !== 0) {
+        throw new Error(
+          `cache listing sentinel page ${sentinelPage} has ${sentinel.actions_caches.length} entries beyond total_count ${totalCount}`,
+        );
+      }
+      if (expectedCacheCount !== undefined && cacheIds.size !== expectedCacheCount) {
+        throw new Error(
+          `cache listing contains ${cacheIds.size} unique ids; cache usage reports active_caches_count ${expectedCacheCount}`,
+        );
+      }
+      return caches;
+    }
   }
 }
 
@@ -79,6 +100,18 @@ export function observedUsageBytes(usage) {
     throw new Error("cache usage has no valid active_caches_size_in_bytes");
   }
   return usageBytes;
+}
+
+export function observedUsageCount(usage) {
+  if (!Object.hasOwn(usage, "active_caches_count")) {
+    throw new Error("cache usage has no valid active_caches_count");
+  }
+
+  const usageCount = usage.active_caches_count;
+  if (!validNonNegativeSafeInteger(usageCount)) {
+    throw new Error("cache usage has no valid active_caches_count");
+  }
+  return usageCount;
 }
 
 async function main() {
@@ -110,11 +143,13 @@ async function main() {
   let usageBytes = null;
   try {
     // The cache-list endpoint is paginated at 100 entries. All pages through
-    // its stable total_count are required because rules 2–4 inspect individual
-    // cache entries, not just the repository-wide usage total.
-    caches = await fetchAllCaches(api);
+    // its stable total_count plus one empty sentinel page are required because
+    // rules 2–4 inspect individual cache entries, not just the repository-wide
+    // usage total. The independently reported active count must agree with the
+    // fetched unique IDs; neither endpoint alone proves an atomic snapshot.
     const usage = await api("/actions/cache/usage");
     usageBytes = observedUsageBytes(usage);
+    caches = await fetchAllCaches(api, observedUsageCount(usage));
   } catch (error) {
     // An unreadable or incomplete API listing is not evidence of a healthy cache budget.
     console.error(`cache budget audit: FAIL -- api-unreadable: ${error.message}`);

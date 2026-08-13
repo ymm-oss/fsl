@@ -138,15 +138,16 @@ export function auditCacheBudget({
     return { findings, ok: false };
   }
 
-  // 1. Budget headroom. Prefer the API's own usage figure when present; fall
-  //    back to summing the listing, which undercounts if it was paginated.
+  // 1. Budget headroom. Prefer the API's own usage figure when present; the
+  //    listing sum is not independent headroom evidence if the endpoints were
+  //    observed at different times or the listing was incomplete.
   const summed = caches.reduce((total, entry) => total + (entry.size_in_bytes ?? 0), 0);
   const effective = typeof usageBytes === "number" ? usageBytes : summed;
   if (typeof usageBytes !== "number") {
     findings.push({
       code: "usage-unobserved",
       message:
-        "the repository cache-usage endpoint returned no total; falling back to the sum of the listing, which undercounts when paginated. Absence of the total is not evidence of headroom.",
+        "the repository cache-usage endpoint returned no total; falling back to the listing sum, which is not independent headroom evidence and can differ because of observation-time changes or an incomplete listing. Absence of the total is not evidence of headroom.",
     });
   }
   if (effective >= limitBytes * warnFraction) {
