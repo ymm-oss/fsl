@@ -44,7 +44,7 @@ const CAUSAL_GUARD_FIXTURE: &str =
 const DOCUMENT_GUARD_FIXTURE: &str =
     "rust/fslc/tests/fixtures/error_envelope_document_lowering_guard.fsl";
 const DOCUMENT_NAME_FIXTURE: &str =
-    "rust/fslc/tests/fixtures/error_envelope_document_undeclared_type.fsl";
+    "rust/fslc/tests/fixtures/error_envelope_document_unknown_name.fsl";
 const GUARD_FIXTURE: &str = "rust/fslc/tests/fixtures/domain_await_routing_rejected.fsl";
 const NAME_FIXTURE: &str =
     "rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl";
@@ -647,6 +647,16 @@ enum FailureClass {
     Literate,
 }
 
+/// The input form that reaches a command's frontend. Generic FSL commands
+/// have one source form; AI semantic cells must cover both component and
+/// project documents, because their dispatch paths are observably distinct.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum InputShape {
+    Source,
+    Component,
+    Project,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Diagnostic {
     None,
@@ -803,8 +813,17 @@ const CAUSAL_NAME_WITH_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectati
     message: MessageExpectation::OmitsInput,
     ..SEMANTIC_JSON
 });
-/// #781 exposes these as product false negatives.  They are pinned to detect
-/// drift, not to endorse accepting invalid component declarations.
+/// #800 tracks these product false negatives. They are pinned to detect drift,
+/// not to endorse accepting invalid component declarations.
+const AI_PROJECT_CHECK_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
+    result: ExpectedField::Exact("ai_project_analyzed"),
+    kind: ExpectedField::Absent,
+    location: LocationShape::Absent,
+    diagnostic: Diagnostic::None,
+    exit: 0,
+    dialect: ExpectedField::Exact("fsl-ai-project.v0"),
+    message: MessageExpectation::Absent,
+});
 const AI_COMPAT_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
     result: ExpectedField::Exact("compat_profile_generated"),
     kind: ExpectedField::Absent,
@@ -867,6 +886,16 @@ const AI_COMPAT_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
     FailureCoverage {
         class: FailureClass::Guard,
+        fixture: AI_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Guard,
         fixture: AI_PROJECT_GUARD_FIXTURE,
         uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
     },
@@ -878,6 +907,16 @@ const AI_COMPAT_COVERAGE: &[FailureCoverage] = &[
 ];
 const AI_DRIFT_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: AI_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
     FailureCoverage {
         class: FailureClass::Guard,
         fixture: AI_PROJECT_GUARD_FIXTURE,
@@ -893,6 +932,16 @@ const AI_EVAL_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
     FailureCoverage {
         class: FailureClass::Guard,
+        fixture: AI_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Guard,
         fixture: AI_PROJECT_GUARD_FIXTURE,
         uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
     },
@@ -906,6 +955,16 @@ const AI_REGRESS_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
     FailureCoverage {
         class: FailureClass::Guard,
+        fixture: AI_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Guard,
         fixture: AI_PROJECT_GUARD_FIXTURE,
         uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
     },
@@ -917,6 +976,16 @@ const AI_REGRESS_COVERAGE: &[FailureCoverage] = &[
 ];
 const AI_REPLAY_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: AI_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
     FailureCoverage {
         class: FailureClass::Guard,
         fixture: AI_PROJECT_GUARD_FIXTURE,
@@ -938,6 +1007,16 @@ const AI_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
         class: FailureClass::Name,
         fixture: AI_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: AI_PROJECT_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_PROJECT_NAME_FIXTURE,
         uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
     },
 ];
@@ -1133,6 +1212,7 @@ const KERNEL_GUARD_COVERAGE: &[FailureCoverage] = &[
 struct KnownAsymmetry {
     class: FailureClass,
     command: &'static str,
+    shape: InputShape,
     fixture: &'static str,
     observed: Expectation,
     issue: &'static str,
@@ -1144,15 +1224,22 @@ struct KnownAsymmetry {
 /// reaches it, [`assert_known_asymmetry`] tells the maintainer to move the
 /// cell into the uniform table instead of silently retaining stale debt.
 macro_rules! pin {
-    ($class:expr, $command:literal, $fixture:expr, $observed:expr, $issue:literal) => {
+    (shape: $shape:expr; $class:expr, $command:literal, $fixture:expr, $observed:expr, $issue:literal) => {
         KnownAsymmetry {
             class: $class,
             command: $command,
+            shape: $shape,
             fixture: $fixture,
             observed: $observed,
             issue: $issue,
             resolution: "fix completed; move this entry to the uniform table",
         }
+    };
+    ($class:expr, $command:literal, $fixture:expr, $observed:expr, $issue:literal) => {
+        pin!(
+            shape: InputShape::Source;
+            $class, $command, $fixture, $observed, $issue
+        )
     };
 }
 
@@ -1214,6 +1301,7 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "#780"
     ),
     pin!(
+        shape: InputShape::Component;
         FailureClass::Parse,
         "ai check",
         PARSE_AI_FIXTURE,
@@ -1221,6 +1309,7 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "#780"
     ),
     pin!(
+        shape: InputShape::Component;
         FailureClass::Parse,
         "ai compat",
         PARSE_AI_FIXTURE,
@@ -1228,6 +1317,7 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "#780"
     ),
     pin!(
+        shape: InputShape::Component;
         FailureClass::Parse,
         "ai drift",
         PARSE_AI_FIXTURE,
@@ -1235,6 +1325,7 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "#780"
     ),
     pin!(
+        shape: InputShape::Component;
         FailureClass::Parse,
         "ai eval",
         PARSE_AI_FIXTURE,
@@ -1242,6 +1333,7 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "#780"
     ),
     pin!(
+        shape: InputShape::Component;
         FailureClass::Parse,
         "ai regress",
         PARSE_AI_FIXTURE,
@@ -1249,6 +1341,7 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "#780"
     ),
     pin!(
+        shape: InputShape::Component;
         FailureClass::Parse,
         "ai replay",
         PARSE_AI_FIXTURE,
@@ -1353,78 +1446,136 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
         "#780"
     ),
-    // #781 tracks this matrix calibration until a dedicated product issue
-    // exists. These are false negatives, not accepted behavior: project
-    // commands report success without validating either malformed rule.
+    // #800 tracks these product false negatives. They are not accepted
+    // behavior: the affected command/input-shape pairs report success
+    // without validating the malformed component declaration.
     pin!(
+        shape: InputShape::Component;
+        FailureClass::Guard,
+        "ai compat",
+        AI_GUARD_FIXTURE,
+        AI_COMPAT_FALSE_GREEN,
+        "#800"
+    ),
+    pin!(
+        shape: InputShape::Component;
+        FailureClass::Name,
+        "ai compat",
+        AI_NAME_FIXTURE,
+        AI_COMPAT_FALSE_GREEN,
+        "#800"
+    ),
+    pin!(
+        shape: InputShape::Project;
         FailureClass::Guard,
         "ai compat",
         AI_PROJECT_GUARD_FIXTURE,
         AI_COMPAT_FALSE_GREEN,
-        "#781"
+        "#800"
     ),
     pin!(
+        shape: InputShape::Project;
         FailureClass::Name,
         "ai compat",
         AI_PROJECT_NAME_FIXTURE,
         AI_COMPAT_FALSE_GREEN,
-        "#781"
+        "#800"
     ),
     pin!(
+        shape: InputShape::Project;
         FailureClass::Guard,
         "ai drift",
         AI_PROJECT_GUARD_FIXTURE,
         AI_DRIFT_FALSE_GREEN,
-        "#781"
+        "#800"
     ),
     pin!(
+        shape: InputShape::Project;
         FailureClass::Name,
         "ai drift",
         AI_PROJECT_NAME_FIXTURE,
         AI_DRIFT_FALSE_GREEN,
-        "#781"
+        "#800"
     ),
     pin!(
+        shape: InputShape::Project;
         FailureClass::Guard,
         "ai eval",
         AI_PROJECT_GUARD_FIXTURE,
         AI_EVAL_FALSE_GREEN,
-        "#781"
+        "#800"
     ),
     pin!(
+        shape: InputShape::Project;
         FailureClass::Name,
         "ai eval",
         AI_PROJECT_NAME_FIXTURE,
         AI_EVAL_FALSE_GREEN,
-        "#781"
+        "#800"
     ),
     pin!(
+        shape: InputShape::Project;
         FailureClass::Guard,
         "ai regress",
         AI_PROJECT_GUARD_FIXTURE,
         AI_REGRESS_FALSE_GREEN,
-        "#781"
+        "#800"
     ),
     pin!(
+        shape: InputShape::Project;
         FailureClass::Name,
         "ai regress",
         AI_PROJECT_NAME_FIXTURE,
         AI_REGRESS_FALSE_GREEN,
-        "#781"
+        "#800"
     ),
     pin!(
+        shape: InputShape::Component;
+        FailureClass::Guard,
+        "ai replay",
+        AI_GUARD_FIXTURE,
+        AI_REPLAY_FALSE_GREEN,
+        "#800"
+    ),
+    pin!(
+        shape: InputShape::Component;
+        FailureClass::Name,
+        "ai replay",
+        AI_NAME_FIXTURE,
+        AI_REPLAY_FALSE_GREEN,
+        "#800"
+    ),
+    pin!(
+        shape: InputShape::Project;
         FailureClass::Guard,
         "ai replay",
         AI_PROJECT_GUARD_FIXTURE,
         AI_REPLAY_FALSE_GREEN,
-        "#781"
+        "#800"
     ),
     pin!(
+        shape: InputShape::Project;
         FailureClass::Name,
         "ai replay",
         AI_PROJECT_NAME_FIXTURE,
         AI_REPLAY_FALSE_GREEN,
-        "#781"
+        "#800"
+    ),
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Guard,
+        "ai check",
+        AI_PROJECT_GUARD_FIXTURE,
+        AI_PROJECT_CHECK_FALSE_GREEN,
+        "#800"
+    ),
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Name,
+        "ai check",
+        AI_PROJECT_NAME_FIXTURE,
+        AI_PROJECT_CHECK_FALSE_GREEN,
+        "#800"
     ),
     pin!(
         FailureClass::Guard,
@@ -1732,6 +1883,7 @@ struct Actual {
 struct Cell {
     class: FailureClass,
     command: &'static str,
+    shape: InputShape,
     fixture: &'static str,
     uniform: Expectation,
 }
@@ -1747,6 +1899,7 @@ fn cells(class: FailureClass) -> Vec<Cell> {
                 .map(move |coverage| Cell {
                     class,
                     command: entry.key,
+                    shape: coverage_input_shape(entry.key, coverage.fixture),
                     fixture: coverage.fixture,
                     uniform: coverage.uniform,
                 });
@@ -1762,6 +1915,7 @@ fn cells(class: FailureClass) -> Vec<Cell> {
                 .map(move |entry| Cell {
                     class,
                     command: entry.key,
+                    shape: InputShape::Source,
                     fixture: LITERATE_FIXTURE,
                     uniform: LITERATE_UNIFORM,
                 });
@@ -1799,18 +1953,63 @@ fn has_literate_not_applicable(entry: &CommandRegistration) -> bool {
     )
 }
 
-fn class_classification_count(entry: &CommandRegistration, class: FailureClass) -> usize {
+fn coverage_input_shape(command: &str, fixture: &str) -> InputShape {
+    if command.starts_with("ai ") {
+        if fixture == AI_PROJECT_GUARD_FIXTURE || fixture == AI_PROJECT_NAME_FIXTURE {
+            InputShape::Project
+        } else {
+            InputShape::Component
+        }
+    } else {
+        InputShape::Source
+    }
+}
+
+fn required_input_shapes(
+    entry: &CommandRegistration,
+    class: FailureClass,
+) -> &'static [InputShape] {
+    const SOURCE: &[InputShape] = &[InputShape::Source];
+    const AI_COMPONENT: &[InputShape] = &[InputShape::Component];
+    const AI_SEMANTIC: &[InputShape] = &[InputShape::Component, InputShape::Project];
+
+    if matches!(entry.scope, ParityScope::SpecPath { .. }) && entry.key.starts_with("ai ") {
+        match class {
+            FailureClass::Parse => AI_COMPONENT,
+            FailureClass::Guard | FailureClass::Name => AI_SEMANTIC,
+            FailureClass::Literate => SOURCE,
+        }
+    } else {
+        SOURCE
+    }
+}
+
+fn class_classification_count(
+    entry: &CommandRegistration,
+    class: FailureClass,
+    shape: InputShape,
+) -> usize {
     entry
         .coverage
         .iter()
-        .filter(|coverage| coverage.class == class)
+        .filter(|coverage| {
+            coverage.class == class && coverage_input_shape(entry.key, coverage.fixture) == shape
+        })
         .count()
-        + usize::from(class == FailureClass::Literate && has_literate_cell(entry))
-        + usize::from(class == FailureClass::Literate && has_literate_not_applicable(entry))
+        + usize::from(
+            shape == InputShape::Source
+                && class == FailureClass::Literate
+                && has_literate_cell(entry),
+        )
+        + usize::from(
+            shape == InputShape::Source
+                && class == FailureClass::Literate
+                && has_literate_not_applicable(entry),
+        )
         + entry
             .not_applicable
             .iter()
-            .filter(|not_applicable| not_applicable.class == class)
+            .filter(|not_applicable| shape == InputShape::Source && not_applicable.class == class)
             .count()
 }
 
@@ -1927,6 +2126,13 @@ fn test_git_available() -> bool {
         .arg("--version")
         .output()
         .is_ok_and(|output| output.status.success())
+}
+
+fn require_test_git() {
+    assert!(
+        test_git_available(),
+        "error-envelope parity requires a Git executable for its approval cells and calibration"
+    );
 }
 
 fn approval_command(command: &str) -> bool {
@@ -2092,12 +2298,8 @@ fn assert_known_asymmetry(
 }
 
 fn assert_cell(cell: Cell) {
-    if approval_command(cell.command) && !test_git_available() {
-        eprintln!(
-            "skipping {:?}/{}: the test-owned approval fixture requires a Git binary",
-            cell.class, cell.command
-        );
-        return;
+    if approval_command(cell.command) {
+        require_test_git();
     }
     let actual = run(cell.command, cell.fixture);
     let expected_input = if approval_command(cell.command) {
@@ -2110,14 +2312,16 @@ fn assert_cell(cell: Cell) {
         .filter(|known| {
             known.class == cell.class
                 && known.command == cell.command
+                && known.shape == cell.shape
                 && known.fixture == cell.fixture
         })
         .collect::<Vec<_>>();
     assert!(
         pins.len() <= 1,
-        "{:?}/{}/{} has more than one known-asymmetry pin",
+        "{:?}/{}/{:?}/{} has more than one known-asymmetry pin",
         cell.class,
         cell.command,
+        cell.shape,
         cell.fixture
     );
     if let Some(known) = pins.first() {
@@ -2228,12 +2432,14 @@ fn parity_registry_exclusions_are_explicit_and_runnable_entries_have_a_spec_slot
             FailureClass::Name,
             FailureClass::Literate,
         ] {
-            assert_eq!(
-                class_classification_count(entry, class),
-                1,
-                "{} must classify {class:?} as exactly one executable Cell or reasoned NotApplicable",
-                entry.key
-            );
+            for shape in required_input_shapes(entry, class) {
+                assert_eq!(
+                    class_classification_count(entry, class, *shape),
+                    1,
+                    "{} must classify {class:?}/{shape:?} as exactly one executable Cell or reasoned NotApplicable",
+                    entry.key
+                );
+            }
         }
         for not_applicable in entry.not_applicable {
             assert!(
@@ -2261,9 +2467,9 @@ fn missing_classification_spec_path_is_rejected() {
         not_applicable: &[],
     };
     assert_eq!(
-        class_classification_count(&empty_coverage, FailureClass::Parse),
+        class_classification_count(&empty_coverage, FailureClass::Parse, InputShape::Source),
         1,
-        "{} must classify Parse as exactly one executable Cell or reasoned NotApplicable",
+        "{} must classify Parse/Source as exactly one executable Cell or reasoned NotApplicable",
         empty_coverage.key
     );
 }
@@ -2312,10 +2518,7 @@ fn unresolved_identifier_errors_are_uniform_or_pinned_across_frontend_siblings()
 
 #[test]
 fn approval_diff_uses_a_valid_baseline_before_exercising_each_failure_class() {
-    if !test_git_available() {
-        eprintln!("skipping approval diff calibration: Git is unavailable");
-        return;
-    }
+    require_test_git();
 
     for (fixture, kind, diagnostic, message) in [
         (
@@ -2363,10 +2566,7 @@ fn approval_diff_uses_a_valid_baseline_before_exercising_each_failure_class() {
 
 #[test]
 fn approval_diff_zero_digest_negative_control_stops_before_the_diff() {
-    if !test_git_available() {
-        eprintln!("skipping approval zero-digest control: Git is unavailable");
-        return;
-    }
+    require_test_git();
 
     let approval = ApprovalFixture::new(NAME_FIXTURE);
     let zero_digest = approval.zero_digest_record();
@@ -2421,6 +2621,7 @@ fn name_matrix_keeps_five_uniform_countercontrols_and_three_pins() {
             KNOWN_ASYMMETRIES.iter().any(|pin| {
                 pin.class == FailureClass::Name
                     && pin.command == cell.command
+                    && pin.shape == cell.shape
                     && pin.fixture == cell.fixture
             })
         })
@@ -2456,10 +2657,17 @@ fn every_pin_is_a_registered_matrix_command_with_a_tracking_issue() {
     ] {
         for cell in cells(class) {
             assert!(
-                exact_cell_keys.insert((cell.class, cell.command, cell.fixture, cell.uniform)),
-                "duplicate matrix cell: {:?}/{}/{}",
+                exact_cell_keys.insert((
+                    cell.class,
+                    cell.command,
+                    cell.shape,
+                    cell.fixture,
+                    cell.uniform
+                )),
+                "duplicate matrix cell: {:?}/{}/{:?}/{}",
                 cell.class,
                 cell.command,
+                cell.shape,
                 cell.fixture
             );
         }
@@ -2467,10 +2675,11 @@ fn every_pin_is_a_registered_matrix_command_with_a_tracking_issue() {
     let mut pin_keys = BTreeSet::new();
     for pin in KNOWN_ASYMMETRIES {
         assert!(
-            pin_keys.insert((pin.class, pin.command, pin.fixture)),
-            "duplicate known-asymmetry pin: {:?}/{}/{}",
+            pin_keys.insert((pin.class, pin.command, pin.shape, pin.fixture)),
+            "duplicate known-asymmetry pin: {:?}/{}/{:?}/{}",
             pin.class,
             pin.command,
+            pin.shape,
             pin.fixture
         );
         assert!(
@@ -2496,22 +2705,34 @@ fn every_pin_is_a_registered_matrix_command_with_a_tracking_issue() {
         );
         let matching_cells = cells(pin.class)
             .into_iter()
-            .filter(|cell| cell.command == pin.command && cell.fixture == pin.fixture)
+            .filter(|cell| {
+                cell.command == pin.command
+                    && cell.shape == pin.shape
+                    && cell.fixture == pin.fixture
+            })
             .collect::<Vec<_>>();
         assert_eq!(
             matching_cells.len(),
             1,
-            "{:?}/{}/{} is pinned but not an executable matrix cell",
+            "{:?}/{}/{:?}/{} is pinned but not an executable matrix cell",
             pin.class,
             pin.command,
+            pin.shape,
             pin.fixture
         );
         let cell = matching_cells[0];
         assert!(
-            exact_cell_keys.contains(&(pin.class, pin.command, pin.fixture, cell.uniform)),
-            "{:?}/{}/{} has a pin whose complete key is absent from the matrix",
+            exact_cell_keys.contains(&(
+                pin.class,
+                pin.command,
+                pin.shape,
+                pin.fixture,
+                cell.uniform
+            )),
+            "{:?}/{}/{:?}/{} has a pin whose complete key is absent from the matrix",
             pin.class,
             pin.command,
+            pin.shape,
             pin.fixture
         );
     }
