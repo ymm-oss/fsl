@@ -345,8 +345,8 @@ test("rejecting: different page-boundary mixed collections fail closed after ret
     ...changedAtSecondPage.slice(100),
   ];
   // These asserted mixed collections are also the values that the mock pages
-  // serve. Replacing page one with a changed snapshot makes the first pair
-  // stable and invalidates the rejecting control.
+  // serve. Replacing page one with a complete changed snapshot invalidates
+  // the rejecting control.
   const pagePairs = [
     [mixedOldThenFirstPageChange, mixedOldThenFirstPageChange],
     [mixedOldThenSecondPageChange, mixedOldThenSecondPageChange],
