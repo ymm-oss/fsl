@@ -110,7 +110,9 @@ jobs:
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. See
+          # non-`pull_request` events. The live audit's created_at order has no documented
+          # tie-breaker; tied entries crossing a page boundary are intentionally fail-closed
+          # as unauditable, not treated as a stable healthy listing. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target

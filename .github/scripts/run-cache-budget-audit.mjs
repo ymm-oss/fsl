@@ -37,6 +37,10 @@ export function maximumAuditRequests(totalCount) {
   return 1 + STABILITY_ATTEMPTS * 2 * listingRequests(totalCount);
 }
 
+function pageNumber(path) {
+  return new URL(path, "https://api.github.com").searchParams.get("page");
+}
+
 function assertListingFitsBudget(totalCount) {
   const required = maximumAuditRequests(totalCount);
   if (required > CACHE_AUDIT_REQUEST_BUDGET) {
@@ -49,7 +53,8 @@ function assertListingFitsBudget(totalCount) {
 
 function cachePath(page) {
   // `created_at` is not changed by restoration/access, unlike last-accessed
-  // order. Ascending order makes a pair of complete observations comparable.
+  // order. GitHub documents it as the primary order only; a tied page boundary
+  // can still reorder and is intentionally rejected as an unstable observation.
   return `/actions/caches?per_page=${CACHE_PAGE_SIZE}&sort=created_at&direction=asc&page=${page}`;
 }
 
@@ -166,27 +171,30 @@ export function observedUsageBytes(usage) {
   return usageBytes;
 }
 
-async function main() {
-  const token = process.env.GITHUB_TOKEN;
-  const repo = process.env.GITHUB_REPOSITORY;
-
-  if (!token || !repo) {
-    console.error(
-      "cache budget audit: GITHUB_TOKEN and GITHUB_REPOSITORY are required; refusing to report a healthy budget without observing one",
-    );
-    process.exit(1);
-  }
-
+/**
+ * Creates the live GitHub API boundary for the cache audit. It is exported so
+ * the request cap, transport failures, and rate-limit headers are calibrated
+ * without an actual network request.
+ */
+export function createCacheAuditApi({ token, repo, fetchImpl = fetch }) {
   let requestCount = 0;
   let rateLimitRemaining = null;
 
-  async function api(path) {
+  async function request(path) {
     if (requestCount >= CACHE_AUDIT_REQUEST_BUDGET) {
       throw new Error(
         `cache audit consumed its ${CACHE_AUDIT_REQUEST_BUDGET}-request budget; refusing to consume reserved rate-limit headroom`,
       );
     }
-    const response = await fetch(`https://api.github.com/repos/${repo}${path}`, {
+    if (
+      rateLimitRemaining !== null &&
+      rateLimitRemaining <= CACHE_AUDIT_REQUEST_HEADROOM
+    ) {
+      throw new Error(
+        `rate limit has ${rateLimitRemaining} requests remaining; refusing to consume ${CACHE_AUDIT_REQUEST_HEADROOM} reserved`,
+      );
+    }
+    const response = await fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
       headers: {
         authorization: `Bearer ${token}`,
         accept: "application/vnd.github+json",
@@ -197,7 +205,11 @@ async function main() {
       throw new Error(`GET ${path} -> ${response.status} ${response.statusText}`);
     }
     requestCount += 1;
-    const remaining = Number(response.headers.get("x-ratelimit-remaining"));
+    const rawRemaining = response.headers.get("x-ratelimit-remaining");
+    if (rawRemaining === null || rawRemaining.trim() === "") {
+      throw new Error(`GET ${path} returned no valid x-ratelimit-remaining header`);
+    }
+    const remaining = Number(rawRemaining);
     if (!validNonNegativeSafeInteger(remaining)) {
       throw new Error(`GET ${path} returned no valid x-ratelimit-remaining header`);
     }
@@ -205,24 +217,56 @@ async function main() {
     return response.json();
   }
 
+  return {
+    request,
+    get requestCount() {
+      return requestCount;
+    },
+    get rateLimitRemaining() {
+      return rateLimitRemaining;
+    },
+  };
+}
+
+export async function runCacheBudgetAudit({
+  token = process.env.GITHUB_TOKEN,
+  repo = process.env.GITHUB_REPOSITORY,
+  fetchImpl = fetch,
+  writeReport = (report) => console.log(report),
+  writeError = (report) => console.error(report),
+} = {}) {
+  if (!token || !repo) {
+    writeError(
+      "cache budget audit: GITHUB_TOKEN and GITHUB_REPOSITORY are required; refusing to report a healthy budget without observing one",
+    );
+    return { ok: false };
+  }
+
+  const api = createCacheAuditApi({ token, repo, fetchImpl });
   let caches;
   let usageBytes = null;
   try {
     // Usage updates about every five minutes, so it is bytes-only conservative
     // evidence, never an identity/completeness reconciliation. Completeness is
     // two stable-order full collections whose IDs and inspected fields agree.
-    const usage = await api("/actions/cache/usage");
+    const usage = await api.request("/actions/cache/usage");
     usageBytes = observedUsageBytes(usage);
     caches = await fetchStableCaches(async (path) => {
-      const result = await api(path);
+      const result = await api.request(path);
       // After the first page of any collection, its declared count defines a
-      // bounded worst-case request plan (including the retry). Preserve the
-      // configured 100-request headroom in the actual rate-limit bucket too.
-      if (path.includes("page=1")) {
-        const neededAfterThisResponse = maximumAuditRequests(result.total_count) - requestCount;
-        if (rateLimitRemaining < neededAfterThisResponse + CACHE_AUDIT_REQUEST_HEADROOM) {
+      // current collection's remaining requests (including its sentinel).
+      // This is not the new collection's total bound minus cumulative requests:
+      // a later, smaller listing cannot make a required current continuation
+      // negative. The next request also stops at/below the 100-request
+      // headroom, so an unbounded future collection can never consume it.
+      if (pageNumber(path) === "1") {
+        const neededAfterThisResponse = listingRequests(result.total_count) - 1;
+        if (
+          api.rateLimitRemaining <
+          neededAfterThisResponse + CACHE_AUDIT_REQUEST_HEADROOM
+        ) {
           throw new Error(
-            `rate limit has ${rateLimitRemaining} requests remaining; need ${neededAfterThisResponse} ` +
+            `rate limit has ${api.rateLimitRemaining} requests remaining; need ${neededAfterThisResponse} ` +
               `for this bounded audit plus ${CACHE_AUDIT_REQUEST_HEADROOM} reserved`,
           );
         }
@@ -231,12 +275,17 @@ async function main() {
     });
   } catch (error) {
     // An unreadable or incomplete API listing is not evidence of a healthy cache budget.
-    console.error(`cache budget audit: FAIL -- api-unreadable: ${error.message}`);
-    process.exit(1);
+    writeError(`cache budget audit: FAIL -- api-unreadable: ${error.message}`);
+    return { ok: false };
   }
 
   const result = auditCacheBudget({ caches, usageBytes });
-  console.log(formatReport(result));
+  writeReport(formatReport(result));
+  return result;
+}
+
+async function main() {
+  const result = await runCacheBudgetAudit();
   process.exit(result.ok ? 0 : 1);
 }
 

@@ -155,13 +155,17 @@ export function auditCacheBudget({
     });
   }
   if (effective >= limitBytes * warnFraction) {
+    const limitDiagnostic =
+      effective > limitBytes
+        ? `${formatGiB(effective - limitBytes)} above the limit`
+        : `${formatGiB(limitBytes - effective)} remaining before the limit`;
     findings.push({
       code: "budget-exhausted",
       message: `cache usage is ${formatGiB(effective)} of a ${formatGiB(limitBytes)} limit (${Math.round(
         (effective / limitBytes) * 100,
       )}%), at or above the ${Math.round(warnFraction * 100)}% threshold. ${formatGiB(
-        limitBytes - effective,
-      )} remains before the limit; a sufficiently large save can trigger least-recently-used eviction, including a default-branch cache that a main-targeting pull request depends on.`,
+        effective,
+      )} is ${limitDiagnostic}; a sufficiently large save can trigger least-recently-used eviction, including a default-branch cache that a main-targeting pull request depends on.`,
     });
   }
 

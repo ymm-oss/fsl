@@ -106,9 +106,15 @@ counts must be zero (the observed out-of-range envelope) or repeat the first
 count, never an arbitrary valid integer. The retry-safe request bound counts
 usage plus every listing request: `1 + 4 × (pages + sentinel)`, capped at 900
 to reserve 100 of the standard 1,000-request Actions-token quota, with
-`x-ratelimit-remaining` checked before continuation. Malformed listing
-envelopes or usage bytes exit as `api-unreadable`; absent usage bytes become
-non-PASS `usage-unobserved`.
+missing/empty/invalid `x-ratelimit-remaining` rejected before conversion and
+headroom checked before every request and against the current collection's
+remaining requests, never a later small collection's bound minus cumulative
+requests. Malformed listing envelopes or usage bytes exit as `api-unreadable`;
+absent usage bytes become non-PASS `usage-unobserved`. GitHub documents
+`created_at` only as the primary sort key: the repeated live sample had unique
+timestamps, so it establishes no tie order. A tied boundary reorder can make
+the listing unauditable and fail closed; it is not evidence of a stable healthy
+collection.
 
 An earlier revision of this change added an `entry-oversized` finding
 (`SINGLE_ENTRY_WARN_BYTES = 2.5 GiB`) calibrated against the wrong ~2.2 GiB

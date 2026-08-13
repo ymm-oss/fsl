@@ -789,10 +789,14 @@ continues to use `max(usage bytes, summed listing bytes)`, so either observed by
 85% rejects.
 
 For completeness, each stability attempt obtains two entire cache listings with fixed
-`per_page=100&sort=created_at&direction=asc`. `created_at` does not change on restore/access. A
-collection requires a safe-integer first `total_count`; each declared page repeats it, has its
-exact implied entry count, and contains unique safe-integer IDs with nonempty `key` and `ref` and
-nonnegative safe-integer `size_in_bytes`. It then requests an empty sentinel. GitHub's observed
+`per_page=100&sort=created_at&direction=asc`. `created_at` does not change on restore/access, but
+GitHub documents only that primary sort key, not a secondary tie order or page-to-page stability.
+The current repeated live observation had nine distinct `created_at` values; it is not evidence
+about tied values. A tie reordered across a page boundary can therefore produce a duplicate ID or
+different paired collection and fail closed as unauditable, rather than establish a false stable
+order. A collection requires a safe-integer first `total_count`; each declared page repeats it, has
+its exact implied entry count, and contains unique safe-integer IDs with nonempty `key` and `ref`
+and nonnegative safe-integer `size_in_bytes`. It then requests an empty sentinel. GitHub's observed
 out-of-range envelope is `{ "total_count": 0, "actions_caches": [] }`; the sentinel may therefore
 have count zero or repeat the initial count, but any other count, a non-array envelope, malformed
 count, or nonempty array fails closed. The two collections must have exactly the same ID set and,
@@ -810,11 +814,14 @@ The request budget counts every request: one usage request plus
 `2 × (pages + sentinel)` for one paired observation; the one permitted retry raises the bounded
 worst case to `1 + 4 × (pages + sentinel)`. The standard Actions `GITHUB_TOKEN` allowance is 1,000
 requests/hour/repository. The runner caps itself at 900 requests, reserves 100 for other workflow
-work, validates `x-ratelimit-remaining`, and fails closed before continuation when the declared
-count cannot fit the retry-safe bound. With 100-entry pages, at most 22,300 entries (223 pages) fit:
-the worst case is `1 + 4 × 224 = 897`; 22,301 entries require 901 and are rejected. Counts
-99,800–99,901 are therefore rejected before a continuation request, rather than approaching the
-repository quota.
+work, rejects a missing/empty/non-integer `x-ratelimit-remaining` header before numeric conversion,
+and stops before each request when the known remaining bucket is at or below that headroom. After a
+page-one response, it reserves the current collection's remaining pages and sentinel plus the
+headroom from its current control state; it does not subtract cumulative requests from a later
+smaller collection's bound and thereby manufacture negative future work. With 100-entry pages, at
+most 22,300 entries (223 pages) fit: the worst case is `1 + 4 × 224 = 897`; 22,301 entries require
+901 and are rejected. Counts 99,800–99,901 are therefore rejected before a continuation request,
+rather than approaching the repository quota.
 
 Given a usable observation, the pure audit fails closed on four states: usage at or above 85% of
 the limit, a missing `refs/heads/main` cache for any critical-path `{key, platform}` pair, — the
@@ -846,8 +853,13 @@ whether the key is one this file has ever heard of, so a future workflow's ungua
 `Swatinem/rust-cache` step cannot reopen the same blind spot under a new name.
 
 `.github/scripts/audit-cache-budget.test.mjs` calibrates all of it offline, including a fixture that
-reproduces the 2026-08-06 listing verbatim and must fail, and rejecting fixtures for a non-`ci.yml`
-rust cache on a pull-request ref and for each half of `rust-native-z3` missing from `main`.
+reproduces the 2026-08-06 listing verbatim and must fail; actual 200-entry page-boundary mixed
+collections (deleted ID on page one, appended ID on page two, and a missing boundary ID); differing
+mixed pairs that remain failing; tied-`created_at` boundary reordering; per-field identity changes;
+every `CI_SHARED_KEYS` key missing from `main`; and direct live-wrapper controls for 22,300/22,301,
+HTTP failure, malformed ordinary pages, the 900-request cap, and rate-limit headers/headroom.
+There are also rejecting fixtures for a non-`ci.yml` rust cache on a pull-request ref and for each
+half of `rust-native-z3` missing from `main`.
 `tools/check-merge-readiness.sh`'s `check_automation` lane runs that suite on every pull request, so
 a change to the checker is covered pre-merge even though the live audit deliberately is not a
 required context: the shared cache state can change after a pull request's own checks pass, so

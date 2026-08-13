@@ -17,15 +17,19 @@ import {
   auditCacheBudget,
   formatReport,
   CACHE_LIMIT_BYTES,
+  CI_SHARED_KEYS,
   GIB,
   REQUIRED_MAIN_ENTRIES,
 } from "./audit-cache-budget.mjs";
 import {
   CACHE_AUDIT_REQUEST_BUDGET,
+  CACHE_AUDIT_REQUEST_HEADROOM,
+  createCacheAuditApi,
   fetchCacheCollection as fetchAllCaches,
   fetchStableCaches,
   maximumAuditRequests,
   observedUsageBytes,
+  runCacheBudgetAudit,
   sameCacheCollection,
 } from "./run-cache-budget-audit.mjs";
 
@@ -81,6 +85,25 @@ function outOfRangeCachePage() {
   // An out-of-range page resets total_count to 0; it does not repeat the
   // first page's total_count.
   return { total_count: 0, actions_caches: [] };
+}
+
+function jsonResponse(body, options = {}) {
+  const { status = 200, statusText = "OK" } = options;
+  const remaining = Object.hasOwn(options, "remaining") ? options.remaining : "999";
+  const headers = new Headers();
+  if (remaining !== undefined) headers.set("x-ratelimit-remaining", remaining);
+  return new Response(JSON.stringify(body), { status, statusText, headers });
+}
+
+function cachePage(totalCount, page) {
+  const start = (page - 1) * 100;
+  return withCacheIds(
+    Array.from(
+      { length: Math.min(100, Math.max(0, totalCount - start)) },
+      (_, index) => cache(`tool-cache-${start + index}`, MAIN, 1),
+    ),
+    start + 1,
+  );
 }
 
 test("accepting: default-branch caches present, budget below threshold, no pull-request Rust caches", () => {
@@ -221,11 +244,12 @@ test("accepting: a stale usage count does not invalidate stable listing identity
   assert.deepEqual(caches, entries);
 });
 
-test("rejecting: two complete collections with different IDs or inspected fields fail closed after retry", async () => {
-  // This uses the API's two 100-entry pages. In the reviewer reproduction,
-  // page one came from an old 200-entry set, then a required main entry was
-  // deleted and a PR cache added before page two. A single collection can
-  // otherwise look healthy while describing no real point in time.
+test("accepting: a page-boundary mixed collection retries to a stable observation", async () => {
+  // This uses the API's two 100-entry pages. The first collection has page one
+  // from the old 200-entry set, then loses the required entry and appends a new
+  // entry before page two. It therefore contains the deleted ID, the new ID,
+  // and lacks the boundary ID -- a real mixed collection, not merely two
+  // whole snapshots selected per request.
   const oldEntries = withCacheIds(
     [
       ...healthyListing(),
@@ -233,30 +257,94 @@ test("rejecting: two complete collections with different IDs or inspected fields
     ],
     1,
   );
-  const changedEntries = oldEntries.map((entry) =>
-    entry.key.includes("-semantic-mutation-")
-      ? {
-          ...entry,
-          id: 201,
-          key: "v0-rust-rust-compile-Linux-x64-aaaaaaaa-bbbbbbbb",
-          ref: "refs/pull/9/merge",
-        }
-      : entry,
-  );
-  const snapshots = [oldEntries, changedEntries, oldEntries, changedEntries];
+  const removedId = oldEntries.find((entry) => entry.key.includes("-semantic-mutation-")).id;
+  const changedEntries = [
+    ...oldEntries.filter((entry) => entry.id !== removedId),
+    {
+      ...oldEntries[0],
+      id: 201,
+      key: "v0-rust-rust-compile-Linux-x64-aaaaaaaa-bbbbbbbb",
+      ref: "refs/pull/9/merge",
+    },
+  ];
+  const mixedEntries = [
+    ...oldEntries.slice(0, 100),
+    ...changedEntries.slice(100),
+  ];
+  assert.ok(mixedEntries.some((entry) => entry.id === removedId));
+  assert.ok(mixedEntries.some((entry) => entry.id === 201));
+  assert.equal(mixedEntries.some((entry) => entry.id === 101), false);
+
+  const snapshots = [oldEntries, changedEntries, changedEntries, changedEntries];
   let collection = -1;
   const requested = [];
+  const caches = await fetchStableCaches(async (path) => {
+    requested.push(path);
+    if (path.endsWith("page=1")) {
+      collection += 1;
+      return {
+        total_count: 200,
+        actions_caches:
+          collection === 0 ? oldEntries.slice(0, 100) : snapshots[collection].slice(0, 100),
+      };
+    }
+    if (path.endsWith("page=2")) {
+      return {
+        total_count: 200,
+        actions_caches:
+          collection === 0 ? changedEntries.slice(100) : snapshots[collection].slice(100),
+      };
+    }
+    if (path.endsWith("page=3")) return outOfRangeCachePage();
+    throw new Error(`unexpected path: ${path}`);
+  });
+
+  assert.equal(collection, 3);
+  assert.equal(requested.length, 12);
+  assert.deepEqual(caches, changedEntries);
+});
+
+test("rejecting: different page-boundary mixed collections fail closed after retry", async () => {
+  const oldEntries = withCacheIds(
+    [
+      ...healthyListing(),
+      ...Array.from({ length: 195 }, (_, index) => cache(`tool-cache-${index}`, MAIN, 0.001)),
+    ],
+    1,
+  );
+  const removedId = oldEntries.find((entry) => entry.key.includes("-semantic-mutation-")).id;
+  const changedAtFirstPage = [
+    ...oldEntries.filter((entry) => entry.id !== removedId),
+    { ...oldEntries[0], id: 201, key: "new-cache", ref: MAIN },
+  ];
+  const changedAtSecondPage = [
+    ...oldEntries.filter((entry) => entry.id !== 150),
+    { ...oldEntries[0], id: 202, key: "other-new-cache", ref: MAIN },
+  ];
+  const mixedOldThenFirstPageChange = [
+    ...oldEntries.slice(0, 100),
+    ...changedAtFirstPage.slice(100),
+  ];
+  const mixedOldThenSecondPageChange = [
+    ...oldEntries.slice(0, 100),
+    ...changedAtSecondPage.slice(100),
+  ];
+  const pagePairs = [
+    [oldEntries, changedAtFirstPage],
+    [oldEntries, changedAtSecondPage],
+    [oldEntries, changedAtFirstPage],
+    [oldEntries, changedAtSecondPage],
+  ];
+  let collection = -1;
 
   await assert.rejects(
     fetchStableCaches(async (path) => {
-      requested.push(path);
       if (path.endsWith("page=1")) {
         collection += 1;
-        return { total_count: 200, actions_caches: snapshots[collection].slice(0, 100) };
+        return { total_count: 200, actions_caches: pagePairs[collection][0].slice(0, 100) };
       }
       if (path.endsWith("page=2")) {
-        const pageTwoSnapshot = collection % 2 === 0 ? changedEntries : snapshots[collection];
-        return { total_count: 200, actions_caches: pageTwoSnapshot.slice(100) };
+        return { total_count: 200, actions_caches: pagePairs[collection][1].slice(100) };
       }
       if (path.endsWith("page=3")) return outOfRangeCachePage();
       throw new Error(`unexpected path: ${path}`);
@@ -264,7 +352,10 @@ test("rejecting: two complete collections with different IDs or inspected fields
     /two complete created_at-ordered cache observations disagreed after 2 attempts/,
   );
   assert.equal(collection, 3);
-  assert.equal(requested.length, 12);
+  assert.equal(
+    sameCacheCollection(mixedOldThenFirstPageChange, mixedOldThenSecondPageChange),
+    false,
+  );
 });
 
 test("accepting: a transient differing pair retries and returns the stable second observation", async () => {
@@ -287,6 +378,57 @@ test("accepting: a transient differing pair retries and returns the stable secon
   assert.equal(collection, 3);
   assert.deepEqual(caches, stableEntries);
   assert.equal(sameCacheCollection(oldEntries, stableEntries), false);
+});
+
+test("rejecting: a tied created_at page boundary that reorders an ID fails closed", async () => {
+  // GitHub documents created_at as the primary sort key, not a deterministic
+  // secondary order for equal timestamps. If tied entries cross a page boundary
+  // between requests, duplicate-ID validation must refuse to call it healthy.
+  const entries = withCacheIds(
+    Array.from({ length: 200 }, (_, index) => ({
+      ...cache(`tied-cache-${index}`, MAIN, 0.001),
+      created_at: "2026-08-13T00:00:00Z",
+    })),
+  );
+  const reorderedSecondPage = [entries[99], ...entries.slice(101)];
+
+  await assert.rejects(
+    fetchAllCaches(async (path) => {
+      if (path.endsWith("page=1")) return { total_count: 200, actions_caches: entries.slice(0, 100) };
+      if (path.endsWith("page=2")) return { total_count: 200, actions_caches: reorderedSecondPage };
+      throw new Error(`unexpected path: ${path}`);
+    }),
+    /repeats cache id 100/,
+  );
+});
+
+test("rejecting: key, ref, and size changes independently prevent a stable collection", async () => {
+  const initial = withCacheIds(healthyListing(), 1);
+  const cases = [
+    ["key", (entry) => ({ ...entry, key: `${entry.key}-changed` })],
+    ["ref", (entry) => ({ ...entry, ref: "refs/heads/other" })],
+    ["size_in_bytes", (entry) => ({ ...entry, size_in_bytes: entry.size_in_bytes + 1 })],
+  ];
+
+  for (const [field, mutate] of cases) {
+    const changed = initial.map((entry) => (entry.id === 1 ? mutate(entry) : entry));
+    let collection = -1;
+    await assert.rejects(
+      fetchStableCaches(async (path) => {
+        if (path.endsWith("page=1")) {
+          collection += 1;
+          return {
+            total_count: 5,
+            actions_caches: collection % 2 === 0 ? initial : changed,
+          };
+        }
+        if (path.endsWith("page=2")) return outOfRangeCachePage();
+        throw new Error(`unexpected path: ${path}`);
+      }),
+      /two complete created_at-ordered cache observations disagreed after 2 attempts/,
+      field,
+    );
+  }
 });
 
 test("rejecting: pagination rejects a total_count that changes after page one", async () => {
@@ -429,6 +571,190 @@ test("rejecting: 99,900 and 99,901 entries remain above the two-observation budg
 test("accepting: the maximum retry-safe page count fits the unified request budget", () => {
   assert.equal(maximumAuditRequests(22_300), 897);
   assert.ok(maximumAuditRequests(22_301) > CACHE_AUDIT_REQUEST_BUDGET);
+});
+
+test("rejecting: shrinking mock proves legacy PASS predicate and corrected fail-closed headroom", async () => {
+  // Before the fix, `maximumAuditRequests(5) - 226` became -217 here, so
+  // `5 < -217 + 100` was false and this fixture reached a healthy pure audit.
+  // The API wrapper now refuses the small collection's first page because its
+  // current control state still needs the collection's sentinel request.
+  const errors = [];
+  let phase = "large";
+  let smallRequests = 0;
+  let requests = 0;
+  const result = await runCacheBudgetAudit({
+    token: "test-token",
+    repo: "owner/repo",
+    writeReport: () => assert.fail("the shrinking fixture must not report PASS"),
+    writeError: (message) => errors.push(message),
+    fetchImpl: async (url) => {
+      requests += 1;
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/actions/cache/usage")) {
+        return jsonResponse({ active_caches_size_in_bytes: 5 });
+      }
+      const page = Number(parsed.searchParams.get("page"));
+      if (phase === "large") {
+        if (page === 224) {
+          phase = "small";
+          return jsonResponse(outOfRangeCachePage());
+        }
+        return jsonResponse({
+          total_count: 22_300,
+          actions_caches: cachePage(22_300, page),
+        });
+      }
+      if (page === 1) {
+        return jsonResponse(
+          { total_count: 5, actions_caches: withCacheIds(healthyListing()) },
+          { remaining: String(5 - smallRequests++) },
+        );
+      }
+      if (page === 2) return jsonResponse(outOfRangeCachePage());
+      throw new Error(`unexpected page ${page}`);
+    },
+  });
+
+  const legacyNeededAfterThisResponse = maximumAuditRequests(5) - 226;
+  assert.equal(legacyNeededAfterThisResponse, -217);
+  assert.equal(5 < legacyNeededAfterThisResponse + CACHE_AUDIT_REQUEST_HEADROOM, false);
+  assert.equal(result.ok, false);
+  assert.equal(requests, 226);
+  assert.match(
+    errors.join("\n"),
+    /rate limit has 5 requests remaining; need 1 for this bounded audit plus 100 reserved/,
+  );
+});
+
+test("rejecting: the live runner fails closed for a 22,301-entry first page", async () => {
+  const errors = [];
+  const paths = [];
+  const result = await runCacheBudgetAudit({
+    token: "test-token",
+    repo: "owner/repo",
+    writeReport: () => assert.fail("an over-budget listing must not report PASS"),
+    writeError: (message) => errors.push(message),
+    fetchImpl: async (url) => {
+      const parsed = new URL(url);
+      paths.push(parsed.pathname + parsed.search);
+      if (parsed.pathname.endsWith("/actions/cache/usage")) {
+        return jsonResponse({ active_caches_size_in_bytes: 0 });
+      }
+      return jsonResponse({
+        total_count: 22_301,
+        actions_caches: cachePage(22_301, 1),
+      });
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(paths, [
+    "/repos/owner/repo/actions/cache/usage",
+    `/repos/owner/repo${PAGE_PATH(1)}`,
+  ]);
+  assert.match(errors.join("\n"), /total_count 22301 needs up to 901 requests/);
+});
+
+test("rejecting: the live runner reaches the 22,300-entry continuation and reports HTTP failure", async () => {
+  const errors = [];
+  const paths = [];
+  const result = await runCacheBudgetAudit({
+    token: "test-token",
+    repo: "owner/repo",
+    writeReport: () => assert.fail("a failed continuation must not report PASS"),
+    writeError: (message) => errors.push(message),
+    fetchImpl: async (url) => {
+      const parsed = new URL(url);
+      paths.push(parsed.pathname + parsed.search);
+      if (parsed.pathname.endsWith("/actions/cache/usage")) {
+        return jsonResponse({ active_caches_size_in_bytes: 0 });
+      }
+      if (parsed.searchParams.get("page") === "1") {
+        return jsonResponse({
+          total_count: 22_300,
+          actions_caches: cachePage(22_300, 1),
+        });
+      }
+      return jsonResponse({}, { status: 503, statusText: "Service Unavailable" });
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(paths, [
+    "/repos/owner/repo/actions/cache/usage",
+    `/repos/owner/repo${PAGE_PATH(1)}`,
+    `/repos/owner/repo${PAGE_PATH(2)}`,
+  ]);
+  assert.match(errors.join("\n"), /GET .*page=2 -> 503 Service Unavailable/);
+});
+
+test("rejecting: the live runner rejects a malformed ordinary page envelope", async () => {
+  const errors = [];
+  const result = await runCacheBudgetAudit({
+    token: "test-token",
+    repo: "owner/repo",
+    writeReport: () => assert.fail("a malformed page must not report PASS"),
+    writeError: (message) => errors.push(message),
+    fetchImpl: async (url) => {
+      if (new URL(url).pathname.endsWith("/actions/cache/usage")) {
+        return jsonResponse({ active_caches_size_in_bytes: 0 });
+      }
+      return jsonResponse({ total_count: 5 });
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(errors.join("\n"), /page 1 has no actions_caches array/);
+});
+
+test("rejecting: API wrapper rejects HTTP failures and missing or invalid rate-limit headers", async () => {
+  const failed = createCacheAuditApi({
+    token: "test-token",
+    repo: "owner/repo",
+    fetchImpl: async () => jsonResponse({}, { status: 401, statusText: "Unauthorized" }),
+  });
+  await assert.rejects(failed.request("/actions/cache/usage"), /401 Unauthorized/);
+
+  for (const remaining of [undefined, "", "not-a-number", "-1", "1.5"]) {
+    const api = createCacheAuditApi({
+      token: "test-token",
+      repo: "owner/repo",
+      fetchImpl: async () => jsonResponse({}, { remaining }),
+    });
+    await assert.rejects(
+      api.request("/actions/cache/usage"),
+      /no valid x-ratelimit-remaining header/,
+      String(remaining),
+    );
+  }
+});
+
+test("rejecting: API wrapper preserves headroom and calibrates its independent 900-request cap", async () => {
+  const lowRemaining = createCacheAuditApi({
+    token: "test-token",
+    repo: "owner/repo",
+    fetchImpl: async () => jsonResponse({}, { remaining: "100" }),
+  });
+  await lowRemaining.request("/actions/cache/usage");
+  await assert.rejects(
+    lowRemaining.request("/actions/caches?page=1"),
+    /refusing to consume 100 reserved/,
+  );
+
+  let calls = 0;
+  const capped = createCacheAuditApi({
+    token: "test-token",
+    repo: "owner/repo",
+    fetchImpl: async () => {
+      calls += 1;
+      return jsonResponse({}, { remaining: "1000" });
+    },
+  });
+  for (let request = 0; request < CACHE_AUDIT_REQUEST_BUDGET; request += 1) {
+    await capped.request(`/test/${request}`);
+  }
+  await assert.rejects(capped.request("/test/over"), /consumed its 900-request budget/);
+  assert.equal(calls, CACHE_AUDIT_REQUEST_BUDGET);
 });
 
 test("rejecting: a billion-entry count consumes no continuation request", async () => {
@@ -607,6 +933,33 @@ test("rejecting: main missing semantic-mutation is not hidden by the other Linux
   assert.match(missing[0].message, /`Linux`/);
 });
 
+test("CI_SHARED_KEYS each have exactly one intended required main key/platform pair", () => {
+  const requiredSharedEntries = REQUIRED_MAIN_ENTRIES
+    .filter((entry) => CI_SHARED_KEYS.includes(entry.key))
+    .sort((left, right) => left.key.localeCompare(right.key));
+  assert.deepEqual(requiredSharedEntries, [
+    { key: "rust-workspace", platform: "Linux" },
+    { key: "semantic-mutation", platform: "Linux" },
+    { key: "wasm", platform: "Linux" },
+  ]);
+  assert.deepEqual(
+    [...new Set(requiredSharedEntries.map((entry) => entry.key))].sort(),
+    [...CI_SHARED_KEYS].sort(),
+  );
+});
+
+test("rejecting: every CI_SHARED_KEY is independently required on main", () => {
+  for (const key of CI_SHARED_KEYS) {
+    const caches = healthyListing().filter((entry) => !entry.key.includes(`-${key}-`));
+    const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+    const missing = result.findings.filter((finding) => finding.code === "main-cache-absent");
+    assert.equal(result.ok, false, key);
+    assert.equal(missing.length, 1, `${key}: ${formatReport(result)}`);
+    assert.match(missing[0].message, new RegExp(`\\\`${key}\\\``));
+    assert.match(missing[0].message, /`Linux`/);
+  }
+});
+
 test("accepting: a shared key containing an earlier platform-like substring is parsed from the tail, not misattributed", () => {
   // A lazy `(.+?)` stops at the *first* platform-like substring, so a shared
   // key such as `foo-Linux-bar` (hypothetical, but the bug class is real) would
@@ -633,6 +986,18 @@ test("rejecting: budget at or above the threshold, even with a healthy ref layou
   });
   assert.equal(result.ok, false);
   assert.ok(result.findings.some((finding) => finding.code === "budget-exhausted"));
+});
+
+test("rejecting: usage above the limit reports the overage, never negative remaining capacity", () => {
+  const caches = healthyListing();
+  const result = auditCacheBudget({
+    caches,
+    usageBytes: Math.round(10.13 * GIB),
+  });
+  const finding = result.findings.find((entry) => entry.code === "budget-exhausted");
+  assert.ok(finding);
+  assert.match(finding.message, /10\.13 GiB is 0\.13 GiB above the limit/);
+  assert.doesNotMatch(finding.message, /-\d+\.\d+ GiB remains/);
 });
 
 test("accepting: budget just below the threshold does not fire", () => {
