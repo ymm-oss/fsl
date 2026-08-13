@@ -696,10 +696,14 @@ mutation lanes was considered and rejected: it would cost the operators shards a
 run (~35 min measured cold vs. ~5 min warm) for less budget relief than `fsl-logic` gives for
 near-zero cost.
 
-**Historical cold-run observations and the combined #752 change.** Under the old configuration, a
-cold `mutation operators` shard exceeded its 30-minute budget (cancelled at 30.2 minutes), and a
-cold `mutation mutants` job exceeded its 60-minute budget (cancelled at about 61 minutes). Their
-`Swatinem/rust-cache` steps did not save after those non-success outcomes. Commit `877fe8c` (#752)
+**Historical cold-run observations and the combined #752 change.** Measured on `main` run
+`31086789147`, PR #743 run `31077948474`, PR #744 run `31083643650`, and PR #745 run
+`31086907528`: each run recorded a cold `mutation operators` shard cancelled at the old
+30-minute budget, with its `Post Run Swatinem/rust-cache@v2` step `skipped`. On `main`, shard
+`(1/3)` ran 30m19s and `mutation mutants` also ran 60m24s before cancellation; both post steps
+were `skipped`. The other two operators shards in that same `main` run succeeded and their post
+steps succeeded, providing an in-run contrast. The three PR runs respectively recorded all three,
+all three, and one operators shard with that cold-cancelled/skipped shape. Commit `877fe8c` (#752)
 changed two levers in the same changeset: it set `cache-on-failure: true` on both then-saving
 semantic-mutation cache steps and raised the corresponding budgets from 30 to 50 minutes and from
 60 to 90 minutes:
@@ -724,10 +728,14 @@ for the promotion-only native-Z3 job: a gate that runs out of wall clock reports
 observe. (`rust-native-z3`'s own `cache-on-failure: true` and 60-minute budget, discussed elsewhere
 in this section, are a separate lane and a separate decision.)
 
-This is also the most likely explanation for `main`'s standing post-merge failures #721
-(`mutation mutants`) and #678 (`semantic mutation (complete)`), whose cancellations sit exactly at
-the old budgets. Whether they clear once this lands is the test of that reading, and #747's
-acceptance criteria record it as such.
+The combined change's job-level recovery is now observed, not an expectation: run `31097824729`
+recorded successful recoveries for #721 (`mutation mutants`) and #678 (`semantic mutation
+(complete)`). The post-merge reporter recorded no later #721 occurrence. It did record later #678
+occurrences as `failure` on runs `31101190847` and `31135753393`, rather than `cancelled`, before
+recording a later recovery on `31237852598`. Thus the old `cancelled` conclusion for these jobs did
+not recur in that evidence; this does not establish that the combined change fixed the distinct
+`failure` conclusion, nor can it separate the flag's contribution from the simultaneous timeout
+increases.
 
 The later run `31097824729` saved its semantic-mutation cache only after the job reached `success`,
 using `post-if`'s ordinary `success()` branch. No observed semantic-mutation run has a cache written

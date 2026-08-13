@@ -62,6 +62,10 @@ test("accepting: default-branch caches present, budget below threshold, no pull-
   const caches = healthyListing();
   const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
   assert.equal(result.ok, true, formatReport(result));
+  assert.equal(
+    formatReport(result),
+    "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches",
+  );
   assert.deepEqual(result.findings, []);
 });
 
