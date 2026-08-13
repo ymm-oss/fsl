@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-spec EnvelopeParityDocumentUndeclaredType {
-  state { owner: UserId }
+spec EnvelopeParityDocumentUnknownName {
+  state { owner: Int }
 
   init { owner = 0 }
 
-  @requirement("REQ-DOCUMENT-001", "the owner type must be declared")
-  invariant OwnerTypeIsKnown { owner == owner }
+  @requirement("REQ-DOCUMENT-001", "the owner reference must be declared")
+  invariant OwnerReferenceIsKnown { missing_owner == owner }
 }

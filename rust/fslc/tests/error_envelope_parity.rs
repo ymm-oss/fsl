@@ -31,10 +31,16 @@ const PARSE_AI_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_broken_a
 const PARSE_CAUSAL_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_broken_causal.fsl";
 const AI_GUARD_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_ai_invalid_rule.fsl";
 const AI_NAME_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_ai_unknown_tool.fsl";
+const AI_PROJECT_GUARD_FIXTURE: &str =
+    "rust/fslc/tests/fixtures/error_envelope_ai_project_invalid_rule.fsl";
+const AI_PROJECT_NAME_FIXTURE: &str =
+    "rust/fslc/tests/fixtures/error_envelope_ai_project_unknown_tool.fsl";
 const DB_GUARD_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_db_invalid_rule.fsl";
 const DB_NAME_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_db_unknown_column.fsl";
 const CAUSAL_NAME_FIXTURE: &str =
     "rust/fslc/tests/fixtures/error_envelope_causal_unknown_reference.fsl";
+const CAUSAL_GUARD_FIXTURE: &str =
+    "rust/fslc/tests/fixtures/error_envelope_causal_import_guard.fsl";
 const DOCUMENT_GUARD_FIXTURE: &str =
     "rust/fslc/tests/fixtures/error_envelope_document_lowering_guard.fsl";
 const DOCUMENT_NAME_FIXTURE: &str =
@@ -133,8 +139,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["ai", "compat", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: AI_PARSE_COVERAGE,
-        not_applicable: AI_COMPAT_NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: AI_COMPAT_COVERAGE,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "ai drift",
@@ -142,17 +148,17 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["ai", "drift", SPEC_PLACEHOLDER, "--logs", EMPTY_RECORDS],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: AI_PARSE_COVERAGE,
-        not_applicable: AI_DRIFT_NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: AI_DRIFT_COVERAGE,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "ai eval",
         scope: ParityScope::SpecPath {
-            invoke: &["ai", "eval", SPEC_PLACEHOLDER],
+            invoke: &["ai", "eval", SPEC_PLACEHOLDER, "--records", EMPTY_RECORDS],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: AI_PARSE_COVERAGE,
-        not_applicable: AI_EVAL_NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: AI_EVAL_COVERAGE,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "ai regress",
@@ -168,8 +174,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             ],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: AI_PARSE_COVERAGE,
-        not_applicable: AI_REGRESS_NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: AI_REGRESS_COVERAGE,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "ai replay",
@@ -177,8 +183,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["ai", "replay", SPEC_PLACEHOLDER, "--logs", EMPTY_RECORDS],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: AI_PARSE_COVERAGE,
-        not_applicable: AI_REPLAY_NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: AI_REPLAY_COVERAGE,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "analyze",
@@ -201,7 +207,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             ],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: APPROVAL_RECORD_COVERAGE,
+        coverage: APPROVAL_CHECK_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -235,7 +241,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             ],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: APPROVAL_RECORD_COVERAGE,
+        coverage: APPROVAL_DIFF_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -245,7 +251,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: CAUSAL_COVERAGE,
-        not_applicable: CAUSAL_ANALYZE_NOT_APPLICABLE_GUARD,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "causal check",
@@ -254,7 +260,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: CAUSAL_COVERAGE,
-        not_applicable: CAUSAL_CHECK_NOT_APPLICABLE_GUARD,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "causal diff",
@@ -263,7 +269,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: CAUSAL_COVERAGE,
-        not_applicable: CAUSAL_DIFF_NOT_APPLICABLE_GUARD,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "causal ledger",
@@ -272,7 +278,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: CAUSAL_COVERAGE,
-        not_applicable: CAUSAL_LEDGER_NOT_APPLICABLE_GUARD,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "causal observe-expectations",
@@ -295,7 +301,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: CAUSAL_COVERAGE,
-        not_applicable: CAUSAL_OBSERVE_EXPECTATIONS_NOT_APPLICABLE_GUARD,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "causal verify-expectations",
@@ -304,7 +310,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: CAUSAL_COVERAGE,
-        not_applicable: CAUSAL_VERIFY_EXPECTATIONS_NOT_APPLICABLE_GUARD,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "chain",
@@ -373,7 +379,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: DB_OBSERVE_COVERAGE,
-        not_applicable: DB_OBSERVE_NOT_APPLICABLE_GUARD,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "diff",
@@ -797,11 +803,44 @@ const CAUSAL_NAME_WITH_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectati
     message: MessageExpectation::OmitsInput,
     ..SEMANTIC_JSON
 });
-const DOCUMENT_TYPE_WITHOUT_INPUT_PATH: Expectation = Expectation::Json(JsonExpectation {
-    kind: ExpectedField::Exact("type"),
+/// #781 exposes these as product false negatives.  They are pinned to detect
+/// drift, not to endorse accepting invalid component declarations.
+const AI_COMPAT_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
+    result: ExpectedField::Exact("compat_profile_generated"),
+    kind: ExpectedField::Absent,
+    location: LocationShape::Absent,
     diagnostic: Diagnostic::None,
-    message: MessageExpectation::OmitsInput,
-    ..SEMANTIC_JSON
+    exit: 0,
+    dialect: ExpectedField::Absent,
+    message: MessageExpectation::Absent,
+});
+const AI_DRIFT_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
+    result: ExpectedField::Exact("observed_supported"),
+    kind: ExpectedField::Absent,
+    location: LocationShape::Absent,
+    diagnostic: Diagnostic::None,
+    exit: 0,
+    dialect: ExpectedField::Absent,
+    message: MessageExpectation::Absent,
+});
+const AI_EVAL_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
+    result: ExpectedField::Exact("statistically_supported"),
+    kind: ExpectedField::Absent,
+    location: LocationShape::Absent,
+    diagnostic: Diagnostic::None,
+    exit: 0,
+    dialect: ExpectedField::Absent,
+    message: MessageExpectation::Absent,
+});
+const AI_REGRESS_FALSE_GREEN: Expectation = AI_EVAL_FALSE_GREEN;
+const AI_REPLAY_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
+    result: ExpectedField::Exact("replay_conformant"),
+    kind: ExpectedField::Absent,
+    location: LocationShape::Absent,
+    diagnostic: Diagnostic::None,
+    exit: 0,
+    dialect: ExpectedField::Exact("fsl-ai-hard.v0"),
+    message: MessageExpectation::Absent,
 });
 
 const NO_COVERAGE: &[FailureCoverage] = &[];
@@ -819,89 +858,76 @@ const NOT_APPLICABLE_PARSE_GUARD_NAME: &[NotApplicable] = &[
         reason: "this command has no FSL source frontend input",
     },
 ];
-const AI_COMPAT_NOT_APPLICABLE_GUARD_AND_NAME: &[NotApplicable] = &[
-    NotApplicable {
-        class: FailureClass::Guard,
-        reason: "run_ai_compat parses an ai_component or project then projects a compatibility profile; it never calls run_verify or a kernel lowering guard",
-    },
-    NotApplicable {
-        class: FailureClass::Name,
-        reason: "run_ai_compat resolves compatibility-profile declarations only and never invokes the kernel model name resolver",
-    },
-];
-const AI_DRIFT_NOT_APPLICABLE_GUARD_AND_NAME: &[NotApplicable] = &[
-    NotApplicable {
-        class: FailureClass::Guard,
-        reason: "run_ai_drift loads an ai_project and evaluates observed evidence; it never lowers an ai_component to the kernel",
-    },
-    NotApplicable {
-        class: FailureClass::Name,
-        reason: "run_ai_drift selects observed-property declarations and never invokes the kernel model name resolver",
-    },
-];
-const AI_EVAL_NOT_APPLICABLE_GUARD_AND_NAME: &[NotApplicable] = &[
-    NotApplicable {
-        class: FailureClass::Guard,
-        reason: "run_ai_eval loads an ai_project and evaluates statistical records; it has no ai_component-to-kernel lowering phase",
-    },
-    NotApplicable {
-        class: FailureClass::Name,
-        reason: "run_ai_eval resolves statistical-property declarations only and never invokes the kernel model name resolver",
-    },
-];
-const AI_REGRESS_NOT_APPLICABLE_GUARD_AND_NAME: &[NotApplicable] = &[
-    NotApplicable {
-        class: FailureClass::Guard,
-        reason: "run_ai_regress loads an ai_project and evaluates migration records; it has no ai_component-to-kernel lowering phase",
-    },
-    NotApplicable {
-        class: FailureClass::Name,
-        reason: "run_ai_regress resolves migration declarations only and never invokes the kernel model name resolver",
-    },
-];
-const AI_REPLAY_NOT_APPLICABLE_GUARD_AND_NAME: &[NotApplicable] = &[
-    NotApplicable {
-        class: FailureClass::Guard,
-        reason: "run_ai_replay parses an ai_component or project and compares event logs; it never lowers the source to a kernel model",
-    },
-    NotApplicable {
-        class: FailureClass::Name,
-        reason: "run_ai_replay resolves declared runtime component fields and never invokes the kernel model name resolver",
-    },
-];
-const DB_OBSERVE_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
-    class: FailureClass::Guard,
-    reason: "run_db_observe parses and validates dbsystem references, then compares observation events; unlike run_db_check it never calls run_verify and has no kernel lowering guard",
-}];
-const CAUSAL_ANALYZE_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
-    class: FailureClass::Guard,
-    reason: "run_causal_analyze builds the causal model and review projection but has no causal-to-kernel lowering guard for its source document",
-}];
-const CAUSAL_CHECK_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
-    class: FailureClass::Guard,
-    reason: "run_causal_check builds and checks the causal model directly; the causal source has no kernel lowering guard phase",
-}];
-const CAUSAL_DIFF_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
-    class: FailureClass::Guard,
-    reason: "run_causal_diff builds two causal models and compares their projections; neither causal source is lowered through a kernel guard",
-}];
-const CAUSAL_LEDGER_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
-    class: FailureClass::Guard,
-    reason: "run_causal_ledger builds a causal model and evidence ledger without lowering the causal source to a kernel model",
-}];
-const CAUSAL_OBSERVE_EXPECTATIONS_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
-    class: FailureClass::Guard,
-    reason: "run_causal_observe_expectations compiles causal expectations and reads evidence; its source path has no kernel lowering guard",
-}];
-const CAUSAL_VERIFY_EXPECTATIONS_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
-    class: FailureClass::Guard,
-    reason: "run_causal_verify_expectations compiles causal expectations and verifies them against imports, not by lowering the causal source through a kernel guard",
-}];
 const AI_PARSE_COVERAGE: &[FailureCoverage] = &[FailureCoverage {
     class: FailureClass::Parse,
     fixture: PARSE_AI_FIXTURE,
     uniform: PARSE_UNIFORM,
 }];
+const AI_COMPAT_COVERAGE: &[FailureCoverage] = &[
+    AI_PARSE_COVERAGE[0],
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: AI_PROJECT_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_PROJECT_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+];
+const AI_DRIFT_COVERAGE: &[FailureCoverage] = &[
+    AI_PARSE_COVERAGE[0],
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: AI_PROJECT_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_PROJECT_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+];
+const AI_EVAL_COVERAGE: &[FailureCoverage] = &[
+    AI_PARSE_COVERAGE[0],
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: AI_PROJECT_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_PROJECT_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+];
+const AI_REGRESS_COVERAGE: &[FailureCoverage] = &[
+    AI_PARSE_COVERAGE[0],
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: AI_PROJECT_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_PROJECT_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+];
+const AI_REPLAY_COVERAGE: &[FailureCoverage] = &[
+    AI_PARSE_COVERAGE[0],
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: AI_PROJECT_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_PROJECT_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+];
 const AI_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
     FailureCoverage {
@@ -991,6 +1017,11 @@ const DB_OBSERVE_COVERAGE: &[FailureCoverage] = &[
         uniform: PARSE_UNIFORM,
     },
     FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: DB_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
         class: FailureClass::Name,
         fixture: DB_NAME_FIXTURE,
         uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
@@ -1013,7 +1044,7 @@ const APPROVAL_CREATE_COVERAGE: &[FailureCoverage] = &[
         uniform: SEMANTIC_UNIFORM,
     },
 ];
-const APPROVAL_RECORD_COVERAGE: &[FailureCoverage] = &[
+const APPROVAL_CHECK_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
         class: FailureClass::Parse,
         fixture: PARSE_KERNEL_FIXTURE,
@@ -1030,11 +1061,33 @@ const APPROVAL_RECORD_COVERAGE: &[FailureCoverage] = &[
         uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
     },
 ];
+const APPROVAL_DIFF_COVERAGE: &[FailureCoverage] = &[
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_KERNEL_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: GUARD_FIXTURE,
+        uniform: SEMANTIC_WITH_INPUT_PATH,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: NAME_FIXTURE,
+        uniform: SEMANTIC_UNIFORM,
+    },
+];
 const CAUSAL_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
         class: FailureClass::Parse,
         fixture: PARSE_CAUSAL_FIXTURE,
         uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: CAUSAL_GUARD_FIXTURE,
+        uniform: CAUSAL_NAME_WITH_DIAGNOSTIC,
     },
     FailureCoverage {
         class: FailureClass::Name,
@@ -1300,33 +1353,78 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
         "#780"
     ),
+    // #781 tracks this matrix calibration until a dedicated product issue
+    // exists. These are false negatives, not accepted behavior: project
+    // commands report success without validating either malformed rule.
     pin!(
-        FailureClass::Parse,
-        "approval diff",
-        PARSE_KERNEL_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
+        FailureClass::Guard,
+        "ai compat",
+        AI_PROJECT_GUARD_FIXTURE,
+        AI_COMPAT_FALSE_GREEN,
+        "#781"
     ),
     pin!(
         FailureClass::Name,
-        "document check",
-        DOCUMENT_NAME_FIXTURE,
-        DOCUMENT_TYPE_WITHOUT_INPUT_PATH,
-        "#780"
+        "ai compat",
+        AI_PROJECT_NAME_FIXTURE,
+        AI_COMPAT_FALSE_GREEN,
+        "#781"
+    ),
+    pin!(
+        FailureClass::Guard,
+        "ai drift",
+        AI_PROJECT_GUARD_FIXTURE,
+        AI_DRIFT_FALSE_GREEN,
+        "#781"
     ),
     pin!(
         FailureClass::Name,
-        "document claims",
-        DOCUMENT_NAME_FIXTURE,
-        DOCUMENT_TYPE_WITHOUT_INPUT_PATH,
-        "#780"
+        "ai drift",
+        AI_PROJECT_NAME_FIXTURE,
+        AI_DRIFT_FALSE_GREEN,
+        "#781"
+    ),
+    pin!(
+        FailureClass::Guard,
+        "ai eval",
+        AI_PROJECT_GUARD_FIXTURE,
+        AI_EVAL_FALSE_GREEN,
+        "#781"
     ),
     pin!(
         FailureClass::Name,
-        "document generate",
-        DOCUMENT_NAME_FIXTURE,
-        DOCUMENT_TYPE_WITHOUT_INPUT_PATH,
-        "#780"
+        "ai eval",
+        AI_PROJECT_NAME_FIXTURE,
+        AI_EVAL_FALSE_GREEN,
+        "#781"
+    ),
+    pin!(
+        FailureClass::Guard,
+        "ai regress",
+        AI_PROJECT_GUARD_FIXTURE,
+        AI_REGRESS_FALSE_GREEN,
+        "#781"
+    ),
+    pin!(
+        FailureClass::Name,
+        "ai regress",
+        AI_PROJECT_NAME_FIXTURE,
+        AI_REGRESS_FALSE_GREEN,
+        "#781"
+    ),
+    pin!(
+        FailureClass::Guard,
+        "ai replay",
+        AI_PROJECT_GUARD_FIXTURE,
+        AI_REPLAY_FALSE_GREEN,
+        "#781"
+    ),
+    pin!(
+        FailureClass::Name,
+        "ai replay",
+        AI_PROJECT_NAME_FIXTURE,
+        AI_REPLAY_FALSE_GREEN,
+        "#781"
     ),
     pin!(
         FailureClass::Guard,
@@ -1619,7 +1717,7 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         FailureClass::Literate,
         "approval diff",
         LITERATE_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+        PARSE_UNIFORM,
         "#694"
     ),
 ];
@@ -1716,59 +1814,123 @@ fn class_classification_count(entry: &CommandRegistration, class: FailureClass) 
             .count()
 }
 
-fn approval_record(fixture: &str) -> PathBuf {
-    let git = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(workspace_root())
+const APPROVAL_BASELINE: &str = include_str!("../../../tests/fixtures/approval.fsl");
+
+/// A test-owned repository is the only Git surface these tests use. Its
+/// destructor also handles `fslc` spawn panics, which the former bare record
+/// file cleanup could not.
+struct ApprovalFixture {
+    root: PathBuf,
+    record: PathBuf,
+}
+
+impl ApprovalFixture {
+    fn new(fixture: &str) -> Self {
+        let sequence = APPROVAL_RECORD_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "fslc-error-envelope-approval-{}-{sequence}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&root)
+            .unwrap_or_else(|error| panic!("create {}: {error}", root.display()));
+        let approval = Self {
+            record: root.join("approval.json"),
+            root,
+        };
+        approval.write("spec.fsl", APPROVAL_BASELINE);
+        approval.git(&["init", "-q"]);
+        approval.git(&["config", "user.email", "envelope-parity@example.com"]);
+        approval.git(&["config", "user.name", "Envelope Parity"]);
+        approval.git(&["config", "commit.gpgsign", "false"]);
+        approval.git(&["add", "spec.fsl"]);
+        approval.git(&["commit", "-qm", "approval baseline"]);
+        approval.run_success(&["ledger", "spec.fsl", "--depth", "1", "-o", "ledger.md"]);
+        approval.run_success(&[
+            "approval",
+            "create",
+            "spec.fsl",
+            "--kind",
+            "ledger",
+            "--artifact",
+            "ledger.md",
+            "--approver",
+            "envelope-parity",
+            "--depth",
+            "1",
+            "-o",
+            "approval.json",
+        ]);
+        approval.write(
+            "spec.fsl",
+            &std::fs::read_to_string(workspace_root().join(fixture))
+                .unwrap_or_else(|error| panic!("read {fixture}: {error}")),
+        );
+        approval
+    }
+
+    fn write(&self, path: &str, contents: &str) {
+        std::fs::write(self.root.join(path), contents)
+            .unwrap_or_else(|error| panic!("write {}/{}: {error}", self.root.display(), path));
+    }
+
+    fn git(&self, arguments: &[&str]) {
+        let output = Command::new("git")
+            .args(arguments)
+            .current_dir(&self.root)
+            .output()
+            .unwrap_or_else(|error| panic!("run test-owned git {arguments:?}: {error}"));
+        assert!(
+            output.status.success(),
+            "test-owned git {arguments:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn run_success(&self, arguments: &[&str]) {
+        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args(arguments)
+            .current_dir(&self.root)
+            .output()
+            .unwrap_or_else(|error| panic!("run approval setup {arguments:?}: {error}"));
+        assert!(
+            output.status.success(),
+            "approval setup {arguments:?} failed: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    fn zero_digest_record(&self) -> PathBuf {
+        let mut record: Value = serde_json::from_slice(
+            &std::fs::read(&self.record)
+                .unwrap_or_else(|error| panic!("read {}: {error}", self.record.display())),
+        )
+        .expect("approval record JSON");
+        record["spec"]["digest"] = Value::String(format!("sha256:{}", "0".repeat(64)));
+        let path = self.root.join("approval-zero-digest.json");
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&record).expect("serialize zero-digest record"),
+        )
+        .unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
+        path
+    }
+}
+
+impl Drop for ApprovalFixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+fn test_git_available() -> bool {
+    Command::new("git")
+        .arg("--version")
         .output()
-        .expect("read current checkout commit");
-    assert!(
-        git.status.success(),
-        "git rev-parse HEAD failed: {}",
-        String::from_utf8_lossy(&git.stderr)
-    );
-    let git_commit = String::from_utf8(git.stdout)
-        .expect("git commit is UTF-8")
-        .trim()
-        .to_owned();
-    let sequence = APPROVAL_RECORD_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "fslc-error-envelope-approval-{}-{sequence}.json",
-        std::process::id()
-    ));
-    let record = serde_json::json!({
-        "schema": "fslc.approval.v1",
-        "spec": {
-            "path": fixture,
-            "digest_algorithm": "fsl-kernel-ast-v1+sha256",
-            "digest": format!("sha256:{}", "0".repeat(64)),
-            "git_commit": git_commit,
-        },
-        "target": {
-            "kind": "ledger",
-            "path": EMPTY_RECORDS,
-            "digest_algorithm": "fsl-rendered-artifact-v1+sha256",
-            "digest": format!("sha256:{}", "0".repeat(64)),
-            "generator": "fslc",
-            "generator_version": env!("CARGO_PKG_VERSION"),
-            "inputs": {
-                "depth": 8,
-                "deadlock": "ignore",
-                "engine": "bmc",
-            },
-        },
-        "approval": {
-            "approver": "envelope-parity",
-            "approved_at": "2026-08-13T00:00:00Z",
-            "requirements": ["REQ-ENVELOPE"],
-        },
-    });
-    std::fs::write(
-        &path,
-        serde_json::to_vec(&record).expect("serialize approval record"),
-    )
-    .unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
-    path
+        .is_ok_and(|output| output.status.success())
+}
+
+fn approval_command(command: &str) -> bool {
+    command.starts_with("approval ")
 }
 
 fn invoke(command: &str, fixture: &str, approval_record: Option<&Path>) -> Vec<String> {
@@ -1794,29 +1956,37 @@ fn invoke(command: &str, fixture: &str, approval_record: Option<&Path>) -> Vec<S
         .collect()
 }
 
-fn run(command: &str, fixture: &str) -> Actual {
-    let temporary_record = match registration(command).scope {
-        ParityScope::SpecPath { invoke } if invoke.contains(&APPROVAL_RECORD_PLACEHOLDER) => {
-            Some(approval_record(fixture))
-        }
-        _ => None,
-    };
-    let arguments = invoke(command, fixture, temporary_record.as_deref());
+fn run_from(
+    command: &str,
+    fixture: &str,
+    approval_record: Option<&Path>,
+    current_dir: &Path,
+) -> Actual {
+    let arguments = invoke(command, fixture, approval_record);
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(&arguments)
-        .current_dir(workspace_root())
+        .current_dir(current_dir)
         .output()
         .unwrap_or_else(|error| panic!("run {command} {arguments:?}: {error}"));
-    if let Some(record) = temporary_record {
-        std::fs::remove_file(&record)
-            .unwrap_or_else(|error| panic!("remove {}: {error}", record.display()));
-    }
     Actual {
         json: serde_json::from_slice(&output.stdout).ok(),
         stdout: String::from_utf8(output.stdout)
             .unwrap_or_else(|error| panic!("{command} stdout is not UTF-8: {error}")),
         exit: output.status.code().expect("native exit status"),
     }
+}
+
+fn run(command: &str, fixture: &str) -> Actual {
+    if approval_command(command) {
+        let approval = ApprovalFixture::new(fixture);
+        let needs_record = match registration(command).scope {
+            ParityScope::SpecPath { invoke } => invoke.contains(&APPROVAL_RECORD_PLACEHOLDER),
+            ParityScope::Excluded { .. } => false,
+        };
+        let record = needs_record.then_some(approval.record.as_path());
+        return run_from(command, "spec.fsl", record, &approval.root);
+    }
+    run_from(command, fixture, None, &workspace_root())
 }
 
 fn matches_expectation(actual: &Actual, expected: Expectation, fixture: &str) -> bool {
@@ -1922,7 +2092,19 @@ fn assert_known_asymmetry(
 }
 
 fn assert_cell(cell: Cell) {
+    if approval_command(cell.command) && !test_git_available() {
+        eprintln!(
+            "skipping {:?}/{}: the test-owned approval fixture requires a Git binary",
+            cell.class, cell.command
+        );
+        return;
+    }
     let actual = run(cell.command, cell.fixture);
+    let expected_input = if approval_command(cell.command) {
+        "spec.fsl"
+    } else {
+        cell.fixture
+    };
     let pins = KNOWN_ASYMMETRIES
         .iter()
         .filter(|known| {
@@ -1943,7 +2125,7 @@ fn assert_cell(cell: Cell) {
             &actual,
             known,
             cell.uniform,
-            cell.fixture,
+            expected_input,
             cell.class,
             cell.command,
         );
@@ -1951,7 +2133,7 @@ fn assert_cell(cell: Cell) {
         assert_expectation(
             &actual,
             cell.uniform,
-            cell.fixture,
+            expected_input,
             cell.class,
             cell.command,
         );
@@ -2126,6 +2308,95 @@ fn unresolved_identifier_errors_are_uniform_or_pinned_across_frontend_siblings()
     for cell in cells(FailureClass::Name) {
         assert_cell(cell);
     }
+}
+
+#[test]
+fn approval_diff_uses_a_valid_baseline_before_exercising_each_failure_class() {
+    if !test_git_available() {
+        eprintln!("skipping approval diff calibration: Git is unavailable");
+        return;
+    }
+
+    for (fixture, kind, diagnostic, message) in [
+        (
+            PARSE_KERNEL_FIXTURE,
+            "parse",
+            Some("FSL-PARSE"),
+            "expected expression",
+        ),
+        (
+            GUARD_FIXTURE,
+            "semantics",
+            None,
+            "top-level await 'PaymentResult' has no executable lowering",
+        ),
+        (
+            NAME_FIXTURE,
+            "semantics",
+            None,
+            "unknown domain symbol 'missing_status'",
+        ),
+    ] {
+        let approval = ApprovalFixture::new(fixture);
+        let actual = run_from(
+            "approval diff",
+            "spec.fsl",
+            Some(&approval.record),
+            &approval.root,
+        );
+        assert_eq!(actual.exit, 2, "{fixture}: {}", actual.stdout);
+        let output = actual.json.expect("approval diff JSON envelope");
+        assert_eq!(output["kind"], kind, "{fixture}: {output}");
+        assert_eq!(
+            output.get("diagnostic_code").and_then(Value::as_str),
+            diagnostic,
+            "{fixture}: {output}"
+        );
+        assert!(
+            output["message"]
+                .as_str()
+                .is_some_and(|actual_message| actual_message.contains(message)),
+            "{fixture}: {output}"
+        );
+    }
+}
+
+#[test]
+fn approval_diff_zero_digest_negative_control_stops_before_the_diff() {
+    if !test_git_available() {
+        eprintln!("skipping approval zero-digest control: Git is unavailable");
+        return;
+    }
+
+    let approval = ApprovalFixture::new(NAME_FIXTURE);
+    let zero_digest = approval.zero_digest_record();
+    let actual = run_from(
+        "approval diff",
+        "spec.fsl",
+        Some(&zero_digest),
+        &approval.root,
+    );
+    assert_eq!(actual.exit, 2, "{}", actual.stdout);
+    let output = actual.json.expect("approval diff JSON envelope");
+    assert_eq!(output["kind"], "semantics", "{output}");
+    assert!(output.get("loc").is_none(), "{output}");
+    assert_eq!(
+        output["message"],
+        "approval baseline commit does not match the recorded specification digest",
+        "{output}"
+    );
+    assert!(
+        !matches_expectation(
+            &Actual {
+                stdout: actual.stdout,
+                json: Some(output),
+                exit: actual.exit,
+            },
+            SEMANTIC_UNIFORM,
+            "spec.fsl"
+        ),
+        "a zero digest must not satisfy the approval-diff Name expectation"
+    );
 }
 
 #[test]
