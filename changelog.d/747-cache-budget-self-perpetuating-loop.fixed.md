@@ -30,18 +30,20 @@ mutants lane also moves its per-run scratch `CARGO_TARGET_DIR` out from under
 `rust/target` (to `${RUNNER_TEMP:-${TMPDIR:-/tmp}}`), and the script now
 clears any `rust/target/semantic-mutation.*`/`semantic-mutation-build` left by
 a restored cache unconditionally, right after mode validation, before either
-lane runs. That placement matters: `Swatinem/rust-cache` saves a key once and
-whichever job reaches its post step first wins, and measured on product-gate
-run `31527197290` all three `semantic-mutation-operators` shards reach their
-post step tens of minutes before `semantic-mutation-mutants` does -- the
-operators shards are this key's only actual saver. An earlier version of this
+lane runs. That placement matters because the current
+`semantic-mutation-mutants` `save-if: false` actively makes the operators
+shards the key's only configured saver; it does not merely record an
+operators-only historical race. The counterexample is run `31086907528`,
+attempt 1: mutants job `92568586155` restored `No cache found.` and its
+successful post step uploaded 2,922,378,363 B while all three operators shards
+were cancelled with their post steps skipped. An earlier version of this
 cleanup ran only in the mutants lane's own path, after the operators lane's
-early exit, so the one lane that saves the key never ran it.
+early exit, so the then-save-enabled operators lane never ran it.
 `semantic-mutation-mutants`'s `Swatinem/rust-cache` step is now
 `save-if: false` (with `cache-on-failure` removed, since `save-if: false`
-already makes it inert) to make that ownership explicit;
-`semantic-mutation-operators` is unchanged. **This is a closed-ingress-path
-fix, not a size fix**: measured directly (product-gate run `31210570118`, job
+already makes it inert), closing its historically observed save path; the
+operators shards remain the only save-enabled path. **This is a
+closed-ingress-path fix, not a size fix**: measured directly (product-gate run `31210570118`, job
 `92972117510`, `mutation operators (3/3)`), the `semantic-mutation` entry's
 current 2.719 GiB was created by a *cold* operators run (`No cache found.` at
 19:14:17Z, saved at 19:48:12Z) that never touched the mutants lane's scratch
@@ -87,7 +89,10 @@ any `v0-rust-*`-prefixed cache on a pull-request ref regardless of whether its
 shared key is one `ci.yml` declares, closing the same blind spot for any
 future workflow's unguarded `Swatinem/rust-cache` step (and, retroactively,
 for `merge-readiness.yml`'s own now-removed per-job keys, which this audit
-never flagged for the same reason).
+never flagged for the same reason). Its runner now fetches every cache-list
+page through the API's `total_count`: the per-entry rules cannot treat the
+first 100 entries as a complete listing, and the calibration suite rejects a
+forbidden pull-request Rust cache placed on page two.
 
 An earlier revision of this change added an `entry-oversized` finding
 (`SINGLE_ENTRY_WARN_BYTES = 2.5 GiB`) calibrated against the wrong ~2.2 GiB

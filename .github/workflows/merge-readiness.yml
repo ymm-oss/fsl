@@ -47,8 +47,8 @@ jobs:
           # respectively. Each says `Restored from cache key
           # "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.`
           # These logs establish the full-key restore; on a future lockfile-hash mismatch,
-          # `src/restore.ts` still falls back to the shared `restoreKey` prefix rather than
-          # a cold build.
+          # `src/restore.ts` attempts a shared `restoreKey` prefix restore, but a cold
+          # build follows if no compatible entry exists.
           # (c) This job's `cargo check --workspace --no-default-features` differs in
           # feature resolution from `rust workspace`'s default-feature build
           # (`tools/check-merge-readiness.sh:15-22`), so even a full key match leaves some
@@ -98,8 +98,8 @@ jobs:
           # respectively. Each says `Restored from cache key
           # "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.`
           # These logs establish the full-key restore; on a future lockfile-hash mismatch,
-          # `src/restore.ts` still falls back to the shared `restoreKey` prefix rather than
-          # a cold build.
+          # `src/restore.ts` attempts a shared `restoreKey` prefix restore, but a cold
+          # build follows if no compatible entry exists.
           # (c) This job builds `cargo fmt --check` plus a default-feature test build of a
           # subset of `rust workspace`'s crates (`tools/check-merge-readiness.sh:25-33`),
           # which is close enough to `rust workspace`'s own build to expect a near-full

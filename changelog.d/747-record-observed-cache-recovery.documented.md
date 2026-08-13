@@ -4,4 +4,7 @@ timeout from 40 to 60 minutes; runs `31581715093` and `31583381471` logged four 
 matches; the Windows entry's 2026-08-12T06:16:19Z recreation resolved `main-cache-absent`, and
 removing two human-authorized orphaned #793 caches resolved the remaining audit findings before run
 `31654305398` succeeded at 7.337 GiB. The restore-only FSL Logic Test logged shared-key full matches
-on run `31565897267` (2m54s) and on run `31570480618` (3m02s).
+on run `31565897267` (2m54s) and on run `31570480618` (3m02s). Also recorded that the current
+`save-if: false` guard, rather than historical timing, makes operators the only configured
+`semantic-mutation` saver: run `31086907528` attempt 1's mutants job `92568586155` uploaded
+2,922,378,363 B after `No cache found.` while all operator posts were skipped.

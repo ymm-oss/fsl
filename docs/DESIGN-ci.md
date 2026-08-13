@@ -596,9 +596,9 @@ contracts` logged `Restored from cache key
 the same two jobs logged it at 09:33:03.06Z and 09:33:05.55Z, respectively. These four restore logs,
 rather than the derivation mechanism, establish the observed full-key match. A future lockfile change
 could still produce `Swatinem/rust-cache`'s ordinary prefix-restore fallback rather than a cold build,
-but that is not what these runs observed. Neither job ever writes to this key: only `ci.yml`'s
-`push`-triggered job does, so no `pull_request` event anywhere can grow it, and merge-readiness gains
-no eviction pressure of its own to reintroduce.
+but that is not what these runs observed. Neither job ever writes to this key: save-enabled `ci.yml`
+steps write on non-`pull_request` events, so no `pull_request` event can grow it, and
+merge-readiness gains no eviction pressure of its own to reintroduce.
 
 This also qualifies a claim made elsewhere in this document. Cache hit rates were measured to have
 no headroom for `rust workspace` — compile is only ~3.5 min of ~33 min **on a warm cache**. That
@@ -630,24 +630,22 @@ wholesale, and now lives under `${RUNNER_TEMP:-${TMPDIR:-/tmp}}` instead. The sc
 `rust/target/semantic-mutation.*`/`semantic-mutation-build` a restored cache may carry forward,
 unconditionally and before either lane does anything -- an earlier version of this cleanup ran only
 in the mutants lane's own path, below `run_operators_lane`'s early `exit 0` for `--lane operators`
-invocations, so the one lane that actually saves this key (see below) never ran it. Both changes
+invocations, so the currently save-enabled operators lane (see below) never ran it. Both changes
 close a path by which a *future* run could let leftover scratch/evidence ride into a save; neither
 changes what the entry, as actually observed, already contains.
 
-**Ownership: the operators shards are this key's only saver; the mutants job is restore-only.**
-`Swatinem/rust-cache` saves a key once, and whichever job reaches its post step first wins --
-measured on product-gate run `31527197290`, all three `semantic-mutation-operators` shards reached
-their post step (19:23:20 / 19:23:34 / 19:23:55) well before `semantic-mutation-mutants` did
-(20:33:31), so the saver is always an operators shard, never the mutants job.
-`semantic-mutation-mutants`'s `Swatinem/rust-cache` step carries `save-if: false`, which changes
-nothing about what actually gets cached today (it never won the race) but makes explicit that its
-sole `rust/target`-scoped output -- its evidence directory, kept under `rust/target` solely because
-the artifact-upload glob requires it -- must never be allowed into a future save if the timing ever
-changed. `semantic-mutation-operators` is unchanged (`save-if` on non-pull-request events,
-`cache-on-failure: true`) and remains this key's sole owner and recovery path. Splitting the key so
-each lane has its own was considered and rejected: the mutants job has essentially no warm value of
-its own to protect -- `~/.cargo/bin/cargo-mutants` is already rebuilt every run today because
-operators always wins the race first -- so a second entry would cost budget for no gain.
+**Ownership: `save-if: false` now makes the operators shards this key's only configured saver, and
+the mutants job restore-only.** This is a property created by the configuration change, not a
+historical inevitability. The decisive counterexample is run `31086907528`, attempt 1: mutants job
+`92568586155` restored `No cache found.`, then its successful `Post Run
+Swatinem/rust-cache@v2` step uploaded **2,922,378,363 B**; all three
+`semantic-mutation-operators` shards were cancelled and their post steps skipped. That observed
+save occurred before the current `save-if: false` guard, so it disproves a claim that an operators
+shard always won the historical race. The guard instead closes the mutants save path now, ensuring
+that future timing cannot make its `rust/target`-scoped evidence directory (kept under `rust/target`
+solely because the artifact-upload glob requires it) enter this shared cache.
+`semantic-mutation-operators` remains save-enabled on non-pull-request events with
+`cache-on-failure: true`, and is therefore the sole configured owner and recovery path.
 
 **Budget lever: `fsl-logic` goes restore-only against `rust-workspace`, taking its dedicated key out
 of the budget entirely (measured, not predicted).** `fsl-logic`'s entire build is
@@ -696,17 +694,20 @@ mutation lanes was considered and rejected: it would cost the operators shards a
 run (~35 min measured cold vs. ~5 min warm) for less budget relief than `fsl-logic` gives for
 near-zero cost.
 
-**Historical cold-run observations and the combined #752 change.** Measured on `main` run
-`31086789147`, PR #743 run `31077948474`, PR #744 run `31083643650`, and PR #745 run
-`31086907528`: each run recorded a cold `mutation operators` shard cancelled at the old
-30-minute budget, with its `Post Run Swatinem/rust-cache@v2` step `skipped`. On `main`, shard
-`(1/3)` ran 30m19s and `mutation mutants` also ran 60m24s before cancellation; both post steps
-were `skipped`. The other two operators shards in that same `main` run succeeded and their post
-steps succeeded, providing an in-run contrast. The three PR runs respectively recorded all three,
-all three, and one operators shard with that cold-cancelled/skipped shape. Commit `877fe8c` (#752)
-changed two levers in the same changeset: it set `cache-on-failure: true` on both then-saving
-semantic-mutation cache steps and raised the corresponding budgets from 30 to 50 minutes and from
-60 to 90 minutes:
+**Historical cold-run observations and the combined #752 change.** `gh api` reports
+`run_attempt=1` for `main` run `31086789147`, PR #743 run `31077948474`, and PR #744 run
+`31083643650`; each recorded cold `mutation operators` shard(s) cancelled at the old 30-minute
+budget with `Post Run Swatinem/rust-cache@v2` `skipped`. On `main`, shard (1/3) ran 30m19s and
+`mutation mutants` also ran 60m24s before cancellation; both post steps were `skipped`. The other
+two operators shards in that same `main` run succeeded and their post steps succeeded, providing an
+in-run contrast. PR #743 and #744 each recorded all three operators shards with the
+cold-cancelled/skipped shape. PR #745 run `31086907528` has `run_attempt=3`; its **attempt 3**
+recorded that shape only for operators shard (2/3). Its earlier attempts are distinct observations:
+attempt 1 had all three operators shards cancelled with skipped post steps (while its mutants job
+saved the counterexample cache recorded above), and attempt 2 had shard (2/3) fail with a skipped
+post step while shards (1/3) and (3/3) succeeded. Commit `877fe8c` (#752) changed two levers in the
+same changeset: it set `cache-on-failure: true` on both then-saving semantic-mutation cache steps
+and raised the corresponding budgets from 30 to 50 minutes and from 60 to 90 minutes:
 
 | job | budget before | warm | cold | budget now |
 |---|---|---|---|---|
@@ -718,15 +719,16 @@ semantic-mutation cache steps and raised the corresponding budgets from 30 to 50
 observed semantic-mutation timeout-cancelled save. Since #752 paired the flag with both timeout
 increases, subsequent outcomes cannot isolate either change's contribution.
 
-The `semantic-mutation` key has exactly one class of savers: the three `semantic-mutation-operators`
-shards (`save-if` on non-pull-request events, `cache-on-failure: true` -- the owner keeps the
-recovery path for a cold start that fails or times out). `semantic-mutation-mutants` is restore-only
-(`save-if: false`); it carries no `cache-on-failure`, which would be meaningless there, since
-`Swatinem/rust-cache`'s save step exits on `save-if` before that flag is ever consulted. Both
-budgets are raised past a measured cold run regardless, for the reason this document already gives
-for the promotion-only native-Z3 job: a gate that runs out of wall clock reports a failure it did not
-observe. (`rust-native-z3`'s own `cache-on-failure: true` and 60-minute budget, discussed elsewhere
-in this section, are a separate lane and a separate decision.)
+With the current configuration, the `semantic-mutation` key has exactly one class of savers: the
+three `semantic-mutation-operators` shards (`save-if` on non-pull-request events,
+`cache-on-failure: true` -- the owner keeps the recovery path for a cold start that fails or times
+out). `semantic-mutation-mutants` is restore-only (`save-if: false`); it carries no
+`cache-on-failure`, which would be meaningless there, since `Swatinem/rust-cache`'s save step exits
+on `save-if` before that flag is ever consulted. Both budgets are raised past a measured cold run
+regardless, for the reason this document already gives for the promotion-only native-Z3 job: a gate
+that runs out of wall clock reports a failure it did not observe. (`rust-native-z3`'s own
+`cache-on-failure: true` and 60-minute budget, discussed elsewhere in this section, are a separate
+lane and a separate decision.)
 
 The combined change's job-level recovery is now observed, not an expectation: run `31097824729`
 recorded successful recoveries for #721 (`mutation mutants`) and #678 (`semantic mutation

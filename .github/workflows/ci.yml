@@ -109,8 +109,9 @@ jobs:
           # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
-          # cold: measured +8 to +16 min per shard. Only `main` saves now, and every pull
-          # request can read `main` because it is the default branch. See
+          # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
+          # non-`pull_request` events, and every pull request can read `main` because it
+          # is the default branch. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -152,8 +153,9 @@ jobs:
           # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
-          # cold: measured +8 to +16 min per shard. Only `main` saves now, and every pull
-          # request can read `main` because it is the default branch. See
+          # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
+          # non-`pull_request` events, and every pull request can read `main` because it
+          # is the default branch. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -284,8 +286,9 @@ jobs:
           # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
-          # cold: measured +8 to +16 min per shard. Only `main` saves now, and every pull
-          # request can read `main` because it is the default branch. See
+          # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
+          # non-`pull_request` events, and every pull request can read `main` because it
+          # is the default branch. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -361,8 +364,9 @@ jobs:
           # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
-          # cold: measured +8 to +16 min per shard. Only `main` saves now, and every pull
-          # request can read `main` because it is the default branch. See
+          # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
+          # non-`pull_request` events, and every pull request can read `main` because it
+          # is the default branch. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -412,8 +416,9 @@ jobs:
           # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
-          # cold: measured +8 to +16 min per shard. Only `main` saves now, and every pull
-          # request can read `main` because it is the default branch. See
+          # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
+          # non-`pull_request` events, and every pull request can read `main` because it
+          # is the default branch. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -467,8 +472,9 @@ jobs:
           # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
-          # cold: measured +8 to +16 min per shard. Only `main` saves now, and every pull
-          # request can read `main` because it is the default branch. See
+          # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
+          # non-`pull_request` events, and every pull request can read `main` because it
+          # is the default branch. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -517,22 +523,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Restore-only: this job never saves the `semantic-mutation` key.
-          # `Swatinem/rust-cache` saves a key once, and whichever job reaches its
-          # post step first wins -- for this key that is always one of the
-          # `semantic-mutation-operators` shards below, which run in parallel and
-          # finish in single-digit minutes against this job's own tens of
-          # minutes, so this job has never actually won that race and its
-          # `cache-on-failure: true` was accordingly dead configuration. This
-          # job's only rust/target-scoped output is its evidence directory
-          # (`rust/target/semantic-mutation.*`, kept under `rust/target` solely
-          # because the artifact-upload glob below requires it), which must not
-          # enter the cache at all. The one thing this job could gain from its
-          # own save -- a warm `~/.cargo/bin/cargo-mutants` -- it already does not
-          # have today, since the operators shards' save always wins first; going
-          # restore-only changes nothing about that and removes the possibility
-          # of this job's evidence directory leaking into a future save. See
-          # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # Restore-only: `save-if: false` makes this job unable to save the
+          # `semantic-mutation` key, so the save-enabled operators shards are its
+          # only configured saver. This is a behavior change, not a historical
+          # inevitability: on run 31086907528 attempt 1, mutants job 92568586155
+          # restored `No cache found.`, then its successful post step uploaded
+          # 2,922,378,363 B while all three operators shards were cancelled and
+          # their post steps skipped. This job's rust/target-scoped evidence
+          # (`rust/target/semantic-mutation.*`, kept there solely because the
+          # artifact-upload glob below requires it) must not enter a future cache
+          # save. `cache-on-failure` is absent because `save-if: false` bypasses
+          # the save path. See docs/DESIGN-ci.md, "Actions cache budget", and
+          # issue #747.
           save-if: false
           workspaces: rust -> target
           shared-key: semantic-mutation

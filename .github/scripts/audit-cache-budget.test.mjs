@@ -20,6 +20,7 @@ import {
   GIB,
   REQUIRED_MAIN_ENTRIES,
 } from "./audit-cache-budget.mjs";
+import { fetchAllCaches } from "./run-cache-budget-audit.mjs";
 
 const MAIN = "refs/heads/main";
 
@@ -50,7 +51,7 @@ function healthyListing() {
     // `rust-native-z3` is one shared key across a `[macos-15, windows-latest]`
     // matrix (`ci.yml`), so it needs one entry per platform to be healthy.
     cacheBytes("v0-rust-rust-native-z3-Darwin-arm64-f9b08cb2-09fbaf53", MAIN, 1_239_235_056),
-    cacheBytes("v0-rust-rust-native-z3-Windows_NT-x64-e8b3ee54-09fbaf53", MAIN, 619_501_189),
+    cacheBytes("v0-rust-rust-native-z3-Windows_NT-x64-af4551b0-09fbaf53", MAIN, 619_429_238),
   ];
 }
 
@@ -69,7 +70,7 @@ test("accepting: default-branch caches present, budget below threshold, no pull-
   assert.deepEqual(result.findings, []);
 });
 
-test("rejecting: a pull-request-scoped ci.yml cache means the save-if guard regressed", () => {
+test("rejecting: a pull-request-scoped ci.yml cache requires provenance review", () => {
   const caches = [
     ...healthyListing(),
     cache("v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53", "refs/pull/745/merge", 1.495),
@@ -80,6 +81,42 @@ test("rejecting: a pull-request-scoped ci.yml cache means the save-if guard regr
   assert.ok(finding, formatReport(result));
   assert.match(finding.message, /refs\/pull\/745\/merge/);
   assert.match(finding.message, /rust-workspace/);
+  assert.match(finding.message, /before the guard existed|later guard regression/);
+});
+
+test("rejecting: pagination finds a forbidden PR Rust cache beyond the first 100 entries", async () => {
+  const firstPage = [
+    ...healthyListing(),
+    ...Array.from({ length: 95 }, (_, index) =>
+      cache(`tool-cache-${index}`, MAIN, 0.001),
+    ),
+  ];
+  const secondPage = [
+    cache("v0-rust-rust-compile-Linux-x64-aaaaaaaa-bbbbbbbb", "refs/pull/9/merge", 0.08),
+  ];
+  const requested = [];
+  const caches = await fetchAllCaches(async (path) => {
+    requested.push(path);
+    if (path.endsWith("page=1")) {
+      return { total_count: 101, actions_caches: firstPage };
+    }
+    if (path.endsWith("page=2")) {
+      return { total_count: 101, actions_caches: secondPage };
+    }
+    throw new Error(`unexpected path: ${path}`);
+  });
+
+  assert.deepEqual(requested, [
+    "/actions/caches?per_page=100&page=1",
+    "/actions/caches?per_page=100&page=2",
+  ]);
+  assert.equal(caches.length, 101);
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+  assert.equal(result.ok, false);
+  assert.ok(
+    result.findings.some((finding) => finding.code === "pull-request-rust-cache-present"),
+    formatReport(result),
+  );
 });
 
 test("rejecting: the 2026-08-06 listing that caused the outage", () => {

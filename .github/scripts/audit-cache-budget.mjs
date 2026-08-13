@@ -191,7 +191,7 @@ export function auditCacheBudget({
         code: "pull-request-cache-present",
         message: `\`${entry.ref}\` holds a cache for \`ci.yml\`'s shared key \`${sharedKey}\` (${formatGiB(
           entry.size_in_bytes ?? 0,
-        )}). \`ci.yml\` restricts saving to non-pull-request events precisely so this cannot happen; its presence means that guard regressed.`,
+        )}). This violates the current no-pull-request-save invariant. It may have been saved before the guard existed or may indicate a later guard regression; inspect created_at and workflow provenance.`,
       });
     }
   }
