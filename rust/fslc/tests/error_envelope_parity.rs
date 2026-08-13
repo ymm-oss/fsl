@@ -615,9 +615,25 @@ const SEMANTIC_UNIFORM: Expectation = Expectation {
     exact_stdout: None,
 };
 
+/// The Guard matrix requires the source fixture path in semantic diagnostics.
+const SEMANTIC_WITH_INPUT_PATH: Expectation = Expectation {
+    message_mentions_input: Some(true),
+    ..SEMANTIC_UNIFORM
+};
+
+const SEMANTIC_WITHOUT_INPUT_PATH: Expectation = Expectation {
+    message_mentions_input: Some(false),
+    ..SEMANTIC_UNIFORM
+};
+
 const SEMANTIC_WITHOUT_LOCATION: Expectation = Expectation {
     location: LocationShape::Absent,
     ..SEMANTIC_UNIFORM
+};
+
+const SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION: Expectation = Expectation {
+    location: LocationShape::Absent,
+    ..SEMANTIC_WITH_INPUT_PATH
 };
 
 const PARSE_WITH_DIAGNOSTIC_ALIAS: Expectation = Expectation {
@@ -718,7 +734,7 @@ const CHECK_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
         class: FailureClass::Guard,
         fixture: GUARD_FIXTURE,
-        uniform: SEMANTIC_UNIFORM,
+        uniform: SEMANTIC_WITH_INPUT_PATH,
     },
     FailureCoverage {
         class: FailureClass::Name,
@@ -746,7 +762,7 @@ const DOMAIN_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
         class: FailureClass::Guard,
         fixture: GUARD_FIXTURE,
-        uniform: SEMANTIC_UNIFORM,
+        uniform: SEMANTIC_WITH_INPUT_PATH,
     },
     FailureCoverage {
         class: FailureClass::Name,
@@ -757,7 +773,7 @@ const DOMAIN_COVERAGE: &[FailureCoverage] = &[
 const KERNEL_GUARD_COVERAGE: &[FailureCoverage] = &[FailureCoverage {
     class: FailureClass::Guard,
     fixture: GUARD_FIXTURE,
-    uniform: SEMANTIC_UNIFORM,
+    uniform: SEMANTIC_WITH_INPUT_PATH,
 }];
 
 struct KnownAsymmetry {
@@ -945,8 +961,29 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         FailureClass::Guard,
         "domain generate",
         GUARD_FIXTURE,
-        SEMANTIC_WITHOUT_LOCATION,
+        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
         "#773"
+    ),
+    pin!(
+        FailureClass::Guard,
+        "domain analyze",
+        GUARD_FIXTURE,
+        SEMANTIC_WITHOUT_INPUT_PATH,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Guard,
+        "domain expand",
+        GUARD_FIXTURE,
+        SEMANTIC_WITHOUT_INPUT_PATH,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Guard,
+        "kernel",
+        GUARD_FIXTURE,
+        SEMANTIC_WITHOUT_INPUT_PATH,
+        "#780"
     ),
     pin!(
         FailureClass::Name,
