@@ -850,12 +850,12 @@ cache on a pull-request ref at all, whether or not its shared key is one `ci.yml
 The critical-path check is per-`{key, platform}` pair, not per-key, because `rust-native-z3` is one
 shared key backed by a `[macos-15, windows-latest]` matrix in `ci.yml`: a key-only set lets either
 platform's presence on `main` hide the other's absence. That was a live blind spot, not a
-hypothetical one -- `entryIdentity`'s regex matched `Linux`/`macOS`/`Windows` (the GitHub Actions
+hypothetical one -- the predecessor `sharedKeyOf`'s regex matched `Linux`/`macOS`/`Windows` (the GitHub Actions
 `runner.os` spellings), but `Swatinem/rust-cache` composes its key from `os.type()`, which reports
 `Linux`, `Darwin`, and `Windows_NT`. `Darwin` and `Windows_NT` never matched, so both `rust-native-z3`
 entries were invisible to every rule in this audit -- including the one that would have reported
-`main`'s Windows cache evicted to zero entries during the incident this section documents. The regex
-now accepts only the observed `os.type()` spellings and
+`main`'s Windows cache evicted to zero entries during the incident this section documents. The
+current `entryIdentity`, which replaced `sharedKeyOf`, accepts only the observed `os.type()` spellings and
 `REQUIRED_MAIN_ENTRIES` now requires `rust-native-z3` on both `Windows_NT` and `Darwin` explicitly,
 and the independently saved `semantic-mutation` key on `Linux`; the latter is the configured
 restore source for every PR's restore-only mutants lane.

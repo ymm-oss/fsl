@@ -532,7 +532,7 @@ test("accepting: a transient differing pair waits once, then returns the stable 
   assert.deepEqual(sleeps, [1_000]);
 });
 
-test("rejecting: default retry timer receives the fixed one-second pacing delay", async () => {
+test("rejecting: default retry timer must resolve before the retry collection begins", async () => {
   const initial = withCacheIds(healthyListing(), 1);
   const changed = initial.map((entry) =>
     entry.id === 1 ? { ...entry, size_in_bytes: entry.size_in_bytes + 1 } : entry,
@@ -540,15 +540,21 @@ test("rejecting: default retry timer receives the fixed one-second pacing delay"
   const snapshots = [initial, changed, changed, changed];
   const delays = [];
   let collection = -1;
+  let resolveTimerCalled;
+  let resolveTimer;
+  const timerCalled = new Promise((resolve) => {
+    resolveTimerCalled = resolve;
+  });
   const originalSetTimeout = globalThis.setTimeout;
   globalThis.setTimeout = (callback, milliseconds, ...arguments_) => {
     delays.push(milliseconds);
-    queueMicrotask(() => callback(...arguments_));
+    resolveTimer = () => callback(...arguments_);
+    resolveTimerCalled();
     return {};
   };
 
   try {
-    const caches = await fetchStableCaches(async (path) => {
+    const stableCaches = fetchStableCaches(async (path) => {
       if (path.endsWith("page=1")) {
         collection += 1;
         return { total_count: 5, actions_caches: snapshots[collection] };
@@ -556,6 +562,16 @@ test("rejecting: default retry timer receives the fixed one-second pacing delay"
       if (path.endsWith("page=2")) return outOfRangeCachePage();
       throw new Error(`unexpected path: ${path}`);
     });
+
+    await timerCalled;
+    assert.equal(
+      collection,
+      1,
+      "the third collection must not begin until the one-second timer resolves",
+    );
+    resolveTimer();
+
+    const caches = await stableCaches;
     assert.deepEqual(caches, changed);
   } finally {
     globalThis.setTimeout = originalSetTimeout;
@@ -1044,31 +1060,61 @@ test("rejecting: the executable runner exits nonzero and uses its default error 
   );
 });
 
-test("API wrapper sends the exact GitHub URL and required authorization and API headers", async () => {
+test("healthy runner sends exact transport metadata for usage, every listing page, and sentinels", async () => {
+  const listing = withCacheIds([
+    ...healthyListing(),
+    ...Array.from({ length: 96 }, (_, index) =>
+      cacheBytes(`tool-cache-${index}`, MAIN, 1),
+    ),
+  ]);
   const calls = [];
-  const api = createCacheAuditApi({
+  const reports = [];
+  const errors = [];
+  const result = await runCacheBudgetAudit({
     token: "test-token",
     repo: "owner/repo",
+    writeReport: (report) => reports.push(report),
+    writeError: (error) => errors.push(error),
     fetchImpl: async (...arguments_) => {
       calls.push(arguments_);
-      return jsonResponse({ active_caches_size_in_bytes: 0 });
+      const parsed = new URL(arguments_[0]);
+      if (parsed.pathname.endsWith("/actions/cache/usage")) {
+        return jsonResponse({ active_caches_size_in_bytes: usageOf(listing) });
+      }
+      const page = Number(parsed.searchParams.get("page"));
+      if (page === 1) {
+        return jsonResponse({ total_count: listing.length, actions_caches: listing.slice(0, 100) });
+      }
+      if (page === 2) {
+        return jsonResponse({ total_count: listing.length, actions_caches: listing.slice(100) });
+      }
+      if (page === 3) return jsonResponse(outOfRangeCachePage());
+      throw new Error(`unexpected cache page ${page}`);
     },
   });
 
-  await api.request("/actions/cache/usage");
+  assert.equal(result.ok, true);
+  assert.deepEqual(reports, [PASS_REPORT]);
+  assert.deepEqual(errors, []);
 
   assert.deepEqual(calls, [
-    [
-      "https://api.github.com/repos/owner/repo/actions/cache/usage",
-      {
-        headers: {
-          authorization: "Bearer test-token",
-          accept: "application/vnd.github+json",
-          "x-github-api-version": "2022-11-28",
-        },
+    "/actions/cache/usage",
+    PAGE_PATH(1),
+    PAGE_PATH(2),
+    PAGE_PATH(3),
+    PAGE_PATH(1),
+    PAGE_PATH(2),
+    PAGE_PATH(3),
+  ].map((path) => [
+    `https://api.github.com/repos/owner/repo${path}`,
+    {
+      headers: {
+        authorization: "Bearer test-token",
+        accept: "application/vnd.github+json",
+        "x-github-api-version": "2022-11-28",
       },
-    ],
-  ]);
+    },
+  ]));
 });
 
 test("rejecting: API wrapper rejects HTTP failures and missing or invalid rate-limit headers", async () => {

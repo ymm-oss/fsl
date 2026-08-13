@@ -79,13 +79,14 @@ macOS recovery is not established by this Windows observation. The direct
 scheduled recovery record is run `31632094255` attempt 1 (`event: schedule`):
 both `native Z3 4.16 (windows-latest)` and `product gate` concluded `success`.
 
-`.github/scripts/audit-cache-budget.mjs`'s `entryIdentity` regex matched the
-GitHub Actions `runner.os` platform spellings (`Linux`/`macOS`/`Windows`), but
+The predecessor `.github/scripts/audit-cache-budget.mjs` `sharedKeyOf` regex
+matched the GitHub Actions `runner.os` platform spellings (`Linux`/`macOS`/`Windows`), but
 `Swatinem/rust-cache` derives its key from `os.type()`, which reports
 `Linux`/`Darwin`/`Windows_NT` -- so `rust-native-z3`'s cache, on either
 platform, was invisible to every rule in this audit, including the one that
 should have reported `main`'s Windows entry evicted to zero during this
-incident. The regex now accepts only the observed `os.type()` spellings, and
+incident. The current `entryIdentity`, which replaced `sharedKeyOf`, accepts
+only the observed `os.type()` spellings, and
 the default-branch requirement is now
 per-`{key, platform}` pair rather than per-key, so `rust-native-z3` must be
 present on both `Windows_NT` and `Darwin` independently -- one platform's
