@@ -218,7 +218,7 @@ export function auditCacheBudget({
 }
 
 export function formatReport({ findings, ok }) {
-  if (ok) return "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped ci.yml caches";
+  if (ok) return "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches";
   return [
     `cache budget audit: FAIL -- ${findings.length} finding(s)`,
     ...findings.map((finding) => `  ${finding.code}: ${finding.message}`),

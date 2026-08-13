@@ -58,7 +58,7 @@ function usageOf(listing) {
   return listing.reduce((total, entry) => total + entry.size_in_bytes, 0);
 }
 
-test("accepting: default-branch caches present, budget below threshold, no pull-request ci.yml caches", () => {
+test("accepting: default-branch caches present, budget below threshold, no pull-request Rust caches", () => {
   const caches = healthyListing();
   const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
   assert.equal(result.ok, true, formatReport(result));

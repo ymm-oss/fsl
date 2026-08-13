@@ -696,21 +696,23 @@ mutation lanes was considered and rejected: it would cost the operators shards a
 run (~35 min measured cold vs. ~5 min warm) for less budget relief than `fsl-logic` gives for
 near-zero cost.
 
-**Eviction started this; `cache-on-failure: false` made it unrecoverable.** The
-`semantic mutation` lane fell into a closed loop, measured on `main` and on three pull requests:
-
-1. a cold scratch build exceeds the job's budget, so the job is cancelled;
-2. `Swatinem/rust-cache` does not save from a failed job (`cache-on-failure` defaults to false),
-   so nothing is written;
-3. the next run is cold again.
-
-**The cache can then only be created by a run that succeeds, and a run can only succeed once the
-cache exists.** Measured budgets against measured durations:
+**Historical cold-run observations and the combined #752 change.** Under the old configuration, a
+cold `mutation operators` shard exceeded its 30-minute budget (cancelled at 30.2 minutes), and a
+cold `mutation mutants` job exceeded its 60-minute budget (cancelled at about 61 minutes). Their
+`Swatinem/rust-cache` steps did not save after those non-success outcomes. Commit `877fe8c` (#752)
+changed two levers in the same changeset: it set `cache-on-failure: true` on both then-saving
+semantic-mutation cache steps and raised the corresponding budgets from 30 to 50 minutes and from
+60 to 90 minutes:
 
 | job | budget before | warm | cold | budget now |
 |---|---|---|---|---|
 | `mutation operators (K/3)` | 30 min | 18.0–19.5 min | **>30** (cancelled at 30.2) | **50 min** |
 | `mutation mutants` | 60 min | 17.2–34.2 min | **>60** (cancelled at ~61) | **90 min** |
+
+`Swatinem/rust-cache`'s `action.yml` describes `cache-on-failure` as a non-success post-save path:
+`post-if: success() || env.CACHE_ON_FAILURE == 'true'`. That is mechanism evidence, not an
+observed semantic-mutation timeout-cancelled save. Since #752 paired the flag with both timeout
+increases, subsequent outcomes cannot isolate either change's contribution.
 
 The `semantic-mutation` key has exactly one class of savers: the three `semantic-mutation-operators`
 shards (`save-if` on non-pull-request events, `cache-on-failure: true` -- the owner keeps the
@@ -727,22 +729,9 @@ This is also the most likely explanation for `main`'s standing post-merge failur
 the old budgets. Whether they clear once this lands is the test of that reading, and #747's
 acceptance criteria record it as such.
 
-**That test resolved, but what it establishes is narrower than a direct confirmation that
-`cache-on-failure` saves through a timeout-driven cancellation.** Both issues recurred with
-`Conclusion: cancelled` repeatedly before commit `877fe8c` (#752, which added
-`cache-on-failure: true` to both semantic-mutation lanes) and neither recurred as `cancelled` again
-afterward; their remaining occurrences before final recovery were `Conclusion: failure`, an
-unrelated test defect fixed separately. But `877fe8c` raised those lanes' timeouts in the same
-commit, so the disappearance of `cancelled` conclusions is confounded with more budget and does not
-isolate `cache-on-failure`'s contribution. The eventual recovery run (`31097824729`) also saved its
-cache after the job reached `success`, which is `post-if`'s ordinary `success()` branch, not a
-saved-after-cancellation case. No observed `semantic-mutation` run has a cache written specifically
-following a timeout-triggered cancellation. What supports `cache-on-failure` working for cancellation,
-not just ordinary failure, is a reading of `Swatinem/rust-cache`'s own
-`action.yml`: the save (post) step's condition is
-`post-if: success() || env.CACHE_ON_FAILURE == 'true'`, and that expression's `env.CACHE_ON_FAILURE`
-branch does not itself test which non-success conclusion the job reached. That is inference from the
-condition's text, not an observed cancel-then-save run, and is recorded as such.
+The later run `31097824729` saved its semantic-mutation cache only after the job reached `success`,
+using `post-if`'s ordinary `success()` branch. No observed semantic-mutation run has a cache written
+specifically following a timeout-driven cancellation.
 
 **The same closed loop appeared independently in `rust-native-z3`'s `windows-latest`/`macos-15`
 matrix. Windows recovery is now observed; macOS recovery is not established by this observation.**

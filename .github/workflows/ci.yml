@@ -366,27 +366,19 @@ jobs:
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
-          # Save even when the job fails or is cancelled by the timeout above. Without
-          # this the lane cannot recover from a cold start: a cold scratch build exceeds
-          # the job budget, the job is cancelled, `rust-cache`'s post step is skipped
-          # (`9 skipped Post Run Swatinem/rust-cache@v2`, observed on run 31527197290),
-          # and the next run is cold again -- the cache can then only be created by a
-          # run that succeeds, and a run can only succeed once the cache exists. This is
-          # the same fix already applied to the `semantic-mutation` lanes below for an
-          # identical deadlock. The action's own `post-if: success() ||
-          # env.CACHE_ON_FAILURE == 'true'` does not distinguish a cancelled conclusion
-          # from a failed one, which reads as support for this saving through a timeout
-          # cancellation and not only an ordinary step failure. This is directly
-          # observed on run 31565897267: its cancelled Windows job's step 9
+          # Run 31527197290's old 40-minute cold Windows job was cancelled and its
+          # post step was skipped (`9 skipped Post Run Swatinem/rust-cache@v2`).
+          # `cache-on-failure: true` enables rust-cache's non-success post-save path;
+          # `post-if: success() || env.CACHE_ON_FAILURE == 'true'` is mechanism
+          # evidence that it includes cancellation. Run 31565897267's cancelled
+          # Windows job's step 9
           # (`Post Run Swatinem/rust-cache@v2`) succeeded and created
           # `v0-rust-rust-native-z3-Windows_NT-x64-af4551b0-09fbaf53` at
           # 2026-08-12T06:16:19.271024Z (619,429,238 B), four seconds before the
-          # job completed. Run 31527197290's corresponding cancelled job instead
-          # logged `9 skipped Post Run Swatinem/rust-cache@v2`. This combined-change
-          # observation does not isolate `cache-on-failure` as the cause: this job's
-          # timeout changed from 40 to 60 minutes in the same changeset, and commit
-          # 877fe8c (#752) likewise coupled the flag with timeout increases for the
-          # semantic-mutation lanes. See docs/DESIGN-ci.md, "Actions cache budget".
+          # job completed. That changeset also raised the timeout from 40 to 60
+          # minutes, so the observed post-save does not isolate either change's
+          # contribution. Commit 877fe8c (#752) likewise paired the semantic-mutation
+          # flag with timeout increases; see docs/DESIGN-ci.md, "Actions cache budget".
           cache-on-failure: true
 
       - name: Test pinned native solver and BMC crates
@@ -481,12 +473,12 @@ jobs:
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
           shared-key: semantic-mutation
-          # Save even when the job fails. Without this the lane cannot recover from a
-          # cold start: a cold scratch build exceeds the job budget, the job is
-          # cancelled, `rust-cache` skips saving, and the next run is cold again. The
-          # cache can then only be created by a run that succeeds, and a run can only
-          # succeed once the cache exists. Measured on `main` and on three pull
-          # requests; see docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # Under the old 30-minute budget, a cold operators run was cancelled at
+          # 30.2 minutes and its post save was skipped. `cache-on-failure: true`
+          # enables rust-cache's post-save path for a non-success outcome. Commit
+          # 877fe8c simultaneously raised this timeout from 30 to 50 minutes, so
+          # subsequent outcomes do not isolate either change's contribution. See
+          # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           cache-on-failure: true
 
       - name: Calibrate curated fault-operator shard
