@@ -342,9 +342,12 @@ jobs:
     # commit's other changes close off (see the `Swatinem/rust-cache` step below and
     # `merge-readiness.yml`). Run 31565897267 then ran cold from 05:14:37Z to
     # 06:16:23Z (61m46s) and was cancelled, so 60 minutes did not cover this cold
-    # vendored-Z3 build. Its post step saved a cache, and the next Windows run
-    # (31570480618) was warm and completed in 34m39s; this is a recovery path, not
-    # an observed successful cold-build duration.
+    # vendored-Z3 build at the current tree and test volume. A prior cold success,
+    # run 30156566539 / job 89675360913, completed in 37m08s on 2026-07-25, but
+    # that is a different tree and test volume. Its post step saved a cache, and
+    # the next Windows run (31570480618) was warm and completed in 34m39s; this
+    # is a recovery path, not evidence that the current tree has a successful
+    # cold-build duration within 60 minutes.
     timeout-minutes: 60
     strategy:
       fail-fast: false

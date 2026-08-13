@@ -11,29 +11,74 @@
 import { auditCacheBudget, formatReport } from "./audit-cache-budget.mjs";
 import { pathToFileURL } from "node:url";
 
+const CACHE_PAGE_SIZE = 100;
+
+function validNonNegativeSafeInteger(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
 export async function fetchAllCaches(api) {
   const caches = [];
+  const cacheIds = new Set();
   let totalCount;
+  let maximumPages;
 
   for (let page = 1; ; page += 1) {
-    const listing = await api(`/actions/caches?per_page=100&page=${page}`);
+    if (maximumPages !== undefined && page > maximumPages) {
+      throw new Error(
+        `cache listing exceeded its fixed ${maximumPages}-page bound from total_count ${totalCount}`,
+      );
+    }
+
+    const listing = await api(`/actions/caches?per_page=${CACHE_PAGE_SIZE}&page=${page}`);
     if (!Array.isArray(listing.actions_caches)) {
       throw new Error(`cache listing page ${page} has no actions_caches array`);
     }
+    if (!validNonNegativeSafeInteger(listing.total_count)) {
+      throw new Error(`cache listing page ${page} has no valid total_count`);
+    }
     if (page === 1) {
       totalCount = listing.total_count;
-      if (!Number.isSafeInteger(totalCount) || totalCount < 0) {
-        throw new Error("cache listing has no valid total_count");
-      }
-    }
-    caches.push(...listing.actions_caches);
-    if (caches.length === totalCount) return caches;
-    if (caches.length > totalCount || listing.actions_caches.length === 0) {
+      maximumPages = Math.max(1, Math.ceil(totalCount / CACHE_PAGE_SIZE));
+    } else if (listing.total_count !== totalCount) {
       throw new Error(
-        `cache listing ended inconsistently: expected ${totalCount} entries, received ${caches.length}`,
+        `cache listing total_count changed from ${totalCount} to ${listing.total_count} on page ${page}`,
       );
     }
+
+    const expectedEntries = Math.min(
+      CACHE_PAGE_SIZE,
+      Math.max(0, totalCount - (page - 1) * CACHE_PAGE_SIZE),
+    );
+    if (listing.actions_caches.length !== expectedEntries) {
+      throw new Error(
+        `cache listing page ${page} has ${listing.actions_caches.length} entries; expected ${expectedEntries} from total_count ${totalCount}`,
+      );
+    }
+
+    for (const cache of listing.actions_caches) {
+      if (!validNonNegativeSafeInteger(cache?.id)) {
+        throw new Error(`cache listing page ${page} has an entry with no valid id`);
+      }
+      if (cacheIds.has(cache.id)) {
+        throw new Error(`cache listing page ${page} repeats cache id ${cache.id}`);
+      }
+      cacheIds.add(cache.id);
+      caches.push(cache);
+    }
+
+    if (page === maximumPages) return caches;
   }
+}
+
+export function observedUsageBytes(usage) {
+  if (!Object.hasOwn(usage, "active_caches_size_in_bytes")) return null;
+
+  const usageBytes = usage.active_caches_size_in_bytes;
+  if (!validNonNegativeSafeInteger(usageBytes)) {
+    throw new Error("cache usage has no valid active_caches_size_in_bytes");
+  }
+  return usageBytes;
 }
 
 async function main() {
@@ -65,13 +110,11 @@ async function main() {
   let usageBytes = null;
   try {
     // The cache-list endpoint is paginated at 100 entries. All pages through
-    // its total_count are required because rules 2–4 inspect individual cache
-    // entries, not just the repository-wide usage total.
+    // its stable total_count are required because rules 2–4 inspect individual
+    // cache entries, not just the repository-wide usage total.
     caches = await fetchAllCaches(api);
     const usage = await api("/actions/cache/usage");
-    if (typeof usage.active_caches_size_in_bytes === "number") {
-      usageBytes = usage.active_caches_size_in_bytes;
-    }
+    usageBytes = observedUsageBytes(usage);
   } catch (error) {
     // An unreadable or incomplete API listing is not evidence of a healthy cache budget.
     console.error(`cache budget audit: FAIL -- api-unreadable: ${error.message}`);

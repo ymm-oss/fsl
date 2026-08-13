@@ -46,13 +46,15 @@ operators shards remain the only save-enabled path. **This is a
 closed-ingress-path fix, not a size fix**: measured directly (product-gate run `31210570118`, job
 `92972117510`, `mutation operators (3/3)`), the `semantic-mutation` entry's
 current 2.719 GiB was created by a *cold* operators run (`No cache found.` at
-19:14:17Z, saved at 19:48:12Z) that never touched the mutants lane's scratch
-build or evidence paths at all -- neither could have contributed to this
-entry's size, so there was no dead weight to recover, and two earlier size
-predictions in this fragment and in `docs/DESIGN-ci.md` (~0.9-1.4 GiB from an
-assumed accumulating scratch tree, then ~2.2 GiB from
-`rust/target/fault-operators`' deliberately persistent build tree treated as
-a designed minimum size) were both wrong about what this entry actually is.
+19:14:17Z, saved at 19:48:12Z). That operators job did not run the mutants
+lane; the same run's successful mutants job `92972117519` ran on a separate
+runner and could not contribute to this cache archive. Neither the mutants
+scratch build nor its evidence paths therefore contributed to this entry's
+size, so there was no dead weight to recover, and two earlier size predictions
+in this fragment and in `docs/DESIGN-ci.md` (~0.9-1.4 GiB from an assumed
+accumulating scratch tree, then ~2.2 GiB from `rust/target/fault-operators`'
+deliberately persistent build tree treated as a designed minimum size) were
+both wrong about what this entry actually is.
 This one cold-start save is evidence of what this key can legitimately hold,
 not a proven minimum across every shard and revision. `semantic-mutation` is
 not resized by this change and is not touched by the budget lever below.
@@ -91,7 +93,10 @@ future workflow's unguarded `Swatinem/rust-cache` step (and, retroactively,
 for `merge-readiness.yml`'s own now-removed per-job keys, which this audit
 never flagged for the same reason). Its runner now fetches every cache-list
 page through the API's `total_count`: the per-entry rules cannot treat the
-first 100 entries as a complete listing, and the calibration suite rejects a
+first 100 entries as a complete listing. The runner requires that every page
+repeat the initial safe `total_count`, fixes the resulting page bound, rejects
+short intermediate or over-capacity final pages, and requires unique cache
+IDs; the calibration suite rejects each malformed listing as well as a
 forbidden pull-request Rust cache placed on page two.
 
 An earlier revision of this change added an `entry-oversized` finding

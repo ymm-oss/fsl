@@ -612,14 +612,15 @@ carried both.** Direct measurement settled it: on product-gate run `31210570118`
 carried forward nothing from any prior run -- built for ~35 minutes, and saved the cache at 19:48:12Z.
 `gh api actions/caches` shows the resulting entry, `v0-rust-semantic-mutation-Linux-x64-...`, created
 at exactly `2026-08-07T19:48:56Z` and sized 2,919,716,751 bytes (2.719 GiB). That run never ran the
-mutants lane's scratch build or evidence generation at all, so neither could have contributed a
-single byte to this entry: there is no dead weight here to recover, and both the ~0.9-1.4 GiB and
-~2.2 GiB sizes this document previously predicted (attributing the size to, respectively, an
-accumulating scratch-build tree and to `fault-operators`' persistent build tree as a designed
-minimum size) do not describe what this entry actually is. This one cold-start save on one shard is
-evidence of what this key *can* legitimately hold, not a proven minimum across every shard and every
-future revision -- `semantic-mutation` is not touched by this fix and is not a lever in the budget
-arithmetic below.
+mutants lane; the same run's successful mutants job `92972117519` ran on a different runner, so it
+could not contribute to this operators job's cache archive. Thus neither the mutants scratch build
+nor its evidence generation contributed a byte to this entry: there is no dead weight here to
+recover, and both the ~0.9-1.4 GiB and ~2.2 GiB sizes this document previously predicted
+(attributing the size to, respectively, an accumulating scratch-build tree and to
+`fault-operators`' persistent build tree as a designed minimum size) do not describe what this entry
+actually is. This one cold-start save on one shard is evidence of what this key *can* legitimately
+hold, not a proven minimum across every shard and every future revision -- `semantic-mutation` is
+not touched by this fix and is not a lever in the budget arithmetic below.
 
 **The scratch-build-tree and evidence-path changes in this branch are a closed-ingress-path fix, not
 a size fix, and are kept for that reason alone.** `tools/run-semantic-mutation-gate.sh`'s mutants
@@ -763,13 +764,18 @@ with run `31527197290`'s cancelled Windows job, whose corresponding post step wa
 same timeout-cancelled condition, the corrected run's `cache-on-failure: true` post step ran. This
 comparison does not isolate that flag as the cause: the same changeset also raised this job's timeout
 from 40 to 60 minutes. The corrected run took 61m46s (05:14:37–06:16:23), so a 60-minute budget did
-**not** make this cold vendored-Z3 build complete; a successful cold-build duration remains
-unobserved. The saved entry made the next Windows run warm: run `31570480618` completed the job in
-34m39s (06:34:04–07:08:43), and the run concluded successfully. These runs observe a recovery path
-after the combined change: a timeout-cancelled run saved a cache and the subsequent warm run
-completed. They do not attribute that save to `cache-on-failure` alone or make a 60-minute cold build
-pass. The 60-minute budget remains a resource bound, while the saved cache provides the recovery
-path.
+**not** make this cold vendored-Z3 build complete; a successful cold-build duration on the current
+tree and test volume remains unobserved. That scope does not erase an earlier observation: run
+`30156566539`, attempt 1, job `89675360913` was a cold Windows success on 2026-07-25, logging `No
+cache found.` at 11:38:31.77Z, completing in 37m08s (11:38:01–12:15:09), and saving a
+602,055,210-byte cache in its successful post step. That success predates the 2026-08-12
+cancellation and used a different tree and test volume, so it does not show that the current tree
+can complete cold within 60 minutes. The saved entry made the next Windows run warm: run
+`31570480618` completed the job in 34m39s (06:34:04–07:08:43), and the run concluded successfully.
+These runs observe a recovery path after the combined change: a timeout-cancelled run saved a cache
+and the subsequent warm run completed. They do not attribute that save to `cache-on-failure` alone
+or make a 60-minute cold build pass. The 60-minute budget remains a resource bound, while the saved
+cache provides the recovery path.
 
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,

@@ -49,9 +49,10 @@ export const BUDGET_WARN_FRACTION = 0.85;
 // declared, whether it is "shared" in the same technical sense, or any other
 // generation rule); it is simply the enumerated set rule 3 checks. Do not
 // infer a rule for membership from the list's current contents. A
-// `refs/pull/*` entry for one of these three means the `save-if` guard
-// regressed -- this is the calibrated rejecting signal for the fix itself,
-// not merely a hygiene check.
+// `refs/pull/*` entry for one of these three is a violation of the current
+// invariant; it may predate the guard or indicate a later guard regression, so
+// inspect `created_at` and workflow provenance. This is the calibrated
+// rejecting signal for the fix itself, not merely a hygiene check.
 //
 // Every other `v0-rust-*` key, including `rust-native-z3` and `fsl-logic`, is
 // still covered against appearing on a `refs/pull/*` ref -- by rule 4 below,
@@ -199,9 +200,11 @@ export function auditCacheBudget({
   // 4. Repository invariant since #752 and the `merge-readiness.yml`
   //    restore-only fix: no workflow saves a rust cache on a pull-request
   //    event, full stop -- not just `CI_SHARED_KEYS`' three declared keys. Any
-  //    `v0-rust-*` key on a `refs/pull/*` ref means that invariant broke
-  //    somewhere, whether in a known shared key (already reported by rule 3
-  //    above, and skipped here to avoid a duplicate finding) or a new one.
+  //    `v0-rust-*` key on a `refs/pull/*` ref is a violation of that current
+  //    invariant; it may predate the guard or indicate a later regression, so
+  //    inspect `created_at` and workflow provenance. This applies whether it is
+  //    a known shared key (already reported by rule 3 above, and skipped here to
+  //    avoid a duplicate finding) or a new one.
   for (const entry of caches) {
     if (attributedPullRequestEntries.has(entry)) continue;
     if (!/^refs\/pull\//.test(entry.ref ?? "")) continue;
