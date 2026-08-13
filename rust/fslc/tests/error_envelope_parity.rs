@@ -36,10 +36,12 @@ const DOMAIN_REPLAY_LOG: &str = "rust/fslc/tests/fixtures/issue_518_clean.jsonl"
 
 /// The one ownership classification for every leaf in `cli-contract.json`.
 ///
-/// A `SpecPath` invocation contains [`SPEC_PLACEHOLDER`] at the FSL input
-/// position.  An `Excluded` command is still deliberate: its primary input is
-/// a manifest, generated artifact, evidence log, or command-specific
-/// multi-input contract rather than this matrix's frontend path.
+/// A `SpecPath` invocation contains [`SPEC_PLACEHOLDER`] at the shared FSL
+/// frontend input position.  Such a command cannot be excluded from this
+/// matrix merely because it produces a profile or has command-specific
+/// semantics.  An `Excluded` command is still deliberate: its primary input
+/// is a manifest, generated artifact, evidence log, records, or a `--kind`-
+/// selected contract that does not reach that frontend path.
 #[derive(Clone, Copy, Debug)]
 enum ParityScope {
     SpecPath { invoke: &'static [&'static str] },
@@ -59,10 +61,18 @@ enum LiterateCoverage {
     NotApplicable,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct FailureCoverage {
+    class: FailureClass,
+    fixture: &'static str,
+    uniform: Expectation,
+}
+
 struct CommandRegistration {
     key: &'static str,
     scope: ParityScope,
     literate: LiterateCoverage,
+    coverage: &'static [FailureCoverage],
 }
 
 const PARITY_REGISTRY: &[CommandRegistration] = &[
@@ -72,6 +82,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["ai", "check", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::PinnedDialect,
+        coverage: AI_PARSE_COVERAGE,
     },
     CommandRegistration {
         key: "ai compare",
@@ -79,13 +90,15 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "compares two precomputed evaluation-record inputs",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "ai compat",
-        scope: ParityScope::Excluded {
-            reason: "emits an AI capability profile with command-specific artifact semantics",
+        scope: ParityScope::SpecPath {
+            invoke: &["ai", "compat", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::NotApplicable,
+        literate: LiterateCoverage::PinnedDialect,
+        coverage: AI_PARSE_COVERAGE,
     },
     CommandRegistration {
         key: "ai drift",
@@ -93,6 +106,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "requires runtime telemetry logs in addition to the component",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "ai eval",
@@ -100,6 +114,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "evaluates precomputed AI evaluation records",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "ai regress",
@@ -107,6 +122,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "compares before/after record sets for an AI migration",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "ai replay",
@@ -114,6 +130,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "requires AI runtime JSONL evidence in addition to the component",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "analyze",
@@ -121,6 +138,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["analyze", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "approval check",
@@ -128,6 +146,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "its spec-shaped positional is selected by --kind and may legitimately be Markdown",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "approval create",
@@ -135,6 +154,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "its spec-shaped positional is selected by --kind and may legitimately be Markdown",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "approval diff",
@@ -142,13 +162,15 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "its spec-shaped positional is selected by --kind and may legitimately be Markdown",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "causal analyze",
         scope: ParityScope::Excluded {
-            reason: "requires a causal projection/profile choice outside this frontend-error matrix",
+            reason: "requires a causal projection/profile contract rather than a shared frontend input",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "causal check",
@@ -156,6 +178,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["causal", "check", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::PinnedDialect,
+        coverage: CAUSAL_PARSE_COVERAGE,
     },
     CommandRegistration {
         key: "causal diff",
@@ -163,6 +186,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "compares two causal models rather than one frontend input",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "causal ledger",
@@ -170,6 +194,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "projects a causal ledger whose evidence inputs alter the command contract",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "causal observe-expectations",
@@ -177,13 +202,15 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "requires an observation log, mapping, scope, and time window",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "causal verify-expectations",
-        scope: ParityScope::Excluded {
-            reason: "is a causal-model verification command with separate expectation semantics",
+        scope: ParityScope::SpecPath {
+            invoke: &["causal", "verify-expectations", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::NotApplicable,
+        literate: LiterateCoverage::PinnedDialect,
+        coverage: CAUSAL_PARSE_COVERAGE,
     },
     CommandRegistration {
         key: "chain",
@@ -191,6 +218,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "positional is an fsl-project.toml manifest, not an FSL source document",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "check",
@@ -198,6 +226,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["check", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::Supported,
+        coverage: CHECK_COVERAGE,
     },
     CommandRegistration {
         key: "compat check",
@@ -205,6 +234,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["compat", "check", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::PinnedDialect,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "conformance",
@@ -212,6 +242,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["conformance", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "db check",
@@ -219,6 +250,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["db", "check", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::PinnedDialect,
+        coverage: DB_PARSE_COVERAGE,
     },
     CommandRegistration {
         key: "db import",
@@ -226,6 +258,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "imports SQL or ORM schema artifacts rather than an FSL frontend document",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "db observe",
@@ -233,6 +266,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "requires database runtime observation evidence",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "diff",
@@ -240,6 +274,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["diff", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "document check",
@@ -247,6 +282,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["document", "check", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "document claims",
@@ -254,6 +290,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["document", "claims", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "document generate",
@@ -261,6 +298,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["document", "generate", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "domain analyze",
@@ -268,6 +306,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["domain", "analyze", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: DOMAIN_COVERAGE,
     },
     CommandRegistration {
         key: "domain check",
@@ -275,6 +314,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["domain", "check", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::PinnedDialect,
+        coverage: DOMAIN_COVERAGE,
     },
     CommandRegistration {
         key: "domain expand",
@@ -282,6 +322,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["domain", "expand", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: DOMAIN_COVERAGE,
     },
     CommandRegistration {
         key: "domain generate",
@@ -289,6 +330,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["domain", "generate", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: DOMAIN_COVERAGE,
     },
     CommandRegistration {
         key: "domain replay",
@@ -302,6 +344,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             ],
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: DOMAIN_COVERAGE,
     },
     CommandRegistration {
         key: "domain testgen",
@@ -309,6 +352,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["domain", "testgen", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: DOMAIN_COVERAGE,
     },
     CommandRegistration {
         key: "explain",
@@ -316,6 +360,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["explain", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "fmt",
@@ -323,6 +368,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["fmt", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "html",
@@ -330,6 +376,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["html", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "kernel",
@@ -337,6 +384,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["kernel", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: KERNEL_GUARD_COVERAGE,
     },
     CommandRegistration {
         key: "ledger",
@@ -344,6 +392,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["ledger", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "lint",
@@ -351,6 +400,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["lint", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "migrate",
@@ -358,6 +408,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["migrate", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "mutate",
@@ -365,6 +416,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["mutate", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "refine",
@@ -377,6 +429,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             ],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "replay",
@@ -384,6 +437,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["replay", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "scenarios",
@@ -391,6 +445,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["scenarios", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::Supported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "sweep",
@@ -398,6 +453,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["sweep", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "testgen",
@@ -405,6 +461,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["testgen", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "typestate",
@@ -412,6 +469,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["typestate", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
+        coverage: NO_COVERAGE,
     },
     CommandRegistration {
         key: "verify",
@@ -419,6 +477,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["verify", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::Supported,
+        coverage: VERIFY_COVERAGE,
     },
     CommandRegistration {
         key: "version",
@@ -426,10 +485,11 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "has no input path or frontend entry point",
         },
         literate: LiterateCoverage::NotApplicable,
+        coverage: NO_COVERAGE,
     },
 ];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum FailureClass {
     Parse,
     Guard,
@@ -451,11 +511,18 @@ enum Diagnostic {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LocationShape {
+    Absent,
+    LineColumn,
+    FileOnly,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Expectation {
     payload: Payload,
     result: Option<&'static str>,
     kind: Option<&'static str>,
-    loc_present: bool,
+    location: LocationShape,
     diagnostic: Diagnostic,
     exit: i32,
     dialect: Option<&'static str>,
@@ -467,7 +534,7 @@ const PARSE_UNIFORM: Expectation = Expectation {
     payload: Payload::Json,
     result: Some("error"),
     kind: Some("parse"),
-    loc_present: true,
+    location: LocationShape::LineColumn,
     diagnostic: Diagnostic::Code("FSL-PARSE"),
     exit: 2,
     dialect: None,
@@ -479,7 +546,7 @@ const SEMANTIC_UNIFORM: Expectation = Expectation {
     payload: Payload::Json,
     result: Some("error"),
     kind: Some("semantics"),
-    loc_present: true,
+    location: LocationShape::LineColumn,
     diagnostic: Diagnostic::None,
     exit: 2,
     dialect: None,
@@ -493,7 +560,7 @@ const SEMANTIC_WITH_INPUT_PATH: Expectation = Expectation {
 };
 
 const SEMANTIC_WITHOUT_LOCATION: Expectation = Expectation {
-    loc_present: false,
+    location: LocationShape::Absent,
     ..SEMANTIC_UNIFORM
 };
 
@@ -506,7 +573,7 @@ const LITERATE_UNIFORM: Expectation = Expectation {
     payload: Payload::Json,
     result: Some("error"),
     kind: Some("usage"),
-    loc_present: true,
+    location: LocationShape::FileOnly,
     diagnostic: Diagnostic::Code("FSL-INPUT-LITERATE-UNSUPPORTED"),
     exit: 2,
     dialect: None,
@@ -514,11 +581,17 @@ const LITERATE_UNIFORM: Expectation = Expectation {
     exact_stdout: None,
 };
 
+/// #796 pins a product false negative: an invalid spec exits 0 and is accepted.
+/// This is a soundness defect, not an endorsed behavior; the pin detects
+/// regressions or changes until the first follow-up queue item, #796, fixes it.
+/// It may share a root with `KNOWN_DIVERGENT_DOMAIN_FIXTURES` entry 1 (#690):
+/// #690 is closed, but its symptom 2 divergence remained live when measured
+/// on 2026-08-13 and is now tracked by open #798.
 const ANALYZED_NAME_FALSE_GREEN: Expectation = Expectation {
     payload: Payload::Json,
     result: Some("analyzed"),
     kind: None,
-    loc_present: false,
+    location: LocationShape::Absent,
     diagnostic: Diagnostic::None,
     exit: 0,
     dialect: Some("fsl-domain-effect.v0"),
@@ -526,11 +599,13 @@ const ANALYZED_NAME_FALSE_GREEN: Expectation = Expectation {
     exact_stdout: None,
 };
 
+/// See [`ANALYZED_NAME_FALSE_GREEN`]: this is the same #796 false-negative
+/// soundness defect and is pinned solely to detect change, not to approve it.
 const EXPANDED_NAME_FALSE_GREEN: Expectation = Expectation {
     payload: Payload::Text,
     result: None,
     kind: None,
-    loc_present: false,
+    location: LocationShape::Absent,
     diagnostic: Diagnostic::None,
     exit: 0,
     dialect: None,
@@ -556,6 +631,68 @@ const EXPANDED_NAME_FALSE_GREEN: Expectation = Expectation {
 "#,
     ),
 };
+
+const CAUSAL_PARSE_WITHOUT_DIAGNOSTIC: Expectation = Expectation {
+    diagnostic: Diagnostic::None,
+    ..PARSE_UNIFORM
+};
+
+const NO_COVERAGE: &[FailureCoverage] = &[];
+const AI_PARSE_COVERAGE: &[FailureCoverage] = &[FailureCoverage {
+    class: FailureClass::Parse,
+    fixture: PARSE_AI_FIXTURE,
+    uniform: PARSE_UNIFORM,
+}];
+const CAUSAL_PARSE_COVERAGE: &[FailureCoverage] = &[FailureCoverage {
+    class: FailureClass::Parse,
+    fixture: PARSE_CAUSAL_FIXTURE,
+    uniform: PARSE_UNIFORM,
+}];
+const CHECK_COVERAGE: &[FailureCoverage] = &[
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_KERNEL_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: GUARD_FIXTURE,
+        uniform: SEMANTIC_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: NAME_FIXTURE,
+        uniform: SEMANTIC_UNIFORM,
+    },
+];
+const VERIFY_COVERAGE: &[FailureCoverage] = CHECK_COVERAGE;
+const DB_PARSE_COVERAGE: &[FailureCoverage] = &[FailureCoverage {
+    class: FailureClass::Parse,
+    fixture: PARSE_DB_FIXTURE,
+    uniform: PARSE_UNIFORM,
+}];
+const DOMAIN_COVERAGE: &[FailureCoverage] = &[
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_DOMAIN_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: GUARD_FIXTURE,
+        uniform: SEMANTIC_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: NAME_FIXTURE,
+        uniform: SEMANTIC_UNIFORM,
+    },
+];
+const KERNEL_GUARD_COVERAGE: &[FailureCoverage] = &[FailureCoverage {
+    class: FailureClass::Guard,
+    fixture: GUARD_FIXTURE,
+    uniform: SEMANTIC_UNIFORM,
+}];
 
 struct KnownAsymmetry {
     class: FailureClass,
@@ -637,8 +774,24 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
     },
     KnownAsymmetry {
         class: FailureClass::Parse,
+        command: "ai compat",
+        observed: SEMANTIC_WITHOUT_LOCATION,
+        uniform: PARSE_UNIFORM,
+        issue: "#780",
+        resolution: "fix completed; move this entry to the uniform table",
+    },
+    KnownAsymmetry {
+        class: FailureClass::Parse,
         command: "causal check",
         observed: PARSE_WITH_DIAGNOSTIC_ALIAS,
+        uniform: PARSE_UNIFORM,
+        issue: "#780",
+        resolution: "fix completed; move this entry to the uniform table",
+    },
+    KnownAsymmetry {
+        class: FailureClass::Parse,
+        command: "causal verify-expectations",
+        observed: CAUSAL_PARSE_WITHOUT_DIAGNOSTIC,
         uniform: PARSE_UNIFORM,
         issue: "#780",
         resolution: "fix completed; move this entry to the uniform table",
@@ -723,6 +876,14 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
     },
     KnownAsymmetry {
         class: FailureClass::Literate,
+        command: "ai compat",
+        observed: SEMANTIC_WITHOUT_LOCATION,
+        uniform: LITERATE_UNIFORM,
+        issue: "#780",
+        resolution: "fix completed; move this entry to the uniform table",
+    },
+    KnownAsymmetry {
+        class: FailureClass::Literate,
         command: "compat check",
         observed: SEMANTIC_WITHOUT_LOCATION,
         uniform: LITERATE_UNIFORM,
@@ -737,12 +898,62 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         issue: "#694",
         resolution: "fix completed; move this entry to the uniform table",
     },
+    KnownAsymmetry {
+        class: FailureClass::Literate,
+        command: "causal verify-expectations",
+        observed: CAUSAL_PARSE_WITHOUT_DIAGNOSTIC,
+        uniform: LITERATE_UNIFORM,
+        issue: "#780",
+        resolution: "fix completed; move this entry to the uniform table",
+    },
 ];
 
 struct Actual {
     stdout: String,
     json: Option<Value>,
     exit: i32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Cell {
+    class: FailureClass,
+    command: &'static str,
+    fixture: &'static str,
+    uniform: Expectation,
+}
+
+fn cells(class: FailureClass) -> Vec<Cell> {
+    PARITY_REGISTRY
+        .iter()
+        .flat_map(|entry| {
+            let class_coverage = entry
+                .coverage
+                .iter()
+                .filter(move |coverage| coverage.class == class)
+                .map(move |coverage| Cell {
+                    class,
+                    command: entry.key,
+                    fixture: coverage.fixture,
+                    uniform: coverage.uniform,
+                });
+            let literate_coverage = (class == FailureClass::Literate)
+                .then_some(entry)
+                .filter(|entry| {
+                    matches!(
+                        entry.literate,
+                        LiterateCoverage::UniformUnsupported | LiterateCoverage::PinnedDialect
+                    )
+                })
+                .into_iter()
+                .map(move |entry| Cell {
+                    class,
+                    command: entry.key,
+                    fixture: LITERATE_FIXTURE,
+                    uniform: LITERATE_UNIFORM,
+                });
+            class_coverage.chain(literate_coverage)
+        })
+        .collect()
 }
 
 fn workspace_root() -> PathBuf {
@@ -811,8 +1022,22 @@ fn matches_expectation(actual: &Actual, expected: Expectation, fixture: &str) ->
             if output.get("result").and_then(Value::as_str) != expected.result
                 || output.get("kind").and_then(Value::as_str) != expected.kind
                 || output.get("dialect").and_then(Value::as_str) != expected.dialect
-                || output.get("loc").is_some_and(Value::is_object) != expected.loc_present
             {
+                return false;
+            }
+            let location_matches = match expected.location {
+                LocationShape::Absent => output.get("loc").is_none(),
+                LocationShape::LineColumn => output.get("loc").is_some_and(|location| {
+                    location.get("line").and_then(Value::as_u64).is_some()
+                        && location.get("column").and_then(Value::as_u64).is_some()
+                }),
+                LocationShape::FileOnly => output.get("loc").is_some_and(|location| {
+                    location.get("file").and_then(Value::as_str) == Some(fixture)
+                        && location.get("line").is_none()
+                        && location.get("column").is_none()
+                }),
+            };
+            if !location_matches {
                 return false;
             }
             let diagnostic_matches = match expected.diagnostic {
@@ -875,20 +1100,28 @@ fn assert_known_asymmetry(
     assert_expectation(actual, known.observed, fixture, class, command);
 }
 
-fn assert_cell(class: FailureClass, command: &str, fixture: &str, uniform: Expectation) {
-    let actual = run(command, fixture);
+fn assert_cell(cell: Cell) {
+    let actual = run(cell.command, cell.fixture);
     let pins = KNOWN_ASYMMETRIES
         .iter()
-        .filter(|known| known.class == class && known.command == command)
+        .filter(|known| known.class == cell.class && known.command == cell.command)
         .collect::<Vec<_>>();
     assert!(
         pins.len() <= 1,
-        "{class:?}/{command} has more than one known-asymmetry pin"
+        "{:?}/{} has more than one known-asymmetry pin",
+        cell.class,
+        cell.command
     );
     if let Some(known) = pins.first() {
-        assert_known_asymmetry(&actual, known, fixture, class, command);
+        assert_known_asymmetry(&actual, known, cell.fixture, cell.class, cell.command);
     } else {
-        assert_expectation(&actual, uniform, fixture, class, command);
+        assert_expectation(
+            &actual,
+            cell.uniform,
+            cell.fixture,
+            cell.class,
+            cell.command,
+        );
     }
 }
 
@@ -962,118 +1195,58 @@ fn parity_registry_exclusions_are_explicit_and_runnable_entries_have_a_spec_slot
 
 #[test]
 fn parse_errors_are_uniform_or_pinned_across_frontend_siblings() {
-    for command in ["check", "verify"] {
-        assert_cell(
-            FailureClass::Parse,
-            command,
-            PARSE_KERNEL_FIXTURE,
-            PARSE_UNIFORM,
-        );
+    for cell in cells(FailureClass::Parse) {
+        assert_cell(cell);
     }
-    for command in [
-        "domain check",
-        "domain analyze",
-        "domain expand",
-        "domain generate",
-        "domain replay",
-        "domain testgen",
-    ] {
-        assert_cell(
-            FailureClass::Parse,
-            command,
-            PARSE_DOMAIN_FIXTURE,
-            PARSE_UNIFORM,
-        );
-    }
-    assert_cell(
-        FailureClass::Parse,
-        "db check",
-        PARSE_DB_FIXTURE,
-        PARSE_UNIFORM,
-    );
-    assert_cell(
-        FailureClass::Parse,
-        "ai check",
-        PARSE_AI_FIXTURE,
-        PARSE_UNIFORM,
-    );
-    assert_cell(
-        FailureClass::Parse,
-        "causal check",
-        PARSE_CAUSAL_FIXTURE,
-        PARSE_UNIFORM,
-    );
 }
 
 #[test]
 fn lowering_guard_errors_are_uniform_or_pinned_across_frontend_siblings() {
-    for command in [
-        "check",
-        "verify",
-        "kernel",
-        "domain check",
-        "domain analyze",
-        "domain expand",
-        "domain generate",
-        "domain replay",
-        "domain testgen",
-    ] {
-        assert_cell(
-            FailureClass::Guard,
-            command,
-            GUARD_FIXTURE,
-            SEMANTIC_UNIFORM,
-        );
+    for cell in cells(FailureClass::Guard) {
+        assert_cell(cell);
     }
 }
 
 #[test]
 fn unresolved_identifier_errors_are_uniform_or_pinned_across_eight_entry_points() {
-    for command in [
-        "check",
-        "verify",
-        "domain check",
-        "domain analyze",
-        "domain expand",
-        "domain generate",
-        "domain replay",
-        "domain testgen",
-    ] {
-        assert_cell(FailureClass::Name, command, NAME_FIXTURE, SEMANTIC_UNIFORM);
+    for cell in cells(FailureClass::Name) {
+        assert_cell(cell);
     }
 }
 
 #[test]
 fn literate_input_errors_are_uniform_or_pinned_across_frontend_siblings() {
-    for entry in PARITY_REGISTRY {
-        if entry.literate == LiterateCoverage::UniformUnsupported {
-            assert_cell(
-                FailureClass::Literate,
-                entry.key,
-                LITERATE_FIXTURE,
-                LITERATE_UNIFORM,
-            );
-        }
-    }
-    for command in [
-        "domain check",
-        "db check",
-        "ai check",
-        "compat check",
-        "causal check",
-    ] {
-        assert_cell(
-            FailureClass::Literate,
-            command,
-            LITERATE_FIXTURE,
-            LITERATE_UNIFORM,
-        );
+    for cell in cells(FailureClass::Literate) {
+        assert_cell(cell);
     }
 }
 
 #[test]
 fn every_pin_is_a_registered_matrix_command_with_a_tracking_issue() {
+    let mut cell_keys = BTreeSet::new();
+    for class in [
+        FailureClass::Parse,
+        FailureClass::Guard,
+        FailureClass::Name,
+        FailureClass::Literate,
+    ] {
+        for cell in cells(class) {
+            assert!(
+                cell_keys.insert((cell.class, cell.command)),
+                "duplicate matrix cell: {:?}/{}",
+                cell.class,
+                cell.command
+            );
+        }
+    }
+    let mut pin_keys = BTreeSet::new();
     for pin in KNOWN_ASYMMETRIES {
+        assert!(
+            pin_keys.insert((pin.class, pin.command)),
+            "duplicate known-asymmetry pin: {:?}/{}",
+            pin.class,
+            pin.command
+        );
         assert!(
             pin.issue.starts_with('#'),
             "{:?}/{} has no tracking issue",
@@ -1092,6 +1265,12 @@ fn every_pin_is_a_registered_matrix_command_with_a_tracking_issue() {
                 ParityScope::SpecPath { .. }
             ),
             "{:?}/{} is pinned but not a runnable matrix command",
+            pin.class,
+            pin.command
+        );
+        assert!(
+            cell_keys.contains(&(pin.class, pin.command)),
+            "{:?}/{} is pinned but not an executable matrix cell",
             pin.class,
             pin.command
         );
