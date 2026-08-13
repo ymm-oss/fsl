@@ -1,6 +1,5 @@
-Required (#781): native CLI error-envelope parity now derives every executed
-failure-class cell from the command registry, rejects `SpecPath` entries with
-no executable coverage, and requires reasons for non-applicable Markdown
-coverage. It includes sidecar-backed AI, causal, database, and approval
-frontend commands; validates location shape; and checks that self-retiring
-pins exactly match executable registry cells.
+Required (Refs #781): native CLI error-envelope parity now pins measured
+`check`/`verify` Parse envelope differences for AI-project and causal input
+shapes, classifies the `approval create --kind requirements_document`
+frontend, and records the compose nested-component Parse boundary. #801
+tracks the remaining work to derive the hand-authored input-shape population.

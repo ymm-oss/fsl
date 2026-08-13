@@ -31,6 +31,8 @@ const PARSE_AI_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_broken_a
 const PARSE_AI_PROJECT_FIXTURE: &str =
     "rust/fslc/tests/fixtures/error_envelope_broken_ai_project.fsl";
 const PARSE_CAUSAL_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_broken_causal.fsl";
+const PARSE_APPROVAL_REQUIREMENTS_DOCUMENT_FIXTURE: &str =
+    "rust/fslc/tests/fixtures/error_envelope_broken_approval_requirements_document.fsl";
 const AI_GUARD_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_ai_invalid_rule.fsl";
 const AI_NAME_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_ai_unknown_tool.fsl";
 const AI_PROJECT_GUARD_FIXTURE: &str =
@@ -339,7 +341,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "check accepts literate Markdown and its successful materialization is covered by the literate contract",
         },
         coverage: CHECK_COVERAGE,
-        not_applicable: &[],
+        not_applicable: CHECK_PARSE_SHAPE_BOUNDARIES,
     },
     CommandRegistration {
         key: "compat check",
@@ -631,7 +633,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             reason: "verify accepts literate Markdown and its successful materialization is covered by the literate contract",
         },
         coverage: VERIFY_COVERAGE,
-        not_applicable: &[],
+        not_applicable: CHECK_PARSE_SHAPE_BOUNDARIES,
     },
     CommandRegistration {
         key: "version",
@@ -657,6 +659,10 @@ enum FailureClass {
 /// The input form that reaches a command's frontend. Generic FSL commands
 /// have one source form; AI semantic cells must cover both component and
 /// project documents, because their dispatch paths are observably distinct.
+/// `check` and `verify` additionally expose distinct AI-project and causal
+/// parse frontends. Requirements-document approval creation is a separate
+/// `--kind` frontend selection. Compose nested-component parsing is a
+/// documented semantic-resolution boundary, not a direct Parse cell.
 /// AI Literate cells additionally retain the generic Markdown source form and
 /// exercise Markdown documents whose extracted FSL body is each AI shape.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -664,6 +670,9 @@ enum InputShape {
     Source,
     Component,
     Project,
+    Causal,
+    Compose,
+    RequirementsDocument,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -765,6 +774,10 @@ const PARSE_WITH_DIAGNOSTIC_ALIAS: Expectation = Expectation::Json(JsonExpectati
 const PARSE_WITHOUT_LOCATION_OR_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectation {
     location: LocationShape::Absent,
     diagnostic: Diagnostic::None,
+    ..PARSE_JSON
+});
+const PARSE_WITH_DIALECT_UNKNOWN_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectation {
+    diagnostic: Diagnostic::Code("FSL-DIALECT-UNKNOWN"),
     ..PARSE_JSON
 });
 
@@ -951,6 +964,15 @@ const AI_REGRESS_COMPONENT_NOT_APPLICABLE: &[NotApplicable] = &[
         reason: "component input stops at missing ai_migration selection before Name validation",
     },
 ];
+/// Component failures loaded from a `compose use ... from` declaration are
+/// resolution failures of the parent document, not direct parser input. #567
+/// independently pins their semantic kind and parent `use` location for both
+/// `check` and `verify`, so this Parse-shape boundary is deliberate.
+const CHECK_PARSE_SHAPE_BOUNDARIES: &[NotApplicable] = &[NotApplicable {
+    class: FailureClass::Parse,
+    shape: InputShape::Compose,
+    reason: "a nested component parse failure is reported as the parent compose document's semantic resolution error; issue_567_cross_file_diagnostic_loc exercises check and verify",
+}];
 const AI_PARSE_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
         class: FailureClass::Parse,
@@ -1118,6 +1140,16 @@ const CHECK_COVERAGE: &[FailureCoverage] = &[
         uniform: PARSE_UNIFORM,
     },
     FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_AI_PROJECT_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_CAUSAL_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
         class: FailureClass::Guard,
         fixture: GUARD_FIXTURE,
         uniform: SEMANTIC_WITH_INPUT_PATH,
@@ -1167,6 +1199,11 @@ const APPROVAL_CREATE_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
         class: FailureClass::Parse,
         fixture: PARSE_KERNEL_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_APPROVAL_REQUIREMENTS_DOCUMENT_FIXTURE,
         uniform: PARSE_UNIFORM,
     },
     FailureCoverage {
@@ -1415,6 +1452,33 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         PARSE_AI_PROJECT_FIXTURE,
         PARSE_WITHOUT_LOCATION_OR_DIAGNOSTIC,
         "#800"
+    ),
+    // #801 owns same-command input-dialect envelope differences. #780 tracks
+    // command-entrypoint parse degradation; its measured table does not cover
+    // this distinct `check` frontend selection.
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Parse,
+        "check",
+        PARSE_AI_PROJECT_FIXTURE,
+        PARSE_WITHOUT_LOCATION_OR_DIAGNOSTIC,
+        "#801"
+    ),
+    pin!(
+        shape: InputShape::Causal;
+        FailureClass::Parse,
+        "check",
+        PARSE_CAUSAL_FIXTURE,
+        PARSE_WITH_DIAGNOSTIC_ALIAS,
+        "#801"
+    ),
+    pin!(
+        shape: InputShape::Causal;
+        FailureClass::Parse,
+        "verify",
+        PARSE_CAUSAL_FIXTURE,
+        PARSE_WITH_DIALECT_UNKNOWN_DIAGNOSTIC,
+        "#801"
     ),
     pin!(
         shape: InputShape::Project;
@@ -2166,6 +2230,16 @@ fn has_literate_not_applicable(entry: &CommandRegistration) -> bool {
 }
 
 fn coverage_input_shape(command: &str, fixture: &str) -> InputShape {
+    if matches!(command, "check" | "verify") {
+        return match fixture {
+            PARSE_AI_PROJECT_FIXTURE => InputShape::Project,
+            PARSE_CAUSAL_FIXTURE => InputShape::Causal,
+            _ => InputShape::Source,
+        };
+    }
+    if command == "approval create" && fixture == PARSE_APPROVAL_REQUIREMENTS_DOCUMENT_FIXTURE {
+        return InputShape::RequirementsDocument;
+    }
     if command.starts_with("ai ") {
         if fixture == PARSE_AI_PROJECT_FIXTURE
             || fixture == AI_PROJECT_GUARD_FIXTURE
@@ -2191,8 +2265,20 @@ fn required_input_shapes(
         InputShape::Component,
         InputShape::Project,
     ];
+    const CHECK_PARSE: &[InputShape] = &[
+        InputShape::Source,
+        InputShape::Project,
+        InputShape::Causal,
+        InputShape::Compose,
+    ];
+    const APPROVAL_CREATE_PARSE: &[InputShape] =
+        &[InputShape::Source, InputShape::RequirementsDocument];
 
-    if matches!(entry.scope, ParityScope::SpecPath { .. }) && entry.key.starts_with("ai ") {
+    if matches!(entry.key, "check" | "verify") && class == FailureClass::Parse {
+        CHECK_PARSE
+    } else if entry.key == "approval create" && class == FailureClass::Parse {
+        APPROVAL_CREATE_PARSE
+    } else if matches!(entry.scope, ParityScope::SpecPath { .. }) && entry.key.starts_with("ai ") {
         match class {
             FailureClass::Parse | FailureClass::Guard | FailureClass::Name => AI_FSL,
             // Markdown has a generic source fixture plus component/project
@@ -2367,6 +2453,23 @@ fn approval_command(command: &str) -> bool {
 fn invoke(command: &str, fixture: &str, approval_record: Option<&Path>) -> Vec<String> {
     let ParityScope::SpecPath { invoke } = registration(command).scope else {
         panic!("{command} is not a runnable SpecPath matrix command");
+    };
+    let invoke = if command == "approval create"
+        && fixture == PARSE_APPROVAL_REQUIREMENTS_DOCUMENT_FIXTURE
+    {
+        &[
+            "approval",
+            "create",
+            SPEC_PLACEHOLDER,
+            "--kind",
+            "requirements_document",
+            "--artifact",
+            "requirements.md",
+            "--approver",
+            "parity",
+        ]
+    } else {
+        invoke
     };
     invoke
         .iter()
