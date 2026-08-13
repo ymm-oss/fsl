@@ -1060,16 +1060,21 @@ test("rejecting: the executable runner exits nonzero and uses its default error 
   );
 });
 
-test("healthy runner sends exact transport metadata for usage, every listing page, and sentinels", async () => {
+test("retrying runner sends exact transport metadata for usage, every listing page, and sentinels", async () => {
   const listing = withCacheIds([
     ...healthyListing(),
     ...Array.from({ length: 96 }, (_, index) =>
       cacheBytes(`tool-cache-${index}`, MAIN, 1),
     ),
   ]);
+  const mismatchedListing = listing.map((entry, index) =>
+    index === 0 ? { ...entry, size_in_bytes: entry.size_in_bytes + 1 } : entry,
+  );
   const calls = [];
   const reports = [];
   const errors = [];
+  let collection = 0;
+  let collectionListing;
   const result = await runCacheBudgetAudit({
     token: "test-token",
     repo: "owner/repo",
@@ -1083,10 +1088,26 @@ test("healthy runner sends exact transport metadata for usage, every listing pag
       }
       const page = Number(parsed.searchParams.get("page"));
       if (page === 1) {
-        return jsonResponse({ total_count: listing.length, actions_caches: listing.slice(0, 100) });
+        collection += 1;
+        // Exercise every permitted retry: each earlier pair disagrees, while
+        // the final pair agrees. This count follows the production retry
+        // bound, but the URLs and all header values below remain literals.
+        collectionListing =
+          collection <= 2 * (STABILITY_ATTEMPTS - 1) && collection % 2 === 0
+            ? mismatchedListing
+            : listing;
+      }
+      if (page === 1) {
+        return jsonResponse({
+          total_count: collectionListing.length,
+          actions_caches: collectionListing.slice(0, 100),
+        });
       }
       if (page === 2) {
-        return jsonResponse({ total_count: listing.length, actions_caches: listing.slice(100) });
+        return jsonResponse({
+          total_count: collectionListing.length,
+          actions_caches: collectionListing.slice(100),
+        });
       }
       if (page === 3) return jsonResponse(outOfRangeCachePage());
       throw new Error(`unexpected cache page ${page}`);
@@ -1099,12 +1120,10 @@ test("healthy runner sends exact transport metadata for usage, every listing pag
 
   assert.deepEqual(calls, [
     "/actions/cache/usage",
-    PAGE_PATH(1),
-    PAGE_PATH(2),
-    PAGE_PATH(3),
-    PAGE_PATH(1),
-    PAGE_PATH(2),
-    PAGE_PATH(3),
+    ...Array.from(
+      { length: STABILITY_ATTEMPTS * 2 },
+      () => [PAGE_PATH(1), PAGE_PATH(2), PAGE_PATH(3)],
+    ).flat(),
   ].map((path) => [
     `https://api.github.com/repos/owner/repo${path}`,
     {
