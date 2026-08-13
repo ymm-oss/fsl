@@ -143,7 +143,16 @@ function jsonResponse(body, options = {}) {
   return new Response(JSON.stringify(body), { status, statusText, headers });
 }
 
-function runExecutableRunner({ listing, usageBytes = usageOf(listing) }) {
+function childEnvironment(overrides = {}) {
+  const environment = { ...process.env, ...overrides };
+  // Test subprocesses must not write profiles into their parent's coverage
+  // directory: Node otherwise merges an independently instrumented CLI entry
+  // into this suite's report and makes its aggregate coverage nondeterministic.
+  delete environment.NODE_V8_COVERAGE;
+  return environment;
+}
+
+function runExecutableRunner({ listing, usageBytes = usageOf(listing), remaining = "999" }) {
   // Run the actual CLI guard with a child-local fetch fixture. Importing after
   // assigning argv[1] enters the same `main()`/`process.exit` path as `node
   // run-cache-budget-audit.mjs`, while keeping its API observations offline.
@@ -154,18 +163,18 @@ function runExecutableRunner({ listing, usageBytes = usageOf(listing) }) {
       const parsed = new URL(url);
       if (parsed.pathname.endsWith("/actions/cache/usage")) {
         return new Response(JSON.stringify({ active_caches_size_in_bytes: usageBytes }), {
-          headers: { "x-ratelimit-remaining": "999" },
+          headers: { "x-ratelimit-remaining": ${JSON.stringify(remaining)} },
         });
       }
       if (parsed.searchParams.get("page") === "1") {
         return new Response(JSON.stringify({
           total_count: listing.length,
           actions_caches: listing,
-        }), { headers: { "x-ratelimit-remaining": "999" } });
+        }), { headers: { "x-ratelimit-remaining": ${JSON.stringify(remaining)} } });
       }
       if (parsed.searchParams.get("page") === "2") {
         return new Response(JSON.stringify({ total_count: 0, actions_caches: [] }), {
-          headers: { "x-ratelimit-remaining": "999" },
+          headers: { "x-ratelimit-remaining": ${JSON.stringify(remaining)} },
         });
       }
       throw new Error(\`unexpected cache page \${parsed.searchParams.get("page")}\`);
@@ -175,11 +184,10 @@ function runExecutableRunner({ listing, usageBytes = usageOf(listing) }) {
   `;
   return spawnSync(process.execPath, ["--input-type=module", "--eval", fixture], {
     encoding: "utf8",
-    env: {
-      ...process.env,
+    env: childEnvironment({
       GITHUB_TOKEN: "test-token",
       GITHUB_REPOSITORY: "owner/repo",
-    },
+    }),
   });
 }
 
@@ -1043,7 +1051,7 @@ test("executable runner uses its default report sink for healthy and unhealthy v
 });
 
 test("rejecting: the executable runner exits nonzero and uses its default error sink when credentials are absent", () => {
-  const environment = { ...process.env };
+  const environment = childEnvironment();
   delete environment.GITHUB_TOKEN;
   delete environment.GITHUB_REPOSITORY;
   const child = spawnSync(process.execPath, [RUNNER_PATH], {
@@ -1058,6 +1066,19 @@ test("rejecting: the executable runner exits nonzero and uses its default error 
     child.stderr,
     "cache budget audit: GITHUB_TOKEN and GITHUB_REPOSITORY are required; refusing to report a healthy budget without observing one\n",
   );
+});
+
+test("rejecting: the executable runner never emits PASS for malformed rate-limit header syntax", () => {
+  const listing = withCacheIds(healthyListing(), 1);
+  for (const remaining of ["0x3e8", "1e3", "+1000", "0b1111101000"]) {
+    const child = runExecutableRunner({ listing, remaining });
+
+    assert.equal(child.error, undefined, remaining);
+    assert.equal(child.status, 1, remaining);
+    assert.equal(child.stdout, "", remaining);
+    assert.doesNotMatch(child.stdout, /cache budget audit: PASS/, remaining);
+    assert.match(child.stderr, /no valid x-ratelimit-remaining header/, remaining);
+  }
 });
 
 test("retrying runner sends exact transport metadata for usage, every listing page, and sentinels", async () => {
@@ -1144,7 +1165,17 @@ test("rejecting: API wrapper rejects HTTP failures and missing or invalid rate-l
   });
   await assert.rejects(failed.request("/actions/cache/usage"), /401 Unauthorized/);
 
-  for (const remaining of [undefined, "", "not-a-number", "-1", "1.5"]) {
+  for (const remaining of [
+    undefined,
+    "",
+    "not-a-number",
+    "-1",
+    "1.5",
+    "0x3e8",
+    "1e3",
+    "+1000",
+    "0b1111101000",
+  ]) {
     const api = createCacheAuditApi({
       token: "test-token",
       repo: "owner/repo",
@@ -1156,6 +1187,14 @@ test("rejecting: API wrapper rejects HTTP failures and missing or invalid rate-l
       String(remaining),
     );
   }
+
+  const whitespace = createCacheAuditApi({
+    token: "test-token",
+    repo: "owner/repo",
+    fetchImpl: async () => jsonResponse({}, { remaining: " 1000 " }),
+  });
+  await whitespace.request("/actions/cache/usage");
+  assert.equal(whitespace.rateLimitRemaining, 1_000);
 });
 
 test("rejecting: API wrapper preserves headroom and calibrates its independent 900-request cap", async () => {
