@@ -58,8 +58,9 @@ jobs:
           # `rust-workspace` entry exists; without one, it remains cold. `main` has never
           # held a cache under this workflow's own former key (no `push` trigger ever
           # existed for it), so that former-key path could not make the first run warm.
-          # The live cache audit's created_at order has no documented tie-breaker; tied
-          # entries crossing a page boundary fail closed as unauditable, not healthy.
+          # The live cache audit's created_at order has no documented tie-breaker; a tied
+          # boundary can produce a duplicate ID or a different paired collection and then fail
+          # closed as unauditable, while an identical mixed collection can repeat.
           # See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           shared-key: rust-workspace
           save-if: false

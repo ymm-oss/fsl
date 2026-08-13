@@ -111,8 +111,9 @@ jobs:
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
           # non-`pull_request` events. The live audit's created_at order has no documented
-          # tie-breaker; tied entries crossing a page boundary are intentionally fail-closed
-          # as unauditable, not treated as a stable healthy listing. See
+          # tie-breaker; a tied boundary can produce a duplicate ID or a different paired
+          # collection and then fail closed as unauditable, while an identical mixed collection
+          # can repeat. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -332,8 +333,9 @@ jobs:
     # observe. Warm measured: 32m56s / 32m45s (2026-08-04), 31m49s / 29m44s / 26m56s
     # (2026-08-05) -- comfortably inside the old 40-minute budget. The scheduled
     # `windows-latest` run then hit exactly 40m0x and was cancelled on every one of
-    # six consecutive occasions from 2026-08-07 00:23 through 2026-08-11: a step
-    # change, not gradual drift, and neither a regression nor added test volume. The
+    # six consecutive occasions from 2026-08-07 00:23 through 2026-08-11: cache absence was
+    # an observed material correlate. These observations span revisions and test volumes, so
+    # they do not exclude either contribution. The
     # decisive contrast is the `Swatinem/rust-cache` restore step itself: the last
     # success (2026-08-05) reported `Cache hit for: v0-rust-rust-native-z3-Windows_NT-x64-...`
     # and restored 591 MiB; the 2026-08-11 cancellation reported `No cache found.`

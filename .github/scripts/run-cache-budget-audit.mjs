@@ -37,7 +37,7 @@ export function maximumAuditRequests(totalCount) {
   return 1 + STABILITY_ATTEMPTS * 2 * listingRequests(totalCount);
 }
 
-function pageNumber(path) {
+export function pageNumber(path) {
   return new URL(path, "https://api.github.com").searchParams.get("page");
 }
 
@@ -53,8 +53,9 @@ function assertListingFitsBudget(totalCount) {
 
 function cachePath(page) {
   // `created_at` is not changed by restoration/access, unlike last-accessed
-  // order. GitHub documents it as the primary order only; a tied page boundary
-  // can still reorder and is intentionally rejected as an unstable observation.
+  // order. GitHub documents it as the primary order only. A tied page boundary
+  // can produce a duplicate ID or a different paired collection, which is
+  // rejected as an unstable observation; an identical mixed state can repeat.
   return `/actions/caches?per_page=${CACHE_PAGE_SIZE}&sort=created_at&direction=asc&page=${page}`;
 }
 

@@ -29,6 +29,7 @@ import {
   fetchStableCaches,
   maximumAuditRequests,
   observedUsageBytes,
+  pageNumber,
   runCacheBudgetAudit,
   sameCacheCollection,
 } from "./run-cache-budget-audit.mjs";
@@ -36,6 +37,18 @@ import {
 const MAIN = "refs/heads/main";
 const PAGE_PATH = (page) =>
   `/actions/caches?per_page=100&sort=created_at&direction=asc&page=${page}`;
+
+test("pageNumber reads the page query parameter without substring matches", () => {
+  const cases = [
+    ["/actions/caches?per_page=100&page=1&sort=created_at", "1"],
+    ["/actions/caches?sort=created_at&direction=asc&page=10&per_page=100", "10"],
+    ["/actions/caches?per_page=100&sort=created_at", null],
+  ];
+
+  for (const [path, expected] of cases) {
+    assert.equal(pageNumber(path), expected, path);
+  }
+});
 
 function cache(key, ref, gib) {
   return { key, ref, size_in_bytes: Math.round(gib * GIB) };
@@ -275,7 +288,10 @@ test("accepting: a page-boundary mixed collection retries to a stable observatio
   assert.ok(mixedEntries.some((entry) => entry.id === 201));
   assert.equal(mixedEntries.some((entry) => entry.id === 101), false);
 
-  const snapshots = [oldEntries, changedEntries, changedEntries, changedEntries];
+  // `mixedEntries` is the actual first collection served below. Keeping the
+  // asserted fixture and the page response on this same value means either
+  // removing the new ID or replacing its page two with old data fails here.
+  const snapshots = [mixedEntries, changedEntries, changedEntries, changedEntries];
   let collection = -1;
   const requested = [];
   const caches = await fetchStableCaches(async (path) => {
@@ -284,15 +300,13 @@ test("accepting: a page-boundary mixed collection retries to a stable observatio
       collection += 1;
       return {
         total_count: 200,
-        actions_caches:
-          collection === 0 ? oldEntries.slice(0, 100) : snapshots[collection].slice(0, 100),
+        actions_caches: snapshots[collection].slice(0, 100),
       };
     }
     if (path.endsWith("page=2")) {
       return {
         total_count: 200,
-        actions_caches:
-          collection === 0 ? changedEntries.slice(100) : snapshots[collection].slice(100),
+        actions_caches: snapshots[collection].slice(100),
       };
     }
     if (path.endsWith("page=3")) return outOfRangeCachePage();
@@ -317,8 +331,9 @@ test("rejecting: different page-boundary mixed collections fail closed after ret
     ...oldEntries.filter((entry) => entry.id !== removedId),
     { ...oldEntries[0], id: 201, key: "new-cache", ref: MAIN },
   ];
+  const secondRemovedId = oldEntries.find((entry) => entry.id === 4).id;
   const changedAtSecondPage = [
-    ...oldEntries.filter((entry) => entry.id !== 150),
+    ...oldEntries.filter((entry) => entry.id !== secondRemovedId),
     { ...oldEntries[0], id: 202, key: "other-new-cache", ref: MAIN },
   ];
   const mixedOldThenFirstPageChange = [
@@ -329,12 +344,24 @@ test("rejecting: different page-boundary mixed collections fail closed after ret
     ...oldEntries.slice(0, 100),
     ...changedAtSecondPage.slice(100),
   ];
+  // These asserted mixed collections are also the values that the mock pages
+  // serve. Replacing page one with a changed snapshot makes the first pair
+  // stable and invalidates the rejecting control.
   const pagePairs = [
-    [oldEntries, changedAtFirstPage],
-    [oldEntries, changedAtSecondPage],
-    [oldEntries, changedAtFirstPage],
-    [oldEntries, changedAtSecondPage],
+    [mixedOldThenFirstPageChange, mixedOldThenFirstPageChange],
+    [mixedOldThenSecondPageChange, mixedOldThenSecondPageChange],
+    [mixedOldThenFirstPageChange, mixedOldThenFirstPageChange],
+    [mixedOldThenSecondPageChange, mixedOldThenSecondPageChange],
   ];
+  for (const [description, pages, deletedId, newId] of [
+    ["first", pagePairs[0], removedId, 201],
+    ["second", pagePairs[1], secondRemovedId, 202],
+  ]) {
+    assert.deepEqual(pages[0], pages[1], `${description}: served pages reconstruct one collection`);
+    assert.ok(pages[0].some((entry) => entry.id === deletedId), `${description}: deleted ID`);
+    assert.ok(pages[0].some((entry) => entry.id === newId), `${description}: new ID`);
+    assert.equal(pages[0].some((entry) => entry.id === 101), false, `${description}: missing ID`);
+  }
   let collection = -1;
 
   await assert.rejects(
@@ -688,23 +715,36 @@ test("rejecting: the live runner reaches the 22,300-entry continuation and repor
   assert.match(errors.join("\n"), /GET .*page=2 -> 503 Service Unavailable/);
 });
 
-test("rejecting: the live runner rejects a malformed ordinary page envelope", async () => {
-  const errors = [];
-  const result = await runCacheBudgetAudit({
-    token: "test-token",
-    repo: "owner/repo",
-    writeReport: () => assert.fail("a malformed page must not report PASS"),
-    writeError: (message) => errors.push(message),
-    fetchImpl: async (url) => {
-      if (new URL(url).pathname.endsWith("/actions/cache/usage")) {
-        return jsonResponse({ active_caches_size_in_bytes: 0 });
-      }
-      return jsonResponse({ total_count: 5 });
-    },
-  });
+test("rejecting: the live runner rejects invalid ordinary-page total_count values", async () => {
+  const cases = [
+    ["missing", { actions_caches: [] }],
+    ["string", { total_count: "5", actions_caches: [] }],
+    ["negative", { total_count: -1, actions_caches: [] }],
+    ["fractional", { total_count: 0.5, actions_caches: [] }],
+  ];
 
-  assert.equal(result.ok, false);
-  assert.match(errors.join("\n"), /page 1 has no actions_caches array/);
+  for (const [description, malformedPage] of cases) {
+    const errors = [];
+    const result = await runCacheBudgetAudit({
+      token: "test-token",
+      repo: "owner/repo",
+      writeReport: () => assert.fail("a malformed page must not report PASS"),
+      writeError: (message) => errors.push(message),
+      fetchImpl: async (url) => {
+        if (new URL(url).pathname.endsWith("/actions/cache/usage")) {
+          return jsonResponse({ active_caches_size_in_bytes: 0 });
+        }
+        return jsonResponse(malformedPage);
+      },
+    });
+
+    assert.equal(result.ok, false, description);
+    assert.match(
+      errors.join("\n"),
+      /cache listing page 1 has no valid total_count/,
+      description,
+    );
+  }
 });
 
 test("rejecting: API wrapper rejects HTTP failures and missing or invalid rate-limit headers", async () => {
@@ -730,16 +770,24 @@ test("rejecting: API wrapper rejects HTTP failures and missing or invalid rate-l
 });
 
 test("rejecting: API wrapper preserves headroom and calibrates its independent 900-request cap", async () => {
-  const lowRemaining = createCacheAuditApi({
-    token: "test-token",
-    repo: "owner/repo",
-    fetchImpl: async () => jsonResponse({}, { remaining: "100" }),
-  });
-  await lowRemaining.request("/actions/cache/usage");
-  await assert.rejects(
-    lowRemaining.request("/actions/caches?page=1"),
-    /refusing to consume 100 reserved/,
-  );
+  for (const remaining of ["100", "0"]) {
+    let calls = 0;
+    const lowRemaining = createCacheAuditApi({
+      token: "test-token",
+      repo: "owner/repo",
+      fetchImpl: async () => {
+        calls += 1;
+        return jsonResponse({}, { remaining });
+      },
+    });
+    await lowRemaining.request("/actions/cache/usage");
+    await assert.rejects(
+      lowRemaining.request("/actions/caches?page=1"),
+      /refusing to consume 100 reserved/,
+      remaining,
+    );
+    assert.equal(calls, 1, `${remaining}: headroom rejects before transport`);
+  }
 
   let calls = 0;
   const capped = createCacheAuditApi({

@@ -612,7 +612,7 @@ carried both.** Direct measurement settled it: on product-gate run `31210570118`
 (`mutation operators (3/3)`) restored with `No cache found.` at 19:14:17Z -- a fully cold start, so it
 carried forward nothing from any prior run -- built for ~35 minutes, and saved the cache at 19:48:12Z.
 `gh api actions/caches` shows the resulting entry, `v0-rust-semantic-mutation-Linux-x64-...`, created
-at exactly `2026-08-07T19:48:56Z` and sized 2,919,716,751 bytes (2.719 GiB). That operators job did not run the
+at `2026-08-07T19:48:56.674225000Z` and sized 2,919,716,751 bytes (2.719 GiB). That operators job did not run the
 mutants lane; the same run's successful mutants job `92972117519` ran on a different runner, so it
 could not contribute to this operators job's cache archive. Thus neither the mutants scratch build
 nor its evidence generation contributed a byte to this entry: there is no dead weight here to
@@ -751,8 +751,8 @@ That job's `Swatinem/rust-cache` step carried `save-if` but not `cache-on-failur
 measured 32m56s / 32m45s (2026-08-04) and 31m49s / 29m44s / 26m56s (2026-08-05), comfortably inside
 the former 40-minute budget; the scheduled `windows-latest` run then hit exactly 40m0x and was
 cancelled on all six consecutive scheduled runs from 2026-08-07 00:23 through 2026-08-11 — a step
-change coincident with the cache-budget eviction above, not gradual drift, a regression, or added
-test volume. The last successful run (2026-08-05) restored the cache
+change for which cache absence was an observed material correlate. Those observations span
+revisions and test volumes, so they do not exclude either contribution. The last successful run (2026-08-05) restored the cache
 (`Cache hit for: v0-rust-rust-native-z3-Windows_NT-x64-...`, 591 MiB); the 2026-08-11 cancellation
 reported `No cache found.` instead, and its job steps show
 `9 skipped Post Run Swatinem/rust-cache@v2` (run `31527197290` attempt 1).
@@ -792,9 +792,9 @@ For completeness, each stability attempt obtains two entire cache listings with 
 `per_page=100&sort=created_at&direction=asc`. `created_at` does not change on restore/access, but
 GitHub documents only that primary sort key, not a secondary tie order or page-to-page stability.
 The current repeated live observation had nine distinct `created_at` values; it is not evidence
-about tied values. A tie reordered across a page boundary can therefore produce a duplicate ID or
-different paired collection and fail closed as unauditable, rather than establish a false stable
-order. A collection requires a safe-integer first `total_count`; each declared page repeats it, has
+about tied values. A tie reordered across a page boundary can produce a duplicate ID or a different
+paired collection and then fail closed as unauditable; an identical mixed collection can instead
+repeat. A collection requires a safe-integer first `total_count`; each declared page repeats it, has
 its exact implied entry count, and contains unique safe-integer IDs with nonempty `key` and `ref`
 and nonnegative safe-integer `size_in_bytes`. It then requests an empty sentinel. GitHub's observed
 out-of-range envelope is `{ "total_count": 0, "actions_caches": [] }`; the sentinel may therefore
@@ -810,11 +810,12 @@ the same mixed state, or the repository can mutate only before/between/after the
 way that leaves their compared IDs and fields equal. The audit makes no claim to detect those
 residuals; that would require a server-provided snapshot token or equivalent API guarantee.
 
-The request budget counts every request: one usage request plus
+The internal request budget counts HTTP-successful requests: one usage request plus
 `2 × (pages + sentinel)` for one paired observation; the one permitted retry raises the bounded
 worst case to `1 + 4 × (pages + sentinel)`. The standard Actions `GITHUB_TOKEN` allowance is 1,000
 requests/hour/repository. The runner caps itself at 900 requests, reserves 100 for other workflow
-work, rejects a missing/empty/non-integer `x-ratelimit-remaining` header before numeric conversion,
+work, and aborts at the first HTTP failure (which therefore cannot permit a later request). It rejects
+a missing/empty/non-integer `x-ratelimit-remaining` header before numeric conversion,
 and stops before each request when the known remaining bucket is at or below that headroom. After a
 page-one response, it reserves the current collection's remaining pages and sentinel plus the
 headroom from its current control state; it does not subtract cumulative requests from a later

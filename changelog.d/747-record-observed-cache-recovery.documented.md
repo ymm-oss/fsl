@@ -11,5 +11,6 @@ matches on run `31565897267` attempt 1 (2m54s) and on run `31570480618` attempt 
 `semantic-mutation` saver: run `31086907528` attempt 1's mutants job `92568586155` uploaded
 2,922,378,363 B after `No cache found.` while all operator posts were skipped.
 The recovery listing's repeated `created_at` order was observed only across distinct timestamps;
-GitHub documents no secondary tie order, so a future tied page-boundary reorder is intentionally
-treated as unauditable/fail-closed by the cache audit rather than recorded as a stable ordering.
+GitHub documents no secondary tie order, so a future tied page boundary can produce a duplicate ID
+or different paired collection and then be treated as unauditable/fail-closed; an identical mixed
+collection can repeat.
