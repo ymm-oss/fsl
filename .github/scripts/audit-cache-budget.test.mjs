@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   auditCacheBudget,
   formatReport,
+  BUDGET_WARN_FRACTION,
   CACHE_LIMIT_BYTES,
   CI_SHARED_KEYS,
   GIB,
@@ -26,22 +27,46 @@ import {
 import {
   CACHE_AUDIT_REQUEST_BUDGET,
   CACHE_AUDIT_REQUEST_HEADROOM,
+  CACHE_PAGE_SIZE,
   createCacheAuditApi,
   fetchCacheCollection as fetchAllCaches,
   fetchStableCaches,
+  GITHUB_TOKEN_REQUEST_CEILING,
   maximumAuditRequests,
   observedUsageBytes,
   pageNumber,
   runCacheBudgetAudit,
   sameCacheCollection,
+  STABILITY_ATTEMPTS,
   STABILITY_RETRY_DELAY_MS,
 } from "./run-cache-budget-audit.mjs";
 
 const MAIN = "refs/heads/main";
+const BYTES_PER_GIB = 1_073_741_824;
 const PAGE_PATH = (page) =>
   `/actions/caches?per_page=100&sort=created_at&direction=asc&page=${page}`;
 const RUNNER_PATH = fileURLToPath(new URL("./run-cache-budget-audit.mjs", import.meta.url));
 const RUNNER_URL = pathToFileURL(RUNNER_PATH).href;
+
+test("exported cache-audit constants have fixed protocol values", () => {
+  assert.equal(GIB, 1_073_741_824);
+  assert.equal(CACHE_LIMIT_BYTES, 10_737_418_240);
+  assert.equal(BUDGET_WARN_FRACTION, 0.85);
+  assert.deepEqual(CI_SHARED_KEYS, ["rust-workspace", "wasm", "semantic-mutation"]);
+  assert.deepEqual(REQUIRED_MAIN_ENTRIES, [
+    { key: "rust-workspace", platform: "Linux" },
+    { key: "wasm", platform: "Linux" },
+    { key: "semantic-mutation", platform: "Linux" },
+    { key: "rust-native-z3", platform: "Windows_NT" },
+    { key: "rust-native-z3", platform: "Darwin" },
+  ]);
+  assert.equal(CACHE_PAGE_SIZE, 100);
+  assert.equal(GITHUB_TOKEN_REQUEST_CEILING, 1_000);
+  assert.equal(CACHE_AUDIT_REQUEST_HEADROOM, 100);
+  assert.equal(CACHE_AUDIT_REQUEST_BUDGET, 900);
+  assert.equal(STABILITY_ATTEMPTS, 2);
+  assert.equal(STABILITY_RETRY_DELAY_MS, 1_000);
+});
 
 test("pageNumber reads the page query parameter without substring matches", () => {
   const cases = [
@@ -56,7 +81,7 @@ test("pageNumber reads the page query parameter without substring matches", () =
 });
 
 function cache(key, ref, gib) {
-  return { key, ref, size_in_bytes: Math.round(gib * GIB) };
+  return { key, ref, size_in_bytes: Math.round(gib * BYTES_PER_GIB) };
 }
 
 function cacheBytes(key, ref, bytes) {
@@ -307,6 +332,17 @@ test("accepting: an empty repository reads page one and its zero-entry sentinel"
   ]);
 });
 
+test("accepting: a sentinel may repeat the initial count with no entries", async () => {
+  const entries = withCacheIds(healthyListing(), 1);
+  const caches = await fetchAllCaches(async (path) => {
+    if (path.endsWith("page=1")) return { total_count: 5, actions_caches: entries };
+    if (path.endsWith("page=2")) return { total_count: 5, actions_caches: [] };
+    throw new Error(`unexpected path: ${path}`);
+  });
+
+  assert.deepEqual(caches, entries);
+});
+
 test("accepting: a stale usage count does not invalidate stable listing identity", async () => {
   // GitHub documents active_caches_count as approximately five-minute data.
   // This models usage=9 while both immediate complete listings contain 5;
@@ -488,7 +524,49 @@ test("accepting: a transient differing pair waits once, then returns the stable 
   assert.equal(collection, 3);
   assert.deepEqual(caches, stableEntries);
   assert.equal(sameCacheCollection(oldEntries, stableEntries), false);
-  assert.deepEqual(sleeps, [STABILITY_RETRY_DELAY_MS]);
+  assert.deepEqual(sleeps, [1_000]);
+});
+
+test("rejecting: default retry timer receives the fixed one-second pacing delay", async () => {
+  const initial = withCacheIds(healthyListing(), 1);
+  const changed = initial.map((entry) =>
+    entry.id === 1 ? { ...entry, size_in_bytes: entry.size_in_bytes + 1 } : entry,
+  );
+  const snapshots = [initial, changed, changed, changed];
+  const delays = [];
+  let collection = -1;
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (callback, milliseconds, ...arguments_) => {
+    delays.push(milliseconds);
+    queueMicrotask(() => callback(...arguments_));
+    return {};
+  };
+
+  try {
+    const caches = await fetchStableCaches(async (path) => {
+      if (path.endsWith("page=1")) {
+        collection += 1;
+        return { total_count: 5, actions_caches: snapshots[collection] };
+      }
+      if (path.endsWith("page=2")) return outOfRangeCachePage();
+      throw new Error(`unexpected path: ${path}`);
+    });
+    assert.deepEqual(caches, changed);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+
+  assert.equal(collection, 3);
+  assert.deepEqual(delays, [1_000]);
+});
+
+test("sameCacheCollection requires equal ID sets in either direction and ignores response order", () => {
+  const collection = withCacheIds(healthyListing(), 1);
+  const subset = collection.slice(0, -1);
+
+  assert.equal(sameCacheCollection(subset, collection), false);
+  assert.equal(sameCacheCollection(collection, subset), false);
+  assert.equal(sameCacheCollection(collection, [...collection].reverse()), true);
 });
 
 test("rejecting: a tied created_at page boundary that reorders an ID fails closed", async () => {
@@ -558,6 +636,16 @@ test("rejecting: pagination rejects a total_count that changes after page one", 
       throw new Error(`unexpected path: ${path}`);
     }, 101),
     /total_count changed from 101 to 102 on page 2/,
+  );
+});
+
+test("rejecting: the collection reader rejects an unsafe initial total_count before computing pages", async () => {
+  await assert.rejects(
+    fetchAllCaches(async () => ({
+      total_count: Number.MAX_SAFE_INTEGER + 1,
+      actions_caches: [],
+    })),
+    /cache listing page 1 has no valid total_count/,
   );
 });
 
@@ -678,13 +766,13 @@ test("rejecting: a 99,800-entry listing is rejected before a continuation reques
 });
 
 test("rejecting: 99,900 and 99,901 entries remain above the two-observation budget", () => {
-  assert.ok(maximumAuditRequests(99_900) > CACHE_AUDIT_REQUEST_BUDGET);
-  assert.ok(maximumAuditRequests(99_901) > CACHE_AUDIT_REQUEST_BUDGET);
+  assert.ok(maximumAuditRequests(99_900) > 900);
+  assert.ok(maximumAuditRequests(99_901) > 900);
 });
 
 test("accepting: the maximum retry-safe page count fits the unified request budget", () => {
   assert.equal(maximumAuditRequests(22_300), 897);
-  assert.ok(maximumAuditRequests(22_301) > CACHE_AUDIT_REQUEST_BUDGET);
+  assert.ok(maximumAuditRequests(22_301) > 900);
 });
 
 test("rejecting: shrinking mock proves legacy PASS predicate and corrected fail-closed headroom", async () => {
@@ -731,7 +819,7 @@ test("rejecting: shrinking mock proves legacy PASS predicate and corrected fail-
 
   const legacyNeededAfterThisResponse = maximumAuditRequests(5) - 226;
   assert.equal(legacyNeededAfterThisResponse, -217);
-  assert.equal(5 < legacyNeededAfterThisResponse + CACHE_AUDIT_REQUEST_HEADROOM, false);
+  assert.equal(5 < legacyNeededAfterThisResponse + 100, false);
   assert.equal(result.ok, false);
   assert.equal(requests, 226);
   assert.match(
@@ -808,6 +896,7 @@ test("rejecting: the live runner rejects invalid ordinary-page total_count value
     ["string", { total_count: "5", actions_caches: [] }],
     ["negative", { total_count: -1, actions_caches: [] }],
     ["fractional", { total_count: 0.5, actions_caches: [] }],
+    ["unsafe", { total_count: Number.MAX_SAFE_INTEGER + 1, actions_caches: [] }],
   ];
 
   for (const [description, malformedPage] of cases) {
@@ -903,7 +992,7 @@ test("runner returns the same healthy or unhealthy verdict that its report repre
     ],
     [
       "over budget",
-      Math.round(CACHE_LIMIT_BYTES * 0.85),
+      9_126_805_504,
       false,
       /^cache budget audit: FAIL -- \d+ finding\(s\)\n  budget-exhausted:/,
     ],
@@ -922,7 +1011,7 @@ test("executable runner uses its default report sink for healthy and unhealthy v
   const listing = withCacheIds(healthyListing(), 1);
   for (const [description, usageBytes, expectedStatus] of [
     ["healthy", usageOf(listing), 0],
-    ["over budget", Math.round(CACHE_LIMIT_BYTES * 0.85), 1],
+    ["over budget", 9_126_805_504, 1],
   ]) {
     const child = runExecutableRunner({ listing, usageBytes });
     const expectedReport = formatReport(auditCacheBudget({ caches: listing, usageBytes }));
@@ -950,6 +1039,33 @@ test("rejecting: the executable runner exits nonzero and uses its default error 
     child.stderr,
     "cache budget audit: GITHUB_TOKEN and GITHUB_REPOSITORY are required; refusing to report a healthy budget without observing one\n",
   );
+});
+
+test("API wrapper sends the exact GitHub URL and required authorization and API headers", async () => {
+  const calls = [];
+  const api = createCacheAuditApi({
+    token: "test-token",
+    repo: "owner/repo",
+    fetchImpl: async (...arguments_) => {
+      calls.push(arguments_);
+      return jsonResponse({ active_caches_size_in_bytes: 0 });
+    },
+  });
+
+  await api.request("/actions/cache/usage");
+
+  assert.deepEqual(calls, [
+    [
+      "https://api.github.com/repos/owner/repo/actions/cache/usage",
+      {
+        headers: {
+          authorization: "Bearer test-token",
+          accept: "application/vnd.github+json",
+          "x-github-api-version": "2022-11-28",
+        },
+      },
+    ],
+  ]);
 });
 
 test("rejecting: API wrapper rejects HTTP failures and missing or invalid rate-limit headers", async () => {
@@ -1003,11 +1119,11 @@ test("rejecting: API wrapper preserves headroom and calibrates its independent 9
       return jsonResponse({}, { remaining: "1000" });
     },
   });
-  for (let request = 0; request < CACHE_AUDIT_REQUEST_BUDGET; request += 1) {
+  for (let request = 0; request < 900; request += 1) {
     await capped.request(`/test/${request}`);
   }
   await assert.rejects(capped.request("/test/over"), /consumed its 900-request budget/);
-  assert.equal(calls, CACHE_AUDIT_REQUEST_BUDGET);
+  assert.equal(calls, 900);
 });
 
 test("rejecting: a billion-entry count consumes no continuation request", async () => {
@@ -1035,6 +1151,7 @@ test("rejecting: malformed required cache-entry fields are unreadable through th
     ["fractional id", (entry) => ({ ...entry, id: 1.5 }), /no valid id/],
     ["infinite id", (entry) => ({ ...entry, id: Number.POSITIVE_INFINITY }), /no valid id/],
     ["not-a-number id", (entry) => ({ ...entry, id: Number.NaN }), /no valid id/],
+    ["unsafe id", (entry) => ({ ...entry, id: Number.MAX_SAFE_INTEGER + 1 }), /no valid id/],
     ["missing key", (entry) => {
       const { key, ...withoutKey } = entry;
       return withoutKey;
@@ -1050,6 +1167,11 @@ test("rejecting: malformed required cache-entry fields are unreadable through th
       return withoutSize;
     }, /no valid size_in_bytes/],
     ["negative size", (entry) => ({ ...entry, size_in_bytes: -1 }), /no valid size_in_bytes/],
+    ["string size", (entry) => ({ ...entry, size_in_bytes: "1" }), /no valid size_in_bytes/],
+    ["fractional size", (entry) => ({ ...entry, size_in_bytes: 1.5 }), /no valid size_in_bytes/],
+    ["not-a-number size", (entry) => ({ ...entry, size_in_bytes: Number.NaN }), /no valid size_in_bytes/],
+    ["infinite size", (entry) => ({ ...entry, size_in_bytes: Number.POSITIVE_INFINITY }), /no valid size_in_bytes/],
+    ["unsafe size", (entry) => ({ ...entry, size_in_bytes: Number.MAX_SAFE_INTEGER + 1 }), /no valid size_in_bytes/],
   ];
 
   for (const [description, mutate, expectedError] of cases) {
@@ -1115,7 +1237,7 @@ test("rejecting: the 2026-08-06 listing that caused the outage", () => {
     cache("Linux-wasm-bindgen-cli-0.2.126", MAIN, 0.007),
     cache("node-cache-Linux-x64-npm-541c2caf", MAIN, 0.011),
   ];
-  const result = auditCacheBudget({ caches, usageBytes: Math.round(9.96 * GIB) });
+  const result = auditCacheBudget({ caches, usageBytes: 10_694_468_567 });
   assert.equal(result.ok, false);
   const codes = result.findings.map((finding) => finding.code);
   assert.ok(codes.includes("budget-exhausted"), formatReport(result));
@@ -1135,7 +1257,7 @@ test("rejecting: the 2026-08-06 listing that caused the outage", () => {
 });
 
 test("rejecting: a non-ci.yml rust cache on a pull-request ref still fires the generic rule", () => {
-  // `rust-compile` is not one of `CI_SHARED_KEYS`, so rule 3 alone would miss
+  // `rust-compile` is not one of the three declared ci.yml shared keys, so rule 3 alone would miss
   // it -- this is the exact shape `merge-readiness.yml` used to produce
   // before it went restore-only, and the shape any future workflow's
   // unguarded `Swatinem/rust-cache` step would produce again.
@@ -1186,9 +1308,17 @@ test("rejecting: main missing semantic-mutation is not hidden by the other Linux
   assert.match(missing[0].message, /`Linux`/);
 });
 
-test("CI_SHARED_KEYS each have exactly one intended required main key/platform pair", () => {
-  const requiredSharedEntries = REQUIRED_MAIN_ENTRIES
-    .filter((entry) => CI_SHARED_KEYS.includes(entry.key))
+test("the three declared shared keys each have one intended required main key/platform pair", () => {
+  const sharedKeys = ["rust-workspace", "wasm", "semantic-mutation"];
+  const requiredMainEntries = [
+    { key: "rust-workspace", platform: "Linux" },
+    { key: "wasm", platform: "Linux" },
+    { key: "semantic-mutation", platform: "Linux" },
+    { key: "rust-native-z3", platform: "Windows_NT" },
+    { key: "rust-native-z3", platform: "Darwin" },
+  ];
+  const requiredSharedEntries = requiredMainEntries
+    .filter((entry) => sharedKeys.includes(entry.key))
     .sort((left, right) => left.key.localeCompare(right.key));
   assert.deepEqual(requiredSharedEntries, [
     { key: "rust-workspace", platform: "Linux" },
@@ -1197,12 +1327,12 @@ test("CI_SHARED_KEYS each have exactly one intended required main key/platform p
   ]);
   assert.deepEqual(
     [...new Set(requiredSharedEntries.map((entry) => entry.key))].sort(),
-    [...CI_SHARED_KEYS].sort(),
+    [...sharedKeys].sort(),
   );
 });
 
-test("rejecting: every CI_SHARED_KEY is independently required on main", () => {
-  for (const key of CI_SHARED_KEYS) {
+test("rejecting: every declared shared key is independently required on main", () => {
+  for (const key of ["rust-workspace", "wasm", "semantic-mutation"]) {
     const caches = healthyListing().filter((entry) => !entry.key.includes(`-${key}-`));
     const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
     const missing = result.findings.filter((finding) => finding.code === "main-cache-absent");
@@ -1210,6 +1340,32 @@ test("rejecting: every CI_SHARED_KEY is independently required on main", () => {
     assert.equal(missing.length, 1, `${key}: ${formatReport(result)}`);
     assert.match(missing[0].message, new RegExp(`\\\`${key}\\\``));
     assert.match(missing[0].message, /`Linux`/);
+  }
+});
+
+test("accepting: cache keys recognize every os.type() platform spelling", () => {
+  for (const platform of ["Linux", "Darwin", "Windows_NT"]) {
+    const key = `v0-rust-platform-test-${platform}-x64-aaaaaaaa-bbbbbbbb`;
+    const result = auditCacheBudget({
+      caches: [cacheBytes(key, MAIN, 0)],
+      usageBytes: 0,
+      requiredMainEntries: [{ key: "platform-test", platform }],
+      ciSharedKeys: [],
+    });
+    assert.equal(result.ok, true, platform);
+  }
+});
+
+test("rejecting: runner.os and unknown cache-key platforms are never attributed as required entries", () => {
+  for (const platform of ["macOS", "Windows", "FreeBSD"]) {
+    const result = auditCacheBudget({
+      caches: [cacheBytes(`v0-rust-platform-test-${platform}-x64-aaaaaaaa-bbbbbbbb`, MAIN, 0)],
+      usageBytes: 0,
+      requiredMainEntries: [{ key: "platform-test", platform }],
+      ciSharedKeys: [],
+    });
+
+    assert.deepEqual(result.findings.map((finding) => finding.code), ["main-cache-absent"], platform);
   }
 });
 
@@ -1226,7 +1382,14 @@ test("accepting: a shared key containing an earlier platform-like substring is p
   const result = auditCacheBudget({
     caches,
     usageBytes: usageOf(caches),
-    requiredMainEntries: [...REQUIRED_MAIN_ENTRIES, { key: "foo-Linux-bar", platform: "Linux" }],
+    requiredMainEntries: [
+      { key: "rust-workspace", platform: "Linux" },
+      { key: "wasm", platform: "Linux" },
+      { key: "semantic-mutation", platform: "Linux" },
+      { key: "rust-native-z3", platform: "Windows_NT" },
+      { key: "rust-native-z3", platform: "Darwin" },
+      { key: "foo-Linux-bar", platform: "Linux" },
+    ],
   });
   assert.equal(result.ok, true, formatReport(result));
 });
@@ -1235,7 +1398,7 @@ test("rejecting: budget at or above the threshold, even with a healthy ref layou
   const caches = healthyListing();
   const result = auditCacheBudget({
     caches,
-    usageBytes: Math.round(CACHE_LIMIT_BYTES * 0.85),
+    usageBytes: 9_126_805_504,
   });
   assert.equal(result.ok, false);
   assert.ok(result.findings.some((finding) => finding.code === "budget-exhausted"));
@@ -1245,7 +1408,7 @@ test("rejecting: usage above the limit reports the overage, never negative remai
   const caches = healthyListing();
   const result = auditCacheBudget({
     caches,
-    usageBytes: Math.round(10.13 * GIB),
+    usageBytes: 10_877_004_677,
   });
   const finding = result.findings.find((entry) => entry.code === "budget-exhausted");
   assert.ok(finding);
@@ -1253,11 +1416,11 @@ test("rejecting: usage above the limit reports the overage, never negative remai
   assert.doesNotMatch(finding.message, /-\d+\.\d+ GiB remains/);
 });
 
-test("accepting: budget just below the threshold does not fire", () => {
+test("accepting: 8.5 GiB minus one byte is below the threshold", () => {
   const caches = healthyListing();
   const result = auditCacheBudget({
     caches,
-    usageBytes: Math.round(CACHE_LIMIT_BYTES * 0.85) - 1,
+    usageBytes: 9_126_805_503,
   });
   assert.equal(
     result.findings.some((finding) => finding.code === "budget-exhausted"),
@@ -1267,20 +1430,20 @@ test("accepting: budget just below the threshold does not fire", () => {
 });
 
 test("rejecting: a newer over-threshold listing cannot be hidden by an earlier lower usage observation", () => {
-  const beforeReplacementUsage = 7 * GIB;
+  const beforeReplacementUsage = 7_516_192_768;
   const listingAfterSameCountReplacement = healthyListing();
   const replacedIndex = listingAfterSameCountReplacement.findIndex((entry) =>
     entry.key.includes("-semantic-mutation-"),
   );
   listingAfterSameCountReplacement[replacedIndex] = {
     ...listingAfterSameCountReplacement[replacedIndex],
-    size_in_bytes: Math.round(9.58 * GIB) - (usageOf(listingAfterSameCountReplacement) - listingAfterSameCountReplacement[replacedIndex].size_in_bytes),
+    size_in_bytes: 10_286_446_674 - (usageOf(listingAfterSameCountReplacement) - listingAfterSameCountReplacement[replacedIndex].size_in_bytes),
   };
 
   // The runner reads usage before listing. A same-count replacement between
   // endpoints can leave the first observation at 7.00 GiB while the later
   // listing totals 9.58 GiB; either observed total must fail the budget.
-  assert.equal(usageOf(listingAfterSameCountReplacement), Math.round(9.58 * GIB));
+  assert.equal(usageOf(listingAfterSameCountReplacement), 10_286_446_674);
   const result = auditCacheBudget({
     caches: listingAfterSameCountReplacement,
     usageBytes: beforeReplacementUsage,
@@ -1308,8 +1471,8 @@ test("rejecting: an absent usage total is never read as headroom", () => {
   assert.ok(result.findings.some((finding) => finding.code === "usage-unobserved"));
 });
 
-test("rejecting: malformed cache-usage totals cannot be reported as observed usage", () => {
-  for (const value of [-1, 1.5, Number.POSITIVE_INFINITY, Number.NaN]) {
+test("rejecting: malformed or unsafe cache-usage totals cannot be reported as observed usage", () => {
+  for (const value of [-1, 1.5, Number.POSITIVE_INFINITY, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
     assert.throws(
       () => observedUsageBytes({ active_caches_size_in_bytes: value }),
       /no valid active_caches_size_in_bytes/,
@@ -1318,10 +1481,21 @@ test("rejecting: malformed cache-usage totals cannot be reported as observed usa
   }
 });
 
-test("accepting: usage count is not an identity or completeness condition", () => {
+test("accepting: a valid stale usage count is not an identity or completeness condition", () => {
   assert.equal(
-    observedUsageBytes({ active_caches_size_in_bytes: 0, active_caches_count: Number.NaN }),
+    observedUsageBytes({ active_caches_size_in_bytes: 0, active_caches_count: 9 }),
     0,
+  );
+});
+
+test("rejecting: an unsafe cache-usage count is not a valid observation", () => {
+  assert.throws(
+    () =>
+      observedUsageBytes({
+        active_caches_size_in_bytes: 0,
+        active_caches_count: Number.MAX_SAFE_INTEGER + 1,
+      }),
+    /no valid active_caches_count/,
   );
 });
 
@@ -1345,10 +1519,38 @@ test("a key whose shared-key cannot be parsed is not silently attributed", () =>
   );
 });
 
-test("formatReport names every finding code", () => {
-  const result = auditCacheBudget({ caches: [], usageBytes: 0 });
-  const report = formatReport(result);
-  for (const finding of result.findings) {
-    assert.ok(report.includes(finding.code), `${finding.code} missing from report`);
-  }
+test("formatReport fixes the complete default FAIL report count, order, and delimiters", () => {
+  const result = auditCacheBudget({
+    caches: [
+      cacheBytes(
+        "v0-rust-rust-workspace-Linux-x64-aaaaaaaa-bbbbbbbb",
+        "refs/pull/9/merge",
+        1_073_741_824,
+      ),
+    ],
+    usageBytes: 9_126_805_504,
+  });
+
+  assert.deepEqual(result.findings.map((finding) => finding.code), [
+    "budget-exhausted",
+    "main-cache-absent",
+    "main-cache-absent",
+    "main-cache-absent",
+    "main-cache-absent",
+    "main-cache-absent",
+    "pull-request-cache-present",
+  ]);
+  assert.equal(
+    formatReport(result),
+    [
+      "cache budget audit: FAIL -- 7 finding(s)",
+      "  budget-exhausted: cache usage is 8.50 GiB of a 10.00 GiB limit (85%), at or above the 85% threshold. 8.50 GiB is 1.50 GiB remaining before the limit; a sufficiently large save can trigger least-recently-used eviction, including a default-branch cache that a main-targeting pull request depends on.",
+      "  main-cache-absent: no `refs/heads/main` cache for shared key `rust-workspace` on platform `Linux`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are `refs/heads/main`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.",
+      "  main-cache-absent: no `refs/heads/main` cache for shared key `wasm` on platform `Linux`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are `refs/heads/main`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.",
+      "  main-cache-absent: no `refs/heads/main` cache for shared key `semantic-mutation` on platform `Linux`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are `refs/heads/main`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.",
+      "  main-cache-absent: no `refs/heads/main` cache for shared key `rust-native-z3` on platform `Windows_NT`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are `refs/heads/main`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.",
+      "  main-cache-absent: no `refs/heads/main` cache for shared key `rust-native-z3` on platform `Darwin`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are `refs/heads/main`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.",
+      "  pull-request-cache-present: `refs/pull/9/merge` holds a cache for `ci.yml`'s shared key `rust-workspace` (1.00 GiB). This violates the current no-pull-request-save invariant. It may have been saved before the guard existed or may indicate a later guard regression; inspect created_at and workflow provenance.",
+    ].join("\n"),
+  );
 });

@@ -79,14 +79,14 @@ macOS recovery is not established by this Windows observation. The direct
 scheduled recovery record is run `31632094255` attempt 1 (`event: schedule`):
 both `native Z3 4.16 (windows-latest)` and `product gate` concluded `success`.
 
-`.github/scripts/audit-cache-budget.mjs`'s `sharedKeyOf` regex matched the
+`.github/scripts/audit-cache-budget.mjs`'s `entryIdentity` regex matched the
 GitHub Actions `runner.os` platform spellings (`Linux`/`macOS`/`Windows`), but
 `Swatinem/rust-cache` derives its key from `os.type()`, which reports
 `Linux`/`Darwin`/`Windows_NT` -- so `rust-native-z3`'s cache, on either
 platform, was invisible to every rule in this audit, including the one that
 should have reported `main`'s Windows entry evicted to zero during this
-incident. The regex is corrected (matching `Windows_NT` before the `Windows`
-it is a strict superset of), and the default-branch requirement is now
+incident. The regex now accepts only the observed `os.type()` spellings, and
+the default-branch requirement is now
 per-`{key, platform}` pair rather than per-key, so `rust-native-z3` must be
 present on both `Windows_NT` and `Darwin` independently -- one platform's
 cache can no longer hide the other's absence. A new general rule also flags
@@ -97,14 +97,17 @@ for `merge-readiness.yml`'s own now-removed per-job keys, which this audit
 never flagged for the same reason). Its runner treats usage as conservative
 bytes-only evidence (`max(usage bytes, listing sum)`); GitHub refreshes its
 count approximately every five minutes, so `active_caches_count` is not an
-identity condition. It collects the full `created_at`-ascending listing twice,
+identity condition, but is rejected when supplied as an invalid numeric
+envelope field. It collects the full `created_at`-ascending listing twice,
 including a validated empty sentinel each time, and requires the ID set plus
 each ID's `key`, `ref`, and `size_in_bytes` to agree. One disagreement retries
 the paired collection; a second fails closed. This detects page-boundary
 mixing whenever it changes the two observed sets, but does not claim an atomic
 snapshot: two collections could still receive the same mixed state. Sentinel
 counts must be zero (the observed out-of-range envelope) or repeat the first
-count, never an arbitrary valid integer. The retry-safe request bound counts
+count, never an arbitrary valid integer. A disagreement waits one second before
+the one bounded retry: this is pacing for a later request, not a claim of a
+fresh or independent backend snapshot, which GitHub does not guarantee. The retry-safe request bound counts
 HTTP-successful usage plus listing requests: `1 + 4 × (pages + sentinel)`, capped at 900
 to reserve 100 of the standard 1,000-request Actions-token quota, with
 missing/empty/invalid `x-ratelimit-remaining` rejected before conversion and

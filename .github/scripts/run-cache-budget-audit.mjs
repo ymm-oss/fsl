@@ -11,7 +11,7 @@
 import { auditCacheBudget, formatReport } from "./audit-cache-budget.mjs";
 import { pathToFileURL } from "node:url";
 
-const CACHE_PAGE_SIZE = 100;
+export const CACHE_PAGE_SIZE = 100;
 // GitHub's standard Actions GITHUB_TOKEN quota is 1,000 requests/hour/repository.
 // Keep 100 requests free for the rest of the workflow and bound the *whole*
 // audit (usage plus two complete observations and one retry) to the remainder.
@@ -182,6 +182,12 @@ export function observedUsageBytes(usage) {
   if (!validNonNegativeSafeInteger(usageBytes)) {
     throw new Error("cache usage has no valid active_caches_size_in_bytes");
   }
+  if (
+    Object.hasOwn(usage, "active_caches_count") &&
+    !validNonNegativeSafeInteger(usage.active_caches_count)
+  ) {
+    throw new Error("cache usage has no valid active_caches_count");
+  }
   return usageBytes;
 }
 
@@ -271,6 +277,9 @@ export async function runCacheBudgetAudit({
       // negative. The next request also stops at/below the 100-request
       // headroom, so an unbounded future collection can never consume it.
       if (pageNumber(path) === "1") {
+        if (!validNonNegativeSafeInteger(result.total_count)) {
+          throw new Error("cache listing page 1 has no valid total_count");
+        }
         const neededAfterThisResponse = listingRequests(result.total_count) - 1;
         if (
           api.rateLimitRemaining <

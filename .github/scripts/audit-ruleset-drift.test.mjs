@@ -5,7 +5,6 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
-  RULESET_DRIFT_LABEL,
   auditAllRulesets,
   auditRuleset,
   compareRuleset,
@@ -449,7 +448,7 @@ test("issue lifecycle: creates one issue on first drift", async () => {
   });
   assert.equal(result.action, "created");
   assert.equal(client.issues.length, 1);
-  assert.ok(client.labels.has(RULESET_DRIFT_LABEL));
+  assert.ok(client.labels.has("ci/ruleset-drift"));
   assert.equal(client.issues[0].title, TITLE);
 });
 

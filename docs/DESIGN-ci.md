@@ -795,7 +795,9 @@ cache provides the recovery path.
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,
 and on `main` pushes that touch it, `ci.yml`, or `merge-readiness.yml`. The runner first obtains
 usage **bytes** only. GitHub documents the usage count as refreshed approximately every five
-minutes, so `active_caches_count` is deliberately not a completeness condition. The pure audit
+minutes, so `active_caches_count` is deliberately not a completeness condition; when supplied, it
+is nevertheless required to be a nonnegative safe integer so a malformed usage envelope cannot be
+treated as valid. The pure audit
 continues to use `max(usage bytes, summed listing bytes)`, so either observed byte total at or above
 85% rejects.
 
@@ -812,8 +814,11 @@ and nonnegative safe-integer `size_in_bytes`. It then requests an empty sentinel
 out-of-range envelope is `{ "total_count": 0, "actions_caches": [] }`; the sentinel may therefore
 have count zero or repeat the initial count, but any other count, a non-array envelope, malformed
 count, or nonempty array fails closed. The two collections must have exactly the same ID set and,
-for every ID, the same `key`, `ref`, and `size_in_bytes`. A disagreement repeats the complete pair
-once; a second disagreement exits `api-unreadable` rather than reporting health.
+for every ID, the same `key`, `ref`, and `size_in_bytes`. A disagreement waits exactly one second
+before repeating the complete pair once; a second disagreement exits `api-unreadable` rather than
+reporting health. That second is bounded pacing between requests: it creates a later observation
+without claiming a fresh or independent backend snapshot. A five-minute wait would add audit delay
+without acquiring an atomicity or freshness guarantee GitHub does not document.
 
 This detects a page-boundary replacement or count-preserving mixed collection whenever it makes the
 two full observations differ, plus malformed/internally inconsistent envelopes and an undercount
@@ -845,12 +850,12 @@ cache on a pull-request ref at all, whether or not its shared key is one `ci.yml
 The critical-path check is per-`{key, platform}` pair, not per-key, because `rust-native-z3` is one
 shared key backed by a `[macos-15, windows-latest]` matrix in `ci.yml`: a key-only set lets either
 platform's presence on `main` hide the other's absence. That was a live blind spot, not a
-hypothetical one -- `sharedKeyOf`'s regex matched `Linux`/`macOS`/`Windows` (the GitHub Actions
+hypothetical one -- `entryIdentity`'s regex matched `Linux`/`macOS`/`Windows` (the GitHub Actions
 `runner.os` spellings), but `Swatinem/rust-cache` composes its key from `os.type()`, which reports
 `Linux`, `Darwin`, and `Windows_NT`. `Darwin` and `Windows_NT` never matched, so both `rust-native-z3`
 entries were invisible to every rule in this audit -- including the one that would have reported
 `main`'s Windows cache evicted to zero entries during the incident this section documents. The regex
-is corrected (`Windows_NT` tried before the `Windows` it is a strict superset of) and
+now accepts only the observed `os.type()` spellings and
 `REQUIRED_MAIN_ENTRIES` now requires `rust-native-z3` on both `Windows_NT` and `Darwin` explicitly,
 and the independently saved `semantic-mutation` key on `Linux`; the latter is the configured
 restore source for every PR's restore-only mutants lane.

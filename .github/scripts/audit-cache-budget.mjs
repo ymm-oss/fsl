@@ -97,10 +97,10 @@ function entryIdentity(key) {
   // occurrence of the real trailing structure, which is the one
   // `Swatinem/rust-cache` actually appends. `platform` is `os.type()`'s actual
   // output, `Linux`/`Darwin`/`Windows_NT` -- never the GitHub Actions
-  // `runner.os` spellings `Linux`/`macOS`/`Windows`. `Windows_NT` is tried
-  // before the bare `Windows` it is a superset of, though the trailing anchor
-  // below no longer strictly depends on that ordering to be correct.
-  const match = /^v\d+-rust-(.+)-(Linux|Darwin|Windows_NT|macOS|Windows)-[^-]+-[0-9a-f]+-[0-9a-f]+$/.exec(
+  // `runner.os` spellings `Linux`/`macOS`/`Windows`. Only the os.type()
+  // spellings below are accepted; a key with an unknown platform is never
+  // attributed to a required entry.
+  const match = /^v\d+-rust-(.+)-(Linux|Darwin|Windows_NT)-[^-]+-[0-9a-f]+-[0-9a-f]+$/.exec(
     key ?? "",
   );
   return match ? { sharedKey: match[1], platform: match[2] } : { sharedKey: null, platform: null };
