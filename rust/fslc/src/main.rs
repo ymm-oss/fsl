@@ -6763,6 +6763,18 @@ fn domain_scaffold_inputs(
     Ok((contract, fsl_tools::domain_scaffold_metadata(domain)))
 }
 
+/// Validate a domain command's source through the checked Kernel path shared
+/// by `check`, `verify`, and `domain generate`.
+///
+/// `domain analyze` and `domain expand` still consume their specialized
+/// projections below, but must never return success for a document direct
+/// lowering rejects (#796).
+fn validate_domain_command_input(path: &Path) -> Result<(), (Value, i32)> {
+    load_kernel_model(path)
+        .map(|_| ())
+        .map_err(|error| (spec_load_error_output(&error), 2))
+}
+
 fn snake_case(value: &str) -> String {
     let characters = value.chars().collect::<Vec<_>>();
     let mut output = String::new();
@@ -6811,12 +6823,15 @@ fn run_domain_check(
 
 fn run_domain_analyze(path: &Path) -> (Value, i32) {
     match parse_domain_document(path) {
-        // Issue #726: `fsl_tools::analyze_domain` itself is now fail-closed
-        // (it routes through the same lowerable-construct guard
-        // `check`/`domain expand` reach via `domain_kernel_source`), so this
-        // call site no longer needs its own guard call.
+        // Preserve #726's renderer-side fail-closed guard and its established
+        // diagnostics first. A successful raw-`DomainSpec` projection must
+        // then also clear the checked direct-lowering path before it can be
+        // returned (#796).
         Ok(domain) => match fsl_tools::analyze_domain(&domain) {
-            Ok(result) => wrap_specialized(result),
+            Ok(result) => match validate_domain_command_input(path) {
+                Ok(()) => wrap_specialized(result),
+                Err(error) => error,
+            },
             Err(error) => (core_error_output(&error), 2),
         },
         Err(error) => (semantic_error_output(&error), 2),
@@ -6832,6 +6847,9 @@ fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
         Ok(source) => source,
         Err(error) => return (core_error_output(&error), 2),
     };
+    if let Err(error) = validate_domain_command_input(path) {
+        return error;
+    }
     if let Some(output_path) = output_path
         && let Err(error) = std::fs::write(output_path, &source)
     {

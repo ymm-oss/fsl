@@ -323,7 +323,10 @@ supported semantics」)。per-key init は `Map` 値型に対して選べる既�
 安定した fsl-domain findings とネストされたカーネル結果(成功時は
 `verified_under_assumptions`)には `fslc domain check` を、aggregate/effect の
 サマリーには `fslc domain analyze` を、生成されたカーネル FSL のデバッグビューの
-確認には `fslc domain expand` を、Functional DDD スキャフォールドには
+確認には `fslc domain expand` を使います。`domain analyze` と `domain expand` は
+いずれも `check`、`verify`、`domain generate` と同じ typed lowering path で、結果を
+返す前に著者が記述した domain source を検証します。未解決識別子は部分的な分析や
+使用不能な Kernel text を出力せず、元の source location 付きで棄却されます。Functional DDD スキャフォールドには
 `fslc domain generate --target typescript|python|kotlin|swift|rust` を、
 アダプタ/コンフォーマンスのスキャフォールドには `fslc domain testgen` を、
 ランタイムの command / event / effect エビデンスには

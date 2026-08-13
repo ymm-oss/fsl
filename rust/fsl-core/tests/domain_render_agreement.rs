@@ -220,12 +220,13 @@ struct KnownDivergence {
 /// a review transcript (AGENTS.md: "do not let the finding survive only in
 /// chat, a review transcript, or agent memory").
 ///
-/// **#690** <https://github.com/ymm-oss/fsl/issues/690> covers both entries
-/// below as one root cause: `domain.rs`'s `Context::normalize`
-/// (`rust/fsl-core/src/domain.rs:301`) is a chain of `str::replace` calls
+/// **#798** <https://github.com/ymm-oss/fsl/issues/798> tracks the two
+/// remaining symptoms caused by `domain.rs`'s `Context::normalize`
+/// (`rust/fsl-core/src/domain.rs:301`), a chain of `str::replace` calls
 /// over rendered text with no syntax tree, so it cannot be scope-aware
 /// (entry 2's `quantity` shadowing) or precedence-aware (entry 2's
-/// `can(...)` expansion) the way a typed AST composition can. Entry 1's
+/// `can(...)` expansion) the way a typed AST composition can. #690 fixed the
+/// precedence symptom; entry 1's
 /// generated-name leak is a symptom of the same string-level substitution
 /// having no notion of what is and is not a legal domain-level reference.
 ///
@@ -258,7 +259,8 @@ struct KnownDivergence {
 ///    valid kernel spec.
 ///
 /// 2. `expressions_valid.fsl` both paths accept, but the projected
-///    contracts still disagree at one point (name-shadowing, #690 symptom
+///    contracts still disagree at one point (name-shadowing, the #798
+///    continuation of #690 symptom
 ///    2). A second point that used to disagree here -- `can(...)`
 ///    operator-precedence misgrouping, #690 symptom 1 -- was fixed and is
 ///    described below, after this list, rather than removed from the
@@ -278,7 +280,8 @@ struct KnownDivergence {
 ///      mis-substitution reaches the `decide Approve` guard
 ///      `quantity >= 0`, which refers to the *command input* `quantity`,
 ///      not the state field. This needs a scope-aware substitution (design
-///      option B/C in #690) and is out of scope for the `can(...)` fix.
+///      option B/C recorded for #690) and is out of scope for the `can(...)`
+///      fix.
 ///
 ///    Before #690's fix, this fixture's
 ///    `invariant legacyImplication { status == Cancelled -> not can(Cancel) }`
@@ -321,7 +324,7 @@ const KNOWN_DIVERGENT_DOMAIN_FIXTURES: &[KnownDivergence] = &[
         fixture: "rust/fslc/tests/fixtures/domain_characterization/ai_internal_name_misuse.fsl",
         shape: DivergenceShape::PathARejects,
         expected_contains: &["unknown domain symbol 'Status_Draft'"],
-        tracking_issue: "https://github.com/ymm-oss/fsl/issues/690",
+        tracking_issue: "https://github.com/ymm-oss/fsl/issues/798",
     },
     KnownDivergence {
         fixture: "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
@@ -331,11 +334,11 @@ const KNOWN_DIVERGENT_DOMAIN_FIXTURES: &[KnownDivergence] = &[
         // \"or\""`) is fixed: `Context::normalize` now parenthesizes each
         // `requires`/`rejects` piece individually before joining, so this
         // fixture's `can(Cancel)` projection no longer disagrees with path
-        // A. Only #690 symptom 2 remains here: the name-shadowing rewrite
-        // still needs a scope-aware substitution (design option B/C, still
-        // open), so `quantity`/`order_quantity` still disagrees.
+        // A. #798 tracks the remaining #690 symptom 2: the name-shadowing
+        // rewrite still needs a scope-aware substitution (design option B/C,
+        // still open), so `quantity`/`order_quantity` still disagrees.
         expected_contains: &["path A = \"quantity\", path B = \"order_quantity\""],
-        tracking_issue: "https://github.com/ymm-oss/fsl/issues/690",
+        tracking_issue: "https://github.com/ymm-oss/fsl/issues/798",
     },
 ];
 
