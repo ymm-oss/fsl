@@ -1,0 +1,29 @@
+{
+  "schema": "fslc.approval.v1",
+  "spec": {
+    "path": "examples/literate/toggle.md",
+    "digest_algorithm": "fsl-kernel-ast-v1+sha256",
+    "digest": "sha256:1d8ad00cf360d39990a8cba12ef5bd10961524e774054fa6dbe3f548a2e44aca",
+    "git_commit": "c12722c0ee47faa75eed08cdfe98469902cb9857"
+  },
+  "target": {
+    "kind": "ledger",
+    "path": "rust/fslc/tests/fixtures/error_envelope_empty_records.json",
+    "digest_algorithm": "fsl-rendered-artifact-v1+sha256",
+    "digest": "sha256:fb2973a2d2e30822216ca5ee87b357605feac27e859281cc268d0bcf8c1414bd",
+    "generator": "fslc",
+    "generator_version": "4.2.0",
+    "inputs": {
+      "depth": 8,
+      "deadlock": "ignore",
+      "engine": "bmc"
+    }
+  },
+  "approval": {
+    "approver": "envelope-audit",
+    "approved_at": "2026-08-13T01:12:35Z",
+    "requirements": [
+      "REQ-190"
+    ]
+  }
+}
