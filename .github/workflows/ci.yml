@@ -103,15 +103,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while, at the time of the
-          # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
+          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # current ref, base branch, and default branch; for a main-targeting pull request,
+          # base/default are both `main`, while sibling pull-request caches remain unreadable.
+          # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events, and every pull request can read `main` because it
-          # is the default branch. See
+          # non-`pull_request` events. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -147,15 +146,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while, at the time of the
-          # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
+          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # current ref, base branch, and default branch; for a main-targeting pull request,
+          # base/default are both `main`, while sibling pull-request caches remain unreadable.
+          # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events, and every pull request can read `main` because it
-          # is the default branch. See
+          # non-`pull_request` events. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -280,15 +278,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while, at the time of the
-          # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
+          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # current ref, base branch, and default branch; for a main-targeting pull request,
+          # base/default are both `main`, while sibling pull-request caches remain unreadable.
+          # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events, and every pull request can read `main` because it
-          # is the default branch. See
+          # non-`pull_request` events. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -361,15 +358,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while, at the time of the
-          # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
+          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # current ref, base branch, and default branch; for a main-targeting pull request,
+          # base/default are both `main`, while sibling pull-request caches remain unreadable.
+          # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events, and every pull request can read `main` because it
-          # is the default branch. See
+          # non-`pull_request` events. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -413,15 +409,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while, at the time of the
-          # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
+          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # current ref, base branch, and default branch; for a main-targeting pull request,
+          # base/default are both `main`, while sibling pull-request caches remain unreadable.
+          # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events, and every pull request can read `main` because it
-          # is the default branch. See
+          # non-`pull_request` events. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -469,15 +464,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while, at the time of the
-          # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
+          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # current ref, base branch, and default branch; for a main-targeting pull request,
+          # base/default are both `main`, while sibling pull-request caches remain unreadable.
+          # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events, and every pull request can read `main` because it
-          # is the default branch. See
+          # non-`pull_request` events. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target

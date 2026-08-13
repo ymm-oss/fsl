@@ -2,9 +2,10 @@
 //
 // Actions cache budget audit (issue #747). GitHub gives a repository 10 GiB of
 // Actions cache and evicts least-recently-used entries when it is exceeded.
-// Caches are also ref-scoped: a run can restore only its own ref's caches and
-// the default branch's, so a pull request's cache is worthless to a sibling
-// pull request while still counting against the shared limit.
+// Caches are also ref-scoped: a run can restore its current ref's caches, its
+// base branch's caches, and the default branch's caches. For a pull request to
+// main, base and default are both main, so a sibling PR's cache remains
+// unusable while still counting against the shared limit.
 //
 // `ci.yml`'s shared keys (originally four; `fsl-logic` was later folded into
 // `rust-workspace`, see below) stored about 6.9 GiB per ref, so two concurrent
@@ -73,13 +74,14 @@ export const CI_SHARED_KEYS = [
 // key across a `[macos-15, windows-latest]` matrix (`ci.yml`), so a key-only
 // set would let the Darwin entry's presence hide a missing Windows_NT one --
 // exactly the failure this audit never reported when the Windows cache was
-// evicted to zero (issue #747). `rust-workspace`/`wasm` only ever run on
-// `ubuntu-latest`, hence `Linux` for both. `fsl-logic` is deliberately absent:
-// it is restore-only against `rust-workspace` and never saves its own key, so
-// requiring one here would always fail.
+// evicted to zero (issue #747). `rust-workspace`/`wasm`/`semantic-mutation`
+// only ever run on `ubuntu-latest`, hence `Linux` for all three. `fsl-logic`
+// is deliberately absent: it is restore-only against `rust-workspace` and
+// never saves its own key, so requiring one here would always fail.
 export const REQUIRED_MAIN_ENTRIES = [
   { key: "rust-workspace", platform: "Linux" },
   { key: "wasm", platform: "Linux" },
+  { key: "semantic-mutation", platform: "Linux" },
   { key: "rust-native-z3", platform: "Windows_NT" },
   { key: "rust-native-z3", platform: "Darwin" },
 ];
@@ -157,7 +159,9 @@ export function auditCacheBudget({
       code: "budget-exhausted",
       message: `cache usage is ${formatGiB(effective)} of a ${formatGiB(limitBytes)} limit (${Math.round(
         (effective / limitBytes) * 100,
-      )}%), at or above the ${Math.round(warnFraction * 100)}% threshold. At this level a single save evicts a least-recently-used entry, and the default branch's caches are the ones every pull request depends on.`,
+      )}%), at or above the ${Math.round(warnFraction * 100)}% threshold. ${formatGiB(
+        limitBytes - effective,
+      )} remains before the limit; a sufficiently large save can trigger least-recently-used eviction, including a default-branch cache that a main-targeting pull request depends on.`,
     });
   }
 
@@ -177,7 +181,7 @@ export function auditCacheBudget({
     if (!mainEntries.has(`${key}::${platform}`)) {
       findings.push({
         code: "main-cache-absent",
-        message: `no \`${defaultBranchRef}\` cache for shared key \`${key}\` on platform \`${platform}\`. Actions caches are ref-scoped, so the default branch is the only cache every pull request can read; without it each pull request (or, for a matrix job, that platform's shard) builds cold.`,
+        message: `no \`${defaultBranchRef}\` cache for shared key \`${key}\` on platform \`${platform}\`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are \`${defaultBranchRef}\`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.`,
       });
     }
   }

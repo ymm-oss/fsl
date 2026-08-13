@@ -12,10 +12,14 @@ import { auditCacheBudget, formatReport } from "./audit-cache-budget.mjs";
 import { pathToFileURL } from "node:url";
 
 const CACHE_PAGE_SIZE = 100;
-// The listing needs one additional empty sentinel request after its declared
-// pages. Bound the full listing sequence so a malformed count cannot consume
-// an unbounded amount of Actions API quota.
-const CACHE_LISTING_REQUEST_CEILING = 1_000;
+// GitHub's standard Actions GITHUB_TOKEN quota is 1,000 requests/hour/repository.
+// Keep 100 requests free for the rest of the workflow and bound the *whole*
+// audit (usage plus two complete observations and one retry) to the remainder.
+export const GITHUB_TOKEN_REQUEST_CEILING = 1_000;
+export const CACHE_AUDIT_REQUEST_HEADROOM = 100;
+export const CACHE_AUDIT_REQUEST_BUDGET =
+  GITHUB_TOKEN_REQUEST_CEILING - CACHE_AUDIT_REQUEST_HEADROOM;
+export const STABILITY_ATTEMPTS = 2;
 
 function validNonNegativeSafeInteger(value) {
   return Number.isSafeInteger(value) && value >= 0;
@@ -25,18 +29,38 @@ function validNonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
 }
 
-export async function fetchAllCaches(api, expectedCacheCount) {
-  if (!validNonNegativeSafeInteger(expectedCacheCount)) {
-    throw new Error("cache usage must provide a valid active_caches_count before listing caches");
-  }
+function listingRequests(totalCount) {
+  return Math.max(1, Math.ceil(totalCount / CACHE_PAGE_SIZE)) + 1;
+}
 
+export function maximumAuditRequests(totalCount) {
+  return 1 + STABILITY_ATTEMPTS * 2 * listingRequests(totalCount);
+}
+
+function assertListingFitsBudget(totalCount) {
+  const required = maximumAuditRequests(totalCount);
+  if (required > CACHE_AUDIT_REQUEST_BUDGET) {
+    throw new Error(
+      `cache listing total_count ${totalCount} needs up to ${required} requests ` +
+        `(usage plus two complete observations and one retry); audit budget is ${CACHE_AUDIT_REQUEST_BUDGET}`,
+    );
+  }
+}
+
+function cachePath(page) {
+  // `created_at` is not changed by restoration/access, unlike last-accessed
+  // order. Ascending order makes a pair of complete observations comparable.
+  return `/actions/caches?per_page=${CACHE_PAGE_SIZE}&sort=created_at&direction=asc&page=${page}`;
+}
+
+export async function fetchCacheCollection(api) {
   const caches = [];
   const cacheIds = new Set();
   let totalCount;
   let maximumPages;
 
   for (let page = 1; ; page += 1) {
-    const listing = await api(`/actions/caches?per_page=${CACHE_PAGE_SIZE}&page=${page}`);
+    const listing = await api(cachePath(page));
     if (!Array.isArray(listing.actions_caches)) {
       throw new Error(`cache listing page ${page} has no actions_caches array`);
     }
@@ -45,17 +69,8 @@ export async function fetchAllCaches(api, expectedCacheCount) {
     }
     if (page === 1) {
       totalCount = listing.total_count;
-      if (totalCount !== expectedCacheCount) {
-        throw new Error(
-          `cache listing total_count ${totalCount} disagrees with cache usage active_caches_count ${expectedCacheCount}`,
-        );
-      }
+      assertListingFitsBudget(totalCount);
       maximumPages = Math.max(1, Math.ceil(totalCount / CACHE_PAGE_SIZE));
-      if (maximumPages + 1 > CACHE_LISTING_REQUEST_CEILING) {
-        throw new Error(
-          `cache listing requires ${maximumPages + 1} requests including its sentinel; ceiling is ${CACHE_LISTING_REQUEST_CEILING}`,
-        );
-      }
     } else if (listing.total_count !== totalCount) {
       throw new Error(
         `cache listing total_count changed from ${totalCount} to ${listing.total_count} on page ${page}`,
@@ -94,28 +109,51 @@ export async function fetchAllCaches(api, expectedCacheCount) {
 
     if (page === maximumPages) {
       const sentinelPage = page + 1;
-      const sentinel = await api(
-        `/actions/caches?per_page=${CACHE_PAGE_SIZE}&page=${sentinelPage}`,
-      );
+      const sentinel = await api(cachePath(sentinelPage));
       if (!Array.isArray(sentinel.actions_caches)) {
         throw new Error(`cache listing sentinel page ${sentinelPage} has no actions_caches array`);
       }
       if (!validNonNegativeSafeInteger(sentinel.total_count)) {
         throw new Error(`cache listing sentinel page ${sentinelPage} has no valid total_count`);
       }
+      if (sentinel.total_count !== 0 && sentinel.total_count !== totalCount) {
+        throw new Error(
+          `cache listing sentinel page ${sentinelPage} has total_count ${sentinel.total_count}; expected 0 or ${totalCount}`,
+        );
+      }
       if (sentinel.actions_caches.length !== 0) {
         throw new Error(
           `cache listing sentinel page ${sentinelPage} has ${sentinel.actions_caches.length} entries beyond total_count ${totalCount}`,
         );
       }
-      if (cacheIds.size !== expectedCacheCount) {
-        throw new Error(
-          `cache listing contains ${cacheIds.size} unique ids; cache usage reports active_caches_count ${expectedCacheCount}`,
-        );
-      }
       return caches;
     }
   }
+}
+
+export function sameCacheCollection(first, second) {
+  if (first.length !== second.length) return false;
+  const secondById = new Map(second.map((entry) => [entry.id, entry]));
+  return first.every((entry) => {
+    const other = secondById.get(entry.id);
+    return (
+      other &&
+      entry.key === other.key &&
+      entry.ref === other.ref &&
+      entry.size_in_bytes === other.size_in_bytes
+    );
+  });
+}
+
+export async function fetchStableCaches(api) {
+  for (let attempt = 1; attempt <= STABILITY_ATTEMPTS; attempt += 1) {
+    const first = await fetchCacheCollection(api);
+    const second = await fetchCacheCollection(api);
+    if (sameCacheCollection(first, second)) return second;
+  }
+  throw new Error(
+    `two complete created_at-ordered cache observations disagreed after ${STABILITY_ATTEMPTS} attempts`,
+  );
 }
 
 export function observedUsageBytes(usage) {
@@ -126,18 +164,6 @@ export function observedUsageBytes(usage) {
     throw new Error("cache usage has no valid active_caches_size_in_bytes");
   }
   return usageBytes;
-}
-
-export function observedUsageCount(usage) {
-  if (!Object.hasOwn(usage, "active_caches_count")) {
-    throw new Error("cache usage has no valid active_caches_count");
-  }
-
-  const usageCount = usage.active_caches_count;
-  if (!validNonNegativeSafeInteger(usageCount)) {
-    throw new Error("cache usage has no valid active_caches_count");
-  }
-  return usageCount;
 }
 
 async function main() {
@@ -151,7 +177,15 @@ async function main() {
     process.exit(1);
   }
 
+  let requestCount = 0;
+  let rateLimitRemaining = null;
+
   async function api(path) {
+    if (requestCount >= CACHE_AUDIT_REQUEST_BUDGET) {
+      throw new Error(
+        `cache audit consumed its ${CACHE_AUDIT_REQUEST_BUDGET}-request budget; refusing to consume reserved rate-limit headroom`,
+      );
+    }
     const response = await fetch(`https://api.github.com/repos/${repo}${path}`, {
       headers: {
         authorization: `Bearer ${token}`,
@@ -162,20 +196,39 @@ async function main() {
     if (!response.ok) {
       throw new Error(`GET ${path} -> ${response.status} ${response.statusText}`);
     }
+    requestCount += 1;
+    const remaining = Number(response.headers.get("x-ratelimit-remaining"));
+    if (!validNonNegativeSafeInteger(remaining)) {
+      throw new Error(`GET ${path} returned no valid x-ratelimit-remaining header`);
+    }
+    rateLimitRemaining = remaining;
     return response.json();
   }
 
   let caches;
   let usageBytes = null;
   try {
-    // The cache-list endpoint is paginated at 100 entries. All pages through
-    // its stable total_count plus one empty sentinel page are required because
-    // rules 2–4 inspect individual cache entries, not just the repository-wide
-    // usage total. The independently reported active count must agree with the
-    // fetched unique IDs; neither endpoint alone proves an atomic snapshot.
+    // Usage updates about every five minutes, so it is bytes-only conservative
+    // evidence, never an identity/completeness reconciliation. Completeness is
+    // two stable-order full collections whose IDs and inspected fields agree.
     const usage = await api("/actions/cache/usage");
     usageBytes = observedUsageBytes(usage);
-    caches = await fetchAllCaches(api, observedUsageCount(usage));
+    caches = await fetchStableCaches(async (path) => {
+      const result = await api(path);
+      // After the first page of any collection, its declared count defines a
+      // bounded worst-case request plan (including the retry). Preserve the
+      // configured 100-request headroom in the actual rate-limit bucket too.
+      if (path.includes("page=1")) {
+        const neededAfterThisResponse = maximumAuditRequests(result.total_count) - requestCount;
+        if (rateLimitRemaining < neededAfterThisResponse + CACHE_AUDIT_REQUEST_HEADROOM) {
+          throw new Error(
+            `rate limit has ${rateLimitRemaining} requests remaining; need ${neededAfterThisResponse} ` +
+              `for this bounded audit plus ${CACHE_AUDIT_REQUEST_HEADROOM} reserved`,
+          );
+        }
+      }
+      return result;
+    });
   } catch (error) {
     // An unreadable or incomplete API listing is not evidence of a healthy cache budget.
     console.error(`cache budget audit: FAIL -- api-unreadable: ${error.message}`);

@@ -58,11 +58,10 @@ both wrong about what this entry actually is.
 This one cold-start save is evidence of what this key can legitimately hold,
 not a proven minimum across every shard and revision. `semantic-mutation` is
 not resized by this change and is not touched by the budget lever below.
-Separately, `rust-native-z3`'s
-`windows-latest`/`macos-15` matrix had the same cancel-skips-save deadlock
-already fixed for the `semantic-mutation` lanes: a cold build (measured warm
-at 27–33 min) exceeded the 40-minute budget, the job was cancelled on all six
-consecutive scheduled runs from 2026-08-07 through 2026-08-11
+Separately, the observed `rust-native-z3` **`windows-latest` leg** had the same
+cancel-skips-save deadlock already fixed for the `semantic-mutation` lanes: a
+cold build (measured warm at 27–33 min) exceeded the 40-minute budget, the job
+was cancelled on all six consecutive scheduled runs from 2026-08-07 through 2026-08-11
 (`9 skipped Post Run Swatinem/rust-cache@v2`, run 31527197290 attempt 1), and the
 skipped post step meant no cache was ever written to recover from. That step
 now carries `cache-on-failure: true`. On run `31565897267` attempt 1, the cancelled
@@ -75,6 +74,9 @@ cache save after timeout cancellation under the combined change, not isolated
 proof that `cache-on-failure` alone caused it: that changeset also raised this
 job's timeout from 40 to 60 minutes, and commit `877fe8c` (#752) likewise
 coupled the flag with timeout increases for the semantic-mutation lanes.
+macOS recovery is not established by this Windows observation. The direct
+scheduled recovery record is run `31632094255` attempt 1 (`event: schedule`):
+both `native Z3 4.16 (windows-latest)` and `product gate` concluded `success`.
 
 `.github/scripts/audit-cache-budget.mjs`'s `sharedKeyOf` regex matched the
 GitHub Actions `runner.os` platform spellings (`Linux`/`macOS`/`Windows`), but
@@ -91,27 +93,22 @@ any `v0-rust-*`-prefixed cache on a pull-request ref regardless of whether its
 shared key is one `ci.yml` declares, closing the same blind spot for any
 future workflow's unguarded `Swatinem/rust-cache` step (and, retroactively,
 for `merge-readiness.yml`'s own now-removed per-job keys, which this audit
-never flagged for the same reason). Its runner now fetches every cache-list
-page through the API's `total_count`, plus one empty sentinel page: the
-per-entry rules cannot treat the first 100 entries as a complete listing. It
-compares the first listing count with the usage endpoint's safe
-`active_caches_count` before continuation, caps the collection at 1,000
-requests, fixes the resulting page shape, and requires unique safe cache IDs
-plus nonempty keys/refs and safe nonnegative entry sizes. GitHub's observed
-out-of-range sentinel response is `{ "total_count": 0, "actions_caches": [] }`;
-the runner therefore requires a valid empty sentinel, not repetition of the
-first count, and still reconciles fetched IDs with the usage count. It rejects
-short or over-capacity pages, a static undercount exposed by a nonempty
-sentinel or usage-count disagreement, a same-count page-boundary replacement
-exposed by the sentinel, and a count mismatch. A consistently omitted entry
-with matching lower counts is not distinguishable from a smaller repository by
-these observations. This does not establish an atomic GitHub snapshot: a
-same-count replacement after a page was read remains undetectable unless a
-later listing page or sentinel exposes it; the earlier usage response cannot
-expose that replacement's identity, though the budget uses the greater of
-usage bytes and listing sum so either observed over-threshold total fails.
-Missing or malformed active counts and malformed usage bytes exit as
-`api-unreadable`; absent usage bytes become non-PASS `usage-unobserved`.
+never flagged for the same reason). Its runner treats usage as conservative
+bytes-only evidence (`max(usage bytes, listing sum)`); GitHub refreshes its
+count approximately every five minutes, so `active_caches_count` is not an
+identity condition. It collects the full `created_at`-ascending listing twice,
+including a validated empty sentinel each time, and requires the ID set plus
+each ID's `key`, `ref`, and `size_in_bytes` to agree. One disagreement retries
+the paired collection; a second fails closed. This detects page-boundary
+mixing whenever it changes the two observed sets, but does not claim an atomic
+snapshot: two collections could still receive the same mixed state. Sentinel
+counts must be zero (the observed out-of-range envelope) or repeat the first
+count, never an arbitrary valid integer. The retry-safe request bound counts
+usage plus every listing request: `1 + 4 × (pages + sentinel)`, capped at 900
+to reserve 100 of the standard 1,000-request Actions-token quota, with
+`x-ratelimit-remaining` checked before continuation. Malformed listing
+envelopes or usage bytes exit as `api-unreadable`; absent usage bytes become
+non-PASS `usage-unobserved`.
 
 An earlier revision of this change added an `entry-oversized` finding
 (`SINGLE_ENTRY_WARN_BYTES = 2.5 GiB`) calibrated against the wrong ~2.2 GiB
@@ -142,7 +139,8 @@ entries and `main-cache-absent` for `rust-native-z3`. Recreating the Windows
 entry at 2026-08-12T06:16:19Z resolved the latter; human-authorized deletion of
 the two PR entries on 2026-08-13 resolved the remaining findings. The listing
 was then 7.337 GiB and audit run `31654305398` attempt 1 succeeded. `CI_SHARED_KEYS` and
-`REQUIRED_MAIN_ENTRIES` both drop `fsl-logic` accordingly; the generic
+`REQUIRED_MAIN_ENTRIES` both drop `fsl-logic` accordingly, while the latter now explicitly
+requires the independently saved Linux `semantic-mutation` entry; the generic
 pull-request-rust-cache rule covers any regression the same way it already
 covers `merge-readiness.yml`'s former per-job keys. Separately, the shared-key
 regex now parses from the tail of the cache key (anchored at the end) instead

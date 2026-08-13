@@ -513,9 +513,10 @@ portable evidence and failure attribution even when agents merge changes quickly
 ### Actions cache budget
 
 GitHub gives a repository **10 GiB** of Actions cache and evicts least-recently-used entries once
-that is exceeded. Caches are also **ref-scoped**: a run restores only its own ref's caches and the
-default branch's, so a pull request's cache is worthless to a sibling pull request while still
-counting against the shared limit.
+that is exceeded. Caches are also **ref-scoped**: a run restores its current ref's caches, its base
+branch's caches, and the default branch's caches. For a pull request targeting `main`, base and
+default are both `main`, so a sibling pull request's cache remains worthless while still counting
+against the shared limit.
 
 `ci.yml` declared four shared keys at the time (`fsl-logic` was one of them; it does not declare one
 today, see below), measured: `semantic-mutation` 2.72 GiB, `rust-workspace`
@@ -772,6 +773,8 @@ cache found.` at 11:38:31.77Z, completing in 37m08s (11:38:01–12:15:09), and s
 cancellation and used a different tree and test volume, so it does not show that the current tree
 can complete cold within 60 minutes. The saved entry made the next Windows run warm: run
 `31570480618` attempt 1 completed the job in 34m39s (06:34:04–07:08:43), and the run concluded successfully.
+The direct scheduled recovery record is run `31632094255` attempt 1 (`event: schedule`): its
+`native Z3 4.16 (windows-latest)` job and its `product gate` job both concluded `success`.
 These runs observe a recovery path after the combined change: a timeout-cancelled run saved a cache
 and the subsequent warm run completed. They do not attribute that save to `cache-on-failure` alone
 or make a 60-minute cold build pass. The 60-minute budget remains a resource bound, while the saved
@@ -779,37 +782,39 @@ cache provides the recovery path.
 
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,
-and on `main` pushes that touch it, `ci.yml`, or `merge-readiness.yml`. Its runner requests a fixed
-100-entry page size and first obtains the usage endpoint's safe-integer `active_caches_count`. On
-the first listing page it requires that count to equal the safe-integer `total_count`, before
-deriving the page count or issuing a continuation request; the collection, including its sentinel,
-also has an explicit 1,000-request ceiling. Each declared listing page must repeat the first
-`total_count`, have the exact implied shape, and contain entries with a unique safe-integer ID,
-nonempty `key` and `ref`, and nonnegative safe-integer `size_in_bytes`. The runner then requests
-one additional empty sentinel page and requires its response fields to be valid. GitHub's observed
-out-of-range response is `{ "total_count": 0, "actions_caches": [] }`, so an empty sentinel is not
-required to repeat the first page's `total_count`; its empty array and the fetched unique-ID/usage
-count reconciliation remain mandatory. Thus a static underreported `total_count` **when a
-nonempty sentinel or usage-count disagreement exposes it**, an over-capacity boundary page, a
-duplicate ID, or a count disagreement cannot be reported healthy; a page-boundary replacement that
-appears on the sentinel page is rejected too. A static undercount that consistently omits an entry
-while both endpoints report the same lower count is indistinguishable from a genuinely smaller
-repository to these observations and is not claimed detectable. The runner validates malformed or
-missing `active_caches_count`, malformed usage bytes, and malformed listing responses as
-`api-unreadable` with exit 1. An absent `active_caches_size_in_bytes` reaches the pure audit as
-`usage-unobserved` and is non-PASS; it is never read as headroom.
+and on `main` pushes that touch it, `ci.yml`, or `merge-readiness.yml`. The runner first obtains
+usage **bytes** only. GitHub documents the usage count as refreshed approximately every five
+minutes, so `active_caches_count` is deliberately not a completeness condition. The pure audit
+continues to use `max(usage bytes, summed listing bytes)`, so either observed byte total at or above
+85% rejects.
 
-Those checks do **not** create an atomic snapshot across GitHub's separate, paginated requests. If
-same-count replacement occurs after a page has been read and no later listing page or sentinel
-exposes it, this control cannot establish that the previously fetched entries still describe the
-repository. The usage response is fetched before pagination, so it cannot expose the identity of a
-later replacement; it can only expose a count disagreement already present when it was read. For
-budget headroom, the pure audit uses the greater of the earlier usage bytes and the later listing
-sum, so either observed total at or above 85% rejects; that protects a later larger listing but
-does not make the two endpoints an atomic identity snapshot. Detecting the residual requires a
-stable snapshot API or a second full collection with an explicitly defined stability comparison;
-neither is part of this control. The audit therefore fails closed on internally inconsistent or
-exposed-incomplete observations, not on every cache mutation that can occur while it is reading.
+For completeness, each stability attempt obtains two entire cache listings with fixed
+`per_page=100&sort=created_at&direction=asc`. `created_at` does not change on restore/access. A
+collection requires a safe-integer first `total_count`; each declared page repeats it, has its
+exact implied entry count, and contains unique safe-integer IDs with nonempty `key` and `ref` and
+nonnegative safe-integer `size_in_bytes`. It then requests an empty sentinel. GitHub's observed
+out-of-range envelope is `{ "total_count": 0, "actions_caches": [] }`; the sentinel may therefore
+have count zero or repeat the initial count, but any other count, a non-array envelope, malformed
+count, or nonempty array fails closed. The two collections must have exactly the same ID set and,
+for every ID, the same `key`, `ref`, and `size_in_bytes`. A disagreement repeats the complete pair
+once; a second disagreement exits `api-unreadable` rather than reporting health.
+
+This detects a page-boundary replacement or count-preserving mixed collection whenever it makes the
+two full observations differ, plus malformed/internally inconsistent envelopes and an undercount
+exposed by its sentinel. It is not an atomic GitHub snapshot: two full collections can still return
+the same mixed state, or the repository can mutate only before/between/after the paired reads in a
+way that leaves their compared IDs and fields equal. The audit makes no claim to detect those
+residuals; that would require a server-provided snapshot token or equivalent API guarantee.
+
+The request budget counts every request: one usage request plus
+`2 × (pages + sentinel)` for one paired observation; the one permitted retry raises the bounded
+worst case to `1 + 4 × (pages + sentinel)`. The standard Actions `GITHUB_TOKEN` allowance is 1,000
+requests/hour/repository. The runner caps itself at 900 requests, reserves 100 for other workflow
+work, validates `x-ratelimit-remaining`, and fails closed before continuation when the declared
+count cannot fit the retry-safe bound. With 100-entry pages, at most 22,300 entries (223 pages) fit:
+the worst case is `1 + 4 × 224 = 897`; 22,301 entries require 901 and are rejected. Counts
+99,800–99,901 are therefore rejected before a continuation request, rather than approaching the
+repository quota.
 
 Given a usable observation, the pure audit fails closed on four states: usage at or above 85% of
 the limit, a missing `refs/heads/main` cache for any critical-path `{key, platform}` pair, — the
@@ -826,7 +831,9 @@ hypothetical one -- `sharedKeyOf`'s regex matched `Linux`/`macOS`/`Windows` (the
 entries were invisible to every rule in this audit -- including the one that would have reported
 `main`'s Windows cache evicted to zero entries during the incident this section documents. The regex
 is corrected (`Windows_NT` tried before the `Windows` it is a strict superset of) and
-`REQUIRED_MAIN_ENTRIES` now requires `rust-native-z3` on both `Windows_NT` and `Darwin` explicitly.
+`REQUIRED_MAIN_ENTRIES` now requires `rust-native-z3` on both `Windows_NT` and `Darwin` explicitly,
+and the independently saved `semantic-mutation` key on `Linux`; the latter is the configured
+restore source for every PR's restore-only mutants lane.
 
 The general pull-request-rust-cache rule exists because `merge-readiness.yml`'s restore-only fix
 (above) makes "no workflow saves a rust cache on a pull-request event" a repository-wide invariant,

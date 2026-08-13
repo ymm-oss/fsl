@@ -20,9 +20,18 @@ import {
   GIB,
   REQUIRED_MAIN_ENTRIES,
 } from "./audit-cache-budget.mjs";
-import { fetchAllCaches, observedUsageBytes, observedUsageCount } from "./run-cache-budget-audit.mjs";
+import {
+  CACHE_AUDIT_REQUEST_BUDGET,
+  fetchCacheCollection as fetchAllCaches,
+  fetchStableCaches,
+  maximumAuditRequests,
+  observedUsageBytes,
+  sameCacheCollection,
+} from "./run-cache-budget-audit.mjs";
 
 const MAIN = "refs/heads/main";
+const PAGE_PATH = (page) =>
+  `/actions/caches?per_page=100&sort=created_at&direction=asc&page=${page}`;
 
 function cache(key, ref, gib) {
   return { key, ref, size_in_bytes: Math.round(gib * GIB) };
@@ -65,9 +74,9 @@ function withCacheIds(entries, firstId = 1) {
 
 function outOfRangeCachePage() {
   // Observed with:
-  // gh api "/repos/ymm-oss/fsl/actions/caches?per_page=100&page=1"
+  // gh api "/repos/ymm-oss/fsl/actions/caches?per_page=100&sort=created_at&direction=asc&page=1"
   // {"count":9,"total_count":9}
-  // gh api "/repos/ymm-oss/fsl/actions/caches?per_page=100&page=2"
+  // gh api "/repos/ymm-oss/fsl/actions/caches?per_page=100&sort=created_at&direction=asc&page=2"
   // {"count":0,"total_count":0}
   // An out-of-range page resets total_count to 0; it does not repeat the
   // first page's total_count.
@@ -131,9 +140,9 @@ test("rejecting: pagination finds a forbidden PR Rust cache beyond the first 100
   }, 101);
 
   assert.deepEqual(requested, [
-    "/actions/caches?per_page=100&page=1",
-    "/actions/caches?per_page=100&page=2",
-    "/actions/caches?per_page=100&page=3",
+    PAGE_PATH(1),
+    PAGE_PATH(2),
+    PAGE_PATH(3),
   ]);
   assert.equal(caches.length, 101);
   const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
@@ -144,7 +153,7 @@ test("rejecting: pagination finds a forbidden PR Rust cache beyond the first 100
   );
 });
 
-test("accepting: pagination calibrates a 101-entry listing against usage count", async () => {
+test("accepting: a 101-entry created_at-ordered collection is complete without usage-count equality", async () => {
   const firstPage = withCacheIds(
     [
       ...healthyListing(),
@@ -164,9 +173,9 @@ test("accepting: pagination calibrates a 101-entry listing against usage count",
   }, 101);
 
   assert.deepEqual(requested, [
-    "/actions/caches?per_page=100&page=1",
-    "/actions/caches?per_page=100&page=2",
-    "/actions/caches?per_page=100&page=3",
+    PAGE_PATH(1),
+    PAGE_PATH(2),
+    PAGE_PATH(3),
   ]);
   const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
   assert.equal(result.ok, true, formatReport(result));
@@ -184,9 +193,100 @@ test("accepting: an empty repository reads page one and its zero-entry sentinel"
 
   assert.deepEqual(caches, []);
   assert.deepEqual(requested, [
-    "/actions/caches?per_page=100&page=1",
-    "/actions/caches?per_page=100&page=2",
+    PAGE_PATH(1),
+    PAGE_PATH(2),
   ]);
+});
+
+test("accepting: a stale usage count does not invalidate stable listing identity", async () => {
+  // GitHub documents active_caches_count as approximately five-minute data.
+  // This models usage=9 while both immediate complete listings contain 5;
+  // bytes remain available to the conservative pure audit, but count is not
+  // passed to or compared by the completeness collector.
+  const usage = { active_caches_count: 9, active_caches_size_in_bytes: 0 };
+  const entries = withCacheIds(healthyListing(), 1);
+  let collection = 0;
+  const caches = await fetchStableCaches(async (path) => {
+    if (path.endsWith("page=1")) {
+      collection += 1;
+      return { total_count: 5, actions_caches: entries };
+    }
+    if (path.endsWith("page=2")) return outOfRangeCachePage();
+    throw new Error(`unexpected path: ${path}`);
+  });
+
+  assert.equal(usage.active_caches_count, 9);
+  assert.equal(observedUsageBytes(usage), 0);
+  assert.equal(collection, 2);
+  assert.deepEqual(caches, entries);
+});
+
+test("rejecting: two complete collections with different IDs or inspected fields fail closed after retry", async () => {
+  // This uses the API's two 100-entry pages. In the reviewer reproduction,
+  // page one came from an old 200-entry set, then a required main entry was
+  // deleted and a PR cache added before page two. A single collection can
+  // otherwise look healthy while describing no real point in time.
+  const oldEntries = withCacheIds(
+    [
+      ...healthyListing(),
+      ...Array.from({ length: 195 }, (_, index) => cache(`tool-cache-${index}`, MAIN, 0.001)),
+    ],
+    1,
+  );
+  const changedEntries = oldEntries.map((entry) =>
+    entry.key.includes("-semantic-mutation-")
+      ? {
+          ...entry,
+          id: 201,
+          key: "v0-rust-rust-compile-Linux-x64-aaaaaaaa-bbbbbbbb",
+          ref: "refs/pull/9/merge",
+        }
+      : entry,
+  );
+  const snapshots = [oldEntries, changedEntries, oldEntries, changedEntries];
+  let collection = -1;
+  const requested = [];
+
+  await assert.rejects(
+    fetchStableCaches(async (path) => {
+      requested.push(path);
+      if (path.endsWith("page=1")) {
+        collection += 1;
+        return { total_count: 200, actions_caches: snapshots[collection].slice(0, 100) };
+      }
+      if (path.endsWith("page=2")) {
+        const pageTwoSnapshot = collection % 2 === 0 ? changedEntries : snapshots[collection];
+        return { total_count: 200, actions_caches: pageTwoSnapshot.slice(100) };
+      }
+      if (path.endsWith("page=3")) return outOfRangeCachePage();
+      throw new Error(`unexpected path: ${path}`);
+    }),
+    /two complete created_at-ordered cache observations disagreed after 2 attempts/,
+  );
+  assert.equal(collection, 3);
+  assert.equal(requested.length, 12);
+});
+
+test("accepting: a transient differing pair retries and returns the stable second observation", async () => {
+  const oldEntries = withCacheIds(healthyListing(), 1);
+  const stableEntries = oldEntries.map((entry) =>
+    entry.id === 1 ? { ...entry, size_in_bytes: entry.size_in_bytes + 1 } : entry,
+  );
+  const snapshots = [oldEntries, stableEntries, stableEntries, stableEntries];
+  let collection = -1;
+
+  const caches = await fetchStableCaches(async (path) => {
+    if (path.endsWith("page=1")) {
+      collection += 1;
+      return { total_count: 5, actions_caches: snapshots[collection] };
+    }
+    if (path.endsWith("page=2")) return outOfRangeCachePage();
+    throw new Error(`unexpected path: ${path}`);
+  });
+
+  assert.equal(collection, 3);
+  assert.deepEqual(caches, stableEntries);
+  assert.equal(sameCacheCollection(oldEntries, stableEntries), false);
 });
 
 test("rejecting: pagination rejects a total_count that changes after page one", async () => {
@@ -240,7 +340,7 @@ test("rejecting: pagination rejects a short intermediate page even if a later pa
     }, 201),
     /page 1 has 99 entries; expected 100 from total_count 201/,
   );
-  assert.deepEqual(requested, ["/actions/caches?per_page=100&page=1"]);
+  assert.deepEqual(requested, [PAGE_PATH(1)]);
 });
 
 test("rejecting: pagination rejects entries beyond the fixed maximum-page capacity", async () => {
@@ -280,8 +380,8 @@ test("rejecting: a nonempty sentinel exposes a later forbidden cache despite an 
     /sentinel page 2 has 1 entries beyond total_count 5/,
   );
   assert.deepEqual(requested, [
-    "/actions/caches?per_page=100&page=1",
-    "/actions/caches?per_page=100&page=2",
+    PAGE_PATH(1),
+    PAGE_PATH(2),
   ]);
 });
 
@@ -307,67 +407,55 @@ test("rejecting: a same-count page-boundary replacement cannot hide a forbidden 
   );
 });
 
-test("rejecting: a first-page count disagreement is rejected before requesting page two", async () => {
-  const firstPage = withCacheIds(healthyListing(), 1);
+test("rejecting: a 99,800-entry listing is rejected before a continuation request", async () => {
   const requested = [];
 
   await assert.rejects(
     fetchAllCaches(async (path) => {
       requested.push(path);
-      if (path.endsWith("page=1")) return { total_count: 5, actions_caches: firstPage };
-      if (path.endsWith("page=2")) {
-        throw new Error("the count disagreement must be rejected before this continuation");
-      }
-      throw new Error(`unexpected path: ${path}`);
-    }, 6),
-    /total_count 5 disagrees with cache usage active_caches_count 6/,
-  );
-  assert.deepEqual(requested, ["/actions/caches?per_page=100&page=1"]);
-});
-
-test("rejecting: a billion-entry count disagreement consumes no continuation request", async () => {
-  const requested = [];
-
-  await assert.rejects(
-    fetchAllCaches(async (path) => {
-      requested.push(path);
-      if (path.endsWith("page=1")) return { total_count: 1_000_000_000, actions_caches: [] };
-      throw new Error(`the count disagreement must be rejected before ${path}`);
-    }, 5),
-    /total_count 1000000000 disagrees with cache usage active_caches_count 5/,
-  );
-  assert.deepEqual(requested, ["/actions/caches?per_page=100&page=1"]);
-});
-
-test("rejecting: a count beyond the listing request ceiling consumes no continuation request", async () => {
-  const requested = [];
-
-  await assert.rejects(
-    fetchAllCaches(async (path) => {
-      requested.push(path);
-      if (path.endsWith("page=1")) return { total_count: 1_000_000_000, actions_caches: [] };
-      throw new Error(`the request ceiling must reject before ${path}`);
-    }, 1_000_000_000),
-    /requires 10000001 requests including its sentinel; ceiling is 1000/,
-  );
-  assert.deepEqual(requested, ["/actions/caches?per_page=100&page=1"]);
-});
-
-test("rejecting: fetchAllCaches requires the independently observed usage count", async () => {
-  let calls = 0;
-  await assert.rejects(
-    fetchAllCaches(async () => {
-      calls += 1;
-      throw new Error("an omitted expected count must reject before listing");
+      if (path.endsWith("page=1")) return { total_count: 99_800, actions_caches: [] };
+      throw new Error(`the request budget must reject before ${path}`);
     }),
-    /must provide a valid active_caches_count/,
+    /total_count 99800 needs up to 3997 requests/,
   );
-  assert.equal(calls, 0);
+  assert.deepEqual(requested, [PAGE_PATH(1)]);
+});
+
+test("rejecting: 99,900 and 99,901 entries remain above the two-observation budget", () => {
+  assert.ok(maximumAuditRequests(99_900) > CACHE_AUDIT_REQUEST_BUDGET);
+  assert.ok(maximumAuditRequests(99_901) > CACHE_AUDIT_REQUEST_BUDGET);
+});
+
+test("accepting: the maximum retry-safe page count fits the unified request budget", () => {
+  assert.equal(maximumAuditRequests(22_300), 897);
+  assert.ok(maximumAuditRequests(22_301) > CACHE_AUDIT_REQUEST_BUDGET);
+});
+
+test("rejecting: a billion-entry count consumes no continuation request", async () => {
+  const requested = [];
+
+  await assert.rejects(
+    fetchAllCaches(async (path) => {
+      requested.push(path);
+      if (path.endsWith("page=1")) return { total_count: 1_000_000_000, actions_caches: [] };
+      throw new Error(`the request budget must reject before ${path}`);
+    }),
+    /total_count 1000000000 needs up to 40000005 requests/,
+  );
+  assert.deepEqual(requested, [PAGE_PATH(1)]);
 });
 
 test("rejecting: malformed required cache-entry fields are unreadable through the runner", async () => {
   const validEntries = withCacheIds(healthyListing(), 1);
   const cases = [
+    ["missing id", (entry) => {
+      const { id, ...withoutId } = entry;
+      return withoutId;
+    }, /no valid id/],
+    ["negative id", (entry) => ({ ...entry, id: -1 }), /no valid id/],
+    ["fractional id", (entry) => ({ ...entry, id: 1.5 }), /no valid id/],
+    ["infinite id", (entry) => ({ ...entry, id: Number.POSITIVE_INFINITY }), /no valid id/],
+    ["not-a-number id", (entry) => ({ ...entry, id: Number.NaN }), /no valid id/],
     ["missing key", (entry) => {
       const { key, ...withoutKey } = entry;
       return withoutKey;
@@ -398,7 +486,36 @@ test("rejecting: malformed required cache-entry fields are unreadable through th
       expectedError,
       description,
     );
-    assert.deepEqual(requested, ["/actions/caches?per_page=100&page=1"], description);
+    assert.deepEqual(requested, [PAGE_PATH(1)], description);
+  }
+});
+
+test("rejecting: malformed sentinel envelopes are unreadable through the runner", async () => {
+  const firstPage = withCacheIds(healthyListing(), 1);
+  const cases = [
+    ["missing actions_caches", { total_count: 0 }, /has no actions_caches array/],
+    ["non-array actions_caches", { total_count: 0, actions_caches: {} }, /has no actions_caches array/],
+    ["missing total_count", { actions_caches: [] }, /has no valid total_count/],
+    ["negative total_count", { total_count: -1, actions_caches: [] }, /has no valid total_count/],
+    ["fractional total_count", { total_count: 0.5, actions_caches: [] }, /has no valid total_count/],
+    [
+      "non-finite total_count",
+      { total_count: Number.POSITIVE_INFINITY, actions_caches: [] },
+      /has no valid total_count/,
+    ],
+    ["incompatible total_count", { total_count: 6, actions_caches: [] }, /expected 0 or 5/],
+  ];
+
+  for (const [description, sentinel, expectedError] of cases) {
+    await assert.rejects(
+      fetchAllCaches(async (path) => {
+        if (path.endsWith("page=1")) return { total_count: 5, actions_caches: firstPage };
+        if (path.endsWith("page=2")) return sentinel;
+        throw new Error(`the malformed ${description} sentinel must reject before ${path}`);
+      }),
+      expectedError,
+      description,
+    );
   }
 });
 
@@ -424,11 +541,10 @@ test("rejecting: the 2026-08-06 listing that caused the outage", () => {
   const codes = result.findings.map((finding) => finding.code);
   assert.ok(codes.includes("budget-exhausted"), formatReport(result));
   // Every required {key, platform} pair is missing from the default branch:
-  // the two Linux critical-path keys (`rust-workspace`, `wasm`; this listing
-  // predates rust-native-z3 joining REQUIRED_MAIN_ENTRIES and `fsl-logic` is
-  // not a required key at all) plus both native-z3 platforms, absent here
-  // entirely rather than merely missing from `main`.
-  assert.equal(codes.filter((code) => code === "main-cache-absent").length, 4);
+  // the three Linux critical-path keys (`rust-workspace`, `wasm`,
+  // `semantic-mutation`) plus both native-z3 platforms, absent here entirely
+  // rather than merely missing from `main`.
+  assert.equal(codes.filter((code) => code === "main-cache-absent").length, 5);
   // `ci.yml` shared keys (`wasm`, `rust-workspace`, `semantic-mutation`) on a
   // pull-request ref are flagged by rule 3: 2 + 3 across the two refs.
   assert.equal(codes.filter((code) => code === "pull-request-cache-present").length, 5);
@@ -479,6 +595,16 @@ test("rejecting: main missing the Darwin half of rust-native-z3 is not hidden by
   assert.equal(missing.length, 1, formatReport(result));
   assert.match(missing[0].message, /`rust-native-z3`/);
   assert.match(missing[0].message, /`Darwin`/);
+});
+
+test("rejecting: main missing semantic-mutation is not hidden by the other Linux entries", () => {
+  const caches = healthyListing().filter((entry) => !entry.key.includes("-semantic-mutation-"));
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+  assert.equal(result.ok, false);
+  const missing = result.findings.filter((finding) => finding.code === "main-cache-absent");
+  assert.equal(missing.length, 1, formatReport(result));
+  assert.match(missing[0].message, /`semantic-mutation`/);
+  assert.match(missing[0].message, /`Linux`/);
 });
 
 test("accepting: a shared key containing an earlier platform-like substring is parsed from the tail, not misattributed", () => {
@@ -574,20 +700,11 @@ test("rejecting: malformed cache-usage totals cannot be reported as observed usa
   }
 });
 
-test("rejecting: missing or malformed active cache counts are never accepted", () => {
-  for (const usage of [
-    {},
-    { active_caches_count: -1 },
-    { active_caches_count: 1.5 },
-    { active_caches_count: Number.POSITIVE_INFINITY },
-    { active_caches_count: Number.NaN },
-  ]) {
-    assert.throws(
-      () => observedUsageCount(usage),
-      /no valid active_caches_count/,
-      `${JSON.stringify(usage)} must be rejected`,
-    );
-  }
+test("accepting: usage count is not an identity or completeness condition", () => {
+  assert.equal(
+    observedUsageBytes({ active_caches_size_in_bytes: 0, active_caches_count: Number.NaN }),
+    0,
+  );
 });
 
 test("rejecting: an unreadable listing fails closed rather than passing as empty", () => {
