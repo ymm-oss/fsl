@@ -966,12 +966,12 @@ const AI_REGRESS_COMPONENT_NOT_APPLICABLE: &[NotApplicable] = &[
 ];
 /// Component failures loaded from a `compose use ... from` declaration are
 /// resolution failures of the parent document, not direct parser input. #567
-/// independently exercises their semantic kind and parent `use` location
-/// across spec-reading commands, so this Parse-shape boundary is deliberate.
+/// independently asserts their semantic kind and parent `use` location across
+/// spec-reading commands, so this Parse-shape boundary is deliberate.
 const CHECK_PARSE_SHAPE_BOUNDARIES: &[NotApplicable] = &[NotApplicable {
     class: FailureClass::Parse,
     shape: InputShape::Compose,
-    reason: "a nested component parse failure is reported as the parent compose document's semantic resolution error; issue_567_cross_file_diagnostic_loc exercises check and verify",
+    reason: "a nested component parse failure is reported as the parent compose document's semantic resolution error; issue_567_cross_file_diagnostic_loc asserts its semantic kind and parent use location across spec-reading commands",
 }];
 const AI_PARSE_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
