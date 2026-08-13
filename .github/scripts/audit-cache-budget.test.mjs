@@ -63,6 +63,17 @@ function withCacheIds(entries, firstId = 1) {
   return entries.map((entry, index) => ({ ...entry, id: firstId + index }));
 }
 
+function outOfRangeCachePage() {
+  // Observed with:
+  // gh api "/repos/ymm-oss/fsl/actions/caches?per_page=100&page=1"
+  // {"count":9,"total_count":9}
+  // gh api "/repos/ymm-oss/fsl/actions/caches?per_page=100&page=2"
+  // {"count":0,"total_count":0}
+  // An out-of-range page resets total_count to 0; it does not repeat the
+  // first page's total_count.
+  return { total_count: 0, actions_caches: [] };
+}
+
 test("accepting: default-branch caches present, budget below threshold, no pull-request Rust caches", () => {
   const caches = healthyListing();
   const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
@@ -114,10 +125,10 @@ test("rejecting: pagination finds a forbidden PR Rust cache beyond the first 100
       return { total_count: 101, actions_caches: secondPage };
     }
     if (path.endsWith("page=3")) {
-      return { total_count: 101, actions_caches: [] };
+      return outOfRangeCachePage();
     }
     throw new Error(`unexpected path: ${path}`);
-  });
+  }, 101);
 
   assert.deepEqual(requested, [
     "/actions/caches?per_page=100&page=1",
@@ -133,6 +144,51 @@ test("rejecting: pagination finds a forbidden PR Rust cache beyond the first 100
   );
 });
 
+test("accepting: pagination calibrates a 101-entry listing against usage count", async () => {
+  const firstPage = withCacheIds(
+    [
+      ...healthyListing(),
+      ...Array.from({ length: 95 }, (_, index) => cache(`tool-cache-${index}`, MAIN, 0.001)),
+    ],
+    1,
+  );
+  const secondPage = withCacheIds([cache("tool-cache-100", MAIN, 0.001)], 101);
+  const requested = [];
+
+  const caches = await fetchAllCaches(async (path) => {
+    requested.push(path);
+    if (path.endsWith("page=1")) return { total_count: 101, actions_caches: firstPage };
+    if (path.endsWith("page=2")) return { total_count: 101, actions_caches: secondPage };
+    if (path.endsWith("page=3")) return outOfRangeCachePage();
+    throw new Error(`unexpected path: ${path}`);
+  }, 101);
+
+  assert.deepEqual(requested, [
+    "/actions/caches?per_page=100&page=1",
+    "/actions/caches?per_page=100&page=2",
+    "/actions/caches?per_page=100&page=3",
+  ]);
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+  assert.equal(result.ok, true, formatReport(result));
+});
+
+test("accepting: an empty repository reads page one and its zero-entry sentinel", async () => {
+  const requested = [];
+  const caches = await fetchAllCaches(async (path) => {
+    requested.push(path);
+    if (path.endsWith("page=1") || path.endsWith("page=2")) {
+      return outOfRangeCachePage();
+    }
+    throw new Error(`unexpected path: ${path}`);
+  }, 0);
+
+  assert.deepEqual(caches, []);
+  assert.deepEqual(requested, [
+    "/actions/caches?per_page=100&page=1",
+    "/actions/caches?per_page=100&page=2",
+  ]);
+});
+
 test("rejecting: pagination rejects a total_count that changes after page one", async () => {
   const firstPage = withCacheIds(
     Array.from({ length: 100 }, (_, index) => cache(`tool-cache-${index}`, MAIN, 0.001)),
@@ -144,7 +200,7 @@ test("rejecting: pagination rejects a total_count that changes after page one", 
       if (path.endsWith("page=1")) return { total_count: 101, actions_caches: firstPage };
       if (path.endsWith("page=2")) return { total_count: 102, actions_caches: secondPage };
       throw new Error(`unexpected path: ${path}`);
-    }),
+    }, 101),
     /total_count changed from 101 to 102 on page 2/,
   );
 });
@@ -162,7 +218,7 @@ test("rejecting: pagination rejects a duplicate cache id on a later page", async
       if (path.endsWith("page=1")) return { total_count: 200, actions_caches: firstPage };
       if (path.endsWith("page=2")) return { total_count: 200, actions_caches: duplicatePage };
       throw new Error(`unexpected path: ${path}`);
-    }),
+    }, 200),
     /repeats cache id 1/,
   );
 });
@@ -181,7 +237,7 @@ test("rejecting: pagination rejects a short intermediate page even if a later pa
         throw new Error("the short first page must have been rejected before this continuation");
       }
       throw new Error(`unexpected path: ${path}`);
-    }),
+    }, 201),
     /page 1 has 99 entries; expected 100 from total_count 201/,
   );
   assert.deepEqual(requested, ["/actions/caches?per_page=100&page=1"]);
@@ -201,12 +257,12 @@ test("rejecting: pagination rejects entries beyond the fixed maximum-page capaci
       if (path.endsWith("page=1")) return { total_count: 101, actions_caches: firstPage };
       if (path.endsWith("page=2")) return { total_count: 101, actions_caches: oversizedFinalPage };
       throw new Error(`the fixed two-page bound must prevent page ${path}`);
-    }),
+    }, 101),
     /page 2 has 2 entries; expected 1 from total_count 101/,
   );
 });
 
-test("rejecting: a static underreported total_count cannot hide a later forbidden cache", async () => {
+test("rejecting: a nonempty sentinel exposes a later forbidden cache despite an underreported total_count", async () => {
   const firstPage = withCacheIds(healthyListing(), 1);
   const hiddenCache = withCacheIds(
     [cache("v0-rust-rust-compile-Linux-x64-aaaaaaaa-bbbbbbbb", "refs/pull/9/merge", 0.08)],
@@ -220,7 +276,7 @@ test("rejecting: a static underreported total_count cannot hide a later forbidde
       if (path.endsWith("page=1")) return { total_count: 5, actions_caches: firstPage };
       if (path.endsWith("page=2")) return { total_count: 5, actions_caches: hiddenCache };
       throw new Error(`unexpected path: ${path}`);
-    }, 6),
+    }, 5),
     /sentinel page 2 has 1 entries beyond total_count 5/,
   );
   assert.deepEqual(requested, [
@@ -251,17 +307,99 @@ test("rejecting: a same-count page-boundary replacement cannot hide a forbidden 
   );
 });
 
-test("rejecting: a listing whose IDs disagree with active_caches_count is unreadable", async () => {
+test("rejecting: a first-page count disagreement is rejected before requesting page two", async () => {
   const firstPage = withCacheIds(healthyListing(), 1);
+  const requested = [];
 
   await assert.rejects(
     fetchAllCaches(async (path) => {
+      requested.push(path);
       if (path.endsWith("page=1")) return { total_count: 5, actions_caches: firstPage };
-      if (path.endsWith("page=2")) return { total_count: 5, actions_caches: [] };
+      if (path.endsWith("page=2")) {
+        throw new Error("the count disagreement must be rejected before this continuation");
+      }
       throw new Error(`unexpected path: ${path}`);
     }, 6),
-    /contains 5 unique ids; cache usage reports active_caches_count 6/,
+    /total_count 5 disagrees with cache usage active_caches_count 6/,
   );
+  assert.deepEqual(requested, ["/actions/caches?per_page=100&page=1"]);
+});
+
+test("rejecting: a billion-entry count disagreement consumes no continuation request", async () => {
+  const requested = [];
+
+  await assert.rejects(
+    fetchAllCaches(async (path) => {
+      requested.push(path);
+      if (path.endsWith("page=1")) return { total_count: 1_000_000_000, actions_caches: [] };
+      throw new Error(`the count disagreement must be rejected before ${path}`);
+    }, 5),
+    /total_count 1000000000 disagrees with cache usage active_caches_count 5/,
+  );
+  assert.deepEqual(requested, ["/actions/caches?per_page=100&page=1"]);
+});
+
+test("rejecting: a count beyond the listing request ceiling consumes no continuation request", async () => {
+  const requested = [];
+
+  await assert.rejects(
+    fetchAllCaches(async (path) => {
+      requested.push(path);
+      if (path.endsWith("page=1")) return { total_count: 1_000_000_000, actions_caches: [] };
+      throw new Error(`the request ceiling must reject before ${path}`);
+    }, 1_000_000_000),
+    /requires 10000001 requests including its sentinel; ceiling is 1000/,
+  );
+  assert.deepEqual(requested, ["/actions/caches?per_page=100&page=1"]);
+});
+
+test("rejecting: fetchAllCaches requires the independently observed usage count", async () => {
+  let calls = 0;
+  await assert.rejects(
+    fetchAllCaches(async () => {
+      calls += 1;
+      throw new Error("an omitted expected count must reject before listing");
+    }),
+    /must provide a valid active_caches_count/,
+  );
+  assert.equal(calls, 0);
+});
+
+test("rejecting: malformed required cache-entry fields are unreadable through the runner", async () => {
+  const validEntries = withCacheIds(healthyListing(), 1);
+  const cases = [
+    ["missing key", (entry) => {
+      const { key, ...withoutKey } = entry;
+      return withoutKey;
+    }, /no valid key/],
+    ["empty key", (entry) => ({ ...entry, key: "" }), /no valid key/],
+    ["missing ref", (entry) => {
+      const { ref, ...withoutRef } = entry;
+      return withoutRef;
+    }, /no valid ref/],
+    ["empty ref", (entry) => ({ ...entry, ref: "" }), /no valid ref/],
+    ["missing size", (entry) => {
+      const { size_in_bytes, ...withoutSize } = entry;
+      return withoutSize;
+    }, /no valid size_in_bytes/],
+    ["negative size", (entry) => ({ ...entry, size_in_bytes: -1 }), /no valid size_in_bytes/],
+  ];
+
+  for (const [description, mutate, expectedError] of cases) {
+    const requested = [];
+    const malformedEntries = [...validEntries];
+    malformedEntries[0] = mutate(malformedEntries[0]);
+    await assert.rejects(
+      fetchAllCaches(async (path) => {
+        requested.push(path);
+        if (path.endsWith("page=1")) return { total_count: 5, actions_caches: malformedEntries };
+        throw new Error(`the malformed ${description} entry must reject before ${path}`);
+      }, 5),
+      expectedError,
+      description,
+    );
+    assert.deepEqual(requested, ["/actions/caches?per_page=100&page=1"], description);
+  }
 });
 
 test("rejecting: the 2026-08-06 listing that caused the outage", () => {
@@ -382,6 +520,30 @@ test("accepting: budget just below the threshold does not fire", () => {
     false,
     formatReport(result),
   );
+});
+
+test("rejecting: a newer over-threshold listing cannot be hidden by an earlier lower usage observation", () => {
+  const beforeReplacementUsage = 7 * GIB;
+  const listingAfterSameCountReplacement = healthyListing();
+  const replacedIndex = listingAfterSameCountReplacement.findIndex((entry) =>
+    entry.key.includes("-semantic-mutation-"),
+  );
+  listingAfterSameCountReplacement[replacedIndex] = {
+    ...listingAfterSameCountReplacement[replacedIndex],
+    size_in_bytes: Math.round(9.58 * GIB) - (usageOf(listingAfterSameCountReplacement) - listingAfterSameCountReplacement[replacedIndex].size_in_bytes),
+  };
+
+  // The runner reads usage before listing. A same-count replacement between
+  // endpoints can leave the first observation at 7.00 GiB while the later
+  // listing totals 9.58 GiB; either observed total must fail the budget.
+  assert.equal(usageOf(listingAfterSameCountReplacement), Math.round(9.58 * GIB));
+  const result = auditCacheBudget({
+    caches: listingAfterSameCountReplacement,
+    usageBytes: beforeReplacementUsage,
+  });
+  assert.equal(result.ok, false, formatReport(result));
+  assert.ok(result.findings.some((finding) => finding.code === "budget-exhausted"));
+  assert.match(formatReport(result), /9\.58 GiB/);
 });
 
 test("rejecting: a missing default-branch key is reported per key", () => {

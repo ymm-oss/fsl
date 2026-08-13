@@ -780,24 +780,36 @@ cache provides the recovery path.
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,
 and on `main` pushes that touch it, `ci.yml`, or `merge-readiness.yml`. Its runner requests a fixed
-100-entry page size, fixes the page count from the first safe-integer `total_count`, requires every
-listed page to repeat that count and have exactly the implied shape, requires a valid unique safe-
-integer ID for every entry, then requests one additional empty sentinel page. It independently
-requires the usage endpoint's safe-integer `active_caches_count` to equal the retrieved unique-ID
-count. Thus a static underreported `total_count`, an over-capacity boundary page, a duplicate ID,
-or a count disagreement cannot be reported healthy; a page-boundary replacement that appears on
-the sentinel page is rejected too. The runner validates malformed or missing
-`active_caches_count`, malformed usage bytes, and malformed listing responses as `api-unreadable`
-with exit 1. An absent `active_caches_size_in_bytes` reaches the pure audit as `usage-unobserved`
-and is non-PASS; it is never read as headroom.
+100-entry page size and first obtains the usage endpoint's safe-integer `active_caches_count`. On
+the first listing page it requires that count to equal the safe-integer `total_count`, before
+deriving the page count or issuing a continuation request; the collection, including its sentinel,
+also has an explicit 1,000-request ceiling. Each declared listing page must repeat the first
+`total_count`, have the exact implied shape, and contain entries with a unique safe-integer ID,
+nonempty `key` and `ref`, and nonnegative safe-integer `size_in_bytes`. The runner then requests
+one additional empty sentinel page and requires its response fields to be valid. GitHub's observed
+out-of-range response is `{ "total_count": 0, "actions_caches": [] }`, so an empty sentinel is not
+required to repeat the first page's `total_count`; its empty array and the fetched unique-ID/usage
+count reconciliation remain mandatory. Thus a static underreported `total_count` **when a
+nonempty sentinel or usage-count disagreement exposes it**, an over-capacity boundary page, a
+duplicate ID, or a count disagreement cannot be reported healthy; a page-boundary replacement that
+appears on the sentinel page is rejected too. A static undercount that consistently omits an entry
+while both endpoints report the same lower count is indistinguishable from a genuinely smaller
+repository to these observations and is not claimed detectable. The runner validates malformed or
+missing `active_caches_count`, malformed usage bytes, and malformed listing responses as
+`api-unreadable` with exit 1. An absent `active_caches_size_in_bytes` reaches the pure audit as
+`usage-unobserved` and is non-PASS; it is never read as headroom.
 
 Those checks do **not** create an atomic snapshot across GitHub's separate, paginated requests. If
-same-count replacement occurs after a page has been read and no later page, sentinel, or usage
-response exposes it, this control cannot establish that the previously fetched entries still
-describe the repository. Detecting that residual requires a stable snapshot API or a second full
-collection with an explicitly defined stability comparison; neither is part of this control. The
-audit therefore fails closed on internally inconsistent or exposed-incomplete observations, not on
-every cache mutation that can occur while it is reading.
+same-count replacement occurs after a page has been read and no later listing page or sentinel
+exposes it, this control cannot establish that the previously fetched entries still describe the
+repository. The usage response is fetched before pagination, so it cannot expose the identity of a
+later replacement; it can only expose a count disagreement already present when it was read. For
+budget headroom, the pure audit uses the greater of the earlier usage bytes and the later listing
+sum, so either observed total at or above 85% rejects; that protects a later larger listing but
+does not make the two endpoints an atomic identity snapshot. Detecting the residual requires a
+stable snapshot API or a second full collection with an explicitly defined stability comparison;
+neither is part of this control. The audit therefore fails closed on internally inconsistent or
+exposed-incomplete observations, not on every cache mutation that can occur while it is reading.
 
 Given a usable observation, the pure audit fails closed on four states: usage at or above 85% of
 the limit, a missing `refs/heads/main` cache for any critical-path `{key, platform}` pair, — the

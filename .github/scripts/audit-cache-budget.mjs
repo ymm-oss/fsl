@@ -138,11 +138,13 @@ export function auditCacheBudget({
     return { findings, ok: false };
   }
 
-  // 1. Budget headroom. Prefer the API's own usage figure when present; the
-  //    listing sum is not independent headroom evidence if the endpoints were
-  //    observed at different times or the listing was incomplete.
+  // 1. Budget headroom. The usage endpoint is observed before the listing, so
+  //    neither endpoint is an atomic snapshot. Use the larger observed value:
+  //    an older, lower usage value must not hide a later, over-threshold
+  //    listing sum, while a higher usage value still protects against a later
+  //    deletion or an incomplete listing.
   const summed = caches.reduce((total, entry) => total + (entry.size_in_bytes ?? 0), 0);
-  const effective = typeof usageBytes === "number" ? usageBytes : summed;
+  const effective = typeof usageBytes === "number" ? Math.max(usageBytes, summed) : summed;
   if (typeof usageBytes !== "number") {
     findings.push({
       code: "usage-unobserved",

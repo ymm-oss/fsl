@@ -12,12 +12,24 @@ import { auditCacheBudget, formatReport } from "./audit-cache-budget.mjs";
 import { pathToFileURL } from "node:url";
 
 const CACHE_PAGE_SIZE = 100;
+// The listing needs one additional empty sentinel request after its declared
+// pages. Bound the full listing sequence so a malformed count cannot consume
+// an unbounded amount of Actions API quota.
+const CACHE_LISTING_REQUEST_CEILING = 1_000;
 
 function validNonNegativeSafeInteger(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
+function validNonEmptyString(value) {
+  return typeof value === "string" && value.length > 0;
+}
+
 export async function fetchAllCaches(api, expectedCacheCount) {
+  if (!validNonNegativeSafeInteger(expectedCacheCount)) {
+    throw new Error("cache usage must provide a valid active_caches_count before listing caches");
+  }
+
   const caches = [];
   const cacheIds = new Set();
   let totalCount;
@@ -33,7 +45,17 @@ export async function fetchAllCaches(api, expectedCacheCount) {
     }
     if (page === 1) {
       totalCount = listing.total_count;
+      if (totalCount !== expectedCacheCount) {
+        throw new Error(
+          `cache listing total_count ${totalCount} disagrees with cache usage active_caches_count ${expectedCacheCount}`,
+        );
+      }
       maximumPages = Math.max(1, Math.ceil(totalCount / CACHE_PAGE_SIZE));
+      if (maximumPages + 1 > CACHE_LISTING_REQUEST_CEILING) {
+        throw new Error(
+          `cache listing requires ${maximumPages + 1} requests including its sentinel; ceiling is ${CACHE_LISTING_REQUEST_CEILING}`,
+        );
+      }
     } else if (listing.total_count !== totalCount) {
       throw new Error(
         `cache listing total_count changed from ${totalCount} to ${listing.total_count} on page ${page}`,
@@ -54,6 +76,15 @@ export async function fetchAllCaches(api, expectedCacheCount) {
       if (!validNonNegativeSafeInteger(cache?.id)) {
         throw new Error(`cache listing page ${page} has an entry with no valid id`);
       }
+      if (!validNonEmptyString(cache.key)) {
+        throw new Error(`cache listing page ${page} has an entry with no valid key`);
+      }
+      if (!validNonEmptyString(cache.ref)) {
+        throw new Error(`cache listing page ${page} has an entry with no valid ref`);
+      }
+      if (!validNonNegativeSafeInteger(cache.size_in_bytes)) {
+        throw new Error(`cache listing page ${page} has an entry with no valid size_in_bytes`);
+      }
       if (cacheIds.has(cache.id)) {
         throw new Error(`cache listing page ${page} repeats cache id ${cache.id}`);
       }
@@ -72,17 +103,12 @@ export async function fetchAllCaches(api, expectedCacheCount) {
       if (!validNonNegativeSafeInteger(sentinel.total_count)) {
         throw new Error(`cache listing sentinel page ${sentinelPage} has no valid total_count`);
       }
-      if (sentinel.total_count !== totalCount) {
-        throw new Error(
-          `cache listing total_count changed from ${totalCount} to ${sentinel.total_count} on sentinel page ${sentinelPage}`,
-        );
-      }
       if (sentinel.actions_caches.length !== 0) {
         throw new Error(
           `cache listing sentinel page ${sentinelPage} has ${sentinel.actions_caches.length} entries beyond total_count ${totalCount}`,
         );
       }
-      if (expectedCacheCount !== undefined && cacheIds.size !== expectedCacheCount) {
+      if (cacheIds.size !== expectedCacheCount) {
         throw new Error(
           `cache listing contains ${cacheIds.size} unique ids; cache usage reports active_caches_count ${expectedCacheCount}`,
         );

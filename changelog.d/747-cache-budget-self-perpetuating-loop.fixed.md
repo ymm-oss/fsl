@@ -93,16 +93,25 @@ future workflow's unguarded `Swatinem/rust-cache` step (and, retroactively,
 for `merge-readiness.yml`'s own now-removed per-job keys, which this audit
 never flagged for the same reason). Its runner now fetches every cache-list
 page through the API's `total_count`, plus one empty sentinel page: the
-per-entry rules cannot treat the first 100 entries as a complete listing. The
-runner requires every listed page to repeat the initial safe `total_count`,
-fixes the resulting page shape, requires unique safe cache IDs, and requires
-the usage endpoint's safe `active_caches_count` to equal those IDs. It rejects
-short or over-capacity pages, a static underreported count, a same-count
-page-boundary replacement exposed by the sentinel, and a count mismatch. This
-does not establish an atomic GitHub snapshot: a same-count replacement after a
-page was read remains undetectable unless a later response exposes it. Missing
-or malformed active counts and malformed usage bytes exit as `api-unreadable`;
-absent usage bytes become non-PASS `usage-unobserved`.
+per-entry rules cannot treat the first 100 entries as a complete listing. It
+compares the first listing count with the usage endpoint's safe
+`active_caches_count` before continuation, caps the collection at 1,000
+requests, fixes the resulting page shape, and requires unique safe cache IDs
+plus nonempty keys/refs and safe nonnegative entry sizes. GitHub's observed
+out-of-range sentinel response is `{ "total_count": 0, "actions_caches": [] }`;
+the runner therefore requires a valid empty sentinel, not repetition of the
+first count, and still reconciles fetched IDs with the usage count. It rejects
+short or over-capacity pages, a static undercount exposed by a nonempty
+sentinel or usage-count disagreement, a same-count page-boundary replacement
+exposed by the sentinel, and a count mismatch. A consistently omitted entry
+with matching lower counts is not distinguishable from a smaller repository by
+these observations. This does not establish an atomic GitHub snapshot: a
+same-count replacement after a page was read remains undetectable unless a
+later listing page or sentinel exposes it; the earlier usage response cannot
+expose that replacement's identity, though the budget uses the greater of
+usage bytes and listing sum so either observed over-threshold total fails.
+Missing or malformed active counts and malformed usage bytes exit as
+`api-unreadable`; absent usage bytes become non-PASS `usage-unobserved`.
 
 An earlier revision of this change added an `entry-oversized` finding
 (`SINGLE_ENTRY_WARN_BYTES = 2.5 GiB`) calibrated against the wrong ~2.2 GiB
