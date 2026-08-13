@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   auditCacheBudget,
@@ -34,12 +34,14 @@ import {
   pageNumber,
   runCacheBudgetAudit,
   sameCacheCollection,
+  STABILITY_RETRY_DELAY_MS,
 } from "./run-cache-budget-audit.mjs";
 
 const MAIN = "refs/heads/main";
 const PAGE_PATH = (page) =>
   `/actions/caches?per_page=100&sort=created_at&direction=asc&page=${page}`;
 const RUNNER_PATH = fileURLToPath(new URL("./run-cache-budget-audit.mjs", import.meta.url));
+const RUNNER_URL = pathToFileURL(RUNNER_PATH).href;
 
 test("pageNumber reads the page query parameter without substring matches", () => {
   const cases = [
@@ -109,6 +111,46 @@ function jsonResponse(body, options = {}) {
   const headers = new Headers();
   if (remaining !== undefined) headers.set("x-ratelimit-remaining", remaining);
   return new Response(JSON.stringify(body), { status, statusText, headers });
+}
+
+function runExecutableRunner({ listing, usageBytes = usageOf(listing) }) {
+  // Run the actual CLI guard with a child-local fetch fixture. Importing after
+  // assigning argv[1] enters the same `main()`/`process.exit` path as `node
+  // run-cache-budget-audit.mjs`, while keeping its API observations offline.
+  const fixture = `
+    const listing = ${JSON.stringify(listing)};
+    const usageBytes = ${JSON.stringify(usageBytes)};
+    globalThis.fetch = async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/actions/cache/usage")) {
+        return new Response(JSON.stringify({ active_caches_size_in_bytes: usageBytes }), {
+          headers: { "x-ratelimit-remaining": "999" },
+        });
+      }
+      if (parsed.searchParams.get("page") === "1") {
+        return new Response(JSON.stringify({
+          total_count: listing.length,
+          actions_caches: listing,
+        }), { headers: { "x-ratelimit-remaining": "999" } });
+      }
+      if (parsed.searchParams.get("page") === "2") {
+        return new Response(JSON.stringify({ total_count: 0, actions_caches: [] }), {
+          headers: { "x-ratelimit-remaining": "999" },
+        });
+      }
+      throw new Error(\`unexpected cache page \${parsed.searchParams.get("page")}\`);
+    };
+    process.argv[1] = ${JSON.stringify(RUNNER_PATH)};
+    await import(${JSON.stringify(RUNNER_URL)});
+  `;
+  return spawnSync(process.execPath, ["--input-type=module", "--eval", fixture], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GITHUB_TOKEN: "test-token",
+      GITHUB_REPOSITORY: "owner/repo",
+    },
+  });
 }
 
 async function runStableRunnerListing({ listing, usageBytes = usageOf(listing) }) {
@@ -325,24 +367,27 @@ test("accepting: a page-boundary mixed collection retries to a stable observatio
   const snapshots = [mixedEntries, changedEntries, changedEntries, changedEntries];
   let collection = -1;
   const requested = [];
-  const caches = await fetchStableCaches(async (path) => {
-    requested.push(path);
-    if (path.endsWith("page=1")) {
-      collection += 1;
-      return {
-        total_count: 200,
-        actions_caches: snapshots[collection].slice(0, 100),
-      };
-    }
-    if (path.endsWith("page=2")) {
-      return {
-        total_count: 200,
-        actions_caches: snapshots[collection].slice(100),
-      };
-    }
-    if (path.endsWith("page=3")) return outOfRangeCachePage();
-    throw new Error(`unexpected path: ${path}`);
-  });
+  const caches = await fetchStableCaches(
+    async (path) => {
+      requested.push(path);
+      if (path.endsWith("page=1")) {
+        collection += 1;
+        return {
+          total_count: 200,
+          actions_caches: snapshots[collection].slice(0, 100),
+        };
+      }
+      if (path.endsWith("page=2")) {
+        return {
+          total_count: 200,
+          actions_caches: snapshots[collection].slice(100),
+        };
+      }
+      if (path.endsWith("page=3")) return outOfRangeCachePage();
+      throw new Error(`unexpected path: ${path}`);
+    },
+    { sleep: async () => {} },
+  );
 
   assert.equal(collection, 3);
   assert.equal(requested.length, 12);
@@ -396,17 +441,20 @@ test("rejecting: different page-boundary mixed collections fail closed after ret
   let collection = -1;
 
   await assert.rejects(
-    fetchStableCaches(async (path) => {
-      if (path.endsWith("page=1")) {
-        collection += 1;
-        return { total_count: 200, actions_caches: pagePairs[collection][0].slice(0, 100) };
-      }
-      if (path.endsWith("page=2")) {
-        return { total_count: 200, actions_caches: pagePairs[collection][1].slice(100) };
-      }
-      if (path.endsWith("page=3")) return outOfRangeCachePage();
-      throw new Error(`unexpected path: ${path}`);
-    }),
+    fetchStableCaches(
+      async (path) => {
+        if (path.endsWith("page=1")) {
+          collection += 1;
+          return { total_count: 200, actions_caches: pagePairs[collection][0].slice(0, 100) };
+        }
+        if (path.endsWith("page=2")) {
+          return { total_count: 200, actions_caches: pagePairs[collection][1].slice(100) };
+        }
+        if (path.endsWith("page=3")) return outOfRangeCachePage();
+        throw new Error(`unexpected path: ${path}`);
+      },
+      { sleep: async () => {} },
+    ),
     /two complete created_at-ordered cache observations disagreed after 2 attempts/,
   );
   assert.equal(collection, 3);
@@ -416,26 +464,31 @@ test("rejecting: different page-boundary mixed collections fail closed after ret
   );
 });
 
-test("accepting: a transient differing pair retries and returns the stable second observation", async () => {
+test("accepting: a transient differing pair waits once, then returns the stable second observation", async () => {
   const oldEntries = withCacheIds(healthyListing(), 1);
   const stableEntries = oldEntries.map((entry) =>
     entry.id === 1 ? { ...entry, size_in_bytes: entry.size_in_bytes + 1 } : entry,
   );
   const snapshots = [oldEntries, stableEntries, stableEntries, stableEntries];
   let collection = -1;
+  const sleeps = [];
 
-  const caches = await fetchStableCaches(async (path) => {
-    if (path.endsWith("page=1")) {
-      collection += 1;
-      return { total_count: 5, actions_caches: snapshots[collection] };
-    }
-    if (path.endsWith("page=2")) return outOfRangeCachePage();
-    throw new Error(`unexpected path: ${path}`);
-  });
+  const caches = await fetchStableCaches(
+    async (path) => {
+      if (path.endsWith("page=1")) {
+        collection += 1;
+        return { total_count: 5, actions_caches: snapshots[collection] };
+      }
+      if (path.endsWith("page=2")) return outOfRangeCachePage();
+      throw new Error(`unexpected path: ${path}`);
+    },
+    { sleep: async (milliseconds) => sleeps.push(milliseconds) },
+  );
 
   assert.equal(collection, 3);
   assert.deepEqual(caches, stableEntries);
   assert.equal(sameCacheCollection(oldEntries, stableEntries), false);
+  assert.deepEqual(sleeps, [STABILITY_RETRY_DELAY_MS]);
 });
 
 test("rejecting: a tied created_at page boundary that reorders an ID fails closed", async () => {
@@ -472,17 +525,20 @@ test("rejecting: key, ref, and size changes independently prevent a stable colle
     const changed = initial.map((entry) => (entry.id === 1 ? mutate(entry) : entry));
     let collection = -1;
     await assert.rejects(
-      fetchStableCaches(async (path) => {
-        if (path.endsWith("page=1")) {
-          collection += 1;
-          return {
-            total_count: 5,
-            actions_caches: collection % 2 === 0 ? initial : changed,
-          };
-        }
-        if (path.endsWith("page=2")) return outOfRangeCachePage();
-        throw new Error(`unexpected path: ${path}`);
-      }),
+      fetchStableCaches(
+        async (path) => {
+          if (path.endsWith("page=1")) {
+            collection += 1;
+            return {
+              total_count: 5,
+              actions_caches: collection % 2 === 0 ? initial : changed,
+            };
+          }
+          if (path.endsWith("page=2")) return outOfRangeCachePage();
+          throw new Error(`unexpected path: ${path}`);
+        },
+        { sleep: async () => {} },
+      ),
       /two complete created_at-ordered cache observations disagreed after 2 attempts/,
       field,
     );
@@ -862,7 +918,23 @@ test("runner returns the same healthy or unhealthy verdict that its report repre
   }
 });
 
-test("rejecting: the executable runner exits nonzero when credentials are absent", () => {
+test("executable runner uses its default report sink for healthy and unhealthy verdicts", () => {
+  const listing = withCacheIds(healthyListing(), 1);
+  for (const [description, usageBytes, expectedStatus] of [
+    ["healthy", usageOf(listing), 0],
+    ["over budget", Math.round(CACHE_LIMIT_BYTES * 0.85), 1],
+  ]) {
+    const child = runExecutableRunner({ listing, usageBytes });
+    const expectedReport = formatReport(auditCacheBudget({ caches: listing, usageBytes }));
+
+    assert.equal(child.error, undefined, description);
+    assert.equal(child.status, expectedStatus, description);
+    assert.equal(child.stdout, `${expectedReport}\n`, description);
+    assert.equal(child.stderr, "", description);
+  }
+});
+
+test("rejecting: the executable runner exits nonzero and uses its default error sink when credentials are absent", () => {
   const environment = { ...process.env };
   delete environment.GITHUB_TOKEN;
   delete environment.GITHUB_REPOSITORY;
@@ -873,9 +945,10 @@ test("rejecting: the executable runner exits nonzero when credentials are absent
 
   assert.equal(child.error, undefined);
   assert.equal(child.status, 1);
-  assert.match(
+  assert.equal(child.stdout, "");
+  assert.equal(
     child.stderr,
-    /cache budget audit: GITHUB_TOKEN and GITHUB_REPOSITORY are required; refusing to report a healthy budget without observing one/,
+    "cache budget audit: GITHUB_TOKEN and GITHUB_REPOSITORY are required; refusing to report a healthy budget without observing one\n",
   );
 });
 

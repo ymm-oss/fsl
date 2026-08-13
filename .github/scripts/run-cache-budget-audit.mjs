@@ -20,6 +20,12 @@ export const CACHE_AUDIT_REQUEST_HEADROOM = 100;
 export const CACHE_AUDIT_REQUEST_BUDGET =
   GITHUB_TOKEN_REQUEST_CEILING - CACHE_AUDIT_REQUEST_HEADROOM;
 export const STABILITY_ATTEMPTS = 2;
+// GitHub documents cache *usage* as updating about every five minutes, but it
+// does not promise that waiting five minutes makes a cache listing an atomic
+// snapshot. The retry is therefore a bounded, separate observation rather than
+// a freshness claim: one second separates the requests without adding five
+// minutes to a scheduled audit, and repeated disagreement still fails closed.
+export const STABILITY_RETRY_DELAY_MS = 1_000;
 
 function validNonNegativeSafeInteger(value) {
   return Number.isSafeInteger(value) && value >= 0;
@@ -152,11 +158,17 @@ export function sameCacheCollection(first, second) {
   });
 }
 
-export async function fetchStableCaches(api) {
+export async function fetchStableCaches(
+  api,
+  { sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)) } = {},
+) {
   for (let attempt = 1; attempt <= STABILITY_ATTEMPTS; attempt += 1) {
     const first = await fetchCacheCollection(api);
     const second = await fetchCacheCollection(api);
     if (sameCacheCollection(first, second)) return second;
+    if (attempt < STABILITY_ATTEMPTS) {
+      await sleep(STABILITY_RETRY_DELAY_MS);
+    }
   }
   throw new Error(
     `two complete created_at-ordered cache observations disagreed after ${STABILITY_ATTEMPTS} attempts`,
@@ -221,9 +233,6 @@ export function createCacheAuditApi({ token, repo, fetchImpl = fetch }) {
 
   return {
     request,
-    get requestCount() {
-      return requestCount;
-    },
     get rateLimitRemaining() {
       return rateLimitRemaining;
     },
