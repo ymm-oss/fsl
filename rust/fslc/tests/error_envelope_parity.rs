@@ -28,6 +28,8 @@ const PARSE_DOMAIN_FIXTURE: &str =
     "rust/fslc/tests/fixtures/domain_characterization/invalid_broken_expression.fsl";
 const PARSE_DB_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_broken_dbsystem.fsl";
 const PARSE_AI_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_broken_ai_component.fsl";
+const PARSE_AI_PROJECT_FIXTURE: &str =
+    "rust/fslc/tests/fixtures/error_envelope_broken_ai_project.fsl";
 const PARSE_CAUSAL_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_broken_causal.fsl";
 const AI_GUARD_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_ai_invalid_rule.fsl";
 const AI_NAME_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_ai_unknown_tool.fsl";
@@ -49,6 +51,10 @@ const GUARD_FIXTURE: &str = "rust/fslc/tests/fixtures/domain_await_routing_rejec
 const NAME_FIXTURE: &str =
     "rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl";
 const LITERATE_FIXTURE: &str = "examples/literate/toggle.md";
+const LITERATE_AI_COMPONENT_FIXTURE: &str =
+    "rust/fslc/tests/fixtures/error_envelope_literate_ai_component.md";
+const LITERATE_AI_PROJECT_FIXTURE: &str =
+    "rust/fslc/tests/fixtures/error_envelope_literate_ai_project.md";
 const DOMAIN_REPLAY_LOG: &str = "rust/fslc/tests/fixtures/issue_518_clean.jsonl";
 const EMPTY_RECORDS: &str = "rust/fslc/tests/fixtures/error_envelope_empty_records.json";
 const DOCUMENT_ARTIFACT: &str = "rust/fslc/tests/fixtures/error_envelope_document.md";
@@ -651,6 +657,8 @@ enum FailureClass {
 /// The input form that reaches a command's frontend. Generic FSL commands
 /// have one source form; AI semantic cells must cover both component and
 /// project documents, because their dispatch paths are observably distinct.
+/// AI Literate cells additionally retain the generic Markdown source form and
+/// exercise Markdown documents whose extracted FSL body is each AI shape.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum InputShape {
     Source,
@@ -752,6 +760,11 @@ const SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION: Expectation =
 
 const PARSE_WITH_DIAGNOSTIC_ALIAS: Expectation = Expectation::Json(JsonExpectation {
     diagnostic: Diagnostic::Alias("parse"),
+    ..PARSE_JSON
+});
+const PARSE_WITHOUT_LOCATION_OR_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectation {
+    location: LocationShape::Absent,
+    diagnostic: Diagnostic::None,
     ..PARSE_JSON
 });
 
@@ -862,6 +875,27 @@ const AI_REPLAY_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
     dialect: ExpectedField::Exact("fsl-ai-hard.v0"),
     message: MessageExpectation::Absent,
 });
+/// Unlike the similarly shaped #800 observations, these are valid project
+/// documents. #694 tracks the command-specific Markdown handling difference.
+const AI_DRIFT_LITERATE_PROJECT: Expectation = Expectation::Json(JsonExpectation {
+    result: ExpectedField::Exact("observed_supported"),
+    kind: ExpectedField::Absent,
+    location: LocationShape::Absent,
+    diagnostic: Diagnostic::None,
+    exit: 0,
+    dialect: ExpectedField::Absent,
+    message: MessageExpectation::Absent,
+});
+const AI_EVAL_LITERATE_PROJECT: Expectation = Expectation::Json(JsonExpectation {
+    result: ExpectedField::Exact("statistically_supported"),
+    kind: ExpectedField::Absent,
+    location: LocationShape::Absent,
+    diagnostic: Diagnostic::None,
+    exit: 0,
+    dialect: ExpectedField::Absent,
+    message: MessageExpectation::Absent,
+});
+const AI_REGRESS_LITERATE_PROJECT: Expectation = AI_EVAL_LITERATE_PROJECT;
 
 const NO_COVERAGE: &[FailureCoverage] = &[];
 const NOT_APPLICABLE_PARSE_GUARD_NAME: &[NotApplicable] = &[
@@ -917,13 +951,21 @@ const AI_REGRESS_COMPONENT_NOT_APPLICABLE: &[NotApplicable] = &[
         reason: "component input stops at missing ai_migration selection before Name validation",
     },
 ];
-const AI_PARSE_COVERAGE: &[FailureCoverage] = &[FailureCoverage {
-    class: FailureClass::Parse,
-    fixture: PARSE_AI_FIXTURE,
-    uniform: PARSE_UNIFORM,
-}];
+const AI_PARSE_COVERAGE: &[FailureCoverage] = &[
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_AI_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_AI_PROJECT_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+];
 const AI_COMPAT_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
+    AI_PARSE_COVERAGE[1],
     FailureCoverage {
         class: FailureClass::Guard,
         fixture: AI_GUARD_FIXTURE,
@@ -947,6 +989,7 @@ const AI_COMPAT_COVERAGE: &[FailureCoverage] = &[
 ];
 const AI_DRIFT_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
+    AI_PARSE_COVERAGE[1],
     FailureCoverage {
         class: FailureClass::Guard,
         fixture: AI_PROJECT_GUARD_FIXTURE,
@@ -960,6 +1003,7 @@ const AI_DRIFT_COVERAGE: &[FailureCoverage] = &[
 ];
 const AI_EVAL_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
+    AI_PARSE_COVERAGE[1],
     FailureCoverage {
         class: FailureClass::Guard,
         fixture: AI_PROJECT_GUARD_FIXTURE,
@@ -973,6 +1017,7 @@ const AI_EVAL_COVERAGE: &[FailureCoverage] = &[
 ];
 const AI_REGRESS_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
+    AI_PARSE_COVERAGE[1],
     FailureCoverage {
         class: FailureClass::Guard,
         fixture: AI_PROJECT_GUARD_FIXTURE,
@@ -986,6 +1031,7 @@ const AI_REGRESS_COVERAGE: &[FailureCoverage] = &[
 ];
 const AI_REPLAY_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
+    AI_PARSE_COVERAGE[1],
     FailureCoverage {
         class: FailureClass::Guard,
         fixture: AI_GUARD_FIXTURE,
@@ -1009,6 +1055,7 @@ const AI_REPLAY_COVERAGE: &[FailureCoverage] = &[
 ];
 const AI_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
+    AI_PARSE_COVERAGE[1],
     FailureCoverage {
         class: FailureClass::Guard,
         fixture: AI_GUARD_FIXTURE,
@@ -1357,6 +1404,57 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         PARSE_AI_FIXTURE,
         SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
         "#780"
+    ),
+    // #800 tracks these product parse-path false negatives and envelope
+    // differences. They are not accepted behavior: replay reports success
+    // for a malformed project while its siblings reject it inconsistently.
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Parse,
+        "ai check",
+        PARSE_AI_PROJECT_FIXTURE,
+        PARSE_WITHOUT_LOCATION_OR_DIAGNOSTIC,
+        "#800"
+    ),
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Parse,
+        "ai compat",
+        PARSE_AI_PROJECT_FIXTURE,
+        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+        "#800"
+    ),
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Parse,
+        "ai drift",
+        PARSE_AI_PROJECT_FIXTURE,
+        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+        "#800"
+    ),
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Parse,
+        "ai eval",
+        PARSE_AI_PROJECT_FIXTURE,
+        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+        "#800"
+    ),
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Parse,
+        "ai regress",
+        PARSE_AI_PROJECT_FIXTURE,
+        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+        "#800"
+    ),
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Parse,
+        "ai replay",
+        PARSE_AI_PROJECT_FIXTURE,
+        AI_REPLAY_FALSE_GREEN,
+        "#800"
     ),
     pin!(
         FailureClass::Parse,
@@ -1811,6 +1909,105 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
         "#694"
     ),
+    // The AI commands do not share one Literate frontend. Component and
+    // project Markdown bodies are separate matrix shapes, not implicit
+    // variants of the generic source fixture.
+    pin!(
+        shape: InputShape::Component;
+        FailureClass::Literate,
+        "ai check",
+        LITERATE_AI_COMPONENT_FIXTURE,
+        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
+        "#694"
+    ),
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Literate,
+        "ai check",
+        LITERATE_AI_PROJECT_FIXTURE,
+        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
+        "#694"
+    ),
+    pin!(
+        shape: InputShape::Component;
+        FailureClass::Literate,
+        "ai compat",
+        LITERATE_AI_COMPONENT_FIXTURE,
+        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
+        "#694"
+    ),
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Literate,
+        "ai compat",
+        LITERATE_AI_PROJECT_FIXTURE,
+        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
+        "#694"
+    ),
+    pin!(
+        shape: InputShape::Component;
+        FailureClass::Literate,
+        "ai drift",
+        LITERATE_AI_COMPONENT_FIXTURE,
+        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+        "#694"
+    ),
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Literate,
+        "ai drift",
+        LITERATE_AI_PROJECT_FIXTURE,
+        AI_DRIFT_LITERATE_PROJECT,
+        "#694"
+    ),
+    pin!(
+        shape: InputShape::Component;
+        FailureClass::Literate,
+        "ai eval",
+        LITERATE_AI_COMPONENT_FIXTURE,
+        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+        "#694"
+    ),
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Literate,
+        "ai eval",
+        LITERATE_AI_PROJECT_FIXTURE,
+        AI_EVAL_LITERATE_PROJECT,
+        "#694"
+    ),
+    pin!(
+        shape: InputShape::Component;
+        FailureClass::Literate,
+        "ai regress",
+        LITERATE_AI_COMPONENT_FIXTURE,
+        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+        "#694"
+    ),
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Literate,
+        "ai regress",
+        LITERATE_AI_PROJECT_FIXTURE,
+        AI_REGRESS_LITERATE_PROJECT,
+        "#694"
+    ),
+    pin!(
+        shape: InputShape::Component;
+        FailureClass::Literate,
+        "ai replay",
+        LITERATE_AI_COMPONENT_FIXTURE,
+        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
+        "#694"
+    ),
+    pin!(
+        shape: InputShape::Project;
+        FailureClass::Literate,
+        "ai replay",
+        LITERATE_AI_PROJECT_FIXTURE,
+        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
+        "#694"
+    ),
     pin!(
         FailureClass::Literate,
         "compat check",
@@ -1922,12 +2119,17 @@ fn cells(class: FailureClass) -> Vec<Cell> {
                     )
                 })
                 .into_iter()
-                .map(move |entry| Cell {
-                    class,
-                    command: entry.key,
-                    shape: InputShape::Source,
-                    fixture: LITERATE_FIXTURE,
-                    uniform: LITERATE_UNIFORM,
+                .flat_map(move |entry| {
+                    required_input_shapes(entry, class)
+                        .iter()
+                        .copied()
+                        .map(move |shape| Cell {
+                            class,
+                            command: entry.key,
+                            shape,
+                            fixture: literate_fixture(entry.key, shape),
+                            uniform: LITERATE_UNIFORM,
+                        })
                 });
             class_coverage.chain(literate_coverage)
         })
@@ -1965,7 +2167,10 @@ fn has_literate_not_applicable(entry: &CommandRegistration) -> bool {
 
 fn coverage_input_shape(command: &str, fixture: &str) -> InputShape {
     if command.starts_with("ai ") {
-        if fixture == AI_PROJECT_GUARD_FIXTURE || fixture == AI_PROJECT_NAME_FIXTURE {
+        if fixture == PARSE_AI_PROJECT_FIXTURE
+            || fixture == AI_PROJECT_GUARD_FIXTURE
+            || fixture == AI_PROJECT_NAME_FIXTURE
+        {
             InputShape::Project
         } else {
             InputShape::Component
@@ -1980,17 +2185,31 @@ fn required_input_shapes(
     class: FailureClass,
 ) -> &'static [InputShape] {
     const SOURCE: &[InputShape] = &[InputShape::Source];
-    const AI_COMPONENT: &[InputShape] = &[InputShape::Component];
-    const AI_SEMANTIC: &[InputShape] = &[InputShape::Component, InputShape::Project];
+    const AI_FSL: &[InputShape] = &[InputShape::Component, InputShape::Project];
+    const AI_LITERATE: &[InputShape] = &[
+        InputShape::Source,
+        InputShape::Component,
+        InputShape::Project,
+    ];
 
     if matches!(entry.scope, ParityScope::SpecPath { .. }) && entry.key.starts_with("ai ") {
         match class {
-            FailureClass::Parse => AI_COMPONENT,
-            FailureClass::Guard | FailureClass::Name => AI_SEMANTIC,
-            FailureClass::Literate => SOURCE,
+            FailureClass::Parse | FailureClass::Guard | FailureClass::Name => AI_FSL,
+            // Markdown has a generic source fixture plus component/project
+            // bodies: all three are required because AI subcommands can
+            // select a different frontend path after literate extraction.
+            FailureClass::Literate => AI_LITERATE,
         }
     } else {
         SOURCE
+    }
+}
+
+fn literate_fixture(command: &str, shape: InputShape) -> &'static str {
+    match (command.starts_with("ai "), shape) {
+        (true, InputShape::Component) => LITERATE_AI_COMPONENT_FIXTURE,
+        (true, InputShape::Project) => LITERATE_AI_PROJECT_FIXTURE,
+        _ => LITERATE_FIXTURE,
     }
 }
 
@@ -2006,11 +2225,7 @@ fn class_classification_count(
             coverage.class == class && coverage_input_shape(entry.key, coverage.fixture) == shape
         })
         .count()
-        + usize::from(
-            shape == InputShape::Source
-                && class == FailureClass::Literate
-                && has_literate_cell(entry),
-        )
+        + usize::from(class == FailureClass::Literate && has_literate_cell(entry))
         + usize::from(
             shape == InputShape::Source
                 && class == FailureClass::Literate
@@ -2482,6 +2697,28 @@ fn missing_classification_spec_path_is_rejected() {
         1,
         "{} must classify Parse/Source as exactly one executable Cell or reasoned NotApplicable",
         empty_coverage.key
+    );
+}
+
+#[test]
+#[should_panic(
+    expected = "must classify Parse/Project as exactly one executable Cell or reasoned NotApplicable"
+)]
+fn missing_ai_parse_project_classification_is_rejected() {
+    let component_only = CommandRegistration {
+        key: "ai parse calibration",
+        scope: ParityScope::SpecPath {
+            invoke: &["ai", "check", SPEC_PLACEHOLDER],
+        },
+        literate: LiterateCoverage::PinnedDialect,
+        coverage: &AI_PARSE_COVERAGE[..1],
+        not_applicable: &[],
+    };
+    assert_eq!(
+        class_classification_count(&component_only, FailureClass::Parse, InputShape::Project),
+        1,
+        "{} must classify Parse/Project as exactly one executable Cell or reasoned NotApplicable",
+        component_only.key
     );
 }
 
