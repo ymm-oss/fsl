@@ -101,6 +101,7 @@ struct FailureCoverage {
 #[derive(Clone, Copy, Debug)]
 struct NotApplicable {
     class: FailureClass,
+    shape: InputShape,
     reason: &'static str,
 }
 
@@ -149,7 +150,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: AI_DRIFT_COVERAGE,
-        not_applicable: &[],
+        not_applicable: AI_DRIFT_COMPONENT_NOT_APPLICABLE,
     },
     CommandRegistration {
         key: "ai eval",
@@ -158,7 +159,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: AI_EVAL_COVERAGE,
-        not_applicable: &[],
+        not_applicable: AI_EVAL_COMPONENT_NOT_APPLICABLE,
     },
     CommandRegistration {
         key: "ai regress",
@@ -175,7 +176,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: AI_REGRESS_COVERAGE,
-        not_applicable: &[],
+        not_applicable: AI_REGRESS_COMPONENT_NOT_APPLICABLE,
     },
     CommandRegistration {
         key: "ai replay",
@@ -866,15 +867,54 @@ const NO_COVERAGE: &[FailureCoverage] = &[];
 const NOT_APPLICABLE_PARSE_GUARD_NAME: &[NotApplicable] = &[
     NotApplicable {
         class: FailureClass::Parse,
+        shape: InputShape::Source,
         reason: "this command has no FSL source frontend input",
     },
     NotApplicable {
         class: FailureClass::Guard,
+        shape: InputShape::Source,
         reason: "this command has no FSL source frontend input",
     },
     NotApplicable {
         class: FailureClass::Name,
+        shape: InputShape::Source,
         reason: "this command has no FSL source frontend input",
+    },
+];
+const AI_DRIFT_COMPONENT_NOT_APPLICABLE: &[NotApplicable] = &[
+    NotApplicable {
+        class: FailureClass::Guard,
+        shape: InputShape::Component,
+        reason: "component input stops at missing observed_property selection before Guard validation",
+    },
+    NotApplicable {
+        class: FailureClass::Name,
+        shape: InputShape::Component,
+        reason: "component input stops at missing observed_property selection before Name validation",
+    },
+];
+const AI_EVAL_COMPONENT_NOT_APPLICABLE: &[NotApplicable] = &[
+    NotApplicable {
+        class: FailureClass::Guard,
+        shape: InputShape::Component,
+        reason: "component input stops at missing statistical_property selection before Guard validation",
+    },
+    NotApplicable {
+        class: FailureClass::Name,
+        shape: InputShape::Component,
+        reason: "component input stops at missing statistical_property selection before Name validation",
+    },
+];
+const AI_REGRESS_COMPONENT_NOT_APPLICABLE: &[NotApplicable] = &[
+    NotApplicable {
+        class: FailureClass::Guard,
+        shape: InputShape::Component,
+        reason: "component input stops at missing ai_migration selection before Guard validation",
+    },
+    NotApplicable {
+        class: FailureClass::Name,
+        shape: InputShape::Component,
+        reason: "component input stops at missing ai_migration selection before Name validation",
     },
 ];
 const AI_PARSE_COVERAGE: &[FailureCoverage] = &[FailureCoverage {
@@ -909,16 +949,6 @@ const AI_DRIFT_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
     FailureCoverage {
         class: FailureClass::Guard,
-        fixture: AI_GUARD_FIXTURE,
-        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-    },
-    FailureCoverage {
-        class: FailureClass::Name,
-        fixture: AI_NAME_FIXTURE,
-        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-    },
-    FailureCoverage {
-        class: FailureClass::Guard,
         fixture: AI_PROJECT_GUARD_FIXTURE,
         uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
     },
@@ -932,16 +962,6 @@ const AI_EVAL_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
     FailureCoverage {
         class: FailureClass::Guard,
-        fixture: AI_GUARD_FIXTURE,
-        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-    },
-    FailureCoverage {
-        class: FailureClass::Name,
-        fixture: AI_NAME_FIXTURE,
-        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-    },
-    FailureCoverage {
-        class: FailureClass::Guard,
         fixture: AI_PROJECT_GUARD_FIXTURE,
         uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
     },
@@ -953,16 +973,6 @@ const AI_EVAL_COVERAGE: &[FailureCoverage] = &[
 ];
 const AI_REGRESS_COVERAGE: &[FailureCoverage] = &[
     AI_PARSE_COVERAGE[0],
-    FailureCoverage {
-        class: FailureClass::Guard,
-        fixture: AI_GUARD_FIXTURE,
-        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-    },
-    FailureCoverage {
-        class: FailureClass::Name,
-        fixture: AI_NAME_FIXTURE,
-        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-    },
     FailureCoverage {
         class: FailureClass::Guard,
         fixture: AI_PROJECT_GUARD_FIXTURE,
@@ -2009,7 +2019,7 @@ fn class_classification_count(
         + entry
             .not_applicable
             .iter()
-            .filter(|not_applicable| shape == InputShape::Source && not_applicable.class == class)
+            .filter(|not_applicable| not_applicable.shape == shape && not_applicable.class == class)
             .count()
 }
 
@@ -2444,9 +2454,10 @@ fn parity_registry_exclusions_are_explicit_and_runnable_entries_have_a_spec_slot
         for not_applicable in entry.not_applicable {
             assert!(
                 !not_applicable.reason.trim().is_empty(),
-                "{} marks {:?} NotApplicable without a concrete reason",
+                "{} marks {:?}/{:?} NotApplicable without a concrete reason",
                 entry.key,
-                not_applicable.class
+                not_applicable.class,
+                not_applicable.shape
             );
         }
     }
