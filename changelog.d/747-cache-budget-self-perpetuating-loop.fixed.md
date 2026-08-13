@@ -108,11 +108,15 @@ dependency set. Measured main-branch entries (2026-08-12): `rust-workspace`
 plus ~41 MB of tool-binary caches -- 8.130 GiB total. Deleting the now-orphaned
 `fsl-logic` entry (separate, human-authorized) and re-adding Windows
 native-z3 (historical 0.577 GiB) estimated 7.338 GiB (73.4%), under the
-8.5 GiB warn threshold. The actual 7.469 GiB listing still failed six
-scheduled audits through run `31566055925` (2026-08-12T05:17Z) because
-`refs/pull/793/merge` retained two orphaned Rust entries; after human-authorized
-deletion on 2026-08-13, the listing was 7.337 GiB and audit run `31654305398`
-succeeded. `CI_SHARED_KEYS` and
+8.5 GiB warn threshold. The 7.469 GiB listing was measured only after the
+six audit failures and was never itself audited. Four scheduled audits
+(`31239888526` through `31459843075`, 2026-08-08 through 2026-08-11) reported
+only `budget-exhausted`; the two 2026-08-12 failures (`31565897238`, push, and
+`31566055925`, schedule) reported both two orphaned `refs/pull/793/merge` Rust
+entries and `main-cache-absent` for `rust-native-z3`. Recreating the Windows
+entry at 2026-08-12T06:16:19Z resolved the latter; human-authorized deletion of
+the two PR entries on 2026-08-13 resolved the remaining findings. The listing
+was then 7.337 GiB and audit run `31654305398` succeeded. `CI_SHARED_KEYS` and
 `REQUIRED_MAIN_ENTRIES` both drop `fsl-logic` accordingly; the generic
 pull-request-rust-cache rule covers any regression the same way it already
 covers `merge-readiness.yml`'s former per-job keys. Separately, the shared-key

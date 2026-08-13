@@ -662,21 +662,29 @@ the deletion, measured `rust-workspace` at 1,605,761,517 B, `fsl-logic` at 1,470
 `semantic-mutation` at 2,919,716,751 B, plus ~41 MB of small tool-binary caches -- **8.130 GiB
 total**. After the human-authorized deletion of the now-orphaned `fsl-logic` entry and the observed
 recreation of the Windows native-z3 entry, the cache listing measured **7.469 GiB**, below the
-8.500 GiB warning threshold; that capacity measurement did **not** mean the cache-budget audit
-passed. The audit still failed on six consecutive scheduled runs from 2026-08-08 through 2026-08-12;
-the last, run `31566055925` at 2026-08-12T05:17Z, reported three findings, including two
-`pull-request-rust-cache-present` findings for `refs/pull/793/merge`: the 0.08 GiB
+8.500 GiB warning threshold, after all six audit failures and before the PR-cache deletion. That
+post-failure capacity observation was not itself audited. The six failed
+audits have three observed finding types across two periods, not one continuous single cause: scheduled runs
+`31239888526` (2026-08-08T04:37Z), `31295386890` (2026-08-09T04:49Z),
+`31357678690` (2026-08-10T05:09Z), and `31459843075` (2026-08-11T04:52Z) each reported only
+`budget-exhausted` (respectively 8.94 / 10.00 GiB, 10.13 / 10.00 GiB, 10.03 / 10.00 GiB, and
+10.03 / 10.00 GiB). The final two failures were run `31565897238` (a **push**, 2026-08-12T05:14Z)
+and scheduled run `31566055925` (2026-08-12T05:17Z); each reported three findings:
+`main-cache-absent` for `rust-native-z3`, plus two `pull-request-rust-cache-present` findings for
+`refs/pull/793/merge`, the 0.08 GiB
 `v0-rust-rust-compile-Linux-x64-e8b3ee54-09fbaf53` and 0.05 GiB
-`v0-rust-core-contracts-Linux-x64-e8b3ee54-09fbaf53`. Those orphaned entries were saved before #793
-branched from a base containing the restore-only correction. After human authorization on 2026-08-13,
-they were deleted; the listing then measured **7.337 GiB**, and workflow-dispatch audit run
-`31654305398` at 2026-08-13T00:24Z succeeded. The restore-only `FSL Logic Test` job on
-run `31570480618` directly logged a cache hit for
-`v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53` at 06:34:15Z, then
-`Restored from cache key "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.` at
-06:34:36Z. Separately, that job completed in **3m02s**, compared with 2m48s / 2m53s / 2m51s for
-warm runs with its former dedicated key on 2026-08-09/10/11. The cache log, rather than duration, establishes the observed
-full match; the duration alone does not establish a cold-build duration. If the shared
+`v0-rust-core-contracts-Linux-x64-e8b3ee54-09fbaf53`. The observed recreation of the Windows
+native-z3 entry at 2026-08-12T06:16:19Z resolved the former finding. Those orphaned PR entries were
+saved before #793 branched from a base containing the restore-only correction; after human
+authorization on 2026-08-13, their deletion resolved the two remaining findings. The listing then
+measured **7.337 GiB**, and workflow-dispatch audit run `31654305398` at 2026-08-13T00:24Z
+succeeded. The restore-only `FSL Logic Test` recorded two shared-key full matches: first, the
+scheduled job in push run `31565897267` at 2026-08-12T05:14:43Z (cache hit) and 05:15:05Z
+(`full match: true`), completing in **2m54s**; then run `31570480618` at 06:34:15Z and 06:34:36Z,
+completing in **3m02s**. Both restored
+`v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53`, compared with 2m48s / 2m53s / 2m51s for
+warm runs with its former dedicated key on 2026-08-09/10/11. The cache logs, rather than duration,
+establish the observed full matches; duration alone does not establish a cold-build duration. If the shared
 `rust-workspace` cache were ever missing or evicted instead, this job would build cold under the
 existing 30-minute timeout. That timeout bounds resource consumption, not job success: past it, the
 job is killed and reported as a failed required context, the same outcome this whole section exists to

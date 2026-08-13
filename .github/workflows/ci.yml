@@ -691,8 +691,13 @@ jobs:
           # saved it; restoring `rust-workspace` here loses nothing this job needed a
           # dedicated key for. This removes the dedicated `fsl-logic` key from the shared
           # budget -- measured at 1,470,489,603 B (1.369 GiB) before this change -- once a
-          # human deletes the now-orphaned entry. The first observed post-change run,
-          # 31570480618, completed in 3m02s after logging `Cache hit for:
+          # human deletes the now-orphaned entry. The first observed post-change run was the
+          # scheduled FSL Logic Test job in push run 31565897267: it completed in 2m54s after
+          # logging `Cache hit for: v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53` at
+          # 05:14:43Z and `Restored from cache key
+          # "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.` at
+          # 05:15:05Z. Run 31570480618 was a second observed full match, completing in 3m02s
+          # after logging `Cache hit for:
           # v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53` at 06:34:15Z and
           # `Restored from cache key "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53"
           # full match: true.` at 06:34:36Z. The former dedicated-key warm runs took
