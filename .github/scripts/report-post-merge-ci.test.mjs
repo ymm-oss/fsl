@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  occurrenceMarker,
   reconcilePostMerge,
 } from "./report-post-merge-ci.mjs";
 
@@ -174,7 +173,7 @@ test("deduplicates the same run and comments once for a later recurrence", async
 
   assert.equal(client.issues.length, 1);
   assert.equal(client.comments.length, 1);
-  assert.ok(client.comments[0].body.includes(occurrenceMarker(42, 91)));
+  assert.ok(client.comments[0].body.includes("<!-- post-merge-ci-occurrence:42:OTE -->"));
 });
 
 test("closes the matching open issue after the job recovers", async () => {

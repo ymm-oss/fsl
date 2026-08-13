@@ -43,6 +43,11 @@ import {
 
 const MAIN = "refs/heads/main";
 const BYTES_PER_GIB = 1_073_741_824;
+const PASS_REPORT =
+  "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches";
+const THRESHOLD_REPORT =
+  "cache budget audit: FAIL -- 1 finding(s)\n" +
+  "  budget-exhausted: cache usage is 8.50 GiB of a 10.00 GiB limit (85%), at or above the 85% threshold. 8.50 GiB is 1.50 GiB remaining before the limit; a sufficiently large save can trigger least-recently-used eviction, including a default-branch cache that a main-targeting pull request depends on.";
 const PAGE_PATH = (page) =>
   `/actions/caches?per_page=100&sort=created_at&direction=asc&page=${page}`;
 const RUNNER_PATH = fileURLToPath(new URL("./run-cache-budget-audit.mjs", import.meta.url));
@@ -988,33 +993,31 @@ test("runner returns the same healthy or unhealthy verdict that its report repre
       "healthy",
       usageOf(listing),
       true,
-      /^cache budget audit: PASS -- budget within threshold/,
+      PASS_REPORT,
     ],
     [
       "over budget",
       9_126_805_504,
       false,
-      /^cache budget audit: FAIL -- \d+ finding\(s\)\n  budget-exhausted:/,
+      THRESHOLD_REPORT,
     ],
   ]) {
     const { errors, reports, result } = await runStableRunnerListing({ listing, usageBytes });
 
     assert.equal(result.ok, expectedOk, description);
     assert.equal(reports.length, 1, description);
-    assert.equal(reports[0], formatReport(result), description);
-    assert.match(reports[0], expectedReport, description);
+    assert.equal(reports[0], expectedReport, description);
     assert.deepEqual(errors, [], description);
   }
 });
 
 test("executable runner uses its default report sink for healthy and unhealthy verdicts", () => {
   const listing = withCacheIds(healthyListing(), 1);
-  for (const [description, usageBytes, expectedStatus] of [
-    ["healthy", usageOf(listing), 0],
-    ["over budget", 9_126_805_504, 1],
+  for (const [description, usageBytes, expectedStatus, expectedReport] of [
+    ["healthy", usageOf(listing), 0, PASS_REPORT],
+    ["over budget", 9_126_805_504, 1, THRESHOLD_REPORT],
   ]) {
     const child = runExecutableRunner({ listing, usageBytes });
-    const expectedReport = formatReport(auditCacheBudget({ caches: listing, usageBytes }));
 
     assert.equal(child.error, undefined, description);
     assert.equal(child.status, expectedStatus, description);
