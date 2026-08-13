@@ -966,8 +966,8 @@ const AI_REGRESS_COMPONENT_NOT_APPLICABLE: &[NotApplicable] = &[
 ];
 /// Component failures loaded from a `compose use ... from` declaration are
 /// resolution failures of the parent document, not direct parser input. #567
-/// independently pins their semantic kind and parent `use` location for both
-/// `check` and `verify`, so this Parse-shape boundary is deliberate.
+/// independently exercises their semantic kind and parent `use` location
+/// across spec-reading commands, so this Parse-shape boundary is deliberate.
 const CHECK_PARSE_SHAPE_BOUNDARIES: &[NotApplicable] = &[NotApplicable {
     class: FailureClass::Parse,
     shape: InputShape::Compose,
@@ -1453,16 +1453,17 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         PARSE_WITHOUT_LOCATION_OR_DIAGNOSTIC,
         "#800"
     ),
-    // #801 owns same-command input-dialect envelope differences. #780 tracks
-    // command-entrypoint parse degradation; its measured table does not cover
-    // this distinct `check` frontend selection.
+    // #780 tracks nonuniform product Parse envelopes. #801 separately tracks
+    // deriving the hand-authored input-shape population from an independent
+    // owner; resolving that structural task alone would not make these cells
+    // uniform.
     pin!(
         shape: InputShape::Project;
         FailureClass::Parse,
         "check",
         PARSE_AI_PROJECT_FIXTURE,
         PARSE_WITHOUT_LOCATION_OR_DIAGNOSTIC,
-        "#801"
+        "#780"
     ),
     pin!(
         shape: InputShape::Causal;
@@ -1470,7 +1471,7 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "check",
         PARSE_CAUSAL_FIXTURE,
         PARSE_WITH_DIAGNOSTIC_ALIAS,
-        "#801"
+        "#780"
     ),
     pin!(
         shape: InputShape::Causal;
@@ -1478,7 +1479,7 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "verify",
         PARSE_CAUSAL_FIXTURE,
         PARSE_WITH_DIALECT_UNKNOWN_DIAGNOSTIC,
-        "#801"
+        "#780"
     ),
     pin!(
         shape: InputShape::Project;
@@ -2356,6 +2357,15 @@ impl ApprovalFixture {
         approval.git(&["commit", "-qm", "approval baseline"]);
         approval.run_success(&["ledger", "spec.fsl", "--depth", "1", "-o", "ledger.md"]);
         approval.run_success(&[
+            "document",
+            "generate",
+            "spec.fsl",
+            "--lang",
+            "ja",
+            "-o",
+            "requirements.md",
+        ]);
+        approval.run_success(&[
             "approval",
             "create",
             "spec.fsl",
@@ -2450,12 +2460,17 @@ fn approval_command(command: &str) -> bool {
     command.starts_with("approval ")
 }
 
-fn invoke(command: &str, fixture: &str, approval_record: Option<&Path>) -> Vec<String> {
+fn invoke(
+    command: &str,
+    shape_fixture: &str,
+    spec_path: &str,
+    approval_record: Option<&Path>,
+) -> Vec<String> {
     let ParityScope::SpecPath { invoke } = registration(command).scope else {
         panic!("{command} is not a runnable SpecPath matrix command");
     };
     let invoke = if command == "approval create"
-        && fixture == PARSE_APPROVAL_REQUIREMENTS_DOCUMENT_FIXTURE
+        && shape_fixture == PARSE_APPROVAL_REQUIREMENTS_DOCUMENT_FIXTURE
     {
         &[
             "approval",
@@ -2475,7 +2490,7 @@ fn invoke(command: &str, fixture: &str, approval_record: Option<&Path>) -> Vec<S
         .iter()
         .map(|argument| {
             if *argument == SPEC_PLACEHOLDER {
-                fixture.to_owned()
+                spec_path.to_owned()
             } else if *argument == APPROVAL_RECORD_PLACEHOLDER {
                 approval_record
                     .unwrap_or_else(|| panic!("{command} needs an approval record"))
@@ -2490,13 +2505,23 @@ fn invoke(command: &str, fixture: &str, approval_record: Option<&Path>) -> Vec<S
         .collect()
 }
 
+fn assert_requirements_document_invocation(arguments: &[String]) {
+    assert!(
+        arguments
+            .windows(2)
+            .any(|pair| pair[0] == "--kind" && pair[1] == "requirements_document"),
+        "requirements-document parse cell must invoke --kind requirements_document, got {arguments:?}"
+    );
+}
+
 fn run_from(
     command: &str,
-    fixture: &str,
+    shape_fixture: &str,
+    spec_path: &str,
     approval_record: Option<&Path>,
     current_dir: &Path,
 ) -> Actual {
-    let arguments = invoke(command, fixture, approval_record);
+    let arguments = invoke(command, shape_fixture, spec_path, approval_record);
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(&arguments)
         .current_dir(current_dir)
@@ -2518,9 +2543,9 @@ fn run(command: &str, fixture: &str) -> Actual {
             ParityScope::Excluded { .. } => false,
         };
         let record = needs_record.then_some(approval.record.as_path());
-        return run_from(command, "spec.fsl", record, &approval.root);
+        return run_from(command, fixture, "spec.fsl", record, &approval.root);
     }
-    run_from(command, fixture, None, &workspace_root())
+    run_from(command, fixture, fixture, None, &workspace_root())
 }
 
 fn matches_expectation(actual: &Actual, expected: Expectation, fixture: &str) -> bool {
@@ -2868,6 +2893,50 @@ fn unresolved_identifier_errors_are_uniform_or_pinned_across_frontend_siblings()
 }
 
 #[test]
+fn requirements_document_approval_invocation_uses_the_selected_kind() {
+    let arguments = invoke(
+        "approval create",
+        PARSE_APPROVAL_REQUIREMENTS_DOCUMENT_FIXTURE,
+        "spec.fsl",
+        None,
+    );
+    eprintln!("requirements-document argv: {arguments:?}");
+    assert_eq!(
+        arguments,
+        [
+            "approval",
+            "create",
+            "spec.fsl",
+            "--kind",
+            "requirements_document",
+            "--artifact",
+            "requirements.md",
+            "--approver",
+            "parity",
+        ]
+    );
+    assert_requirements_document_invocation(&arguments);
+}
+
+#[test]
+#[should_panic(expected = "must invoke --kind requirements_document")]
+fn requirements_document_approval_ledger_invocation_is_rejected() {
+    let mut arguments = invoke(
+        "approval create",
+        PARSE_APPROVAL_REQUIREMENTS_DOCUMENT_FIXTURE,
+        "spec.fsl",
+        None,
+    );
+    let kind = arguments
+        .iter_mut()
+        .find(|argument| argument.as_str() == "requirements_document")
+        .expect("requirements-document invocation has kind argument");
+    *kind = "ledger".to_owned();
+    eprintln!("requirements-document argv negative control: {arguments:?}");
+    assert_requirements_document_invocation(&arguments);
+}
+
+#[test]
 fn approval_diff_uses_a_valid_baseline_before_exercising_each_failure_class() {
     require_test_git();
 
@@ -2894,6 +2963,7 @@ fn approval_diff_uses_a_valid_baseline_before_exercising_each_failure_class() {
         let approval = ApprovalFixture::new(fixture);
         let actual = run_from(
             "approval diff",
+            fixture,
             "spec.fsl",
             Some(&approval.record),
             &approval.root,
@@ -2923,6 +2993,7 @@ fn approval_diff_zero_digest_negative_control_stops_before_the_diff() {
     let zero_digest = approval.zero_digest_record();
     let actual = run_from(
         "approval diff",
+        NAME_FIXTURE,
         "spec.fsl",
         Some(&zero_digest),
         &approval.root,
