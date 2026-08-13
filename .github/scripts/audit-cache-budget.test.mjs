@@ -11,7 +11,9 @@
 // ref-scoped caches and `main` held no Rust build cache at all.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   auditCacheBudget,
@@ -37,6 +39,7 @@ import {
 const MAIN = "refs/heads/main";
 const PAGE_PATH = (page) =>
   `/actions/caches?per_page=100&sort=created_at&direction=asc&page=${page}`;
+const RUNNER_PATH = fileURLToPath(new URL("./run-cache-budget-audit.mjs", import.meta.url));
 
 test("pageNumber reads the page query parameter without substring matches", () => {
   const cases = [
@@ -106,6 +109,34 @@ function jsonResponse(body, options = {}) {
   const headers = new Headers();
   if (remaining !== undefined) headers.set("x-ratelimit-remaining", remaining);
   return new Response(JSON.stringify(body), { status, statusText, headers });
+}
+
+async function runStableRunnerListing({ listing, usageBytes = usageOf(listing) }) {
+  const reports = [];
+  const errors = [];
+  const paths = [];
+  const result = await runCacheBudgetAudit({
+    token: "test-token",
+    repo: "owner/repo",
+    writeReport: (report) => reports.push(report),
+    writeError: (error) => errors.push(error),
+    fetchImpl: async (url) => {
+      const parsed = new URL(url);
+      paths.push(parsed.pathname + parsed.search);
+      if (parsed.pathname.endsWith("/actions/cache/usage")) {
+        return jsonResponse({ active_caches_size_in_bytes: usageBytes });
+      }
+      if (parsed.searchParams.get("page") === "1") {
+        return jsonResponse({
+          total_count: listing.length,
+          actions_caches: listing,
+        });
+      }
+      if (parsed.searchParams.get("page") === "2") return jsonResponse(outOfRangeCachePage());
+      throw new Error(`unexpected cache page ${parsed.searchParams.get("page")}`);
+    },
+  });
+  return { errors, paths, reports, result };
 }
 
 function cachePage(totalCount, page) {
@@ -745,6 +776,107 @@ test("rejecting: the live runner rejects invalid ordinary-page total_count value
       description,
     );
   }
+});
+
+test("rejecting: malformed ordinary actions_caches envelopes are api-unreadable before continuation", async () => {
+  for (const [description, malformedPage] of [
+    ["missing", { total_count: 5 }],
+    ["non-array", { total_count: 5, actions_caches: {} }],
+  ]) {
+    const errors = [];
+    const cachePaths = [];
+    const result = await runCacheBudgetAudit({
+      token: "test-token",
+      repo: "owner/repo",
+      writeReport: () => assert.fail(`${description} listing must not report PASS`),
+      writeError: (message) => errors.push(message),
+      fetchImpl: async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname.endsWith("/actions/cache/usage")) {
+          return jsonResponse({ active_caches_size_in_bytes: 0 });
+        }
+        cachePaths.push(parsed.pathname.replace("/repos/owner/repo", "") + parsed.search);
+        assert.equal(parsed.searchParams.get("page"), "1", `${description}: no continuation request`);
+        return jsonResponse(malformedPage);
+      },
+    });
+
+    assert.equal(result.ok, false, description);
+    assert.deepEqual(cachePaths, [PAGE_PATH(1)], description);
+    assert.match(
+      errors.join("\n"),
+      /cache budget audit: FAIL -- api-unreadable: cache listing page 1 has no actions_caches array/,
+      description,
+    );
+  }
+});
+
+test("rejecting: the runner requires each credential before any transport call", async () => {
+  for (const [description, credentials] of [
+    ["token", { token: "", repo: "owner/repo" }],
+    ["repository", { token: "test-token", repo: "" }],
+  ]) {
+    let transportCalls = 0;
+    const errors = [];
+    const result = await runCacheBudgetAudit({
+      ...credentials,
+      writeReport: () => assert.fail(`${description}: absent credentials must not report PASS`),
+      writeError: (message) => errors.push(message),
+      fetchImpl: async () => {
+        transportCalls += 1;
+        throw new Error("credential guard must reject before transport");
+      },
+    });
+
+    assert.equal(result.ok, false, description);
+    assert.equal(transportCalls, 0, description);
+    assert.deepEqual(errors, [
+      "cache budget audit: GITHUB_TOKEN and GITHUB_REPOSITORY are required; refusing to report a healthy budget without observing one",
+    ]);
+  }
+});
+
+test("runner returns the same healthy or unhealthy verdict that its report represents", async () => {
+  const listing = withCacheIds(healthyListing(), 1);
+  for (const [description, usageBytes, expectedOk, expectedReport] of [
+    [
+      "healthy",
+      usageOf(listing),
+      true,
+      /^cache budget audit: PASS -- budget within threshold/,
+    ],
+    [
+      "over budget",
+      Math.round(CACHE_LIMIT_BYTES * 0.85),
+      false,
+      /^cache budget audit: FAIL -- \d+ finding\(s\)\n  budget-exhausted:/,
+    ],
+  ]) {
+    const { errors, reports, result } = await runStableRunnerListing({ listing, usageBytes });
+
+    assert.equal(result.ok, expectedOk, description);
+    assert.equal(reports.length, 1, description);
+    assert.equal(reports[0], formatReport(result), description);
+    assert.match(reports[0], expectedReport, description);
+    assert.deepEqual(errors, [], description);
+  }
+});
+
+test("rejecting: the executable runner exits nonzero when credentials are absent", () => {
+  const environment = { ...process.env };
+  delete environment.GITHUB_TOKEN;
+  delete environment.GITHUB_REPOSITORY;
+  const child = spawnSync(process.execPath, [RUNNER_PATH], {
+    encoding: "utf8",
+    env: environment,
+  });
+
+  assert.equal(child.error, undefined);
+  assert.equal(child.status, 1);
+  assert.match(
+    child.stderr,
+    /cache budget audit: GITHUB_TOKEN and GITHUB_REPOSITORY are required; refusing to report a healthy budget without observing one/,
+  );
 });
 
 test("rejecting: API wrapper rejects HTTP failures and missing or invalid rate-limit headers", async () => {

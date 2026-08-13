@@ -111,9 +111,9 @@ jobs:
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
           # non-`pull_request` events. The live audit's created_at order has no documented
-          # tie-breaker; a tied boundary can produce a duplicate ID or a different paired
-          # collection and then fail closed as unauditable, while an identical mixed collection
-          # can repeat. See
+          # tie-breaker; a tied boundary can produce a duplicate ID, rejected immediately, or
+          # different paired observations, which retry once and fail closed if still different;
+          # an identical mixed state can repeat as an undetectable residual. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -332,7 +332,7 @@ jobs:
     # below gives: a gate that runs out of wall clock reports a failure it did not
     # observe. Warm measured: 32m56s / 32m45s (2026-08-04), 31m49s / 29m44s / 26m56s
     # (2026-08-05) -- comfortably inside the old 40-minute budget. The scheduled
-    # `windows-latest` run then hit exactly 40m0x and was cancelled on every one of
+    # `windows-latest` run then timed out at the configured 40-minute limit on every one of
     # six consecutive occasions from 2026-08-07 00:23 through 2026-08-11: cache absence was
     # an observed material correlate. These observations span revisions and test volumes, so
     # they do not exclude either contribution. The

@@ -54,8 +54,9 @@ function assertListingFitsBudget(totalCount) {
 function cachePath(page) {
   // `created_at` is not changed by restoration/access, unlike last-accessed
   // order. GitHub documents it as the primary order only. A tied page boundary
-  // can produce a duplicate ID or a different paired collection, which is
-  // rejected as an unstable observation; an identical mixed state can repeat.
+  // can produce a duplicate ID, which is rejected immediately, or different
+  // paired observations, which retry once and fail closed if still different;
+  // an identical mixed state can repeat as an undetectable residual.
   return `/actions/caches?per_page=${CACHE_PAGE_SIZE}&sort=created_at&direction=asc&page=${page}`;
 }
 

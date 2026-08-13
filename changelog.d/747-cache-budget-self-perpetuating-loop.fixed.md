@@ -58,13 +58,14 @@ both wrong about what this entry actually is.
 This one cold-start save is evidence of what this key can legitimately hold,
 not a proven minimum across every shard and revision. `semantic-mutation` is
 not resized by this change and is not touched by the budget lever below.
-Separately, the observed `rust-native-z3` **`windows-latest` leg** had the same
-cancel-skips-save deadlock already fixed for the `semantic-mutation` lanes: a
-cold build (measured warm at 27–33 min) exceeded the 40-minute budget, the job
-was cancelled on all six consecutive scheduled runs from 2026-08-07 through 2026-08-11
-(`9 skipped Post Run Swatinem/rust-cache@v2`, run 31527197290 attempt 1), and the
-skipped post step meant no cache was ever written to recover from. That step
-now carries `cache-on-failure: true`. On run `31565897267` attempt 1, the cancelled
+Separately, six observed `rust-native-z3` **`windows-latest`** scheduled runs
+timed out at the configured 40-minute limit from 2026-08-07 through 2026-08-11.
+They span four revisions and test volumes: `0590975` / `31133932323`,
+`bcb0a4d` / `31210570118`, `1050a76` / `31273202771`, and `60705fd` /
+`31330456273`, `31423201873`, `31527197290`. Each observed cancelled job had
+`Post Run Swatinem/rust-cache@v2` skipped; cache absence is a material
+correlate, not evidence that one deadlock or one change caused every timeout.
+That step now carries `cache-on-failure: true`. On run `31565897267` attempt 1, the cancelled
 Windows job's `Post Run Swatinem/rust-cache@v2` step succeeded and created
 `v0-rust-rust-native-z3-Windows_NT-x64-af4551b0-09fbaf53` at
 2026-08-12T06:16:19.271024Z (619,429,238 B), four seconds before the job
@@ -113,9 +114,9 @@ requests. Malformed listing envelopes or usage bytes exit as `api-unreadable`;
 absent usage bytes become non-PASS `usage-unobserved`. GitHub documents
 `created_at` only as the primary sort key: the repeated live sample had unique
 timestamps, so it establishes no tie order. A tied boundary reorder can make
-the listing unauditable through a duplicate ID or different paired collection
-and fail closed; an identical mixed collection can repeat and is not evidence
-of a stable healthy collection.
+the listing unauditable through a duplicate ID, rejected immediately, or
+different paired observations, which retry once and fail closed if still
+different; an identical mixed state can repeat as an undetectable residual.
 
 An earlier revision of this change added an `entry-oversized` finding
 (`SINGLE_ENTRY_WARN_BYTES = 2.5 GiB`) calibrated against the wrong ~2.2 GiB
@@ -143,7 +144,7 @@ six audit failures and was never itself audited. Four scheduled audits
 2026-08-12 failures (`31565897238` attempt 1, push, and `31566055925` attempt 1,
 schedule) reported both two orphaned `refs/pull/793/merge` Rust
 entries and `main-cache-absent` for `rust-native-z3`. Recreating the Windows
-entry at 2026-08-12T06:16:19Z resolved the latter; human-authorized deletion of
+entry at 2026-08-12T06:16:19.271024Z resolved the latter; human-authorized deletion of
 the two PR entries on 2026-08-13 resolved the remaining findings. The listing
 was then 7.337 GiB and audit run `31654305398` attempt 1 succeeded. `CI_SHARED_KEYS` and
 `REQUIRED_MAIN_ENTRIES` both drop `fsl-logic` accordingly, while the latter now explicitly

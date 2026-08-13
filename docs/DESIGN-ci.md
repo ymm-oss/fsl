@@ -674,7 +674,7 @@ and scheduled run `31566055925` attempt 1 (2026-08-12T05:17Z); each reported thr
 `refs/pull/793/merge`, the 0.08 GiB
 `v0-rust-rust-compile-Linux-x64-e8b3ee54-09fbaf53` and 0.05 GiB
 `v0-rust-core-contracts-Linux-x64-e8b3ee54-09fbaf53`. The observed recreation of the Windows
-native-z3 entry at 2026-08-12T06:16:19Z resolved the former finding. Those orphaned PR entries were
+native-z3 entry at 2026-08-12T06:16:19.271024Z resolved the former finding. Those orphaned PR entries were
 saved before #793 branched from a base containing the restore-only correction; after human
 authorization on 2026-08-13, their deletion resolved the two remaining findings. The listing then
 measured **7.337 GiB**, and workflow-dispatch audit run `31654305398` attempt 1 at 2026-08-13T00:24Z
@@ -749,10 +749,21 @@ specifically following a timeout-driven cancellation.
 matrix. Windows recovery is now observed; macOS recovery is not established by this observation.**
 That job's `Swatinem/rust-cache` step carried `save-if` but not `cache-on-failure`. Warm Windows runs
 measured 32m56s / 32m45s (2026-08-04) and 31m49s / 29m44s / 26m56s (2026-08-05), comfortably inside
-the former 40-minute budget; the scheduled `windows-latest` run then hit exactly 40m0x and was
-cancelled on all six consecutive scheduled runs from 2026-08-07 00:23 through 2026-08-11 — a step
-change for which cache absence was an observed material correlate. Those observations span
-revisions and test volumes, so they do not exclude either contribution. The last successful run (2026-08-05) restored the cache
+the former 40-minute budget; six scheduled `windows-latest` observations from 2026-08-07 00:23
+through 2026-08-11 timed out at the configured 40-minute limit. They span four revisions and test
+volumes:
+
+| revision | observed scheduled run(s) |
+| --- | --- |
+| `0590975` | `31133932323` |
+| `bcb0a4d` | `31210570118` |
+| `1050a76` | `31273202771` |
+| `60705fd` | `31330456273`, `31423201873`, `31527197290` |
+
+Each observed run had a cancelled Windows job with its `Post Run Swatinem/rust-cache@v2` step
+skipped. Cache absence is an observed material correlate across those observations, not evidence
+that one self-perpetuating deadlock or any single change caused every timeout. The last successful
+run (2026-08-05) restored the cache
 (`Cache hit for: v0-rust-rust-native-z3-Windows_NT-x64-...`, 591 MiB); the 2026-08-11 cancellation
 reported `No cache found.` instead, and its job steps show
 `9 skipped Post Run Swatinem/rust-cache@v2` (run `31527197290` attempt 1).
@@ -792,9 +803,10 @@ For completeness, each stability attempt obtains two entire cache listings with 
 `per_page=100&sort=created_at&direction=asc`. `created_at` does not change on restore/access, but
 GitHub documents only that primary sort key, not a secondary tie order or page-to-page stability.
 The current repeated live observation had nine distinct `created_at` values; it is not evidence
-about tied values. A tie reordered across a page boundary can produce a duplicate ID or a different
-paired collection and then fail closed as unauditable; an identical mixed collection can instead
-repeat. A collection requires a safe-integer first `total_count`; each declared page repeats it, has
+about tied values. A tie reordered across a page boundary can produce a duplicate ID, rejected
+immediately, or different paired observations, which retry once and fail closed if still different;
+an identical mixed state can repeat as an undetectable residual. A collection requires a
+safe-integer first `total_count`; each declared page repeats it, has
 its exact implied entry count, and contains unique safe-integer IDs with nonempty `key` and `ref`
 and nonnegative safe-integer `size_in_bytes`. It then requests an empty sentinel. GitHub's observed
 out-of-range envelope is `{ "total_count": 0, "actions_caches": [] }`; the sentinel may therefore

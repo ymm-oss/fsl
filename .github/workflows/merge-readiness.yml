@@ -59,8 +59,9 @@ jobs:
           # held a cache under this workflow's own former key (no `push` trigger ever
           # existed for it), so that former-key path could not make the first run warm.
           # The live cache audit's created_at order has no documented tie-breaker; a tied
-          # boundary can produce a duplicate ID or a different paired collection and then fail
-          # closed as unauditable, while an identical mixed collection can repeat.
+          # boundary can produce a duplicate ID, rejected immediately, or different paired
+          # observations, which retry once and fail closed if still different; an identical
+          # mixed state can repeat as an undetectable residual.
           # See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           shared-key: rust-workspace
           save-if: false
