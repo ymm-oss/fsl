@@ -588,18 +588,17 @@ own key, from any event. `merge-readiness.yml`'s two `Swatinem/rust-cache` steps
 `save-if: false`): both jobs run `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same
 checkout as `ci.yml`'s `rust workspace` job, and `Swatinem/rust-cache` derives its key from the
 rustc version, `CARGO`/`CC`/`CFLAGS`/`CXX`/`CMAKE`/`RUST`-prefixed env vars, and the workspace
-lockfiles — none of which differ between the two workflows — so an exact key match is expected, but
-this is a mechanism-derived expectation, not something observed yet: the pull-request-scoped entries
-that could have confirmed a full match were deleted 2026-08-12 during unrelated cleanup, and this
-branch has not been merged, so no post-merge run of `merge-readiness.yml` exists to have logged one.
-**This paragraph records an expectation pending confirmation, not a confirmed result.** The first
-post-merge run's own log is the actual evidence: it must show
-`Restored from cache key "..." full match: true.` before this claim is treated as confirmed; if it
-instead shows a prefix-restore fallback or a miss, this paragraph needs updating, not the code (a
-mismatch degrades only to `Swatinem/rust-cache`'s ordinary prefix-restore fallback rather than a cold
-build, so it would not be a functional regression, only a correction to this expectation). Neither
-job ever writes to this key: only `ci.yml`'s `push`-triggered job does, so no `pull_request` event
-anywhere can grow it, and merge-readiness gains no eviction pressure of its own to reintroduce.
+lockfiles — none of which differ between the two workflows. That mechanism-derived expectation is now
+supported by direct pull-request log evidence: on run `31581715093`, `merge readiness / core
+contracts` logged `Restored from cache key
+"v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.` at 09:11:00.77Z and
+`merge readiness / Rust compile` logged the same full match at 09:11:04.76Z; on run `31583381471`,
+the same two jobs logged it at 09:33:03.06Z and 09:33:05.55Z, respectively. These four restore logs,
+rather than the derivation mechanism, establish the observed full-key match. A future lockfile change
+could still produce `Swatinem/rust-cache`'s ordinary prefix-restore fallback rather than a cold build,
+but that is not what these runs observed. Neither job ever writes to this key: only `ci.yml`'s
+`push`-triggered job does, so no `pull_request` event anywhere can grow it, and merge-readiness gains
+no eviction pressure of its own to reintroduce.
 
 This also qualifies a claim made elsewhere in this document. Cache hit rates were measured to have
 no headroom for `rust workspace` — compile is only ~3.5 min of ~33 min **on a warm cache**. That
@@ -663,7 +662,15 @@ the deletion, measured `rust-workspace` at 1,605,761,517 B, `fsl-logic` at 1,470
 `semantic-mutation` at 2,919,716,751 B, plus ~41 MB of small tool-binary caches -- **8.130 GiB
 total**. After the human-authorized deletion of the now-orphaned `fsl-logic` entry and the observed
 recreation of the Windows native-z3 entry, the cache listing measured **7.469 GiB**, below the
-8.500 GiB warning threshold; the cache-budget audit passed. The restore-only `FSL Logic Test` job on
+8.500 GiB warning threshold; that capacity measurement did **not** mean the cache-budget audit
+passed. The audit still failed on six consecutive scheduled runs from 2026-08-08 through 2026-08-12;
+the last, run `31566055925` at 2026-08-12T05:17Z, reported three findings, including two
+`pull-request-rust-cache-present` findings for `refs/pull/793/merge`: the 0.08 GiB
+`v0-rust-rust-compile-Linux-x64-e8b3ee54-09fbaf53` and 0.05 GiB
+`v0-rust-core-contracts-Linux-x64-e8b3ee54-09fbaf53`. Those orphaned entries were saved before #793
+branched from a base containing the restore-only correction. After human authorization on 2026-08-13,
+they were deleted; the listing then measured **7.337 GiB**, and workflow-dispatch audit run
+`31654305398` at 2026-08-13T00:24Z succeeded. The restore-only `FSL Logic Test` job on
 run `31570480618` directly logged a cache hit for
 `v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53` at 06:34:15Z, then
 `Restored from cache key "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.` at

@@ -337,8 +337,11 @@ jobs:
     # and restored 591 MiB; the 2026-08-11 cancellation reported `No cache found.`
     # instead. The cache had been evicted by pull-request-scoped caches this same
     # commit's other changes close off (see the `Swatinem/rust-cache` step below and
-    # `merge-readiness.yml`); 60 minutes covers a genuine cold vendored-Z3 build on
-    # this matrix, matching the headroom already given to the Linux promotion lane.
+    # `merge-readiness.yml`). Run 31565897267 then ran cold from 05:14:37Z to
+    # 06:16:23Z (61m46s) and was cancelled, so 60 minutes did not cover this cold
+    # vendored-Z3 build. Its post step saved a cache, and the next Windows run
+    # (31570480618) was warm and completed in 34m39s; this is a recovery path, not
+    # an observed successful cold-build duration.
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -373,15 +376,17 @@ jobs:
           # identical deadlock. The action's own `post-if: success() ||
           # env.CACHE_ON_FAILURE == 'true'` does not distinguish a cancelled conclusion
           # from a failed one, which reads as support for this saving through a timeout
-          # cancellation and not only an ordinary step failure -- but that reading is
-          # inference from the condition text, not a direct observation: commit 877fe8c
-          # (#752), which added this same flag to the semantic-mutation lanes, also
-          # raised those lanes' timeouts in the same commit, so the `cancelled`
-          # conclusions on issues #721/#678 stopping afterward is confounded with more
-          # budget, not isolated evidence for `cache-on-failure` alone. No run in this
-          # repository's history has been observed saving specifically after a
-          # timeout-triggered cancellation; see docs/DESIGN-ci.md, "Actions cache
-          # budget", for what is and is not established here.
+          # cancellation and not only an ordinary step failure. This is directly
+          # observed on run 31565897267: its cancelled Windows job's step 9
+          # (`Post Run Swatinem/rust-cache@v2`) succeeded and created
+          # `v0-rust-rust-native-z3-Windows_NT-x64-af4551b0-09fbaf53` at
+          # 2026-08-12T06:16:19.271024Z (619,429,238 B), four seconds before the
+          # job completed. Run 31527197290's corresponding cancelled job instead
+          # logged `9 skipped Post Run Swatinem/rust-cache@v2`. This combined-change
+          # observation does not isolate `cache-on-failure` as the cause: this job's
+          # timeout changed from 40 to 60 minutes in the same changeset, and commit
+          # 877fe8c (#752) likewise coupled the flag with timeout increases for the
+          # semantic-mutation lanes. See docs/DESIGN-ci.md, "Actions cache budget".
           cache-on-failure: true
 
       - name: Test pinned native solver and BMC crates
@@ -686,9 +691,13 @@ jobs:
           # saved it; restoring `rust-workspace` here loses nothing this job needed a
           # dedicated key for. This removes the dedicated `fsl-logic` key from the shared
           # budget -- measured at 1,470,489,603 B (1.369 GiB) before this change -- once a
-          # human deletes the now-orphaned entry. Baseline warm duration: 2m48s-2m53s
-          # (scheduled runs 2026-08-09/10/11); TODO: record this job's first post-change
-          # run duration here once observed.
+          # human deletes the now-orphaned entry. The first observed post-change run,
+          # 31570480618, completed in 3m02s after logging `Cache hit for:
+          # v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53` at 06:34:15Z and
+          # `Restored from cache key "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53"
+          # full match: true.` at 06:34:36Z. The former dedicated-key warm runs took
+          # 2m48s / 2m53s / 2m51s on 2026-08-09/10/11; the full-match log, not duration,
+          # is the evidence of the shared-key restore.
           shared-key: rust-workspace
           save-if: false
           workspaces: rust -> target

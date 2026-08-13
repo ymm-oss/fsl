@@ -18,12 +18,13 @@ this path -- it would leave every pull request permanently cold, since
 nothing would ever save a `main` copy under this workflow's own key for it to
 restore. Both `Swatinem/rust-cache` steps instead go restore-only against
 `ci.yml`'s own `rust-workspace` key (`shared-key: rust-workspace`,
-`save-if: false`): the two workflows' jobs share a toolchain, runner, and
-checkout, so the derived cache key is expected to match -- an expectation
-still pending confirmation from a post-merge run's own `full match: true`
-restore log, not something already observed, since this branch had not yet
-merged as of this writing and the pull-request-scoped entries that could have
-confirmed it were deleted 2026-08-12 during unrelated cleanup.
+`save-if: false`). The shared toolchain, runner, and checkout predict an exact
+derived-key match, and four direct pull-request restore logs confirm it: run
+`31581715093` logged `full match: true` for core contracts at 09:11:00.77Z
+and Rust compile at 09:11:04.76Z; run `31583381471` logged the same result at
+09:33:03.06Z and 09:33:05.55Z. Each identified
+`v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53`; the logs, rather than
+the mechanism, establish the observed full-key match.
 `tools/run-semantic-mutation-gate.sh`'s
 mutants lane also moves its per-run scratch `CARGO_TARGET_DIR` out from under
 `rust/target` (to `${RUNNER_TEMP:-${TMPDIR:-/tmp}}`), and the script now
@@ -60,16 +61,16 @@ at 27–33 min) exceeded the 40-minute budget, the job was cancelled on all six
 consecutive scheduled runs from 2026-08-07 through 2026-08-11
 (`9 skipped Post Run Swatinem/rust-cache@v2`, run 31527197290), and the
 skipped post step meant no cache was ever written to recover from. That step
-now carries `cache-on-failure: true`. `Swatinem/rust-cache`'s own
-`post-if: success() || env.CACHE_ON_FAILURE == 'true'` reads as supporting a
-save through cancellation, not only ordinary failure, but this repository has
-not directly observed a cache written specifically after a timeout
-cancellation: the semantic-mutation lanes' `cancelled` recurrences (issues
-#721, #678) stopped after commit `877fe8c` added the same flag, but that
-commit simultaneously raised those lanes' timeouts, confounding the two
-causes, and the eventual recovery run saved after reaching `success`, not
-after a cancellation. `timeout-minutes` is separately raised from 40 to 60,
-diagnosed from measured warm/cold durations rather than raised blind.
+now carries `cache-on-failure: true`. On run `31565897267`, the cancelled
+Windows job's `Post Run Swatinem/rust-cache@v2` step succeeded and created
+`v0-rust-rust-native-z3-Windows_NT-x64-af4551b0-09fbaf53` at
+2026-08-12T06:16:19.271024Z (619,429,238 B), four seconds before the job
+completed; this directly contrasts with run `31527197290`, whose cancelled
+job logged `9 skipped Post Run Swatinem/rust-cache@v2`. This is an observed
+cache save after timeout cancellation under the combined change, not isolated
+proof that `cache-on-failure` alone caused it: that changeset also raised this
+job's timeout from 40 to 60 minutes, and commit `877fe8c` (#752) likewise
+coupled the flag with timeout increases for the semantic-mutation lanes.
 
 `.github/scripts/audit-cache-budget.mjs`'s `sharedKeyOf` regex matched the
 GitHub Actions `runner.os` platform spellings (`Linux`/`macOS`/`Windows`), but
@@ -106,8 +107,12 @@ dependency set. Measured main-branch entries (2026-08-12): `rust-workspace`
 `rust-native-z3` Darwin 1,239,235,056 B, `semantic-mutation` 2,919,716,751 B,
 plus ~41 MB of tool-binary caches -- 8.130 GiB total. Deleting the now-orphaned
 `fsl-logic` entry (separate, human-authorized) and re-adding Windows
-native-z3 (historical 0.577 GiB) gives 8.130 − 1.369 + 0.577 = **7.338 GiB
-(73.4%)**, under the 8.5 GiB warn threshold. `CI_SHARED_KEYS` and
+native-z3 (historical 0.577 GiB) estimated 7.338 GiB (73.4%), under the
+8.5 GiB warn threshold. The actual 7.469 GiB listing still failed six
+scheduled audits through run `31566055925` (2026-08-12T05:17Z) because
+`refs/pull/793/merge` retained two orphaned Rust entries; after human-authorized
+deletion on 2026-08-13, the listing was 7.337 GiB and audit run `31654305398`
+succeeded. `CI_SHARED_KEYS` and
 `REQUIRED_MAIN_ENTRIES` both drop `fsl-logic` accordingly; the generic
 pull-request-rust-cache rule covers any regression the same way it already
 covers `merge-readiness.yml`'s former per-job keys. Separately, the shared-key

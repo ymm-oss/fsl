@@ -40,14 +40,14 @@ jobs:
           # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
           # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace
           # lockfiles. This job and `ci.yml`'s `rust workspace` job both run
-          # `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same checkout,
-          # so an exact key match is expected -- not asserted as observed here, because
-          # the pull-request-scoped cache entries that could have confirmed a full-key
-          # match were deleted 2026-08-12 during unrelated cache cleanup and cannot be
-          # re-measured retroactively. Confirm from the first post-merge run's own log:
-          # `Restored from cache key "v0-rust-rust-workspace-Linux-x64-..." full match:
-          # true.` Even on a lockfile-hash mismatch, `src/restore.ts` falls back to the
-          # shared `restoreKey` prefix, so this degrades to a partial restore rather than
+          # `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same checkout.
+          # The expected exact key match is directly observed in four pull-request logs:
+          # run 31581715093 logged it for core contracts at 09:11:00.77Z and Rust compile
+          # at 09:11:04.76Z; run 31583381471 logged it at 09:33:03.06Z and 09:33:05.55Z,
+          # respectively. Each says `Restored from cache key
+          # "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.`
+          # These logs establish the full-key restore; on a future lockfile-hash mismatch,
+          # `src/restore.ts` still falls back to the shared `restoreKey` prefix rather than
           # a cold build.
           # (c) This job's `cargo check --workspace --no-default-features` differs in
           # feature resolution from `rust workspace`'s default-feature build
@@ -91,14 +91,14 @@ jobs:
           # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
           # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace
           # lockfiles. This job and `ci.yml`'s `rust workspace` job both run
-          # `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same checkout,
-          # so an exact key match is expected -- not asserted as observed here, because
-          # the pull-request-scoped cache entries that could have confirmed a full-key
-          # match were deleted 2026-08-12 during unrelated cache cleanup and cannot be
-          # re-measured retroactively. Confirm from the first post-merge run's own log:
-          # `Restored from cache key "v0-rust-rust-workspace-Linux-x64-..." full match:
-          # true.` Even on a lockfile-hash mismatch, `src/restore.ts` falls back to the
-          # shared `restoreKey` prefix, so this degrades to a partial restore rather than
+          # `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same checkout.
+          # The expected exact key match is directly observed in four pull-request logs:
+          # run 31581715093 logged it for core contracts at 09:11:00.77Z and Rust compile
+          # at 09:11:04.76Z; run 31583381471 logged it at 09:33:03.06Z and 09:33:05.55Z,
+          # respectively. Each says `Restored from cache key
+          # "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.`
+          # These logs establish the full-key restore; on a future lockfile-hash mismatch,
+          # `src/restore.ts` still falls back to the shared `restoreKey` prefix rather than
           # a cold build.
           # (c) This job builds `cargo fmt --check` plus a default-feature test build of a
           # subset of `rust workspace`'s crates (`tools/check-merge-readiness.sh:25-33`),
