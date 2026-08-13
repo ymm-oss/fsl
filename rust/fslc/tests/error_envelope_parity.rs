@@ -18,6 +18,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::Value;
 
@@ -28,6 +29,16 @@ const PARSE_DOMAIN_FIXTURE: &str =
 const PARSE_DB_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_broken_dbsystem.fsl";
 const PARSE_AI_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_broken_ai_component.fsl";
 const PARSE_CAUSAL_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_broken_causal.fsl";
+const AI_GUARD_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_ai_invalid_rule.fsl";
+const AI_NAME_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_ai_unknown_tool.fsl";
+const DB_GUARD_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_db_invalid_rule.fsl";
+const DB_NAME_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_db_unknown_column.fsl";
+const CAUSAL_NAME_FIXTURE: &str =
+    "rust/fslc/tests/fixtures/error_envelope_causal_unknown_reference.fsl";
+const DOCUMENT_GUARD_FIXTURE: &str =
+    "rust/fslc/tests/fixtures/error_envelope_document_lowering_guard.fsl";
+const DOCUMENT_NAME_FIXTURE: &str =
+    "rust/fslc/tests/fixtures/error_envelope_document_undeclared_type.fsl";
 const GUARD_FIXTURE: &str = "rust/fslc/tests/fixtures/domain_await_routing_rejected.fsl";
 const NAME_FIXTURE: &str =
     "rust/fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl";
@@ -38,10 +49,8 @@ const DOCUMENT_ARTIFACT: &str = "rust/fslc/tests/fixtures/error_envelope_documen
 const REPLAY_TRACE: &str = "rust/fslc/tests/fixtures/replay_trace.valid.v1.json";
 const APPROVAL_RECORD_PLACEHOLDER: &str = "{approval-record}";
 const DOCUMENT_ARTIFACT_PLACEHOLDER: &str = "{document-artifact}";
-const APPROVAL_PARSE_RECORD: &str =
-    "rust/fslc/tests/fixtures/error_envelope_approval_parse_record.json";
-const APPROVAL_LITERATE_RECORD: &str =
-    "rust/fslc/tests/fixtures/error_envelope_approval_literate_record.json";
+
+static APPROVAL_RECORD_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 
 /// The one ownership classification for every leaf in `cli-contract.json`.
 ///
@@ -104,8 +113,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["ai", "check", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: AI_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: AI_COVERAGE,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "ai compare",
@@ -125,7 +134,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: AI_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        not_applicable: AI_COMPAT_NOT_APPLICABLE_GUARD_AND_NAME,
     },
     CommandRegistration {
         key: "ai drift",
@@ -134,7 +143,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: AI_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        not_applicable: AI_DRIFT_NOT_APPLICABLE_GUARD_AND_NAME,
     },
     CommandRegistration {
         key: "ai eval",
@@ -143,7 +152,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: AI_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        not_applicable: AI_EVAL_NOT_APPLICABLE_GUARD_AND_NAME,
     },
     CommandRegistration {
         key: "ai regress",
@@ -160,7 +169,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: AI_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        not_applicable: AI_REGRESS_NOT_APPLICABLE_GUARD_AND_NAME,
     },
     CommandRegistration {
         key: "ai replay",
@@ -169,7 +178,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         },
         literate: LiterateCoverage::PinnedDialect,
         coverage: AI_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        not_applicable: AI_REPLAY_NOT_APPLICABLE_GUARD_AND_NAME,
     },
     CommandRegistration {
         key: "analyze",
@@ -192,8 +201,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             ],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: APPROVAL_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: APPROVAL_RECORD_COVERAGE,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "approval create",
@@ -211,8 +220,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             ],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: APPROVAL_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: APPROVAL_CREATE_COVERAGE,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "approval diff",
@@ -226,8 +235,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             ],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: APPROVAL_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: APPROVAL_RECORD_COVERAGE,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "causal analyze",
@@ -235,8 +244,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["causal", "analyze", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: CAUSAL_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: CAUSAL_COVERAGE,
+        not_applicable: CAUSAL_ANALYZE_NOT_APPLICABLE_GUARD,
     },
     CommandRegistration {
         key: "causal check",
@@ -244,8 +253,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["causal", "check", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: CAUSAL_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: CAUSAL_COVERAGE,
+        not_applicable: CAUSAL_CHECK_NOT_APPLICABLE_GUARD,
     },
     CommandRegistration {
         key: "causal diff",
@@ -253,8 +262,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["causal", "diff", SPEC_PLACEHOLDER, SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: CAUSAL_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: CAUSAL_COVERAGE,
+        not_applicable: CAUSAL_DIFF_NOT_APPLICABLE_GUARD,
     },
     CommandRegistration {
         key: "causal ledger",
@@ -262,8 +271,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["causal", "ledger", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: CAUSAL_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: CAUSAL_COVERAGE,
+        not_applicable: CAUSAL_LEDGER_NOT_APPLICABLE_GUARD,
     },
     CommandRegistration {
         key: "causal observe-expectations",
@@ -285,8 +294,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             ],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: CAUSAL_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: CAUSAL_COVERAGE,
+        not_applicable: CAUSAL_OBSERVE_EXPECTATIONS_NOT_APPLICABLE_GUARD,
     },
     CommandRegistration {
         key: "causal verify-expectations",
@@ -294,8 +303,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["causal", "verify-expectations", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: CAUSAL_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: CAUSAL_COVERAGE,
+        not_applicable: CAUSAL_VERIFY_EXPECTATIONS_NOT_APPLICABLE_GUARD,
     },
     CommandRegistration {
         key: "chain",
@@ -343,8 +352,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["db", "check", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: DB_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: DB_CHECK_COVERAGE,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "db import",
@@ -363,8 +372,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["db", "observe", SPEC_PLACEHOLDER, "--trace", EMPTY_RECORDS],
         },
         literate: LiterateCoverage::PinnedDialect,
-        coverage: DB_PARSE_COVERAGE,
-        not_applicable: NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: DB_OBSERVE_COVERAGE,
+        not_applicable: DB_OBSERVE_NOT_APPLICABLE_GUARD,
     },
     CommandRegistration {
         key: "diff",
@@ -386,8 +395,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             ],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: DOCUMENT_PARSE_COVERAGE,
-        not_applicable: DOCUMENT_NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: DOCUMENT_COVERAGE,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "document claims",
@@ -395,8 +404,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["document", "claims", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: DOCUMENT_PARSE_COVERAGE,
-        not_applicable: DOCUMENT_NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: DOCUMENT_COVERAGE,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "document generate",
@@ -404,8 +413,8 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["document", "generate", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: DOCUMENT_PARSE_COVERAGE,
-        not_applicable: DOCUMENT_NOT_APPLICABLE_GUARD_AND_NAME,
+        coverage: DOCUMENT_COVERAGE,
+        not_applicable: &[],
     },
     CommandRegistration {
         key: "domain analyze",
@@ -633,12 +642,6 @@ enum FailureClass {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Payload {
-    Json,
-    Text,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Diagnostic {
     None,
     Code(&'static str),
@@ -659,12 +662,6 @@ enum ExpectedField {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum StdoutExpectation {
-    AnyText,
-    Exact(&'static str),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum MessageExpectation {
     Absent,
     MentionsInput,
@@ -672,8 +669,7 @@ enum MessageExpectation {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct Expectation {
-    payload: Payload,
+struct JsonExpectation {
     result: ExpectedField,
     kind: ExpectedField,
     location: LocationShape,
@@ -681,11 +677,18 @@ struct Expectation {
     exit: i32,
     dialect: ExpectedField,
     message: MessageExpectation,
-    exact_stdout: StdoutExpectation,
 }
 
-const PARSE_UNIFORM: Expectation = Expectation {
-    payload: Payload::Json,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Expectation {
+    Json(JsonExpectation),
+    Text {
+        exit: i32,
+        exact_stdout: &'static str,
+    },
+}
+
+const PARSE_JSON: JsonExpectation = JsonExpectation {
     result: ExpectedField::Exact("error"),
     kind: ExpectedField::Exact("parse"),
     location: LocationShape::LineColumn,
@@ -693,11 +696,10 @@ const PARSE_UNIFORM: Expectation = Expectation {
     exit: 2,
     dialect: ExpectedField::Absent,
     message: MessageExpectation::OmitsInput,
-    exact_stdout: StdoutExpectation::AnyText,
 };
+const PARSE_UNIFORM: Expectation = Expectation::Json(PARSE_JSON);
 
-const SEMANTIC_UNIFORM: Expectation = Expectation {
-    payload: Payload::Json,
+const SEMANTIC_JSON: JsonExpectation = JsonExpectation {
     result: ExpectedField::Exact("error"),
     kind: ExpectedField::Exact("semantics"),
     location: LocationShape::LineColumn,
@@ -705,37 +707,38 @@ const SEMANTIC_UNIFORM: Expectation = Expectation {
     exit: 2,
     dialect: ExpectedField::Absent,
     message: MessageExpectation::MentionsInput,
-    exact_stdout: StdoutExpectation::AnyText,
 };
+const SEMANTIC_UNIFORM: Expectation = Expectation::Json(SEMANTIC_JSON);
 
 /// The Guard matrix requires the source fixture path in semantic diagnostics.
-const SEMANTIC_WITH_INPUT_PATH: Expectation = Expectation {
+const SEMANTIC_WITH_INPUT_PATH: Expectation = Expectation::Json(JsonExpectation {
     message: MessageExpectation::MentionsInput,
-    ..SEMANTIC_UNIFORM
-};
+    ..SEMANTIC_JSON
+});
 
-const SEMANTIC_WITHOUT_INPUT_PATH: Expectation = Expectation {
+const SEMANTIC_WITHOUT_INPUT_PATH: Expectation = Expectation::Json(JsonExpectation {
     message: MessageExpectation::OmitsInput,
-    ..SEMANTIC_UNIFORM
-};
+    ..SEMANTIC_JSON
+});
 
-const SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION: Expectation = Expectation {
+const SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION: Expectation = Expectation::Json(JsonExpectation {
     location: LocationShape::Absent,
-    ..SEMANTIC_WITH_INPUT_PATH
-};
+    ..SEMANTIC_JSON
+});
 
-const SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION: Expectation = Expectation {
-    location: LocationShape::Absent,
-    ..SEMANTIC_WITHOUT_INPUT_PATH
-};
+const SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION: Expectation =
+    Expectation::Json(JsonExpectation {
+        location: LocationShape::Absent,
+        message: MessageExpectation::OmitsInput,
+        ..SEMANTIC_JSON
+    });
 
-const PARSE_WITH_DIAGNOSTIC_ALIAS: Expectation = Expectation {
+const PARSE_WITH_DIAGNOSTIC_ALIAS: Expectation = Expectation::Json(JsonExpectation {
     diagnostic: Diagnostic::Alias("parse"),
-    ..PARSE_UNIFORM
-};
+    ..PARSE_JSON
+});
 
-const LITERATE_UNIFORM: Expectation = Expectation {
-    payload: Payload::Json,
+const LITERATE_UNIFORM: Expectation = Expectation::Json(JsonExpectation {
     result: ExpectedField::Exact("error"),
     kind: ExpectedField::Exact("usage"),
     location: LocationShape::FileOnly,
@@ -743,8 +746,7 @@ const LITERATE_UNIFORM: Expectation = Expectation {
     exit: 2,
     dialect: ExpectedField::Absent,
     message: MessageExpectation::MentionsInput,
-    exact_stdout: StdoutExpectation::AnyText,
-};
+});
 
 /// #796 pins a product false negative: an invalid spec exits 0 and is accepted.
 /// This is a soundness defect, not an endorsed behavior; the pin detects
@@ -752,8 +754,7 @@ const LITERATE_UNIFORM: Expectation = Expectation {
 /// It may share a root with `KNOWN_DIVERGENT_DOMAIN_FIXTURES` entry 1 (#690):
 /// #690 is closed, but its symptom 2 divergence remained live when measured
 /// on 2026-08-13 and is now tracked by open #798.
-const ANALYZED_NAME_FALSE_GREEN: Expectation = Expectation {
-    payload: Payload::Json,
+const ANALYZED_NAME_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
     result: ExpectedField::Exact("analyzed"),
     kind: ExpectedField::Absent,
     location: LocationShape::Absent,
@@ -761,22 +762,13 @@ const ANALYZED_NAME_FALSE_GREEN: Expectation = Expectation {
     exit: 0,
     dialect: ExpectedField::Exact("fsl-domain-effect.v0"),
     message: MessageExpectation::Absent,
-    exact_stdout: StdoutExpectation::AnyText,
-};
+});
 
 /// See [`ANALYZED_NAME_FALSE_GREEN`]: this is the same #796 false-negative
 /// soundness defect and is pinned solely to detect change, not to approve it.
-const EXPANDED_NAME_FALSE_GREEN: Expectation = Expectation {
-    payload: Payload::Text,
-    result: ExpectedField::Absent,
-    kind: ExpectedField::Absent,
-    location: LocationShape::Absent,
-    diagnostic: Diagnostic::None,
+const EXPANDED_NAME_FALSE_GREEN: Expectation = Expectation::Text {
     exit: 0,
-    dialect: ExpectedField::Absent,
-    message: MessageExpectation::Absent,
-    exact_stdout: StdoutExpectation::Exact(
-        r#"spec InvalidUnknownName "domain: generated from fsl-domain/fsl-effect" {
+    exact_stdout: r#"spec InvalidUnknownName "domain: generated from fsl-domain/fsl-effect" {
   enum Status { Status_Draft, Status_Approved }
   state {
     order_status: Status,
@@ -794,13 +786,23 @@ const EXPANDED_NAME_FALSE_GREEN: Expectation = Expectation {
   terminal { false }
 }
 "#,
-    ),
 };
 
-const CAUSAL_PARSE_WITHOUT_DIAGNOSTIC: Expectation = Expectation {
+const CAUSAL_PARSE_WITHOUT_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectation {
     diagnostic: Diagnostic::None,
-    ..PARSE_UNIFORM
-};
+    ..PARSE_JSON
+});
+const CAUSAL_NAME_WITH_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectation {
+    diagnostic: Diagnostic::Alias("causal_unknown_reference"),
+    message: MessageExpectation::OmitsInput,
+    ..SEMANTIC_JSON
+});
+const DOCUMENT_TYPE_WITHOUT_INPUT_PATH: Expectation = Expectation::Json(JsonExpectation {
+    kind: ExpectedField::Exact("type"),
+    diagnostic: Diagnostic::None,
+    message: MessageExpectation::OmitsInput,
+    ..SEMANTIC_JSON
+});
 
 const NO_COVERAGE: &[FailureCoverage] = &[];
 const NOT_APPLICABLE_PARSE_GUARD_NAME: &[NotApplicable] = &[
@@ -817,36 +819,102 @@ const NOT_APPLICABLE_PARSE_GUARD_NAME: &[NotApplicable] = &[
         reason: "this command has no FSL source frontend input",
     },
 ];
-const NOT_APPLICABLE_GUARD_AND_NAME: &[NotApplicable] = &[
+const AI_COMPAT_NOT_APPLICABLE_GUARD_AND_NAME: &[NotApplicable] = &[
     NotApplicable {
         class: FailureClass::Guard,
-        reason: "the command's #781 contract is parser-only; its command-specific phase does not share the bounded lowering-guard matrix",
+        reason: "run_ai_compat parses an ai_component or project then projects a compatibility profile; it never calls run_verify or a kernel lowering guard",
     },
     NotApplicable {
         class: FailureClass::Name,
-        reason: "the command's #781 contract is parser-only; its command-specific phase does not share the bounded name-resolution matrix",
+        reason: "run_ai_compat resolves compatibility-profile declarations only and never invokes the kernel model name resolver",
     },
 ];
-const DOCUMENT_NOT_APPLICABLE_GUARD_AND_NAME: &[NotApplicable] = &[
+const AI_DRIFT_NOT_APPLICABLE_GUARD_AND_NAME: &[NotApplicable] = &[
     NotApplicable {
         class: FailureClass::Guard,
-        reason: "the document projection path rejects the source at its adapter boundary before the shared lowering guard is reached",
+        reason: "run_ai_drift loads an ai_project and evaluates observed evidence; it never lowers an ai_component to the kernel",
     },
     NotApplicable {
         class: FailureClass::Name,
-        reason: "the document projection path rejects the source at its adapter boundary before the shared name resolver is reached",
+        reason: "run_ai_drift selects observed-property declarations and never invokes the kernel model name resolver",
     },
 ];
+const AI_EVAL_NOT_APPLICABLE_GUARD_AND_NAME: &[NotApplicable] = &[
+    NotApplicable {
+        class: FailureClass::Guard,
+        reason: "run_ai_eval loads an ai_project and evaluates statistical records; it has no ai_component-to-kernel lowering phase",
+    },
+    NotApplicable {
+        class: FailureClass::Name,
+        reason: "run_ai_eval resolves statistical-property declarations only and never invokes the kernel model name resolver",
+    },
+];
+const AI_REGRESS_NOT_APPLICABLE_GUARD_AND_NAME: &[NotApplicable] = &[
+    NotApplicable {
+        class: FailureClass::Guard,
+        reason: "run_ai_regress loads an ai_project and evaluates migration records; it has no ai_component-to-kernel lowering phase",
+    },
+    NotApplicable {
+        class: FailureClass::Name,
+        reason: "run_ai_regress resolves migration declarations only and never invokes the kernel model name resolver",
+    },
+];
+const AI_REPLAY_NOT_APPLICABLE_GUARD_AND_NAME: &[NotApplicable] = &[
+    NotApplicable {
+        class: FailureClass::Guard,
+        reason: "run_ai_replay parses an ai_component or project and compares event logs; it never lowers the source to a kernel model",
+    },
+    NotApplicable {
+        class: FailureClass::Name,
+        reason: "run_ai_replay resolves declared runtime component fields and never invokes the kernel model name resolver",
+    },
+];
+const DB_OBSERVE_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
+    class: FailureClass::Guard,
+    reason: "run_db_observe parses and validates dbsystem references, then compares observation events; unlike run_db_check it never calls run_verify and has no kernel lowering guard",
+}];
+const CAUSAL_ANALYZE_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
+    class: FailureClass::Guard,
+    reason: "run_causal_analyze builds the causal model and review projection but has no causal-to-kernel lowering guard for its source document",
+}];
+const CAUSAL_CHECK_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
+    class: FailureClass::Guard,
+    reason: "run_causal_check builds and checks the causal model directly; the causal source has no kernel lowering guard phase",
+}];
+const CAUSAL_DIFF_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
+    class: FailureClass::Guard,
+    reason: "run_causal_diff builds two causal models and compares their projections; neither causal source is lowered through a kernel guard",
+}];
+const CAUSAL_LEDGER_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
+    class: FailureClass::Guard,
+    reason: "run_causal_ledger builds a causal model and evidence ledger without lowering the causal source to a kernel model",
+}];
+const CAUSAL_OBSERVE_EXPECTATIONS_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
+    class: FailureClass::Guard,
+    reason: "run_causal_observe_expectations compiles causal expectations and reads evidence; its source path has no kernel lowering guard",
+}];
+const CAUSAL_VERIFY_EXPECTATIONS_NOT_APPLICABLE_GUARD: &[NotApplicable] = &[NotApplicable {
+    class: FailureClass::Guard,
+    reason: "run_causal_verify_expectations compiles causal expectations and verifies them against imports, not by lowering the causal source through a kernel guard",
+}];
 const AI_PARSE_COVERAGE: &[FailureCoverage] = &[FailureCoverage {
     class: FailureClass::Parse,
     fixture: PARSE_AI_FIXTURE,
     uniform: PARSE_UNIFORM,
 }];
-const CAUSAL_PARSE_COVERAGE: &[FailureCoverage] = &[FailureCoverage {
-    class: FailureClass::Parse,
-    fixture: PARSE_CAUSAL_FIXTURE,
-    uniform: PARSE_UNIFORM,
-}];
+const AI_COVERAGE: &[FailureCoverage] = &[
+    AI_PARSE_COVERAGE[0],
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: AI_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+];
 const PARSE_KERNEL_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
         class: FailureClass::Parse,
@@ -864,11 +932,23 @@ const PARSE_KERNEL_COVERAGE: &[FailureCoverage] = &[
         uniform: SEMANTIC_UNIFORM,
     },
 ];
-const DOCUMENT_PARSE_COVERAGE: &[FailureCoverage] = &[FailureCoverage {
-    class: FailureClass::Parse,
-    fixture: PARSE_KERNEL_FIXTURE,
-    uniform: PARSE_UNIFORM,
-}];
+const DOCUMENT_COVERAGE: &[FailureCoverage] = &[
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_KERNEL_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: DOCUMENT_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: DOCUMENT_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH,
+    },
+];
 const CHECK_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
         class: FailureClass::Parse,
@@ -887,16 +967,81 @@ const CHECK_COVERAGE: &[FailureCoverage] = &[
     },
 ];
 const VERIFY_COVERAGE: &[FailureCoverage] = CHECK_COVERAGE;
-const DB_PARSE_COVERAGE: &[FailureCoverage] = &[FailureCoverage {
-    class: FailureClass::Parse,
-    fixture: PARSE_DB_FIXTURE,
-    uniform: PARSE_UNIFORM,
-}];
-const APPROVAL_PARSE_COVERAGE: &[FailureCoverage] = &[FailureCoverage {
-    class: FailureClass::Parse,
-    fixture: PARSE_KERNEL_FIXTURE,
-    uniform: PARSE_UNIFORM,
-}];
+const DB_CHECK_COVERAGE: &[FailureCoverage] = &[
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_DB_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: DB_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: DB_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+];
+const DB_OBSERVE_COVERAGE: &[FailureCoverage] = &[
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_DB_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: DB_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+];
+const APPROVAL_CREATE_COVERAGE: &[FailureCoverage] = &[
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_KERNEL_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: GUARD_FIXTURE,
+        uniform: SEMANTIC_WITH_INPUT_PATH,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: NAME_FIXTURE,
+        uniform: SEMANTIC_UNIFORM,
+    },
+];
+const APPROVAL_RECORD_COVERAGE: &[FailureCoverage] = &[
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_KERNEL_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+];
+const CAUSAL_COVERAGE: &[FailureCoverage] = &[
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_CAUSAL_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: CAUSAL_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH,
+    },
+];
 const DOMAIN_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
         class: FailureClass::Parse,
@@ -1107,6 +1252,48 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "#780"
     ),
     pin!(
+        FailureClass::Name,
+        "causal analyze",
+        CAUSAL_NAME_FIXTURE,
+        CAUSAL_NAME_WITH_DIAGNOSTIC,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Name,
+        "causal check",
+        CAUSAL_NAME_FIXTURE,
+        CAUSAL_NAME_WITH_DIAGNOSTIC,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Name,
+        "causal diff",
+        CAUSAL_NAME_FIXTURE,
+        CAUSAL_NAME_WITH_DIAGNOSTIC,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Name,
+        "causal ledger",
+        CAUSAL_NAME_FIXTURE,
+        CAUSAL_NAME_WITH_DIAGNOSTIC,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Name,
+        "causal observe-expectations",
+        CAUSAL_NAME_FIXTURE,
+        CAUSAL_NAME_WITH_DIAGNOSTIC,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Name,
+        "causal verify-expectations",
+        CAUSAL_NAME_FIXTURE,
+        CAUSAL_NAME_WITH_DIAGNOSTIC,
+        "#780"
+    ),
+    pin!(
         FailureClass::Parse,
         "approval check",
         PARSE_KERNEL_FIXTURE,
@@ -1118,6 +1305,27 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "approval diff",
         PARSE_KERNEL_FIXTURE,
         SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Name,
+        "document check",
+        DOCUMENT_NAME_FIXTURE,
+        DOCUMENT_TYPE_WITHOUT_INPUT_PATH,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Name,
+        "document claims",
+        DOCUMENT_NAME_FIXTURE,
+        DOCUMENT_TYPE_WITHOUT_INPUT_PATH,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Name,
+        "document generate",
+        DOCUMENT_NAME_FIXTURE,
+        DOCUMENT_TYPE_WITHOUT_INPUT_PATH,
         "#780"
     ),
     pin!(
@@ -1508,7 +1716,62 @@ fn class_classification_count(entry: &CommandRegistration, class: FailureClass) 
             .count()
 }
 
-fn invoke(command: &str, fixture: &str) -> Vec<String> {
+fn approval_record(fixture: &str) -> PathBuf {
+    let git = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(workspace_root())
+        .output()
+        .expect("read current checkout commit");
+    assert!(
+        git.status.success(),
+        "git rev-parse HEAD failed: {}",
+        String::from_utf8_lossy(&git.stderr)
+    );
+    let git_commit = String::from_utf8(git.stdout)
+        .expect("git commit is UTF-8")
+        .trim()
+        .to_owned();
+    let sequence = APPROVAL_RECORD_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "fslc-error-envelope-approval-{}-{sequence}.json",
+        std::process::id()
+    ));
+    let record = serde_json::json!({
+        "schema": "fslc.approval.v1",
+        "spec": {
+            "path": fixture,
+            "digest_algorithm": "fsl-kernel-ast-v1+sha256",
+            "digest": format!("sha256:{}", "0".repeat(64)),
+            "git_commit": git_commit,
+        },
+        "target": {
+            "kind": "ledger",
+            "path": EMPTY_RECORDS,
+            "digest_algorithm": "fsl-rendered-artifact-v1+sha256",
+            "digest": format!("sha256:{}", "0".repeat(64)),
+            "generator": "fslc",
+            "generator_version": env!("CARGO_PKG_VERSION"),
+            "inputs": {
+                "depth": 8,
+                "deadlock": "ignore",
+                "engine": "bmc",
+            },
+        },
+        "approval": {
+            "approver": "envelope-parity",
+            "approved_at": "2026-08-13T00:00:00Z",
+            "requirements": ["REQ-ENVELOPE"],
+        },
+    });
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&record).expect("serialize approval record"),
+    )
+    .unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
+    path
+}
+
+fn invoke(command: &str, fixture: &str, approval_record: Option<&Path>) -> Vec<String> {
     let ParityScope::SpecPath { invoke } = registration(command).scope else {
         panic!("{command} is not a runnable SpecPath matrix command");
     };
@@ -1518,11 +1781,10 @@ fn invoke(command: &str, fixture: &str) -> Vec<String> {
             if *argument == SPEC_PLACEHOLDER {
                 fixture.to_owned()
             } else if *argument == APPROVAL_RECORD_PLACEHOLDER {
-                match fixture {
-                    PARSE_KERNEL_FIXTURE => APPROVAL_PARSE_RECORD.to_owned(),
-                    LITERATE_FIXTURE => APPROVAL_LITERATE_RECORD.to_owned(),
-                    _ => panic!("{command} has no approval record for fixture {fixture}"),
-                }
+                approval_record
+                    .unwrap_or_else(|| panic!("{command} needs an approval record"))
+                    .display()
+                    .to_string()
             } else if *argument == DOCUMENT_ARTIFACT_PLACEHOLDER {
                 DOCUMENT_ARTIFACT.to_owned()
             } else {
@@ -1533,12 +1795,22 @@ fn invoke(command: &str, fixture: &str) -> Vec<String> {
 }
 
 fn run(command: &str, fixture: &str) -> Actual {
-    let arguments = invoke(command, fixture);
+    let temporary_record = match registration(command).scope {
+        ParityScope::SpecPath { invoke } if invoke.contains(&APPROVAL_RECORD_PLACEHOLDER) => {
+            Some(approval_record(fixture))
+        }
+        _ => None,
+    };
+    let arguments = invoke(command, fixture, temporary_record.as_deref());
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(&arguments)
         .current_dir(workspace_root())
         .output()
         .unwrap_or_else(|error| panic!("run {command} {arguments:?}: {error}"));
+    if let Some(record) = temporary_record {
+        std::fs::remove_file(&record)
+            .unwrap_or_else(|error| panic!("remove {}: {error}", record.display()));
+    }
     Actual {
         json: serde_json::from_slice(&output.stdout).ok(),
         stdout: String::from_utf8(output.stdout)
@@ -1548,20 +1820,14 @@ fn run(command: &str, fixture: &str) -> Actual {
 }
 
 fn matches_expectation(actual: &Actual, expected: Expectation, fixture: &str) -> bool {
-    if actual.exit != expected.exit {
-        return false;
-    }
-    match expected.payload {
-        Payload::Text => {
-            if actual.json.is_some() {
+    match expected {
+        Expectation::Text { exit, exact_stdout } => {
+            actual.exit == exit && actual.json.is_none() && actual.stdout == exact_stdout
+        }
+        Expectation::Json(expected) => {
+            if actual.exit != expected.exit {
                 return false;
             }
-            match expected.exact_stdout {
-                StdoutExpectation::AnyText => true,
-                StdoutExpectation::Exact(expected_stdout) => actual.stdout == expected_stdout,
-            }
-        }
-        Payload::Json => {
             let Some(output) = &actual.json else {
                 return false;
             };
@@ -1752,6 +2018,11 @@ fn parity_registry_exclusions_are_explicit_and_runnable_entries_have_a_spec_slot
                     "{} lacks a {SPEC_PLACEHOLDER} input slot",
                     entry.key
                 );
+                assert!(
+                    !entry.coverage.is_empty(),
+                    "{} is a SpecPath command but has no executable failure-class coverage",
+                    entry.key
+                );
             }
             ParityScope::Excluded { reason } => assert!(
                 !reason.trim().is_empty(),
@@ -1816,6 +2087,27 @@ fn missing_classification_spec_path_is_rejected() {
 }
 
 #[test]
+#[should_panic(expected = "has no executable failure-class coverage")]
+fn all_reasoned_exclusions_spec_path_is_rejected() {
+    let reasoned_only = CommandRegistration {
+        key: "test all reasoned exclusions",
+        scope: ParityScope::SpecPath {
+            invoke: &["test", SPEC_PLACEHOLDER],
+        },
+        literate: LiterateCoverage::NotApplicable {
+            reason: "calibration control",
+        },
+        coverage: NO_COVERAGE,
+        not_applicable: NOT_APPLICABLE_PARSE_GUARD_NAME,
+    };
+    assert!(
+        !reasoned_only.coverage.is_empty(),
+        "{} is a SpecPath command but has no executable failure-class coverage",
+        reasoned_only.key
+    );
+}
+
+#[test]
 fn parse_errors_are_uniform_or_pinned_across_frontend_siblings() {
     for cell in cells(FailureClass::Parse) {
         assert_cell(cell);
@@ -1830,7 +2122,7 @@ fn lowering_guard_errors_are_uniform_or_pinned_across_frontend_siblings() {
 }
 
 #[test]
-fn unresolved_identifier_errors_are_uniform_or_pinned_across_eight_entry_points() {
+fn unresolved_identifier_errors_are_uniform_or_pinned_across_frontend_siblings() {
     for cell in cells(FailureClass::Name) {
         assert_cell(cell);
     }
