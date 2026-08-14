@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+
+requirements EnvelopeParityDocumentLoweringGuard {
+  @requirement("REQ-DOCUMENT-002", "the lifecycle must declare its initial stage")
+  requirement REQ-DOCUMENT-002 "a requirement annotation reaches document projection" {
+    action record() {}
+  }
+
+  process Claim {
+    stages Draft, Approved
+  }
+}
+
+verify {
+  instances Claim = 1
+}

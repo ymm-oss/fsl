@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+
+causal EnvelopeParityUnknownCausalReference {
+  uses missing from "missing_spec.fsl"
+
+  timebase day
+  horizon 1
+}

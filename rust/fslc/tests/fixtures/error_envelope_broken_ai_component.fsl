@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
+ai_component EnvelopeParityBrokenAi {
+  model model_v1;
+  prompt prompt_v1;
+  input Request;
+  output Response;
+
+  this is intentionally not valid ai_component syntax
+}

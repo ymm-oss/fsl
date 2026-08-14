@@ -104,6 +104,7 @@ fn every_spec_reading_command_reports_the_same_corrected_location() {
     ] {
         let (value, status) = run(&args);
         assert_eq!(status, 2, "{args:?}: {value}");
+        assert_eq!(value["kind"], "semantics", "{args:?}: {value}");
         assert_eq!(value["loc"]["line"], 13, "{args:?}: {value}");
         assert_eq!(value["loc"]["column"], 3, "{args:?}: {value}");
         assert!(

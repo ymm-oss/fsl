@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// After the artifact frontmatter preflight, the requirements-document approval
+// path must reach the shared FSL parser before fresh-render or conformance validation.
+spec EnvelopeParityBrokenApprovalRequirementsDocument {
+  state { x: Int }
+  init { x = }
+}
