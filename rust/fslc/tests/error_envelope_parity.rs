@@ -769,11 +769,6 @@ const PARSE_WITH_DIAGNOSTIC_ALIAS: Expectation = Expectation::Json(JsonExpectati
     diagnostic: Diagnostic::Alias("parse"),
     ..PARSE_JSON
 });
-const PARSE_WITHOUT_LOCATION_OR_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectation {
-    location: LocationShape::Absent,
-    diagnostic: Diagnostic::None,
-    ..PARSE_JSON
-});
 const LITERATE_UNIFORM: Expectation = Expectation::Json(JsonExpectation {
     result: ExpectedField::Exact("error"),
     kind: ExpectedField::Exact("usage"),
@@ -1294,18 +1289,6 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
     // #800 tracks these product parse-path false negatives and envelope
     // differences. They are not accepted behavior: replay reports success
     // for a malformed project while its siblings reject it inconsistently.
-    // #780 tracks nonuniform product Parse envelopes. #801 separately tracks
-    // deriving the hand-authored input-shape population from an independent
-    // owner; resolving that structural task alone would not make these cells
-    // uniform.
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Parse,
-        "check",
-        PARSE_AI_PROJECT_FIXTURE,
-        PARSE_WITHOUT_LOCATION_OR_DIAGNOSTIC,
-        "#780"
-    ),
     pin!(
         shape: InputShape::Project;
         FailureClass::Parse,
