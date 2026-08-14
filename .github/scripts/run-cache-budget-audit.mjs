@@ -229,9 +229,10 @@ export function createCacheAuditApi({ token, repo, fetchImpl = fetch }) {
     if (rawRemaining === null || rawRemaining.trim() === "") {
       throw new Error(`GET ${path} returned no valid x-ratelimit-remaining header`);
     }
-    // Header whitespace is permitted by HTTP field-value grammar, but the
-    // value itself must be an ASCII decimal integer; Number() would otherwise
-    // accept non-decimal syntaxes such as 0x3e8, 1e3, and 0b1111101000.
+    // HTTP message syntax removes surrounding OWS before field-value
+    // evaluation, but the value itself must be an ASCII decimal integer;
+    // Number() would otherwise accept non-decimal syntaxes such as 0x3e8,
+    // 1e3, and 0b1111101000.
     const normalizedRemaining = rawRemaining.trim();
     if (!/^[0-9]+$/.test(normalizedRemaining)) {
       throw new Error(`GET ${path} returned no valid x-ratelimit-remaining header`);

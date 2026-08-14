@@ -152,6 +152,12 @@ function childEnvironment(overrides = {}) {
   return environment;
 }
 
+test("child subprocess environments never inherit V8 coverage output", () => {
+  const environment = childEnvironment({ NODE_V8_COVERAGE: "sentinel" });
+
+  assert.equal(Object.hasOwn(environment, "NODE_V8_COVERAGE"), false);
+});
+
 function runExecutableRunner({ listing, usageBytes = usageOf(listing), remaining = "999" }) {
   // Run the actual CLI guard with a child-local fetch fixture. Importing after
   // assigning argv[1] enters the same `main()`/`process.exit` path as `node
@@ -1070,7 +1076,14 @@ test("rejecting: the executable runner exits nonzero and uses its default error 
 
 test("rejecting: the executable runner never emits PASS for malformed rate-limit header syntax", () => {
   const listing = withCacheIds(healthyListing(), 1);
-  for (const remaining of ["0x3e8", "1e3", "+1000", "0b1111101000"]) {
+  for (const remaining of [
+    "0x3e8",
+    "1e3",
+    "+1000",
+    "0b1111101000",
+    "9007199254740992",
+    "9".repeat(1_000),
+  ]) {
     const child = runExecutableRunner({ listing, remaining });
 
     assert.equal(child.error, undefined, remaining);
@@ -1175,6 +1188,8 @@ test("rejecting: API wrapper rejects HTTP failures and missing or invalid rate-l
     "1e3",
     "+1000",
     "0b1111101000",
+    "9007199254740992",
+    "9".repeat(1_000),
   ]) {
     const api = createCacheAuditApi({
       token: "test-token",
