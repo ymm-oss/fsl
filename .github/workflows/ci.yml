@@ -103,14 +103,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while, at the time of the
-          # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
+          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # current ref, base branch, and default branch; for a main-targeting pull request,
+          # base/default are both `main`, while sibling pull-request caches remain unreadable.
+          # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
-          # cold: measured +8 to +16 min per shard. Only `main` saves now, and every pull
-          # request can read `main` because it is the default branch. See
+          # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
+          # non-`pull_request` events. The live audit's created_at order has no documented
+          # tie-breaker; a tied boundary can produce a duplicate ID, rejected immediately, or
+          # different paired observations, which retry once and fail closed if still different;
+          # an identical mixed state can repeat as an undetectable residual. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -146,14 +149,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while, at the time of the
-          # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
+          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # current ref, base branch, and default branch; for a main-targeting pull request,
+          # base/default are both `main`, while sibling pull-request caches remain unreadable.
+          # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
-          # cold: measured +8 to +16 min per shard. Only `main` saves now, and every pull
-          # request can read `main` because it is the default branch. See
+          # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
+          # non-`pull_request` events. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -278,14 +281,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while, at the time of the
-          # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
+          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # current ref, base branch, and default branch; for a main-targeting pull request,
+          # base/default are both `main`, while sibling pull-request caches remain unreadable.
+          # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
-          # cold: measured +8 to +16 min per shard. Only `main` saves now, and every pull
-          # request can read `main` because it is the default branch. See
+          # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
+          # non-`pull_request` events. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -329,16 +332,23 @@ jobs:
     # below gives: a gate that runs out of wall clock reports a failure it did not
     # observe. Warm measured: 32m56s / 32m45s (2026-08-04), 31m49s / 29m44s / 26m56s
     # (2026-08-05) -- comfortably inside the old 40-minute budget. The scheduled
-    # `windows-latest` run then hit exactly 40m0x and was cancelled on every one of
-    # six consecutive occasions from 2026-08-07 00:23 through 2026-08-11: a step
-    # change, not gradual drift, and neither a regression nor added test volume. The
+    # `windows-latest` run then timed out at the configured 40-minute limit on every one of
+    # six consecutive occasions from 2026-08-07 00:23 through 2026-08-11: cache absence was
+    # an observed material correlate. These observations span revisions and test volumes, so
+    # they do not exclude either contribution. The
     # decisive contrast is the `Swatinem/rust-cache` restore step itself: the last
     # success (2026-08-05) reported `Cache hit for: v0-rust-rust-native-z3-Windows_NT-x64-...`
     # and restored 591 MiB; the 2026-08-11 cancellation reported `No cache found.`
     # instead. The cache had been evicted by pull-request-scoped caches this same
     # commit's other changes close off (see the `Swatinem/rust-cache` step below and
-    # `merge-readiness.yml`); 60 minutes covers a genuine cold vendored-Z3 build on
-    # this matrix, matching the headroom already given to the Linux promotion lane.
+    # `merge-readiness.yml`). Run 31565897267 attempt 1 then ran cold from 05:14:37Z to
+    # 06:16:23Z (61m46s) and was cancelled, so 60 minutes did not cover this cold
+    # vendored-Z3 build at the current tree and test volume. A prior cold success,
+    # run 30156566539 attempt 1 / job 89675360913, completed in 37m08s on 2026-07-25, but
+    # that is a different tree and test volume. Its post step saved a cache, and
+    # the next Windows run (31570480618 attempt 1) was warm and completed in 34m39s; this
+    # is a recovery path, not evidence that the current tree has a successful
+    # cold-build duration within 60 minutes.
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -352,36 +362,30 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while, at the time of the
-          # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
+          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # current ref, base branch, and default branch; for a main-targeting pull request,
+          # base/default are both `main`, while sibling pull-request caches remain unreadable.
+          # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
-          # cold: measured +8 to +16 min per shard. Only `main` saves now, and every pull
-          # request can read `main` because it is the default branch. See
+          # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
+          # non-`pull_request` events. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
-          # Save even when the job fails or is cancelled by the timeout above. Without
-          # this the lane cannot recover from a cold start: a cold scratch build exceeds
-          # the job budget, the job is cancelled, `rust-cache`'s post step is skipped
-          # (`9 skipped Post Run Swatinem/rust-cache@v2`, observed on run 31527197290),
-          # and the next run is cold again -- the cache can then only be created by a
-          # run that succeeds, and a run can only succeed once the cache exists. This is
-          # the same fix already applied to the `semantic-mutation` lanes below for an
-          # identical deadlock. The action's own `post-if: success() ||
-          # env.CACHE_ON_FAILURE == 'true'` does not distinguish a cancelled conclusion
-          # from a failed one, which reads as support for this saving through a timeout
-          # cancellation and not only an ordinary step failure -- but that reading is
-          # inference from the condition text, not a direct observation: commit 877fe8c
-          # (#752), which added this same flag to the semantic-mutation lanes, also
-          # raised those lanes' timeouts in the same commit, so the `cancelled`
-          # conclusions on issues #721/#678 stopping afterward is confounded with more
-          # budget, not isolated evidence for `cache-on-failure` alone. No run in this
-          # repository's history has been observed saving specifically after a
-          # timeout-triggered cancellation; see docs/DESIGN-ci.md, "Actions cache
-          # budget", for what is and is not established here.
+          # Run 31527197290 attempt 1's old 40-minute cold Windows job was cancelled and its
+          # post step was skipped (`9 skipped Post Run Swatinem/rust-cache@v2`).
+          # `cache-on-failure: true` enables rust-cache's non-success post-save path;
+          # `post-if: success() || env.CACHE_ON_FAILURE == 'true'` is mechanism
+          # evidence that it includes cancellation. Run 31565897267 attempt 1's cancelled
+          # Windows job's step 9
+          # (`Post Run Swatinem/rust-cache@v2`) succeeded and created
+          # `v0-rust-rust-native-z3-Windows_NT-x64-af4551b0-09fbaf53` at
+          # 2026-08-12T06:16:19.271024Z (619,429,238 B), four seconds before the
+          # job completed. That changeset also raised the timeout from 40 to 60
+          # minutes, so the observed post-save does not isolate either change's
+          # contribution. Commit 877fe8c (#752) likewise paired the semantic-mutation
+          # flag with timeout increases; see docs/DESIGN-ci.md, "Actions cache budget".
           cache-on-failure: true
 
       - name: Test pinned native solver and BMC crates
@@ -409,14 +413,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while, at the time of the
-          # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
+          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # current ref, base branch, and default branch; for a main-targeting pull request,
+          # base/default are both `main`, while sibling pull-request caches remain unreadable.
+          # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
-          # cold: measured +8 to +16 min per shard. Only `main` saves now, and every pull
-          # request can read `main` because it is the default branch. See
+          # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
+          # non-`pull_request` events. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
@@ -464,24 +468,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. A pull request's cache is
-          # readable only by that same pull request -- Actions caches are ref-scoped, so
-          # sibling pull requests cannot use each other's -- while, at the time of the
-          # 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
+          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # current ref, base branch, and default branch; for a main-targeting pull request,
+          # base/default are both `main`, while sibling pull-request caches remain unreadable.
+          # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
-          # cold: measured +8 to +16 min per shard. Only `main` saves now, and every pull
-          # request can read `main` because it is the default branch. See
+          # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
+          # non-`pull_request` events. See
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
           shared-key: semantic-mutation
-          # Save even when the job fails. Without this the lane cannot recover from a
-          # cold start: a cold scratch build exceeds the job budget, the job is
-          # cancelled, `rust-cache` skips saving, and the next run is cold again. The
-          # cache can then only be created by a run that succeeds, and a run can only
-          # succeed once the cache exists. Measured on `main` and on three pull
-          # requests; see docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # Under the old 30-minute budget, a cold operators run was cancelled at
+          # 30.2 minutes and its post save was skipped. `cache-on-failure: true`
+          # enables rust-cache's post-save path for a non-success outcome. Commit
+          # 877fe8c simultaneously raised this timeout from 30 to 50 minutes, so
+          # subsequent outcomes do not isolate either change's contribution. See
+          # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           cache-on-failure: true
 
       - name: Calibrate curated fault-operator shard
@@ -520,22 +524,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Restore-only: this job never saves the `semantic-mutation` key.
-          # `Swatinem/rust-cache` saves a key once, and whichever job reaches its
-          # post step first wins -- for this key that is always one of the
-          # `semantic-mutation-operators` shards below, which run in parallel and
-          # finish in single-digit minutes against this job's own tens of
-          # minutes, so this job has never actually won that race and its
-          # `cache-on-failure: true` was accordingly dead configuration. This
-          # job's only rust/target-scoped output is its evidence directory
-          # (`rust/target/semantic-mutation.*`, kept under `rust/target` solely
-          # because the artifact-upload glob below requires it), which must not
-          # enter the cache at all. The one thing this job could gain from its
-          # own save -- a warm `~/.cargo/bin/cargo-mutants` -- it already does not
-          # have today, since the operators shards' save always wins first; going
-          # restore-only changes nothing about that and removes the possibility
-          # of this job's evidence directory leaking into a future save. See
-          # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # Restore-only: `save-if: false` makes this job unable to save the
+          # `semantic-mutation` key, so the save-enabled operators shards are its
+          # only configured saver. This is a behavior change, not a historical
+          # inevitability: on run 31086907528 attempt 1, mutants job 92568586155
+          # restored `No cache found.`, then its successful post step uploaded
+          # 2,922,378,363 B while all three operators shards were cancelled and
+          # their post steps skipped. This job's rust/target-scoped evidence
+          # (`rust/target/semantic-mutation.*`, kept there solely because the
+          # artifact-upload glob below requires it) must not enter a future cache
+          # save. `cache-on-failure` is absent because `save-if: false` bypasses
+          # the save path. See docs/DESIGN-ci.md, "Actions cache budget", and
+          # issue #747.
           save-if: false
           workspaces: rust -> target
           shared-key: semantic-mutation
@@ -686,9 +686,18 @@ jobs:
           # saved it; restoring `rust-workspace` here loses nothing this job needed a
           # dedicated key for. This removes the dedicated `fsl-logic` key from the shared
           # budget -- measured at 1,470,489,603 B (1.369 GiB) before this change -- once a
-          # human deletes the now-orphaned entry. Baseline warm duration: 2m48s-2m53s
-          # (scheduled runs 2026-08-09/10/11); TODO: record this job's first post-change
-          # run duration here once observed.
+          # human deletes the now-orphaned entry. The first observed post-change run was the
+          # scheduled FSL Logic Test job in push run 31565897267 attempt 1: it completed in 2m54s after
+          # logging `Cache hit for: v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53` at
+          # 05:14:43Z and `Restored from cache key
+          # "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.` at
+          # 05:15:05Z. Run 31570480618 attempt 1 was a second observed full match, completing in 3m02s
+          # after logging `Cache hit for:
+          # v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53` at 06:34:15Z and
+          # `Restored from cache key "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53"
+          # full match: true.` at 06:34:36Z. The former dedicated-key warm runs took
+          # 2m48s / 2m53s / 2m51s on 2026-08-09/10/11; the full-match log, not duration,
+          # is the evidence of the shared-key restore.
           shared-key: rust-workspace
           save-if: false
           workspaces: rust -> target

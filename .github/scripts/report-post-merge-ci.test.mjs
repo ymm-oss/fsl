@@ -4,8 +4,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  POST_MERGE_LABEL,
-  occurrenceMarker,
   reconcilePostMerge,
 } from "./report-post-merge-ci.mjs";
 
@@ -135,7 +133,7 @@ test("creates one actionable issue for a failed job", async () => {
     closed: 0,
     failures: 1,
   });
-  assert.deepEqual(client.labels, new Set([POST_MERGE_LABEL]));
+  assert.deepEqual(client.labels, new Set(["ci/post-merge"]));
   assert.equal(client.issues.length, 1);
   assert.match(client.issues[0].title, /windows-latest/);
   assert.doesNotMatch(client.issues[0].title, /^.*product gate.*$/);
@@ -175,7 +173,7 @@ test("deduplicates the same run and comments once for a later recurrence", async
 
   assert.equal(client.issues.length, 1);
   assert.equal(client.comments.length, 1);
-  assert.ok(client.comments[0].body.includes(occurrenceMarker(42, 91)));
+  assert.ok(client.comments[0].body.includes("<!-- post-merge-ci-occurrence:42:OTE -->"));
 });
 
 test("closes the matching open issue after the job recovers", async () => {

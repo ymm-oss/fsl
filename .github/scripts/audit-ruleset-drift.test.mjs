@@ -5,13 +5,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
-  RULESET_DRIFT_LABEL,
   auditAllRulesets,
   auditRuleset,
   compareRuleset,
   fetchObservation,
   reconcileRulesetDrift,
-  rulesetDriftMarker,
   validateContract,
 } from "./audit-ruleset-drift.mjs";
 
@@ -366,7 +364,7 @@ test("live: an injected fetch failure is api-unreadable and still creates the fa
   assert.equal(comparison.findings[0].class, "api-unreadable");
   assert.equal(reconcile.action, "created");
   assert.equal(issueClient.issues.length, 1);
-  assert.ok(issueClient.issues[0].body.includes(rulesetDriftMarker(String(contractEntry.ruleset_id))));
+  assert.ok(issueClient.issues[0].body.includes("<!-- ruleset-drift:19090811 -->"));
 });
 
 test("live: a 404 is ruleset-missing and still creates the failure issue", async () => {
@@ -449,7 +447,7 @@ test("issue lifecycle: creates one issue on first drift", async () => {
   });
   assert.equal(result.action, "created");
   assert.equal(client.issues.length, 1);
-  assert.ok(client.labels.has(RULESET_DRIFT_LABEL));
+  assert.ok(client.labels.has("ci/ruleset-drift"));
   assert.equal(client.issues[0].title, TITLE);
 });
 
