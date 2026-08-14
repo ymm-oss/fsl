@@ -242,12 +242,19 @@ fn verify_against_two_snapshot_fifo(engine: &str, edition: &str) -> (Value, i32)
 #[cfg(unix)]
 #[test]
 fn verify_reads_one_fifo_snapshot_for_bmc_induction_and_liveness() {
-    for (engine, edition) in [("bmc", "current"), ("induction", "next")] {
+    for (engine, edition, expected_result) in [
+        ("bmc", "current", "verified"),
+        ("induction", "next", "proved"),
+    ] {
         let (output, status) = verify_against_two_snapshot_fifo(engine, edition);
         assert_eq!(status, 0, "{engine}: {output:#}");
-        assert_ne!(
-            output["result"], "error",
-            "{engine} must verify valid source A, not invalid source B: {output:#}"
+        assert_eq!(
+            output["result"], expected_result,
+            "{engine} must verify source A, not invalid source B: {output:#}"
+        );
+        assert_eq!(
+            output["leads_to"]["Served"]["checked_to_depth"], 4,
+            "{engine} must execute source A's leadsTo check: {output:#}"
         );
     }
 }

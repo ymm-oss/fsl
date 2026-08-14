@@ -16416,7 +16416,7 @@ spec InitTraceability {
         let (_kernel, model) =
             load_kernel_model_from_source(&fixture.path, &captured).expect("lower source A");
         assert!(
-            model.state.contains_key("pending"),
+            model.state.iter().any(|(name, _)| name == "pending"),
             "kernel model must retain source A's state"
         );
         assert_eq!(
@@ -16437,8 +16437,16 @@ spec InitTraceability {
             "source A must retain its liveness property"
         );
 
-        for engine in ["bmc", "induction"] {
-            let (output, status) = run_verify_from_source(
+        // The in-process control covers every public engine × edition
+        // combination. `edition=next` additionally proves that the
+        // post-processing stage retains the already captured source.
+        for (engine, edition, expected_result) in [
+            ("bmc", "current", "verified"),
+            ("bmc", "next", "verified"),
+            ("induction", "current", "proved"),
+            ("induction", "next", "proved"),
+        ] {
+            let result = run_verify_from_source(
                 &fixture.path,
                 &captured,
                 4,
@@ -16447,11 +16455,26 @@ spec InitTraceability {
                 DEFAULT_EXPLICIT_BUDGET,
                 1,
             );
-            assert_eq!(status, 0, "{engine} must verify source A: {output:#}");
-            assert_ne!(
-                output["result"], "error",
-                "{engine} must not observe replacement source B: {output:#}"
+            let (output, status) =
+                apply_domain_edition_from_source(result, &captured, &fixture.path, edition);
+            assert_eq!(
+                status, 0,
+                "{engine}/{edition} must verify source A: {output:#}"
             );
+            assert_eq!(
+                output["result"], expected_result,
+                "{engine}/{edition} must retain source A's verdict: {output:#}"
+            );
+            assert_eq!(
+                output["leads_to"]["Served"]["checked_to_depth"], 4,
+                "{engine}/{edition} must execute source A's leadsTo check: {output:#}"
+            );
+            if edition == "next" {
+                assert_eq!(
+                    output["edition"], "next",
+                    "{engine}/{edition} post-processing must use source A: {output:#}"
+                );
+            }
         }
     }
 
