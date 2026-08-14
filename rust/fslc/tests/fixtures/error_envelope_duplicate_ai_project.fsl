@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+
+dataset DuplicateRecords {
+  source "records.jsonl"
+}
+
+statistical_property DuplicateQuality {
+  target SupportAnswerAgent
+  dataset DuplicateRecords
+  require min_samples >= 0
+}
+
+statistical_property DuplicateQuality {
+  target SupportAnswerAgent
+  dataset DuplicateRecords
+  require min_samples >= 0
+}

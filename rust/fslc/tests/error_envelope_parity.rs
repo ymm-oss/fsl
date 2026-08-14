@@ -30,6 +30,8 @@ const PARSE_DB_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_broken_d
 const PARSE_AI_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_broken_ai_component.fsl";
 const PARSE_AI_PROJECT_FIXTURE: &str =
     "rust/fslc/tests/fixtures/error_envelope_broken_ai_project.fsl";
+const PARSE_AI_PROJECT_DUPLICATE_FIXTURE: &str =
+    "rust/fslc/tests/fixtures/error_envelope_duplicate_ai_project.fsl";
 const PARSE_CAUSAL_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_broken_causal.fsl";
 const PARSE_APPROVAL_REQUIREMENTS_DOCUMENT_FIXTURE: &str =
     "rust/fslc/tests/fixtures/error_envelope_broken_approval_requirements_document.fsl";
@@ -1216,7 +1218,7 @@ const CAUSAL_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
         class: FailureClass::Name,
         fixture: CAUSAL_NAME_FIXTURE,
-        uniform: SEMANTIC_WITHOUT_INPUT_PATH,
+        uniform: CAUSAL_NAME_WITH_DIAGNOSTIC,
     },
 ];
 const DOMAIN_COVERAGE: &[FailureCoverage] = &[
@@ -1292,14 +1294,6 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
     // #800 tracks these product parse-path false negatives and envelope
     // differences. They are not accepted behavior: replay reports success
     // for a malformed project while its siblings reject it inconsistently.
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Parse,
-        "ai check",
-        PARSE_AI_PROJECT_FIXTURE,
-        PARSE_WITHOUT_LOCATION_OR_DIAGNOSTIC,
-        "#800"
-    ),
     // #780 tracks nonuniform product Parse envelopes. #801 separately tracks
     // deriving the hand-authored input-shape population from an independent
     // owner; resolving that structural task alone would not make these cells
@@ -1310,48 +1304,6 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "check",
         PARSE_AI_PROJECT_FIXTURE,
         PARSE_WITHOUT_LOCATION_OR_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Name,
-        "causal analyze",
-        CAUSAL_NAME_FIXTURE,
-        CAUSAL_NAME_WITH_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Name,
-        "causal check",
-        CAUSAL_NAME_FIXTURE,
-        CAUSAL_NAME_WITH_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Name,
-        "causal diff",
-        CAUSAL_NAME_FIXTURE,
-        CAUSAL_NAME_WITH_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Name,
-        "causal ledger",
-        CAUSAL_NAME_FIXTURE,
-        CAUSAL_NAME_WITH_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Name,
-        "causal observe-expectations",
-        CAUSAL_NAME_FIXTURE,
-        CAUSAL_NAME_WITH_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Name,
-        "causal verify-expectations",
-        CAUSAL_NAME_FIXTURE,
-        CAUSAL_NAME_WITH_DIAGNOSTIC,
         "#780"
     ),
     pin!(
@@ -1970,7 +1922,7 @@ fn has_literate_not_applicable(entry: &CommandRegistration) -> bool {
 fn coverage_input_shape(command: &str, fixture: &str) -> InputShape {
     if matches!(command, "check" | "verify") {
         return match fixture {
-            PARSE_AI_PROJECT_FIXTURE => InputShape::Project,
+            PARSE_AI_PROJECT_FIXTURE | PARSE_AI_PROJECT_DUPLICATE_FIXTURE => InputShape::Project,
             PARSE_CAUSAL_FIXTURE => InputShape::Causal,
             _ => InputShape::Source,
         };
@@ -1980,6 +1932,7 @@ fn coverage_input_shape(command: &str, fixture: &str) -> InputShape {
     }
     if command.starts_with("ai ") {
         if fixture == PARSE_AI_PROJECT_FIXTURE
+            || fixture == PARSE_AI_PROJECT_DUPLICATE_FIXTURE
             || fixture == AI_PROJECT_GUARD_FIXTURE
             || fixture == AI_PROJECT_NAME_FIXTURE
         {
@@ -2610,6 +2563,64 @@ fn parse_errors_are_uniform_or_pinned_across_frontend_siblings() {
     for cell in cells(FailureClass::Parse) {
         assert_cell(cell);
     }
+}
+
+#[test]
+fn ai_project_parser_failures_keep_their_own_spans_across_evidence_commands() {
+    for fixture in [PARSE_AI_PROJECT_FIXTURE, PARSE_AI_PROJECT_DUPLICATE_FIXTURE] {
+        let outputs = ["ai check", "ai drift", "ai eval", "ai regress"]
+            .into_iter()
+            .map(|command| {
+                let actual = run(command, fixture);
+                assert_expectation(
+                    &actual,
+                    PARSE_UNIFORM,
+                    fixture,
+                    FailureClass::Parse,
+                    command,
+                );
+                actual.json.expect("parse error JSON envelope")
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            outputs.windows(2).all(|pair| pair[0] == pair[1]),
+            "{fixture} must retain one parser-owned envelope: {outputs:?}"
+        );
+        if fixture == PARSE_AI_PROJECT_DUPLICATE_FIXTURE {
+            assert_eq!(
+                outputs[0]["loc"],
+                serde_json::json!({"line": 13, "column": 1}),
+                "the duplicate declaration, not a preceding sibling, owns the diagnostic"
+            );
+            assert_eq!(
+                outputs[0]["message"],
+                "duplicate statistical_property 'DuplicateQuality' at 13:1"
+            );
+        }
+    }
+}
+
+#[test]
+fn surface_loader_read_failures_keep_the_legacy_semantic_envelope() {
+    let missing = "rust/fslc/tests/fixtures/error_envelope_missing_surface_input.fsl";
+    assert!(
+        !workspace_root().join(missing).exists(),
+        "{missing} is reserved as a missing-input calibration path"
+    );
+    let actual = run_from(
+        "domain analyze",
+        PARSE_DOMAIN_FIXTURE,
+        missing,
+        None,
+        &workspace_root(),
+    );
+    assert_eq!(actual.exit, 2, "{}", actual.stdout);
+    let output = actual.json.expect("missing input JSON envelope");
+    assert_eq!(output["result"], "error", "{output}");
+    assert_eq!(output["kind"], "semantics", "{output}");
+    assert!(output.get("loc").is_none(), "{output}");
+    assert!(output.get("diagnostic").is_none(), "{output}");
+    assert!(output.get("diagnostic_code").is_none(), "{output}");
 }
 
 #[test]

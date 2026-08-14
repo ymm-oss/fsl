@@ -1,2 +1,2 @@
-Fixed (#780): dialect CLI commands now preserve parse error kind, location, and
-`FSL-PARSE` diagnostic code through their specialized spec-loading boundaries.
+Partially fixed (#780): domain, DB, AI-component, AI-project evidence, approval,
+and causal command boundaries preserve parse error kind, location, and `FSL-PARSE`.

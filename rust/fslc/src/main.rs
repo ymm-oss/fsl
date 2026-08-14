@@ -5946,7 +5946,11 @@ fn load_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, Spe
     if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
         return parse_surface_document(path).map_err(SpecLoadError::unlocated_semantic);
     }
-    let source = read_spec_source(path)?;
+    // This loader's caller contract predates the typed `io` envelope. Keep a
+    // read failure distinct from a parse failure without widening #780 beyond
+    // its declared parse-only surface.
+    let source = std::fs::read_to_string(path)
+        .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))?;
     load_surface_document_from_source(&source)
 }
 
@@ -6390,10 +6394,13 @@ fn run_ai_project_check(source: &str, path: &Path) -> (Value, i32) {
         Ok(project) => project,
         Err(error) => {
             let mut output = error_output("parse", &error.message);
-            if let Some((line, column)) = error.position
-                && let Some(object) = output.as_object_mut()
-            {
-                object.insert("loc".to_owned(), json!({"line": line, "column": column}));
+            if let Some(object) = output.as_object_mut() {
+                if let Some((line, column)) = error.position {
+                    object.insert("loc".to_owned(), json!({"line": line, "column": column}));
+                }
+                if let Some(code) = error.diagnostic_code {
+                    object.insert("diagnostic_code".to_owned(), json!(code));
+                }
             }
             return (output, 2);
         }
@@ -6488,14 +6495,11 @@ fn load_ai_project(path: &Path) -> Result<fsl_syntax::AiProject, (Value, i32)> {
         .map_err(|error| (error_output("io", &error.to_string()), 2))?;
     if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
         return fsl_syntax::parse_ai_project(&source, &ai_project_name(path))
-            .map_err(|error| (semantic_error_output(&error), 2));
+            .map_err(|error| (semantic_error_output(&error.message), 2));
     }
     match fsl_syntax::parse_ai_project(&source, &ai_project_name(path)) {
         Ok(project) => Ok(project),
-        Err(message) => surface_parse_failure(&source).map_or_else(
-            || Err((semantic_error_output(&message), 2)),
-            |error| Err((surface_parse_error_output(&error), 2)),
-        ),
+        Err(error) => Err((surface_parse_error_output(&error), 2)),
     }
 }
 
@@ -6652,7 +6656,7 @@ fn run_ai_compat(path: &Path, environment: Option<&str>) -> (Value, i32) {
         if fslc_rust::frontend_output::is_ai_project(&source) {
             match fsl_syntax::parse_ai_project(&source, &ai_project_name(path)) {
                 Ok(project) => project.components,
-                Err(error) => return (semantic_error_output(&error), 2),
+                Err(error) => return (semantic_error_output(&error.message), 2),
             }
         } else {
             match load_surface_document(path) {
@@ -6809,7 +6813,11 @@ fn parse_domain_document_from_source(
 fn read_domain_command_input(
     path: &Path,
 ) -> Result<(String, fsl_syntax::DomainSpec), SpecLoadError> {
-    let source = read_spec_source(path)?;
+    // This command's caller contract predates the typed `io` envelope, same as
+    // `load_surface_document` above. Keep a read failure classified as
+    // `semantics` without widening #780 beyond its declared parse-only scope.
+    let source = std::fs::read_to_string(path)
+        .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))?;
     let domain = parse_domain_document_from_source(&source)?;
     Ok((source, domain))
 }
