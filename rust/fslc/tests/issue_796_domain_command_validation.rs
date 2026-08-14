@@ -50,42 +50,27 @@ fn run_text(args: &[&str]) -> (String, i32) {
     )
 }
 
-fn diagnostic_reason(output: &Value) -> &str {
-    output["message"]
-        .as_str()
-        .expect("semantic diagnostic message")
-        .split_once(" at ")
-        .map_or_else(
-            || {
-                output["message"]
-                    .as_str()
-                    .expect("semantic diagnostic message")
-            },
-            |(reason, _)| reason,
-        )
-}
-
 fn assert_rejected_like_check(fixture: &str) {
     let (check, check_status) = run(&["check", fixture]);
     assert_eq!(check_status, 2, "check: {check:#}");
+    assert_eq!(check["result"], "error", "check: {check:#}");
     assert_eq!(check["kind"], "semantics", "check: {check:#}");
     assert!(check.get("loc").is_some(), "check: {check:#}");
-    let reason = diagnostic_reason(&check);
+    assert!(
+        check.get("diagnostic_code").is_none(),
+        "check unexpectedly has a diagnostic code: {check:#}"
+    );
 
     for command in [["domain", "analyze"], ["domain", "expand"]] {
         let (actual, status) = run(&[command[0], command[1], fixture]);
         assert_eq!(status, 2, "{command:?}: {actual:#}");
-        assert_eq!(actual["result"], "error", "{command:?}: {actual:#}");
-        assert_eq!(actual["kind"], "semantics", "{command:?}: {actual:#}");
-        assert_eq!(
-            diagnostic_reason(&actual),
-            reason,
-            "{command:?} must share check's semantic diagnostic reason: actual={actual:#}, check={check:#}"
-        );
-        assert_eq!(
-            actual["loc"], check["loc"],
-            "{command:?} must preserve check's source location: actual={actual:#}, check={check:#}"
-        );
+        for field in ["result", "kind", "message", "loc", "diagnostic_code"] {
+            assert_eq!(
+                actual.get(field),
+                check.get(field),
+                "{command:?} must exactly match check's {field} field: actual={actual:#}, check={check:#}"
+            );
+        }
     }
 }
 

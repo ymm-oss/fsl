@@ -221,14 +221,13 @@ struct KnownDivergence {
 /// chat, a review transcript, or agent memory").
 ///
 /// **#798** <https://github.com/ymm-oss/fsl/issues/798> tracks the two
-/// remaining symptoms caused by `domain.rs`'s `Context::normalize`
-/// (`rust/fsl-core/src/domain.rs:301`), a chain of `str::replace` calls
-/// over rendered text with no syntax tree, so it cannot be scope-aware
-/// (entry 2's `quantity` shadowing) or precedence-aware (entry 2's
-/// `can(...)` expansion) the way a typed AST composition can. #690 fixed the
-/// precedence symptom; entry 1's
-/// generated-name leak is a symptom of the same string-level substitution
-/// having no notion of what is and is not a legal domain-level reference.
+/// remaining symptoms: the generated-name leak (entry 1) and the
+/// scope-insensitive `quantity` shadowing (entry 2). They arise from
+/// `domain.rs`'s `Context::normalize` (`rust/fsl-core/src/domain.rs:301`), a
+/// chain of `str::replace` calls over rendered text with no syntax tree, so it
+/// cannot distinguish legal domain-level references or respect lexical scope
+/// the way a typed AST composition can. Separately, #690 fixed the
+/// `can(...)` precedence symptom by parenthesizing each joined piece.
 ///
 /// **#691** <https://github.com/ymm-oss/fsl/issues/691> covered a third,
 /// now-resolved entry (`lvalues_surface.fsl`, a `Map<K, V>` domain state
