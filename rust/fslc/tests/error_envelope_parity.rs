@@ -716,10 +716,6 @@ struct JsonExpectation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Expectation {
     Json(JsonExpectation),
-    Text {
-        exit: i32,
-        exact_stdout: &'static str,
-    },
 }
 
 const PARSE_JSON: JsonExpectation = JsonExpectation {
@@ -790,46 +786,6 @@ const LITERATE_UNIFORM: Expectation = Expectation::Json(JsonExpectation {
     dialect: ExpectedField::Absent,
     message: MessageExpectation::MentionsInput,
 });
-
-/// #796 pins a product false negative: an invalid spec exits 0 and is accepted.
-/// This is a soundness defect, not an endorsed behavior; the pin detects
-/// regressions or changes until the first follow-up queue item, #796, fixes it.
-/// It may share a root with `KNOWN_DIVERGENT_DOMAIN_FIXTURES` entry 1 (#690):
-/// #690 is closed, but its symptom 2 divergence remained live when measured
-/// on 2026-08-13 and is now tracked by open #798.
-const ANALYZED_NAME_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
-    result: ExpectedField::Exact("analyzed"),
-    kind: ExpectedField::Absent,
-    location: LocationShape::Absent,
-    diagnostic: Diagnostic::None,
-    exit: 0,
-    dialect: ExpectedField::Exact("fsl-domain-effect.v0"),
-    message: MessageExpectation::Absent,
-});
-
-/// See [`ANALYZED_NAME_FALSE_GREEN`]: this is the same #796 false-negative
-/// soundness defect and is pinned solely to detect change, not to approve it.
-const EXPANDED_NAME_FALSE_GREEN: Expectation = Expectation::Text {
-    exit: 0,
-    exact_stdout: r#"spec InvalidUnknownName "domain: generated from fsl-domain/fsl-effect" {
-  enum Status { Status_Draft, Status_Approved }
-  state {
-    order_status: Status,
-    event_Touched: Bool,
-  }
-  init {
-    order_status = Status_Draft
-    event_Touched = false
-  }
-  action order_touch() {
-    event_Touched = true
-    order_status = order_status
-  }
-  invariant Order_unknownName "DOMAIN-INVARIANT: Order.unknownName" { missing_status == Status_Draft }
-  terminal { false }
-}
-"#,
-};
 
 const CAUSAL_PARSE_WITHOUT_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectation {
     diagnostic: Diagnostic::None,
@@ -1815,20 +1771,6 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
     ),
     pin!(
         FailureClass::Name,
-        "domain analyze",
-        NAME_FIXTURE,
-        ANALYZED_NAME_FALSE_GREEN,
-        "#796"
-    ),
-    pin!(
-        FailureClass::Name,
-        "domain expand",
-        NAME_FIXTURE,
-        EXPANDED_NAME_FALSE_GREEN,
-        "#796"
-    ),
-    pin!(
-        FailureClass::Name,
         "domain generate",
         NAME_FIXTURE,
         SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
@@ -2550,9 +2492,6 @@ fn run(command: &str, fixture: &str) -> Actual {
 
 fn matches_expectation(actual: &Actual, expected: Expectation, fixture: &str) -> bool {
     match expected {
-        Expectation::Text { exit, exact_stdout } => {
-            actual.exit == exit && actual.json.is_none() && actual.stdout == exact_stdout
-        }
         Expectation::Json(expected) => {
             if actual.exit != expected.exit {
                 return false;
@@ -3022,7 +2961,7 @@ fn approval_diff_zero_digest_negative_control_stops_before_the_diff() {
 }
 
 #[test]
-fn name_matrix_keeps_five_uniform_countercontrols_and_three_pins() {
+fn name_matrix_keeps_seven_uniform_countercontrols_and_one_pin() {
     let bounded_commands = [
         "check",
         "verify",
@@ -3053,11 +2992,11 @@ fn name_matrix_keeps_five_uniform_countercontrols_and_three_pins() {
         8,
         "Name matrix must keep eight countercontrols"
     );
-    assert_eq!(pinned, 3, "Name matrix must keep three self-retiring pins");
+    assert_eq!(pinned, 1, "Name matrix must keep one self-retiring pin");
     assert_eq!(
         name_cells.len() - pinned,
-        5,
-        "Name matrix must keep five uniform countercontrols"
+        7,
+        "Name matrix must keep seven uniform countercontrols"
     );
 }
 

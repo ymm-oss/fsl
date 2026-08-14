@@ -223,7 +223,7 @@ struct KnownDivergence {
 /// **#798** <https://github.com/ymm-oss/fsl/issues/798> tracks the two
 /// remaining symptoms: the generated-name leak (entry 1) and the
 /// scope-insensitive `quantity` shadowing (entry 2). They arise from
-/// `domain.rs`'s `Context::normalize` (`rust/fsl-core/src/domain.rs:301`), a
+/// `domain.rs`'s `Context::normalize`, a
 /// chain of `str::replace` calls over rendered text with no syntax tree, so it
 /// cannot distinguish legal domain-level references or respect lexical scope
 /// the way a typed AST composition can. Separately, #690 fixed the
@@ -285,8 +285,8 @@ struct KnownDivergence {
 ///    Before #690's fix, this fixture's
 ///    `invariant legacyImplication { status == Cancelled -> not can(Cancel) }`
 ///    also disagreed at the projected `and`/`or` operator shape:
-///    `domain.rs`'s `can(...)` expansion (path B, `Context::normalize`
-///    around line 328) joined the requires/rejects pieces with literal
+///    `domain.rs`'s `can(...)` expansion (path B, `Context::normalize`) joined
+///    the requires/rejects pieces with literal
 ///    `" and "` without individually parenthesizing each piece, so the
 ///    rendered text read
 ///    `status == Draft or status == Approved and not (status == Cancelled)`
