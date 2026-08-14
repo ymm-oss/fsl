@@ -255,13 +255,47 @@ pub(super) fn causal_command(
     }
 }
 
-fn causal_error_output(error: &fsl_tools::CausalError) -> (Value, i32) {
-    let kind = if error.kind == "parse" {
-        "parse"
-    } else {
-        "semantics"
-    };
-    let mut output = error_output(kind, &error.message);
+pub(super) fn causal_parse_error_output(
+    error: &fsl_syntax::ParseError,
+    legacy_literate: bool,
+) -> (Value, i32) {
+    let mut output = error_output("parse", &error.to_string());
+    if let Some(object) = output.as_object_mut() {
+        if legacy_literate {
+            object.insert("diagnostic".to_owned(), json!("parse"));
+        } else {
+            object.insert("diagnostic_code".to_owned(), json!("FSL-PARSE"));
+        }
+        object.insert("loc".to_owned(), error.span.python_loc());
+    }
+    (output, 2)
+}
+
+fn causal_unadorned_parse_error_output(error: &fsl_syntax::ParseError) -> (Value, i32) {
+    let mut output = error_output("parse", &error.to_string());
+    if let Some(object) = output.as_object_mut() {
+        object.insert("loc".to_owned(), error.span.python_loc());
+    }
+    (output, 2)
+}
+
+fn causal_error_output(error: &fsl_tools::CausalError, legacy_literate: bool) -> (Value, i32) {
+    if error.kind == "parse" {
+        let mut output = error_output("parse", &error.message);
+        if let Some(object) = output.as_object_mut() {
+            if legacy_literate {
+                object.insert("diagnostic".to_owned(), json!("parse"));
+            } else {
+                object.insert("diagnostic_code".to_owned(), json!("FSL-PARSE"));
+            }
+            object.insert(
+                "loc".to_owned(),
+                json!({"line": error.line, "column": error.column}),
+            );
+        }
+        return (output, 2);
+    }
+    let mut output = error_output("semantics", &error.message);
     if let Some(object) = output.as_object_mut() {
         object.insert("diagnostic".to_owned(), json!(error.kind));
         object.insert(
@@ -285,7 +319,9 @@ fn load_causal_model(
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     let resolver = fsl_core::FsResolver::new(base);
-    fsl_tools::build_causal_model(&source, &resolver).map_err(|error| causal_error_output(&error))
+    let legacy_literate = path.extension().and_then(std::ffi::OsStr::to_str) == Some("md");
+    fsl_tools::build_causal_model(&source, &resolver)
+        .map_err(|error| causal_error_output(&error, legacy_literate))
 }
 
 fn merge_causal_envelope(value: Value) -> (Value, i32) {
@@ -499,11 +535,11 @@ fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
     let surface = match fsl_syntax::parse_causal(&source) {
         Ok(surface) => surface,
         Err(error) => {
-            let mut output = error_output("parse", &error.to_string());
-            if let Some(object) = output.as_object_mut() {
-                object.insert("loc".to_owned(), error.span.python_loc());
-            }
-            return (output, 2);
+            return if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
+                causal_unadorned_parse_error_output(&error)
+            } else {
+                causal_parse_error_output(&error, false)
+            };
         }
     };
     let (model, _) = match load_causal_model(path) {
@@ -516,7 +552,7 @@ fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
     let resolver = fsl_core::FsResolver::new(base);
     let compiled = match fsl_tools::compile_expectations(&surface, &model, &resolver) {
         Ok(compiled) => compiled,
-        Err(error) => return causal_error_output(&error),
+        Err(error) => return causal_error_output(&error, false),
     };
     let mut expectations = Vec::new();
     for expectation in &compiled {
@@ -636,11 +672,11 @@ fn run_causal_observe_expectations(
     let surface = match fsl_syntax::parse_causal(&source) {
         Ok(surface) => surface,
         Err(error) => {
-            let mut output = error_output("parse", &error.to_string());
-            if let Some(object) = output.as_object_mut() {
-                object.insert("loc".to_owned(), error.span.python_loc());
-            }
-            return (output, 2);
+            return if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
+                causal_unadorned_parse_error_output(&error)
+            } else {
+                causal_parse_error_output(&error, false)
+            };
         }
     };
     let (model, _) = match load_causal_model(path) {
@@ -653,7 +689,7 @@ fn run_causal_observe_expectations(
     let resolver = fsl_core::FsResolver::new(base);
     let compiled = match fsl_tools::compile_expectations(&surface, &model, &resolver) {
         Ok(compiled) => compiled,
-        Err(error) => return causal_error_output(&error),
+        Err(error) => return causal_error_output(&error, false),
     };
     if compiled.is_empty() {
         return (

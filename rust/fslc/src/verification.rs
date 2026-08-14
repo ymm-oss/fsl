@@ -1824,6 +1824,15 @@ pub(super) fn run_verify_cli(
             2,
         );
     }
+    // Causal models are intentionally outside the kernel dialect dispatcher.
+    // Check their syntax first so a malformed causal input retains its parser
+    // diagnostic instead of being rewritten as an unknown kernel dialect.
+    if let Ok(source) = std::fs::read_to_string(path)
+        && fsl_syntax::is_causal_source(&source)
+        && let Err(error) = fsl_syntax::parse_causal(&source)
+    {
+        return super::causal::causal_parse_error_output(&error, false);
+    }
     let prepared = match prepare_cli_verification(path, options) {
         Ok(prepared) => prepared,
         Err(output) => return output,

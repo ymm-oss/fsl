@@ -772,11 +772,6 @@ const PARSE_WITHOUT_LOCATION_OR_DIAGNOSTIC: Expectation = Expectation::Json(Json
     diagnostic: Diagnostic::None,
     ..PARSE_JSON
 });
-const PARSE_WITH_DIALECT_UNKNOWN_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectation {
-    diagnostic: Diagnostic::Code("FSL-DIALECT-UNKNOWN"),
-    ..PARSE_JSON
-});
-
 const LITERATE_UNIFORM: Expectation = Expectation::Json(JsonExpectation {
     result: ExpectedField::Exact("error"),
     kind: ExpectedField::Exact("usage"),
@@ -1294,110 +1289,6 @@ macro_rules! pin {
 }
 
 const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
-    pin!(
-        FailureClass::Parse,
-        "domain check",
-        PARSE_DOMAIN_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "domain analyze",
-        PARSE_DOMAIN_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "domain expand",
-        PARSE_DOMAIN_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "domain generate",
-        PARSE_DOMAIN_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "domain replay",
-        PARSE_DOMAIN_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "domain testgen",
-        PARSE_DOMAIN_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "db check",
-        PARSE_DB_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "db observe",
-        PARSE_DB_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Parse,
-        "ai check",
-        PARSE_AI_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Parse,
-        "ai compat",
-        PARSE_AI_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Parse,
-        "ai drift",
-        PARSE_AI_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Parse,
-        "ai eval",
-        PARSE_AI_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Parse,
-        "ai regress",
-        PARSE_AI_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Parse,
-        "ai replay",
-        PARSE_AI_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
     // #800 tracks these product parse-path false negatives and envelope
     // differences. They are not accepted behavior: replay reports success
     // for a malformed project while its siblings reject it inconsistently.
@@ -1422,19 +1313,45 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "#780"
     ),
     pin!(
-        shape: InputShape::Causal;
-        FailureClass::Parse,
-        "check",
-        PARSE_CAUSAL_FIXTURE,
-        PARSE_WITH_DIAGNOSTIC_ALIAS,
+        FailureClass::Name,
+        "causal analyze",
+        CAUSAL_NAME_FIXTURE,
+        CAUSAL_NAME_WITH_DIAGNOSTIC,
         "#780"
     ),
     pin!(
-        shape: InputShape::Causal;
-        FailureClass::Parse,
-        "verify",
-        PARSE_CAUSAL_FIXTURE,
-        PARSE_WITH_DIALECT_UNKNOWN_DIAGNOSTIC,
+        FailureClass::Name,
+        "causal check",
+        CAUSAL_NAME_FIXTURE,
+        CAUSAL_NAME_WITH_DIAGNOSTIC,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Name,
+        "causal diff",
+        CAUSAL_NAME_FIXTURE,
+        CAUSAL_NAME_WITH_DIAGNOSTIC,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Name,
+        "causal ledger",
+        CAUSAL_NAME_FIXTURE,
+        CAUSAL_NAME_WITH_DIAGNOSTIC,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Name,
+        "causal observe-expectations",
+        CAUSAL_NAME_FIXTURE,
+        CAUSAL_NAME_WITH_DIAGNOSTIC,
+        "#780"
+    ),
+    pin!(
+        FailureClass::Name,
+        "causal verify-expectations",
+        CAUSAL_NAME_FIXTURE,
+        CAUSAL_NAME_WITH_DIAGNOSTIC,
         "#780"
     ),
     pin!(
@@ -1448,132 +1365,10 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
     pin!(
         shape: InputShape::Project;
         FailureClass::Parse,
-        "ai drift",
-        PARSE_AI_PROJECT_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Parse,
-        "ai eval",
-        PARSE_AI_PROJECT_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Parse,
-        "ai regress",
-        PARSE_AI_PROJECT_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Parse,
         "ai replay",
         PARSE_AI_PROJECT_FIXTURE,
         AI_REPLAY_FALSE_GREEN,
         "#800"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "compat check",
-        PARSE_KERNEL_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "causal check",
-        PARSE_CAUSAL_FIXTURE,
-        PARSE_WITH_DIAGNOSTIC_ALIAS,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "causal verify-expectations",
-        PARSE_CAUSAL_FIXTURE,
-        CAUSAL_PARSE_WITHOUT_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "causal analyze",
-        PARSE_CAUSAL_FIXTURE,
-        PARSE_WITH_DIAGNOSTIC_ALIAS,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "causal diff",
-        PARSE_CAUSAL_FIXTURE,
-        PARSE_WITH_DIAGNOSTIC_ALIAS,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "causal ledger",
-        PARSE_CAUSAL_FIXTURE,
-        PARSE_WITH_DIAGNOSTIC_ALIAS,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "causal observe-expectations",
-        PARSE_CAUSAL_FIXTURE,
-        CAUSAL_PARSE_WITHOUT_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Name,
-        "causal analyze",
-        CAUSAL_NAME_FIXTURE,
-        CAUSAL_NAME_WITH_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Name,
-        "causal check",
-        CAUSAL_NAME_FIXTURE,
-        CAUSAL_NAME_WITH_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Name,
-        "causal diff",
-        CAUSAL_NAME_FIXTURE,
-        CAUSAL_NAME_WITH_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Name,
-        "causal ledger",
-        CAUSAL_NAME_FIXTURE,
-        CAUSAL_NAME_WITH_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Name,
-        "causal observe-expectations",
-        CAUSAL_NAME_FIXTURE,
-        CAUSAL_NAME_WITH_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Name,
-        "causal verify-expectations",
-        CAUSAL_NAME_FIXTURE,
-        CAUSAL_NAME_WITH_DIAGNOSTIC,
-        "#780"
-    ),
-    pin!(
-        FailureClass::Parse,
-        "approval check",
-        PARSE_KERNEL_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#780"
     ),
     // #800 tracks these product false negatives. They are not accepted
     // behavior: the affected command/input-shape pairs report success
