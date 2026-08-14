@@ -16469,6 +16469,20 @@ spec InitTraceability {
                 output["leads_to"]["Served"]["checked_to_depth"], 4,
                 "{engine}/{edition} must execute source A's leadsTo check: {output:#}"
             );
+            // `checked_to_depth` alone only echoes `--depth`; it would match
+            // for any model that merely declares a `Served` leadsTo property.
+            // The `vacuous_leadsto` warning instead depends on the engine
+            // having actually evaluated source A's `pending ~> done` trigger
+            // reachability, so it is fixture-content evidence that the
+            // liveness check ran against A rather than a stray default.
+            assert!(
+                output["warnings"].as_array().is_some_and(|warnings| {
+                    warnings.iter().any(|warning| {
+                        warning["kind"] == "vacuous_leadsto" && warning["name"] == "Served"
+                    })
+                }),
+                "{engine}/{edition} must report source A's vacuous leadsTo trigger: {output:#}"
+            );
             if edition == "next" {
                 assert_eq!(
                     output["edition"], "next",

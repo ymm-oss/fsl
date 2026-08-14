@@ -256,6 +256,19 @@ fn verify_reads_one_fifo_snapshot_for_bmc_induction_and_liveness() {
             output["leads_to"]["Served"]["checked_to_depth"], 4,
             "{engine} must execute source A's leadsTo check: {output:#}"
         );
+        // `checked_to_depth` alone only echoes `--depth`; it says nothing
+        // about the model that was actually loaded. The `vacuous_leadsto`
+        // warning instead depends on the engine having evaluated source A's
+        // `pending ~> done` trigger reachability, so it is content-bound
+        // evidence that the liveness check ran against A, not against B.
+        assert!(
+            output["warnings"].as_array().is_some_and(|warnings| {
+                warnings
+                    .iter()
+                    .any(|warning| warning["kind"] == "vacuous_leadsto" && warning["name"] == "Served")
+            }),
+            "{engine} must report source A's vacuous leadsTo trigger: {output:#}"
+        );
     }
 }
 
