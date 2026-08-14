@@ -332,11 +332,14 @@ supported semantics") because the per-key init has no default to select for a
 Use `fslc domain check` for stable fsl-domain findings and the nested kernel
 result (`verified_under_assumptions` on success), `fslc domain analyze` for the
 aggregate/effect summary, `fslc domain expand` to inspect a generated kernel FSL
-debug view. Both `domain analyze` and `domain expand` validate the authored
-domain source through the same typed lowering path as `check`, `verify`, and
-`domain generate` before returning a summary or Kernel text; they reject
-unresolved identifiers with the original source location instead of emitting a
-partial analysis or unusable Kernel text.
+debug view. At command entry, both `domain analyze` and `domain expand` read
+one authored-source `String` and derive their `DomainSpec` summary or generated
+Kernel text and checked Kernel from that same snapshot through typed lowering.
+An atomic path replacement cannot make either command validate a different
+source version before returning output. They reject unresolved identifiers with
+the original source location instead of emitting a partial analysis or unusable
+Kernel text. `domain generate` uses the same typed lowering but does not yet
+have this single-snapshot contract; #808 tracks that separate TOCTOU follow-up.
 `fslc domain generate --target typescript|python|kotlin|swift|rust` for
 Functional DDD scaffolds, `fslc domain testgen` for adapter/conformance
 scaffolds, and `fslc domain replay --logs events.jsonl` for runtime command /

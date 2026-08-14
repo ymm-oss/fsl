@@ -363,11 +363,14 @@ supported semantics") because the per-key init has no default to select for a
 <p>Use <code>fslc domain check</code> for stable fsl-domain findings and the nested kernel
 result (<code>verified_under_assumptions</code> on success), <code>fslc domain analyze</code> for the
 aggregate/effect summary, <code>fslc domain expand</code> to inspect a generated kernel FSL
-debug view. Both <code>domain analyze</code> and <code>domain expand</code> validate the authored
-domain source through the same typed lowering path as <code>check</code>, <code>verify</code>, and
-<code>domain generate</code> before returning a summary or Kernel text; they reject
-unresolved identifiers with the original source location instead of emitting a
-partial analysis or unusable Kernel text.
+debug view. At command entry, both <code>domain analyze</code> and <code>domain expand</code> read
+one authored-source <code>String</code> and derive their <code>DomainSpec</code> summary or generated
+Kernel text and checked Kernel from that same snapshot through typed lowering.
+An atomic path replacement cannot make either command validate a different
+source version before returning output. They reject unresolved identifiers with
+the original source location instead of emitting a partial analysis or unusable
+Kernel text. <code>domain generate</code> uses the same typed lowering but does not yet
+have this single-snapshot contract; #808 tracks that separate TOCTOU follow-up.
 <code>fslc domain generate --target typescript|python|kotlin|swift|rust</code> for
 Functional DDD scaffolds, <code>fslc domain testgen</code> for adapter/conformance
 scaffolds, and <code>fslc domain replay --logs events.jsonl</code> for runtime command /
