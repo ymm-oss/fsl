@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: Apache-2.0
+
+ai_component EnvelopeParityProjectInvalidRule {
+  model model_v1;
+  prompt prompt_v1;
+  input Request;
+  output Response;
+
+  check hard {
+    rule unregistered_hard_rule;
+  }
+}
+
+dataset EnvelopeParityRecords {
+  source "records.jsonl"
+}
+
+statistical_property EnvelopeParityStatistical {
+  target EnvelopeParityProjectInvalidRule
+  dataset EnvelopeParityRecords
+  require min_samples >= 0
+}
+
+observed_property EnvelopeParityObserved {
+  target EnvelopeParityProjectInvalidRule
+  source "records.jsonl"
+}
+
+ai_migration EnvelopeParityMigration {
+  preserve {
+    no_regression {
+      metric accuracy drop <= 0
+    }
+  }
+}

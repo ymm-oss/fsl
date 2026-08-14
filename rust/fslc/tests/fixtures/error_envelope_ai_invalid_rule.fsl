@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+
+ai_component EnvelopeParityInvalidAiRule {
+  model model_v1;
+  prompt prompt_v1;
+  input Request;
+  output Response;
+
+  tool SearchOrder {
+    schema SearchOrderV1;
+  }
+
+  authority {
+    may_execute SearchOrder;
+  }
+
+  check hard {
+    rule unregistered_hard_rule;
+  }
+}

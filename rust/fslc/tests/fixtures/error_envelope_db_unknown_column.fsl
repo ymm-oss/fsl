@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+
+dbsystem EnvelopeParityUnknownDbColumn {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+    }
+  }
+
+  migration remove_missing_column from 0 to 1 {
+    drop users.missing_column;
+  }
+}
