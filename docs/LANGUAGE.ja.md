@@ -325,12 +325,13 @@ supported semantics」)。per-key init は `Map` 値型に対して選べる既�
 サマリーには `fslc domain analyze` を、生成されたカーネル FSL のデバッグビューの
 確認には `fslc domain expand` を使います。`domain analyze` と `domain expand` は
 コマンド開始時に著者が記述した domain source を一つの `String` として読み、その
-同じ snapshot から typed lowering により `DomainSpec` のサマリーまたは生成 Kernel
-text と検査済み Kernel を導出します。atomic な path replacement が起きても、出力前に
-別の source version を検証することはありません。未解決識別子は部分的な分析や
-使用不能な Kernel text を出力せず、元の source location 付きで棄却されます。
-`domain generate` は同じ typed lowering を使いますが、この single-snapshot 契約は
-まだ持ちません。別個の TOCTOU follow-up は #808 が追跡します。Functional DDD スキャフォールドには
+同じ snapshot を `parse_domain_document_from_source` に渡して `DomainSpec` を
+parse し、さらにその同じ String を `load_kernel_model_from_source` に渡して検査済み
+Kernel を構築します。atomic な path replacement が起きても、出力前に別の source
+version を検証することはありません。未解決識別子は部分的な分析や使用不能な Kernel
+text を出力せず、元の source location 付きで棄却されます。`domain generate` は同じ
+typed lowering を使いますが、この single-snapshot 契約はまだ持ちません。別個の
+TOCTOU follow-up は #808 が追跡します。Functional DDD スキャフォールドには
 `fslc domain generate --target typescript|python|kotlin|swift|rust` を、
 アダプタ/コンフォーマンスのスキャフォールドには `fslc domain testgen` を、
 ランタイムの command / event / effect エビデンスには

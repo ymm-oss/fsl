@@ -514,10 +514,11 @@ tests, or external evidence.
 `domain_kernel_source` (rendered `.fsl` text, used by `domain expand` and
 by `check_domain` to validate renderability; only its hard-finding envelope
 includes the generated `kernel_source`). At command entry, `domain analyze`
-and `domain expand` read one source `String` and derive both their `DomainSpec`
-projection and checked Kernel through `load_kernel_model_from_source` from that
-same string. An atomic replacement of the path therefore cannot make either
-command validate a different source version before returning success (#796).
+and `domain expand` read one source `String`, parse their `DomainSpec`
+projection from it with `parse_domain_document_from_source`, and pass that same
+string to `load_kernel_model_from_source` to construct the checked Kernel. An
+atomic replacement of the path therefore cannot make either command validate a
+different source version before returning success (#796).
 `domain generate` uses the same typed lowering but does not yet provide this
 single-snapshot contract; #808 tracks that separate TOCTOU follow-up.
 `rust/fsl-core/tests/domain_render_agreement.rs` projects both through
