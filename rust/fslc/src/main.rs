@@ -5918,9 +5918,11 @@ fn apply_domain_edition(
     (output, status)
 }
 
-fn parse_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    fsl_syntax::parse_surface_document(&source).map_err(|error| {
+fn parse_surface_document_from_source(
+    path: &Path,
+    source: &str,
+) -> Result<fsl_syntax::SurfaceDocument, String> {
+    fsl_syntax::parse_surface_document(source).map_err(|error| {
         format!(
             "{} at {}:{}:{}",
             error.message,
@@ -5929,6 +5931,11 @@ fn parse_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, St
             error.span.start.column
         )
     })
+}
+
+fn parse_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    parse_surface_document_from_source(path, &source)
 }
 
 fn validate_specialized_document(path: &Path) -> Result<(), String> {
@@ -6740,10 +6747,29 @@ fn ai_compat_profile_block(profile: &Value) -> String {
 }
 
 fn parse_domain_document(path: &Path) -> Result<fsl_syntax::DomainSpec, String> {
-    match parse_surface_document(path)? {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    parse_domain_document_from_source(path, &source)
+}
+
+fn parse_domain_document_from_source(
+    path: &Path,
+    source: &str,
+) -> Result<fsl_syntax::DomainSpec, String> {
+    match parse_surface_document_from_source(path, source)? {
         fsl_syntax::SurfaceDocument::Domain(domain) => Ok(domain),
         _ => Err("expected a domain document".to_owned()),
     }
+}
+
+/// Capture the one source snapshot that a domain projection command may use.
+///
+/// The AST projected by `domain analyze` / `domain expand` and the checked
+/// Kernel validation must originate from this same string. Re-reading `path`
+/// after parsing would permit an atomic save to validate different content.
+fn read_domain_command_input(path: &Path) -> Result<(String, fsl_syntax::DomainSpec), String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let domain = parse_domain_document_from_source(path, &source)?;
+    Ok((source, domain))
 }
 
 fn domain_scaffold_inputs(
@@ -6769,8 +6795,8 @@ fn domain_scaffold_inputs(
 /// `domain analyze` and `domain expand` still consume their specialized
 /// projections below, but must never return success for a document direct
 /// lowering rejects (#796).
-fn validate_domain_command_input(path: &Path) -> Result<(), (Value, i32)> {
-    load_kernel_model(path)
+fn validate_domain_command_input(path: &Path, source: &str) -> Result<(), (Value, i32)> {
+    load_kernel_model_from_source(path, source)
         .map(|_| ())
         .map_err(|error| (spec_load_error_output(&error), 2))
 }
@@ -6822,13 +6848,13 @@ fn run_domain_check(
 }
 
 fn run_domain_analyze(path: &Path) -> (Value, i32) {
-    match parse_domain_document(path) {
+    match read_domain_command_input(path) {
         // Preserve #726's renderer-side fail-closed guard and its established
         // diagnostics first. A successful raw-`DomainSpec` projection must
         // then also clear the checked direct-lowering path before it can be
         // returned (#796).
-        Ok(domain) => match fsl_tools::analyze_domain(&domain) {
-            Ok(result) => match validate_domain_command_input(path) {
+        Ok((source, domain)) => match fsl_tools::analyze_domain(&domain) {
+            Ok(result) => match validate_domain_command_input(path, &source) {
                 Ok(()) => wrap_specialized(result),
                 Err(error) => error,
             },
@@ -6839,15 +6865,15 @@ fn run_domain_analyze(path: &Path) -> (Value, i32) {
 }
 
 fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
-    let domain = match parse_domain_document(path) {
-        Ok(domain) => domain,
+    let (input_source, domain) = match read_domain_command_input(path) {
+        Ok(input) => input,
         Err(error) => return (semantic_error_output(&error), 2),
     };
     let source = match fsl_tools::domain_kernel_source(&domain) {
         Ok(source) => source,
         Err(error) => return (core_error_output(&error), 2),
     };
-    if let Err(error) = validate_domain_command_input(path) {
+    if let Err(error) = validate_domain_command_input(path, &input_source) {
         return error;
     }
     if let Some(output_path) = output_path
@@ -15560,16 +15586,29 @@ fn load_model(path: &Path) -> Result<KernelModel, SpecLoadError> {
 
 fn load_kernel_model(path: &Path) -> Result<(String, KernelSpec, KernelModel), SpecLoadError> {
     let source = read_spec_source(path)?;
+    let (kernel, model) = load_kernel_model_from_source(path, &source)?;
+    Ok((source, kernel, model))
+}
+
+/// Build a checked Kernel/model from a caller-owned source snapshot.
+///
+/// `load_kernel_model` remains the path-reading compatibility entry point;
+/// callers that also need a specialized surface projection must use this
+/// variant to avoid a second filesystem read.
+fn load_kernel_model_from_source(
+    path: &Path,
+    source: &str,
+) -> Result<(KernelSpec, KernelModel), SpecLoadError> {
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
     let kernel =
-        match fsl_core::parse_kernel_source_with_file(&source, &resolver, path.to_string_lossy()) {
+        match fsl_core::parse_kernel_source_with_file(source, &resolver, path.to_string_lossy()) {
             Ok(kernel) => kernel,
-            Err(error) => return Err(kernel_load_error(&source, &error)),
+            Err(error) => return Err(kernel_load_error(source, &error)),
         };
     let model = fsl_core::build_model(kernel.clone())
         .map_err(|error| SpecLoadError::Semantic(SemanticDiagnostic::from_model_error(&error)))?;
-    Ok((source, kernel, model))
+    Ok((kernel, model))
 }
 
 /// Read a spec file, classifying a read failure as `io` rather than letting the
@@ -16111,5 +16150,48 @@ spec InitTraceability {
             assert!(nodes.contains(edge["from"].as_str().unwrap()));
             assert!(nodes.contains(edge["to"].as_str().unwrap()));
         }
+    }
+
+    /// Deterministic TOCTOU control for #796. The first read captures an
+    /// authored-invalid domain, then an atomic rename replaces the path with
+    /// a valid document. Both specialized projections can still complete from
+    /// the original AST, but their checked Kernel validation must reject the
+    /// original snapshot. Reverting validation to `load_kernel_model(path)`
+    /// makes this test fail because that second read accepts the replacement.
+    #[test]
+    fn domain_projection_validation_uses_the_original_source_snapshot() {
+        let directory =
+            std::env::temp_dir().join(format!("fslc-domain-snapshot-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("create temporary fixture directory");
+        let path = directory.join("domain.fsl");
+        let replacement = directory.join("replacement.fsl");
+        std::fs::write(
+            &path,
+            include_str!("../tests/fixtures/domain_characterization/invalid_unknown_name.fsl"),
+        )
+        .expect("write invalid source");
+        std::fs::write(
+            &replacement,
+            include_str!("../tests/fixtures/domain_characterization/expressions_valid.fsl"),
+        )
+        .expect("write valid replacement");
+
+        let (source, domain) = read_domain_command_input(&path).expect("capture invalid snapshot");
+        std::fs::rename(&replacement, &path).expect("atomically replace input after first read");
+
+        assert!(
+            fsl_tools::analyze_domain(&domain).is_ok(),
+            "the specialized analysis must reach the checked validation"
+        );
+        assert!(
+            fsl_tools::domain_kernel_source(&domain).is_ok(),
+            "the specialized expansion must reach the checked validation"
+        );
+        assert!(
+            validate_domain_command_input(&path, &source).is_err(),
+            "validation must use the initially-read invalid source, not its valid replacement"
+        );
+
+        std::fs::remove_dir_all(&directory).expect("remove temporary fixture directory");
     }
 }
