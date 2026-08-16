@@ -47,10 +47,11 @@ subset and refuses to overwrite the authoritative native file.
 
 `run_verify` and the native `verify` CLI capture their root specification once and derive
 specialized-document validation, Kernel/model lowering, requirements trace and implements metadata,
-strict-tag warnings, and every selected native verification engine from that same source string
-(#808). A concurrent atomic replacement of the root path therefore cannot make a successful
-verification report results derived from two versions of that document. The path-taking wrappers
-remain available to command entries that have not yet adopted this contract.
+strict-tag warnings, every selected native verification engine (BMC and induction, across every
+supported `--edition`), and the edition post-processing stage from that same source string (#808). A
+concurrent atomic replacement of the root path therefore cannot make a successful verification
+report results derived from two versions of that document. The path-taking wrappers remain
+available to command entries that have not yet adopted this contract.
 
 This boundary applies only to the root document. `FsResolver` continues to read compose, import,
 and implements dependencies at their referenced paths; making the whole dependency graph
