@@ -93,7 +93,6 @@ struct TwoSnapshotFifo {
     writer_outcome: std::sync::mpsc::Receiver<WriterOutcome>,
     phase: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     writer: Option<std::thread::JoinHandle<()>>,
-    second_writer_opened: bool,
 }
 
 #[cfg(unix)]
@@ -188,7 +187,6 @@ impl TwoSnapshotFifo {
             writer_outcome: writer_outcome_receiver,
             phase,
             writer: Some(writer),
-            second_writer_opened: false,
         }
     }
 
@@ -198,7 +196,6 @@ impl TwoSnapshotFifo {
         match self.second_opened.try_recv() {
             Err(TryRecvError::Empty) => {}
             Ok(()) => {
-                self.second_writer_opened = true;
                 panic!("the CLI opened the replacement FIFO, proving a second path read");
             }
             Err(TryRecvError::Disconnected) => {
