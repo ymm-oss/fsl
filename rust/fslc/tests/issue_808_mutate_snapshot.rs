@@ -30,7 +30,12 @@ fn mutate_against_two_snapshot_fifo() -> (Value, i32) {
     let mut fixture = support::TwoSnapshotFifo::new("issue-808-mutate", source_a, source_b);
     let path = fixture.path().to_string_lossy().into_owned();
     let mut child = Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .args(["mutate", &path, "--depth", "4", "--no-cache"])
+        // `mutate` accepts only `--depth`, `--by-requirement`, `--max-mutants`
+        // and `--from`. Passing an unsupported option makes the CLI exit with
+        // `kind: usage` before it ever opens the path, which leaves the FIFO
+        // writer blocked in `open` and makes `assert_no_second_open` vacuously
+        // true — the control would prove nothing even if it terminated.
+        .args(["mutate", &path, "--depth", "4"])
         .current_dir(support::root())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
