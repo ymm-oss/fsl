@@ -59,6 +59,13 @@ transactional is a separate contract. Re-parsing the captured root source in ind
 allowed: it is the source identity, rather than sharing an AST or model, that establishes the
 snapshot guarantee.
 
+The generic `testgen` and `scenarios` command entries join the same contract: `run_scenarios` and
+`run_testgen` capture their root specification once and derive `load_model`, requirement-trace
+validation, the BMC fallback on a genuine violation, and every acceptance/forbidden requirement-trace
+scenario from that same source string (#808). `domain testgen` and the AI dialects still re-read
+their root path inside the generic `testgen` path they delegate to; that gap is intentionally out of
+scope for #808 (no user-facing consumer of the DDD notation exists yet) and remains open.
+
 The #442 local-optimum audit found that retaining the old Python exporter as an apparent complete
 source was locally convenient when the Rust CLI still matched it, but became a `mixed`
 externalization/time-delayed defect once causal evolved only in Rust: documentation and 39 causal
