@@ -10311,7 +10311,26 @@ fn run_mutate(
     by_requirement: bool,
     external_mutants: Option<&Path>,
 ) -> (Value, i32) {
-    let (baseline, status) = run_verify(path, depth, "warn", "bmc", DEFAULT_EXPLICIT_BUDGET, 1);
+    // Capture one root-spec snapshot up front (#808): the baseline verify, the
+    // Kernel/model load, the requirements-trace contract, and the surface
+    // parse all derive from this same `source` instead of independently
+    // re-reading `path`, so a concurrent edit cannot land the baseline
+    // `verified` result and the enumerated mutant set on different file
+    // contents. `FsResolver` still reads compose/import/implements
+    // dependencies with their own independent read semantics.
+    let mut source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return mutate_error(spec_load_error_output(&error)),
+    };
+    let (baseline, status) = run_verify_from_source(
+        path,
+        &source,
+        depth,
+        "warn",
+        "bmc",
+        DEFAULT_EXPLICIT_BUDGET,
+        1,
+    );
     if status != 0 || baseline.get("result").and_then(Value::as_str) != Some("verified") {
         // The baseline envelope is re-emitted verbatim, so its own `result`
         // decides the exit code through `docs/LANGUAGE.md`'s table: `violated`
@@ -10320,19 +10339,15 @@ fn run_mutate(
         let baseline_status = mutate_exit_status(&baseline, status);
         return (baseline, baseline_status);
     }
-    let model = match load_model(path) {
+    let model = match load_model_from_source(path, &source) {
         Ok(model) => model,
         Err(error) => return mutate_error(spec_load_error_output(&error)),
-    };
-    let mut source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => return mutate_error(error_output("io", &error.to_string())),
     };
     let trace_contract = match fsl_core::requirements_trace_contract(&source) {
         Ok(contract) => contract,
         Err(error) => return mutate_error(core_error_output(&error)),
     };
-    let document = match parse_surface_document(path) {
+    let document = match parse_surface_document_from_source(path, &source) {
         Ok(document) => document,
         Err(error) => return mutate_error(semantic_error_output(&error)),
     };
@@ -16681,5 +16696,82 @@ spec GrowFixture {
             result["invariant"], "NonNegativeBalance",
             "the BMC fallback must report source A's invariant: {result:#}"
         );
+    }
+
+    /// `mutate`'s own kill-rate control (#808). `run_mutate` itself performs
+    /// exactly one root-path read by construction (that is the fix), so a
+    /// synchronous disk swap around a single call to it can no longer
+    /// observe a race -- that end-to-end race is instead covered by the
+    /// Unix FIFO control in `tests/issue_808_mutate_snapshot.rs`. This test
+    /// instead exercises the exact `*_from_source` calls and pure
+    /// mutant-oracle helpers `run_mutate`'s body chains together, proving
+    /// each stays bound to a captured source A even after the path on disk
+    /// is replaced with sibling fixture B.
+    ///
+    /// Fixture A's `NonNegative` invariant kills the mutant that removes
+    /// `dec`'s `requires` guard; fixture B is otherwise identical but omits
+    /// that invariant, so the exact same mutant survives instead. Both
+    /// baselines verify, so a `status`/`result` check alone cannot
+    /// distinguish A from B -- the assertions below instead depend on
+    /// content only source A declares (the checked invariant name, and the
+    /// mutant's `killed_by`).
+    #[test]
+    fn mutate_helpers_use_the_captured_root_snapshot() {
+        let source_a = include_str!("../tests/fixtures/issue_808_mutate_snapshot_a.fsl");
+        let source_b = include_str!("../tests/fixtures/issue_808_mutate_snapshot_b.fsl");
+        let fixture = SnapshotFixture::new("mutate", source_a);
+        let captured = read_spec_source(&fixture.path).expect("capture source A");
+        assert_eq!(captured, source_a);
+        std::fs::write(&fixture.path, source_b).expect("replace with source B on disk");
+
+        // The exact baseline call `run_mutate` makes.
+        let (baseline, status) = run_verify_from_source(
+            &fixture.path,
+            &captured,
+            4,
+            "warn",
+            "bmc",
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        );
+        assert_eq!(status, 0, "{baseline:#}");
+        assert_eq!(baseline["result"], "verified", "{baseline:#}");
+        assert_eq!(
+            baseline["invariants_checked"],
+            json!(["NonNegative"]),
+            "baseline must check source A's invariant, which source B does not declare: {baseline:#}"
+        );
+
+        // The exact model load `run_mutate` makes.
+        let model = load_model_from_source(&fixture.path, &captured).expect("lower source A");
+        assert!(
+            model
+                .invariants
+                .iter()
+                .any(|invariant| display(&invariant.name) == "NonNegative"),
+            "model must retain source A's invariant"
+        );
+
+        // The exact document parse `run_mutate` makes.
+        let document =
+            parse_surface_document_from_source(&fixture.path, &captured).expect("parse source A");
+        let fsl_syntax::SurfaceDocument::Spec(spec) = document else {
+            panic!("fixture must parse as a spec document: {document:?}");
+        };
+
+        // The exact mutant enumeration + per-mutant oracle `run_mutate` runs.
+        let mutant = fsl_tools::enumerate_builtin_mutants(&spec)
+            .into_iter()
+            .find(|mutant| {
+                mutant.op == "requires_remove" && mutant.action.as_deref() == Some("dec")
+            })
+            .expect("dec requires_remove mutant present in source A");
+        let outcome = mutation_oracle(mutant.spec, 4);
+        assert!(
+            !outcome.clean,
+            "removing dec's requires guard must be killed by source A's NonNegative invariant, \
+             not survive as the same mutation would against source B"
+        );
+        assert_eq!(outcome.killed_by.as_deref(), Some("NonNegative"));
     }
 }
