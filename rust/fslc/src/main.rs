@@ -5943,25 +5943,30 @@ fn parse_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, St
 /// for callers that deliberately own a non-envelope result; spec-input
 /// commands must retain the parser's class and span through this path.
 fn load_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, SpecLoadError> {
-    if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
-        return parse_surface_document(path).map_err(SpecLoadError::unlocated_semantic);
-    }
     // This loader's caller contract predates the typed `io` envelope. Keep a
     // read failure distinct from a parse failure without widening #780 beyond
     // its declared parse-only surface.
     let source = std::fs::read_to_string(path)
         .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))?;
-    load_surface_document_from_source(&source)
+    load_surface_document_from_source(path, &source)
 }
 
 /// Load a dialect surface document from an already-captured source string.
 ///
 /// Domain-projection commands (#796) must validate and project from the same
 /// snapshot they read, so they call this instead of re-reading `path` through
-/// [`load_surface_document`].
+/// [`load_surface_document`]. `path` is still needed here (not just for
+/// diagnostics): a literate (`.md`) document keeps the pre-#780 unlocated
+/// `semantics` classification instead of a located `parse` envelope, and that
+/// dispatch is keyed on the extension, not the content.
 fn load_surface_document_from_source(
+    path: &Path,
     source: &str,
 ) -> Result<fsl_syntax::SurfaceDocument, SpecLoadError> {
+    if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
+        return parse_surface_document_from_source(path, source)
+            .map_err(SpecLoadError::unlocated_semantic);
+    }
     fsl_syntax::parse_surface_document(source)
         .map_err(|error| SpecLoadError::Parse(Box::new(error)))
 }
@@ -6796,9 +6801,10 @@ fn parse_domain_document(path: &Path) -> Result<fsl_syntax::DomainSpec, SpecLoad
 /// string so a caller that must validate and project the identical snapshot
 /// (#796) does not re-read `path`.
 fn parse_domain_document_from_source(
+    path: &Path,
     source: &str,
 ) -> Result<fsl_syntax::DomainSpec, SpecLoadError> {
-    match load_surface_document_from_source(source)? {
+    match load_surface_document_from_source(path, source)? {
         fsl_syntax::SurfaceDocument::Domain(domain) => Ok(domain),
         _ => Err(SpecLoadError::unlocated_semantic(
             "expected a domain document",
@@ -6819,7 +6825,7 @@ fn read_domain_command_input(
     // `semantics` without widening #780 beyond its declared parse-only scope.
     let source = std::fs::read_to_string(path)
         .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))?;
-    let domain = parse_domain_document_from_source(&source)?;
+    let domain = parse_domain_document_from_source(path, &source)?;
     Ok((source, domain))
 }
 
