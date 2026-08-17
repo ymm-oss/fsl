@@ -13,11 +13,15 @@
 //! dead-ghost tautologies), so a torn read can hide a real hollow spec
 //! behind a healthy-looking number computed against the wrong content.
 
-mod support;
+#[cfg(unix)]
+#[path = "support/fifo_snapshot.rs"]
+mod fifo_snapshot;
 
 #[cfg(unix)]
 use std::process::Command;
 
+#[cfg(unix)]
+use fifo_snapshot::{TwoSnapshotFifo, wait_for_output};
 #[cfg(unix)]
 use serde_json::Value;
 
@@ -25,10 +29,10 @@ use serde_json::Value;
 fn mutate_against_two_snapshot_fifo() -> (Value, i32) {
     use std::process::Stdio;
 
-    let source_a = include_str!("fixtures/issue_808_mutate_snapshot_a.fsl").to_owned();
-    let source_b = include_str!("fixtures/issue_808_mutate_snapshot_b.fsl").to_owned();
-    let mut fixture = support::TwoSnapshotFifo::new("issue-808-mutate", source_a, source_b);
-    let path = fixture.path().to_string_lossy().into_owned();
+    let source_a = include_str!("fixtures/issue_808_mutate_snapshot_a.fsl");
+    let source_b = include_str!("fixtures/issue_808_mutate_snapshot_b.fsl");
+    let mut fixture = TwoSnapshotFifo::new("mutate", source_a, source_b);
+    let path = fixture.fifo.to_string_lossy().into_owned();
     let mut child = Command::new(env!("CARGO_BIN_EXE_fslc"))
         // `mutate` accepts only `--depth`, `--by-requirement`, `--max-mutants`
         // and `--from`. Passing an unsupported option makes the CLI exit with
@@ -36,12 +40,12 @@ fn mutate_against_two_snapshot_fifo() -> (Value, i32) {
         // writer blocked in `open` and makes `assert_no_second_open` vacuously
         // true — the control would prove nothing even if it terminated.
         .args(["mutate", &path, "--depth", "4"])
-        .current_dir(support::root())
+        .current_dir(fifo_snapshot::root())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn native fslc against FIFO");
-    let output = support::wait_for_output(&mut child);
+    let output = wait_for_output(&mut child);
 
     // This is the correctness oracle. Cleanup opens B only after this point.
     fixture.assert_no_second_open();
