@@ -263,9 +263,9 @@ fn verify_reads_one_fifo_snapshot_for_bmc_induction_and_liveness() {
         // evidence that the liveness check ran against A, not against B.
         assert!(
             output["warnings"].as_array().is_some_and(|warnings| {
-                warnings
-                    .iter()
-                    .any(|warning| warning["kind"] == "vacuous_leadsto" && warning["name"] == "Served")
+                warnings.iter().any(|warning| {
+                    warning["kind"] == "vacuous_leadsto" && warning["name"] == "Served"
+                })
             }),
             "{engine} must report source A's vacuous leadsTo trigger: {output:#}"
         );
