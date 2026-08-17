@@ -43,6 +43,22 @@ six Rust-only causal commands, and the native test fixes that leaf count plus th
 `causal verify` path. `tools/export_cli_contract.py` exports only the frozen Python compatibility
 subset and refuses to overwrite the authoritative native file.
 
+## Root-source snapshot integrity
+
+`run_verify` and the native `verify` CLI capture their root specification once and derive
+specialized-document validation, Kernel/model lowering, requirements trace and implements metadata,
+strict-tag warnings, every selected native verification engine (BMC and induction, across every
+supported `--edition`), and the edition post-processing stage from that same source string (#808). A
+concurrent atomic replacement of the root path therefore cannot make a successful verification
+report results derived from two versions of that document. The path-taking wrappers remain
+available to command entries that have not yet adopted this contract.
+
+This boundary applies only to the root document. `FsResolver` continues to read compose, import,
+and implements dependencies at their referenced paths; making the whole dependency graph
+transactional is a separate contract. Re-parsing the captured root source in individual helpers is
+allowed: it is the source identity, rather than sharing an AST or model, that establishes the
+snapshot guarantee.
+
 The #442 local-optimum audit found that retaining the old Python exporter as an apparent complete
 source was locally convenient when the Rust CLI still matched it, but became a `mixed`
 externalization/time-delayed defect once causal evolved only in Rust: documentation and 39 causal

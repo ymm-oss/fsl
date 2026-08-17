@@ -29,7 +29,7 @@ use causal::{causal_command, run_causal_check};
 use verification::{
     BmcRequest, DeadlockMode, ExplicitRequest, InductionRequest, ModelSelection,
     VerificationEngine, run_auto_filtered, run_bmc_filtered, run_explicit_filtered,
-    run_induction_filtered, run_verify_cli,
+    run_induction_filtered, run_verify_cli, run_verify_cli_from_source,
 };
 
 const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
@@ -1761,10 +1761,14 @@ fn command() -> Result<(Value, i32), String> {
                 .map_or(&display_path, |state| &state.path);
             let options = parse_verify_options(&mut args)?;
             Ok(if command == "verify" {
-                let result = run_verify_cli(path, &display_path, &options);
-                with_version_metadata(apply_domain_edition(
+                let source = match read_spec_source(path) {
+                    Ok(source) => source,
+                    Err(error) => return Ok((spec_load_error_output(&error), 2)),
+                };
+                let result = run_verify_cli_from_source(path, &display_path, &source, &options);
+                with_version_metadata(apply_domain_edition_from_source(
                     result,
-                    path,
+                    &source,
                     &display_path,
                     &options.edition,
                 ))
@@ -5853,7 +5857,7 @@ fn run_check_with_tags(
 /// names the document the caller passed on the command line, never the
 /// transient materialization.
 fn apply_domain_edition(
-    (mut output, status): (Value, i32),
+    (output, status): (Value, i32),
     path: &Path,
     display_path: &Path,
     edition: &str,
@@ -5861,13 +5865,22 @@ fn apply_domain_edition(
     let Ok(source) = std::fs::read_to_string(path) else {
         return (output, status);
     };
+    apply_domain_edition_from_source((output, status), &source, display_path, edition)
+}
+
+fn apply_domain_edition_from_source(
+    (mut output, status): (Value, i32),
+    source: &str,
+    display_path: &Path,
+    edition: &str,
+) -> (Value, i32) {
     let migration_edition = if edition == "next" {
         fslc_rust::migration::Edition::Next
     } else {
         fslc_rust::migration::Edition::Current
     };
     let Ok(plan) = fslc_rust::migration::plan_migration(
-        &source,
+        source,
         &display_path.to_string_lossy(),
         migration_edition,
     ) else {
@@ -5881,7 +5894,7 @@ fn apply_domain_edition(
         .collect::<Vec<_>>();
     if edition != "next" {
         additions.extend(fslc_rust::frontend_output::implicit_initial_value_warnings(
-            &source,
+            source,
             &display_path.to_string_lossy(),
         ));
     }
@@ -5971,8 +5984,8 @@ fn load_surface_document_from_source(
         .map_err(|error| SpecLoadError::Parse(Box::new(error)))
 }
 
-fn validate_specialized_document(path: &Path) -> Result<(), String> {
-    match parse_surface_document(path)? {
+fn validate_specialized_document_from_source(path: &Path, source: &str) -> Result<(), String> {
+    match parse_surface_document_from_source(path, source)? {
         fsl_syntax::SurfaceDocument::Db(system) => {
             fsl_tools::validate_db(&system).map_err(|error| error.to_string())
         }
@@ -6004,6 +6017,11 @@ fn validate_specialized_document(path: &Path) -> Result<(), String> {
         }
         _ => Ok(()),
     }
+}
+
+fn validate_specialized_document(path: &Path) -> Result<(), String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    validate_specialized_document_from_source(path, &source)
 }
 
 fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
@@ -14549,7 +14567,15 @@ fn validate_requirement_traces(
     model: &KernelModel,
 ) -> Result<(Option<Value>, bool), String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    validate_requirement_trace_source(&source, model)
+    validate_requirement_traces_from_source(path, &source, model)
+}
+
+fn validate_requirement_traces_from_source(
+    _path: &Path,
+    source: &str,
+    model: &KernelModel,
+) -> Result<(Option<Value>, bool), String> {
+    validate_requirement_trace_source(source, model)
 }
 
 fn requirement_step_match(
@@ -14610,8 +14636,17 @@ fn implements_result(
             span: None,
         }
     })?;
+    implements_result_from_source(path, &source, model, depth)
+}
+
+fn implements_result_from_source(
+    path: &Path,
+    source: &str,
+    model: &KernelModel,
+    depth: usize,
+) -> Result<Option<Value>, fslc_rust::verification_output::RequirementsImplementsError> {
     let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-    fslc_rust::verification_output::requirements_implements_output(&source, &resolver, model, depth)
+    fslc_rust::verification_output::requirements_implements_output(source, &resolver, model, depth)
 }
 
 fn implements_error_output(
@@ -15195,16 +15230,42 @@ fn run_verify(
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
+    run_verify_from_source(
+        path,
+        &source,
+        depth,
+        deadlock_mode,
+        engine,
+        explicit_budget,
+        k_ind,
+    )
+}
+
+/// Verify one caller-owned root-source snapshot.
+///
+/// The specialized validation, Kernel/model lowering, requirements metadata,
+/// and selected verification engine all derive from `source`. Dependency files
+/// loaded by `FsResolver` deliberately retain their independent read semantics.
+#[allow(clippy::too_many_lines)]
+fn run_verify_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    explicit_budget: usize,
+    k_ind: usize,
+) -> (Value, i32) {
     // Causal sources deliberately sit outside `parse_document`'s dialect
     // registry.  Classify their syntax failure with their own parser before
     // the generic dispatcher would report the unrelated unknown-dialect
     // diagnostic.  A valid causal source keeps the existing verify behavior.
-    if fsl_syntax::is_causal_source(&source)
-        && let Err(error) = fsl_syntax::parse_causal(&source)
+    if fsl_syntax::is_causal_source(source)
+        && let Err(error) = fsl_syntax::parse_causal(source)
     {
         return causal::causal_parse_error_output(&error, false);
     }
-    match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source)) {
+    match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)) {
         Err(error) => return (surface_parse_error_output(&error), 2),
         Ok(fsl_syntax::ParsedDocument {
             surface: fsl_syntax::SurfaceDocument::Agent(_),
@@ -15220,31 +15281,49 @@ fn run_verify(
         }
         Ok(_) => {}
     }
-    if let Err(error) = validate_specialized_document(path) {
+    if let Err(error) = validate_specialized_document_from_source(path, source) {
         return (semantic_error_output(&error), 2);
     }
-    let mut has_trace_contract = false;
-    let mut implements = None;
-    let mut compose_warnings = Vec::new();
-    if let Ok((_, kernel, model)) = load_kernel_model(path) {
-        match validate_requirement_traces(path, &model) {
-            Ok((Some(failure), _)) => return (failure, 2),
-            Ok((None, has_contract)) => has_trace_contract = has_contract,
-            Err(error) => return (semantic_error_output(&error), 2),
+    // Preserve the established precedence of usage diagnostics over a Kernel
+    // load failure: the former path-based implementation reached engine
+    // selection before its engine loaded the model. Keep the error deferred,
+    // but never re-read `path` to obtain it.
+    let loaded_model = load_kernel_model_from_source(path, source);
+    let (has_trace_contract, implements, compose_warnings) = match &loaded_model {
+        Ok((kernel, model)) => {
+            let has_trace_contract =
+                match validate_requirement_traces_from_source(path, source, model) {
+                    Ok((Some(failure), _)) => return (failure, 2),
+                    Ok((None, has_contract)) => has_contract,
+                    Err(error) => return (semantic_error_output(&error), 2),
+                };
+            let implements = match implements_result_from_source(path, source, model, depth) {
+                Ok(implements) => implements,
+                Err(error) => return (implements_error_output(&error), 2),
+            };
+            (
+                has_trace_contract,
+                implements,
+                kernel.diagnostics().to_vec(),
+            )
         }
-        implements = match implements_result(path, &model, depth) {
-            Ok(implements) => implements,
-            Err(error) => return (implements_error_output(&error), 2),
-        };
-        compose_warnings = kernel.diagnostics().to_vec();
-    }
+        Err(_) => (false, None, Vec::new()),
+    };
     let deadlock = match DeadlockMode::parse(deadlock_mode) {
         Ok(mode) => mode,
         Err(error) => return (error_output("usage", &error), 2),
     };
+    let engine = match VerificationEngine::parse(engine) {
+        Ok(engine) => engine,
+        Err(error) => return (error_output("usage", &error), 2),
+    };
+    let (_, model) = match loaded_model {
+        Ok(model) => model,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
     let selection = ModelSelection {
         path,
-        model: None,
+        model: Some(&model),
         scope: None,
         property: None,
         excluded: &[],
@@ -15254,15 +15333,15 @@ fn run_verify(
     // `BmcOutputOptions::skip_vacuity_probe` (issue #729), it must always
     // compute the reachability probe.
     let skip_vacuity_probe = false;
-    let (mut output, status) = match VerificationEngine::parse(engine) {
-        Ok(VerificationEngine::Bmc) => run_bmc_filtered(BmcRequest {
+    let (mut output, status) = match engine {
+        VerificationEngine::Bmc => run_bmc_filtered(BmcRequest {
             selection,
             depth,
             deadlock,
             initial_state: None,
             skip_vacuity_probe,
         }),
-        Ok(VerificationEngine::Induction) => run_induction_filtered(InductionRequest {
+        VerificationEngine::Induction => run_induction_filtered(InductionRequest {
             selection,
             depth,
             deadlock,
@@ -15270,21 +15349,20 @@ fn run_verify(
             auxiliary: &[],
             skip_vacuity_probe,
         }),
-        Ok(VerificationEngine::Explicit) => run_explicit_filtered(ExplicitRequest {
+        VerificationEngine::Explicit => run_explicit_filtered(ExplicitRequest {
             selection,
             depth,
             deadlock,
             budget: explicit_budget,
             skip_vacuity_probe,
         }),
-        Ok(VerificationEngine::Auto) => run_auto_filtered(ExplicitRequest {
+        VerificationEngine::Auto => run_auto_filtered(ExplicitRequest {
             selection,
             depth,
             deadlock,
             budget: explicit_budget,
             skip_vacuity_probe,
         }),
-        Err(error) => return (error_output("usage", &error), 2),
     };
     if let Value::Object(envelope) = &mut output
         && envelope.get("result").and_then(Value::as_str) != Some("error")
@@ -15668,17 +15746,22 @@ fn load_model(path: &Path) -> Result<KernelModel, SpecLoadError> {
     load_kernel_model(path).map(|(_, _, model)| model)
 }
 
+fn load_model_from_source(path: &Path, source: &str) -> Result<KernelModel, SpecLoadError> {
+    load_kernel_model_from_source(path, source).map(|(_, model)| model)
+}
+
 fn load_kernel_model(path: &Path) -> Result<(String, KernelSpec, KernelModel), SpecLoadError> {
     let source = read_spec_source(path)?;
     let (kernel, model) = load_kernel_model_from_source(path, &source)?;
     Ok((source, kernel, model))
 }
 
-/// Build a checked Kernel/model from a caller-owned source snapshot.
+/// Build a checked Kernel/model from a caller-owned root-source snapshot.
 ///
 /// `load_kernel_model` remains the path-reading compatibility entry point;
-/// callers that also need a specialized surface projection must use this
-/// variant to avoid a second filesystem read.
+/// callers that already captured their source — whether to avoid a second
+/// root-path read or because they also need a specialized surface projection
+/// — use this variant. The resolver can still read imported dependencies.
 fn load_kernel_model_from_source(
     path: &Path,
     source: &str,
@@ -15930,8 +16013,16 @@ fn load_snapshot_value_object(
 
 fn load_model_scoped(path: &Path, scope: &ScopeBounds) -> Result<KernelModel, SpecLoadError> {
     let source = read_spec_source(path)?;
+    load_model_scoped_from_source(path, &source, scope)
+}
+
+fn load_model_scoped_from_source(
+    _path: &Path,
+    source: &str,
+    scope: &ScopeBounds,
+) -> Result<KernelModel, SpecLoadError> {
     let kernel =
-        match fsl_core::parse_kernel_source_with_bounds(&source, &scope.instances, &scope.values) {
+        match fsl_core::parse_kernel_source_with_bounds(source, &scope.instances, &scope.values) {
             Ok(kernel) => kernel,
             // A rejected `--instances`/`--values` bound is a CLI argument
             // defect, not a construct in the spec, so it owns no location.
@@ -15940,7 +16031,7 @@ fn load_model_scoped(path: &Path, scope: &ScopeBounds) -> Result<KernelModel, Sp
                     error.message,
                 )));
             }
-            Err(error) => return Err(kernel_load_error(&source, &error)),
+            Err(error) => return Err(kernel_load_error(source, &error)),
         };
     fsl_core::build_model(kernel)
         .map_err(|error| SpecLoadError::Semantic(SemanticDiagnostic::from_model_error(&error)))
@@ -16277,5 +16368,149 @@ spec InitTraceability {
         );
 
         std::fs::remove_dir_all(&directory).expect("remove temporary fixture directory");
+    }
+
+    struct SnapshotFixture {
+        directory: std::path::PathBuf,
+        path: std::path::PathBuf,
+    }
+
+    impl SnapshotFixture {
+        fn new(name: &str, source: &str) -> Self {
+            let directory = std::env::temp_dir().join(format!(
+                "fslc-issue-808-{name}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock after Unix epoch")
+                    .as_nanos(),
+            ));
+            std::fs::create_dir(&directory).expect("create source snapshot directory");
+            let path = directory.join("input.fsl");
+            std::fs::write(&path, source).expect("write source A");
+            Self { directory, path }
+        }
+    }
+
+    impl Drop for SnapshotFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.directory);
+        }
+    }
+
+    /// Platform-neutral #808 control. Capturing source A from a regular file
+    /// before replacing it with malformed source B must leave every
+    /// `*_from_source` helper bound to A. No scheduling, thread, rename, or
+    /// platform-specific filesystem primitive is involved.
+    #[test]
+    fn source_helpers_use_the_captured_root_snapshot() {
+        let source_a = include_str!("../tests/fixtures/vacuous_leadsto.fsl");
+        let fixture = SnapshotFixture::new("helpers", source_a);
+        let captured = read_spec_source(&fixture.path).expect("capture source A");
+        std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
+
+        assert!(
+            validate_specialized_document_from_source(&fixture.path, &captured).is_ok(),
+            "specialized validation must use source A"
+        );
+        let (_kernel, model) =
+            load_kernel_model_from_source(&fixture.path, &captured).expect("lower source A");
+        assert!(
+            model.state.iter().any(|(name, _)| name == "pending"),
+            "kernel model must retain source A's state"
+        );
+        assert_eq!(
+            validate_requirement_traces_from_source(&fixture.path, &captured, &model)
+                .expect("validate source A requirement traces"),
+            (None, false)
+        );
+        assert_eq!(
+            implements_result_from_source(&fixture.path, &captured, &model, 4)
+                .expect("derive source A implements metadata"),
+            None
+        );
+        assert!(
+            model
+                .leadstos
+                .iter()
+                .any(|property| display(&property.name) == "Served"),
+            "source A must retain its liveness property"
+        );
+
+        // The in-process control covers every public engine × edition
+        // combination. `edition=next` additionally proves that the
+        // post-processing stage retains the already captured source.
+        for (engine, edition, expected_result) in [
+            ("bmc", "current", "verified"),
+            ("bmc", "next", "verified"),
+            ("induction", "current", "proved"),
+            ("induction", "next", "proved"),
+        ] {
+            let result = run_verify_from_source(
+                &fixture.path,
+                &captured,
+                4,
+                "warn",
+                engine,
+                DEFAULT_EXPLICIT_BUDGET,
+                1,
+            );
+            let (output, status) =
+                apply_domain_edition_from_source(result, &captured, &fixture.path, edition);
+            assert_eq!(
+                status, 0,
+                "{engine}/{edition} must verify source A: {output:#}"
+            );
+            assert_eq!(
+                output["result"], expected_result,
+                "{engine}/{edition} must retain source A's verdict: {output:#}"
+            );
+            assert_eq!(
+                output["leads_to"]["Served"]["checked_to_depth"], 4,
+                "{engine}/{edition} must execute source A's leadsTo check: {output:#}"
+            );
+            // `checked_to_depth` alone only echoes `--depth`; it would match
+            // for any model that merely declares a `Served` leadsTo property.
+            // The `vacuous_leadsto` warning instead depends on the engine
+            // having actually evaluated source A's `pending ~> done` trigger
+            // reachability, so it is fixture-content evidence that the
+            // liveness check ran against A rather than a stray default.
+            assert!(
+                output["warnings"].as_array().is_some_and(|warnings| {
+                    warnings.iter().any(|warning| {
+                        warning["kind"] == "vacuous_leadsto" && warning["name"] == "Served"
+                    })
+                }),
+                "{engine}/{edition} must report source A's vacuous leadsTo trigger: {output:#}"
+            );
+            if edition == "next" {
+                assert_eq!(
+                    output["edition"], "next",
+                    "{engine}/{edition} post-processing must use source A: {output:#}"
+                );
+            }
+        }
+    }
+
+    /// The requirements `implements` path invokes the native refinement
+    /// engine. Its root document must use the captured requirements source
+    /// even after that path is replaced; its referenced business document is
+    /// intentionally still read through `FsResolver` and is not part of #808.
+    #[test]
+    fn implements_refinement_uses_the_captured_root_snapshot() {
+        let requirements = include_str!("../../../tests/fixtures/chain/requirements.fsl");
+        let business = include_str!("../../../tests/fixtures/chain/business.fsl");
+        let fixture = SnapshotFixture::new("implements", requirements);
+        std::fs::write(fixture.directory.join("business.fsl"), business)
+            .expect("write implements dependency");
+        let captured = read_spec_source(&fixture.path).expect("capture requirements source A");
+        std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
+        let (_, model) =
+            load_kernel_model_from_source(&fixture.path, &captured).expect("lower requirements A");
+
+        let implements = implements_result_from_source(&fixture.path, &captured, &model, 4)
+            .expect("derive implements refinement from source A")
+            .expect("requirements source A declares implements");
+        assert_eq!(implements["result"], "refines", "{implements:#}");
     }
 }

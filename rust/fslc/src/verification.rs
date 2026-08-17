@@ -9,11 +9,13 @@ use sha2::{Digest, Sha256};
 
 use super::{
     CliVerifyOptions, ScopeBounds, SpecLoadError, add_strict_tag_warnings, apply_vacuity_mode,
-    block_on_native, display, envelope, error_output, implements_error_output, implements_result,
-    invariant_names, load_kernel_model, load_model, load_model_scoped, load_snapshot_value_object,
-    load_state_snapshot, read_spec_source, select_properties, selected_implicit_bounds,
-    semantic_error_output, spec_load_error_output, surface_parse_error_output,
-    validate_requirement_traces, validate_specialized_document,
+    block_on_native, display, envelope, error_output, implements_error_output,
+    implements_result_from_source, invariant_names, load_kernel_model_from_source, load_model,
+    load_model_from_source, load_model_scoped, load_model_scoped_from_source,
+    load_snapshot_value_object, load_state_snapshot, read_spec_source, select_properties,
+    selected_implicit_bounds, semantic_error_output, spec_load_error_output,
+    surface_parse_error_output, validate_requirement_traces_from_source,
+    validate_specialized_document_from_source,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1809,6 +1811,19 @@ pub(super) fn run_verify_cli(
     cache_identity_path: &Path,
     options: &CliVerifyOptions,
 ) -> CommandResult {
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    run_verify_cli_from_source(path, cache_identity_path, &source, options)
+}
+
+pub(super) fn run_verify_cli_from_source(
+    path: &Path,
+    cache_identity_path: &Path,
+    source: &str,
+    options: &CliVerifyOptions,
+) -> CommandResult {
     if !options.lemmas.is_empty() && options.engine != "induction" {
         return (
             error_output("usage", "--lemma requires --engine induction"),
@@ -1827,13 +1842,15 @@ pub(super) fn run_verify_cli(
     // Causal models are intentionally outside the kernel dialect dispatcher.
     // Check their syntax first so a malformed causal input retains its parser
     // diagnostic instead of being rewritten as an unknown kernel dialect.
-    if let Ok(source) = std::fs::read_to_string(path)
-        && fsl_syntax::is_causal_source(&source)
-        && let Err(error) = fsl_syntax::parse_causal(&source)
+    // Uses the already-captured `source` snapshot rather than re-reading
+    // `path`, so this check can never observe a different root source than
+    // the rest of this verification.
+    if fsl_syntax::is_causal_source(source)
+        && let Err(error) = fsl_syntax::parse_causal(source)
     {
         return super::causal::causal_parse_error_output(&error, false);
     }
-    let prepared = match prepare_cli_verification(path, options) {
+    let prepared = match prepare_cli_verification_from_source(path, source, options) {
         Ok(prepared) => prepared,
         Err(output) => return output,
     };
@@ -1860,7 +1877,7 @@ pub(super) fn run_verify_cli(
     {
         return output;
     }
-    let (output, status) = execute_cli_verification(path, options, &prepared);
+    let (output, status) = execute_cli_verification(path, source, options, &prepared);
     let (output, status) = finalize_cli_verification(
         path,
         options,
@@ -1875,24 +1892,24 @@ pub(super) fn run_verify_cli(
     (output, status)
 }
 
-fn prepare_cli_verification(
+fn prepare_cli_verification_from_source(
     path: &Path,
+    source: &str,
     options: &CliVerifyOptions,
 ) -> Result<PreparedCliVerification, CommandResult> {
-    let source = read_spec_source(path).map_err(|error| (spec_load_error_output(&error), 2))?;
-    let is_agent_document = match fsl_syntax::parse_surface_document(&source) {
+    let is_agent_document = match fsl_syntax::parse_surface_document(source) {
         Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,
         Ok(_) => false,
         Err(error) => return Err((surface_parse_error_output(&error), 2)),
     };
     let has_scope = !options.scope.instances.is_empty() || !options.scope.values.is_empty();
-    if let Err(error) = validate_specialized_document(path) {
+    if let Err(error) = validate_specialized_document_from_source(path, source) {
         return Err((semantic_error_output(&error), 2));
     }
     let snapshot_model = if has_scope {
-        load_model_scoped(path, &options.scope)
+        load_model_scoped_from_source(path, source, &options.scope)
     } else {
-        load_model(path)
+        load_model_from_source(path, source)
     };
     let initial_state = if let Some(snapshot_path) = options.from_state.as_deref() {
         let model = snapshot_model
@@ -1907,7 +1924,7 @@ fn prepare_cli_verification(
     };
     let mut has_trace_contract = false;
     if !has_scope && let Ok(model) = &snapshot_model {
-        match validate_requirement_traces(path, model) {
+        match validate_requirement_traces_from_source(path, source, model) {
             Ok((Some(failure), _)) => return Err((failure, 2)),
             Ok((None, has_contract)) => has_trace_contract = has_contract,
             Err(error) => return Err((semantic_error_output(&error), 2)),
@@ -1920,11 +1937,17 @@ fn prepare_cli_verification(
     let compose_warnings = if has_scope {
         Vec::new()
     } else {
-        load_kernel_model(path)
-            .map(|(_, kernel, _)| kernel.diagnostics().to_vec())
+        load_kernel_model_from_source(path, source)
+            .map(|(kernel, _)| kernel.diagnostics().to_vec())
             .unwrap_or_default()
     };
-    validate_cli_property_selection(path, options, has_scope, snapshot_model.as_ref().ok())?;
+    validate_cli_property_selection(
+        path,
+        source,
+        options,
+        has_scope,
+        snapshot_model.as_ref().ok(),
+    )?;
     Ok(PreparedCliVerification {
         has_scope,
         is_agent_document,
@@ -1937,6 +1960,7 @@ fn prepare_cli_verification(
 
 fn validate_cli_property_selection(
     path: &Path,
+    source: &str,
     options: &CliVerifyOptions,
     has_scope: bool,
     prepared_model: Option<&KernelModel>,
@@ -1946,8 +1970,8 @@ fn validate_cli_property_selection(
     }
     let mut model = match prepared_model {
         Some(model) => Ok(model.clone()),
-        None if has_scope => load_model_scoped(path, &options.scope),
-        None => load_model(path),
+        None if has_scope => load_model_scoped_from_source(path, source, &options.scope),
+        None => load_model_from_source(path, source),
     }
     .map_err(|error| (spec_load_error_output(&error), 2))?;
     if options.engine == "induction"
@@ -2167,6 +2191,7 @@ fn store_auto_verification(
 
 fn execute_cli_verification(
     path: &Path,
+    source: &str,
     options: &CliVerifyOptions,
     prepared: &PreparedCliVerification,
 ) -> CommandResult {
@@ -2194,7 +2219,7 @@ fn execute_cli_verification(
     let implements = if filtered {
         None
     } else {
-        match implements_result(path, model, options.depth) {
+        match implements_result_from_source(path, source, model, options.depth) {
             Ok(implements) => implements,
             Err(error) => return (implements_error_output(&error), 2),
         }
@@ -2323,8 +2348,15 @@ fn finalize_cli_verification(
     }
     if status == 0
         && options.strict_tags
-        && let Err(output) =
-            add_cli_strict_tag_warnings(path, options, prepared.has_scope, &mut output)
+        && let Err(output) = add_cli_strict_tag_warnings(
+            path,
+            options,
+            prepared
+                .model
+                .as_ref()
+                .expect("successful verification has a prepared model"),
+            &mut output,
+        )
     {
         return output;
     }
@@ -2382,16 +2414,10 @@ fn add_snapshot_metadata(output: &mut Value, options: &CliVerifyOptions) {
 fn add_cli_strict_tag_warnings(
     path: &Path,
     options: &CliVerifyOptions,
-    has_scope: bool,
+    model: &KernelModel,
     output: &mut Value,
 ) -> Result<(), CommandResult> {
-    let model = if has_scope {
-        load_model_scoped(path, &options.scope)
-    } else {
-        load_model(path)
-    }
-    .map_err(|error| (spec_load_error_output(&error), 2))?;
-    add_strict_tag_warnings(output, &model, path, true, options.requirements.as_deref())
+    add_strict_tag_warnings(output, model, path, true, options.requirements.as_deref())
         .map_err(|error| (error_output("io", &error), 2))
 }
 #[cfg(test)]
