@@ -5938,6 +5938,39 @@ fn parse_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, St
     parse_surface_document_from_source(path, &source)
 }
 
+/// Load a dialect surface document without flattening a parser diagnostic at
+/// the command boundary.  The legacy string-returning helper above is kept
+/// for callers that deliberately own a non-envelope result; spec-input
+/// commands must retain the parser's class and span through this path.
+fn load_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, SpecLoadError> {
+    // This loader's caller contract predates the typed `io` envelope. Keep a
+    // read failure distinct from a parse failure without widening #780 beyond
+    // its declared parse-only surface.
+    let source = std::fs::read_to_string(path)
+        .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))?;
+    load_surface_document_from_source(path, &source)
+}
+
+/// Load a dialect surface document from an already-captured source string.
+///
+/// Domain-projection commands (#796) must validate and project from the same
+/// snapshot they read, so they call this instead of re-reading `path` through
+/// [`load_surface_document`]. `path` is still needed here (not just for
+/// diagnostics): a literate (`.md`) document keeps the pre-#780 unlocated
+/// `semantics` classification instead of a located `parse` envelope, and that
+/// dispatch is keyed on the extension, not the content.
+fn load_surface_document_from_source(
+    path: &Path,
+    source: &str,
+) -> Result<fsl_syntax::SurfaceDocument, SpecLoadError> {
+    if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
+        return parse_surface_document_from_source(path, source)
+            .map_err(SpecLoadError::unlocated_semantic);
+    }
+    fsl_syntax::parse_surface_document(source)
+        .map_err(|error| SpecLoadError::Parse(Box::new(error)))
+}
+
 fn validate_specialized_document(path: &Path) -> Result<(), String> {
     match parse_surface_document(path)? {
         fsl_syntax::SurfaceDocument::Db(system) => {
@@ -5974,10 +6007,10 @@ fn validate_specialized_document(path: &Path) -> Result<(), String> {
 }
 
 fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
-    let system = match parse_surface_document(path) {
+    let system = match load_surface_document(path) {
         Ok(fsl_syntax::SurfaceDocument::Db(system)) => system,
         Ok(_) => return (semantic_error_output("expected a dbsystem document"), 2),
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let mut result = match fsl_tools::check_db(&system) {
         Ok(Value::Object(result)) => result,
@@ -6017,10 +6050,10 @@ fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
 }
 
 fn run_db_observe(path: &Path, trace: &Path) -> (Value, i32) {
-    let system = match parse_surface_document(path) {
+    let system = match load_surface_document(path) {
         Ok(fsl_syntax::SurfaceDocument::Db(system)) => system,
         Ok(_) => return (semantic_error_output("expected a dbsystem document"), 2),
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let payload = match std::fs::read_to_string(trace)
         .map_err(|error| error.to_string())
@@ -6164,7 +6197,7 @@ fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
     if fslc_rust::frontend_output::is_ai_project(&source) {
         return run_ai_project_check(&source, path);
     }
-    match parse_surface_document(path) {
+    match load_surface_document(path) {
         Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => {
             let (kernel, status) =
                 run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
@@ -6188,7 +6221,7 @@ fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
             semantic_error_output("expected an ai_component or agent document"),
             2,
         ),
-        Err(error) => (semantic_error_output(&error), 2),
+        Err(error) => (spec_load_error_output(&error), 2),
     }
 }
 
@@ -6266,7 +6299,7 @@ fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> 
             json!({"result":if findings.is_empty(){"replay_conformant"}else{"replay_nonconformant"},"dialect":"fsl-ai-hard.v0","finding_schema_version":"fsl-ai-finding.v0","event_schema_version":"fsl-ai-event.v0","ai_component":summary.component,"events_checked":events.len(),"formal_result":"not_run","evidence":{"kind":"runtime_replay","formal_proof":false},"assumptions":[],"findings":findings}),
         );
     }
-    let component = match parse_surface_document(path) {
+    let component = match load_surface_document(path) {
         Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => component,
         Ok(_) => {
             return (
@@ -6274,7 +6307,7 @@ fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> 
                 2,
             );
         }
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     if selected_component.is_some_and(|selected| selected != component.name) {
         return (
@@ -6367,10 +6400,13 @@ fn run_ai_project_check(source: &str, path: &Path) -> (Value, i32) {
         Ok(project) => project,
         Err(error) => {
             let mut output = error_output("parse", &error.message);
-            if let Some((line, column)) = error.position
-                && let Some(object) = output.as_object_mut()
-            {
-                object.insert("loc".to_owned(), json!({"line": line, "column": column}));
+            if let Some(object) = output.as_object_mut() {
+                if let Some((line, column)) = error.position {
+                    object.insert("loc".to_owned(), json!({"line": line, "column": column}));
+                }
+                if let Some(code) = error.diagnostic_code {
+                    object.insert("diagnostic_code".to_owned(), json!(code));
+                }
             }
             return (output, 2);
         }
@@ -6463,8 +6499,14 @@ fn ai_project_name(path: &Path) -> String {
 fn load_ai_project(path: &Path) -> Result<fsl_syntax::AiProject, (Value, i32)> {
     let source = std::fs::read_to_string(path)
         .map_err(|error| (error_output("io", &error.to_string()), 2))?;
-    fsl_syntax::parse_ai_project(&source, &ai_project_name(path))
-        .map_err(|error| (semantic_error_output(&error), 2))
+    if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
+        return fsl_syntax::parse_ai_project(&source, &ai_project_name(path))
+            .map_err(|error| (semantic_error_output(&error.message), 2));
+    }
+    match fsl_syntax::parse_ai_project(&source, &ai_project_name(path)) {
+        Ok(project) => Ok(project),
+        Err(error) => Err((surface_parse_error_output(&error), 2)),
+    }
 }
 
 /// `fslc ai eval`: check a selected `statistical_property`'s declared
@@ -6620,10 +6662,10 @@ fn run_ai_compat(path: &Path, environment: Option<&str>) -> (Value, i32) {
         if fslc_rust::frontend_output::is_ai_project(&source) {
             match fsl_syntax::parse_ai_project(&source, &ai_project_name(path)) {
                 Ok(project) => project.components,
-                Err(error) => return (semantic_error_output(&error), 2),
+                Err(error) => return (semantic_error_output(&error.message), 2),
             }
         } else {
-            match parse_surface_document(path) {
+            match load_surface_document(path) {
                 Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => vec![component],
                 Ok(_) => {
                     return (
@@ -6633,7 +6675,7 @@ fn run_ai_compat(path: &Path, environment: Option<&str>) -> (Value, i32) {
                         2,
                     );
                 }
-                Err(error) => return (semantic_error_output(&error), 2),
+                Err(error) => return (spec_load_error_output(&error), 2),
             }
         };
     if components.is_empty() {
@@ -6746,18 +6788,27 @@ fn ai_compat_profile_block(profile: &Value) -> String {
     format!("artifact {artifact} {{\n{requires_line}{provides_line}}}\n")
 }
 
-fn parse_domain_document(path: &Path) -> Result<fsl_syntax::DomainSpec, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    parse_domain_document_from_source(path, &source)
+fn parse_domain_document(path: &Path) -> Result<fsl_syntax::DomainSpec, SpecLoadError> {
+    match load_surface_document(path)? {
+        fsl_syntax::SurfaceDocument::Domain(domain) => Ok(domain),
+        _ => Err(SpecLoadError::unlocated_semantic(
+            "expected a domain document",
+        )),
+    }
 }
 
+/// Same as [`parse_domain_document`], but from an already-captured source
+/// string so a caller that must validate and project the identical snapshot
+/// (#796) does not re-read `path`.
 fn parse_domain_document_from_source(
     path: &Path,
     source: &str,
-) -> Result<fsl_syntax::DomainSpec, String> {
-    match parse_surface_document_from_source(path, source)? {
+) -> Result<fsl_syntax::DomainSpec, SpecLoadError> {
+    match load_surface_document_from_source(path, source)? {
         fsl_syntax::SurfaceDocument::Domain(domain) => Ok(domain),
-        _ => Err("expected a domain document".to_owned()),
+        _ => Err(SpecLoadError::unlocated_semantic(
+            "expected a domain document",
+        )),
     }
 }
 
@@ -6766,8 +6817,14 @@ fn parse_domain_document_from_source(
 /// The AST projected by `domain analyze` / `domain expand` and the checked
 /// Kernel validation must originate from this same string. Re-reading `path`
 /// after parsing would permit an atomic save to validate different content.
-fn read_domain_command_input(path: &Path) -> Result<(String, fsl_syntax::DomainSpec), String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+fn read_domain_command_input(
+    path: &Path,
+) -> Result<(String, fsl_syntax::DomainSpec), SpecLoadError> {
+    // This command's caller contract predates the typed `io` envelope, same as
+    // `load_surface_document` above. Keep a read failure classified as
+    // `semantics` without widening #780 beyond its declared parse-only scope.
+    let source = std::fs::read_to_string(path)
+        .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))?;
     let domain = parse_domain_document_from_source(path, &source)?;
     Ok((source, domain))
 }
@@ -6830,7 +6887,7 @@ fn run_domain_check(
     let domain = match parse_domain_document(path) {
         Ok(domain) => domain,
         Err(error) => {
-            return apply_domain_edition((semantic_error_output(&error), 2), path, path, edition);
+            return apply_domain_edition((spec_load_error_output(&error), 2), path, path, edition);
         }
     };
     let (kernel, status) = run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
@@ -6860,14 +6917,14 @@ fn run_domain_analyze(path: &Path) -> (Value, i32) {
             },
             Err(error) => (core_error_output(&error), 2),
         },
-        Err(error) => (semantic_error_output(&error), 2),
+        Err(error) => (spec_load_error_output(&error), 2),
     }
 }
 
 fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
     let (input_source, domain) = match read_domain_command_input(path) {
         Ok(input) => input,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let source = match fsl_tools::domain_kernel_source(&domain) {
         Ok(source) => source,
@@ -6899,7 +6956,7 @@ fn run_domain_generate(
 ) -> (Value, i32) {
     let domain = match parse_domain_document(path) {
         Ok(domain) => domain,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     if profile != "functional-ddd" {
         return (
@@ -7067,7 +7124,7 @@ fn domain_replay_step(
 fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
     let domain = match parse_domain_document(path) {
         Ok(domain) => domain,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let events = match read_json_events(logs) {
         Ok(events) => events,
@@ -7346,7 +7403,7 @@ fn run_domain_testgen(
 ) -> (Value, i32) {
     let domain = match parse_domain_document(path) {
         Ok(domain) => domain,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let (generic, generic_status) = run_testgen(path, depth, target, deadlock_mode, strict, None);
     if generic_status != 0 {
@@ -10977,6 +11034,24 @@ fn approval_artifact(
     Ok((bytes, None))
 }
 
+fn approval_spec_digest(path: &Path) -> Result<String, SpecLoadError> {
+    if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
+        return approval::spec_digest(path).map_err(SpecLoadError::unlocated_semantic);
+    }
+    let source = read_spec_source(path)?;
+    if fsl_syntax::extract_literate_fsl(&source).is_some() {
+        return approval::spec_digest(path).map_err(SpecLoadError::unlocated_semantic);
+    }
+    let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+    let kernel = fsl_core::parse_kernel_source(&source, &resolver).map_err(|error| {
+        surface_parse_failure(&source).map_or_else(
+            || SpecLoadError::unlocated_semantic(error.to_string()),
+            |error| SpecLoadError::Parse(Box::new(error)),
+        )
+    })?;
+    approval::spec_digest_kernel(&kernel).map_err(SpecLoadError::unlocated_semantic)
+}
+
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn run_approval_create(
     path: &Path,
@@ -11252,7 +11327,7 @@ fn approval_evaluation(
     approval::verify_git_baseline(&repo, &relative_path, &record.spec.git_commit)
         .map_err(|error| error_output("io", &error))?;
     let current_spec_digest =
-        approval::spec_digest(path).map_err(|error| semantic_error_output(&error))?;
+        approval_spec_digest(path).map_err(|error| spec_load_error_output(&error))?;
     let (artifact, current_claim_set_digest) =
         approval_artifact(path, &record.target.kind, &record.target.inputs)?;
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
@@ -15120,6 +15195,15 @@ fn run_verify(
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
+    // Causal sources deliberately sit outside `parse_document`'s dialect
+    // registry.  Classify their syntax failure with their own parser before
+    // the generic dispatcher would report the unrelated unknown-dialect
+    // diagnostic.  A valid causal source keeps the existing verify behavior.
+    if fsl_syntax::is_causal_source(&source)
+        && let Err(error) = fsl_syntax::parse_causal(&source)
+    {
+        return causal::causal_parse_error_output(&error, false);
+    }
     match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source)) {
         Err(error) => return (surface_parse_error_output(&error), 2),
         Ok(fsl_syntax::ParsedDocument {

@@ -632,6 +632,25 @@ mod tests {
     }
 
     #[test]
+    fn check_preserves_ai_project_parser_location_and_code() {
+        let request = Request {
+            cmd: "check".to_owned(),
+            source: include_str!("../../fslc/tests/fixtures/error_envelope_broken_ai_project.fsl")
+                .to_owned(),
+            source_file: "broken_ai_project.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        };
+
+        let error = block_on(check(&request, TEST_SOLVER_VERSION));
+
+        assert_eq!(error["result"], json!("error"));
+        assert_eq!(error["kind"], json!("parse"));
+        assert_eq!(error["diagnostic_code"], json!("FSL-PARSE"));
+        assert_eq!(error["loc"], json!({"line": 9, "column": 3}));
+    }
+
+    #[test]
     fn check_rejects_an_incomplete_governance_contract() {
         let request = Request {
             cmd: "check".to_owned(),

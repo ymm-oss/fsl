@@ -54,9 +54,10 @@ pub fn parse_checked_ai_project(
     name: &str,
 ) -> Result<fsl_syntax::AiProject, AiProjectParseError> {
     let project =
-        fsl_syntax::parse_ai_project(source, name).map_err(|message| AiProjectParseError {
-            message,
-            position: None,
+        fsl_syntax::parse_ai_project(source, name).map_err(|error| AiProjectParseError {
+            message: error.to_string(),
+            position: Some((error.span.start.line, error.span.start.column)),
+            diagnostic_code: Some(error.code()),
         })?;
     let unparsed = project.unparsed_clauses();
     if unparsed.is_empty() {
@@ -81,6 +82,7 @@ pub fn parse_checked_ai_project(
              (min_samples, ci_lower, ci_upper, a point estimate, observed, or drift): {detail}"
         ),
         position: Some((first.line, first.column)),
+        diagnostic_code: Some("FSL-PARSE"),
     })
 }
 
@@ -90,6 +92,7 @@ pub fn parse_checked_ai_project(
 pub struct AiProjectParseError {
     pub message: String,
     pub position: Option<(u32, u32)>,
+    pub diagnostic_code: Option<&'static str>,
 }
 
 /// Render the multi-declaration AI project check result when applicable,
@@ -110,6 +113,9 @@ pub fn ai_project_check_output(
         output.insert("message".to_owned(), json!(error.message));
         if let Some((line, column)) = error.position {
             output.insert("loc".to_owned(), json!({"line": line, "column": column}));
+        }
+        if let Some(code) = error.diagnostic_code {
+            output.insert("diagnostic_code".to_owned(), json!(code));
         }
         return Some((Value::Object(output), 2));
     }

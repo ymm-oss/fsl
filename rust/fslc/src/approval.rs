@@ -469,6 +469,14 @@ pub fn spec_digest(path: &Path) -> Result<String, String> {
     let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
     let kernel =
         fsl_core::parse_kernel_source(&source, &resolver).map_err(|error| error.to_string())?;
+    spec_digest_kernel(&kernel)
+}
+
+/// Hash an already-lowered kernel AST while ignoring source locations.
+///
+/// This lets callers that own a public spec-loading envelope preserve a
+/// typed parse failure through loading before calculating the approval digest.
+pub fn spec_digest_kernel(kernel: &fsl_core::KernelSpec) -> Result<String, String> {
     let ast = normalized_ast(&kernel.kernel_ast_v1())
         .ok_or_else(|| "normalized kernel AST is empty".to_owned())?;
     let encoded = serde_json::to_vec(&ast).map_err(|error| error.to_string())?;
