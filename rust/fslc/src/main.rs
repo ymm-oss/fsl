@@ -5962,7 +5962,8 @@ fn load_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, Spe
 fn load_surface_document_from_source(
     source: &str,
 ) -> Result<fsl_syntax::SurfaceDocument, SpecLoadError> {
-    fsl_syntax::parse_surface_document(source).map_err(|error| SpecLoadError::Parse(Box::new(error)))
+    fsl_syntax::parse_surface_document(source)
+        .map_err(|error| SpecLoadError::Parse(Box::new(error)))
 }
 
 fn validate_specialized_document(path: &Path) -> Result<(), String> {
