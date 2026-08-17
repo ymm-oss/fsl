@@ -5074,21 +5074,33 @@ fn replay_failure_with_state(
 
 #[allow(clippy::too_many_lines)]
 fn run_scenarios(path: &Path, depth: usize, deadlock_mode: &str) -> (Value, i32) {
-    run_scenarios_mode(path, depth, deadlock_mode, false)
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    run_scenarios_mode_from_source(path, &source, depth, deadlock_mode, false)
 }
 
+/// Build one scenarios envelope from one caller-owned root-source snapshot.
+///
+/// `load_model`, requirement-trace validation, the BMC fallback on a genuine
+/// violation, and the acceptance/forbidden requirement-trace scenarios all
+/// derive from `source`, matching `run_verify_from_source`'s contract.
+/// Dependency files loaded by `FsResolver` deliberately retain their
+/// independent read semantics.
 #[allow(clippy::too_many_lines)]
-fn run_scenarios_mode(
+fn run_scenarios_mode_from_source(
     path: &Path,
+    source: &str,
     depth: usize,
     deadlock_mode: &str,
     allow_unreached: bool,
 ) -> (Value, i32) {
-    let model = match load_model(path) {
+    let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    match validate_requirement_traces(path, &model) {
+    match validate_requirement_traces_from_source(path, source, &model) {
         Ok((Some(failure), _)) => return (failure, 2),
         Ok((None, _)) => {}
         Err(error) => return (semantic_error_output(&error), 2),
@@ -5106,8 +5118,9 @@ fn run_scenarios_mode(
         || (!allow_unreached && result.reachables.values().any(Option::is_none))
         || (deadlock_mode == "error" && result.deadlock_step.is_some())
     {
-        return run_verify(
+        return run_verify_from_source(
             path,
+            source,
             depth,
             deadlock_mode,
             "bmc",
@@ -5268,7 +5281,7 @@ fn run_scenarios_mode(
         );
         scenarios.push(Value::Object(scenario));
     }
-    match requirement_trace_scenarios(path, &model) {
+    match requirement_trace_scenarios_from_source(source, &model) {
         Ok(requirement_scenarios) => scenarios.extend(requirement_scenarios),
         Err(error) => return (semantic_error_output(&error), 2),
     }
@@ -5286,10 +5299,12 @@ fn run_scenarios_mode(
 }
 
 #[allow(clippy::too_many_lines)]
-fn requirement_trace_scenarios(path: &Path, model: &KernelModel) -> Result<Vec<Value>, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+fn requirement_trace_scenarios_from_source(
+    source: &str,
+    model: &KernelModel,
+) -> Result<Vec<Value>, String> {
     let Some(contract) =
-        fsl_core::requirements_trace_contract(&source).map_err(|error| error.to_string())?
+        fsl_core::requirements_trace_contract(source).map_err(|error| error.to_string())?
     else {
         return Ok(Vec::new());
     };
@@ -10716,7 +10731,8 @@ fn run_testgen(
         Ok(parts) => parts,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let (scenarios, status) = run_scenarios_mode(path, depth, deadlock_mode, !strict);
+    let (scenarios, status) =
+        run_scenarios_mode_from_source(path, &source, depth, deadlock_mode, !strict);
     if status != 0 {
         // A genuine `violated`/`reachable_failed` counterexample (status 1)
         // is not a spec error: propagate it verbatim (verdict, exit code,
@@ -16512,5 +16528,158 @@ spec InitTraceability {
             .expect("derive implements refinement from source A")
             .expect("requirements source A declares implements");
         assert_eq!(implements["result"], "refines", "{implements:#}");
+    }
+
+    /// Platform-neutral #808 control for the generic `scenarios`/`testgen`
+    /// path. Source A and source B are both valid but declare distinct action
+    /// names, so a status/`result != "error"` check alone cannot tell them
+    /// apart -- only content bound to A proves the fix. Reverting
+    /// `run_scenarios_mode_from_source` to read `load_model(path)` (or any of
+    /// its sibling calls back to their path-taking form) makes the
+    /// `action_coverage` and generated-test assertions below observe B's
+    /// `increment`/`decrement` actions instead of A's `finish`.
+    #[test]
+    fn scenarios_and_testgen_use_the_captured_root_snapshot() {
+        let source_a = r"
+spec ReadyFixture {
+  state { pending: Bool, done: Bool }
+  init { pending = false  done = false }
+
+  action arrive() {
+    requires not pending
+    pending = true
+  }
+
+  action finish() {
+    requires pending
+    pending = false
+    done = true
+  }
+
+  leadsTo Served { pending ~> done }
+}
+";
+        let source_b = r"
+spec AltFixture {
+  state { count: Int }
+  init { count = 0 }
+
+  action increment() {
+    count = count + 1
+  }
+
+  action decrement() {
+    requires count > 0
+    count = count - 1
+  }
+}
+";
+        let fixture = SnapshotFixture::new("scenarios", source_a);
+        let captured = read_spec_source(&fixture.path).expect("capture source A");
+        std::fs::write(&fixture.path, source_b).expect("replace with distinct valid source B");
+
+        let (scenarios, status) =
+            run_scenarios_mode_from_source(&fixture.path, &captured, 4, "warn", true);
+        assert_eq!(status, 0, "{scenarios:#}");
+        assert_eq!(scenarios["spec"], "ReadyFixture", "{scenarios:#}");
+        let covered_actions: std::collections::BTreeSet<_> = scenarios["scenarios"]
+            .as_array()
+            .expect("scenarios array")
+            .iter()
+            .filter(|scenario| scenario["kind"] == "action_coverage")
+            .filter_map(|scenario| scenario["action"].as_str())
+            .collect();
+        assert_eq!(
+            covered_actions,
+            std::collections::BTreeSet::from(["arrive", "finish"]),
+            "must cover only source A's actions, not source B's: {scenarios:#}"
+        );
+        assert!(
+            scenarios["scenarios"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|scenario| scenario["kind"] == "leadsTo" && scenario["property"] == "Served"),
+            "must retain source A's leadsTo response scenario: {scenarios:#}"
+        );
+
+        // Replicate `run_testgen`'s non-compose generation path with the same
+        // captured source and model, proving the generated test content is
+        // bound to A rather than whatever is currently on disk.
+        let (kernel, model) =
+            load_kernel_model_from_source(&fixture.path, &captured).expect("lower source A");
+        let walk = fslc_rust::testgen_trace_vectors(&model).expect("build trace vectors from A");
+        let path_context =
+            testgen_path_context(&fixture.path, None).expect("build testgen path context");
+        let input = fsl_core::public_kernel_contract(
+            &kernel,
+            &model,
+            &fixture.path.to_string_lossy(),
+            source_dialect(&captured),
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|contract| {
+            fsl_tools::public_kernel_testgen_input(&contract, &path_context, &scenarios, &walk)
+        })
+        .expect("build testgen input from source A");
+        let content =
+            fsl_tools::generate_testgen(&input, "pytest").expect("generate pytest content");
+        assert!(
+            content.contains("finish"),
+            "generated test must reference source A's action: {content}"
+        );
+        assert!(
+            !content.contains("increment") && !content.contains("decrement"),
+            "generated test must not reference source B's actions: {content}"
+        );
+    }
+
+    /// Platform-neutral #808 control for the BMC fallback branch: a genuine
+    /// invariant violation must make `run_scenarios_mode_from_source` return
+    /// `run_verify_from_source`'s result derived from source A, not a fresh
+    /// read of whatever replaced the path. Source A and B declare distinct
+    /// action/spec names so the fallback's `spec`/`invariant`/trace content
+    /// pins to A; reverting the fallback to `run_verify(path, ...)` makes the
+    /// `spec`/`invariant` assertions below observe B instead.
+    #[test]
+    fn scenarios_violation_fallback_uses_the_captured_root_snapshot() {
+        let source_a = r"
+spec SpendFixture {
+  state { balance: Int }
+  init { balance = 0 }
+
+  invariant NonNegativeBalance { balance >= 0 }
+
+  action spend() {
+    balance = balance - 1
+  }
+}
+";
+        let source_b = r"
+spec GrowFixture {
+  state { total: Int }
+  init { total = 0 }
+
+  action grow() {
+    total = total + 1
+  }
+}
+";
+        let fixture = SnapshotFixture::new("scenarios-violation", source_a);
+        let captured = read_spec_source(&fixture.path).expect("capture source A");
+        std::fs::write(&fixture.path, source_b).expect("replace with distinct valid source B");
+
+        let (result, status) =
+            run_scenarios_mode_from_source(&fixture.path, &captured, 4, "warn", true);
+        assert_eq!(status, 1, "{result:#}");
+        assert_eq!(result["result"], "violated", "{result:#}");
+        assert_eq!(
+            result["spec"], "SpendFixture",
+            "the BMC fallback must report source A's spec, not source B's: {result:#}"
+        );
+        assert_eq!(
+            result["invariant"], "NonNegativeBalance",
+            "the BMC fallback must report source A's invariant: {result:#}"
+        );
     }
 }
