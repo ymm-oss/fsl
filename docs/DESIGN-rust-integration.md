@@ -53,6 +53,20 @@ concurrent atomic replacement of the root path therefore cannot make a successfu
 report results derived from two versions of that document. The path-taking wrappers remain
 available to command entries that have not yet adopted this contract.
 
+`run_mutate` and the native `mutate` CLI adopt the same contract: the baseline `verify` call, the
+Kernel/model load, the requirements-trace contract, and the surface-document parse that enumerates
+and scores builtin mutants all derive from one root-spec snapshot captured at command entry (#808).
+Kill-rate is the project's primary hollow-spec signal (`--vacuity` alone misses dead-ghost
+tautologies), so binding it to a single snapshot matters independently of the general verify
+contract above: before this fix, a baseline `verified` result from one file revision could be
+reported alongside a mutant set enumerated and scored against a different revision, silently mixing
+one document's health with another document's mutation coverage. `run_mutate_legacy` — dead code
+behind `#[allow(dead_code)]`, unreachable from any command dispatch — carries the same pre-#808
+multi-read shape but is out of scope for this fix; it re-reads through this same contract if it is
+ever wired up. The standalone `refine` command is unaffected: it takes three independently-owned
+paths (implementation, abstraction, mapping) and already reads each exactly once, so it has no
+same-path multi-read hazard to fix.
+
 This boundary applies only to the root document. `FsResolver` continues to read compose, import,
 and implements dependencies at their referenced paths; making the whole dependency graph
 transactional is a separate contract. Re-parsing the captured root source in individual helpers is
