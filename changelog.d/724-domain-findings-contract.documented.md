@@ -2,7 +2,7 @@ Documented (#724): `docs/DESIGN-domain.md`'s Findings section restated to
 match the native `fslc domain check`/`domain replay` implementation instead
 of the 7-kind list it previously claimed as implemented. Native
 `fslc domain check` implements exactly 4 finding kinds
-(`rust/fsl-tools/src/domain.rs:34-66`):
+(`rust/fsl-tools/src/domain.rs`'s `effect_findings`):
 `irreversible_effect_without_idempotency_key`,
 `pending_effect_without_timeout_or_fallback`,
 `missing_compensation_for_irreversible_effect`, and

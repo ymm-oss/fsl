@@ -316,6 +316,16 @@ findings, `fslc domain expand` to inspect the generated kernel, and
 `DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`. The v0 implementation does not prove
 real gateway behavior, queue delivery, wall-clock timeouts, or production
 exactly-once semantics.
+At command entry, `fslc domain analyze` and `fslc domain expand` both read one
+authored-source `String`, parse their `DomainSpec` with
+`parse_domain_document_from_source`, and pass that same string to
+`load_kernel_model_from_source` to construct the checked Kernel. Atomic path
+replacement therefore cannot make either command validate a different source
+version before returning output. They reject unresolved identifiers with the
+original source location; neither command is a best-effort/raw-AST inspection
+path for semantically invalid domain input. `domain generate` uses the same
+typed lowering but does not yet have this single-snapshot contract; #808 tracks
+that separate TOCTOU follow-up.
 The accepted #662 design keeps `event_*` flags one-hot/current-step and will add
 a dedicated `Map<Correlation,SagaPhase>` in a follow-up; do not make global
 event flags sticky or treat one effect's status map as a general saga history.

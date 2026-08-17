@@ -513,7 +513,14 @@ tests, or external evidence.
 `lower_domain` (typed `KernelSpec`, used by `check`/`verify`) and
 `domain_kernel_source` (rendered `.fsl` text, used by `domain expand` and
 by `check_domain` to validate renderability; only its hard-finding envelope
-includes the generated `kernel_source`).
+includes the generated `kernel_source`). At command entry, `domain analyze`
+and `domain expand` read one source `String`, parse their `DomainSpec`
+projection from it with `parse_domain_document_from_source`, and pass that same
+string to `load_kernel_model_from_source` to construct the checked Kernel. An
+atomic replacement of the path therefore cannot make either command validate a
+different source version before returning success (#796).
+`domain generate` uses the same typed lowering but does not yet provide this
+single-snapshot contract; #808 tracks that separate TOCTOU follow-up.
 `rust/fsl-core/tests/domain_render_agreement.rs` projects both through
 `public_kernel_contract` for the full domain corpus and requires them to match
 except on source spans (#664). Building that gate found the two
@@ -521,9 +528,13 @@ implementations already disagree: `Context::normalize`/`Context::default`
 (`domain.rs`) render text with `str::replace` and no syntax tree, so they
 cannot be scope-aware the way `lower_domain`'s typed AST composition is. #690
 fixed the known `can(...)` precedence false green by parenthesizing each joined
-piece; its scope-aware substitution and generated-name symptoms remain open.
+piece. #798 tracks the remaining scope-aware substitution and generated-name
+renderer gaps. #796 validates the CLI source before returning its renderer
+output, so the #798 generated-name misuse is rejected at the command boundary
+rather than being emitted as a seemingly valid Kernel; it does not make the
+two lowerings agree.
 `domain_render_agreement.rs`'s `KNOWN_DIVERGENT_DOMAIN_FIXTURES` pins the
-currently known instances as regression fixtures; #690 owns the remaining
+currently known instances as regression fixtures; #798 owns the remaining
 `Context::normalize` scope and generated-name gaps. #691 (a separate root cause --
 `Context::default` had a catch-all arm reachable for every container type,
 not `Context::normalize`'s substitution-order problem) is fixed:
