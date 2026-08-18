@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec InductionTransHypothesis {
+  type Count = 0..1
+  state { x: Count }
+  init { x = 0 }
+
+  action stay() { x = x }
+
+  invariant Zero { x == 0 }
+  trans StartsZero { old(x) == 0 }
+}

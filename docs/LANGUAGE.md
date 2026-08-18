@@ -236,9 +236,13 @@ events, domain errors, pure `decide`/`evolve`, async effect lifecycles, and
 saga/process-manager coordination. It lowers each command+decide+evolve path to
 a kernel `action`, aggregate state to prefixed kernel state, saga steps to
 event-flag guarded actions, and effect lifecycle state to finite
-`Map<CorrelationId, EffectStatus>` / `Map<CorrelationId, Attempt>` maps. Domain
-enum members are namespaced during lowering, so two domain enums may both contain
-`Pending`. Domain expressions may use `X in [A, B]` and `can(Command)`; these are
+`Map<CorrelationId, EffectStatus>` / `Map<CorrelationId, Attempt>` maps. Every
+action that raises an event's occurrence flag applies that event's declared
+`evolve` in the same action, whichever construct generated the action
+(command, effect completion, saga observe, or saga step/timeout/compensation).
+Domain enum members are namespaced during lowering, so two domain enums may
+both contain `Pending`. Domain expressions may use `X in [A, B]` and
+`can(Command)`; these are
 resolved from the typed domain tree and lowered structurally to kernel
 expressions. Bare enum members use the expected logical type; an untyped member
 shared by multiple enums is an error. Finite membership becomes an equality
@@ -247,6 +251,18 @@ aggregate and becomes the conjunction of the command's `requires` clauses and
 the negation of each rejection condition. Unknown symbols, cross-aggregate
 commands, type mismatches, and unsupported calls are reported at the original
 domain expression.
+
+A saga `compensation { when Trigger after After { emits ... } }` block lowers
+to a kernel action guarded by BOTH the trigger event flag and the `after`
+event flag, so the compensation only fires once both events have been
+observed. Because generated event flags are a one-hot, one-step observation,
+this dual guard is satisfiable only when a single `decide` emits both events
+in the same transition; the common case where the trigger and after events
+differ (for example, a compensation triggered by a later failure after an
+earlier success) is structurally disabled under the current flag scheme, and
+`fslc verify` reports the disabled compensation action as a never-enabled
+action warning rather than silently accepting a trace that never observed the
+`after` event.
 
 An effect can assign completion events explicit outcome roles with
 `success_event`, `failure_event`, and `timeout_event`. These declarations are the
@@ -282,16 +298,49 @@ graph with portable source identities, exact byte/line coordinates,
 target bindings, source-node reverse lookup, and explicit assurance/completeness.
 
 When a domain aggregate state field omits its initializer, the current edition
-preserves the established Bool `false`, enum first-member, range lower-bound, or
-external-placeholder `0` choice and emits `implicit_initial_value`. The warning
-contains the selected value, reason, current/next severity, field span, and a
-machine-applicable explicit-initializer insertion. The next edition requires the
-initializer to be explicit.
+preserves the established Bool `false`, Int `0`, enum first-member (rendered
+bare, as domain source itself would accept — never `domain_kernel_source`'s
+kernel-scoped mangled identifier, no matter how deeply the enum is nested
+inside a `value_object` or a `Map`'s value), range lower-bound,
+external-placeholder `0`, `value_object` struct-literal, `Option<T>` `none`,
+`Set<T>` `Set {}`, or top-level `Map<K, V>` dense per-key
+(`forall k: K { field[k] = <V's default> }`, where `<V's default>` recurses
+through this same selection) choice, and emits `implicit_initial_value` for
+every one of these shapes (#731) — the warning's coverage matches the
+renderer's total dispatch (`fsl_core::domain_type_default`, the single owner
+both the warning and `domain_kernel_source` read the selected value, and how
+an enum member within it is spelled, from), not just a scalar subset. The
+warning contains the selected value, reason, current/next severity, field
+span, and — where a machine-applicable insertion exists — a
+`suggestion`/`canonical_replacement`. Two field shapes omit the insertion, and
+consequently keep `edition_severity.next` at `warning` rather than `error`
+(the next edition cannot yet demand an initializer it has no safe way to
+insert): a top-level `Map<K, V>` field has no whole-field default at all
+(`field: Map<K, V> = expr;` is always rejected, "whole-Map domain defaults are
+not supported", because the per-key form is the only supported `Map`
+default), and a `Set<T>` or `value_object`-typed field's brace-literal default
+(`Set { ... }`, `Name { ... }`) cannot currently be round-tripped by `fslc
+fmt`'s reformat-and-reparse pass (issue #770) even though `fslc check` accepts
+it when written explicitly; `migrate --write` is fail-closed and would not
+write a corrupted file, but offering the insertion would trip #770's reformat
+failure and fail migration for the whole file, dropping every other,
+otherwise-safe edit in it too. A `Map` nested as another `Map`'s value is
+separately rejected ("Map state requires explicit initialization through
+supported semantics") because the per-key init has no default to select for a
+`Map` value type.
 
 Use `fslc domain check` for stable fsl-domain findings and the nested kernel
 result (`verified_under_assumptions` on success), `fslc domain analyze` for the
 aggregate/effect summary, `fslc domain expand` to inspect a generated kernel FSL
-debug view,
+debug view. At command entry, both `domain analyze` and `domain expand` read
+one authored-source `String`, parse their `DomainSpec` with
+`parse_domain_document_from_source`, and pass that same string to
+`load_kernel_model_from_source` to construct the checked Kernel. An atomic path
+replacement cannot make either command validate a different source version
+before returning output. They reject unresolved identifiers with the original
+source location instead of emitting a partial analysis or unusable Kernel text.
+`domain generate` uses the same typed lowering but does not yet have this
+single-snapshot contract; #808 tracks that separate TOCTOU follow-up.
 `fslc domain generate --target typescript|python|kotlin|swift|rust` for
 Functional DDD scaffolds, `fslc domain testgen` for adapter/conformance
 scaffolds, and `fslc domain replay --logs events.jsonl` for runtime command /
@@ -740,8 +789,9 @@ fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexa
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
-               [--property <Name>]               # check one named property in isolation —
-                                                 #   invariant / trans / leadsTo / reachable (for probing)
+               [--property <Name>]               # check one named property obligation —
+                                                 #   invariant / trans / leadsTo / reachable;
+                                                 #   induction keeps all invariants for a selected trans
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
@@ -855,6 +905,16 @@ two are never conflated.
 
 `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
 `reachable` declarations and checks only the named property kind in isolation.
+There is one induction-specific dependency rule: with
+`--engine induction --property <trans>`, the named `trans` is the only transition
+obligation, but all user invariants and implicit type bounds remain in the base
+case and the induction hypothesis. This preserves proofs whose two-state safety
+argument depends on established state invariants and makes the selected
+transition's verdict match the same transition in an all-properties induction
+run. Existing `--property <invariant>` behavior is unchanged: it still restricts
+the model to that invariant rather than retaining sibling invariants. The
+induction selector continues to reject selected `leadsTo` and `reachable`
+properties with a usage error.
 `--exclude-property Name` is repeatable and acts as the cross-kind inverse:
 it removes named invariants, `trans`, `leadsTo`, and `reachable` properties
 from the run and from checked-property outputs (`invariants_checked`,
@@ -1001,16 +1061,21 @@ inherit both automatically. Vacuity findings (`vacuous_implication` /
 `over_constrained`) and `blocking` (the other invariants making the
 antecedent/trigger impossible, empty when it's merely unreached within
 depth) — same shape as `reachable_failed`'s `unreached[].blocking_requires`.
+`vacuity_probe_truncated` (§15) is a distinct claim — the reachability
+probe was cut off by its state budget, not by depth — and carries its own
+`classification: "probe_truncated"` rather than either of the above.
 Blame identifies; it never proposes a repair (weakening a guard, dropping a
 conjunct) — that would cut against the anti-hollowing principle. All of this
 is strictly additive to the JSON contract.
 
 Diagnostics that identify a faithfulness/intent gap may also carry
 `faithfulness_class` plus `recommended_action`. Current classes are:
-`partial_op_unguarded`, `frozen_only_invariant`, `intent_unexercised`, and
-`liveness_not_refined`. The tag is derived from existing `result` / `kind` /
-`violation_kind` fields and is additive; consumers should keep reading the
-original classification fields for detail.
+`partial_op_unguarded`, `frozen_only_invariant`, `intent_unexercised`,
+`liveness_not_refined`, and `reachability_unknown` (`vacuity_probe_truncated`
+only — the reachability probe was budget-cut, not merely intent-unexercised).
+The tag is derived from existing `result` / `kind` / `violation_kind` fields
+and is additive; consumers should keep reading the original classification
+fields for detail.
 
 Progress-preserving refinement failures are reported as `refinement_failed` with
 `kind:"progress_lost"`, `violation_kind:"leadsTo"`, `impl_trace`,
@@ -1114,6 +1179,18 @@ Non-fsl fenced blocks (` ```python `, etc.) are ignored. `use`/compose paths
 resolve relative to the Markdown file's directory (same as for `.fsl` files);
 a literate `.md` may `use`/compose `.fsl` files this way, but using another
 `.md` file as a compose target is not supported.
+
+`check`, `verify`, and `scenarios` are the only commands that extract fences
+this way. Every other command that reads a spec path (`lint`, `migrate`,
+`fmt`, `kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`,
+`html`, `ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, and
+`document generate`/`claims`/`check`) rejects a `.md` input as an input-kind
+error instead: `result: "error"`, `kind: "usage"`,
+`diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"`, a message naming the
+commands that do support literate input, and a `loc` that names the input
+file rather than a spec position. This keeps a Markdown document passed to an
+unsupported command from being misreported as a spec syntax error at the
+position of the Markdown's own first non-fsl character.
 
 ## 8. Recommended workflow: make proved the standard
 
@@ -2318,8 +2395,14 @@ capability-completeness assumptions. Compatibility failures return
 environment, artifact, migration/schema element, minimal conflict set, and repair
 candidates. Runtime observation returns `observed_mismatch` with
 `formal_result: "not_run"`; absence from logs is not proof of unused behavior.
-Use ordinary `fslc verify` when you want to inspect the generated kernel
-counterexample directly.
+A non-passing nested `kernel.result` (`violated`/`reachable_failed`/
+`unknown_cti`/`unknown_budget`) folds through to the top-level `result`, and
+the nested `kernel` object carries that verdict's replayable evidence
+(`loc`/`trace`/`blame`/`cti`/`hint`/`unreached`/... — the same registry
+`fslc domain check` uses). Use ordinary `fslc verify` when you want the full
+generated-kernel envelope, including diagnostics `db check`/`domain check`
+deliberately do not project (coverage-name lists, run statistics, and the
+like).
 
 `fslc db observe` validates the observation envelope/events against
 `schemas/fslc/db/observation.v0.schema.json` (typed required fields, a closed
@@ -2593,14 +2676,27 @@ DESIGN-*.md).
   under-constraint = a missing guard, which a safety invariant stays silent
   about). The dual of `acceptance` (must-allow). → [`DESIGN-forbidden.md`](DESIGN-forbidden.md)
 - **Vacuity check (`--vacuity`)** — on the verified/proved path, warns about
-  `vacuous_implication` (the antecedent of an implication is unreachable),
+  `never_enabled_action` (an action has no enabled instance through the checked
+  depth; bounded evidence, not a permanent-dead proof), `vacuous_implication`
+  (the antecedent of an implication is unreachable),
   `vacuous_leadsto` (the trigger is unreachable), `always_true_requires`
   (a guard that is always true under the context of preceding clauses),
   `tautology_over_frozen` (a dynamically tautological invariant over state no
   action changes), `urgency_freeze` (a generated deadline `tick` proven dead
-  because urgency freezes time), and `vacuous_deadline` (a generated deadline
-  whose age is proven to remain zero across every transition). `error` exits 2. →
+  because urgency freezes time), `vacuous_deadline` (a generated deadline
+  whose age is proven to remain zero across every transition), and
+  `vacuity_probe_truncated`†. `error` exits 2. →
   [`DESIGN-vacuity.md`](DESIGN-vacuity.md)
+
+  † `vacuity_probe_truncated`: the `vacuous_implication`/`vacuous_leadsto`
+  reachability probe shares one budgeted concrete BFS across every
+  antecedent/trigger in the spec; a candidate that neither becomes true nor
+  finishes exhausting its reachable state space before the state-count
+  budget is hit reports this kind instead of `vacuous_implication`/
+  `vacuous_leadsto` — vacuity was never established either way, so treating
+  it as confirmed-vacuous would be a false positive and dropping it would
+  let `--vacuity error` pass a spec whose vacuity was never actually
+  decided. Selected by `--vacuity` exactly like the other seven kinds.
 - **`--strict-tags`** — warns on success results about untagged declarations
   (fabrication candidates) and unreferenced requirements (omission candidates,
   including empty requirement blocks). Existence-level matching. → [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md)

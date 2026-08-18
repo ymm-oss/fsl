@@ -13,7 +13,7 @@
 //! `src/fslc/ai_project.py`: a small typed metadata model built with a
 //! brace-matching block scanner, not a strict grammar.
 
-use crate::ai::{AiComponent, parse_ai_component};
+use crate::{AiComponent, ParseError, SourcePos, Span, parse_ai_component};
 
 /// Top-level declaration kinds this parser recognizes as fsl-ai project
 /// blocks. A block whose kind is not in this set is ignored (mirrors the
@@ -318,13 +318,21 @@ impl AiProject {
 ///
 /// # Errors
 ///
-/// Returns a message when no recognized top-level block is found, a block is
-/// unterminated, or a `statistical_property`/`observed_property`/
-/// `ai_migration` name is declared more than once.
-pub fn parse_ai_project(source: &str, name: &str) -> Result<AiProject, String> {
-    let blocks = top_blocks(source, 0)?;
+/// Returns a typed parser diagnostic when no recognized top-level block is
+/// found, a block is unterminated, or a `statistical_property`/
+/// `observed_property`/`ai_migration` name is declared more than once.
+///
+/// The fsl-ai project's brace scanner owns its own syntax. Its failures must
+/// therefore retain their source span here rather than being reinterpreted by
+/// the generic surface parser at a command boundary.
+pub fn parse_ai_project(source: &str, name: &str) -> Result<AiProject, ParseError> {
+    let blocks = top_blocks(source, 0, source)?;
     if blocks.is_empty() {
-        return Err("expected fsl-ai project declarations".to_owned());
+        return Err(parse_error_at(
+            source,
+            0,
+            "expected fsl-ai project declarations",
+        ));
     }
     let mut project = AiProject {
         name: name.to_owned(),
@@ -333,9 +341,10 @@ pub fn parse_ai_project(source: &str, name: &str) -> Result<AiProject, String> {
     for block in &blocks {
         match block.kind.as_str() {
             "ai_component" => {
-                project
-                    .components
-                    .push(parse_ai_component(&block.text).map_err(|error| error.to_string())?);
+                project.components.push(
+                    parse_ai_component(&block.text)
+                        .map_err(|error| relocate_parse_error(source, block, error))?,
+                );
             }
             "dataset" => project.datasets.push(parse_dataset(block)),
             // Descended only far enough to record the name: these are tracked
@@ -350,7 +359,7 @@ pub fn parse_ai_project(source: &str, name: &str) -> Result<AiProject, String> {
             "observed_property" => project
                 .observed_properties
                 .push(parse_observed_property(block, source)?),
-            "ai_migration" => project.migrations.push(parse_migration(block)?),
+            "ai_migration" => project.migrations.push(parse_migration(block, source)?),
             kind if RAW_BLOCKS.contains(&kind) => project.raw_blocks.push(AiRawBlock {
                 kind: block.kind.clone(),
                 name: block.name.clone(),
@@ -363,31 +372,27 @@ pub fn parse_ai_project(source: &str, name: &str) -> Result<AiProject, String> {
     // until issue 571: a `dataset X` reference resolves by name, so two
     // declarations sharing one made the resolution depend on declaration order,
     // and `datasets` echoed the name twice.
-    reject_duplicates(project.datasets.iter().map(|d| d.name.as_str()), "dataset")?;
-    reject_duplicates(project.evaluators.iter().map(String::as_str), "evaluator")?;
-    reject_duplicates(
-        project
-            .statistical_properties
-            .iter()
-            .map(|p| p.name.as_str()),
-        "statistical_property",
-    )?;
-    reject_duplicates(
-        project.observed_properties.iter().map(|p| p.name.as_str()),
-        "observed_property",
-    )?;
-    reject_duplicates(
-        project.migrations.iter().map(|p| p.name.as_str()),
-        "ai_migration",
-    )?;
+    reject_duplicate_blocks(&blocks, "dataset", source)?;
+    reject_duplicate_blocks(&blocks, "evaluator", source)?;
+    reject_duplicate_blocks(&blocks, "statistical_property", source)?;
+    reject_duplicate_blocks(&blocks, "observed_property", source)?;
+    reject_duplicate_blocks(&blocks, "ai_migration", source)?;
     Ok(project)
 }
 
-fn reject_duplicates<'a>(names: impl Iterator<Item = &'a str>, label: &str) -> Result<(), String> {
+fn reject_duplicate_blocks(
+    blocks: &[RawBlock],
+    label: &str,
+    source: &str,
+) -> Result<(), ParseError> {
     let mut seen = std::collections::BTreeSet::new();
-    for name in names {
-        if !seen.insert(name) {
-            return Err(format!("duplicate {label} '{name}'"));
+    for block in blocks.iter().filter(|block| block.kind == label) {
+        if !seen.insert(block.name.as_str()) {
+            return Err(parse_error_at(
+                source,
+                block.start,
+                format!("duplicate {label} '{}'", block.name),
+            ));
         }
     }
     Ok(())
@@ -398,6 +403,9 @@ fn reject_duplicates<'a>(names: impl Iterator<Item = &'a str>, label: &str) -> R
 struct RawBlock {
     kind: String,
     name: String,
+    /// Char offset of the declaration's first character in the whole project
+    /// source. Duplicate declarations report this declaration, not a sibling.
+    start: usize,
     /// Char offset of `body`'s first character within the whole project
     /// source, so a clause inside it can report its own `loc` (#562).
     body_offset: usize,
@@ -539,7 +547,11 @@ fn brace_depth(chars: &[char]) -> i32 {
     depth
 }
 
-fn top_blocks(source: &str, base: usize) -> Result<Vec<RawBlock>, String> {
+fn top_blocks(
+    source: &str,
+    base: usize,
+    project_source: &str,
+) -> Result<Vec<RawBlock>, ParseError> {
     let chars: Vec<char> = source.chars().collect();
     let mut blocks = Vec::new();
     let mut i = 0usize;
@@ -555,13 +567,15 @@ fn top_blocks(source: &str, base: usize) -> Result<Vec<RawBlock>, String> {
             continue;
         }
         let Some(end) = matching_brace(&chars, header.brace) else {
-            return Err(format!(
-                "unterminated {} '{}' block",
-                header.kind, header.name
+            return Err(parse_error_at(
+                project_source,
+                base + header.brace,
+                format!("unterminated {} '{}' block", header.kind, header.name),
             ));
         };
         if brace_depth(&chars[..header.start]) == 0 {
             blocks.push(RawBlock {
+                start: base + header.start,
                 text: chars[header.start..=end].iter().collect(),
                 body: chars[header.brace + 1..end].iter().collect(),
                 body_offset: base + header.brace + 1,
@@ -572,6 +586,50 @@ fn top_blocks(source: &str, base: usize) -> Result<Vec<RawBlock>, String> {
         i = end + 1;
     }
     Ok(blocks)
+}
+
+fn source_pos(source: &str, char_offset: usize) -> SourcePos {
+    let mut offset = 0;
+    let mut line = 1;
+    let mut column = 1;
+    for character in source.chars().take(char_offset) {
+        offset += character.len_utf8();
+        if character == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    SourcePos {
+        offset,
+        line,
+        column,
+    }
+}
+
+fn parse_error_at(source: &str, char_offset: usize, message: impl Into<String>) -> ParseError {
+    let position = source_pos(source, char_offset);
+    ParseError::new(
+        message,
+        Span {
+            start: position,
+            end: position,
+        },
+    )
+}
+
+fn relocate_parse_error(source: &str, block: &RawBlock, error: ParseError) -> ParseError {
+    let start = block.start + block.text[..error.span.start.offset].chars().count();
+    let end = block.start + block.text[..error.span.end.offset].chars().count();
+    ParseError::coded(
+        error.code(),
+        error.message,
+        Span {
+            start: source_pos(source, start),
+            end: source_pos(source, end),
+        },
+    )
 }
 
 fn strip_comment(line: &str) -> &str {
@@ -807,7 +865,7 @@ fn parse_metric_requirement(
 fn parse_statistical_property(
     block: &RawBlock,
     source: &str,
-) -> Result<AiStatisticalProperty, String> {
+) -> Result<AiStatisticalProperty, ParseError> {
     let mut target = None;
     let mut dataset = None;
     let mut evaluator = None;
@@ -823,9 +881,13 @@ fn parse_statistical_property(
             evaluator = Some(atom(rest));
         } else if let Some(rest) = line.strip_prefix("confidence ") {
             confidence = atom(rest).parse().map_err(|_| {
-                format!(
-                    "statistical_property '{}' has a non-numeric confidence",
-                    block.name
+                parse_error_at(
+                    source,
+                    entry.offset,
+                    format!(
+                        "statistical_property '{}' has a non-numeric confidence",
+                        block.name
+                    ),
                 )
             })?;
         } else if let Some(rest) = line.strip_prefix("require ") {
@@ -836,7 +898,7 @@ fn parse_statistical_property(
             ));
         }
     }
-    for child in top_blocks(&block.body, block.body_offset)? {
+    for child in top_blocks(&block.body, block.body_offset, source)? {
         if child.kind != "slice" {
             continue;
         }
@@ -926,7 +988,7 @@ fn parse_observed_requirement(
 fn parse_observed_property(
     block: &RawBlock,
     project_source: &str,
-) -> Result<AiObservedProperty, String> {
+) -> Result<AiObservedProperty, ParseError> {
     let mut target = None;
     let mut source = None;
     let mut window = None;
@@ -947,7 +1009,7 @@ fn parse_observed_property(
             ));
         }
     }
-    for child in top_blocks(&block.body, block.body_offset)? {
+    for child in top_blocks(&block.body, block.body_offset, project_source)? {
         if child.kind != "slice" {
             continue;
         }
@@ -998,13 +1060,13 @@ fn parse_regression_requirement(
     })
 }
 
-fn parse_migration(block: &RawBlock) -> Result<AiMigration, String> {
+fn parse_migration(block: &RawBlock, source: &str) -> Result<AiMigration, ParseError> {
     let mut regression_requirements = Vec::new();
-    for child in top_blocks(&block.body, block.body_offset)? {
+    for child in top_blocks(&block.body, block.body_offset, source)? {
         if child.kind != "preserve" {
             continue;
         }
-        for grandchild in top_blocks(&child.body, child.body_offset)? {
+        for grandchild in top_blocks(&child.body, child.body_offset, source)? {
             if grandchild.kind != "no_regression" {
                 continue;
             }
@@ -1014,8 +1076,10 @@ fn parse_migration(block: &RawBlock) -> Result<AiMigration, String> {
                 if let Some(rest) = line.strip_prefix("dataset ") {
                     dataset = Some(atom(rest));
                 } else if line.starts_with("metric ") {
-                    regression_requirements
-                        .push(parse_regression_requirement(line, dataset.clone())?);
+                    regression_requirements.push(
+                        parse_regression_requirement(line, dataset.clone())
+                            .map_err(|error| parse_error_at(source, entry.offset, error))?,
+                    );
                 }
             }
         }
@@ -1115,7 +1179,11 @@ observed_property SupportAgentOperationalQuality {
     #[test]
     fn rejects_source_with_no_recognized_block() {
         let error = parse_ai_project("domain D {}", "P").unwrap_err();
-        assert!(error.contains("expected fsl-ai project declarations"));
+        assert!(
+            error
+                .message
+                .contains("expected fsl-ai project declarations")
+        );
     }
 
     #[test]

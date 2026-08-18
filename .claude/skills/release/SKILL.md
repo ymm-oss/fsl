@@ -105,8 +105,10 @@ a feature-flag system solely to accommodate this flow.
    - bump `rust/Cargo.toml`'s workspace version and regenerate `rust/Cargo.lock`
      with Cargo; do not bump the frozen `pyproject.toml` package for a native
      GitHub Release;
-   - move `[Unreleased]` entries under `## [X.Y.Z] - YYYY-MM-DD` while retaining
-     an empty `[Unreleased]` section;
+   - ran `tools/aggregate_changelog.sh release --version X.Y.Z --date YYYY-MM-DD`,
+     moving `[Unreleased]` entries and aggregating every `changelog.d/`
+     fragment under `## [X.Y.Z] - YYYY-MM-DD`, leaving `[Unreleased]` and
+     `changelog.d/` both empty;
    - update comparison links and confirm the matching changelog section is a
      non-empty Release body.
 4. Run `./tools/check-native-integration.sh` and dispatch the release workflow's
@@ -172,8 +174,9 @@ must continue while unrelated work lands on `main`.
   the temporary branch only after its release metadata is reconciled to `main`.
 - After release, open a metadata reconciliation pull request to `main`. Carry
   forward the released version and comparison links, remove only the entries
-  shipped by the release branch, and preserve newer `[Unreleased]` entries from
-  advancing `main`. Do not merge the older release tree wholesale over `main`.
+  shipped by the release branch, and preserve newer `[Unreleased]` entries and
+  `changelog.d/` fragments from advancing `main`. Do not merge the older
+  release tree wholesale over `main`.
 - Do not introduce permanent `pre-production`; the temporary branch represents
   the stabilized candidate, not an environment.
 

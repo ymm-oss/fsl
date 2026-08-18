@@ -1,0 +1,136 @@
+domain Issue779SagaEmitEvolveNegativeControls {
+  // SPDX-License-Identifier: Apache-2.0
+  //
+  // #779 negative controls. This fixture is `examples/domain/order_fulfillment_saga.fsl`
+  // plus three invariants that exist ONLY to witness the fix and must NOT be added to the
+  // corpus example itself (#772: a "dead value is never reached" invariant would fossilize
+  // the pre-#779 defect as intended behavior instead of stating protocol intent).
+  //
+  // - `inventoryNeverReservationPending` / `paymentNeverPaymentPending`: before #779 these are
+  //   `proved` under `--engine induction` because the saga step/timeout/compensation actions
+  //   never apply their declared `evolve`, so `ReservationPending`/`PaymentPending` are
+  //   unreachable. After #779 they must flip to `violated` (reachable via
+  //   approve -> reserve_inventory / -> capture_payment).
+  // - `inventoryNeverReleaseRequested`: must stay `proved` both before and after #779. The
+  //   compensation action's one-hot dual guard (`requires event_PaymentFailed` and
+  //   `requires event_InventoryReserved`, mutually exclusive one-hot flags) keeps it
+  //   structurally unreachable until #679 changes the guard shape. #779 only adds the missing
+  //   `evolve` call and must not touch that guard.
+  implementation_profile functional_ddd
+
+  enum OrderStatus { Pending, Approved, Cancelled }
+  enum InventoryStatus { NotRequested, ReservationPending, Reserved, Failed, ReleaseRequested }
+  enum PaymentStatus { NotRequested, PaymentPending, Captured, Failed, TimedOut }
+
+  aggregate Order {
+    id OrderId
+
+    state {
+      status: OrderStatus = Pending;
+      inventory_status: InventoryStatus = NotRequested;
+      payment_status: PaymentStatus = NotRequested;
+    }
+
+    command ApproveOrder {}
+
+    event OrderApproved {}
+    event InventoryReservationRequested {}
+    event InventoryReserved {}
+    event InventoryReservationFailed {}
+    event PaymentCaptureRequested { payment_request_id: PaymentRequestId }
+    event PaymentCaptured { payment_request_id: PaymentRequestId }
+    event PaymentFailed { payment_request_id: PaymentRequestId }
+    event PaymentCaptureTimedOut { payment_request_id: PaymentRequestId }
+    event ShipmentRequested {}
+    event InventoryReleaseRequested {}
+
+    decide ApproveOrder {
+      requires status == Pending
+      emits OrderApproved
+    }
+
+    evolve OrderApproved {
+      status = Approved
+    }
+
+    evolve InventoryReservationRequested {
+      inventory_status = ReservationPending
+    }
+
+    evolve InventoryReserved {
+      inventory_status = Reserved
+    }
+
+    evolve InventoryReservationFailed {
+      inventory_status = Failed
+    }
+
+    evolve PaymentCaptureRequested {
+      payment_status = PaymentPending
+    }
+
+    evolve PaymentCaptured {
+      payment_status = Captured
+    }
+
+    evolve PaymentFailed {
+      payment_status = Failed
+    }
+
+    evolve PaymentCaptureTimedOut {
+      payment_status = TimedOut
+    }
+
+    evolve ShipmentRequested {
+      status = Approved
+    }
+
+    evolve InventoryReleaseRequested {
+      inventory_status = ReleaseRequested
+    }
+
+    invariant inventoryNeverReservationPending {
+      inventory_status != ReservationPending
+    }
+
+    invariant paymentNeverPaymentPending {
+      payment_status != PaymentPending
+    }
+
+    invariant inventoryNeverReleaseRequested {
+      inventory_status != ReleaseRequested
+    }
+  }
+
+  saga OrderFulfillment {
+    starts_on OrderApproved
+    outbox OrderOutbox
+    inbox FulfillmentInbox
+
+    step ReserveInventory {
+      async
+      emits InventoryReservationRequested
+      awaits one_of [InventoryReserved, InventoryReservationFailed]
+      timeout after 5m emits InventoryReservationFailed
+    }
+
+    step CapturePayment {
+      async
+      requires InventoryReserved
+      emits PaymentCaptureRequested
+      awaits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
+      timeout after 10m emits PaymentCaptureTimedOut
+    }
+
+    step ShipOrder {
+      requires PaymentCaptured
+      emits ShipmentRequested
+    }
+
+    compensation {
+      when PaymentFailed after InventoryReserved {
+        emits InventoryReleaseRequested
+      }
+    }
+  }
+}

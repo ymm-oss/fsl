@@ -1,0 +1,21 @@
+The negative control for the source witness (#753). It applies cleanly -- its
+hunk removes a line and adds the identical line back -- and leaves the file
+byte-for-byte unchanged, so `git apply` reports success while the compiler
+sees no fault at all. The harness requires `assert_fault_reached_source` to
+refuse it. If this control ever passes that witness, a `primary=ok` verdict is
+once again ambiguous between "the detector does not cover the seam" and "the
+detector never saw the fault", which is the confusion this witness exists to
+remove.
+
+Deliberately targets the same file as the other two controls, so all three
+share one seam and a future edit to `outcome.rs` moves them together.
+
+--- a/rust/fslc/src/outcome.rs
++++ b/rust/fslc/src/outcome.rs
+@@ -219,5 +219,5 @@
+         // success. Falling through to zero is exactly how #554 arose, and a
+         // poisoned verify-cache entry must not be readable as a pass either.
+         _ => OutcomeClass::Failure,
+-    }
++    }
+ }

@@ -512,7 +512,8 @@ interpretation trigger even though commit/rollback policy remains centralized. R
 each observed step through a Monitor.
 
 Search ownership is broader than two BFS functions. `check_refinement`, `find_boundary_violation`,
-`expression_reachable`, `action_cover_traces`, and `leadsto_response_traces` each own a distinct
+`expression_reachability` (renamed and budgeted from `expression_reachable`, issue #729),
+`action_cover_traces`, and `leadsto_response_traces` each own a distinct
 solver-free queue/result contract and reuse Monitor transitions. The public legacy BFS does the
 same. The product explicit engine additionally owns deterministic-initialization and eligibility
 gates plus frontier, parent, closure, coverage, and state budget in `explicit.rs`; these APIs are
@@ -923,6 +924,60 @@ exit 2) and `analyze` batch (which reports `analyzed` for zero files) agree. The
 inputs — a fixed pipeline versus a directory glob — and no accepted decision calls the asymmetry a
 defect. Each aggregation records its choice as a stated constant reproducing today's behavior. If
 `analyze` batch's zero-file success is itself wrong, that is a separate issue with its own evidence.
+
+#### Nested kernel projection registry (#663)
+
+`run_db_check` and `run_domain_check` each project a nested `verify` kernel envelope into their own
+`kernel` object, and before #663 each held an independent, hand-copied allowlist for it:
+`run_domain_check`'s (`stable_kernel_projection`, 16 keys after #641) carried an AGENTS.md-citing
+comment for its replayable-evidence keys, and `run_db_check`'s (7 keys) carried neither the comment
+nor any of that evidence. Fixes for #515 and #641 landed on the domain copy only because there was
+nowhere else to land them — the same defect shape #600/#612 record for `is_definitive_kernel_verdict`
+one level up.
+
+Both copies entered in one commit, and the asymmetry is inherited rather than invented twice:
+`81b31eb8` ("complete native fslc migration", 172 files) ported `src/fslc/db_check.py`'s 7-key
+allowlist faithfully, but `src/fslc/domain_check.py` had emitted `"kernel": kernel` — the whole
+unprojected envelope — so the domain side arrived as a *new* 16-key allowlist over a source that had
+never dropped anything. That is why #515 and #641 both took the shape of adding keys back: they were
+rediscovering, one incident at a time, keys the frozen reference had never removed. Anyone tempted to
+narrow `PROJECTED_KERNEL_KEYS` again should read that history first — the pre-migration behavior for
+`domain check` was "project nothing", not "project these sixteen".
+
+The difference survived from the migration to #663 because it lived *inside* `kernel`, and the parity
+harness covering these commands excludes that object from comparison
+(`tools/check_rust_phase3_commands.py`'s `project()`); the harness was also never wired into any
+runner. That blind spot is its own issue, #689, and it is still what hides #687.
+
+`rust/fslc/src/outcome.rs` owns the single answer: `classify_kernel_key(key: &str) ->
+Option<KernelKeyFate>`, its `PROJECTED_KERNEL_KEYS` emission order, and `project_kernel(kernel:
+Value) -> Value`. `run_db_check` and `run_domain_check` are its only production callers. It sits
+beside `outcome_class` in the lib for the same reason recorded above:
+`issue_663_kernel_projection_owner.rs` is an integration test exercising the compiled binary, so a
+bin module would leave it unable to defer to the production registry and force it back into a
+hand-copied literal — the exact defect being removed.
+
+An unrecognized key passes through `project_kernel` unchanged rather than panicking. A panic was
+considered and rejected: AGENTS.md makes the JSON envelope itself an invariant ("Native CLI and
+Worker output must preserve the JSON envelope, exit codes, locations, and replayable evidence
+contract"), and panicking here would exit 101 with no envelope at all, discarding a verdict
+`run_verify` had already computed correctly — unlike the native-Z3-backend panic (`main.rs`,
+"unexpectedly yielded Pending"), where no correct output exists to discard in the first place. See
+`project_kernel`'s doc comment for the full argument.
+
+The registry is total by construction: every key `classify_kernel_key` recognizes is `Projected`
+(with an emission-order position in `PROJECTED_KERNEL_KEYS`) or `Dropped` (with a reason stated in
+its own match arm); `None` means unregistered. `issue_663_kernel_projection_owner.rs`'s
+`every_key_a_curated_verify_corpus_emits_is_classified` is the external gate against a new `verify`
+output channel shipping unregistered — it fails loudly in CI over a curated corpus, which is where
+the loudness now lives instead of a runtime panic over production input.
+
+The owner is single **within `fslc-rust`**, not across the workspace. `rust/fsl-tools/src/ai.rs:183`'s
+`kernel_projection` is a third, independent copy of the pre-#663 7-key shape, used by `fslc ai check`,
+and it cannot call `classify_kernel_key`/`project_kernel` because the dependency direction is
+`fslc-rust -> fsl-tools`, not the reverse. This is a known boundary, not an oversight: unifying it is
+a crate-ownership change requiring its own issue and scope per `.claude/rules/rust-verifier.md`.
+Tracked as #687 (https://github.com/ymm-oss/fsl/issues/687).
 
 ### `fsl-wasm`
 

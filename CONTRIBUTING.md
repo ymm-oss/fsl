@@ -58,14 +58,18 @@ inventory and explicitly optional Python surfaces.
 ## Guidelines for changes
 
 - **Language or semantics:** update Rust syntax/lowering, typed model, symbolic and concrete evaluation,
-  regression cases, `docs/LANGUAGE.md`, `skills/fsl/reference.md`, an accepted design note, and
-  `CHANGELOG.md` together. A new dialect's top-level construct, and any new `examples/`/`specs/`
+  regression cases, `docs/LANGUAGE.md`, `skills/fsl/reference.md`, an accepted design note, and a new
+  `changelog.d/` fragment (see `changelog.d/README.md`) together. A new dialect's top-level construct,
+  and any new `examples/`/`specs/`
   directory it lands in, must also be registered in `tests/dialect_registry.py` (`DIALECTS`,
   `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS` with a reason) — the conformance harness
-  (`docs/DESIGN-conformance-harness.md`) scans every `.fsl` under `specs/`/`examples/` and fails
-  loudly on an unregistered construct instead of silently skipping it.
+  (`docs/DESIGN-conformance-harness.md`) scans every `.fsl` under `specs/`/`examples/` and is written
+  to fail loudly on an unregistered construct instead of silently skipping it. That harness is a
+  manual/reference check that no CI lane currently invokes (see the design doc's "Cost and CI
+  wiring") — register the construct regardless of that gap.
 - **Public Kernel contract:** update schemas, Rust exporter/consumer paths, conformance vectors,
-  agreement tests, `docs/DESIGN-kernel-contract.md`, language/reference docs, and changelog.
+  agreement tests, `docs/DESIGN-kernel-contract.md`, language/reference docs, and a new
+  `changelog.d/` fragment (see `changelog.d/README.md`) rather than editing `CHANGELOG.md` directly.
 - **CLI/JSON contract:** preserve field meanings, ordering requirements, raw-output modes, exit codes,
   locations, and replayable evidence. Any parity allowlist entry needs a nondeterminism rationale.
 - **Specs and examples:** run native `check`, bounded verification, induction where relevant, mutation,
@@ -95,8 +99,10 @@ SPDX header used by neighboring files. Rust must remain formatted, Clippy-clean,
 ## Commits and pull requests
 
 Use a dedicated branch/worktree for non-trivial work and preserve unrelated local changes. Keep one
-topic per commit, use a Conventional Commit-style subject, and add notable changes under
-`CHANGELOG.md` `[Unreleased]`.
+topic per commit, use a Conventional Commit-style subject, and add a notable change as a new
+`changelog.d/<id>-<slug>.<category>.md` fragment (see `changelog.d/README.md`) rather than editing
+`CHANGELOG.md` directly; the fragment is aggregated into `CHANGELOG.md`'s `[Unreleased]` section only
+at release time.
 
 A pull request should describe the problem, the accepted contract, implementation scope, verification
 evidence, linked issue, and any documentation or agent-skill changes. Bug reports and proposals should

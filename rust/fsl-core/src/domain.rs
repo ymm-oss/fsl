@@ -5,15 +5,138 @@ use std::collections::{BTreeMap, BTreeSet};
 use fsl_syntax::{
     DomainAggregate, DomainEffect, DomainEvolve, DomainField, DomainLoc, DomainSaga,
     DomainSagaStep, DomainSpec, DomainType, DomainTypeSourceForm, SourcePos, Span, SyntaxExpr,
-    SyntaxExprKind,
+    SyntaxExprKind, SyntaxTypeExpr, SyntaxTypeExprKind,
 };
 
 use crate::{
-    CoreError,
+    CoreError, LoweringStep, OriginChain, OriginId, OriginSite,
     domain_lowering::{
         domain_effect_owns_event, effect_outcome_member, validate_effect_outcome_roles,
     },
 };
+
+/// A rendering-time failure located at a span in the original `DomainSpec`.
+///
+/// This module runs before text serialization, so both the public location and
+/// the internal origin chain point at authored domain source rather than the
+/// ephemeral Kernel text produced by [`domain_kernel_source`].
+fn error_at(message: impl Into<String>, span: Span) -> CoreError {
+    CoreError {
+        message: message.into(),
+        line: span.start.line,
+        column: span.start.column,
+        origin: Some(Box::new(OriginChain {
+            id: OriginId(format!(
+                "domain:render-error:{}:{}",
+                span.start.offset, span.end.offset
+            )),
+            dialect: "domain".to_owned(),
+            primary: Some(OriginSite {
+                source_file: None,
+                span: Some(span),
+                dialect: "domain".to_owned(),
+                declaration_path: Vec::new(),
+            }),
+            secondary: Vec::new(),
+            lowering_steps: vec![LoweringStep {
+                kind: "render_domain_kernel_source".to_owned(),
+                detail: None,
+            }],
+            generated: false,
+        })),
+        name_resolution: false,
+    }
+}
+
+/// If `type_name` is a top-level `Map<K, V>` application, its key and value
+/// type expressions; `None` for every other shape (including a malformed
+/// `Map` arity, which falls through to [`Context::default_for_type`]'s
+/// generic "unsupported domain type constructor" rejection instead of being
+/// treated as a renderable Map here).
+fn map_key_value(type_name: &SyntaxTypeExpr) -> Option<(&SyntaxTypeExpr, &SyntaxTypeExpr)> {
+    match &type_name.kind {
+        SyntaxTypeExprKind::Apply {
+            constructor,
+            arguments,
+        } if constructor.text == "Map" => match arguments.as_slice() {
+            [key, value] => Some((key, value)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// [`domain_type_default`]'s result: either a single value a field's
+/// initializer would render as `= value`, or -- for a top-level `Map<K, V>`
+/// field only -- the dense per-key `forall` init [`domain_kernel_source`]'s
+/// state-field loop builds directly, since a bare `Map` has no single
+/// default value of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DomainDefault {
+    /// A field initializer's right-hand side, e.g. `none`, `Set {}`, a bare
+    /// enum member, or a `value_object` struct literal.
+    Value(String),
+    /// The per-key value `field[k] = value` renders for every key, the only
+    /// supported default for a top-level `Map<K, V>` field
+    /// (`field: Map<K, V> = expr;` is always rejected).
+    MapPerKey(String),
+}
+
+/// The domain-*source* form of the renderer's default value for `type_name`
+/// in `domain` -- the same total dispatch [`domain_kernel_source`] uses via
+/// `Context::default_for_type` to choose every field's implicit value,
+/// exposed so the `implicit_initial_value` warning (issue #731) reports the
+/// value this function -- the single owner -- selects, rather than a second
+/// hand-rolled copy of the dispatch that can silently drift from it (as the
+/// pre-#731 warning did for every container type).
+///
+/// "Domain-source form" matters for one case: an enum default renders as the
+/// bare member name a domain-source initializer would accept (`Pending`),
+/// not `domain_kernel_source`'s kernel-scoped mangled identifier
+/// (`Status_Pending`), and that bare form is threaded through recursion --
+/// into a `value_object`'s struct-literal fields and a `Map`'s per-key value
+/// -- so an enum default is never mangled no matter how deep it is nested
+/// (issue #731 review, M1: an earlier version of this fix special-cased only
+/// a field's own top-level enum type in the warning, which still mangled an
+/// enum nested inside a `value_object` or a `Map` value).
+///
+/// # Errors
+///
+/// Returns [`CoreError`] wherever `Context::default_for_type` does: an
+/// unknown domain type name, an enum with no members, or a type shape it
+/// fails closed on -- including a `Map` nested as another `Map`'s value,
+/// which is never renderable (`"Map state requires explicit initialization
+/// through supported semantics"`).
+pub fn domain_type_default(
+    domain: &DomainSpec,
+    type_name: &SyntaxTypeExpr,
+    span: Span,
+) -> Result<DomainDefault, CoreError> {
+    let context = Context::new(domain);
+    if let Some((_key, value)) = map_key_value(type_name) {
+        return context
+            .default_for_type(value, span, &BTreeMap::new(), DefaultForm::DomainSource)
+            .map(DomainDefault::MapPerKey);
+    }
+    context
+        .default_for_type(type_name, span, &BTreeMap::new(), DefaultForm::DomainSource)
+        .map(DomainDefault::Value)
+}
+
+/// Which identifier form [`Context::default_for_type`] renders an enum
+/// member's default as. Every other arm (`Bool`, `Int`, range/external,
+/// `Option`, `Set`, `Map`) renders identically in both forms; only the enum
+/// leaf differs, so this is threaded through rather than duplicating the
+/// whole dispatch per form (issue #731 review, M1).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DefaultForm {
+    /// `domain_kernel_source`'s own flat kernel namespace, where enum
+    /// members are mangled (`Enum_Member`) to avoid cross-enum collisions.
+    Kernel,
+    /// The syntax a domain-source field initializer itself accepts, where an
+    /// enum member is referenced by its bare declared name.
+    DomainSource,
+}
 
 fn synthetic_num(value: i64, loc: DomainLoc) -> SyntaxExpr {
     let position = SourcePos {
@@ -265,39 +388,142 @@ impl<'a> Context<'a> {
             .map(|candidate| candidate.type_name.render_source())
     }
 
-    fn default(&self, field: &DomainField, type_env: &BTreeMap<String, String>) -> String {
+    /// The field-level default: an explicit `= expr` wins; otherwise falls
+    /// through to [`Self::default_for_type`]'s total dispatch on the field's
+    /// type. Mirrors `domain_lowering.rs`'s `Resolver::default_value`
+    /// (field-level, checks for an explicit default) versus
+    /// `Resolver::default_for_type` (type-level, total).
+    fn default(
+        &self,
+        field: &DomainField,
+        type_env: &BTreeMap<String, String>,
+        form: DefaultForm,
+    ) -> Result<String, CoreError> {
         if let Some(value) = &field.default {
-            return self.normalize(
+            return Ok(self.normalize(
                 &value.render_source(),
                 None,
                 type_env,
                 Some(&field.type_name),
                 true,
-            );
+                form,
+            ));
         }
-        match field.type_name.as_str() {
-            "Bool" => "false".to_owned(),
-            "Int" => "0".to_owned(),
-            _ => match self.ty(&field.type_name) {
-                Some(ty) if ty.kind == "enum" => self.enum_value(&ty.name, &ty.members[0]),
-                Some(ty) if matches!(ty.kind.as_str(), "range" | "external") => ty
-                    .lo
-                    .as_ref()
-                    .map_or_else(|| "0".to_owned(), SyntaxExpr::render_source),
-                Some(ty) if ty.kind == "value_object" => format!(
-                    "{} {{ {} }}",
-                    ty.name,
-                    ty.fields
-                        .iter()
-                        .map(|field| format!("{}: {}", field.name, self.default(field, type_env)))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                _ => "0".to_owned(),
+        self.default_for_type(&field.type_name, field.span, type_env, form)
+    }
+
+    /// Total dispatch over `SyntaxTypeExprKind` -- the same two-variant AST
+    /// enum `domain_lowering.rs`'s `LogicalType` is itself derived from --
+    /// with no catch-all arm that can produce a value. An unrecognized
+    /// `SyntaxTypeExprKind::Apply` constructor reaches the final named arm,
+    /// which returns [`CoreError`] (the same "unsupported domain type
+    /// constructor" message `domain_lowering.rs`'s
+    /// `logical_type`/`surface_type` already use for the identical case), not
+    /// a silently rendered `"0"`. `form` selects only how the enum leaf
+    /// renders a selected member (see [`DefaultForm`]); every other arm is
+    /// identical in both forms and threads `form` through unchanged so a
+    /// nested enum -- inside a `value_object`'s fields or a `Map`'s value --
+    /// never mangles regardless of how deep it is (issue #731 review, M1).
+    fn default_for_type(
+        &self,
+        type_name: &SyntaxTypeExpr,
+        span: Span,
+        type_env: &BTreeMap<String, String>,
+        form: DefaultForm,
+    ) -> Result<String, CoreError> {
+        match &type_name.kind {
+            SyntaxTypeExprKind::Name(ident) => match ident.text.as_str() {
+                "Bool" => Ok("false".to_owned()),
+                "Int" => Ok("0".to_owned()),
+                other => match self.ty(other) {
+                    Some(ty) if ty.kind == "enum" => {
+                        let Some(member) = ty.members.first() else {
+                            return Err(error_at(
+                                format!("enum '{}' has no members", ty.name),
+                                span,
+                            ));
+                        };
+                        Ok(match form {
+                            DefaultForm::Kernel => self.enum_value(&ty.name, member),
+                            DefaultForm::DomainSource => member.clone(),
+                        })
+                    }
+                    Some(ty) if matches!(ty.kind.as_str(), "range" | "external") => Ok(ty
+                        .lo
+                        .as_ref()
+                        .map_or_else(|| "0".to_owned(), SyntaxExpr::render_source)),
+                    Some(ty) if ty.kind == "value_object" => Ok(format!(
+                        "{} {{ {} }}",
+                        ty.name,
+                        ty.fields
+                            .iter()
+                            .map(|field| Ok(format!(
+                                "{}: {}",
+                                field.name,
+                                self.default(field, type_env, form)?
+                            )))
+                            .collect::<Result<Vec<_>, CoreError>>()?
+                            .join(", ")
+                    )),
+                    // Only "enum" | "range" | "external" | "value_object" are
+                    // ever constructed (fsl-syntax's domain parser and this
+                    // crate's own "external" backfill for referenced names
+                    // are the only producers); a fifth kind string reaching
+                    // here is unrecognized and must fail closed, not render
+                    // "0".
+                    Some(ty) => Err(error_at(
+                        format!("unsupported domain type kind '{}'", ty.kind),
+                        span,
+                    )),
+                    None => Err(error_at(format!("unknown domain type '{other}'"), span)),
+                },
+            },
+            SyntaxTypeExprKind::Apply {
+                constructor,
+                arguments,
+            } => match (constructor.text.as_str(), arguments.as_slice()) {
+                ("Option", [_]) => Ok("none".to_owned()),
+                ("Set", [_]) => Ok("Set {}".to_owned()),
+                // A bare `Map` default (no top-level state-field forall
+                // context) is always rejected, matching
+                // `domain_lowering.rs`'s `default_for_type` Map arm exactly:
+                // the only supported Map default is the per-key `forall`
+                // form `domain_kernel_source`'s state-field loop builds
+                // directly, before this function is ever called on the
+                // Map's own type.
+                ("Map", [_, _]) => Err(error_at(
+                    "Map state requires explicit initialization through supported semantics",
+                    span,
+                )),
+                // Includes `Seq` (out of scope: path A already rejects Seq
+                // domain state at `surface_type`, before any default is
+                // requested) and any unrecognized constructor/arity -- both
+                // fail closed here instead of falling through to "0".
+                (unsupported_constructor, unsupported_arguments) => Err(error_at(
+                    format!(
+                        "unsupported domain type constructor '{}'/{}",
+                        unsupported_constructor,
+                        unsupported_arguments.len()
+                    ),
+                    span,
+                )),
             },
         }
     }
 
+    /// `form` governs only the `target_type`-driven bare-enum-member
+    /// mangling below: every kernel-text call site (guards, invariants,
+    /// evolve assignments) always passes [`DefaultForm::Kernel`], since
+    /// those render directly into `domain_kernel_source`'s output; only
+    /// [`Self::default`]'s explicit-default branch threads its caller's
+    /// `form` through, so a `value_object` field's own explicit enum
+    /// default (e.g. `status: OrderStatus = Draft;`) renders bare when the
+    /// whole struct literal is being computed in domain-source form (issue
+    /// #731 review, M1 follow-up: this is the second of two enum-mangling
+    /// sites -- [`Self::default_for_type`]'s own enum arm is the first --
+    /// that must both honor `form` for a nested `value_object` field's
+    /// explicit default to stay unmangled).
+    #[allow(clippy::too_many_lines)]
     fn normalize(
         &self,
         expression: &str,
@@ -305,6 +531,7 @@ impl<'a> Context<'a> {
         type_env: &BTreeMap<String, String>,
         target_type: Option<&str>,
         replace_state: bool,
+        form: DefaultForm,
     ) -> String {
         let mut output = compact(expression)
             .replace("&&", " and ")
@@ -332,12 +559,16 @@ impl<'a> Context<'a> {
                             "({})",
                             pieces
                                 .iter()
-                                .map(|piece| self.normalize(
-                                    piece,
-                                    Some(aggregate),
-                                    type_env,
-                                    None,
-                                    false
+                                .map(|piece| format!(
+                                    "({})",
+                                    self.normalize(
+                                        piece,
+                                        Some(aggregate),
+                                        type_env,
+                                        None,
+                                        false,
+                                        DefaultForm::Kernel,
+                                    )
                                 ))
                                 .collect::<Vec<_>>()
                                 .join(" and ")
@@ -386,7 +617,8 @@ impl<'a> Context<'a> {
                 output.replace_range(start..=end, &format!("({})", values.join(" or ")));
             }
         }
-        if let Some(target) = target_type
+        if form == DefaultForm::Kernel
+            && let Some(target) = target_type
             && self.ty(target).is_some_and(|ty| ty.kind == "enum")
             && output
                 .chars()
@@ -458,7 +690,8 @@ fn evolve_assignments(
                     Some(aggregate),
                     type_env,
                     None,
-                    true
+                    true,
+                    DefaultForm::Kernel,
                 )
             )
         })
@@ -480,10 +713,44 @@ fn evolve_assignments(
             type_env,
             state.get(root).copied(),
             true,
+            DefaultForm::Kernel,
         );
         format!("{target} = {expression}")
     }));
     output
+}
+
+/// Render the declared `evolve` for each event a saga step/timeout/compensation
+/// action emits, pairing with `event_assignments`: an action that raises
+/// `event_<E>` for an occurring event must apply E's declared evolve in the
+/// same action (docs/DESIGN-domain.md's saga step pairing invariant).
+fn saga_emit_evolve_lines(context: &Context<'_>, events: &[String]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for event_name in events {
+        let Some((aggregate, event)) = context.event(event_name) else {
+            continue;
+        };
+        let environment = aggregate
+            .state
+            .iter()
+            .chain(&event.fields)
+            .map(|field| (field.name.text.clone(), field.type_name.render_source()))
+            .collect();
+        lines.extend(
+            evolve_assignments(
+                context,
+                aggregate,
+                aggregate
+                    .evolves
+                    .iter()
+                    .find(|item| item.event == *event_name),
+                &environment,
+            )
+            .into_iter()
+            .map(|line| format!("  {line}")),
+        );
+    }
+    lines
 }
 
 fn render_effect_actions(context: &Context<'_>, effect: &DomainEffect) -> Vec<String> {
@@ -631,6 +898,7 @@ fn saga_guards(
     guards
 }
 
+#[allow(clippy::too_many_lines)]
 fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> {
     let mut lines = Vec::new();
     let mut observed = BTreeSet::new();
@@ -695,6 +963,7 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
                 .into_iter()
                 .map(|line| format!("  {line}")),
         );
+        lines.extend(saga_emit_evolve_lines(context, &step.emits));
         lines.push("}".to_owned());
         if let Some(timeout) = &step.timeout_event {
             lines.push(format!("action {action}_timeout() {{"));
@@ -704,6 +973,10 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
                     .into_iter()
                     .map(|line| format!("  {line}")),
             );
+            lines.extend(saga_emit_evolve_lines(
+                context,
+                std::slice::from_ref(timeout),
+            ));
             lines.push("}".to_owned());
         }
     }
@@ -718,11 +991,16 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
             "  requires {}",
             Context::event_flag(&compensation.trigger_event)
         ));
+        lines.push(format!(
+            "  requires {}",
+            Context::event_flag(&compensation.after_event)
+        ));
         lines.extend(
             event_assignments(context.domain, &compensation.emits)
                 .into_iter()
                 .map(|line| format!("  {line}")),
         );
+        lines.extend(saga_emit_evolve_lines(context, &compensation.emits));
         lines.push("}".to_owned());
     }
     lines
@@ -732,11 +1010,15 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
 ///
 /// # Errors
 ///
-/// Returns [`CoreError`] when an effect event has conflicting explicit outcome roles.
+/// Returns [`CoreError`] when a domain declaration cannot be rendered into a
+/// valid executable kernel, including invalid enums and conflicting explicit
+/// effect outcome roles.
 #[allow(clippy::too_many_lines)]
 pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
     validate_effect_outcome_roles(domain)?;
+    crate::domain_lowering::validate_lowerable_constructs(domain)?;
     let context = Context::new(domain);
+    crate::domain_lowering::validate_domain_enums(&context.types)?;
     let mut lines = vec![format!(
         "spec {} \"domain: generated from fsl-domain/fsl-effect\" {{",
         domain.name
@@ -810,10 +1092,46 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
         for field in &aggregate.state {
             let name = Context::state_name(aggregate, &field.name);
             state.push(format!("    {name}: {},", field.type_name));
-            init.push(format!(
-                "    {name} = {}",
-                context.default(field, &environment)
-            ));
+            match map_key_value(&field.type_name) {
+                Some((key, value)) => {
+                    // Mirrors `domain_lowering.rs`'s `expand_domain`
+                    // (~line 2182): a top-level Map state field with no
+                    // explicit default lowers to a dense per-key `forall`
+                    // init, and an explicit whole-Map default is rejected
+                    // here rather than rendered, matching path A's
+                    // "whole-Map domain defaults are not supported".
+                    if field.default.is_some() {
+                        return Err(error_at(
+                            "whole-Map domain defaults are not supported",
+                            field.span,
+                        ));
+                    }
+                    let key_type = match &key.kind {
+                        SyntaxTypeExprKind::Name(ident) => ident.text.clone(),
+                        SyntaxTypeExprKind::Apply { .. } => {
+                            return Err(error_at(
+                                "map keys require a scalar or named type",
+                                field.span,
+                            ));
+                        }
+                    };
+                    let value_default = context.default_for_type(
+                        value,
+                        field.span,
+                        &environment,
+                        DefaultForm::Kernel,
+                    )?;
+                    init.push(format!(
+                        "    forall k: {key_type} {{ {name}[k] = {value_default} }}"
+                    ));
+                }
+                None => {
+                    init.push(format!(
+                        "    {name} = {}",
+                        context.default(field, &environment, DefaultForm::Kernel)?
+                    ));
+                }
+            }
         }
     }
     let mut events = domain
@@ -897,7 +1215,8 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
                         Some(aggregate),
                         &environment,
                         None,
-                        true
+                        true,
+                        DefaultForm::Kernel,
                     )
                 ));
             }
@@ -909,7 +1228,8 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
                         Some(aggregate),
                         &environment,
                         None,
-                        true
+                        true,
+                        DefaultForm::Kernel,
                     )
                 ));
             }
@@ -997,7 +1317,8 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
                     Some(aggregate),
                     &environment,
                     None,
-                    true
+                    true,
+                    DefaultForm::Kernel,
                 )
             ));
         }

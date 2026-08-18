@@ -93,19 +93,11 @@ domain OrderAsyncEffect {
     emits one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
     retry {
       max_attempts 3
-      backoff exponential
     }
     timeout after 10m emits PaymentCaptureTimedOut
     compensation {
       emits PaymentFailed
     }
-  }
-
-  await PaymentResult {
-    waits_for one_of [PaymentCaptured, PaymentFailed, PaymentCaptureTimedOut]
-    on PaymentCaptured -> PaymentCaptured
-    on PaymentFailed -> PaymentFailed
-    on PaymentCaptureTimedOut -> PaymentCaptureTimedOut
   }
 
   projection OrderObservedState {

@@ -363,6 +363,7 @@ fn add_frontend_metadata(
     output
 }
 
+#[allow(clippy::too_many_lines)]
 async fn verify(request: &Request, solver_version: &str) -> Value {
     let started = performance_now();
     if let Err(failure) = fsl_syntax::parse_surface_document(&request.source) {
@@ -396,25 +397,38 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
     // symbolic value cannot represent. `partial_op` is intentionally left to
     // the public symbolic verifier boundary itself (#651).
     if fsl_runtime::deterministic_initial_state(&model).is_ok() {
-        match fsl_runtime::find_boundary_violation(model.clone(), request.options.depth) {
-            Ok(Some((violation, trace))) if violation.kind != "partial_op" => {
-                let statistics = fsl_solver::VerificationStatistics::default();
-                return fslc_rust::verification_output::render_boundary_output(
-                    envelope(solver_version),
-                    &model,
-                    &violation,
-                    &trace,
-                    &fslc_rust::verification_output::BmcOutputOptions {
-                        depth: request.options.depth,
-                        deadlock,
-                        checked_bounds: None,
-                        elapsed_s: (performance_now() - started) / 1000.0,
-                        statistics: &statistics,
-                    },
-                )
-                .0;
+        match fsl_runtime::find_boundary_violation(
+            &model,
+            request.options.depth,
+            fsl_runtime::CONCRETE_PROBE_BUDGET,
+        ) {
+            Ok(probe) => {
+                if let Some((violation, trace)) = probe.finding
+                    && violation.kind != "partial_op"
+                {
+                    let statistics = fsl_solver::VerificationStatistics::default();
+                    return fslc_rust::verification_output::render_boundary_output(
+                        envelope(solver_version),
+                        &model,
+                        &violation,
+                        &trace,
+                        &fslc_rust::verification_output::BmcOutputOptions {
+                            depth: request.options.depth,
+                            deadlock,
+                            checked_bounds: None,
+                            elapsed_s: (performance_now() - started) / 1000.0,
+                            statistics: &statistics,
+                            // The Worker request surface has no `--vacuity`
+                            // option at all (issue #729): always compute.
+                            skip_vacuity_probe: false,
+                        },
+                    )
+                    .0;
+                }
+                // `exhausted && finding.is_none()` falls through here exactly
+                // like a completed empty search (issue #697; same contract
+                // as the native pre-pass in `rust/fslc/src/verification.rs`).
             }
-            Ok(Some(_) | None) => {}
             Err(failure) => {
                 return verifier_error(solver_version, &failure);
             }
@@ -454,6 +468,9 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             checked_bounds: None,
             elapsed_s: (performance_now() - started) / 1000.0,
             statistics: &statistics,
+            // The Worker request surface has no `--vacuity` option at all
+            // (issue #729): always compute.
+            skip_vacuity_probe: false,
         },
     );
     prepend_compose_warnings(&mut output, compose_warnings);
@@ -587,6 +604,7 @@ mod tests {
                 checked_bounds: None,
                 elapsed_s,
                 statistics,
+                skip_vacuity_probe: false,
             },
         )
         .0
@@ -611,6 +629,25 @@ mod tests {
                 .as_str()
                 .is_some_and(|message| message.contains("same state location"))
         );
+    }
+
+    #[test]
+    fn check_preserves_ai_project_parser_location_and_code() {
+        let request = Request {
+            cmd: "check".to_owned(),
+            source: include_str!("../../fslc/tests/fixtures/error_envelope_broken_ai_project.fsl")
+                .to_owned(),
+            source_file: "broken_ai_project.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        };
+
+        let error = block_on(check(&request, TEST_SOLVER_VERSION));
+
+        assert_eq!(error["result"], json!("error"));
+        assert_eq!(error["kind"], json!("parse"));
+        assert_eq!(error["diagnostic_code"], json!("FSL-PARSE"));
+        assert_eq!(error["loc"], json!({"line": 9, "column": 3}));
     }
 
     #[test]
@@ -754,6 +791,7 @@ mod tests {
     fn verified_result_contains_shared_warnings() {
         let model = model_from(
             "spec Warnings { state { x: Bool } init { x = false } \
+             @requirement(\"REQ-BLOCKED\", \"blocked action\") \
              action blocked() { requires x x = false } \
              invariant Vacuous \"REQ-WARN: vacuous warning\" { x => x } }",
         );
@@ -811,6 +849,17 @@ mod tests {
         assert_eq!(
             warnings[1]["message"],
             json!("deadlock reachable at step 0 (state: x=false)")
+        );
+        assert_eq!(warnings[2]["kind"], json!("never_enabled_action"));
+        assert_eq!(warnings[2]["name"], json!("blocked"));
+        assert!(warnings[2]["loc"].is_object());
+        assert_eq!(
+            warnings[2]["requirement"],
+            json!({"id": "REQ-BLOCKED", "text": "blocked action"})
+        );
+        assert_eq!(
+            warnings[2]["requirements"].as_array().map(Vec::len),
+            Some(1)
         );
         assert!(
             warnings[2]["message"]

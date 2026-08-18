@@ -78,7 +78,7 @@ pub struct BmcResult {
     pub deadlock_trace: Option<Vec<TraceStep>>,
     pub action_coverage: BTreeMap<String, bool>,
     pub frontier_progress: bool,
-    /// Solver-dependent vacuity facts (`docs/DESIGN-vacuity.md` §2 lanes 3–6).
+    /// Solver-dependent vacuity facts (`docs/DESIGN-vacuity.md` §2 lanes 4–7).
     /// Depth-independent by construction; see [`crate::vacuity`].
     pub vacuity: Vec<VacuityFinding>,
 }

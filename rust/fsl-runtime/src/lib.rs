@@ -11,11 +11,13 @@ use fsl_core::{
     KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
     KernelLValue as LValue, KernelModel, KernelStatement as Statement, ModelError, ParamDef,
     Refinement, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef, display_name,
-    insert_requirement_metadata, model_warnings, state_summary, static_leadsto_bindings,
+    insert_requirement_metadata, internal_origin_json, model_warnings, origin_display_name,
+    state_summary, static_leadsto_bindings,
 };
 use serde_json::{Value as JsonValue, json};
 
 mod explicit;
+mod trace;
 
 pub use explicit::{
     ExplicitReachableWitness, ExplicitResult, ExplicitViolation, deterministic_initial_state,
@@ -1663,7 +1665,7 @@ pub fn check_refinement(
     // failure reported is stable). Every candidate that passes seeds its
     // own root below, so the walk explores the full reachable set of every
     // nondeterministic initial branch, not just one.
-    let mut queue = VecDeque::new();
+    let mut queue = trace::LeanFrontier::new();
     for impl_state in impl_initial_states {
         let alpha_initial = alpha_state(
             &impl_state,
@@ -1717,64 +1719,66 @@ pub fn check_refinement(
             ));
             return Ok(check);
         }
-        queue.push_back((
-            Monitor {
-                model: implementation.clone(),
-                state: impl_state,
-                step: 0,
-            },
-            0_usize,
-            initial_trace,
-        ));
+        queue.push(impl_state, 0);
     }
 
+    // The frontier carries `State` only, not `Monitor` -- a full `Monitor`
+    // clone per candidate transition duplicates the whole `KernelModel`
+    // repeatedly at every layer (issue #783's 1.72 GB @ depth 3). `scratch`
+    // is re-pointed at each state instead, following `first_self_violation`
+    // and `bfs`'s established pattern. Traces are no longer carried in the
+    // queue either; `parents` -- left empty for every root, per
+    // `trace::reconstruct_trace`'s multi-root contract -- reconstructs one
+    // only when a failure is about to be reported.
     let mut visited = BTreeSet::new();
-    while let Some((_, step, _)) = queue.front() {
-        let step = *step;
+    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+    let mut scratch = Monitor::from_state(implementation.clone(), State::new());
+    while let Some(step) = queue.front_step() {
         let mut layer = Vec::new();
-        while queue
-            .front()
-            .is_some_and(|(_, queued_step, _)| *queued_step == step)
-        {
-            let Some((monitor, _, trace)) = queue.pop_front() else {
+        while queue.front_step() == Some(step) {
+            let Some((state, _)) = queue.pop() else {
                 unreachable!("queue front was present");
             };
-            if visited.insert(monitor.state.clone()) && step < depth {
-                layer.push((monitor, trace));
+            if visited.insert(state.clone()) && step < depth {
+                layer.push(state);
             }
         }
-        let mut candidates = Vec::new();
-        for (state_index, (monitor, trace)) in layer.into_iter().enumerate() {
-            let alpha_before = alpha_state(
-                &monitor.state,
+        // `alpha_before` for each layer state is computed once here, in
+        // layer order, and looked up by index below -- not recomputed per
+        // candidate -- to keep both the values and their computation order
+        // identical to the pre-#783 per-node walk.
+        let mut alphas = Vec::with_capacity(layer.len());
+        for state in &layer {
+            alphas.push(alpha_state(
+                state,
                 implementation,
                 abstraction,
                 mapping,
                 &eval_model,
-            )?;
-            for enabled in monitor.enabled()? {
+            )?);
+        }
+        let mut candidates = Vec::new();
+        for (state_index, state) in layer.iter().enumerate() {
+            scratch.state = state.clone();
+            scratch.step = step;
+            for enabled in scratch.enabled()? {
                 let action_index = implementation
                     .actions
                     .iter()
                     .position(|action| action.name == enabled.action)
                     .unwrap_or(usize::MAX);
-                candidates.push((
-                    action_index,
-                    enabled.params.clone(),
-                    state_index,
-                    monitor.clone(),
-                    trace.clone(),
-                    alpha_before.clone(),
-                    enabled,
-                ));
+                candidates.push((action_index, enabled.params.clone(), state_index, enabled));
             }
         }
         candidates.sort_by(|left, right| {
             (&left.0, &left.1, &left.2).cmp(&(&right.0, &right.1, &right.2))
         });
-        for (_, _, _, monitor, trace, alpha_before, enabled) in candidates {
-            let mut child = monitor.clone();
-            let stepped = child.step(&enabled)?;
+        for (_, _, state_index, enabled) in candidates {
+            let state = &layer[state_index];
+            let alpha_before = &alphas[state_index];
+            scratch.state = state.clone();
+            scratch.step = step;
+            let stepped = scratch.step(&enabled)?;
             if stepped.violation.is_some() {
                 // Unreachable in practice: `first_self_violation` above
                 // already proved the impl has no self-violation within
@@ -1784,15 +1788,9 @@ pub fn check_refinement(
                 // panic — would resurrect the false-green #466 fixes.
                 continue;
             }
-            let mut child_trace = trace.clone();
-            child_trace.push(trace_step_from_result(
-                step + 1,
-                &monitor.state,
-                &enabled,
-                &stepped,
-            ));
+            let child_state = stepped.state.clone();
             let alpha_after = alpha_state(
-                &child.state,
+                &child_state,
                 implementation,
                 abstraction,
                 mapping,
@@ -1801,7 +1799,9 @@ pub fn check_refinement(
             let action_map = &mapping.action_correspondences[&enabled.action];
             match &action_map.target {
                 ActionCorrespondenceTarget::Stutter => {
-                    if alpha_before != alpha_after {
+                    if alpha_before != &alpha_after {
+                        let child_trace =
+                            refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
                         check.failure = Some(refinement_failure(
                             "stutter_changed_abs",
                             Some("step"),
@@ -1826,7 +1826,7 @@ pub fn check_refinement(
                     let mut bindings = enabled.params.clone();
                     let values = match args
                         .iter()
-                        .map(|expr| eval(expr, &monitor.state, &mut bindings, &eval_model, None))
+                        .map(|expr| eval(expr, state, &mut bindings, &eval_model, None))
                         .collect::<Result<Vec<_>, _>>()
                     {
                         Ok(values) => values,
@@ -1843,6 +1843,13 @@ pub fn check_refinement(
                         // located refinement finding, not an unclassified
                         // internal error that the CLI defaults to `kind:"type"`.
                         Err(error) if is_partial_operation_error(&error.message) => {
+                            let child_trace = refinement_child_trace(
+                                state,
+                                &parents,
+                                step + 1,
+                                &enabled,
+                                &stepped,
+                            );
                             check.failure = Some(refinement_failure(
                                 "map_partial_op",
                                 Some("step"),
@@ -1866,7 +1873,7 @@ pub fn check_refinement(
                     // state is already fully computed, so there is nothing
                     // for `abstraction.init` to determine here either.
                     let abs_state = abstract_action_state(
-                        &alpha_before,
+                        alpha_before,
                         abstraction,
                         abs_action,
                         &expected_params,
@@ -1875,6 +1882,8 @@ pub fn check_refinement(
                     let Some(abs_enabled) =
                         refinement_action_instance(&abs_monitor, abs_action, expected_params)?
                     else {
+                        let child_trace =
+                            refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
                         check.failure = Some(refinement_failure(
                             "abs_requires_failed",
                             Some("step"),
@@ -1889,6 +1898,8 @@ pub fn check_refinement(
                     let abs_step = abs_monitor.step(&abs_enabled)?;
                     let expected_state = project_abstract_state(&abs_step.state, abstraction)?;
                     if expected_state != alpha_after {
+                        let child_trace =
+                            refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
                         check.failure = Some(refinement_failure(
                             "abs_state_mismatch",
                             Some("step"),
@@ -1909,6 +1920,8 @@ pub fn check_refinement(
                 } else {
                     "abs_state_mismatch"
                 };
+                let child_trace =
+                    refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
                 check.failure = Some(refinement_failure(
                     kind,
                     Some("step"),
@@ -1920,12 +1933,39 @@ pub fn check_refinement(
                 ));
                 return Ok(check);
             }
-            if !visited.contains(&child.state) {
-                queue.push_back((child, step + 1, child_trace));
+            if !visited.contains(&child_state) {
+                parents
+                    .entry(child_state.clone())
+                    .or_insert_with(|| trace::ParentLink {
+                        parent: state.clone(),
+                        action: TraceAction {
+                            name: enabled.action.clone(),
+                            params: enabled.params.clone(),
+                        },
+                    });
+                queue.push(child_state, step + 1);
             }
         }
     }
     Ok(check)
+}
+
+/// The replayable trace ending at the step just taken from `state`, built by
+/// walking `parents` back to the walk's root and appending that one step --
+/// reconstructed only when a refinement failure is about to be reported,
+/// mirroring `find_boundary_violation`'s and `first_self_violation`'s
+/// on-demand trace construction (issue #783) instead of carrying a growing
+/// `Vec<TraceStep>` clone in every queued frontier node.
+fn refinement_child_trace(
+    state: &State,
+    parents: &BTreeMap<State, trace::ParentLink>,
+    next_step: usize,
+    enabled: &EnabledAction,
+    stepped: &StepResult,
+) -> Vec<TraceStep> {
+    let mut child_trace = trace::reconstruct_trace(state, parents);
+    child_trace.push(trace_step_from_result(next_step, state, enabled, stepped));
+    child_trace
 }
 
 /// Exhaustively explore concrete reachable states to a bounded depth.
@@ -1936,34 +1976,43 @@ pub fn check_refinement(
 ///
 /// Returns [`RuntimeError`] if concrete evaluation or execution fails.
 pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> {
-    let initial = Monitor::new(model)?;
+    // The queue carries `State` only, not `Monitor` -- a full `Monitor`
+    // clone per explored state duplicates the whole `KernelModel` on every
+    // node (issue #730). `scratch` is re-pointed at each popped state
+    // instead; `BfsResult` never holds a trace, so there is no parent-link
+    // bookkeeping to do here (contrast `find_boundary_violation` and
+    // `first_self_violation`, which must reconstruct a trace on violation).
+    let mut scratch = Monitor::new(model)?;
+    let initial_state = scratch.state.clone();
     let mut result = BfsResult {
-        spec: initial.model.name.clone(),
+        spec: scratch.model.name.clone(),
         depth,
         states_explored: 0,
-        violation: initial.current_violation()?,
-        reachables: initial
+        violation: scratch.current_violation()?,
+        reachables: scratch
             .model
             .reachables
             .iter()
             .map(|property| (property.name.clone(), None))
             .collect(),
         deadlock_step: None,
-        action_coverage: initial
+        action_coverage: scratch
             .model
             .actions
             .iter()
             .map(|action| (action.name.clone(), false))
             .collect(),
     };
-    if let Some(violation) = record_reachables(&initial, 0, &mut result)? {
+    if let Some(violation) = record_reachables(&scratch, 0, &mut result)? {
         result.violation = Some(violation);
     }
-    let mut queue = VecDeque::from([(initial.clone(), 0_usize)]);
-    let mut visited = BTreeSet::from([initial.state.clone()]);
-    while let Some((monitor, step)) = queue.pop_front() {
+    let mut queue = VecDeque::from([(initial_state.clone(), 0_usize)]);
+    let mut visited = BTreeSet::from([initial_state]);
+    while let Some((state, step)) = queue.pop_front() {
         result.states_explored += 1;
-        let enabled = monitor.enabled()?;
+        scratch.state = state.clone();
+        scratch.step = step;
+        let enabled = scratch.enabled()?;
         if enabled.is_empty() {
             result.deadlock_step = Some(result.deadlock_step.map_or(step, |old| old.min(step)));
         }
@@ -1973,9 +2022,10 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
         if step >= depth {
             continue;
         }
-        for instance in enabled {
-            let mut child = monitor.clone();
-            let stepped = child.step(&instance)?;
+        for instance in &enabled {
+            scratch.state = state.clone();
+            scratch.step = step;
+            let stepped = scratch.step(instance)?;
             if let Some(violation) = stepped.violation {
                 if result
                     .violation
@@ -1986,7 +2036,7 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
                 }
                 continue;
             }
-            if let Some(violation) = record_reachables(&child, step + 1, &mut result)? {
+            if let Some(violation) = record_reachables(&scratch, step + 1, &mut result)? {
                 if result
                     .violation
                     .as_ref()
@@ -1996,59 +2046,152 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
                 }
                 continue;
             }
-            if visited.insert(child.state.clone()) {
-                queue.push_back((child, step + 1));
+            let child_state = scratch.state.clone();
+            if visited.insert(child_state.clone()) {
+                queue.push_back((child_state, step + 1));
             }
         }
     }
     Ok(result)
 }
 
-/// Find the first concrete partial-operation or type-bound violation and its trace.
+/// The default budget for [`find_boundary_violation`]'s state count: the
+/// number of distinct concrete states it will visit before giving up and
+/// reporting [`BoundaryProbe::exhausted`] instead of continuing to grow
+/// without limit (issue #697).
+///
+/// Calibrated, not guessed: a full sweep of `specs/` + `examples/` at their
+/// default `--depth 8` (169 files with a deterministic initial state; every
+/// other file is excluded by [`deterministic_initial_state`] before this
+/// budget is ever consulted) found a maximum `states_explored` of 23,409
+/// (`examples/named_predicate.fsl`), with every file reaching normal BFS
+/// closure -- none came close to exhausting even a 500,000-state ceiling,
+/// and the second-highest file needed only 16,182. 50,000 keeps a >=2.1x
+/// margin over the observed maximum (and >=3x over every other corpus
+/// file) while keeping the pathological case this budget exists for -- a
+/// history-recording `Seq` that defeats BFS dedup, whose true reachable
+/// closure is far larger than any budget this size would ever cover -- to a
+/// low-single-digit-GB peak RSS even in an unoptimized debug build, instead
+/// of the unbounded growth issue #697 reported past 11.4 GB. A larger
+/// budget (e.g. 100,000) was measured and rejected: it left materially less
+/// headroom before an unoptimized debug build's peak RSS reached the same
+/// order of magnitude as the original failure. See
+/// `docs/DESIGN-kernel-contract.md` "Concrete boundary pre-pass budget" for
+/// the full measurement.
+///
+/// The value is bracketed from both sides by measurement, not chosen by feel:
+/// below by the corpus (167 specs at depth 8; the largest pre-pass explored
+/// 23,409 states, in `examples/named_predicate.fsl`, so 50,000 leaves ~2.1x of
+/// headroom) and above by debug-build peak RSS. Because 2.1x is thin, the
+/// property is protected by an executable control rather than by the margin:
+/// `rust/fslc/tests/issue_697_corpus_probe_budget.rs` fails loudly if any
+/// corpus spec would exhaust this budget and therefore lose its concrete
+/// evidence. Raise the constant only together with that test's recorded
+/// maximum.
+pub const CONCRETE_PROBE_BUDGET: usize = 50_000;
+
+/// The outcome of a budgeted [`find_boundary_violation`] search.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoundaryProbe {
+    /// The first concrete `partial_op`/`type_bound` violation found, with its
+    /// full replayable trace from the initial state.
+    pub finding: Option<(Violation, Vec<TraceStep>)>,
+    /// Whether the search stopped because it reached `budget` distinct
+    /// states rather than because it exhausted every state reachable within
+    /// `depth`. A caller must treat `exhausted && finding.is_none()`
+    /// identically to a normal empty result: this probe is an evidence
+    /// detour, not a verdict authority, so an inconclusive budgeted search
+    /// falls through to the symbolic engine exactly as a completed empty
+    /// search does.
+    pub exhausted: bool,
+    /// The number of distinct states visited, for diagnostics and for the
+    /// corpus-conservation check that calibrates `CONCRETE_PROBE_BUDGET`.
+    pub states_explored: usize,
+}
+
+/// Find the first concrete partial-operation or type-bound violation and its
+/// trace, visiting at most `budget` distinct states.
+///
+/// This search is an evidence detour, not a verdict authority: it only ever
+/// returns `partial_op`/`type_bound` findings, and a caller that gets
+/// `exhausted: true` with no finding must fall through to the symbolic
+/// engine, which finds every symbolically representable violation on its
+/// own. The one outcome class this search uniquely covers -- a reachable
+/// over-capacity `Seq` successor the bounded symbolic value cannot represent
+/// -- still fails closed downstream (`rust/fsl-verifier/src/value.rs`'s
+/// "model sequence length exceeds capacity") rather than passing, so
+/// exhaustion never silently downgrades a real violation to a false green
+/// (issue #697).
 ///
 /// # Errors
 ///
 /// Returns [`RuntimeError`] when concrete action evaluation fails for another reason.
 pub fn find_boundary_violation(
-    model: KernelModel,
+    model: &KernelModel,
     depth: usize,
-) -> Result<Option<(Violation, Vec<TraceStep>)>, RuntimeError> {
-    let initial = Monitor::new(model)?;
-    let initial_trace = vec![TraceStep {
-        step: 0,
-        state: initial.state.clone(),
-        action: None,
-        changes: BTreeMap::new(),
-    }];
-    let mut queue = VecDeque::from([(initial.clone(), initial_trace, 0_usize)]);
-    let mut visited = BTreeSet::from([initial.state.clone()]);
-    while let Some((monitor, trace, step)) = queue.pop_front() {
+    budget: usize,
+) -> Result<BoundaryProbe, RuntimeError> {
+    let mut scratch = Monitor::new(model.clone())?;
+    let initial_state = scratch.state.clone();
+    let mut queue = VecDeque::from([(initial_state.clone(), 0_usize)]);
+    let mut visited = BTreeSet::from([initial_state.clone()]);
+    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+
+    while let Some((state, step)) = queue.pop_front() {
         if step >= depth {
             continue;
         }
-        for instance in monitor.enabled()? {
-            let mut child = monitor.clone();
-            let before = child.state.clone();
-            let stepped = child.step(&instance)?;
-            let mut child_trace = trace.clone();
-            child_trace.push(trace_step_from_result(
-                step + 1,
-                &before,
-                &instance,
-                &stepped,
-            ));
-            if let Some(violation) = stepped.violation {
+        scratch.state = state.clone();
+        scratch.step = step;
+        for instance in scratch.enabled()? {
+            scratch.state = state.clone();
+            scratch.step = step;
+            let stepped = scratch.step(&instance)?;
+            if let Some(violation) = stepped.violation.clone() {
                 if matches!(violation.kind.as_str(), "partial_op" | "type_bound") {
-                    return Ok(Some((violation, child_trace)));
+                    let mut found_trace = trace::reconstruct_trace(&state, &parents);
+                    found_trace.push(trace_step_from_result(
+                        step + 1,
+                        &state,
+                        &instance,
+                        &stepped,
+                    ));
+                    return Ok(BoundaryProbe {
+                        finding: Some((violation, found_trace)),
+                        exhausted: false,
+                        states_explored: visited.len(),
+                    });
                 }
                 continue;
             }
-            if visited.insert(child.state.clone()) {
-                queue.push_back((child, child_trace, step + 1));
+            let child_state = stepped.state.clone();
+            if visited.insert(child_state.clone()) {
+                parents.insert(
+                    child_state.clone(),
+                    trace::ParentLink {
+                        parent: state.clone(),
+                        action: TraceAction {
+                            name: instance.action.clone(),
+                            params: instance.params.clone(),
+                        },
+                    },
+                );
+                if visited.len() >= budget {
+                    return Ok(BoundaryProbe {
+                        finding: None,
+                        exhausted: true,
+                        states_explored: visited.len(),
+                    });
+                }
+                queue.push_back((child_state, step + 1));
             }
         }
     }
-    Ok(None)
+    Ok(BoundaryProbe {
+        finding: None,
+        exhausted: false,
+        states_explored: visited.len(),
+    })
 }
 
 /// Find the first violation of ANY kind (type bound, user invariant, `trans`,
@@ -2078,91 +2221,219 @@ fn first_self_violation(
     initial_states: &[State],
     depth: usize,
 ) -> Result<Option<(Violation, Vec<TraceStep>)>, RuntimeError> {
+    // Queue nodes carry `State` only; a scratch `Monitor` is re-pointed at
+    // each popped state instead of cloning the whole model per node, and the
+    // trace is reconstructed from parent links only when a violation is
+    // actually found instead of cloning the whole `Vec<TraceStep>` so far at
+    // every node (issue #730 -- worse than `find_boundary_violation` was
+    // before #697, since this cloned both the model *and* the trace).
+    //
+    // Multiple roots (issue #493: a nondeterministic init has more than one
+    // concrete initial state) are handled by leaving every root out of
+    // `parents` and letting `trace::reconstruct_trace` discover whichever
+    // root a given state actually descends from -- see its doc comment.
+    let mut scratch = Monitor::from_state(model.clone(), State::new());
     let mut queue = VecDeque::new();
     let mut visited = BTreeSet::new();
+    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
     for state in initial_states {
-        let initial = Monitor {
-            model: model.clone(),
-            state: state.clone(),
-            step: 0,
-        };
-        let initial_trace = vec![TraceStep {
-            step: 0,
-            state: initial.state.clone(),
-            action: None,
-            changes: BTreeMap::new(),
-        }];
-        if let Some(violation) = initial.current_violation()? {
-            return Ok(Some((violation, initial_trace)));
+        scratch.state = state.clone();
+        scratch.step = 0;
+        if let Some(violation) = scratch.current_violation()? {
+            return Ok(Some((violation, trace::reconstruct_trace(state, &parents))));
         }
-        if visited.insert(initial.state.clone()) {
-            queue.push_back((initial, initial_trace, 0_usize));
+        if visited.insert(state.clone()) {
+            queue.push_back((state.clone(), 0_usize));
         }
     }
-    while let Some((monitor, trace, step)) = queue.pop_front() {
+    while let Some((state, step)) = queue.pop_front() {
         if step >= depth {
             continue;
         }
-        for instance in monitor.enabled()? {
-            let mut child = monitor.clone();
-            let before = child.state.clone();
-            let stepped = child.step(&instance)?;
-            let mut child_trace = trace.clone();
-            child_trace.push(trace_step_from_result(
-                step + 1,
-                &before,
-                &instance,
-                &stepped,
-            ));
-            if let Some(violation) = stepped.violation {
-                return Ok(Some((violation, child_trace)));
+        scratch.state = state.clone();
+        scratch.step = step;
+        for instance in scratch.enabled()? {
+            scratch.state = state.clone();
+            scratch.step = step;
+            let stepped = scratch.step(&instance)?;
+            if let Some(violation) = stepped.violation.clone() {
+                let mut found_trace = trace::reconstruct_trace(&state, &parents);
+                found_trace.push(trace_step_from_result(
+                    step + 1,
+                    &state,
+                    &instance,
+                    &stepped,
+                ));
+                return Ok(Some((violation, found_trace)));
             }
-            if visited.insert(child.state.clone()) {
-                queue.push_back((child, child_trace, step + 1));
+            let child_state = scratch.state.clone();
+            if visited.insert(child_state.clone()) {
+                parents.insert(
+                    child_state.clone(),
+                    trace::ParentLink {
+                        parent: state.clone(),
+                        action: TraceAction {
+                            name: instance.action.clone(),
+                            params: instance.params.clone(),
+                        },
+                    },
+                );
+                queue.push_back((child_state, step + 1));
             }
         }
     }
     Ok(None)
 }
 
-/// Return whether a Boolean expression holds in any concrete state up to `depth`.
+/// The outcome of a budgeted vacuity-reachability probe for one
+/// antecedent/trigger expression (issue #729).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Reachability {
+    /// The expression became true in some concretely reached state within
+    /// `depth`.
+    Reachable,
+    /// The BFS enumerated every state reachable within `depth` (or
+    /// exhausted the frontier before `depth`) without the expression ever
+    /// becoming true — a completed, not merely truncated, empty search.
+    /// This is the verdict the former `expression_reachable` reported as a
+    /// plain `false`, and it keeps meaning the same thing: `--vacuity
+    /// error`'s `vacuous_implication`/`vacuous_leadsto` findings stay keyed
+    /// on this variant, unchanged by this issue's budget.
+    Unreachable,
+    /// The BFS stopped, or a per-candidate evaluation failed, before either
+    /// finding the expression true or exhausting the reachable state space
+    /// within `depth` -- reachability was never decided. Reached two ways:
+    /// the shared budget was hit while this candidate was still pending, or
+    /// evaluating this candidate's expression in some visited state
+    /// returned an error (rare on a checked model). Fail-closed by
+    /// construction: a caller must not fold this into `Unreachable` for
+    /// either reason — treating it as "confirmed vacuous" would be a false
+    /// positive, and treating it as "confirmed not vacuous" (silently
+    /// dropping it) would let `--vacuity error` pass a spec whose vacuity
+    /// was never actually established. The two causes are deliberately not
+    /// distinguished in this type: both mean the same thing to a caller
+    /// ("no verdict"), and a per-candidate evaluation error and a shared
+    /// state-budget cutoff are two ways of reaching the identical
+    /// obligation, not two different obligations.
+    Exhausted,
+}
+
+/// Evaluate the reachability of every expression in `expressions` with one
+/// shared, budgeted BFS over `model`'s concrete state space (issue #729).
+///
+/// Sharing one BFS across every candidate removes the per-antecedent/
+/// per-trigger multiplier the former per-expression `expression_reachable`
+/// paid (a full BFS per property): each candidate still pending is
+/// evaluated against every popped state, drops out of the pending set the
+/// instant it is found true, and the walk stops early once every candidate
+/// has resolved. `budget` bounds the number of distinct concrete states
+/// visited exactly like [`find_boundary_violation`]'s budget (state count
+/// checked right after insertion, before the state is queued): once the
+/// pending set is non-empty and the budget is reached, every still-pending
+/// candidate resolves [`Reachability::Exhausted`].
+///
+/// A per-expression evaluation error (rare on a checked model) resolves
+/// *only that expression* as [`Reachability::Exhausted`] rather than
+/// aborting the whole call: batching must not let one malformed candidate
+/// suppress every other candidate's vacuity evidence in the same run. This
+/// is a deliberate behavior change from the original `expression_reachable`,
+/// where a `Result::Err` for one property's antecedent produced no warning
+/// at all for that property (silently treated as "not vacuous"); resolving
+/// it `Exhausted` instead keeps every no-verdict outcome on the same
+/// fail-closed path regardless of *why* a verdict could not be reached, so
+/// `--vacuity error` cannot be defeated by causing a candidate's evaluation
+/// to error rather than causing its BFS to run long. A failure of the
+/// state-space walk itself (an action's `enabled`/`step` cannot be
+/// evaluated) is not a per-candidate condition and still propagates as
+/// `Err` for the whole call, matching every other BFS in this module —
+/// unlike a per-candidate evaluation error, there is no narrower unit to
+/// attribute it to. When that happens, every candidate still pending at
+/// that point (including ones that would otherwise have resolved
+/// `Exhausted` from the budget moments later) loses its finding entirely
+/// rather than being reported `Exhausted`; `verification_warnings` accepts
+/// this as a known, narrow gap (see its own doc comment) rather than
+/// threading partial results out of an `Err` path.
 ///
 /// # Errors
 ///
-/// Returns [`RuntimeError`] when the expression or a reachable action cannot be
-/// evaluated concretely.
-pub fn expression_reachable(
-    model: KernelModel,
-    expression: &Expr,
+/// Returns [`RuntimeError`] when the state-space walk itself fails.
+pub fn expression_reachability(
+    model: &KernelModel,
+    expressions: &[Expr],
     depth: usize,
-) -> Result<bool, RuntimeError> {
-    let initial = Monitor::new(model)?;
-    let mut queue = VecDeque::from([(initial.clone(), 0_usize)]);
-    let mut visited = BTreeSet::from([initial.state.clone()]);
-    while let Some((monitor, step)) = queue.pop_front() {
-        if as_bool(with_total_division(|| {
-            eval(
-                expression,
-                &monitor.state,
-                &mut Bindings::new(),
-                &monitor.model,
-                None,
-            )
-        })?)? {
-            return Ok(true);
+    budget: usize,
+) -> Result<Vec<Reachability>, RuntimeError> {
+    if expressions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut scratch = Monitor::new(model.clone())?;
+    let initial_state = scratch.state.clone();
+    let mut queue = VecDeque::from([(initial_state.clone(), 0_usize)]);
+    let mut visited = BTreeSet::from([initial_state]);
+    let mut results: Vec<Option<Reachability>> = vec![None; expressions.len()];
+    let mut pending: BTreeSet<usize> = (0..expressions.len()).collect();
+
+    'walk: while let Some((state, step)) = queue.pop_front() {
+        scratch.state = state.clone();
+        scratch.step = step;
+        let mut resolved = Vec::new();
+        for &index in &pending {
+            let truth = with_total_division(|| {
+                eval(
+                    &expressions[index],
+                    &scratch.state,
+                    &mut Bindings::new(),
+                    &scratch.model,
+                    None,
+                )
+            })
+            .and_then(as_bool);
+            match truth {
+                Ok(true) => {
+                    results[index] = Some(Reachability::Reachable);
+                    resolved.push(index);
+                }
+                Err(_) => {
+                    // Absorbed per-candidate, not propagated: see the doc
+                    // comment above. Fail-closed, unlike the pre-#729
+                    // behavior this replaces.
+                    results[index] = Some(Reachability::Exhausted);
+                    resolved.push(index);
+                }
+                Ok(false) => {}
+            }
+        }
+        for index in resolved {
+            pending.remove(&index);
+        }
+        if pending.is_empty() {
+            break 'walk;
         }
         if step >= depth {
             continue;
         }
-        for instance in monitor.enabled()? {
-            let mut child = monitor.clone();
-            let stepped = child.step(&instance)?;
-            if stepped.violation.is_none() && visited.insert(child.state.clone()) {
-                queue.push_back((child, step + 1));
+        for instance in scratch.enabled()? {
+            scratch.state = state.clone();
+            scratch.step = step;
+            let stepped = scratch.step(&instance)?;
+            if stepped.violation.is_some() {
+                continue;
+            }
+            if visited.insert(stepped.state.clone()) {
+                if visited.len() >= budget {
+                    for &index in &pending {
+                        results[index] = Some(Reachability::Exhausted);
+                    }
+                    break 'walk;
+                }
+                queue.push_back((stepped.state, step + 1));
             }
         }
     }
-    Ok(false)
+    Ok(results
+        .into_iter()
+        .map(|result| result.unwrap_or(Reachability::Unreachable))
+        .collect())
 }
 
 /// Wrap `expr` in a nested `exists` quantifier over `binders`, outermost
@@ -2180,34 +2451,22 @@ fn exists_wrap(binders: &[Binder], expr: Expr) -> Expr {
         })
 }
 
-/// Build the verification warnings shared by native and browser frontends.
-///
-/// The two reachability vacuity lanes are computed here and stay
-/// solver-independent. `solver_vacuity` carries the already-rendered
-/// `docs/DESIGN-vacuity.md` §2 lanes 3–6 that only `fsl-verifier` can decide;
-/// passing them in keeps the documented warning order (model → vacuity →
-/// deadlock → action coverage) owned by one function without giving
-/// `fsl-runtime` a solver dependency.
+/// The existentially-closed antecedent of each user invariant shaped
+/// `forall* P => Q` (`docs/DESIGN-vacuity.md` lane 2), paired with the
+/// index of the source invariant in `model.invariants`. An invariant
+/// without that shape (after peeling leading `forall`s) contributes no
+/// candidate, so the index travels with the expression rather than being
+/// assumed to line up with position.
 #[must_use]
-pub fn verification_warnings(
-    model: &KernelModel,
-    depth: usize,
-    warn_deadlock: bool,
-    deadlock_step: Option<usize>,
-    deadlock_state: Option<&State>,
-    action_coverage: &BTreeMap<String, bool>,
-    solver_vacuity: &[JsonValue],
-) -> Vec<JsonValue> {
-    let mut warnings = model_warnings(model);
-    for property in &model.invariants {
-        // `docs/DESIGN-vacuity.md`'s primary `vacuous_implication` shape is a
-        // single `=>` directly under `forall*`: peel every leading `forall`
-        // (nested foralls included, matching the frozen Python reference's
-        // `_implication_antecedent_candidate`), then existentially close the
-        // antecedent over the collected binders before checking
-        // reachability. With zero leading foralls this is a no-op
-        // (`exists_wrap` over an empty slice returns the antecedent
-        // unchanged), so the original top-level-`=>` shape still works.
+pub fn vacuous_implication_candidates(model: &KernelModel) -> Vec<(usize, Expr)> {
+    let mut candidates = Vec::new();
+    for (index, property) in model.invariants.iter().enumerate() {
+        // `forall* => ...` shape: peel every leading `forall` (nested
+        // foralls included, matching the frozen Python reference's
+        // `_implication_antecedent_candidate`), then existentially close
+        // the antecedent over the collected binders. With zero leading
+        // foralls this is a no-op, so the original top-level-`=>` shape
+        // still works.
         let mut binders = Vec::new();
         let mut inner = &property.expr;
         while let Expr::Quantified {
@@ -2228,45 +2487,174 @@ pub fn verification_warnings(
         if op != "=>" {
             continue;
         }
-        let antecedent = exists_wrap(&binders, (**left).clone());
-        if matches!(
-            expression_reachable(model.clone(), &antecedent, depth),
-            Ok(false)
-        ) {
-            let mut warning = json!({
-                "kind": "vacuous_implication",
-                "name": display_name(&property.name),
-                "message": format!("invariant '{}' has an implication antecedent that is unreachable within depth {depth}", display_name(&property.name)),
-                "hint": "the antecedent is not reachable within this depth; check whether an action that should establish it is missing, or whether the antecedent expression is wrong",
-                "loc": property.span.python_loc(),
-                "classification": "insufficient_depth",
-                "blocking": [],
-                "faithfulness_class": "intent_unexercised",
-                "recommended_action": "add a single-shot reachable for the action / raise --depth",
-            });
+        candidates.push((index, exists_wrap(&binders, (**left).clone())));
+    }
+    candidates
+}
+
+/// The existentially-closed trigger of each `leadsTo` property
+/// (`docs/DESIGN-vacuity.md` lane 3), one per `model.leadstos` entry in
+/// declaration order.
+#[must_use]
+pub fn vacuous_leadsto_candidates(model: &KernelModel) -> Vec<Expr> {
+    model
+        .leadstos
+        .iter()
+        .map(|property| exists_wrap(&property.binders, property.before.clone()))
+        .collect()
+}
+
+/// One `vacuous_implication`/`vacuous_leadsto` reachability finding shy of
+/// its `kind`, shared by the two lanes below so the truncated variant
+/// (`vacuity_probe_truncated`) does not need to duplicate the JSON shape.
+fn vacuity_reachability_warning(
+    kind: &str,
+    subject: &str,
+    name: &str,
+    message: &str,
+    hint: &str,
+    loc: &JsonValue,
+) -> JsonValue {
+    json!({
+        "kind": kind,
+        "name": name,
+        "message": message,
+        "hint": hint,
+        "loc": loc,
+        "classification": if kind == "vacuity_probe_truncated" { "probe_truncated" } else { "insufficient_depth" },
+        "blocking": [],
+        "faithfulness_class": if kind == "vacuity_probe_truncated" { "reachability_unknown" } else { "intent_unexercised" },
+        "recommended_action": if kind == "vacuity_probe_truncated" {
+            format!("the {subject}'s reachability could not be established by the probe; this is unusual and typically means either the state shape (e.g. an order-sensitive history variable) defeats BFS dedup and exhausts the internal budget -- simplify it or reduce --depth -- or the {subject} itself fails to evaluate in some reached state -- check it for a construct the concrete evaluator cannot represent")
+        } else {
+            "add a single-shot reachable for the action / raise --depth".to_owned()
+        },
+    })
+}
+
+/// Build the verification warnings shared by native and browser frontends.
+///
+/// The two reachability vacuity lanes are computed here, with one shared,
+/// budgeted BFS (issue #729) over every antecedent/trigger candidate
+/// (`CONCRETE_PROBE_BUDGET`, the same constant/calibration
+/// `find_boundary_violation` uses), and stay solver-independent.
+/// `solver_vacuity` carries the already-rendered `docs/DESIGN-vacuity.md`
+/// §2 lanes 4–7 that only `fsl-verifier` can decide; passing them in keeps
+/// the documented warning order (model → vacuity → deadlock → action
+/// coverage) owned by one function without giving `fsl-runtime` a solver
+/// dependency.
+///
+/// `skip_vacuity_probe` skips the whole reachability BFS (neither
+/// `vacuous_implication`/`vacuous_leadsto` nor `vacuity_probe_truncated` is
+/// computed or emitted) rather than computing it and filtering the result.
+/// INVARIANT (issue #729): only the `verify`/`sweep` CLI option parsing for
+/// `--vacuity ignore` may pass `true` here. Every other caller -- the
+/// `ledger`/`html`/`mutate` baseline, the wasm Worker surface (which has no
+/// `--vacuity` option at all), induction's internal BMC base pass, and
+/// tests -- must pass `false` so the probe always runs and `--vacuity
+/// error` never silently loses evidence it would otherwise catch.
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn verification_warnings(
+    model: &KernelModel,
+    depth: usize,
+    warn_deadlock: bool,
+    deadlock_step: Option<usize>,
+    deadlock_state: Option<&State>,
+    action_coverage: &BTreeMap<String, bool>,
+    solver_vacuity: &[JsonValue],
+    skip_vacuity_probe: bool,
+) -> Vec<JsonValue> {
+    let mut warnings = model_warnings(model);
+    if !skip_vacuity_probe {
+        let implication_candidates = vacuous_implication_candidates(model);
+        let leadsto_candidates = vacuous_leadsto_candidates(model);
+        let mut probe_expressions: Vec<Expr> = implication_candidates
+            .iter()
+            .map(|(_, expression)| expression.clone())
+            .collect();
+        probe_expressions.extend(leadsto_candidates.iter().cloned());
+        // A `RuntimeError` from the state-space walk itself (see
+        // `expression_reachability`'s doc comment -- distinct from a
+        // per-candidate evaluation error, which resolves `Exhausted`
+        // instead of propagating) loses every candidate's finding for this
+        // run, with no narrower fallback to degrade to: `.unwrap_or_default`
+        // yields an empty `Vec`, so `probe_results.get(_)` is `None` for
+        // every index below and no warning is emitted for any candidate.
+        // This is NOT observationally equivalent to the pre-#729 baseline,
+        // where each property's own independent `expression_reachable` call
+        // only lost that one property's warning on error -- it is a known,
+        // narrow gap against this issue's own fail-closed contract: a
+        // candidate that would have resolved `Exhausted` (budget truncation)
+        // moments after the walk-level error occurred loses its
+        // `vacuity_probe_truncated` finding entirely instead of reporting
+        // it. Accepted rather than threading partial results out of an
+        // `Err` path, because a walk-level `RuntimeError` here means an
+        // action's `enabled`/`step` itself could not be evaluated -- the
+        // same condition that already fails the surrounding BMC/explicit
+        // run before vacuity warnings are ever rendered, so this path is
+        // not reachable on any spec that reaches `verification_warnings` in
+        // the first place. See `docs/DESIGN-vacuity.md`.
+        let probe_results =
+            expression_reachability(model, &probe_expressions, depth, CONCRETE_PROBE_BUDGET)
+                .unwrap_or_default();
+        for (candidate_index, (property_index, _)) in implication_candidates.iter().enumerate() {
+            let property = &model.invariants[*property_index];
+            let name = display_name(&property.name);
+            let mut warning = match probe_results.get(candidate_index) {
+                Some(Reachability::Unreachable) => vacuity_reachability_warning(
+                    "vacuous_implication",
+                    "implication antecedent",
+                    &name,
+                    &format!(
+                        "invariant '{name}' has an implication antecedent that is unreachable within depth {depth}"
+                    ),
+                    "the antecedent is not reachable within this depth; check whether an action that should establish it is missing, or whether the antecedent expression is wrong",
+                    &property.span.python_loc(),
+                ),
+                Some(Reachability::Exhausted) => vacuity_reachability_warning(
+                    "vacuity_probe_truncated",
+                    "implication antecedent",
+                    &name,
+                    &format!(
+                        "invariant '{name}' has an implication antecedent whose reachability the probe could not establish within depth {depth}"
+                    ),
+                    "vacuity was not established either way for this antecedent; the probe either exhausted its internal state budget or failed to evaluate the antecedent in some reached state before reaching a verdict",
+                    &property.span.python_loc(),
+                ),
+                Some(Reachability::Reachable) | None => continue,
+            };
             if let JsonValue::Object(warning) = &mut warning {
                 insert_requirement_metadata(warning, &property.annotations, property.meta.as_ref());
             }
             warnings.push(warning);
         }
-    }
-    for property in &model.leadstos {
-        let trigger = exists_wrap(&property.binders, property.before.clone());
-        if matches!(
-            expression_reachable(model.clone(), &trigger, depth),
-            Ok(false)
-        ) {
-            let mut warning = json!({
-                "kind": "vacuous_leadsto",
-                "name": display_name(&property.name),
-                "message": format!("leadsTo '{}' has a trigger that is unreachable within depth {depth}", display_name(&property.name)),
-                "hint": "the trigger is not reachable within this depth; check whether an action that should establish it is missing, or whether the trigger expression is wrong",
-                "loc": property.span.python_loc(),
-                "classification": "insufficient_depth",
-                "blocking": [],
-                "faithfulness_class": "intent_unexercised",
-                "recommended_action": "add a single-shot reachable for the action / raise --depth",
-            });
+        let leadsto_offset = implication_candidates.len();
+        for (offset, property) in model.leadstos.iter().enumerate() {
+            let name = display_name(&property.name);
+            let mut warning = match probe_results.get(leadsto_offset + offset) {
+                Some(Reachability::Unreachable) => vacuity_reachability_warning(
+                    "vacuous_leadsto",
+                    "leadsTo trigger",
+                    &name,
+                    &format!(
+                        "leadsTo '{name}' has a trigger that is unreachable within depth {depth}"
+                    ),
+                    "the trigger is not reachable within this depth; check whether an action that should establish it is missing, or whether the trigger expression is wrong",
+                    &property.span.python_loc(),
+                ),
+                Some(Reachability::Exhausted) => vacuity_reachability_warning(
+                    "vacuity_probe_truncated",
+                    "leadsTo trigger",
+                    &name,
+                    &format!(
+                        "leadsTo '{name}' has a trigger whose reachability the probe could not establish within depth {depth}"
+                    ),
+                    "vacuity was not established either way for this trigger; the probe either exhausted its internal state budget or failed to evaluate the trigger in some reached state before reaching a verdict",
+                    &property.span.python_loc(),
+                ),
+                Some(Reachability::Reachable) | None => continue,
+            };
             if let JsonValue::Object(warning) = &mut warning {
                 insert_requirement_metadata(warning, &property.annotations, property.meta.as_ref());
             }
@@ -2283,14 +2671,58 @@ pub fn verification_warnings(
         }));
     }
     for (name, covered) in action_coverage {
-        if !covered {
-            warnings.push(json!({
-                "message": format!("action '{}' is never enabled within depth {depth} — the spec may be vacuous (check its requires clauses)", display_name(name)),
-                "hint": format!("these requires clauses are unsatisfiable at every step up to depth {depth}; weaken one of them, add an action that establishes them, or increase --depth"),
-            }));
+        if !covered && let Some(action) = model.actions.iter().find(|action| action.name == *name) {
+            warnings.extend(never_enabled_action_warning(model, action, depth));
         }
     }
     warnings
+}
+
+/// Render the public, bounded action-coverage finding shared by verification
+/// and `scenarios`. Returns `None` for internal scaffolding without an authored
+/// origin or a source-backed action span. The action origin is the sole
+/// authority for a lowered action's display name; the executable name remains
+/// only as `generated_name` alongside the origin chain.
+#[must_use]
+pub fn never_enabled_action_warning(
+    model: &KernelModel,
+    action: &ActionDef,
+    depth: usize,
+) -> Option<JsonValue> {
+    let origin = model.action_origin(&action.name);
+    let name = origin
+        .and_then(origin_display_name)
+        .map_or_else(|| display_name(&action.name), str::to_owned);
+    // Keep this public diagnostic aligned with all other action JSON: a
+    // source-backed lowered action reports the authored primary location,
+    // while a kernel action retains its own declaration span. Zero spans are
+    // reserved for generated-only sentinels and are not public findings.
+    let source_span = origin
+        .and_then(|origin| origin.primary.as_ref().and_then(|site| site.span))
+        .filter(|span| span.start.line > 0 && span.start.column > 0)
+        .or_else(|| {
+            (action.span.start.line > 0 && action.span.start.column > 0).then_some(action.span)
+        })?;
+    let loc = source_span.python_loc();
+    let mut warning = json!({
+        "kind": "never_enabled_action",
+        "name": name,
+        "loc": loc,
+        "message": format!("action '{name}' is never enabled within depth {depth} — the spec may be vacuous (check its requires clauses)"),
+        "hint": format!("these requires clauses are unsatisfiable at every step up to depth {depth}; weaken one of them, add an action that establishes them, or increase --depth"),
+        "blocking_requires": [],
+    });
+    if let JsonValue::Object(entry) = &mut warning {
+        insert_requirement_metadata(entry, &action.annotations, action.meta.as_ref());
+        if let Some(origin) = origin {
+            entry.insert(
+                "generated_name".to_owned(),
+                json!(display_name(&action.name)),
+            );
+            entry.insert("origin".to_owned(), internal_origin_json(origin));
+        }
+    }
+    Some(warning)
 }
 
 /// Remove bounded deadlock findings from warnings promoted to an induction proof.
@@ -2439,37 +2871,50 @@ pub fn action_cover_traces(
     model: KernelModel,
     depth: usize,
 ) -> Result<BTreeMap<String, Vec<TraceStep>>, RuntimeError> {
-    let initial = Monitor::new(model)?;
-    let initial_trace = vec![TraceStep {
-        step: 0,
-        state: initial.state.clone(),
-        action: None,
-        changes: BTreeMap::new(),
-    }];
+    // `scratch` re-pointed per state, `parents` reconstructed only on
+    // witness discovery -- the same #783 pattern as `check_refinement`'s
+    // walk. The witness for a covered action is built from the *parent*
+    // state's own reconstructed trace plus the covering step, not from the
+    // child's `parents` entry: the witness registration below fires even
+    // when the child was already visited by an earlier path (it runs before
+    // the `visited` check), so it cannot depend on the child having a
+    // `ParentLink` at all.
+    let mut scratch = Monitor::new(model)?;
+    let initial_state = scratch.state.clone();
     let mut covered = BTreeMap::new();
-    let mut visited = BTreeSet::from([initial.state.clone()]);
-    let mut queue = VecDeque::from([(initial, initial_trace, 0_usize)]);
-    while let Some((monitor, trace, step)) = queue.pop_front() {
+    let mut visited = BTreeSet::from([initial_state.clone()]);
+    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+    let mut queue = trace::LeanFrontier::new();
+    queue.push(initial_state, 0);
+    while let Some((state, step)) = queue.pop() {
         if step >= depth {
             continue;
         }
-        let enabled = monitor.enabled()?;
+        scratch.state = state.clone();
+        scratch.step = step;
+        let enabled = scratch.enabled()?;
         for instance in enabled {
-            let mut child = monitor.clone();
-            let result = child.step(&instance)?;
-            let mut child_trace = trace.clone();
-            child_trace.push(trace_step_from_result(
-                step + 1,
-                &monitor.state,
-                &instance,
-                &result,
-            ));
+            scratch.state = state.clone();
+            scratch.step = step;
+            let result = scratch.step(&instance)?;
             if result.violation.is_none() {
-                covered
-                    .entry(instance.action.clone())
-                    .or_insert_with(|| child_trace.clone());
-                if visited.insert(child.state.clone()) {
-                    queue.push_back((child, child_trace, step + 1));
+                let child_state = result.state.clone();
+                if !covered.contains_key(&instance.action) {
+                    let mut witness = trace::reconstruct_trace(&state, &parents);
+                    witness.push(trace_step_from_result(step + 1, &state, &instance, &result));
+                    covered.insert(instance.action.clone(), witness);
+                }
+                if visited.insert(child_state.clone()) {
+                    parents
+                        .entry(child_state.clone())
+                        .or_insert_with(|| trace::ParentLink {
+                            parent: state.clone(),
+                            action: TraceAction {
+                                name: instance.action.clone(),
+                                params: instance.params.clone(),
+                            },
+                        });
+                    queue.push(child_state, step + 1);
                 }
             }
         }
@@ -2512,28 +2957,38 @@ pub fn leadsto_response_traces(
     if model.leadstos.is_empty() {
         return Ok((Vec::new(), Vec::new()));
     }
-    let initial = Monitor::new(model.clone())?;
+    // Only the per-node `Monitor` clone (a whole `KernelModel` clone) is
+    // removed here, via a re-pointed `scratch` -- issue #783 scoped this
+    // lane to that clone alone. The per-node `Vec<TraceStep>` clone stays:
+    // this walk has no `visited` dedup (a `pending`/response history is
+    // path-dependent, so two routes to the same state must stay distinct
+    // path-trees, not merge behind a shared `ParentLink`), and a
+    // `reconstruct_trace`-style backward walk has no well-defined single
+    // parent to walk back through when routes fork and rejoin.
+    let mut scratch = Monitor::new(model.clone())?;
+    let initial_state = scratch.state.clone();
     let bindings = model
         .leadstos
         .iter()
         .map(|property| {
             Ok((
                 property.name.clone(),
-                leadsto_bindings(property, &initial.state, model)?,
+                leadsto_bindings(property, &initial_state, model)?,
             ))
         })
         .collect::<Result<BTreeMap<_, _>, RuntimeError>>()?;
     let target_count = bindings.values().map(Vec::len).sum::<usize>();
     let initial_trace = vec![TraceStep {
         step: 0,
-        state: initial.state.clone(),
+        state: initial_state.clone(),
         action: None,
         changes: BTreeMap::new(),
     }];
     let mut responses = BTreeMap::<(String, Bindings), LeadstoResponse>::new();
     let mut triggered = BTreeSet::<(String, Bindings)>::new();
-    let mut queue = VecDeque::from([(initial, initial_trace, 0_usize)]);
-    while let Some((monitor, trace, step)) = queue.pop_front() {
+    let mut queue = trace::PathFrontier::new();
+    queue.push(initial_state, initial_trace, 0);
+    while let Some((state, trace, step)) = queue.pop() {
         for property in &model.leadstos {
             for binding in &bindings[&property.name] {
                 let key = (property.name.clone(), binding.clone());
@@ -2571,20 +3026,18 @@ pub fn leadsto_response_traces(
         if responses.len() == target_count || step >= depth {
             continue;
         }
-        for instance in monitor.enabled()? {
-            let mut child = monitor.clone();
-            let result = child.step(&instance)?;
+        scratch.state = state.clone();
+        scratch.step = step;
+        for instance in scratch.enabled()? {
+            scratch.state = state.clone();
+            scratch.step = step;
+            let result = scratch.step(&instance)?;
             if result.violation.is_some() {
                 continue;
             }
             let mut child_trace = trace.clone();
-            child_trace.push(trace_step_from_result(
-                step + 1,
-                &monitor.state,
-                &instance,
-                &result,
-            ));
-            queue.push_back((child, child_trace, step + 1));
+            child_trace.push(trace_step_from_result(step + 1, &state, &instance, &result));
+            queue.push(result.state.clone(), child_trace, step + 1);
         }
     }
     let missing = bindings

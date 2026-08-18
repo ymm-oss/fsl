@@ -78,17 +78,30 @@ inventory, and promotion changes run the `scheduled` tier.
   evidence contract. Do not allowlist verdict, location, assurance, or exit-code differences.
 - A language feature moves with its grammar/lowering, typed model, symbolic and concrete semantics,
   regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/reference.md`, a design
-  note, and `CHANGELOG.md`. A new declaration, binder, or reference form additionally moves with
+  note, and a `changelog.d/` fragment (see `changelog.d/README.md`; `CHANGELOG.md`'s `[Unreleased]`
+  body itself is aggregated from fragments at release time and must not be hand-edited). A new
+  declaration, binder, or reference form additionally moves with
   `rust/fsl-lsp/src/index.rs` and a targeted role/scope test, or it silently loses
   definition/references/rename/documentSymbol with no parse failure to surface the gap;
   `rust/fsl-lsp/tests/corpus.rs` only asserts that every identifier is indexed as something.
   `docs/LANGUAGE.ja.md` is a second canonical source kept section-aligned
   1:1 with `docs/LANGUAGE.md` (same count/order of `## ` sections) — `tools/build_site_reference.py`
-  fails loudly on drift; see `docs/DESIGN-docs-site.md` D7. A new dialect's top-level construct (and
-  any new `examples/`/`specs/` directory) additionally moves with `tests/dialect_registry.py`
-  (`DIALECTS`, `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS`), or the conformance harness
-  (`docs/DESIGN-conformance-harness.md`) fails loudly with an unregistered-construct error instead
-  of silently excluding the corpus.
+  fails loudly on drift; see `docs/DESIGN-docs-site.md` D7 (this one *is* a required CI check:
+  `.github/workflows/site-reference-freshness.yml`). A new dialect's top-level construct (and any new
+  `examples/`/`specs/` directory) additionally moves with `tests/dialect_registry.py` (`DIALECTS`,
+  `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS`). The frozen-Python conformance harness
+  (`docs/DESIGN-conformance-harness.md`, `tests/test_dialect_conformance.py`) is written to fail
+  loudly on an unregistered construct instead of silently excluding the corpus, but — unlike the
+  `docs/LANGUAGE.ja.md` check above — **no CI workflow and no `./tools/check-native-integration.sh`
+  lane currently invokes it**; it is a developer-run manual/reference check, not a machine-enforced
+  gate (see the design doc's "Cost and CI wiring"). Scope that precisely: registering the construct
+  in `tests/dialect_registry.py` and the harness's dual-evaluator (Monitor/BMC/oracle) agreement
+  checks have no mechanical enforcement today. A narrower obligation is enforced regardless — every
+  `.fsl` under `specs/`/`examples/` must `check` cleanly or declare/exclude its error — by
+  `rust/fslc/tests/corpus_check_sweep.rs` inside the required `rust workspace` job
+  (`.github/workflows/ci.yml`). That native sweep will not catch a missing `tests/dialect_registry.py`
+  entry or a Monitor/native disagreement; register the construct because the rule says so, not
+  because something will always catch you if you don't.
 - Top-level dialect counts and parser parity do not establish nested semantic coverage. When porting
   or auditing an AST/enum sum type, inventory every behavior-bearing variant and bind each accepted
   variant to executable native semantics with accepting/rejecting controls, or to an explicit
@@ -120,6 +133,14 @@ or a maintained example. Then remove the temporary report and its backlinks. Kee
 experiment record only when its method or raw data is itself a maintained product artifact; Git and
 pull-request history preserve chronology.
 
+For an explicitly requested local Referance semantic-drift audit, follow
+`docs/DESIGN-referance-local-audit.md`: begin with a verified task-local Store and provenance-bearing
+behavior/freshness evidence, then use the repo-owned bounded CodeReferance profile only as an auxiliary
+read-only detector. Confirm both Store path and audited root, keep every observation shadow/local, and
+complete authority-ordered triage before filing a finding. Referance is not a CI, merge, product,
+promotion, or release gate, and its symbol/parity results never establish nested executable semantics
+or authorize automatic ground/promote/issue.
+
 ## Coding and change conventions
 
 Use `cargo fmt` and keep Clippy warning-free. The workspace forbids unsafe Rust. Python code follows
@@ -146,6 +167,7 @@ For non-trivial changes, use a dedicated branch/worktree so unrelated local stat
 the task. Use repository-relative paths in committed files and delegation briefs; never embed a
 developer's absolute path or username. Preserve unrelated user changes.
 
-Keep one topic per commit, use Conventional Commit-style subjects, and add notable changes under
-`CHANGELOG.md` `[Unreleased]`. A pull request should state the problem, contract change, test evidence,
-linked issue, and any documentation or skill updates.
+Keep one topic per commit, use Conventional Commit-style subjects, and add a notable change as a new
+`changelog.d/<id>-<slug>.<category>.md` fragment (see `changelog.d/README.md`) in the same pull
+request, rather than editing `CHANGELOG.md` directly. A pull request should state the problem,
+contract change, test evidence, linked issue, and any documentation or skill updates.

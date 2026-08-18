@@ -81,6 +81,20 @@ pub struct BmcOutputOptions<'a> {
     pub checked_bounds: Option<&'a BTreeSet<String>>,
     pub elapsed_s: f64,
     pub statistics: &'a VerificationStatistics,
+    /// Whether to skip the budgeted vacuity reachability probe
+    /// (`fsl_runtime::verification_warnings`'s `vacuous_implication`/
+    /// `vacuous_leadsto`/`vacuity_probe_truncated` lanes) entirely, rather
+    /// than compute it and filter the result (issue #729).
+    ///
+    /// INVARIANT: only the `verify`/`sweep` CLI option parsing for
+    /// `--vacuity ignore` (`rust/fslc/src/verification.rs`'s
+    /// `execute_cli_verification`) may set this `true`. Every other
+    /// caller -- the `ledger`/`html`/`mutate` baseline (`run_verify`), the
+    /// wasm Worker surface (which has no `--vacuity` option at all),
+    /// induction's internal BMC base pass, and tests -- must pass `false`
+    /// so the probe always runs and `--vacuity error` never silently loses
+    /// evidence it would otherwise catch.
+    pub skip_vacuity_probe: bool,
 }
 
 /// The source location a typed-model diagnostic carries, if the model bound one
@@ -1025,6 +1039,7 @@ pub fn render_explicit_output(
     elapsed_s: f64,
     vacuity: &[VacuityFinding],
     reachable_diagnostics: &std::collections::BTreeMap<String, fsl_verifier::ReachableDiagnosis>,
+    skip_vacuity_probe: bool,
 ) -> Result<(Value, i32), String> {
     let compatible = explicit_as_bmc(result, vacuity, reachable_diagnostics);
     replay_bmc_witnesses(model, &compatible, None)?;
@@ -1037,6 +1052,7 @@ pub fn render_explicit_output(
             checked_bounds,
             elapsed_s,
             statistics: &statistics,
+            skip_vacuity_probe,
         };
         let (mut output, status) = if violation.kind == "partial_op" {
             let boundary = fsl_runtime::Violation {
@@ -1061,6 +1077,7 @@ pub fn render_explicit_output(
             checked_bounds,
             elapsed_s,
             statistics: &statistics,
+            skip_vacuity_probe,
         };
         let (mut output, status) =
             render_deadlock_failure(envelope, model, &compatible, step, &options);
@@ -1099,6 +1116,7 @@ pub fn render_explicit_output(
             checked_bounds,
             elapsed_s,
             statistics: &statistics,
+            skip_vacuity_probe,
         };
         let (mut output, status) =
             render_reachable_failure(envelope, model, &compatible, &unreached, &options);
@@ -1118,6 +1136,7 @@ pub fn render_explicit_output(
         deadlock,
         elapsed_s,
         &statistics,
+        skip_vacuity_probe,
     ))
 }
 
@@ -1189,6 +1208,9 @@ fn render_explicit_budget(
         checked_bounds,
         elapsed_s,
         statistics,
+        // This branch never renders `warnings` (see `add_common`), so the
+        // vacuity probe is never invoked from here regardless of this value.
+        skip_vacuity_probe: false,
     };
     add_common(&mut output, model, compatible, &options);
     output.insert("depth".to_owned(), json!(result.depth));
@@ -1223,6 +1245,7 @@ fn render_explicit_success(
     deadlock: DeadlockMode,
     elapsed_s: f64,
     statistics: &VerificationStatistics,
+    skip_vacuity_probe: bool,
 ) -> (Value, i32) {
     if !result.closure {
         let options = BmcOutputOptions {
@@ -1231,6 +1254,7 @@ fn render_explicit_success(
             checked_bounds,
             elapsed_s,
             statistics,
+            skip_vacuity_probe,
         };
         let (mut output, status) = render_success(output, model, compatible, &options);
         add_explicit_metadata(&mut output, result);
@@ -1245,6 +1269,7 @@ fn render_explicit_success(
         checked_bounds,
         elapsed_s,
         statistics,
+        skip_vacuity_probe,
     };
     add_common(&mut output, model, compatible, &options);
     output.insert("depth".to_owned(), json!(result.depth));
@@ -1822,11 +1847,12 @@ fn shared_warnings(
             .map(|entry| &entry.state),
         &result.action_coverage,
         &solver_vacuity_warnings(model, result),
+        options.skip_vacuity_probe,
     )
 }
 
 /// Render the solver-decided vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes
-/// 3–5) that `fsl-verifier` proved for this model.
+/// 4–7) that `fsl-verifier` proved for this model.
 ///
 /// None of the messages mention `--depth`: unlike the two reachability lanes,
 /// these judgments quantify over the declared type space and therefore hold at
@@ -2183,6 +2209,7 @@ mod tests {
             0.0,
             &[],
             &std::collections::BTreeMap::new(),
+            false,
         );
         assert!(rendered.is_err());
     }
@@ -2212,6 +2239,7 @@ mod tests {
                 checked_bounds: None,
                 elapsed_s: 0.0,
                 statistics: &statistics,
+                skip_vacuity_probe: false,
             },
         );
         let (mut explicit_output, explicit_status) = render_explicit_output(
@@ -2223,6 +2251,7 @@ mod tests {
             0.0,
             &[],
             &std::collections::BTreeMap::new(),
+            false,
         )
         .expect("explicit evidence replays");
         let explicit_envelope = explicit_output.as_object_mut().expect("explicit envelope");

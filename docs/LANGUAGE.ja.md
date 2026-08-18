@@ -237,7 +237,10 @@ domain <Name> {
 `action` へ、aggregate 状態をプレフィックス付きのカーネル状態へ、saga の step を
 イベントフラグでガードされた action へ、エフェクトライフサイクル状態を有限の
 `Map<CorrelationId, EffectStatus>` / `Map<CorrelationId, Attempt>` マップへと
-lowering します。domain の enum メンバーは lowering 時に名前空間化されるので、
+lowering します。イベントの発生フラグを立てる action は、それを生成した構文
+(command、effect の完了、saga の observe、saga の step/timeout/compensation の
+いずれであっても)によらず、そのイベントの宣言済み `evolve` を同じ action 内で
+適用します。domain の enum メンバーは lowering 時に名前空間化されるので、
 2 つの domain enum が両方とも `Pending` を含んでもかまいません。domain の式では
 `X in [A, B]` と `can(Command)` が使えます。これらは型付き domain ツリーから解決
 され、カーネル式へ構造的に lowering されます。裸の enum メンバーは期待される論理型
@@ -246,6 +249,17 @@ lowering します。domain の enum メンバーは lowering 時に名前空間
 aggregate 内で解決され、そのコマンドの `requires` 節の連言と、各拒否条件の否定に
 なります。未知のシンボル、aggregate をまたぐコマンド、型の不一致、未対応の呼び出し
 は、元の domain 式の位置で報告されます。
+
+saga の `compensation { when Trigger after After { emits ... } }` ブロックは、
+トリガーイベントフラグと `after` イベントフラグの**両方**でガードされたカーネル
+action へ lowering されます。つまり compensation は、両方のイベントが観測されて
+初めて発火します。生成されるイベントフラグは 1 遷移につき 1 つだけ立つ one-hot な
+観測なので、この二重ガードは単一の `decide` が両方のイベントを同一遷移で emit する
+場合にしか充足できません。トリガーイベントと after イベントが異なる一般的なケース
+(例えば、先の成功の後で起きた失敗によってトリガーされる compensation)は、現在の
+one-hot フラグ方式のもとでは構造的に無効化されており、`fslc verify` はこれを、
+after イベントを一度も観測していないトレースを黙って受理するのではなく、
+never-enabled action の警告として報告します。
 
 effect は `success_event`、`failure_event`、`timeout_event` により、完了イベントへ
 明示的な outcome role を割り当てられます。これらの宣言が分類の正規契約であり、
@@ -278,15 +292,46 @@ domain 宣言では、有限のバリアントに `enum Name { Member, ... }` �
 assurance/completeness を持つトップレベルの provenance グラフとして公開します。
 
 domain aggregate の状態フィールドが初期化子を省略した場合、現行エディションは
-確立された Bool `false`、enum 先頭メンバー、範囲下限、external-placeholder `0` の
-選択を維持し、`implicit_initial_value` を出力します。この警告には、選択された値、
-理由、current/next の深刻度、フィールドのスパン、機械適用可能な明示初期化子の挿入
-が含まれます。次のエディションでは初期化子の明示が必須になります。
+確立された Bool `false`、Int `0`、enum 先頭メンバー(domain ソース自体が受理する
+bare な形で描画されます — `value_object` や `Map` の値としてどれだけ深く nested
+していても、`domain_kernel_source` の kernel 側 mangled 識別子には決してなりません)、
+範囲下限、external-placeholder `0`、`value_object` の構造体リテラル、`Option<T>` の
+`none`、`Set<T>` の `Set {}`、トップレベルの `Map<K, V>` の密な per-key init
+(`forall k: K { field[k] = <V の既定値> }`、`<V の既定値>` はこの同じ選択を再帰的に
+辿る)のいずれかの選択を維持し、これら**すべて**の形状について `implicit_initial_value`
+を出力します(#731)。この警告のカバー範囲は renderer の総当たり dispatch
+(`fsl_core::domain_type_default` — 警告と `domain_kernel_source` の双方が、選択値
+そのものと、その中の enum メンバーの綴り方を読み出す単一のオーナー)と一致しており、
+一部のスカラー形状だけではありません。この警告には、選択された値、理由、current/next
+の深刻度、フィールドのスパン、そして機械適用可能な挿入が存在する場合は
+`suggestion`/`canonical_replacement` が含まれます。2つのフィールド形状ではこの挿入が
+省略され、それに伴い `edition_severity.next` は `error` ではなく `warning` のままに
+なります(次のエディションは、安全に挿入する手段がない初期化子をまだ必須化できません):
+トップレベルの `Map<K, V>` フィールドには whole-field の既定値が一切なく
+(`field: Map<K, V> = expr;` は常に棄却されます、「whole-Map domain defaults are not
+supported」。サポートされる `Map` の既定値は per-key 形式のみだからです)、`Set<T>`
+または `value_object` 型フィールドの brace-literal な既定値(`Set { ... }`、
+`Name { ... }`)は、`fslc check` が明示的に書かれたものを受理するにもかかわらず、
+`fslc fmt` の reformat-and-reparse パスで現状 round-trip できません(issue #770)。
+`migrate --write` は fail-closed であり壊れたファイルを書き出すことはありませんが、
+挿入を提示すると #770 の reformat 失敗を誘発し、そのファイル全体の migration が
+失敗して、他の安全な編集まで一緒に失われます。別の `Map` の値として nested された
+`Map` は別途棄却されます(「Map state requires explicit initialization through
+supported semantics」)。per-key init は `Map` 値型に対して選べる既定値を持たないから
+です。
 
 安定した fsl-domain findings とネストされたカーネル結果(成功時は
 `verified_under_assumptions`)には `fslc domain check` を、aggregate/effect の
 サマリーには `fslc domain analyze` を、生成されたカーネル FSL のデバッグビューの
-確認には `fslc domain expand` を、Functional DDD スキャフォールドには
+確認には `fslc domain expand` を使います。`domain analyze` と `domain expand` は
+コマンド開始時に著者が記述した domain source を一つの `String` として読み、その
+同じ snapshot を `parse_domain_document_from_source` に渡して `DomainSpec` を
+parse し、さらにその同じ String を `load_kernel_model_from_source` に渡して検査済み
+Kernel を構築します。atomic な path replacement が起きても、出力前に別の source
+version を検証することはありません。未解決識別子は部分的な分析や使用不能な Kernel
+text を出力せず、元の source location 付きで棄却されます。`domain generate` は同じ
+typed lowering を使いますが、この single-snapshot 契約はまだ持ちません。別個の
+TOCTOU follow-up は #808 が追跡します。Functional DDD スキャフォールドには
 `fslc domain generate --target typescript|python|kotlin|swift|rust` を、
 アダプタ/コンフォーマンスのスキャフォールドには `fslc domain testgen` を、
 ランタイムの command / event / effect エビデンスには
@@ -718,8 +763,9 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
-               [--property <Name>]               # check one named property in isolation —
-                                                 #   invariant / trans / leadsTo / reachable (for probing)
+               [--property <Name>]               # check one named property obligation —
+                                                 #   invariant / trans / leadsTo / reachable;
+                                                 #   induction の trans 選択は全 invariant を保持
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
@@ -831,6 +877,14 @@ Public Kernel v2 はオプトインで、
 
 `verify --property Name` は invariant、`trans`、`leadsTo`、`reachable` の宣言を
 横断して解決し、指名されたプロパティ種別だけを単独で検査します。
+ただし induction には依存関係に関する規則が 1 つあります:
+`--engine induction --property <trans>` では、指名した `trans` だけが遷移の証明義務に
+なりますが、すべてのユーザー invariant と暗黙の型境界はベースケースと induction
+仮定に残ります。これにより、確立済みの状態 invariant に依存する 2 状態安全性の証明を
+維持し、選択実行のその遷移に対する verdict を all-properties induction 実行と一致させます。
+既存の `--property <invariant>` の挙動は変更しません: sibling invariant は保持せず、
+指名した invariant だけにモデルを制限します。induction selector は、選択された
+`leadsTo` と `reachable` を引き続き usage error として拒否します。
 `--exclude-property Name` は繰り返し指定でき、種別を横断する逆操作として機能します:
 指名された invariant、`trans`、`leadsTo`、`reachable` プロパティを、実行と、検査済み
 プロパティの出力(`invariants_checked`、`transitions_checked`、`leads_to`、
@@ -972,6 +1026,9 @@ holds, violating_bindings?}`)は、invariant が複数の AND 連言肢から構
 (`insufficient_depth` | `over_constrained`)と `blocking`(前件/トリガーを不可能に
 している他の invariant。深さ内で単に未到達なだけのときは空)を得ます —
 `reachable_failed` の `unreached[].blocking_requires` と同じ形です。
+`vacuity_probe_truncated`(§15)は別の主張です — 到達性 probe が深さではなく
+state の budget で打ち切られた、というもので、上記のどちらでもなく独自の
+`classification: "probe_truncated"` を持ちます。
 blame は特定するだけで、修復(ガードの弱化、連言肢の削除)を提案することは決して
 ありません — それは anti-hollowing の原則に反するからです。これらはすべて JSON
 コントラクトへの厳密に追加的な変更です。
@@ -979,7 +1036,9 @@ blame は特定するだけで、修復(ガードの弱化、連言肢の削除)
 忠実性/意図のギャップを特定する診断は、`faithfulness_class` と
 `recommended_action` も運ぶことがあります。現在のクラスは
 `partial_op_unguarded`、`frozen_only_invariant`、`intent_unexercised`、
-`liveness_not_refined` です。このタグは既存の `result` / `kind` /
+`liveness_not_refined`、`reachability_unknown`(`vacuity_probe_truncated`
+専用 — 到達性 probe が budget で打ち切られたのであって、単に意図が未行使
+なのではありません)です。このタグは既存の `result` / `kind` /
 `violation_kind` フィールドから導出される追加的なものです。消費者は詳細のために
 元の分類フィールドを読み続けるべきです。
 
@@ -1085,6 +1144,17 @@ fsl 以外のフェンス付きブロック(` ```python ` など)は無視され
 パスは(`.fsl` ファイルと同様に)Markdown ファイルのディレクトリを基準に解決されます。
 literate な `.md` はこの方法で `.fsl` ファイルを `use`/compose できますが、別の
 `.md` ファイルを compose のターゲットにすることはサポートされません。
+
+このフェンス抽出を行うのは `check`・`verify`・`scenarios` の 3 コマンドだけです。
+仕様パスを読み取る他のすべてのコマンド(`lint`・`migrate`・`fmt`・`kernel`・
+`conformance`・`explain`・`mutate`・`typestate`・`testgen`・`html`・`ledger`・
+`analyze`・`diff`・`refine`・`replay`・`sweep`、および
+`document generate`/`claims`/`check`)は、`.md` 入力を代わりに入力種別の誤りとして
+拒否します: `result: "error"`、`kind: "usage"`、
+`diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"`、対応コマンドを挙げたメッセージ、
+そして仕様上の位置ではなく入力ファイル自体を指す `loc` です。これにより、非対応
+コマンドに渡された Markdown ドキュメントが、その Markdown 自身の最初の非 fsl 文字の
+位置にある仕様の構文エラーとして誤報されることを防ぎます。
 
 ## 8. 推奨ワークフロー: proved を標準にする
 
@@ -2265,8 +2335,13 @@ fslc db import examples/db/minimal_prisma_schema.prisma --name ImportedFromPrism
 migration/schema の要素、最小の競合集合、修復候補を含む `findings[]` を返します。
 ランタイムの観測は `formal_result: "not_run"` の `observed_mismatch` を返します。
 ログからの不在は、未使用の振る舞いの証明ではありません。
-生成されたカーネルの反例を直接調べたいときは、通常の `fslc verify` を使って
-ください。
+入れ子の `kernel.result` が非成功(`violated`/`reachable_failed`/
+`unknown_cti`/`unknown_budget`)であれば最上位の `result` に畳み込まれ、入れ子
+の `kernel` オブジェクトはその verdict の再現可能な証拠(`loc`/`trace`/
+`blame`/`cti`/`hint`/`unreached`/…— `fslc domain check` と同じレジストリ)を
+保持します。生成されたカーネルの完全なエンベロープ(`db check`/`domain check`
+が意図的に射影しないカバレッジ名リストや実行統計など)を調べたいときは、通常の
+`fslc verify` を使ってください。
 
 `fslc db observe` は、観測イベントを評価する前に、観測エンベロープ/イベントを
 `schemas/fslc/db/observation.v0.schema.json` に対して検証します(型付きの必須
@@ -2541,16 +2616,27 @@ DESIGN-*.md があります)。
   これについて沈黙します)。`acceptance`(must-allow)の双対です。
   → [`DESIGN-forbidden.md`](DESIGN-forbidden.md)
 - **Vacuity 検査(`--vacuity`)** — verified/proved のパスの上で、
-  `vacuous_implication`(含意の前件が到達不能)、
+  `never_enabled_action`(検査した深さ内で action の enabled な instance がない。
+  恒久的な死を証明するものではない有界の証拠)、`vacuous_implication`(含意の前件が到達不能)、
   `vacuous_leadsto`(トリガーが到達不能)、`always_true_requires`
   (先行する節の文脈の下で常に真であるガード)、
   `tautology_over_frozen`(どの action も変えない状態の上の、動的に
   トートロジーである invariant)、`urgency_freeze`(urgency が時間を凍結するために
   死んでいると証明された、生成された deadline の `tick`)、
-  `vacuous_deadline`(生成 deadline の age が全遷移で 0 のままと証明される)を
-  警告します。
+  `vacuous_deadline`(生成 deadline の age が全遷移で 0 のままと証明される)、
+  `vacuity_probe_truncated`†を警告します。
   `error` は exit 2 です。→
   [`DESIGN-vacuity.md`](DESIGN-vacuity.md)
+
+  † `vacuity_probe_truncated`: `vacuous_implication`/`vacuous_leadsto` の
+  到達性 probe は、spec 内の全 antecedent/trigger にまたがって 1 回の
+  budget 付き concrete BFS を共有します。ある候補が、真になることも
+  到達可能な状態空間を使い切ることもないまま state 数の budget に
+  到達した場合、`vacuous_implication`/`vacuous_leadsto` の代わりにこの
+  kind を報告します — 空虚性はどちら向きにも確立されていないため、
+  「空虚性確定」として扱えば偽陽性になり、単に握りつぶせば
+  `--vacuity error` が空虚性を一度も判定していない spec を通過させて
+  しまいます。他の 7 kind と全く同様に `--vacuity` で選択されます。
 - **`--strict-tags`** — 成功の結果の上で、タグのない宣言(捏造の候補)と、参照
   されない要件(欠落の候補。空の requirement ブロックを含む)を警告します。存在
   レベルの突合です。→ [`DESIGN-strict-tags.md`](DESIGN-strict-tags.md)

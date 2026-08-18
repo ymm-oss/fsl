@@ -19,7 +19,9 @@ The first pilot is P2 symbolic-witness/concrete-replay agreement. Mutation
 testing is a detector calibration method. It is not another observer, never
 promotes a public assurance class, and never changes a product process exit.
 Specification mutation through `fslc mutate` remains a separate user-facing
-domain.
+domain. (`fslc mutate`'s own `domain`-dialect acceptance normative text — issue
+#727 — lives in `docs/DESIGN-mutate.md` §2, not here, per that document's scope
+above.)
 
 ## Scope and anchors
 
@@ -128,8 +130,46 @@ baseline. The fresh target keeps baseline evidence independent of prior runs.
   or a stale equivalence entry fails closed. Shards are complete only when all
   declared shards publish outcomes for the same revision and tool version.
 
-The product entrypoint is `tools/check-native-integration.sh semantic-mutation`.
-It does not invoke the frozen Python reference.
+### CI scheduling: two lanes, one aggregator
+
+The curated operator half and the generic cargo-mutants half are wall-clock-independent by
+construction, so CI runs them as separate jobs behind an aggregator that carries the required
+`semantic mutation (...)` context (docs/DESIGN-ci.md, "Sharded pre-merge Linux evidence").
+This is a scheduling change only: every check that ran before still runs, in the same
+tier (`changed`/`complete`), with the same classifications and the same evidence contract.
+
+- `semantic-mutation-operators` (3-way matrix) runs
+  `tools/run-semantic-mutation-gate.sh <mode> --lane operators --shard K/3`. Each shard gets a
+  round-robin third of `operators.txt` by 0-based row index (`operator i` belongs to shard `K` iff
+  `i % 3 == K - 1`), assigned by `tools/run-fault-operators.sh`'s `assign_shard`. The whole-table
+  validation in `read_table` (missing patch file, orphaned patch, malformed row) and the harness's
+  own `check_stale_seam_control` negative control run in **every** shard, not just one — a fault in
+  either must be caught regardless of which shard happens to run it. `check_no_op_control`'s loop and
+  the main operator loop are both restricted to the shard's assigned indices, which is what makes the
+  ~912s no-op control shardable at all.
+- `semantic-mutation-mutants` runs `tools/run-semantic-mutation-gate.sh <mode> --lane mutants`,
+  complete and **unsharded**: at the measured ~14.3 min it is already close to the curated lane's
+  post-split floor, and cargo-mutants sharding (mutant-inventory slicing, uncertain
+  `--shard`/partition index-base semantics in the pinned runner, migrating the stale-reviewed-
+  equivalents check) would add real risk for no measured wall-clock gain.
+- The `semantic-mutation` aggregator requires both lanes to report `success` (`if: always()`, so a
+  failing shard cannot be masked by a GitHub-treated-as-satisfied *skip* of the aggregator), then
+  downloads every operator shard's `shard-manifest.v1.json` and enforces completeness: identical
+  `base_revision` and `table_operators` across all three manifests, and the disjoint union of their
+  `executed_operators` equal to `table_operators` exactly (via `tools/check-shard-union.sh`, the same
+  fail-closed subset/disjoint/union-equality primitive used by the `rust workspace` split). A shard
+  writes its manifest only after it succeeds, so a failed shard cannot contribute a manifest that
+  reads as complete.
+
+With no `--lane` flag, `tools/run-semantic-mutation-gate.sh`'s behavior is unchanged from before this
+split: the same manifest test, the same unsharded `run-fault-operators.sh` call, and the same
+cargo-mutants run, in the same order. This is the path `tools/check-native-integration.sh
+semantic-mutation` and every local invocation still take. `--lane`/`--shard` are additive, CI-only
+scheduling controls.
+
+The product entrypoint for a complete, unsharded local run is
+`tools/check-native-integration.sh semantic-mutation`. It does not invoke the frozen Python
+reference.
 
 ## Survivor promotion
 

@@ -27,6 +27,44 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          # Restore-only against `ci.yml`'s `rust-workspace` key, not a `save-if` guard.
+          # (a) This workflow has no `push` trigger (see `on:` above) and never gains one
+          # from `pull_request`/`merge_group` alone, so it has no path of its own to ever
+          # save a main-branch copy. Guarding this step's own key with
+          # `save-if: ${{ github.event_name != 'pull_request' }}`, as `ci.yml` does, would
+          # leave every pull request permanently cold instead: the earlier fix in this
+          # branch made that mistake (see git history) before independent review caught
+          # it. This job never saves at all and instead reads `ci.yml`'s `rust-workspace`
+          # entry, which successful non-pull-request `ci.yml` runs can populate.
+          # (b) Key derivation: `Swatinem/rust-cache` (`src/config.ts`) ignores `key` and
+          # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
+          # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace
+          # lockfiles. This job and `ci.yml`'s `rust workspace` job both run
+          # `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same checkout.
+          # The expected exact key match is directly observed in four pull-request logs:
+          # run 31581715093 attempt 1 logged it for core contracts at 09:11:00.77Z and Rust compile
+          # at 09:11:04.76Z; run 31583381471 attempt 1 logged it at 09:33:03.06Z and 09:33:05.55Z,
+          # respectively. Each says `Restored from cache key
+          # "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.`
+          # These logs establish the full-key restore; on a future lockfile-hash mismatch,
+          # `src/restore.ts` attempts a shared `restoreKey` prefix restore, but a cold
+          # build follows if no compatible entry exists.
+          # (c) This job's `cargo check --workspace --no-default-features` differs in
+          # feature resolution from `rust workspace`'s default-feature build
+          # (`tools/check-merge-readiness.sh:15-22`), so even a full key match leaves some
+          # dependency crates rebuilding -- a partial warm, not a guaranteed full one.
+          # The four jobs above observed full matches. For a future first run,
+          # restore-only is warm or partially warm only when an exact or prefix-compatible
+          # `rust-workspace` entry exists; without one, it remains cold. `main` has never
+          # held a cache under this workflow's own former key (no `push` trigger ever
+          # existed for it), so that former-key path could not make the first run warm.
+          # The live cache audit's created_at order has no documented tie-breaker; a tied
+          # boundary can produce a duplicate ID, rejected immediately, or different paired
+          # observations, which retry once and fail closed if still different; an identical
+          # mixed state can repeat as an undetectable residual.
+          # See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          shared-key: rust-workspace
+          save-if: false
           workspaces: rust -> target
 
       - name: Check the native-Z3-free Rust surface
@@ -45,6 +83,40 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          # Restore-only against `ci.yml`'s `rust-workspace` key, not a `save-if` guard.
+          # (a) This workflow has no `push` trigger (see `on:` above) and never gains one
+          # from `pull_request`/`merge_group` alone, so it has no path of its own to ever
+          # save a main-branch copy. Guarding this step's own key with
+          # `save-if: ${{ github.event_name != 'pull_request' }}`, as `ci.yml` does, would
+          # leave every pull request permanently cold instead: the earlier fix in this
+          # branch made that mistake (see git history) before independent review caught
+          # it. This job never saves at all and instead reads `ci.yml`'s `rust-workspace`
+          # entry, which successful non-pull-request `ci.yml` runs can populate.
+          # (b) Key derivation: `Swatinem/rust-cache` (`src/config.ts`) ignores `key` and
+          # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
+          # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace
+          # lockfiles. This job and `ci.yml`'s `rust workspace` job both run
+          # `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same checkout.
+          # The expected exact key match is directly observed in four pull-request logs:
+          # run 31581715093 attempt 1 logged it for core contracts at 09:11:00.77Z and Rust compile
+          # at 09:11:04.76Z; run 31583381471 attempt 1 logged it at 09:33:03.06Z and 09:33:05.55Z,
+          # respectively. Each says `Restored from cache key
+          # "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.`
+          # These logs establish the full-key restore; on a future lockfile-hash mismatch,
+          # `src/restore.ts` attempts a shared `restoreKey` prefix restore, but a cold
+          # build follows if no compatible entry exists.
+          # (c) This job builds `cargo fmt --check` plus a default-feature test build of a
+          # subset of `rust workspace`'s crates (`tools/check-merge-readiness.sh:25-33`),
+          # which is close enough to `rust workspace`'s own build to expect a near-full
+          # warm restore, unlike `rust-compile`'s `--no-default-features` lane above.
+          # The four jobs above observed full matches. For a future first run,
+          # restore-only is warm or partially warm only when an exact or prefix-compatible
+          # `rust-workspace` entry exists; without one, it remains cold. `main` has never
+          # held a cache under this workflow's own former key (no `push` trigger ever
+          # existed for it), so that former-key path could not make the first run warm.
+          # See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          shared-key: rust-workspace
+          save-if: false
           workspaces: rust -> target
 
       - name: Check solver-independent contracts
@@ -56,6 +128,12 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, not the default single commit: the changelog
+          # fragment checks below diff BASE_SHA...HEAD_SHA and read
+          # CHANGELOG.md at both revisions (docs/DESIGN-changelog-fragments.md,
+          # migration site 6).
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -63,6 +141,12 @@ jobs:
 
       - name: Test post-merge issue reconciliation
         run: ./tools/check-merge-readiness.sh automation
+
+      - name: Check changelog fragments (control 1, control 4)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: ./tools/aggregate_changelog.sh check-pr
 
   merge-readiness:
     name: merge readiness

@@ -9,11 +9,13 @@ use sha2::{Digest, Sha256};
 
 use super::{
     CliVerifyOptions, ScopeBounds, SpecLoadError, add_strict_tag_warnings, apply_vacuity_mode,
-    block_on_native, display, envelope, error_output, implements_error_output, implements_result,
-    invariant_names, load_kernel_model, load_model, load_model_scoped, load_snapshot_value_object,
-    load_state_snapshot, read_spec_source, select_properties, selected_implicit_bounds,
-    semantic_error_output, spec_load_error_output, surface_parse_error_output,
-    validate_requirement_traces, validate_specialized_document,
+    block_on_native, display, envelope, error_output, implements_error_output,
+    implements_result_from_source, invariant_names, load_kernel_model_from_source, load_model,
+    load_model_from_source, load_model_scoped, load_model_scoped_from_source,
+    load_snapshot_value_object, load_state_snapshot, read_spec_source, select_properties,
+    selected_implicit_bounds, semantic_error_output, spec_load_error_output,
+    surface_parse_error_output, validate_requirement_traces_from_source,
+    validate_specialized_document_from_source,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -53,6 +55,10 @@ pub(super) struct BmcRequest<'a> {
     pub(super) depth: usize,
     pub(super) deadlock: DeadlockMode,
     pub(super) initial_state: Option<&'a std::collections::BTreeMap<String, FslValue>>,
+    /// See `BmcOutputOptions::skip_vacuity_probe` (issue #729): only
+    /// `execute_cli_verification`'s `--vacuity ignore` handling may set
+    /// this `true`.
+    pub(super) skip_vacuity_probe: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -62,6 +68,8 @@ pub(super) struct InductionRequest<'a> {
     pub(super) deadlock: DeadlockMode,
     pub(super) k: usize,
     pub(super) auxiliary: &'a [(String, KernelExpr)],
+    /// See `BmcRequest::skip_vacuity_probe`.
+    pub(super) skip_vacuity_probe: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -70,6 +78,8 @@ pub(super) struct ExplicitRequest<'a> {
     pub(super) depth: usize,
     pub(super) deadlock: DeadlockMode,
     pub(super) budget: usize,
+    /// See `BmcRequest::skip_vacuity_probe`.
+    pub(super) skip_vacuity_probe: bool,
 }
 
 type CommandResult = (Value, i32);
@@ -134,13 +144,7 @@ fn verification_cost(started: Instant, statistics: &fsl_solver::VerificationStat
 }
 
 fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, SpecLoadError> {
-    let mut model = match selection.model {
-        Some(model) => model.clone(),
-        None => selection.scope.map_or_else(
-            || load_model(selection.path),
-            |scope| load_model_scoped(selection.path, scope),
-        )?,
-    };
+    let mut model = load_unselected_model(selection)?;
     // A rejected `--property`/`--exclude` names a property that is absent from
     // the model, so there is no construct in the source to point at.
     select_properties(&mut model, selection.property, selection.excluded)
@@ -148,6 +152,47 @@ fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, Spe
     Ok(model)
 }
 
+fn load_unselected_model(selection: ModelSelection<'_>) -> Result<KernelModel, SpecLoadError> {
+    let model = match selection.model {
+        Some(model) => model.clone(),
+        None => selection.scope.map_or_else(
+            || load_model(selection.path),
+            |scope| load_model_scoped(selection.path, scope),
+        )?,
+    };
+    Ok(model)
+}
+
+/// Restrict induction's obligations to a selected transition without deleting
+/// the invariants that establish its base case and form its step hypothesis.
+/// Other selector kinds keep `load_selected_model`'s existing model-restriction
+/// semantics.
+fn selected_transition_induction_model(
+    selection: ModelSelection<'_>,
+) -> Result<Option<KernelModel>, SpecLoadError> {
+    let Some(selected) = selection.property else {
+        return Ok(None);
+    };
+    let mut model = load_unselected_model(selection)?;
+    if !model
+        .transitions
+        .iter()
+        .any(|property| display(&property.name) == selected)
+    {
+        return Ok(None);
+    }
+    let invariant_hypotheses = model.invariants.clone();
+    select_properties(&mut model, selection.property, selection.excluded)
+        .map_err(SpecLoadError::unlocated_semantic)?;
+    if model.transitions.is_empty() {
+        // `--exclude-property` wins when it names the selected transition.
+        return Ok(None);
+    }
+    model.invariants = invariant_hypotheses;
+    Ok(Some(model))
+}
+
+#[allow(clippy::too_many_lines)]
 pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i32) {
     let InductionRequest {
         selection,
@@ -155,13 +200,28 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         deadlock,
         k,
         auxiliary,
+        skip_vacuity_probe,
     } = request;
+    let selected_transition_model = match selected_transition_induction_model(selection) {
+        Ok(model) => model,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let selection = selected_transition_model
+        .as_ref()
+        .map_or(selection, |model| ModelSelection {
+            path: selection.path,
+            model: Some(model),
+            scope: None,
+            property: None,
+            excluded: &[],
+        });
     let started = Instant::now();
     let base_request = BmcRequest {
         selection,
         depth,
         deadlock,
         initial_state: None,
+        skip_vacuity_probe,
     };
     let (base_prepared, base_solved) = match execute_bmc(&base_request, started) {
         Ok(execution) => execution,
@@ -177,6 +237,7 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
             checked_bounds: base_prepared.checked_bounds.as_ref(),
             elapsed_s: started.elapsed().as_secs_f64(),
             statistics: &base_solved.statistics,
+            skip_vacuity_probe: base_request.skip_vacuity_probe,
         },
     );
     let Value::Object(base) = &base_value else {
@@ -829,6 +890,7 @@ pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32
         started.elapsed().as_secs_f64(),
         &vacuity,
         &reachable_diagnostics,
+        request.skip_vacuity_probe,
     ))
 }
 
@@ -888,6 +950,7 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
             started.elapsed().as_secs_f64(),
             &vacuity,
             &reachable_diagnostics,
+            request.skip_vacuity_probe,
         ));
     if output.get("result").and_then(Value::as_str) == Some("unknown_budget") {
         return auto_fallback_to_bmc(request, &budget_fallback_reason(&output), "budget");
@@ -901,6 +964,7 @@ fn auto_fallback_to_bmc(request: ExplicitRequest<'_>, reason: &str, kind: &str) 
         depth: request.depth,
         deadlock: request.deadlock,
         initial_state: None,
+        skip_vacuity_probe: request.skip_vacuity_probe,
     });
     annotate_auto_fallback(&mut output, reason, kind);
     (output, status)
@@ -961,6 +1025,7 @@ pub(super) fn run_bmc_filtered(request: BmcRequest<'_>) -> (Value, i32) {
             checked_bounds: prepared.checked_bounds.as_ref(),
             elapsed_s: started.elapsed().as_secs_f64(),
             statistics: &solved.statistics,
+            skip_vacuity_probe: request.skip_vacuity_probe,
         },
     )
 }
@@ -990,24 +1055,38 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
         && request.initial_state.is_none()
         && fsl_runtime::deterministic_initial_state(&model).is_ok()
     {
-        match fsl_runtime::find_boundary_violation(model.clone(), request.depth) {
-            Ok(Some((violation, trace))) if violation.kind != "partial_op" => {
-                let statistics = fsl_solver::VerificationStatistics::default();
-                return Err(fslc_rust::verification_output::render_boundary_output(
-                    envelope(),
-                    &model,
-                    &violation,
-                    &trace,
-                    &fslc_rust::verification_output::BmcOutputOptions {
-                        depth: request.depth,
-                        deadlock: request.deadlock,
-                        checked_bounds: None,
-                        elapsed_s: started.elapsed().as_secs_f64(),
-                        statistics: &statistics,
-                    },
-                ));
+        match fsl_runtime::find_boundary_violation(
+            &model,
+            request.depth,
+            fsl_runtime::CONCRETE_PROBE_BUDGET,
+        ) {
+            Ok(probe) => {
+                if let Some((violation, trace)) = probe.finding
+                    && violation.kind != "partial_op"
+                {
+                    let statistics = fsl_solver::VerificationStatistics::default();
+                    return Err(fslc_rust::verification_output::render_boundary_output(
+                        envelope(),
+                        &model,
+                        &violation,
+                        &trace,
+                        &fslc_rust::verification_output::BmcOutputOptions {
+                            depth: request.depth,
+                            deadlock: request.deadlock,
+                            checked_bounds: None,
+                            elapsed_s: started.elapsed().as_secs_f64(),
+                            statistics: &statistics,
+                            // This branch renders `render_boundary_output`,
+                            // which never emits `warnings`, so this value is
+                            // inert here; threaded through for consistency.
+                            skip_vacuity_probe: request.skip_vacuity_probe,
+                        },
+                    ));
+                }
+                // `exhausted && finding.is_none()` falls through here exactly
+                // like a completed empty search: the pre-pass is an evidence
+                // detour, not a verdict authority (issue #697).
             }
-            Ok(Some(_) | None) => {}
             Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
         }
     }
@@ -1217,22 +1296,47 @@ fn collision_free_lemma_name(
     name
 }
 
-pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions) -> (Value, i32) {
-    let deadlock = match DeadlockMode::parse(&options.deadlock) {
-        Ok(mode) => mode,
-        Err(error) => return (error_output("usage", &error), 2),
-    };
+fn prepare_lemma_induction<'a>(
+    path: &'a Path,
+    options: &'a CliVerifyOptions,
+    prepared: &'a PreparedCliVerification,
+) -> Result<
+    (
+        ModelSelection<'a>,
+        KernelModel,
+        std::collections::BTreeSet<String>,
+    ),
+    CommandResult,
+> {
+    let model = prepared
+        .model
+        .as_ref()
+        .map_err(|error| (spec_load_error_output(error), 2))?;
     let selection = ModelSelection {
         path,
-        model: None,
+        model: Some(model),
         scope: None,
         property: options.property.as_deref(),
         excluded: &options.exclude_properties,
     };
-    let (model, mut occupied_names) = match load_lemma_model(path, options) {
-        Ok(model) => model,
-        Err(output) => return output,
+    let (selected, occupied_names) = load_lemma_model(selection)?;
+    Ok((selection, selected, occupied_names))
+}
+
+fn run_induction_with_lemmas(
+    path: &Path,
+    options: &CliVerifyOptions,
+    prepared: &PreparedCliVerification,
+) -> (Value, i32) {
+    let deadlock = match DeadlockMode::parse(&options.deadlock) {
+        Ok(mode) => mode,
+        Err(error) => return (error_output("usage", &error), 2),
     };
+    let (selection, model, mut occupied_names) =
+        match prepare_lemma_induction(path, options, prepared) {
+            Ok(prepared) => prepared,
+            Err(output) => return output,
+        };
     let mut entries = Vec::new();
     let mut proved_candidates = Vec::new();
     let (mut auxiliary, mut auxiliary_sources) = (Vec::new(), Vec::new());
@@ -1263,6 +1367,11 @@ pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions)
         }
         entries.push(entry);
     }
+    // See `execute_cli_verification`'s matching comment: this is the
+    // `--lemma` path's own derivation of the same CLI `--vacuity` option,
+    // since `run_induction_with_lemmas` is called directly from
+    // `run_verify_cli` rather than through `execute_cli_verification`.
+    let skip_vacuity_probe = options.vacuity == "ignore";
     let (mut result, status) = loop {
         let (current, status) = run_induction_filtered(InductionRequest {
             selection,
@@ -1270,6 +1379,7 @@ pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions)
             deadlock,
             k: options.k_ind,
             auxiliary: &auxiliary,
+            skip_vacuity_probe,
         });
         if current.get("result").and_then(Value::as_str) != Some("unknown_cti")
             || current.get("violation_kind").and_then(Value::as_str) == Some("leadsTo_rank")
@@ -1321,24 +1431,31 @@ pub(super) fn run_induction_with_lemmas(path: &Path, options: &CliVerifyOptions)
 }
 
 fn load_lemma_model(
-    path: &Path,
-    options: &CliVerifyOptions,
+    selection: ModelSelection<'_>,
 ) -> Result<(KernelModel, std::collections::BTreeSet<String>), CommandResult> {
-    let mut model = load_model(path).map_err(|error| (spec_load_error_output(&error), 2))?;
-    let occupied_names = model
+    let unselected =
+        load_unselected_model(selection).map_err(|error| (spec_load_error_output(&error), 2))?;
+    let occupied_names = unselected
         .invariants
         .iter()
-        .chain(&model.transitions)
-        .chain(&model.reachables)
+        .chain(&unselected.transitions)
+        .chain(&unselected.reachables)
         .map(|property| property.name.clone())
-        .chain(model.leadstos.iter().map(|property| property.name.clone()))
+        .chain(
+            unselected
+                .leadstos
+                .iter()
+                .map(|property| property.name.clone()),
+        )
         .collect();
-    select_properties(
-        &mut model,
-        options.property.as_deref(),
-        &options.exclude_properties,
-    )
-    .map_err(|error| (semantic_error_output(&error), 2))?;
+    let model = match selected_transition_induction_model(selection)
+        .map_err(|error| (spec_load_error_output(&error), 2))?
+    {
+        Some(model) => model,
+        None => {
+            load_selected_model(selection).map_err(|error| (spec_load_error_output(&error), 2))?
+        }
+    };
     Ok((model, occupied_names))
 }
 
@@ -1694,6 +1811,19 @@ pub(super) fn run_verify_cli(
     cache_identity_path: &Path,
     options: &CliVerifyOptions,
 ) -> CommandResult {
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    run_verify_cli_from_source(path, cache_identity_path, &source, options)
+}
+
+pub(super) fn run_verify_cli_from_source(
+    path: &Path,
+    cache_identity_path: &Path,
+    source: &str,
+    options: &CliVerifyOptions,
+) -> CommandResult {
     if !options.lemmas.is_empty() && options.engine != "induction" {
         return (
             error_output("usage", "--lemma requires --engine induction"),
@@ -1709,13 +1839,25 @@ pub(super) fn run_verify_cli(
             2,
         );
     }
-    if !options.lemmas.is_empty() {
-        return run_induction_with_lemmas(path, options);
+    // Causal models are intentionally outside the kernel dialect dispatcher.
+    // Check their syntax first so a malformed causal input retains its parser
+    // diagnostic instead of being rewritten as an unknown kernel dialect.
+    // Uses the already-captured `source` snapshot rather than re-reading
+    // `path`, so this check can never observe a different root source than
+    // the rest of this verification.
+    if fsl_syntax::is_causal_source(source)
+        && let Err(error) = fsl_syntax::parse_causal(source)
+    {
+        return super::causal::causal_parse_error_output(&error, false);
     }
-    let prepared = match prepare_cli_verification(path, options) {
+    let prepared = match prepare_cli_verification_from_source(path, source, options) {
         Ok(prepared) => prepared,
         Err(output) => return output,
     };
+    if !options.lemmas.is_empty() {
+        let (output, status) = run_induction_with_lemmas(path, options, &prepared);
+        return finalize_cli_verification(path, options, &prepared, None, output, status);
+    }
     // `auto` never keys a cache entry under the literal string "auto": a
     // lookup consults the explicit/bmc keys directly
     // (`cached_auto_verification`) and a store writes under whichever engine
@@ -1735,7 +1877,7 @@ pub(super) fn run_verify_cli(
     {
         return output;
     }
-    let (output, status) = execute_cli_verification(path, options, &prepared);
+    let (output, status) = execute_cli_verification(path, source, options, &prepared);
     let (output, status) = finalize_cli_verification(
         path,
         options,
@@ -1750,24 +1892,24 @@ pub(super) fn run_verify_cli(
     (output, status)
 }
 
-fn prepare_cli_verification(
+fn prepare_cli_verification_from_source(
     path: &Path,
+    source: &str,
     options: &CliVerifyOptions,
 ) -> Result<PreparedCliVerification, CommandResult> {
-    let source = read_spec_source(path).map_err(|error| (spec_load_error_output(&error), 2))?;
-    let is_agent_document = match fsl_syntax::parse_surface_document(&source) {
+    let is_agent_document = match fsl_syntax::parse_surface_document(source) {
         Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,
         Ok(_) => false,
         Err(error) => return Err((surface_parse_error_output(&error), 2)),
     };
     let has_scope = !options.scope.instances.is_empty() || !options.scope.values.is_empty();
-    if let Err(error) = validate_specialized_document(path) {
+    if let Err(error) = validate_specialized_document_from_source(path, source) {
         return Err((semantic_error_output(&error), 2));
     }
     let snapshot_model = if has_scope {
-        load_model_scoped(path, &options.scope)
+        load_model_scoped_from_source(path, source, &options.scope)
     } else {
-        load_model(path)
+        load_model_from_source(path, source)
     };
     let initial_state = if let Some(snapshot_path) = options.from_state.as_deref() {
         let model = snapshot_model
@@ -1782,7 +1924,7 @@ fn prepare_cli_verification(
     };
     let mut has_trace_contract = false;
     if !has_scope && let Ok(model) = &snapshot_model {
-        match validate_requirement_traces(path, model) {
+        match validate_requirement_traces_from_source(path, source, model) {
             Ok((Some(failure), _)) => return Err((failure, 2)),
             Ok((None, has_contract)) => has_trace_contract = has_contract,
             Err(error) => return Err((semantic_error_output(&error), 2)),
@@ -1795,11 +1937,17 @@ fn prepare_cli_verification(
     let compose_warnings = if has_scope {
         Vec::new()
     } else {
-        load_kernel_model(path)
-            .map(|(_, kernel, _)| kernel.diagnostics().to_vec())
+        load_kernel_model_from_source(path, source)
+            .map(|(kernel, _)| kernel.diagnostics().to_vec())
             .unwrap_or_default()
     };
-    validate_cli_property_selection(path, options, has_scope, snapshot_model.as_ref().ok())?;
+    validate_cli_property_selection(
+        path,
+        source,
+        options,
+        has_scope,
+        snapshot_model.as_ref().ok(),
+    )?;
     Ok(PreparedCliVerification {
         has_scope,
         is_agent_document,
@@ -1812,6 +1960,7 @@ fn prepare_cli_verification(
 
 fn validate_cli_property_selection(
     path: &Path,
+    source: &str,
     options: &CliVerifyOptions,
     has_scope: bool,
     prepared_model: Option<&KernelModel>,
@@ -1821,24 +1970,17 @@ fn validate_cli_property_selection(
     }
     let mut model = match prepared_model {
         Some(model) => Ok(model.clone()),
-        None if has_scope => load_model_scoped(path, &options.scope),
-        None => load_model(path),
+        None if has_scope => load_model_scoped_from_source(path, source, &options.scope),
+        None => load_model_from_source(path, source),
     }
     .map_err(|error| (spec_load_error_output(&error), 2))?;
     if options.engine == "induction"
         && let Some(name) = options.property.as_deref()
         && let Some(kind) = model
-            .transitions
+            .leadstos
             .iter()
             .any(|item| display(&item.name) == name)
-            .then_some("trans")
-            .or_else(|| {
-                model
-                    .leadstos
-                    .iter()
-                    .any(|item| display(&item.name) == name)
-                    .then_some("leadsTo")
-            })
+            .then_some("leadsTo")
             .or_else(|| {
                 model
                     .reachables
@@ -2049,6 +2191,7 @@ fn store_auto_verification(
 
 fn execute_cli_verification(
     path: &Path,
+    source: &str,
     options: &CliVerifyOptions,
     prepared: &PreparedCliVerification,
 ) -> CommandResult {
@@ -2076,7 +2219,7 @@ fn execute_cli_verification(
     let implements = if filtered {
         None
     } else {
-        match implements_result(path, model, options.depth) {
+        match implements_result_from_source(path, source, model, options.depth) {
             Ok(implements) => implements,
             Err(error) => return (implements_error_output(&error), 2),
         }
@@ -2088,12 +2231,25 @@ fn execute_cli_verification(
         property: options.property.as_deref(),
         excluded: &options.exclude_properties,
     };
+    // INVARIANT (issue #729): together with `run_induction_with_lemmas`'
+    // matching derivation (the `--lemma` path bypasses this function), this
+    // is the *only* place in the product that may set `skip_vacuity_probe`
+    // to `true`. It is derived directly from the CLI's own `--vacuity`
+    // option parsing, which both `verify` and `sweep` funnel through
+    // `run_verify_cli` -- `sweep` builds its own `CliVerifyOptions` per
+    // grid cell and calls `run_verify_cli` exactly like `verify` does.
+    // Every other constructor of `BmcRequest`/`InductionRequest`/
+    // `ExplicitRequest` in this codebase (the `ledger`/`html`/`mutate`
+    // baseline in `rust/fslc/src/main.rs`'s `run_verify`, and tests) must
+    // pass `false`.
+    let skip_vacuity_probe = options.vacuity == "ignore";
     let (mut output, status) = match VerificationEngine::parse(&options.engine) {
         Ok(VerificationEngine::Bmc) => run_bmc_filtered(BmcRequest {
             selection,
             depth: options.depth,
             deadlock,
             initial_state: prepared.initial_state.as_ref(),
+            skip_vacuity_probe,
         }),
         Ok(VerificationEngine::Induction) => run_induction_filtered(InductionRequest {
             selection,
@@ -2101,18 +2257,21 @@ fn execute_cli_verification(
             deadlock,
             k: options.k_ind,
             auxiliary: &[],
+            skip_vacuity_probe,
         }),
         Ok(VerificationEngine::Explicit) => run_explicit_filtered(ExplicitRequest {
             selection,
             depth: options.depth,
             deadlock,
             budget: options.explicit_budget,
+            skip_vacuity_probe,
         }),
         Ok(VerificationEngine::Auto) => run_auto_filtered(ExplicitRequest {
             selection,
             depth: options.depth,
             deadlock,
             budget: options.explicit_budget,
+            skip_vacuity_probe,
         }),
         Err(error) => return (error_output("usage", &error), 2),
     };
@@ -2189,8 +2348,15 @@ fn finalize_cli_verification(
     }
     if status == 0
         && options.strict_tags
-        && let Err(output) =
-            add_cli_strict_tag_warnings(path, options, prepared.has_scope, &mut output)
+        && let Err(output) = add_cli_strict_tag_warnings(
+            path,
+            options,
+            prepared
+                .model
+                .as_ref()
+                .expect("successful verification has a prepared model"),
+            &mut output,
+        )
     {
         return output;
     }
@@ -2248,16 +2414,10 @@ fn add_snapshot_metadata(output: &mut Value, options: &CliVerifyOptions) {
 fn add_cli_strict_tag_warnings(
     path: &Path,
     options: &CliVerifyOptions,
-    has_scope: bool,
+    model: &KernelModel,
     output: &mut Value,
 ) -> Result<(), CommandResult> {
-    let model = if has_scope {
-        load_model_scoped(path, &options.scope)
-    } else {
-        load_model(path)
-    }
-    .map_err(|error| (spec_load_error_output(&error), 2))?;
-    add_strict_tag_warnings(output, &model, path, true, options.requirements.as_deref())
+    add_strict_tag_warnings(output, model, path, true, options.requirements.as_deref())
         .map_err(|error| (error_output("io", &error), 2))
 }
 #[cfg(test)]
@@ -2287,6 +2447,7 @@ mod tests {
             depth: 4,
             deadlock: DeadlockMode::Ignore,
             initial_state: None,
+            skip_vacuity_probe: false,
         });
         assert_eq!(status, 0);
         assert_eq!(output["result"], "verified");
@@ -2309,6 +2470,7 @@ mod tests {
             deadlock: DeadlockMode::Ignore,
             k: 1,
             auxiliary: &[],
+            skip_vacuity_probe: false,
         });
         assert_eq!(status, 1);
         assert_eq!(output["result"], "unknown_cti");
@@ -2371,6 +2533,7 @@ mod tests {
             0.0,
             &[],
             &std::collections::BTreeMap::new(),
+            false,
         );
         let (output, status) = finish_explicit_output(rendered);
         assert_eq!(status, 3);

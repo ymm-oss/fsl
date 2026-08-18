@@ -9,7 +9,7 @@ domain DomainExpressionCharacterization {
   value_object AuditStamp {
     status: OrderStatus = Draft;
     attempts: Quantity = 0;
-    invariant nonNegative { attempts >= 0 }
+    // invariant nonNegative rejected fail-closed since #710 (docs/DESIGN-domain.md)
   }
 
   aggregate Order {
@@ -66,9 +66,9 @@ domain DomainExpressionCharacterization {
       previous_status = status
     }
 
-    on_stale Approved when status == Approved and previous_status != Cancelled {
-      emits ApprovalRejected
-    }
+    // on_stale rejected fail-closed since #711 (docs/DESIGN-domain.md)
+    //
+    //
 
     invariant canonicalImplication {
       status == Approved => previous_status == Draft or previous_status == Approved

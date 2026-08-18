@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+# Bounded, opt-in CodeReferance profile for the FSL domain lowering/rendering slice.
+# This profile is local audit tooling; its output is shadow evidence, never authority.
+
+doc_patterns = [
+  "docs/DESIGN-domain.md",
+  "docs/DESIGN-conformance-harness.md",
+  "docs/DESIGN-kernel-contract.md",
+  "docs/DESIGN-rust-integration.md",
+  "docs/RUST-PORTING.md",
+]
+
+source_patterns = [
+  "examples/annotations/annotated_domain.fsl",
+  "examples/domain/*.fsl",
+  "rust/fsl-syntax/src/domain.rs",
+  "rust/fsl-core/src/domain.rs",
+  "rust/fsl-core/src/domain_lowering.rs",
+  "rust/fsl-core/tests/domain_lowering.rs",
+  "rust/fsl-core/tests/domain_render_agreement.rs",
+  "rust/fsl-tools/src/domain.rs",
+  "rust/fsl-tools/src/domain_codegen.rs",
+  "rust/fsl-tools/src/domain_naming.rs",
+  "rust/fsl-tools/tests/domain_regression.rs",
+  "rust/fslc/tests/domain_codegen_contract.rs",
+  "rust/fslc/tests/domain_expression_characterization.rs",
+  "rust/fslc/tests/issue_515_domain_check_false_green.rs",
+  "rust/fslc/tests/issue_518_domain_replay_detection.rs",
+  "rust/fslc/tests/issue_681_precedence_policy.rs",
+  "rust/fslc/tests/fixtures/domain_characterization/*.fsl",
+  "schemas/fslc/domain/*.json",
+  "src/fslc/domain_*.py",
+  "src/fslc/domain_codegen/*.py",
+  "tests/dialect_registry.py",
+  "tests/test_domain_dialect.py",
+  "tests/test_rust_cli_semantics.py",
+]
+
+source_roots = ["rust", "src"]
+virtual_artifacts = ["domain-slice.toml"]

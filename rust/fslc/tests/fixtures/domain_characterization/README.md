@@ -9,12 +9,43 @@ an intentional semantic or diagnostic change has been accepted and documented.
 - `expressions_valid.fsl` covers canonical logical operators and legacy `->`, bare
   enum members, finite membership, `can(Command)`, aggregate state references,
   scalar/field assignments, defaults, invariants, and stale-policy expressions.
-- `lvalues_surface.fsl` covers root, index, and field lvalue parsing. Its current
-  Map-state lowering limitation is intentionally characterized as a failure.
+- `lvalues_surface.fsl` covers root, index, and field lvalue parsing, including a
+  `Map<K, V>` domain state field with no explicit default (issue #691: fixed --
+  `Context::default_for_type` in `rust/fsl-core/src/domain.rs` is now total over
+  the field's `SyntaxTypeExprKind`, and the top-level state-field loop in
+  `domain_kernel_source` renders the same dense per-key `forall` init
+  `domain_lowering.rs`'s path A already generated).
+- `container_defaults_surface.fsl` covers `Option<T>`/`Set<T>` domain state
+  fields with no explicit default (issue #691's other two affected variants;
+  registered in `rust/fsl-core/tests/domain_render_agreement.rs`'s
+  `VALID_DOMAIN_FIXTURES` so the two lowering paths' agreement on this shape
+  stays gated, not just this corpus's own characterization).
 - `effect_saga_valid.fsl` covers expressions used by effect and saga lowering.
-- `on_stale` is captured in the surface projection only because current domain
-  lowering omits it; this corpus records that gap without accepting it as the
-  intended language contract.
+- `invalid_empty_enum_containers.fsl` is the rejecting control that keeps empty
+  enum validation ahead of both typed lowering and rendered-kernel generation,
+  including direct, `Option`, `Set`, Map-key, and Map-value positions.
+- `invalid_duplicate_enum.fsl` keeps the repeated member's original location
+  and `name` diagnostic classification across both the `domain expand`
+  renderer boundary and the `domain check` load path.
+- `on_stale` is captured in the surface projection for parser/AST fidelity, but
+  since #711 it is rejected fail-closed by `validate_lowerable_constructs`
+  before either lowering path runs (`domain_stale_policy_rejected.fsl` in
+  `rust/fsl-core/tests/domain_render_agreement.rs`'s
+  `SEMANTICALLY_INVALID_DOMAIN_FIXTURES`): no accepted design pins `on_stale`
+  semantics, so this is now an accepted, intentional rejection rather than a
+  recorded omission. `expressions_valid.fsl` keeps a commented-out `on_stale`
+  block (same line count, so later constructs' spans do not shift) as a record
+  that the construct used to be silently accepted here.
+- `value_object` invariants (e.g. `expressions_valid.fsl`'s former
+  `AuditStamp.nonNegative`) are, since #710, likewise rejected fail-closed by
+  `validate_lowerable_constructs` before either lowering path runs
+  (`domain_value_object_invariant_rejected.fsl` in
+  `SEMANTICALLY_INVALID_DOMAIN_FIXTURES`): the frozen Python reference only
+  emits direct-state-field VO instances and skips `Option<VO>`/`Set<VO>`/
+  `Map<_,VO>`/command-input/event-field/nested-VO positions, so adopting it
+  would leave most instances unconstrained while an author believes they are
+  checked. `value_object` field defaults (without invariants) remain fully
+  supported, as `lvalues_surface.fsl` (in `VALID_DOMAIN_FIXTURES`) shows.
 - `expressions_valid.fsl` records accepted legacy `||` and `->` normalization;
   `legacy_logical_parse_error.fsl` records the current lexer rejection of `&&`.
   The later typed-expression migration must make any change explicit.

@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// `late` becomes enabled exactly at depth 3. This pins never-enabled action
+// coverage as bounded evidence: it is a finding at K-1, not at K.
+spec NeverEnabledDepthBoundary {
+  state { count: Int }
+  init { count = 0 }
+
+  action advance() {
+    requires count < 3
+    count = count + 1
+  }
+
+  @requirement("REQ-LATE", "late action becomes enabled at depth three")
+  action late() {
+    requires count == 3
+    count = count
+  }
+
+  invariant Trivial { true }
+}

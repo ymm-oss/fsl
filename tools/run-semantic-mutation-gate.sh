@@ -4,28 +4,120 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-mode="${1:-complete}"
 runner_version="cargo-mutants 27.1.0"
+
+# Lane split (issue: CI wall-clock reduction). With no `--lane` flag every
+# check below still runs, in the same order, exactly as before -- that is
+# the contract this file's local and CI default callers depend on.
+# `--lane operators` runs only the curated fault-operator half (optionally
+# sharded with `--shard K/N`, forwarded verbatim to
+# `run-fault-operators.sh`); `--lane mutants` runs everything else: the
+# generic cargo-mutants half plus the manifest/schema checks that are cheap
+# enough to run in both lanes. `--shard` without `--lane operators` is
+# refused rather than silently ignored.
+mode=""
+lane=""
+shard_spec=""
+usage() {
+  echo "usage: $0 [changed|complete] [--lane operators|mutants] [--shard K/N]" >&2
+  exit 2
+}
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --lane)
+      [ "$#" -ge 2 ] || usage
+      case "$2" in
+        operators|mutants) lane="$2" ;;
+        *) usage ;;
+      esac
+      shift 2
+      ;;
+    --shard)
+      [ "$#" -ge 2 ] || usage
+      shard_spec="$2"
+      shift 2
+      ;;
+    changed|complete)
+      [ -z "$mode" ] || usage
+      mode="$1"
+      shift
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
+mode="${mode:-complete}"
+
+if [ -n "$shard_spec" ]; then
+  [ "$lane" = "operators" ] || usage
+  [[ "$shard_spec" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] || usage
+  [ "${BASH_REMATCH[1]}" -le "${BASH_REMATCH[2]}" ] || usage
+fi
 
 case "$mode" in
   changed|complete) ;;
   *)
-    echo "usage: $0 [changed|complete]" >&2
-    exit 2
+    usage
     ;;
 esac
 
-if [ "$(cargo mutants --version)" != "$runner_version" ]; then
-  echo "semantic-mutation: requires exactly $runner_version; observed $(cargo mutants --version 2>&1)" >&2
-  exit 1
+# This clears leftover evidence/scratch directories a restored cache may carry
+# forward, but it does not shrink the `semantic-mutation` cache entry itself.
+# Measured directly (run 31210570118, `mutation operators (3/3)`, job
+# 92972117510): that entry's current 2.719 GiB was created by a *cold*
+# operators run (`No cache found.` at 19:14:17Z, `Saving cache` at 19:48:12Z)
+# that never touched the mutants lane's scratch build tree or evidence
+# directory at all -- those paths cannot have contributed to this entry's
+# size, so there is no dead weight here for this line to recover. This is a
+# closed-ingress-path fix, not a size fix: it stops a *future* run of either
+# lane from ever letting a restored evidence/scratch leftover ride along into
+# a save, which was possible before because the cleanup this line replaces
+# used to run only in the mutants lane's own path, below the point where
+# `--lane operators` already exits (see git history) -- the one lane that
+# actually saves this key never ran it. Cleared before either lane does
+# anything else, once per invocation, including the unsharded local path that
+# runs operators then mutants in the same process.
+rm -rf "$root"/rust/target/semantic-mutation.* "$root/rust/target/semantic-mutation-build"
+
+run_manifest_test() {
+  # Validates the operator inventory, the P2 scope/equivalents manifests, and
+  # the mutation runner config together. Cheap (compile-dominated, ~1 min)
+  # and idempotent, so it runs once for the unsharded default path and once
+  # per invocation when split into lanes -- both lanes depend on parts of it
+  # (operators.txt for the operators lane, scope.v1.json/equivalents.v1.json
+  # for the mutants lane) and neither half is expensive enough to be worth
+  # splitting further.
+  cargo test --manifest-path "$root/rust/Cargo.toml" -p fslc-rust \
+    --test implementation_mutation_manifest --locked
+}
+
+run_operators_lane() {
+  # Curated controls. They cover semantic faults that a token-level mutator
+  # cannot express and prove that stale seams fail loudly.
+  local shard_args=()
+  [ -z "$shard_spec" ] || shard_args=(--shard "$shard_spec")
+  "$root/tools/run-fault-operators.sh" "${shard_args[@]}"
+}
+
+if [ "$lane" != "operators" ]; then
+  if [ "$(cargo mutants --version)" != "$runner_version" ]; then
+    echo "semantic-mutation: requires exactly $runner_version; observed $(cargo mutants --version 2>&1)" >&2
+    exit 1
+  fi
 fi
 
-cargo test --manifest-path "$root/rust/Cargo.toml" -p fslc-rust \
-  --test implementation_mutation_manifest --locked
+run_manifest_test
 
-# Curated controls are part of both tiers. They cover semantic faults that a
-# token-level mutator cannot express and prove that stale seams fail loudly.
-"$root/tools/run-fault-operators.sh"
+if [ "$lane" = "operators" ]; then
+  run_operators_lane
+  echo "semantic-mutation: mode=$mode lane=operators shard=${shard_spec:-1/1} complete"
+  exit 0
+fi
+
+if [ "$lane" != "mutants" ]; then
+  run_operators_lane
+fi
 
 mkdir -p "$root/rust/target"
 output="$(mktemp -d "$root/rust/target/semantic-mutation.${mode}.XXXXXX")"
@@ -38,11 +130,19 @@ git -C "$scratch" init --quiet
 mkdir -p "$scratch/rust/target"
 # A target shared by disposable checkouts can retain a mutant artifact whose
 # source timestamp is newer than the freshly copied baseline. Give each run a
-# fresh build directory outside the retained evidence glob, so the baseline
-# can never reuse another run's mutation and CI does not upload build objects.
-mkdir -p "$root/rust/target/semantic-mutation-build"
+# fresh build directory, so the baseline can never reuse another run's
+# mutation. This scratch tree is disposable working state, not evidence: it
+# sits outside `rust/target` (unlike the `$output` evidence directory above,
+# which the artifact-upload glob `rust/target/semantic-mutation.*/**` in
+# ci.yml requires), so `Swatinem/rust-cache` never saves it. This closes a
+# path by which a run-scoped directory here *could* have ridden into a future
+# save while it lived under `rust/target/semantic-mutation-build` -- it is not
+# known to have actually done so: the `semantic-mutation` cache entry's
+# measured size is fully accounted for by a cold `mutation operators` run that
+# never created this directory at all (docs/DESIGN-ci.md, "Actions cache
+# budget").
 export CARGO_TARGET_DIR
-CARGO_TARGET_DIR="$(mktemp -d "$root/rust/target/semantic-mutation-build/run.XXXXXX")"
+CARGO_TARGET_DIR="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/fsl-semantic-mutation-build.XXXXXX")"
 args=(
   --config .cargo/mutants.toml
   --in-place

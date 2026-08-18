@@ -71,8 +71,101 @@ fn error_at(message: impl Into<String>, span: Span) -> CoreError {
     }
 }
 
+pub(crate) fn validate_domain_enums(types: &[DomainType]) -> Result<(), CoreError> {
+    for ty in types {
+        if ty.kind != "enum" {
+            continue;
+        }
+        if ty.members.is_empty() {
+            return Err(error_at(
+                format!("enum '{}' has no members", ty.name),
+                ty.span,
+            ));
+        }
+        let mut seen = BTreeSet::new();
+        for (index, member) in ty.members.iter().enumerate() {
+            if !seen.insert(member) {
+                return Err(error_at(
+                    format!("duplicate enum member '{member}' in '{}'", ty.name),
+                    ty.member_spans.get(index).copied().unwrap_or(ty.span),
+                )
+                .into_name_resolution());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn span_at(loc: DomainLoc) -> Span {
     loc.span()
+}
+
+/// Reject domain constructs that parse into a [`DomainSpec`] but have no
+/// executable lowering on either path (#710/#711/#712/#723). Each of these
+/// constructs is accepted by the grammar and, before this validation, was
+/// silently dropped by both `lower_domain` and `domain_kernel_source`: an
+/// author who wrote one believed it was checked when nothing consumed it.
+/// Fail closed instead of inventing semantics no accepted design pins.
+///
+/// This walks the raw parsed [`DomainSpec`], not a resolver context: these
+/// are `semantics`-class diagnostics (an accepted-but-unlowerable construct),
+/// not name-resolution failures.
+pub(crate) fn validate_lowerable_constructs(domain: &DomainSpec) -> Result<(), CoreError> {
+    if let Some(awaited) = domain.awaits.first() {
+        return Err(error_at(
+            format!(
+                "top-level await '{}' has no executable lowering; use a saga step's awaits",
+                awaited.name
+            ),
+            span_at(awaited.loc),
+        ));
+    }
+    for aggregate in &domain.aggregates {
+        if let Some(stale) = aggregate.stale_policies.first() {
+            return Err(error_at(
+                format!(
+                    "on_stale '{}' has no executable lowering; stale policies are not supported",
+                    stale.event
+                ),
+                span_at(stale.loc),
+            ));
+        }
+    }
+    for effect in &domain.effects {
+        if let Some(backoff) = &effect.retry.backoff {
+            return Err(error_at(
+                format!(
+                    "retry backoff '{backoff}' has no executable lowering; delete only the \
+                     `backoff` line, not the whole retry block -- `max_attempts` remains fully \
+                     lowered"
+                ),
+                // A `DomainRetry` only exists once the parser has read a `retry { ... }` block,
+                // and it always records that block's own loc at the same time (see
+                // `Parser::retry` in `rust/fsl-syntax/src/domain.rs`), so `backoff.is_some()`
+                // implies `loc.is_some()`.
+                span_at(
+                    effect
+                        .retry
+                        .loc
+                        .expect("a parsed retry block always records its own loc"),
+                ),
+            ));
+        }
+    }
+    for ty in &domain.types {
+        if ty.kind == "value_object"
+            && let Some(invariant) = ty.invariants.first()
+        {
+            return Err(error_at(
+                format!(
+                    "value_object invariant '{}.{}' has no executable lowering; value-object invariants are not supported",
+                    ty.name, invariant.name.text
+                ),
+                invariant.span,
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn safe(name: &str) -> String {
@@ -114,11 +207,23 @@ fn lower_name(name: &str) -> String {
     safe(&output)
 }
 
-fn state_name(aggregate: &DomainAggregate, field: &str) -> String {
+/// The kernel state variable name a domain aggregate field lowers to
+/// (`{aggregate}_{field}`). Exported so an external corpus sweep can compute
+/// an `evolve` assignment's kernel target from the `DomainSpec` alone,
+/// instead of guessing from generated names (see `event_flag`).
+#[must_use]
+pub fn state_name(aggregate: &DomainAggregate, field: &str) -> String {
     format!("{}_{}", lower_name(&aggregate.name), safe(field))
 }
 
-fn event_flag(event: &str) -> String {
+/// The kernel one-hot event-occurrence flag name a domain event lowers to
+/// (`event_{event}`). Exported so an external corpus sweep (the #779 saga
+/// step/timeout/compensation "evolve pairing" gate) can compute which kernel
+/// variable an event's occurrence flag is from the `DomainSpec` alone,
+/// rather than pattern-matching generated action bodies for an `event_`
+/// prefix — the latter has no `DomainSpec`-side referent to check against.
+#[must_use]
+pub fn event_flag(event: &str) -> String {
     format!("event_{}", safe(event))
 }
 
@@ -1854,27 +1959,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn validate_document_expressions(&self) -> Result<(), CoreError> {
-        for ty in &self.types {
-            if ty.kind != "enum" {
-                continue;
-            }
-            if ty.members.is_empty() {
-                return Err(error_at(
-                    format!("enum '{}' has no members", ty.name),
-                    ty.span,
-                ));
-            }
-            let mut seen = BTreeSet::new();
-            for (index, member) in ty.members.iter().enumerate() {
-                if !seen.insert(member) {
-                    return Err(error_at(
-                        format!("duplicate enum member '{member}' in '{}'", ty.name),
-                        ty.member_spans.get(index).copied().unwrap_or(ty.span),
-                    )
-                    .into_name_resolution());
-                }
-            }
-        }
+        validate_domain_enums(&self.types)?;
         for ty in &self.types {
             if ty.kind != "value_object" {
                 continue;
@@ -1886,9 +1971,6 @@ impl<'a> Resolver<'a> {
                     let _ =
                         self.resolve_expr(default, Some(&expected), &scope, None, &mut Vec::new())?;
                 }
-            }
-            for invariant in &ty.invariants {
-                self.resolve_bool(&invariant.expr, &scope, None)?;
             }
         }
         for aggregate in &self.domain.aggregates {
@@ -1913,13 +1995,6 @@ impl<'a> Resolver<'a> {
                         )?;
                     }
                 }
-            }
-            for stale in &aggregate.stale_policies {
-                self.event(&stale.event, stale.loc)?;
-                for emitted in &stale.emits {
-                    self.event(emitted, stale.loc)?;
-                }
-                self.resolve_bool(&stale.condition, &state_scope, Some(aggregate))?;
             }
             for evolve in &aggregate.evolves {
                 let (_, event) = self.event(&evolve.event, evolve.loc)?;
@@ -2005,6 +2080,32 @@ impl<'a> Resolver<'a> {
         }
         Ok(items)
     }
+
+    /// Apply the declared `evolve` for each event a saga step/timeout/compensation
+    /// action emits, pairing with `event_assignments`: an action that raises
+    /// `event_<E>` for an occurring event must apply E's declared evolve in the
+    /// same action (docs/DESIGN-domain.md's saga step pairing invariant).
+    fn saga_emit_evolve(
+        &self,
+        loc: DomainLoc,
+        events: &[String],
+    ) -> Result<(Vec<ActionItem>, Annotations), CoreError> {
+        let mut items = Vec::new();
+        let mut annotations = Annotations::default();
+        for event_name in events {
+            let (aggregate, event) = self.event(event_name, loc)?;
+            let mut scope = self.scope_for_aggregate(aggregate)?;
+            self.extend_fields(&mut scope, &event.fields)?;
+            items.extend(self.evolve_items(aggregate, event_name, &scope)?);
+            annotations.extend(
+                evolve_annotations(aggregate, event_name)
+                    .source_order()
+                    .iter()
+                    .cloned(),
+            );
+        }
+        Ok((items, annotations))
+    }
 }
 
 fn metadata(id: impl Into<String>, text: impl Into<String>) -> MetaTag {
@@ -2064,6 +2165,7 @@ pub(crate) fn lower_domain_surface(
     domain: &DomainSpec,
 ) -> Result<(SurfaceSpec, OriginRegistry), CoreError> {
     validate_effect_outcome_roles(domain)?;
+    validate_lowerable_constructs(domain)?;
     let resolver = Resolver::new(domain);
     resolver.validate_document_expressions()?;
     let mut items = Vec::new();
@@ -2721,13 +2823,18 @@ fn lower_saga_actions(
                     .into_iter()
                     .map(ActionItem::Statement),
             );
+            let (evolve_items, evolve_annotations) =
+                resolver.saga_emit_evolve(step.loc, &step.emits)?;
+            action_items.extend(evolve_items);
+            let mut annotations = step.annotations.clone();
+            annotations.extend(evolve_annotations.source_order().iter().cloned());
             let action_name = format!("saga_{}_{}", lower_name(&saga.name), lower_name(&step.name));
             items.push(action(
                 action_name.clone(),
                 Vec::new(),
                 action_items,
                 span,
-                step.annotations.clone(),
+                annotations,
             ));
             if let Some(timeout) = &step.timeout_event {
                 let mut timeout_items = guards
@@ -2740,12 +2847,18 @@ fn lower_saga_actions(
                         .into_iter()
                         .map(ActionItem::Statement),
                 );
+                let (timeout_evolve_items, timeout_evolve_annotations) =
+                    resolver.saga_emit_evolve(step.loc, std::slice::from_ref(timeout))?;
+                timeout_items.extend(timeout_evolve_items);
+                let mut timeout_annotations = step.annotations.clone();
+                timeout_annotations
+                    .extend(timeout_evolve_annotations.source_order().iter().cloned());
                 items.push(action(
                     format!("{action_name}_timeout"),
                     Vec::new(),
                     timeout_items,
                     span,
-                    step.annotations.clone(),
+                    timeout_annotations,
                 ));
             }
         }
@@ -2753,16 +2866,19 @@ fn lower_saga_actions(
             resolver.event(&compensation.trigger_event, compensation.loc)?;
             resolver.event(&compensation.after_event, compensation.loc)?;
             let span = span_at(compensation.loc);
-            let mut action_items = vec![ActionItem::Requires(
-                Expr::Var(event_flag(&compensation.trigger_event)),
-                span,
-            )];
+            let mut action_items = vec![
+                ActionItem::Requires(Expr::Var(event_flag(&compensation.trigger_event)), span),
+                ActionItem::Requires(Expr::Var(event_flag(&compensation.after_event)), span),
+            ];
             action_items.extend(
                 resolver
                     .event_assignments(&compensation.emits, span)?
                     .into_iter()
                     .map(ActionItem::Statement),
             );
+            let (evolve_items, evolve_annotations) =
+                resolver.saga_emit_evolve(compensation.loc, &compensation.emits)?;
+            action_items.extend(evolve_items);
             items.push(action(
                 format!(
                     "saga_{}_compensate_{}_after_{}",
@@ -2773,7 +2889,7 @@ fn lower_saga_actions(
                 Vec::new(),
                 action_items,
                 span,
-                Annotations::default(),
+                evolve_annotations,
             ));
         }
     }

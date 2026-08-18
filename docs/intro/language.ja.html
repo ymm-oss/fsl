@@ -276,7 +276,10 @@ fsl-domain findings を報告します):</p>
 <code>action</code> へ、aggregate 状態をプレフィックス付きのカーネル状態へ、saga の step を
 イベントフラグでガードされた action へ、エフェクトライフサイクル状態を有限の
 <code>Map&lt;CorrelationId, EffectStatus&gt;</code> / <code>Map&lt;CorrelationId, Attempt&gt;</code> マップへと
-lowering します。domain の enum メンバーは lowering 時に名前空間化されるので、
+lowering します。イベントの発生フラグを立てる action は、それを生成した構文
+(command、effect の完了、saga の observe、saga の step/timeout/compensation の
+いずれであっても)によらず、そのイベントの宣言済み <code>evolve</code> を同じ action 内で
+適用します。domain の enum メンバーは lowering 時に名前空間化されるので、
 2 つの domain enum が両方とも <code>Pending</code> を含んでもかまいません。domain の式では
 <code>X in [A, B]</code> と <code>can(Command)</code> が使えます。これらは型付き domain ツリーから解決
 され、カーネル式へ構造的に lowering されます。裸の enum メンバーは期待される論理型
@@ -285,6 +288,16 @@ lowering します。domain の enum メンバーは lowering 時に名前空間
 aggregate 内で解決され、そのコマンドの <code>requires</code> 節の連言と、各拒否条件の否定に
 なります。未知のシンボル、aggregate をまたぐコマンド、型の不一致、未対応の呼び出し
 は、元の domain 式の位置で報告されます。</p>
+<p>saga の <code>compensation { when Trigger after After { emits ... } }</code> ブロックは、
+トリガーイベントフラグと <code>after</code> イベントフラグの<strong>両方</strong>でガードされたカーネル
+action へ lowering されます。つまり compensation は、両方のイベントが観測されて
+初めて発火します。生成されるイベントフラグは 1 遷移につき 1 つだけ立つ one-hot な
+観測なので、この二重ガードは単一の <code>decide</code> が両方のイベントを同一遷移で emit する
+場合にしか充足できません。トリガーイベントと after イベントが異なる一般的なケース
+(例えば、先の成功の後で起きた失敗によってトリガーされる compensation)は、現在の
+one-hot フラグ方式のもとでは構造的に無効化されており、<code>fslc verify</code> はこれを、
+after イベントを一度も観測していないトレースを黙って受理するのではなく、
+never-enabled action の警告として報告します。</p>
 <p>effect は <code>success_event</code>、<code>failure_event</code>、<code>timeout_event</code> により、完了イベントへ
 明示的な outcome role を割り当てられます。これらの宣言が分類の正規契約であり、
 イベント名に <code>fail</code>、<code>cancel</code>、<code>timeout</code> が含まれていても、それぞれ <code>Succeeded</code>、
@@ -313,14 +326,45 @@ aggregate 内で解決され、そのコマンドの <code>requires</code> 節�
 バイト/行座標、ターゲットバインディング、ソースノードの逆引き、明示的な
 assurance/completeness を持つトップレベルの provenance グラフとして公開します。</p>
 <p>domain aggregate の状態フィールドが初期化子を省略した場合、現行エディションは
-確立された Bool <code>false</code>、enum 先頭メンバー、範囲下限、external-placeholder <code>0</code> の
-選択を維持し、<code>implicit_initial_value</code> を出力します。この警告には、選択された値、
-理由、current/next の深刻度、フィールドのスパン、機械適用可能な明示初期化子の挿入
-が含まれます。次のエディションでは初期化子の明示が必須になります。</p>
+確立された Bool <code>false</code>、Int <code>0</code>、enum 先頭メンバー(domain ソース自体が受理する
+bare な形で描画されます — <code>value_object</code> や <code>Map</code> の値としてどれだけ深く nested
+していても、<code>domain_kernel_source</code> の kernel 側 mangled 識別子には決してなりません)、
+範囲下限、external-placeholder <code>0</code>、<code>value_object</code> の構造体リテラル、<code>Option&lt;T&gt;</code> の
+<code>none</code>、<code>Set&lt;T&gt;</code> の <code>Set {}</code>、トップレベルの <code>Map&lt;K, V&gt;</code> の密な per-key init
+(<code>forall k: K { field[k] = &lt;V の既定値&gt; }</code>、<code>&lt;V の既定値&gt;</code> はこの同じ選択を再帰的に
+辿る)のいずれかの選択を維持し、これら<strong>すべて</strong>の形状について <code>implicit_initial_value</code>
+を出力します(#731)。この警告のカバー範囲は renderer の総当たり dispatch
+(<code>fsl_core::domain_type_default</code> — 警告と <code>domain_kernel_source</code> の双方が、選択値
+そのものと、その中の enum メンバーの綴り方を読み出す単一のオーナー)と一致しており、
+一部のスカラー形状だけではありません。この警告には、選択された値、理由、current/next
+の深刻度、フィールドのスパン、そして機械適用可能な挿入が存在する場合は
+<code>suggestion</code>/<code>canonical_replacement</code> が含まれます。2つのフィールド形状ではこの挿入が
+省略され、それに伴い <code>edition_severity.next</code> は <code>error</code> ではなく <code>warning</code> のままに
+なります(次のエディションは、安全に挿入する手段がない初期化子をまだ必須化できません):
+トップレベルの <code>Map&lt;K, V&gt;</code> フィールドには whole-field の既定値が一切なく
+(<code>field: Map&lt;K, V&gt; = expr;</code> は常に棄却されます、「whole-Map domain defaults are not
+supported」。サポートされる <code>Map</code> の既定値は per-key 形式のみだからです)、<code>Set&lt;T&gt;</code>
+または <code>value_object</code> 型フィールドの brace-literal な既定値(<code>Set { ... }</code>、
+<code>Name { ... }</code>)は、<code>fslc check</code> が明示的に書かれたものを受理するにもかかわらず、
+<code>fslc fmt</code> の reformat-and-reparse パスで現状 round-trip できません(issue #770)。
+<code>migrate --write</code> は fail-closed であり壊れたファイルを書き出すことはありませんが、
+挿入を提示すると #770 の reformat 失敗を誘発し、そのファイル全体の migration が
+失敗して、他の安全な編集まで一緒に失われます。別の <code>Map</code> の値として nested された
+<code>Map</code> は別途棄却されます(「Map state requires explicit initialization through
+supported semantics」)。per-key init は <code>Map</code> 値型に対して選べる既定値を持たないから
+です。</p>
 <p>安定した fsl-domain findings とネストされたカーネル結果(成功時は
 <code>verified_under_assumptions</code>)には <code>fslc domain check</code> を、aggregate/effect の
 サマリーには <code>fslc domain analyze</code> を、生成されたカーネル FSL のデバッグビューの
-確認には <code>fslc domain expand</code> を、Functional DDD スキャフォールドには
+確認には <code>fslc domain expand</code> を使います。<code>domain analyze</code> と <code>domain expand</code> は
+コマンド開始時に著者が記述した domain source を一つの <code>String</code> として読み、その
+同じ snapshot を <code>parse_domain_document_from_source</code> に渡して <code>DomainSpec</code> を
+parse し、さらにその同じ String を <code>load_kernel_model_from_source</code> に渡して検査済み
+Kernel を構築します。atomic な path replacement が起きても、出力前に別の source
+version を検証することはありません。未解決識別子は部分的な分析や使用不能な Kernel
+text を出力せず、元の source location 付きで棄却されます。<code>domain generate</code> は同じ
+typed lowering を使いますが、この single-snapshot 契約はまだ持ちません。別個の
+TOCTOU follow-up は #808 が追跡します。Functional DDD スキャフォールドには
 <code>fslc domain generate --target typescript|python|kotlin|swift|rust</code> を、
 アダプタ/コンフォーマンスのスキャフォールドには <code>fslc domain testgen</code> を、
 ランタイムの command / event / effect エビデンスには
@@ -726,8 +770,13 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 <td><code>violated</code> / <code>type_bound</code> / <code>_bounds_&lt;var&gt;</code></td>
 </tr>
 <tr>
-<td>部分演算(action 文脈限定: <code>requires</code>/本体/<code>ensures</code> のみ、§3 参照)</td>
-<td><code>pop()</code>/<code>head()</code>/<code>at(i)</code> の時点で列が非空かつインデックスが範囲内であり、<code>/</code> <code>%</code> の除数が非ゼロ</td>
+<td>Seq の部分演算(action および property 文脈)</td>
+<td><code>pop()</code>/<code>head()</code>/<code>at(i)</code>/index の時点で列が非空かつインデックスが範囲内である</td>
+<td><code>violated</code> / <code>partial_op</code> / <code>_partial_&lt;action&gt;</code>、<code>_partial_property_&lt;property&gt;</code>、または <code>_partial_property_terminal</code></td>
+</tr>
+<tr>
+<td>算術の部分演算(action 文脈限定: <code>requires</code>/本体/<code>ensures</code> のみ、§3 参照)</td>
+<td><code>/</code> <code>%</code> の除数が非ゼロである</td>
 <td><code>violated</code> / <code>partial_op</code> / <code>_partial_&lt;action&gt;</code></td>
 </tr>
 <tr>
@@ -795,8 +844,9 @@ fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, count
                [--from-state state.json]         # replace init with a complete logical snapshot (BMC only)
                [--deadlock warn|error|ignore]
                [--vacuity warn|error|ignore]     # vacuity check (§15)
-               [--property &lt;Name&gt;]               # check one named property in isolation —
-                                                 #   invariant / trans / leadsTo / reachable (for probing)
+               [--property &lt;Name&gt;]               # check one named property obligation —
+                                                 #   invariant / trans / leadsTo / reachable;
+                                                 #   induction の trans 選択は全 invariant を保持
                [--exclude-property &lt;Name&gt;]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc sweep     &lt;file.fsl&gt; --instances E=lo..hi --depth lo..hi [--property Name]
@@ -902,6 +952,14 @@ Public Kernel v2 はオプトインで、
 「has no response scenario within depth K」になります。両者は混同されません。</p>
 <p><code>verify --property Name</code> は invariant、<code>trans</code>、<code>leadsTo</code>、<code>reachable</code> の宣言を
 横断して解決し、指名されたプロパティ種別だけを単独で検査します。
+ただし induction には依存関係に関する規則が 1 つあります:
+<code>--engine induction --property &lt;trans&gt;</code> では、指名した <code>trans</code> だけが遷移の証明義務に
+なりますが、すべてのユーザー invariant と暗黙の型境界はベースケースと induction
+仮定に残ります。これにより、確立済みの状態 invariant に依存する 2 状態安全性の証明を
+維持し、選択実行のその遷移に対する verdict を all-properties induction 実行と一致させます。
+既存の <code>--property &lt;invariant&gt;</code> の挙動は変更しません: sibling invariant は保持せず、
+指名した invariant だけにモデルを制限します。induction selector は、選択された
+<code>leadsTo</code> と <code>reachable</code> を引き続き usage error として拒否します。
 <code>--exclude-property Name</code> は繰り返し指定でき、種別を横断する逆操作として機能します:
 指名された invariant、<code>trans</code>、<code>leadsTo</code>、<code>reachable</code> プロパティを、実行と、検査済み
 プロパティの出力(<code>invariants_checked</code>、<code>transitions_checked</code>、<code>leads_to</code>、
@@ -1066,13 +1124,18 @@ holds, violating_bindings?}</code>)は、invariant が複数の AND 連言肢か
 (<code>insufficient_depth</code> | <code>over_constrained</code>)と <code>blocking</code>(前件/トリガーを不可能に
 している他の invariant。深さ内で単に未到達なだけのときは空)を得ます —
 <code>reachable_failed</code> の <code>unreached[].blocking_requires</code> と同じ形です。
+<code>vacuity_probe_truncated</code>(§15)は別の主張です — 到達性 probe が深さではなく
+state の budget で打ち切られた、というもので、上記のどちらでもなく独自の
+<code>classification: "probe_truncated"</code> を持ちます。
 blame は特定するだけで、修復(ガードの弱化、連言肢の削除)を提案することは決して
 ありません — それは anti-hollowing の原則に反するからです。これらはすべて JSON
 コントラクトへの厳密に追加的な変更です。</p>
 <p>忠実性/意図のギャップを特定する診断は、<code>faithfulness_class</code> と
 <code>recommended_action</code> も運ぶことがあります。現在のクラスは
 <code>partial_op_unguarded</code>、<code>frozen_only_invariant</code>、<code>intent_unexercised</code>、
-<code>liveness_not_refined</code> です。このタグは既存の <code>result</code> / <code>kind</code> /
+<code>liveness_not_refined</code>、<code>reachability_unknown</code>(<code>vacuity_probe_truncated</code>
+専用 — 到達性 probe が budget で打ち切られたのであって、単に意図が未行使
+なのではありません)です。このタグは既存の <code>result</code> / <code>kind</code> /
 <code>violation_kind</code> フィールドから導出される追加的なものです。消費者は詳細のために
 元の分類フィールドを読み続けるべきです。</p>
 <p>進行を保存する refinement の失敗は、<code>refinement_failed</code> として、
@@ -1160,7 +1223,17 @@ spec Cart {
 fsl 以外のフェンス付きブロック(<code>```python</code> など)は無視されます。<code>use</code>/compose の
 パスは(<code>.fsl</code> ファイルと同様に)Markdown ファイルのディレクトリを基準に解決されます。
 literate な <code>.md</code> はこの方法で <code>.fsl</code> ファイルを <code>use</code>/compose できますが、別の
-<code>.md</code> ファイルを compose のターゲットにすることはサポートされません。</p></div></details>
+<code>.md</code> ファイルを compose のターゲットにすることはサポートされません。</p>
+<p>このフェンス抽出を行うのは <code>check</code>・<code>verify</code>・<code>scenarios</code> の 3 コマンドだけです。
+仕様パスを読み取る他のすべてのコマンド(<code>lint</code>・<code>migrate</code>・<code>fmt</code>・<code>kernel</code>・
+<code>conformance</code>・<code>explain</code>・<code>mutate</code>・<code>typestate</code>・<code>testgen</code>・<code>html</code>・<code>ledger</code>・
+<code>analyze</code>・<code>diff</code>・<code>refine</code>・<code>replay</code>・<code>sweep</code>、および
+<code>document generate</code>/<code>claims</code>/<code>check</code>)は、<code>.md</code> 入力を代わりに入力種別の誤りとして
+拒否します: <code>result: "error"</code>、<code>kind: "usage"</code>、
+<code>diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"</code>、対応コマンドを挙げたメッセージ、
+そして仕様上の位置ではなく入力ファイル自体を指す <code>loc</code> です。これにより、非対応
+コマンドに渡された Markdown ドキュメントが、その Markdown 自身の最初の非 fsl 文字の
+位置にある仕様の構文エラーとして誤報されることを防ぎます。</p></div></details>
 <details id="8-recommended-workflow-make-proved-the-standard"><summary>8. 推奨ワークフロー: proved を標準にする<span class="tree-blurb"> — BMC から帰納法へ、proved を標準にする推奨ワークフロー。</span></summary><div class="tree-body"><ol>
 <li>spec を書く → <code>fslc check</code>(高速な構文/型のループ)</li>
 <li><code>fslc verify --depth 8</code> → violated ならトレースを使って直す。
@@ -1200,8 +1273,10 @@ action drain() { if q.size() &gt; 0 { x = q.head()  q = q.pop() } }
   }
 }
 </code></pre>
-<p><code>at()</code> はプロパティの文脈では全域です(範囲外は不特定の値を生みます)ので、常に
-<code>i &lt; q.size()</code> でガードしてください。</p>
+<p>プロパティ文脈で範囲外の <code>at()</code>/index を読むこと(または空の Seq に対する
+<code>head()</code>/<code>pop()</code>)は <code>partial_op</code> 違反です。<code>i &lt; q.size() =&gt; ...</code> でガードすると
+read は短絡評価され、プロパティは定義されたままになります。<code>/</code> と <code>%</code> とは異なり、
+Seq read が不特定のシンボリック値へ全域化されることはありません。</p>
 <h3 id="seq">Seq 上の集約: インデックス / ドメイン型のイディオム</h3>
 <pre><code class="language-fsl">type Idx = 0..3                        // a domain type covering up to capacity-1
 invariant BalanceMatchesLog {
@@ -2160,8 +2235,10 @@ requirement NFR-1 &quot;complete within 4 ticks of acceptance&quot; {
   urgent にすること(<code>requires age &gt;= K</code> を持つ respond_due 形式)</strong>です。
   非空虚性を確認するには、<code>K-1</code> へ下げて violated になることを確認します。
   <code>fslc verify --vacuity</code> は、この罠の証明可能な形式(urgent の条件が初期かつ
-  帰納的)に対して <code>kind:"urgency_freeze"</code> を出します。警告の不在は非空虚性の証明
-  ではありません。</li>
+  帰納的)に対して <code>kind:"urgency_freeze"</code> を出します。さらに、<code>tick</code> が age 条件の
+  偽の間には動ける場合でも、対象 deadline の全 age が全遷移で 0 のままと証明された
+  ときは <code>kind:"vacuous_deadline"</code> を出します。どちらの警告も不在であることは
+  非空虚性の証明ではありません。</li>
 <li>BMC の検査はすぐに機能します。帰納的な証明はしばしば、時間予算の補助 invariant
   (<code>age + remaining work &lt;= K</code> の形)を必要とします(CTI から導出します。実例は
   <code>examples/nfr/</code>)。</li>
@@ -2268,8 +2345,13 @@ fslc db import examples/db/minimal_prisma_schema.prisma --name ImportedFromPrism
 migration/schema の要素、最小の競合集合、修復候補を含む <code>findings[]</code> を返します。
 ランタイムの観測は <code>formal_result: "not_run"</code> の <code>observed_mismatch</code> を返します。
 ログからの不在は、未使用の振る舞いの証明ではありません。
-生成されたカーネルの反例を直接調べたいときは、通常の <code>fslc verify</code> を使って
-ください。</p>
+入れ子の <code>kernel.result</code> が非成功(<code>violated</code>/<code>reachable_failed</code>/
+<code>unknown_cti</code>/<code>unknown_budget</code>)であれば最上位の <code>result</code> に畳み込まれ、入れ子
+の <code>kernel</code> オブジェクトはその verdict の再現可能な証拠(<code>loc</code>/<code>trace</code>/
+<code>blame</code>/<code>cti</code>/<code>hint</code>/<code>unreached</code>/…— <code>fslc domain check</code> と同じレジストリ)を
+保持します。生成されたカーネルの完全なエンベロープ(<code>db check</code>/<code>domain check</code>
+が意図的に射影しないカバレッジ名リストや実行統計など)を調べたいときは、通常の
+<code>fslc verify</code> を使ってください。</p>
 <p><code>fslc db observe</code> は、観測イベントを評価する前に、観測エンベロープ/イベントを
 <code>schemas/fslc/db/observation.v0.schema.json</code> に対して検証します(型付きの必須
 フィールド、閉じた <code>capability</code> 語彙、不正なレコードでは exit 2)。各イベントの
@@ -2512,18 +2594,31 @@ DESIGN-*.md があります)。</p>
   これについて沈黙します)。<code>acceptance</code>(must-allow)の双対です。
   → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>
 <li><strong>Vacuity 検査(<code>--vacuity</code>)</strong> — verified/proved のパスの上で、
-  <code>vacuous_implication</code>(含意の前件が到達不能)、
+  <code>never_enabled_action</code>(検査した深さ内で action の enabled な instance がない。
+  恒久的な死を証明するものではない有界の証拠)、<code>vacuous_implication</code>(含意の前件が到達不能)、
   <code>vacuous_leadsto</code>(トリガーが到達不能)、<code>always_true_requires</code>
   (先行する節の文脈の下で常に真であるガード)、
   <code>tautology_over_frozen</code>(どの action も変えない状態の上の、動的に
   トートロジーである invariant)、<code>urgency_freeze</code>(urgency が時間を凍結するために
-  死んでいると証明された、生成された deadline の <code>tick</code>)を警告します。
+  死んでいると証明された、生成された deadline の <code>tick</code>)、
+  <code>vacuous_deadline</code>(生成 deadline の age が全遷移で 0 のままと証明される)、
+  <code>vacuity_probe_truncated</code>†を警告します。
   <code>error</code> は exit 2 です。→
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
-<li><strong><code>--strict-tags</code></strong> — 成功の結果の上で、タグのない宣言(捏造の候補)と、参照
+</ul>
+<p>† <code>vacuity_probe_truncated</code>: <code>vacuous_implication</code>/<code>vacuous_leadsto</code> の
+  到達性 probe は、spec 内の全 antecedent/trigger にまたがって 1 回の
+  budget 付き concrete BFS を共有します。ある候補が、真になることも
+  到達可能な状態空間を使い切ることもないまま state 数の budget に
+  到達した場合、<code>vacuous_implication</code>/<code>vacuous_leadsto</code> の代わりにこの
+  kind を報告します — 空虚性はどちら向きにも確立されていないため、
+  「空虚性確定」として扱えば偽陽性になり、単に握りつぶせば
+  <code>--vacuity error</code> が空虚性を一度も判定していない spec を通過させて
+  しまいます。他の 7 kind と全く同様に <code>--vacuity</code> で選択されます。
+- <strong><code>--strict-tags</code></strong> — 成功の結果の上で、タグのない宣言(捏造の候補)と、参照
   されない要件(欠落の候補。空の requirement ブロックを含む)を警告します。存在
-  レベルの突合です。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a></li>
-<li><strong><code>fslc mutate</code></strong> — spec を機械的に変異させ、各ミュータントが既存の検査の網に
+  レベルの突合です。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a>
+- <strong><code>fslc mutate</code></strong> — spec を機械的に変異させ、各ミュータントが既存の検査の網に
   よって殺されるかを測定します。スコアは<strong>有界ミュータント集合への感度
   (bounded mutant-set sensitivity)</strong>です: 選択された有限のミュータント集合・
   選択された <code>--depth</code>・verify/acceptance/forbidden/refinement オラクルの下での
@@ -2549,15 +2644,15 @@ DESIGN-*.md があります)。</p>
   観測された下界です。acceptance と forbidden の kill は、失敗した trace 宣言の
   明示的な requirement annotation を使います。AC/FB case ID は暗黙の requirement
   ではなく、trace case ID は宣言種別ごとに一意です。→
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a></li>
-<li><strong><code>fslc explain --readable</code></strong> — 骨格の列挙(状態、action の誰が/いつ/何を変える
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
+- <strong><code>fslc explain --readable</code></strong> — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement
   マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で
   それを壊せる」)+ witness のナレーションの上のテキストビュー。人間のレビューを、
   論理式を読むことから、具体例を裁定することへ移します。<code>--readable</code> なしでは
   JSON モードが引き続き利用できます。→
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-explain.md"><code>DESIGN-explain.md</code></a></li>
-<li><strong><code>fslc analyze</code></strong> — 構造的な観測 JSON を出力します。<code>--projection tsg</code> は、
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
+- <strong><code>fslc analyze</code></strong> — 構造的な観測 JSON を出力します。<code>--projection tsg</code> は、
   要件、action、状態、プロパティ、シナリオの Typed Semantic Graph を返します。
   グラフの射影は、連結成分、SCC、代表的なサイクル、次数、そしてサイクルランクや
   ファンイン/ファンアウトのハブのような構造メトリクスを返します。
@@ -2606,14 +2701,13 @@ DESIGN-*.md があります)。</p>
   これらの findings は <code>formal_status: "not_a_violation"</code> を運びます。構造的な
   サイクルや非連結の成分は、証明の失敗ではありません。TSG、グラフの射影、findings
   のバージョン付きスキーマは <code>schemas/fslc/analysis/</code> の下で公開されています。→
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md"><code>DESIGN-analysis.md</code></a></li>
-<li><strong><code>fslc html</code></strong> — 同じ explain/verify のエビデンスの上の、自己完結の HTML
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md"><code>DESIGN-analysis.md</code></a>
+- <strong><code>fslc html</code></strong> — 同じ explain/verify のエビデンスの上の、自己完結の HTML
   レポート: ステータスのサマリー、state/action/プロパティのテーブル、action から
   状態への書き込みグラフ、トレースのタイムライン、witness の例、counterfactual、
   ソース、生の JSON。読み手に CLI の実行を要求することなく、PR、設計レビュー、
   非専門家によるプロジェクトレビューに使うためのものです。→
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></li>
-</ul>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></p>
 <p>書く前の規律(形式化メモ、自然言語→構文の逆引き、推奨プラクティス)は
 <code>skills/</code> の下の AI エージェントスキルにあり、共有の言語リファレンスは
 <code>skills/fsl/SKILL.md</code> にあります。保守される実例は

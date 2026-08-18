@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: Apache-2.0
+
+ai_component EnvelopeParityProjectUnknownTool {
+  model model_v1;
+  prompt prompt_v1;
+  input Request;
+  output Response;
+
+  tool SearchOrder {
+    schema SearchOrderV1;
+  }
+
+  authority {
+    may_execute MissingTool;
+  }
+}
+
+dataset EnvelopeParityRecords {
+  source "records.jsonl"
+}
+
+statistical_property EnvelopeParityStatistical {
+  target EnvelopeParityProjectUnknownTool
+  dataset EnvelopeParityRecords
+  require min_samples >= 0
+}
+
+observed_property EnvelopeParityObserved {
+  target EnvelopeParityProjectUnknownTool
+  source "records.jsonl"
+}
+
+ai_migration EnvelopeParityMigration {
+  preserve {
+    no_regression {
+      metric accuracy drop <= 0
+    }
+  }
+}

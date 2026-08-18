@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+
+causal EnvelopeParityCausalImportGuard {
+  uses rejected from "domain_await_routing_rejected.fsl"
+
+  timebase day
+  horizon 1
+}

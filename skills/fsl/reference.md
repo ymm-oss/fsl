@@ -316,9 +316,24 @@ findings, `fslc domain expand` to inspect the generated kernel, and
 `DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`. The v0 implementation does not prove
 real gateway behavior, queue delivery, wall-clock timeouts, or production
 exactly-once semantics.
+At command entry, `fslc domain analyze` and `fslc domain expand` both read one
+authored-source `String`, parse their `DomainSpec` with
+`parse_domain_document_from_source`, and pass that same string to
+`load_kernel_model_from_source` to construct the checked Kernel. Atomic path
+replacement therefore cannot make either command validate a different source
+version before returning output. They reject unresolved identifiers with the
+original source location; neither command is a best-effort/raw-AST inspection
+path for semantically invalid domain input. `domain generate` uses the same
+typed lowering but does not yet have this single-snapshot contract; #808 tracks
+that separate TOCTOU follow-up.
 The accepted #662 design keeps `event_*` flags one-hot/current-step and will add
 a dedicated `Map<Correlation,SagaPhase>` in a follow-up; do not make global
 event flags sticky or treat one effect's status map as a general saga history.
+A saga `compensation { when Trigger after After { ... } }` block is guarded by
+BOTH event flags (#713); because flags are one-hot, a compensation whose
+trigger and after events differ is structurally disabled today and surfaces
+as a `fslc verify` never-enabled action warning — do not suppress that
+warning or weaken the guard to make it disappear.
 Native domain generation is grounded in Public Kernel v1. A closed
 `domain-scaffold-metadata.v1` companion retains source grouping/spelling that
 lowering cannot publish. Versions, dialect, duplicate Kernel members, and
@@ -345,10 +360,29 @@ traceability relation, not origin identities. Public Kernel v1 remains
 byte-compatible and does not expose the internal chain; publication belongs to
 v2 (#256).
 
-Omitted domain aggregate initializers retain the current Bool `false`, enum
-first-member, range lower-bound, or external-placeholder `0` behavior while
-emitting `implicit_initial_value`. The warning carries the selected value,
-reason, edition severities, source span, and a machine-applicable insertion.
+Omitted domain aggregate initializers retain the current Bool `false`, Int
+`0`, enum first-member (rendered bare, as domain source itself accepts, no
+matter how deeply the enum is nested inside a `value_object` or a `Map`
+value -- never `domain_kernel_source`'s kernel-mangled identifier), range
+lower-bound, external-placeholder `0`, `value_object` struct-literal,
+`Option<T>` -> `none`, `Set<T>` -> `Set {}`, or top-level `Map<K, V>` ->
+dense per-key `forall k: K { field[k] = <value default> }` behavior, and
+every one of those shapes emits `implicit_initial_value` (#731) -- the
+warning's dispatch matches the renderer's total dispatch
+(`fsl_core::domain_type_default`, the single owner of both the selected
+value and how any enum member within it is spelled). The warning carries the
+selected value, reason, edition severities, source span, and -- where a safe
+insertion exists -- a machine-applicable edit. A top-level `Map<K, V>` field
+(no whole-field default exists at all) and a `Set<T>`/`value_object` field
+whose brace-literal default cannot yet round-trip through `fslc fmt`'s
+reformat-and-reparse pass (issue #770) omit the insertion and keep
+`edition_severity.next` at `warning`: `migrate --write` is fail-closed and
+would not write a corrupted file, but offering the insertion would trip
+#770's reformat failure and fail migration for the whole file, dropping
+every other edit in it too. An explicit whole-`Map` default and a `Map`
+nested as another `Map`'s value are both rejected ("whole-Map domain
+defaults are not supported" / "Map state requires explicit initialization
+through supported semantics").
 
 AI hard-contract dialect (expands to the same kernel for deterministic
 tool-boundary checks and reports stable fsl-ai findings for runtime replay):
@@ -871,8 +905,10 @@ An **intended terminal state** (processing complete, etc. — a state where stop
 is correct) is declared with `terminal { <predicate> }` — a stop satisfying the
 predicate is excluded from the deadlock check, while other unexpected deadlocks
 continue to be detected (more precise than `--deadlock ignore`, which uniformly
-ignores all stops). vacuity is a warning only on the verified/proved path:
-an unreached antecedent of an implication invariant (`vacuous_implication`), an
+ignores all stops). `verify`/`sweep` vacuity selection is a warning only on the
+verified/proved path: an action
+with no enabled instance through the checked depth (`never_enabled_action`; bounded
+evidence that can disappear at a larger depth), an unreached antecedent of an implication invariant (`vacuous_implication`), an
 unreached leadsTo trigger (`vacuous_leadsto`), a requires clause always true under
 the context of the preceding requires (`always_true_requires` — actions with
 coverage false and compose synchronized actions are excluded; a synchronized
@@ -886,7 +922,30 @@ declared type space rather than over the states reached within `--depth`, so
 their verdict never moves with the bound: `requires visits < 100` on
 `visits: 0..100` is a real guard and stays unreported even at a depth that
 never reaches 100. `--vacuity error` gives
-`result:"error"`; `--vacuity ignore` disables it.
+`result:"error"`; `--vacuity ignore` disables it. For the two reachability
+kinds (`vacuous_implication`/`vacuous_leadsto`, next paragraph) and their
+`vacuity_probe_truncated` sibling, `ignore` additionally skips *computing*
+the shared reachability probe rather than computing it and filtering the
+result; the other four kinds (`always_true_requires`, `tautology_over_frozen`,
+`urgency_freeze`, `vacuous_deadline`) are solver-decided lanes that are
+still computed and then filtered. `never_enabled_action` is emitted from the
+existing action-coverage exploration, then selected or removed by the same mode;
+the structured `action_coverage` evidence remains a separate ledger projection and
+does not change assurance.
+
+`fslc scenarios` has no `--vacuity` mode and never escalates this finding to
+exit 2. It independently retains the same typed `never_enabled_action`
+coverage diagnostic so a generated scaffold cannot call a blocked action covered.
+
+The `vacuous_implication`/`vacuous_leadsto` reachability probe shares one
+budgeted concrete BFS across every antecedent/trigger in the spec. A
+candidate that neither becomes true nor finishes exhausting its reachable
+state space before the internal state-count budget is hit (or whose
+expression fails to evaluate) reports `kind:"vacuity_probe_truncated"`
+instead — vacuity was never established either way, so it selects under
+`--vacuity` exactly like the other seven kinds (`error` fails closed on it
+too). Budget exhaustion is rare; a corpus-conservation test keeps the
+budget generous enough that no maintained spec hits it.
 
 ## 7. CLI and JSON essentials
 
@@ -903,8 +962,9 @@ fslc conformance <f> [--depth K=4] [--kernel-version 1|2] # matching vectors (de
 fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
                [--explicit-budget N=1000000]        # explicit/auto; max visited states
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
-               [--property <Name>]                  # check one named property in isolation
-                                                    #   (invariant / trans / leadsTo / reachable)
+               [--property <Name>]                  # check one named property obligation
+                                                    #   (invariant / trans / leadsTo / reachable;
+                                                    #    selected trans keeps induction invariants)
                [--exclude-property <Name>]...       # skip named invariant/trans/leadsTo/reachable
                [--instances NAME=N]...              # override verify-block `instances NAME = N`
                [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`
@@ -1076,7 +1136,13 @@ Multiple fsl blocks form one compilation unit (split definitions across
 sections). Files without fsl fences are rejected; non-fsl fences
 (` ```python ` etc.) are ignored. A literate `.md` may `use`/compose `.fsl`
 files relative to its own directory; using another `.md` as a compose target
-is not supported.
+is not supported. Every other spec-reading command (`lint`, `migrate`, `fmt`,
+`kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`, `html`,
+`ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`,
+`document generate`/`claims`/`check`) rejects `.md` input as an input-kind
+error (`kind:"usage"`, `diagnostic_code:"FSL-INPUT-LITERATE-UNSUPPORTED"`,
+`loc` naming the input file, not a spec position) instead of handing it to
+the parser (issue #665).
 
 `diff` uses bidirectional bounded refinement for behavior changes, implication
 between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`
@@ -1278,8 +1344,25 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `summary.by_source` exclude invalid records from their denominator, and each
   mutant carries `source:"builtin"|"external"`. `--max-mutants` applies only
   to the built-in catalog (`0` gives an external-only run).
+  `mutate` also accepts `domain` documents: it mutates the same rendered
+  kernel text `domain expand` emits, so `target`/`loc` use generated action
+  names and kernel-text line numbers rather than domain source lines, and
+  the envelope carries that text as `kernel_source` so a witness is
+  resolvable on its own. `--from` external mutants for a domain document
+  must target `kernel_source` text, not the `.fsl` domain source. Absolute
+  domain kill-rates are not comparable to other dialects (domain lowering
+  emits few properties); read the dead-note-carrying survivor set as the
+  primary signal instead — a saga whose compensations are structurally
+  unreachable at baseline should show all of their mutants surviving with
+  the existing dead-action note, not killed.
 - `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
   `reachable` declarations and checks only the named property kind in isolation.
+  Under `--engine induction --property <trans>`, the named transition is the
+  only transition obligation, while every user invariant and implicit type
+  bound remains in the base case and induction hypothesis. This is the one
+  dependency-preserving exception to model restriction. Existing selected-
+  invariant behavior is unchanged and still drops sibling invariants. Selected
+  `leadsTo` and `reachable` remain rejected by the induction selector.
   `--exclude-property Name` is repeatable and acts as the cross-kind inverse:
   it removes named invariants, `trans`, `leadsTo`, and `reachable` checks from
   the run and from checked-property outputs. If both options name the same

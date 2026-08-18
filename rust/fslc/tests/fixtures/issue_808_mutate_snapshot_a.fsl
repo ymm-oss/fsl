@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Kill-rate control fixture for #808. Removing `dec`'s `requires` clause
+// lets `count` go negative, which `NonNegative` catches: that mutant is
+// killed. The sibling `issue_808_mutate_snapshot_b.fsl` fixture is
+// otherwise identical but omits the invariant, so the same mutant survives
+// there instead. `mutate` must report kill-rate evidence bound to whichever
+// source snapshot it actually read.
+spec MutateSnapshotFixture {
+  state { count: Int }
+  init { count = 0 }
+
+  invariant NonNegative { count >= 0 }
+
+  action inc() {
+    count = count + 1
+  }
+
+  action dec() {
+    requires count > 0
+    count = count - 1
+  }
+}

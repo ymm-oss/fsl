@@ -1,0 +1,31 @@
+domain AwaitRoutingRejected {
+  // SPDX-License-Identifier: Apache-2.0
+  type PaymentRequestId = 0..1
+
+  aggregate Order {
+    id OrderId
+    state { status: PaymentResultStatus = NotRequested; }
+
+    command RequestPaymentCapture { payment_request_id: PaymentRequestId }
+
+    event PaymentCaptureRequested { payment_request_id: PaymentRequestId }
+    event PaymentCaptured { payment_request_id: PaymentRequestId }
+    event PaymentFailed { payment_request_id: PaymentRequestId }
+
+    decide RequestPaymentCapture {
+      emits PaymentCaptureRequested
+    }
+
+    evolve PaymentCaptureRequested { status = Requested }
+    evolve PaymentCaptured { status = Captured }
+    evolve PaymentFailed { status = Failed }
+  }
+
+  enum PaymentResultStatus { NotRequested, Requested, Captured, Failed }
+
+  await PaymentResult {
+    waits_for one_of [PaymentCaptured, PaymentFailed]
+    on PaymentCaptured -> PaymentCaptured
+    on PaymentFailed -> PaymentFailed
+  }
+}

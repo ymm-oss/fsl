@@ -1,4 +1,16 @@
 *.fsl text eol=lf
+
+# Every checked-in fixture under this directory is compared byte-for-byte
+# against a CLI envelope, so a platform-dependent checkout changes what the
+# fixture means. `error_envelope_document.md` reached `main` without a rule,
+# was checked out CRLF on `windows-latest`, and its leading `---` stopped
+# parsing as document frontmatter: three `error_envelope_parity` cells failed
+# on that runner alone (run 31759050211). Cover the directory rather than each
+# new file, because the per-file rules below did not extend to fixtures added
+# later.
+rust/fslc/tests/fixtures/** text eol=lf
+rust/fslc/tests/fixtures/**/.z3-trace binary
+
 rust/fslc/tests/fixtures/conformance_coverage.v1.md text eol=lf
 rust/fslc/tests/fixtures/typestate_order.v1.json text eol=lf
 rust/fslc/tests/fixtures/typestate_order.v1.ts text eol=lf

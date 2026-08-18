@@ -7,10 +7,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_core::{
     FslValue as Value, KernelBinder as Binder, KernelExpr as Expr, KernelLValue as LValue,
-    KernelModel, KernelStatement as Statement, TraceAction, TraceChange, TraceStep, TypeDef,
-    TypeRef,
+    KernelModel, KernelStatement as Statement, TraceAction, TraceStep, TypeDef, TypeRef,
 };
 
+use super::trace::{ParentLink, reconstruct_trace, state_changes};
 use super::{
     Bindings, Monitor, RuntimeError, State, Violation, eval, runtime_error, with_total_division,
 };
@@ -47,12 +47,6 @@ pub struct ExplicitResult {
 enum InitWriteKey {
     Root(String),
     ConcreteIndex(String, String),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ParentLink {
-    parent: State,
-    action: TraceAction,
 }
 
 /// Verify a finite kernel model using level-synchronous concrete BFS.
@@ -122,10 +116,16 @@ pub fn verify_explicit_selected(
         return Err(runtime_error(reason));
     }
 
-    let initial = Monitor::new(model)?;
-    let initial_state = initial.state.clone();
+    // The frontier carries `State` only, not `Monitor` -- a full `Monitor`
+    // clone per child, on top of a `BTreeMap<State, Monitor>` frontier
+    // holding one whole `KernelModel` per live state, duplicated the model
+    // at both layers (issue #730). `scratch` is re-pointed at each state
+    // instead; `parents` (already used for trace reconstruction) is the
+    // only per-state bookkeeping kept.
+    let mut scratch = Monitor::new(model)?;
+    let initial_state = scratch.state.clone();
     let mut result = ExplicitResult {
-        spec: initial.model.name.clone(),
+        spec: scratch.model.name.clone(),
         depth,
         depth_reached: 0,
         states_explored: 1,
@@ -133,7 +133,7 @@ pub fn verify_explicit_selected(
         closure: false,
         budget_exceeded: false,
         violation: None,
-        reachables: initial
+        reachables: scratch
             .model
             .reachables
             .iter()
@@ -141,34 +141,34 @@ pub fn verify_explicit_selected(
             .collect(),
         deadlock_step: None,
         deadlock_trace: None,
-        action_coverage: initial
+        action_coverage: scratch
             .model
             .actions
             .iter()
             .map(|action| (action.name.clone(), false))
             .collect(),
     };
-    let mut frontier = BTreeMap::from([(initial_state.clone(), initial)]);
-    let mut seen = BTreeSet::from([initial_state.clone()]);
+    let mut frontier = BTreeSet::from([initial_state.clone()]);
+    let mut seen = BTreeSet::from([initial_state]);
     let mut parents = BTreeMap::<State, ParentLink>::new();
 
     for level in 0..=depth {
         result.depth_reached = level;
         result.max_frontier_width = result.max_frontier_width.max(frontier.len());
 
-        for monitor in frontier.values() {
-            if let Some(violation) = monitor.current_violation_selected(checked_bounds)? {
+        for state in &frontier {
+            scratch.state = state.clone();
+            scratch.step = level;
+            if let Some(violation) = scratch.current_violation_selected(checked_bounds)? {
                 result.violation = Some(ExplicitViolation {
-                    trace: reconstruct_trace(&initial_state, &monitor.state, &parents),
+                    trace: reconstruct_trace(state, &parents),
                     violation,
                 });
                 return Ok(result);
             }
-            if let Some(violation) =
-                record_reachables(monitor, level, &initial_state, &parents, &mut result)?
-            {
+            if let Some(violation) = record_reachables(&scratch, level, &parents, &mut result)? {
                 result.violation = Some(ExplicitViolation {
-                    trace: reconstruct_trace(&initial_state, &monitor.state, &parents),
+                    trace: reconstruct_trace(state, &parents),
                     violation,
                 });
                 return Ok(result);
@@ -176,17 +176,19 @@ pub fn verify_explicit_selected(
         }
 
         let mut enabled_by_state = BTreeMap::new();
-        for (state, monitor) in &frontier {
-            let enabled = monitor.enabled()?;
+        for state in &frontier {
+            scratch.state = state.clone();
+            scratch.step = level;
+            let enabled = scratch.enabled()?;
             for instance in &enabled {
                 result.action_coverage.insert(instance.action.clone(), true);
             }
             if enabled.is_empty() && result.deadlock_step.is_none() {
-                let terminal = match terminal_holds(monitor) {
+                let terminal = match terminal_holds(&scratch) {
                     Ok(value) => value,
                     Err(error) if super::is_partial_operation_error(&error.message) => {
                         result.violation = Some(ExplicitViolation {
-                            trace: reconstruct_trace(&initial_state, state, &parents),
+                            trace: reconstruct_trace(state, &parents),
                             violation: Violation {
                                 kind: "partial_op".to_owned(),
                                 name: "_partial_property_terminal".to_owned(),
@@ -199,8 +201,7 @@ pub fn verify_explicit_selected(
                 };
                 if !terminal {
                     result.deadlock_step = Some(level);
-                    result.deadlock_trace =
-                        Some(reconstruct_trace(&initial_state, state, &parents));
+                    result.deadlock_trace = Some(reconstruct_trace(state, &parents));
                 }
             }
             enabled_by_state.insert(state.clone(), enabled);
@@ -210,22 +211,24 @@ pub fn verify_explicit_selected(
             break;
         }
 
-        let mut next = BTreeMap::new();
-        for (state, monitor) in &frontier {
+        let mut next = BTreeSet::new();
+        for state in &frontier {
             for instance in &enabled_by_state[state] {
-                let mut child = monitor.clone();
-                let stepped = child.step_selected(instance, checked_bounds)?;
+                scratch.state = state.clone();
+                scratch.step = level;
+                let stepped = scratch.step_selected(instance, checked_bounds)?;
                 if let Some(violation) = stepped.violation {
                     // The Monitor rolls back on violation (`state` is the pre-step
                     // state); the trace must show the attempted post-state.
                     let after = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
-                    let mut trace = reconstruct_trace(&initial_state, state, &parents);
+                    let mut trace = reconstruct_trace(state, &parents);
                     trace.push(edge_trace_step(level + 1, state, instance, after));
                     result.depth_reached = level + 1;
                     result.violation = Some(ExplicitViolation { violation, trace });
                     return Ok(result);
                 }
-                if seen.contains(&child.state) {
+                let child_state = scratch.state.clone();
+                if seen.contains(&child_state) {
                     continue;
                 }
                 if seen.len() >= max_states {
@@ -233,7 +236,6 @@ pub fn verify_explicit_selected(
                     result.budget_exceeded = true;
                     return Ok(result);
                 }
-                let child_state = child.state.clone();
                 seen.insert(child_state.clone());
                 parents.insert(
                     child_state.clone(),
@@ -245,7 +247,7 @@ pub fn verify_explicit_selected(
                         },
                     },
                 );
-                next.insert(child_state, child);
+                next.insert(child_state);
             }
         }
         result.states_explored = seen.len();
@@ -281,7 +283,6 @@ fn terminal_holds(monitor: &Monitor) -> Result<bool, RuntimeError> {
 fn record_reachables(
     monitor: &Monitor,
     level: usize,
-    initial_state: &State,
     parents: &BTreeMap<State, ParentLink>,
     result: &mut ExplicitResult,
 ) -> Result<Option<Violation>, RuntimeError> {
@@ -313,7 +314,7 @@ fn record_reachables(
                         property.name.clone(),
                         Some(ExplicitReachableWitness {
                             step: level,
-                            trace: reconstruct_trace(initial_state, &monitor.state, parents),
+                            trace: reconstruct_trace(&monitor.state, parents),
                         }),
                     );
                 }
@@ -323,37 +324,6 @@ fn record_reachables(
         }
         Ok(None)
     })
-}
-
-fn reconstruct_trace(
-    initial_state: &State,
-    final_state: &State,
-    parents: &BTreeMap<State, ParentLink>,
-) -> Vec<TraceStep> {
-    let mut cursor = final_state.clone();
-    let mut reversed = Vec::<(State, TraceAction)>::new();
-    while let Some(link) = parents.get(&cursor) {
-        reversed.push((cursor, link.action.clone()));
-        cursor = link.parent.clone();
-    }
-    reversed.reverse();
-    let mut trace = vec![TraceStep {
-        step: 0,
-        state: initial_state.clone(),
-        action: None,
-        changes: BTreeMap::new(),
-    }];
-    let mut before = initial_state.clone();
-    for (index, (state, action)) in reversed.into_iter().enumerate() {
-        trace.push(TraceStep {
-            step: index + 1,
-            changes: state_changes(&before, &state),
-            state: state.clone(),
-            action: Some(action),
-        });
-        before = state;
-    }
-    trace
 }
 
 fn edge_trace_step(
@@ -371,24 +341,6 @@ fn edge_trace_step(
         }),
         changes: state_changes(before, state),
     }
-}
-
-fn state_changes(before: &State, after: &State) -> BTreeMap<String, TraceChange> {
-    after
-        .iter()
-        .filter_map(|(name, value)| {
-            let old = &before[name];
-            (old != value).then(|| {
-                (
-                    name.clone(),
-                    TraceChange {
-                        from: old.clone(),
-                        to: value.clone(),
-                    },
-                )
-            })
-        })
-        .collect()
 }
 
 /// Per-root definite-assignment coverage tracked at component granularity.

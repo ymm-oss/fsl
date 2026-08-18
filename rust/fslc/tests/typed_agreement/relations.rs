@@ -543,9 +543,11 @@ fn assert_action_context_partial_op_agrees_across_engines(id: &str, source: &str
         "'{id}': Monitor BFS and explicit disagree"
     );
 
-    let (boundary_violation, _trace) = fsl_runtime::find_boundary_violation(model.clone(), depth)
-        .unwrap_or_else(|error| panic!("'{id}': find_boundary_violation errored: {error}"))
-        .unwrap_or_else(|| panic!("'{id}': find_boundary_violation found no violation"));
+    let (boundary_violation, _trace) =
+        fsl_runtime::find_boundary_violation(&model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET)
+            .unwrap_or_else(|error| panic!("'{id}': find_boundary_violation errored: {error}"))
+            .finding
+            .unwrap_or_else(|| panic!("'{id}': find_boundary_violation found no violation"));
     assert_eq!(
         boundary_violation.kind, "partial_op",
         "'{id}': find_boundary_violation kind"
