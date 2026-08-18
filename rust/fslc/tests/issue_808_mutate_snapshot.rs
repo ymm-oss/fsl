@@ -21,7 +21,7 @@ mod fifo_snapshot;
 use std::process::Command;
 
 #[cfg(unix)]
-use fifo_snapshot::{TwoSnapshotFifo, wait_for_output};
+use fifo_snapshot::{ReapedChild, TwoSnapshotFifo, WriterOutcome, wait_for_output};
 #[cfg(unix)]
 use serde_json::Value;
 
@@ -33,23 +33,29 @@ fn mutate_against_two_snapshot_fifo() -> (Value, i32) {
     let source_b = include_str!("fixtures/issue_808_mutate_snapshot_b.fsl");
     let mut fixture = TwoSnapshotFifo::new("mutate", source_a, source_b);
     let path = fixture.fifo.to_string_lossy().into_owned();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_fslc"))
-        // `mutate` accepts only `--depth`, `--by-requirement`, `--max-mutants`
-        // and `--from`. Passing an unsupported option makes the CLI exit with
-        // `kind: usage` before it ever opens the path, which leaves the FIFO
-        // writer blocked in `open` and makes `assert_no_second_open` vacuously
-        // true — the control would prove nothing even if it terminated.
-        .args(["mutate", &path, "--depth", "4"])
-        .current_dir(fifo_snapshot::root())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn native fslc against FIFO");
+    let mut child = ReapedChild::new(
+        Command::new(env!("CARGO_BIN_EXE_fslc"))
+            // `mutate` accepts only `--depth`, `--by-requirement`,
+            // `--max-mutants` and `--from`. Passing an unsupported option
+            // makes the CLI exit with `kind: usage` before it ever opens the
+            // path, which used to leave the FIFO writer blocked forever in a
+            // blocking cleanup `open` (#819); the hardened
+            // `TwoSnapshotFifo::release_writer` now uses only nonblocking
+            // reads so this shape of mistake fails with an assertion instead
+            // of hanging (see `fifo_snapshot_hardening.rs` for a dedicated
+            // control on exactly this path).
+            .args(["mutate", &path, "--depth", "4"])
+            .current_dir(fifo_snapshot::root())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn native fslc against FIFO"),
+    );
     let output = wait_for_output(&mut child);
 
     // This is the correctness oracle. Cleanup opens B only after this point.
     fixture.assert_no_second_open();
-    fixture.release_writer();
+    assert_eq!(fixture.release_writer(), WriterOutcome::Finished, "mutate");
 
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
