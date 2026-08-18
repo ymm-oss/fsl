@@ -111,7 +111,6 @@ pub struct TwoSnapshotFifo {
     writer_outcome: std::sync::mpsc::Receiver<WriterOutcome>,
     phase: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     writer: Option<std::thread::JoinHandle<()>>,
-    second_writer_opened: bool,
 }
 
 #[allow(dead_code)]
@@ -205,7 +204,6 @@ impl TwoSnapshotFifo {
             writer_outcome: writer_outcome_receiver,
             phase,
             writer: Some(writer),
-            second_writer_opened: false,
         }
     }
 
@@ -218,7 +216,6 @@ impl TwoSnapshotFifo {
         match self.second_opened.try_recv() {
             Err(TryRecvError::Empty) => {}
             Ok(()) => {
-                self.second_writer_opened = true;
                 panic!("the CLI opened source B, proving a second root-path read");
             }
             Err(TryRecvError::Disconnected) => {
@@ -270,15 +267,26 @@ impl TwoSnapshotFifo {
         let Some(writer) = self.writer.take() else {
             return WriterOutcome::Finished;
         };
-        if !self.second_writer_opened {
-            self.second_writer_opened = self.second_opened.try_recv().is_ok();
-        }
 
         let mut controls = vec![
             self.open_nonblocking_control_fifo()
                 .expect("open nonblocking FIFO cleanup control"),
         ];
-        let mut replacement_control_opened = self.phase.load(Ordering::SeqCst) >= Self::REPLACED;
+        // Always start `false`, even though `phase` may already read
+        // `REPLACED` here: control #1 above was opened against whichever
+        // inode the pathname pointed to at that moment, which can race
+        // ahead of this read and land on the *first* inode while `phase`
+        // has already advanced. Deciding `true` from `phase` alone can
+        // therefore skip opening a control on the replacement inode
+        // entirely, stranding the writer's second `open` and failing the
+        // `CLEANUP_TIMEOUT` assert below instead of draining it. Starting
+        // `false` lets the loop's own `phase` check decide on its next
+        // iteration, guaranteeing a control on the replacement inode.
+        // Duplicating a control on the same (first) inode when control #1
+        // already happened to land on the replacement is harmless: both
+        // are nonblocking, cleanup only discards what it reads, and it
+        // does not matter which of two draining readers gets which bytes.
+        let mut replacement_control_opened = false;
         let deadline = std::time::Instant::now() + Self::CLEANUP_TIMEOUT;
         let mut outcome = None;
 
