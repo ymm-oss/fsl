@@ -5,6 +5,8 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-08-18
+
 - Fixed (#753): `git apply` silently skips every file in a patch, and exits zero, when the
   fault-operator scratch checkout is not its own git repository root -- git resolves the
   scratch to the enclosing repository, where everything under it lives beneath `rust/target/`
@@ -658,6 +660,591 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   verified/violated verdict on independent `Bool` state) and #691 (a
   `Map`-typed state field with no default renders an ill-typed literal `0`)
   (#664).
+- Added (#727): `fslc mutate` now accepts `domain` documents. It renders the
+  domain document through the same textual kernel path `fslc domain expand`
+  uses (`fsl_tools::domain_kernel_source`) and mutates the re-parsed kernel
+  spec instead of the direct-lowering path `check`/`verify` use for domain.
+  Direct lowering does propagate real spans into the domain source file
+  (measured: 409 spans, 16 null, same on both paths), but resolves to only 23
+  distinct non-null source positions against 90 for the rendered path, so it
+  collapses many distinct mutants onto the same witness location; the
+  rendered path is chosen for that ~4x finer discrimination, at the cost that
+  its `loc` points into rendered kernel text rather than a domain source
+  line, which is why that text is embedded in the output envelope as
+  `kernel_source`, matching `domain expand`/`domain check`. A saga whose
+  compensation actions are structurally dead at baseline now reports every
+  compensation-targeting mutant surviving with the existing "action dead at
+  baseline" note, giving domain specs the same kill-rate self-check evidence
+  channel other dialects already have. Unlowerable domain constructs are
+  still rejected by the shared lowering guard before any mutant runs; other
+  non-spec-like dialects (`governance`, `db`, …) are unaffected. As
+  out-of-scope defensive hardening in the same dialect-lowering match this
+  change adds an arm to, one call site (`requirements_trace_contract`'s error
+  handler; unreachable for domain, whose only parse there always succeeds)
+  and a second in the pre-existing `Business|Requirements|Compose` branch
+  (never reached by `domain`, a separate match arm) stopped collapsing a
+  typed `CoreError` into an untyped `semantics` message and now render
+  through `core_error_output`, preserving `loc` and diagnostic
+  classification (the #780 defect class).
+- Added (#737): checked-in `changelog.d/` fragments for `CHANGELOG.md`'s
+  `[Unreleased]` entries, closing the shared-edit merge-conflict spike's
+  GO-C1 decision (`docs/DESIGN-changelog-fragments.md`). `tools/aggregate_changelog.sh`
+  (stdlib-only bash, matching the `merge readiness / automation contracts`
+  lane's dependency contract) implements all six fail-closed controls the
+  record requires, each proven with both an accepting and a calibrated
+  rejecting fixture executed in `selftest`: nonconforming fragment name (now
+  also rejecting a conforming-looking name hidden anywhere
+  `list_fragment_files` will not enumerate it -- a subdirectory or a
+  top-level dotfile, both of which earlier releases of this fragment left
+  invisible to every check but control 1's own shallow path match), duplicate (id, category),
+  nondeterministic or nonconforming order (both the numeric-id and the
+  category-order sort components, each pinned against a golden a
+  lexicographic sham fails), unaggregated-at-release plus bidirectional
+  direct-edit-forbidden (diffed against the merge base, matching this
+  repository's own three-dot convention, so a release landing on `main` does
+  not misname every open pull request's untouched `[Unreleased]` body as a
+  direct edit; the single remaining release exclusion is proven not to let a
+  bullet silently drop under cover of a release move), missing-or-empty
+  fragment (with a release exclusion keyed directly to control 4's own
+  validated "the `[Unreleased]` body was actually emptied under a matching
+  new version heading" classification, computed once and shared by both
+  controls so they cannot disagree -- not merely CHANGELOG.md's git status,
+  which a fragment deletion plus any unrelated CHANGELOG.md edit, down to a
+  trailing newline, would also have satisfied -- and no longer requiring a
+  deleted fragment at all, so a version-only release with nothing accumulated
+  in `changelog.d/` also merges. The exclusion exempts only the fixed, measured
+  set of *product-surface* paths a release commit actually bumps
+  (`is_release_bump_path`: `rust/Cargo.toml`, `rust/Cargo.lock`, and the domain
+  characterization baseline, byte-identical across all four releases in this
+  repository's history), not every product-surface path in a release-move diff
+  -- a validated release move that also carries an unrelated product change
+  still demands a fragment for that change, so a forged, empty version heading
+  in a repository whose `[Unreleased]` body is otherwise always empty buys an
+  exemption for those three paths and nothing beyond them, a bound
+  `docs/DESIGN-changelog-fragments.md` records and accepts explicitly. A
+  product-surface path arriving by rename or copy is classified by its
+  destination, so moving a file into `rust/`, `specs/`, or any other product
+  surface owes a fragment exactly as a plain addition does), and aggregation
+  conservation checked by per-bullet identity, not substring containment
+  (calibrated against a fragment-dropping sham, a first-line-only-truncating
+  sham, and a sham that drops one fragment while duplicating another whose
+  entire rendered block is a byte-for-byte prefix of the dropped one's).
+  Fragment bodies are also checked for hygiene (a stray carriage-return byte,
+  a leading list marker, or a leading ATX heading marker -- `#` through
+  `######` followed by a space, not a bare issue-reference `#`) before
+  aggregation. `changelog.d/.DS_Store`, `.gitkeep`, and editor swap files are
+  exempted from the nonconforming-name/enumerability check by exact name,
+  alongside `README.md`, since none of them can ever be an attempted fragment.
+  The category vocabulary is eleven
+  words, not ten: `changed` joins the set, measured 12 times across
+  `CHANGELOG.md`'s full history (more than seven of the other ten words),
+  where an earlier version of this mechanism's own documentation called it
+  "unmeasured" and told authors not to add it. The existing 620-line,
+  27-bullet `[Unreleased]` body is left untouched rather than converted: of
+  its bullets, 10 are in `- <Lead> (#NNN):` form, 3 more carry an id outside
+  that position, and 14 carry no id of any kind, so control 6 would reject
+  every fragment a conversion tried to produce for those 14; the body moves
+  under a version heading the ordinary way at the next release
+  (`docs/RELEASE.md` step 7), in the same step that aggregates this
+  directory's fragments. Every migration site moves together: `AGENTS.md`,
+  `CONTRIBUTING.md`, `docs/DESIGN-kernel-contract.md`, and
+  `docs/DESIGN-saga-history.md`'s coupled-change guidance,
+  `.claude/hooks/changelog_reminder.py`, `.claude/agents/fsl-coupled-change-reviewer.md`,
+  `.claude/skills/add-language-feature/SKILL.md`, `.claude/skills/release/SKILL.md`,
+  `tools/check-product-gate-scope.sh`'s `changelog.d/` exemption prefix (with
+  the `changelog.dx/y` near-miss still classifying as product),
+  `docs/DESIGN-ci.md`'s exemption amendment, `.github/workflows/release.yml`'s
+  stale-fragment guard, and `.github/workflows/merge-readiness.yml`'s new
+  pull-request-level fragment/direct-edit check. This entry is itself the
+  first fragment.
+- Fixed (#723): effect `retry { backoff ... }` clauses (e.g. `retry { max_attempts
+  3; backoff exponential }`) are now rejected fail-closed by both lowering
+  paths through the same `validate_lowerable_constructs` gate
+  (`rust/fsl-core/src/domain_lowering.rs`) that #710/#711/#712 established:
+  no accepted design pins a backoff strategy's execution meaning in the
+  finite model, and the parsed `backoff` value was never read by either
+  lowering path or by the frozen Python reference
+  (`src/fslc/domain_parser.py`, `src/fslc/domain_ir.py`), which only stores
+  it in the IR. **Migration**: remove the `backoff ...` line from any `retry`
+  block; it never had executable meaning under `check`/`verify`, so removing
+  it changes no verification outcome. `retry { max_attempts N }` without a
+  `backoff` clause is unaffected and still lowers the `attempts < N` guard.
+  `examples/domain/order_async_effect.fsl` and
+  `rust/fslc/tests/fixtures/issue_518_domain_replay.fsl` had their now-rejected
+  `backoff exponential` lines removed as part of this fix, and
+  `docs/intro/domain.{en,ja}.html`'s matching code sample was updated to
+  match. See `docs/DESIGN-domain.md`. Tracked mechanism for future migration
+  diagnostics: #702, #703. Remaining #723 items (`projection`, effect
+  `compensation`, saga `outboxes`/`inboxes`) are out of this fix's scope.
+- Fixed (#726): `fsl_tools::analyze_domain` now calls `domain_kernel_source`
+  before projecting a domain document, instead of projecting the raw
+  `DomainSpec` directly. `fslc domain analyze`'s accepted/rejected spec set is
+  now identical to `domain expand`'s, since both share `domain_kernel_source`:
+  this rejects not only the three #710/#711/#712 unlowerable constructs (a
+  top-level `await`, an `on_stale` policy, a `value_object` invariant), which
+  `check`/`verify` (including the wasm Worker's) already reject transitively
+  through `lower_domain`, but also a conflicting explicit effect-outcome role,
+  a duplicate or empty enum declaration, and any failure `domain_kernel_source`'s
+  own kernel-text rendering raises (for example an unsupported Map/container
+  default shape, or a reference to an unknown domain type). `analyze` previously
+  accepted all of these with `result:"analyzed"`/exit 0; it now matches `domain
+  expand`'s diagnostic byte-for-byte for every one of them. A well-formed
+  domain spec still analyzes successfully.
+- Fixed (#728): typed bounded never-enabled action coverage as `never_enabled_action`, so native `verify` and `sweep` select it with `--vacuity error|ignore`, while WASM and mode-less scenarios preserve the diagnostic.
+- Fixed issue #729: `verification_warnings`'s `vacuous_implication`/
+  `vacuous_leadsto` reachability probe (`fsl-runtime`) ran one **unbudgeted**
+  concrete BFS per antecedent/trigger, cloning the whole `KernelModel` per
+  explored node. On the `LabelCoreRepro` reproducer
+  (`rust/fslc/tests/issue_697_all_properties_memory.rs`), isolating a single
+  affected property (`--property PublishedWasReviewed`) consumed ~1,095 MB
+  (measured control, before this fix; the issue reported ~1,096 MB), against
+  ~47 MB for an unaffected property, and `--vacuity ignore` did not help —
+  `apply_vacuity_mode` only filtered the already-computed output. Every
+  implication antecedent and leadsTo trigger now shares one budgeted BFS
+  (`fsl_runtime::expression_reachability`, budgeted at the same
+  `CONCRETE_PROBE_BUDGET` `find_boundary_violation` uses and reusing its
+  established scratch-`Monitor` pattern from issue #730/#776), which drops the
+  same isolated-property case to ~348 MB (no vacuity option change) or ~44 MB
+  (`--vacuity ignore`, which now genuinely skips the probe instead of
+  filtering its output) and removes the per-property multiplier the shared BFS
+  was designed to eliminate. Reachability is now tri-state
+  (`Reachability::{Reachable, Unreachable, Exhausted}`): a candidate that hits
+  the budget before resolving reports the new `vacuity_probe_truncated` kind
+  (added to `fsl_core::VACUITY_KINDS`, 6 → 7) instead of silently becoming
+  `Unreachable` (fail-open) or being dropped (also fail-open under `--vacuity
+  error`) — depth-bounded non-closure is unaffected and still reports
+  `vacuous_implication`/`vacuous_leadsto` exactly as before. `skip_vacuity_probe`
+  is threaded as an explicit argument from the one CLI derivation point
+  (`--vacuity ignore` in `verify`/`sweep`); the `ledger`/`html`/`mutate`
+  baseline and the wasm Worker surface (neither has a `--vacuity` option)
+  always compute it. Negative controls: the `--vacuity ignore` envelope equals
+  the `--vacuity warn` envelope with vacuity-kind warnings filtered out
+  (`issue_729_vacuity_ignore_skip.rs`); `ledger`/`html` output for an ordinary
+  vacuous finding is unchanged, and a `vacuity_probe_truncated` finding cannot
+  move a requirement's assurance class since `assurance_token` never reads
+  `warnings` (`issue_729_vacuity_probe_truncated_ledger.rs`); a
+  corpus-conservation test confirms no maintained spec exhausts the shared
+  budget (`issue_729_vacuity_probe_corpus_budget.rs`).
+- Fixed issue #730: `fsl-runtime`'s `bfs` (the solver-free agreement oracle),
+  `first_self_violation` (`check_refinement`'s self-consistency precondition),
+  and `verify_explicit_selected` each held a `Monitor` -- and therefore the
+  whole `KernelModel` by value -- per queued/frontier node, so exploring `n`
+  states cloned the model `n` times; `first_self_violation` additionally
+  cloned its whole accumulated `Vec<TraceStep>` per node, worse than
+  `find_boundary_violation` before issue #697's fix. Measured directly on the
+  `LabelCoreRepro` reproducer (release build, depth 3, 16,290 states): `bfs`'s
+  peak memory footprint dropped from ~946 MB to ~236 MB with the state count
+  unchanged. All three now carry only a `State` (plus a scratch `Monitor`
+  re-pointed at each popped state, `find_boundary_violation`'s established
+  pattern) and reconstruct a trace from parent links only when one is
+  actually needed. `first_self_violation`'s multi-root case (issue #493:
+  nondeterministic init) is handled by `trace::reconstruct_trace` discovering
+  each state's actual root by walking parent links to whichever parentless
+  state the chain terminates at, rather than assuming a single passed-in
+  initial state. No public contract changed: verdicts, JSON envelopes, and
+  state counts are identical before and after on the reproducer and on the
+  `specs`/`examples` corpus.
+- Fixed (#731): `implicit_initial_value` now fires for every domain aggregate
+  state field the renderer already gives an implicit default -- `Int` (`0`),
+  `Option<T>` (`none`), `Set<T>` (`Set {}`), a top-level `Map<K, V>` (the dense
+  per-key `forall` init), and `value_object`-typed fields (their struct-literal
+  default) -- not just the original four scalar shapes (`Bool`, enum, range,
+  external-placeholder). `rust/fslc/src/frontend_output.rs`'s warning now
+  reads the selected value from `fsl_core::domain_type_default`, the same
+  total dispatch `domain_kernel_source` already used
+  (`rust/fsl-core/src/domain.rs`'s `Context::default_for_type`), instead of a
+  second, non-exhaustive copy of the dispatch that silently excluded any type
+  name containing `<`. An enum default is rendered in domain-source form (the
+  bare declared member, e.g. `Pending`) rather than `domain_kernel_source`'s
+  kernel-scoped mangled identifier (`Status_Pending`); a `DefaultForm`
+  threaded through `Context::default_for_type`/`default`/`normalize` selects
+  the right form at every enum-rendering site, including a value_object's own
+  explicit default field and an enum nested inside a value_object's struct
+  literal or a top-level Map's per-key value, so nesting depth cannot bring
+  the mangled form back. New regression tests
+  (`rust/fslc/tests/issue_250_initialization.rs`) cover container/value_object
+  coverage, an explicit default still suppressing the warning, bare `Int`
+  warning like every other scalar shape, and a nested enum inside a
+  value_object/Map staying bare (never `domain_kernel_source`'s mangled form)
+  at any depth; a `domain_expand`-vs-warning string-level check confirms the
+  selected value matches for every shape that renders identically in both
+  domain-source and kernel form -- deliberately excluding enum-bearing values,
+  where the warning's bare member and `domain_kernel_source`'s mangled
+  identifier now intentionally differ. A top-level `Map<K, V>` field (no
+  whole-field initializer syntax exists at all) and a `Set<T>`/`value_object`
+  field whose brace-literal default cannot yet round-trip through `fslc
+  fmt`'s reformat-and-reparse pass (issue #770, found and reproduced
+  independently while implementing this fix) both still warn under `check`
+  but omit the machine-applicable insertion -- chosen by an allowlist over
+  the field's type shape (`Option` only; everything else, including any
+  future brace-literal-rendering constructor, fails closed until reviewed),
+  not the rendered value's text -- and keep `edition_severity.next` at
+  `warning` rather than `error`, since `migrate --write` is fail-closed (it
+  would not write a corrupted file) but attempting that insertion would trip
+  #770's reformat failure and fail migration for the whole file, dropping
+  every other, otherwise-safe edit in it too. A "defect witness" test pins
+  #770's `fslc fmt` symptom directly so a future fix to #770 turns it red;
+  its failure message also flags issue #785, a second pre-existing defect on
+  the same `Context::normalize` enum-mangling guard (found independently
+  during review, not reachable through this PR's own withheld insertion) that
+  must be fixed before the `value_object` insertion can be safely re-enabled.
+- Fixed (#747): `main`'s scheduled product gate is no longer cancelled by a
+  self-perpetuating cache-budget loop. PR #752 restricted `Swatinem/rust-cache`
+  saving in `ci.yml` to non-pull-request events so pull requests could not keep
+  evicting `main`'s caches, but `merge-readiness.yml`'s two `rust-cache` steps
+  (`rust-compile`, `core-contracts`) carried no such guard. Because that
+  workflow runs on every pull request, each one kept saving a fresh
+  ref-scoped copy of both keys. Measured on 2026-08-11: 15 pull-request refs
+  (#743-#792, all closed or merged by then) still held 29 entries (~1.90 GiB)
+  on those two keys alone, part of 38 entries / 10.03 GiB total against the
+  repository's 10 GiB budget -- retained not because anything kept restoring
+  them, but because GitHub only evicts an unused cache after 7 days without a
+  read, and measurement landed inside that window. The LRU evictor does not
+  distinguish "small but many" from "few but large": it had removed
+  `refs/heads/main`'s `native Z3 4.16 (windows-latest)` cache down to zero
+  entries. `merge-readiness.yml` has no `push` trigger, so the `ci.yml`-style
+  `save-if: ${{ github.event_name != 'pull_request' }}` guard would not close
+  this path -- it would leave every pull request permanently cold, since
+  nothing would ever save a `main` copy under this workflow's own key for it to
+  restore. Both `Swatinem/rust-cache` steps instead go restore-only against
+  `ci.yml`'s own `rust-workspace` key (`shared-key: rust-workspace`,
+  `save-if: false`). The shared toolchain, runner, and checkout predict an exact
+  derived-key match, and four direct pull-request restore logs confirm it: run
+  `31581715093` attempt 1 logged `full match: true` for core contracts at 09:11:00.77Z
+  and Rust compile at 09:11:04.76Z; run `31583381471` attempt 1 logged the same result at
+  09:33:03.06Z and 09:33:05.55Z. Each identified
+  `v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53`; the logs, rather than
+  the mechanism, establish the observed full-key match.
+  `tools/run-semantic-mutation-gate.sh`'s
+  mutants lane also moves its per-run scratch `CARGO_TARGET_DIR` out from under
+  `rust/target` (to `${RUNNER_TEMP:-${TMPDIR:-/tmp}}`), and the script now
+  clears any `rust/target/semantic-mutation.*`/`semantic-mutation-build` left by
+  a restored cache unconditionally, right after mode validation, before either
+  lane runs. That placement matters because the current
+  `semantic-mutation-mutants` `save-if: false` actively makes the operators
+  shards the key's only configured saver; it does not merely record an
+  operators-only historical race. The counterexample is run `31086907528`,
+  attempt 1: mutants job `92568586155` restored `No cache found.` and its
+  successful post step uploaded 2,922,378,363 B while all three operators shards
+  were cancelled with their post steps skipped. An earlier version of this
+  cleanup ran only in the mutants lane's own path, after the operators lane's
+  early exit, so the then-save-enabled operators lane never ran it.
+  `semantic-mutation-mutants`'s `Swatinem/rust-cache` step is now
+  `save-if: false` (with `cache-on-failure` removed, since `save-if: false`
+  already makes it inert), closing its historically observed save path; the
+  operators shards remain the only save-enabled path. **This is a
+  closed-ingress-path fix, not a size fix**: measured directly (product-gate run `31210570118` attempt 1, job
+  `92972117510`, `mutation operators (3/3)`), the `semantic-mutation` entry's
+  current 2.719 GiB was created by a *cold* operators run (`No cache found.` at
+  19:14:17Z, saved at 19:48:12Z). That operators job did not run the mutants
+  lane; the same run's successful mutants job `92972117519` ran on a separate
+  runner and could not contribute to this cache archive. Neither the mutants
+  scratch build nor its evidence paths therefore contributed to this entry's
+  size, so there was no dead weight to recover, and two earlier size predictions
+  in this fragment and in `docs/DESIGN-ci.md` (~0.9-1.4 GiB from an assumed
+  accumulating scratch tree, then ~2.2 GiB from `rust/target/fault-operators`'
+  deliberately persistent build tree treated as a designed minimum size) were
+  both wrong about what this entry actually is.
+  This one cold-start save is evidence of what this key can legitimately hold,
+  not a proven minimum across every shard and revision. `semantic-mutation` is
+  not resized by this change and is not touched by the budget lever below.
+  Separately, six observed `rust-native-z3` **`windows-latest`** scheduled runs
+  timed out at the configured 40-minute limit from 2026-08-07 through 2026-08-11.
+  They span four revisions and test volumes: `0590975` / `31133932323`,
+  `bcb0a4d` / `31210570118`, `1050a76` / `31273202771`, and `60705fd` /
+  `31330456273`, `31423201873`, `31527197290`. Each observed cancelled job had
+  `Post Run Swatinem/rust-cache@v2` skipped; cache absence is a material
+  correlate, not evidence that one deadlock or one change caused every timeout.
+  That step now carries `cache-on-failure: true`. On run `31565897267` attempt 1, the cancelled
+  Windows job's `Post Run Swatinem/rust-cache@v2` step succeeded and created
+  `v0-rust-rust-native-z3-Windows_NT-x64-af4551b0-09fbaf53` at
+  2026-08-12T06:16:19.271024Z (619,429,238 B), four seconds before the job
+  completed; this directly contrasts with run `31527197290` attempt 1, whose cancelled
+  job logged `9 skipped Post Run Swatinem/rust-cache@v2`. This is an observed
+  cache save after timeout cancellation under the combined change, not isolated
+  proof that `cache-on-failure` alone caused it: that changeset also raised this
+  job's timeout from 40 to 60 minutes, and commit `877fe8c` (#752) likewise
+  coupled the flag with timeout increases for the semantic-mutation lanes.
+  macOS recovery is not established by this Windows observation. The direct
+  scheduled recovery record is run `31632094255` attempt 1 (`event: schedule`):
+  both `native Z3 4.16 (windows-latest)` and `product gate` concluded `success`.
+
+  The predecessor `.github/scripts/audit-cache-budget.mjs` `sharedKeyOf` regex
+  matched the GitHub Actions `runner.os` platform spellings (`Linux`/`macOS`/`Windows`), but
+  `Swatinem/rust-cache` derives its key from `os.type()`, which reports
+  `Linux`/`Darwin`/`Windows_NT` -- so `rust-native-z3`'s cache, on either
+  platform, was invisible to every rule in this audit, including the one that
+  should have reported `main`'s Windows entry evicted to zero during this
+  incident. The current `entryIdentity`, which replaced `sharedKeyOf`, accepts
+  only the observed `os.type()` spellings, and
+  the default-branch requirement is now
+  per-`{key, platform}` pair rather than per-key, so `rust-native-z3` must be
+  present on both `Windows_NT` and `Darwin` independently -- one platform's
+  cache can no longer hide the other's absence. A new general rule also flags
+  any `v0-rust-*`-prefixed cache on a pull-request ref regardless of whether its
+  shared key is one `ci.yml` declares, closing the same blind spot for any
+  future workflow's unguarded `Swatinem/rust-cache` step (and, retroactively,
+  for `merge-readiness.yml`'s own now-removed per-job keys, which this audit
+  never flagged for the same reason). Its runner treats usage as conservative
+  bytes-only evidence (`max(usage bytes, listing sum)`); GitHub refreshes its
+  count approximately every five minutes, so `active_caches_count` is not an
+  identity condition, but is rejected when supplied as an invalid numeric
+  envelope field. It collects the full `created_at`-ascending listing twice,
+  including a validated empty sentinel each time, and requires the ID set plus
+  each ID's `key`, `ref`, and `size_in_bytes` to agree. One disagreement retries
+  the paired collection; a second fails closed. This detects page-boundary
+  mixing whenever it changes the two observed sets, but does not claim an atomic
+  snapshot: two collections could still receive the same mixed state. Sentinel
+  counts must be zero (the observed out-of-range envelope) or repeat the first
+  count, never an arbitrary valid integer. A disagreement waits one second before
+  the one bounded retry: this is pacing for a later request, not a claim of a
+  fresh or independent backend snapshot, which GitHub does not guarantee. The retry-safe request bound counts
+  HTTP-successful usage plus listing requests: `1 + 4 × (pages + sentinel)`, capped at 900
+  to reserve 100 of the standard 1,000-request Actions-token quota, with
+  missing/empty/invalid `x-ratelimit-remaining` rejected before conversion and
+  headroom checked before every request and against the current collection's
+  remaining requests, never a later small collection's bound minus cumulative
+  requests. Malformed listing envelopes or usage bytes exit as `api-unreadable`;
+  absent usage bytes become non-PASS `usage-unobserved`. GitHub documents
+  `created_at` only as the primary sort key: the repeated live sample had unique
+  timestamps, so it establishes no tie order. A tied boundary reorder can make
+  the listing unauditable through a duplicate ID, rejected immediately, or
+  different paired observations, which retry once and fail closed if still
+  different; an identical mixed state can repeat as an undetectable residual.
+
+  An earlier revision of this change added an `entry-oversized` finding
+  (`SINGLE_ENTRY_WARN_BYTES = 2.5 GiB`) calibrated against the wrong ~2.2 GiB
+  size above; since the observed clean size is 2.719 GiB, that control would
+  have fired on a healthy `semantic-mutation` entry and has been removed rather than
+  recalibrated, since no measured defect signature exists to calibrate it
+  against (raising the threshold to paper over this would only be guessing at
+  an unmeasured defect). The actual budget lever is `ci.yml`'s `fsl-logic` job,
+  which now goes restore-only against `rust-workspace`
+  (`shared-key: rust-workspace`, `save-if: false`) instead of saving its own
+  key: its entire build (`cargo test -p fslc-rust --test typed_agreement
+  --locked`) is a strict subset of what `rust workspace` already builds, and
+  `Swatinem/rust-cache` prunes workspace-member artifacts at save time regardless
+  of which job saves, so every lane's cache is substantively the same external
+  dependency set. Measured main-branch entries (2026-08-12): `rust-workspace`
+  1,605,761,517 B, `fsl-logic` 1,470,489,603 B, `wasm` 1,452,450,563 B,
+  `rust-native-z3` Darwin 1,239,235,056 B, `semantic-mutation` 2,919,716,751 B,
+  plus ~41 MB of tool-binary caches -- 8.130 GiB total. Deleting the now-orphaned
+  `fsl-logic` entry (separate, human-authorized) and re-adding Windows
+  native-z3 (historical 0.577 GiB) estimated 7.338 GiB (73.4%), under the
+  8.5 GiB warn threshold. The 7.469 GiB listing was measured only after the
+  six audit failures and was never itself audited. Four scheduled audits
+  (`31239888526`, `31295386890`, `31357678690`, and `31459843075`, each attempt 1,
+  2026-08-08 through 2026-08-11) reported only `budget-exhausted`; the two
+  2026-08-12 failures (`31565897238` attempt 1, push, and `31566055925` attempt 1,
+  schedule) reported both two orphaned `refs/pull/793/merge` Rust
+  entries and `main-cache-absent` for `rust-native-z3`. Recreating the Windows
+  entry at 2026-08-12T06:16:19.271024Z resolved the latter; human-authorized deletion of
+  the two PR entries on 2026-08-13 resolved the remaining findings. The listing
+  was then 7.337 GiB and audit run `31654305398` attempt 1 succeeded. `CI_SHARED_KEYS` and
+  `REQUIRED_MAIN_ENTRIES` both drop `fsl-logic` accordingly, while the latter now explicitly
+  requires the independently saved Linux `semantic-mutation` entry; the generic
+  pull-request-rust-cache rule covers any regression the same way it already
+  covers `merge-readiness.yml`'s former per-job keys. Separately, the shared-key
+  regex now parses from the tail of the cache key (anchored at the end) instead
+  of lazily from the head: a reviewer reproduced a case where a shared key
+  containing a platform-like substring earlier in its name (e.g. a hypothetical
+  `foo-Linux-bar`) misparsed into the wrong shared key, which caused a real,
+  present main-branch entry to be reported `main-cache-absent`. See
+  `docs/DESIGN-ci.md`, "Actions cache budget".
+- Fixed (#723): `fslc domain check`/`analyze`'s `reliable_effect_without_outbox_boundary`
+  finding now honors `DESIGN-effect.md`'s accepted "outbox on the effect *or
+  owning saga*" contract instead of only the effect's own `outbox`. A saga owns
+  an effect when one of its steps or `compensation` blocks emits the effect's
+  request event; an unrelated saga's outbox boundary no longer silences the
+  finding, and a partially-covered set of owning sagas still fires with the
+  uncovered saga names recorded in the finding's `witness.uncovered_sagas`.
+- Fixed (#779): a saga step, timeout, or compensation action that emits an
+  event no longer leaves that event's declared `evolve` unapplied. Both native
+  `domain` lowering paths (`lower_saga_actions` in `domain_lowering.rs`,
+  `render_saga_actions` in `domain.rs`) called `event_assignments` for these
+  three action kinds without the paired `evolve_items`/`saga_emit_evolve` call,
+  so an action could raise its emitted event's one-hot flag while the aggregate
+  state that event was declared to evolve stayed frozen at its initial value
+  forever — an accepted-but-unreachable-transition soundness defect in the same
+  class PR #725 (#713) closed for the compensation guard. Both paths now apply
+  the declared evolve in the same action, in emit order, matching the pairing
+  already correct for command/decide, effect-completion, and saga-observe
+  actions. A new corpus-wide sweep
+  (`rust/fsl-core/tests/domain_saga_evolve_pairing.rs`) asserts, for every
+  action any domain fixture lowers to on either path, that an action setting an
+  event flag true also applies that event's declared evolve, so a future
+  lowering rewrite (e.g. #679's saga-history rewrite) cannot silently drop the
+  pairing again. Negative controls on `examples/domain/order_fulfillment_saga.fsl`
+  confirm both the fix (`inventory_status != ReservationPending` and
+  `payment_status != PaymentPending`, previously `proved` under
+  `--engine induction`, now correctly `violated`) and its boundary
+  (`inventory_status != ReleaseRequested` stays `proved`, and the saga's
+  never-enabled compensation warning is unchanged, because the compensation
+  action's dual event-flag guard is untouched by this fix and remains
+  structurally disabled until #679).
+- Partially fixed (#780): domain, DB, AI-component, AI-project check/evidence,
+  approval, and causal command boundaries preserve parse kind, location, and `FSL-PARSE`.
+- Fixed issue #783: `fsl-runtime`'s `check_refinement` correspondence walk,
+  `action_cover_traces`, and `leadsto_response_traces` were the three
+  remaining lanes still holding a `Monitor` -- and therefore the whole
+  `KernelModel` by value -- per queued/frontier node, the same defect class
+  issue #730 fixed in `bfs`, `first_self_violation`, and
+  `verify_explicit_selected`; the first two additionally cloned a growing
+  `Vec<TraceStep>` per node. Measured directly on the shared `LabelCoreRepro`
+  refinement fixture (release build, depth 3): `check_refinement`'s peak
+  memory footprint dropped from ~1,728 MB (consistent with the issue's own
+  reported ~1.72 GB) to ~491 MB, with `refines`/`refinement_failed` verdicts
+  identical before and after. `check_refinement` and `action_cover_traces`
+  now carry only a `State` per frontier node (plus a scratch `Monitor`
+  re-pointed at each popped state) and reconstruct a trace from parent links
+  only when one is actually needed, using the same `trace::ParentLink`/
+  `reconstruct_trace` machinery issue #697 established; both are now locked
+  onto a shared `LeanFrontier` type so a future per-node `Monitor`/
+  `Vec<TraceStep>` clone in either is a consumer-side type error, not only a
+  review-time judgment call. `leadsto_response_traces` is a partial fix
+  scoped to the `Monitor` clone alone: its walk has no `visited` dedup (a
+  `leadsTo` pending/response history is path-dependent, so two routes
+  reaching the same state must stay distinct path-trees), so its per-node
+  `Vec<TraceStep>` clone is unchanged -- but it is now locked onto a second
+  shared type, `PathFrontier` (`(State, Vec<TraceStep>, usize)`, no
+  `Monitor`), so a future per-node `Monitor` clone there is also a
+  consumer-side type error, closing the one lane an independent review found
+  without either a ceiling or a type guard. A negative control
+  (`rust/fsl-runtime/tests/issue_783_refine_memory_ceiling.rs`, Linux-only,
+  its `LabelCoreRepro` fixture shared with the `issue_730_*` ceiling tests via
+  `tests/support/mod.rs`) adds a calibrated memory ceiling for
+  `check_refinement`'s walk and, as PR #776 deferred to this issue, one for
+  `first_self_violation`'s own frontier. Both ceilings are calibrated from a
+  direct Linux measurement (`rust:1-bookworm` Docker, `aarch64`; exact
+  commands, mutant source commits, and reasoning are recorded in the test
+  file's own top comment, not only here): a binary-search sweep of
+  `CEILING_KB` against the fixed build and a mutant confirmed the `ulimit
+  -v`-capped assertion actually passes on the fixed build and actually fails
+  (`SIGABRT`, `status=...unix_wait_status(134)`, `stderr="memory allocation
+  of N bytes failed"`) on the corresponding mutant, with both PASS/FAIL
+  boundaries reproduced twice. The two mutants differ in precision: commit
+  `6012c00` (all three #783 lanes reverted) stands in for `check_refinement`'s
+  mutant, sound teeth there because the measurement's driver never reaches
+  `action_cover_traces`/`leadsto_response_traces`; `first_self_violation`'s
+  mutant restores only that function to its pre-#776 form (commit
+  `20d0a9b^`). `check_refinement`: fixed boundary `(500, 502]` MiB,
+  `6012c00` boundary `(2000, 2020]` MiB, `CEILING_KB = 950 * 1024`
+  (1.89-1.90x headroom, 2.11-2.13x margin). `first_self_violation`: fixed
+  boundary `(500, 505]` MiB, pre-#776-clone boundary `(2120, 2150]` MiB,
+  `CEILING_KB = 1000 * 1024` (1.98-2.00x headroom, 2.12-2.15x margin). The one
+  remaining assumption is architecture: this measurement is `aarch64`, while
+  this repository's CI runs `x86_64`; if either ceiling flakes on CI, that
+  cross-architecture gap is the most likely cause, and widening `CEILING_KB`
+  is the fix, not tightening the test's claim. No public contract changed:
+  `RefinementCheck`/`LeadstoResponse` fields, JSON envelopes, exit codes, and
+  verdicts/trace/state-count output are identical before and after, checked
+  directly across every `specs`/`examples` corpus refinement mapping (`fslc
+  refine`, 27 registered triples) and every `spec`-dialect corpus file (`fslc
+  scenarios`, 93 files, default and `--depth 6`).
+- Fixed (#796): `domain analyze` and `domain expand` now reject unresolved domain
+  identifiers with the same located semantic diagnostic as `check`, instead of
+  returning a false-green analysis or an unusable generated Kernel.
+- Fixed: CLI test fixtures now check out with line-feed endings on every runner.
+  `.gitattributes` pinned `*.fsl` and four named files, so the `.md` and `.json`
+  fixtures added with the error-envelope parity matrix were checked out CRLF on
+  `windows-latest`. `error_envelope_document.md`'s leading `---` then stopped
+  parsing as document frontmatter and three parity cells failed on that runner
+  alone while Linux and macOS stayed green (run `31759050211`). The directory now
+  carries the rule, `.z3-trace` stays binary, and
+  `rust/fslc/tests/fixture_line_endings.rs` fails with the offending path if a
+  fixture escapes it again.
+- Fixed (#808): native `fslc` verification now binds validation, lowering,
+  requirements metadata, and engine execution to one captured root-spec snapshot.
+- Fixed (#808): native `fslc mutate` now binds its baseline verification, Kernel/model load,
+  requirements-trace contract, and mutant enumeration to one captured root-spec snapshot, so a
+  concurrent edit of the input file can no longer mix one revision's baseline with another
+  revision's kill-rate.
+- Fixed (#808): native `fslc testgen` and generic `scenarios` now bind requirement-trace
+  validation, the BMC fallback on a genuine violation, and requirement-trace scenario
+  generation to the same captured root-spec snapshot as `verify` (#811).
+- Required (Refs #781): native CLI error-envelope parity now pins measured
+  `check`/`verify` Parse envelope differences for AI-project and causal input
+  shapes under #780, classifies the actually invoked `approval create --kind
+  requirements_document` frontend with its generated reviewed artifact, and
+  records the compose nested-component Parse boundary. #801 tracks only the
+  remaining work to derive the hand-authored input-shape population.
+- Documented (#723): `docs/DESIGN-effect.md`'s effect lifecycle diagram no
+  longer lists `Compensated` as a reachable status. `effect_outcome_member`
+  (`rust/fsl-core/src/domain_lowering.rs`) is a total function over exactly
+  `{Succeeded, Failed, TimedOut, Cancelled}`, and the renderer
+  (`rust/fsl-core/src/domain.rs`) mirrors the same set; an effect's
+  `compensation { emits ... }` block only feeds the presence-only
+  `missing_compensation_for_irreversible_effect` finding
+  (`rust/fsl-tools/src/domain.rs`) and never writes effect status, so
+  `Compensated` was unreachable in both v0 lowering paths. The generated
+  `EffectStatus` enum keeps the `Compensated` member (reserved) because
+  `rust/fslc/tests/issue_450_sibling_enum_conversion.rs` and the domain
+  characterization baseline already depend on it for refinement enum
+  conversion. A new negative control,
+  `effect_compensated_status_is_never_assigned_by_either_lowering_path`
+  (`rust/fsl-core/tests/domain_render_agreement.rs`), pins the current
+  unreachability across both lowering paths so a future writer for
+  `Compensated` is forced to update this test and `docs/DESIGN-effect.md`
+  together; real compensation semantics are tracked against #679's
+  correlation-indexed `SagaPhase` history, a precondition for defining which
+  compensation cancels which specific effect instance.
+  `docs/intro/domain.en.html` and `docs/intro/domain.ja.html` carried the same
+  `Compensated` transition in their effect-lifecycle callout and are corrected
+  identically.
+- Documented (#724): `docs/DESIGN-domain.md`'s Findings section restated to
+  match the native `fslc domain check`/`domain replay` implementation instead
+  of the 7-kind list it previously claimed as implemented. Native
+  `fslc domain check` implements exactly 4 finding kinds
+  (`rust/fsl-tools/src/domain.rs`'s `effect_findings`):
+  `irreversible_effect_without_idempotency_key`,
+  `pending_effect_without_timeout_or_fallback`,
+  `missing_compensation_for_irreversible_effect`, and
+  `reliable_effect_without_outbox_boundary`. `aggregate_boundary_violation` and
+  the static form of `uncorrelated_async_completion` were never findings: an
+  `evolve` writing outside its aggregate and an async effect with no
+  `correlation_id` both fail Kernel lowering itself
+  (`rust/fsl-core/src/domain_lowering.rs`) with a top-level `result:"error"`,
+  `kind:"semantics"` envelope outside the finding schema, a stronger
+  (fail-closed) guarantee than a warning/error finding would give; only the
+  `domain replay` form of `uncorrelated_async_completion` is a real finding
+  (`rust/fslc/src/main.rs`, `rust/fslc/tests/issue_518_domain_replay_detection.rs`).
+  `missing_decide_for_command`, `missing_evolve_for_event`, and the
+  previously-undocumented `cross_aggregate_update_without_event` exist only in
+  the frozen Python compatibility reference (`src/fslc/domain_expand.py`), not
+  in native. `late_completion_without_stale_policy` is removed rather than
+  restated: reviving it would recommend the `on_stale` syntax native already
+  rejects fail-closed (#711). `saga_dead_end` and `process_wait_cycle` are
+  removed with no native replacement; whether to implement them is tracked in
+  #769. `docs/DESIGN-effect.md`'s effect-lifecycle summary and its
+  timeout/retry/fallback vs. stale-policy warning claim are corrected to match.
+  `docs/intro/domain.en.html` and `docs/intro/domain.ja.html` carried the same
+  7-kind over-statement in their own findings table and prevention cards and
+  are corrected identically.
+- Documented (#747): Recorded recovery observations after #794: on run `31565897267` attempt 1, a cancelled
+  Windows native-Z3 job's post step saved 619,429,238 B, although the same changeset also raised its
+  timeout from 40 to 60 minutes; runs `31581715093` attempt 1 and `31583381471` attempt 1 logged four
+  merge-readiness full matches; the Windows entry's 2026-08-12T06:16:19.271024Z recreation resolved
+  `main-cache-absent`, and removing two human-authorized orphaned #793 caches resolved the remaining audit
+  findings before run `31654305398` attempt 1 succeeded at 7.337 GiB. The direct scheduled recovery
+  record, run `31632094255` attempt 1 (`event: schedule`), has both `native Z3 4.16 (windows-latest)`
+  and `product gate` concluding `success`. The restore-only FSL Logic Test logged shared-key full
+  matches on run `31565897267` attempt 1 (2m54s) and on run `31570480618` attempt 1 (3m02s). Also recorded that the current
+  `save-if: false` guard, rather than historical timing, makes operators the only configured
+  `semantic-mutation` saver: run `31086907528` attempt 1's mutants job `92568586155` uploaded
+  2,922,378,363 B after `No cache found.` while all operator posts were skipped.
+  The recovery listing's repeated `created_at` order was observed only across distinct timestamps;
+  GitHub documents no secondary tie order, so a future tied page boundary can produce a duplicate ID,
+  rejected immediately, or different paired observations, which retry once and fail closed if still
+  different; an identical mixed state can repeat as an undetectable residual.
+- Documented (#787): `AGENTS.md`, `CONTRIBUTING.md`, `docs/DESIGN-conformance-harness.md`,
+  `docs/README.md`, `tests/test_dialect_conformance.py`, `tests/dialect_registry.py`,
+  `rust/fsl-syntax/src/causal.rs`, and `docs/DESIGN-causal.md` now state plainly that the
+  frozen-Python conformance harness and coupled-change parity checks (`tests/test_dialect_conformance.py`,
+  `tests/test_coupled_change_meta.py`) are developer-run manual/reference checks with no CI or
+  `tools/check-native-integration.sh` lane invoking them, instead of describing them as machine-enforced
+  gates. The underlying coupling rules (register a new dialect construct in `tests/dialect_registry.py`)
+  are unchanged; only the enforcement-mechanism claim was corrected. The `docs/LANGUAGE.ja.md` freshness
+  claim, which genuinely is a required CI check (`site-reference-freshness.yml`), is untouched.
 
 ## [4.2.0] - 2026-08-03
 
@@ -4909,7 +5496,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.2.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.3.0...HEAD
+[4.3.0]: https://github.com/ymm-oss/fsl/compare/v4.2.0...v4.3.0
 [4.2.0]: https://github.com/ymm-oss/fsl/compare/v4.1.0...v4.2.0
 [4.1.0]: https://github.com/ymm-oss/fsl/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/ymm-oss/fsl/compare/v3.1.0...v4.0.0
