@@ -923,9 +923,18 @@ fn logical_var(target: &LValue) -> Option<&str> {
 /// Falls back to `InitWriteKey::Root` (whole-variable) whenever `coverage`
 /// is not `Coverage::Keys` for an `Index` target — including `Full`,
 /// `Fields`, and unresolved (`None`, e.g. a dynamic key or a nested lvalue).
-/// That fallback is at least as strict as treating the write as touching
-/// the entire variable, so it never accepts something today's coarser
-/// `Root`-only classification would have rejected.
+/// That fallback never *accepts* something the coarser, pre-#821
+/// `Root`-only classification would have rejected: every write this
+/// function buckets under `Root` was already bucketed there before. It is
+/// not, however, "as strict as touching the entire variable" in the
+/// collision sense: `Root(name)` never collides with
+/// `ConcreteIndex(name, _)`, so a `None`-coverage target is simply not
+/// collision-checked against any concrete key at all. A `forall`-bound
+/// index used through a non-`Var` key expression (e.g. `m[i - i]`) is one
+/// such target; two iterations of it aliasing each other, or it aliasing a
+/// separate `m[K] = ...`, can still go undetected here when the values
+/// agree. That gap is pre-existing (identical on `origin/main`) and is not
+/// fixed by this change.
 fn init_write_keys(target: &LValue, coverage: Option<&Coverage>) -> BTreeSet<InitWriteKey> {
     if let (LValue::Index(name, _), Some(Coverage::Keys(keys))) = (target, coverage) {
         return keys

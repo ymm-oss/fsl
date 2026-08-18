@@ -291,15 +291,52 @@ fn init_forall_write_collides_with_later_concrete_write_to_the_same_key() {
         fsl_runtime::verify_explicit(lone_forall, 1, 100).expect("lone injective forall accepted");
     assert!(result.violation.is_none());
 
-    // Accepting control: a forall covering one key and a separate flat
-    // write to a genuinely different key must stay accepted.
-    let disjoint = model(
+    // Accepting control: a forall on one map and flat writes to a wholly
+    // separate map are trivially not duplicates (different logical roots,
+    // not disjoint keys on the same map). See the three same-map controls
+    // below for the case this change actually had to get right.
+    let disjoint_variables = model(
         "spec Probe { type Idx = 0..2 state { m: Map<Idx, Bool>, n: Map<Idx, Bool> } \
          init { forall i: Idx { m[i] = true } n[0] = true n[1] = false n[2] = true } \
          action noop() { } }",
     );
-    let result = fsl_runtime::verify_explicit(disjoint, 1, 100)
-        .expect("forall write and flat writes to a distinct map's keys are not duplicates");
+    let result = fsl_runtime::verify_explicit(disjoint_variables, 1, 100)
+        .expect("forall write and flat writes to an unrelated map's keys are not duplicates");
+    assert!(result.violation.is_none());
+
+    // Accepting control: two `forall` blocks over disjoint subranges of the
+    // *same* map's key domain must not collide with each other.
+    let disjoint_foralls = model(
+        "spec Probe { type Idx = 0..3 state { m: Map<Idx, Bool> } \
+         init { forall i in 0..1 { m[i] = true } forall j in 2..3 { m[j] = false } } \
+         action noop() { } }",
+    );
+    let result = fsl_runtime::verify_explicit(disjoint_foralls, 1, 100)
+        .expect("two foralls over disjoint subranges of the same map do not collide");
+    assert!(result.violation.is_none());
+
+    // Accepting control: a forall covering one subrange and a flat write to
+    // a key outside that subrange, on the *same* map, must not collide.
+    let forall_then_flat = model(
+        "spec Probe { type Idx = 0..2 state { m: Map<Idx, Bool> } \
+         init { forall i in 0..1 { m[i] = true } m[2] = false } \
+         action noop() { } }",
+    );
+    let result = fsl_runtime::verify_explicit(forall_then_flat, 1, 100)
+        .expect("a forall and a same-map flat write to a key it does not cover do not collide");
+    assert!(result.violation.is_none());
+
+    // Accepting control: the same shape in the opposite order -- the flat
+    // write first, the forall second -- since detection must not depend on
+    // statement order.
+    let flat_then_forall = model(
+        "spec Probe { type Idx = 0..2 state { m: Map<Idx, Bool> } \
+         init { m[2] = false forall i in 0..1 { m[i] = true } } \
+         action noop() { } }",
+    );
+    let result = fsl_runtime::verify_explicit(flat_then_forall, 1, 100).expect(
+        "a same-map flat write followed by a forall that does not cover its key do not collide",
+    );
     assert!(result.violation.is_none());
 }
 
