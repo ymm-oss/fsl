@@ -67,7 +67,7 @@ Uninstall:
 rm -rf ~/.local/share/fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery
 ```
 
-The current release is **v4.3.0**. Official releases contain checksummed native binaries,
+See the [Releases](https://github.com/ymm-oss/fsl/releases) page for the current version. Official releases contain checksummed native binaries,
 the VSCode extension, and Kernel bundles, and — since the v3.0.0 release — a checksummed
 Agent Skill bundle; the installer separately verifies a pinned source-archive checksum for
 compatibility with that original v3.0.0 packaging. The Python compatibility reference
@@ -313,7 +313,7 @@ fsl/
 │   ├── fslc/               #   native CLI and JSON/process contract
 │   ├── fsl-wasm/           #   browser Worker surface
 │   └── fsl-lsp/            #   native language server and document index
-├── src/fslc/               # frozen Python compatibility reference (63 modules; do not add product behavior here)
+├── src/fslc/               # frozen Python compatibility reference; do not add product behavior here
 ├── docs/                   # docs/README.md maps all of it; LANGUAGE.md is the language reference
 ├── specs/                  # sample specs (*.fsl); each file's header comment states the language
 │                           #   feature/idiom it exercises
