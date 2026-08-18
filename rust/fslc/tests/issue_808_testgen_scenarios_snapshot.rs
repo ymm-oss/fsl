@@ -21,7 +21,7 @@ mod fifo_snapshot;
 use std::process::Command;
 
 #[cfg(unix)]
-use fifo_snapshot::{TwoSnapshotFifo, wait_for_output};
+use fifo_snapshot::{ReapedChild, TwoSnapshotFifo, WriterOutcome, wait_for_output};
 #[cfg(unix)]
 use serde_json::Value;
 
@@ -105,18 +105,20 @@ fn spawn_against_two_snapshot_fifo(
     args.push(remaining.next().expect("command name"));
     args.push(&path);
     args.extend(remaining);
-    let mut child = Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .args(&args)
-        .current_dir(fifo_snapshot::root())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn native fslc against FIFO");
+    let mut child = ReapedChild::new(
+        Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args(&args)
+            .current_dir(fifo_snapshot::root())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn native fslc against FIFO"),
+    );
     let output = wait_for_output(&mut child);
 
     // This is the correctness oracle. Cleanup opens B only after this point.
     fixture.assert_no_second_open();
-    fixture.release_writer();
+    assert_eq!(fixture.release_writer(), WriterOutcome::Finished, "{label}");
     (fixture, output)
 }
 
