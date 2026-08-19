@@ -342,7 +342,7 @@ pub fn lower_compose(
                 meta,
                 annotations,
             }) => {
-                init.extend(rewrite_compose_statements(statements.clone(), &components));
+                init.extend(rewrite_compose_statements(statements.clone(), &components)?);
                 if init_meta.is_none() {
                     init_meta.clone_from(meta);
                 }
@@ -952,12 +952,11 @@ fn rewrite_compose_item(
 fn rewrite_compose_statements(
     statements: Vec<Statement>,
     components: &BTreeMap<String, Component>,
-) -> Vec<Statement> {
+) -> Result<Vec<Statement>, CoreError> {
     statements
         .into_iter()
         .map(|statement| resolve_alias_statement(statement, components))
-        .collect::<Result<_, _>>()
-        .expect("compose alias validation occurs during lowering")
+        .collect()
 }
 
 fn resolve_alias_statement(
