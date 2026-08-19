@@ -2491,6 +2491,22 @@ fn parity_registry_exclusions_are_explicit_and_runnable_entries_have_a_spec_slot
 }
 
 #[test]
+fn mutate_coverage_includes_every_kernel_coverage_entry() {
+    // Prevent index-based sharing from leaving mutate narrower when the shared
+    // Kernel coverage grows or is reordered.
+    for expected in PARSE_KERNEL_COVERAGE {
+        assert!(
+            MUTATE_COVERAGE.iter().any(|actual| {
+                actual.class == expected.class && actual.fixture == expected.fixture
+            }),
+            "mutate coverage must include {:?}/{} from PARSE_KERNEL_COVERAGE",
+            expected.class,
+            expected.fixture
+        );
+    }
+}
+
+#[test]
 #[should_panic(expected = "exactly one executable Cell or reasoned NotApplicable")]
 fn missing_classification_spec_path_is_rejected() {
     let empty_coverage = CommandRegistration {
