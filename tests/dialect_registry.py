@@ -47,6 +47,17 @@ class Dialect:
     depth: int = 4  # BFS/verify agreement bound for this dialect's files
 
 
+@dataclass(frozen=True)
+class NativeOnlyRefinementSyntax:
+    path: str
+    construct: str
+    line: int
+    column: int
+    design_citation: str
+    reason: str
+    native_owner: str
+
+
 # construct -> Dialect. "kernel" is the design layer's own top-level `spec`.
 DIALECTS: dict[str, Dialect] = {
     "kernel": Dialect("spec", 60),
@@ -128,5 +139,24 @@ MONITOR_EXCLUSIONS: dict[str, str] = {
         "is not a DECLARED_ERROR fixture. Native coverage lives in "
         "rust/fslc/tests/cli_regression.rs::"
         "native_check_locates_a_semantic_dependency_error_at_the_preservation"
+    ),
+}
+
+# Exact corpus path -> native-only refinement syntax. This is deliberately
+# separate from MONITOR_EXCLUSIONS: every refinement mapping is non-monitorable,
+# but only this file has syntax the frozen parser intentionally cannot accept.
+NATIVE_ONLY_REFINEMENT_SYNTAX: dict[str, NativeOnlyRefinementSyntax] = {
+    "examples/layers/return_impl_refines.fsl": NativeOnlyRefinementSyntax(
+        path="examples/layers/return_impl_refines.fsl",
+        construct="enum abstraction",
+        line=11,
+        column=3,
+        design_citation="docs/DESIGN-enum-member-identity.md:13-16, 38-52",
+        reason=(
+            "source-total many-to-one enum abstraction mapping syntax is "
+            "Rust-native-only; the accepted decision explicitly retains the "
+            "frozen Python reference unchanged"
+        ),
+        native_owner="rust/fsl-core refinement typechecking and lowering",
     ),
 }
