@@ -50,6 +50,7 @@
 | [`DESIGN-log-replay.md`](DESIGN-log-replay.md) | Production JSONL replay through refinement mapping syntax: record contract, complete-observation boundary, first-divergence JSON, and Monitor execution |
 | [`DESIGN-scenarios.md`](DESIGN-scenarios.md) | scenarios and the unsat-core diagnostics for coverage |
 | [`DESIGN-seq.md`](DESIGN-seq.md) | Seq<T,N> (partial_op, type whitelist) |
+| [`DESIGN-seq-partial-operations.md`](DESIGN-seq-partial-operations.md) | Accepted Seq partial-operation semantics: out-of-prefix reads report `partial_op` consistently across engines while guarded short-circuit reads remain defined |
 | [`DESIGN-option-struct.md`](DESIGN-option-struct.md) | Option fields in structs |
 | [`DESIGN-divmod.md`](DESIGN-divmod.md) | Integer division `/` and remainder `%` (total definition of division by zero, partial_op, Euclidean) |
 | [`DESIGN-forbidden.md`](DESIGN-forbidden.md) | `forbidden` (negative acceptance criteria / must-forbid) — detecting under-constraint |
@@ -63,6 +64,7 @@
 | [`DESIGN-precedence-policy.md`](DESIGN-precedence-policy.md) | The business-layer no-bypass precedence policy (#75) — why `business` keeps users from writing `state`/`invariant` directly |
 | [`DESIGN-ledger.md`](DESIGN-ledger.md) | `fslc ledger` (turning verifier evidence into a per-requirement-id Markdown audit ledger for PM/audit) |
 | [`DESIGN-assurance-classes.md`](DESIGN-assurance-classes.md) | Assurance-class vocabulary (`proved`/`bounded`/`replay-observed`/`statistical`/`not_run`) shared by `fslc ledger` and `fslc html`, and what each class does/does not guarantee |
+| [`DESIGN-assurance-matrix.md`](DESIGN-assurance-matrix.md) | CI-internal C3 semantic assurance matrix: every semantic-feature/product-surface cell is exercised, a rejecting control, fail-closed unsupported, or reasoned not-applicable |
 | [`DESIGN-triangulated-assurance.md`](DESIGN-triangulated-assurance.md) | CI-internal Triangulated Assurance: raw common observations, explicit observer lineages, executable three-edge agreement, calibration, federated ownership, and P1/P2/P3 pilots |
 | [`DESIGN-document-requirement-claim-ir.md`](DESIGN-document-requirement-claim-ir.md) | `fslc document` foundation (issue #325): the versioned Requirement Claim IR (RCIR) v1 public contract and the deterministic requirement-claim projector |
 | [`DESIGN-document-controlled-language-renderer.md`](DESIGN-document-controlled-language-renderer.md) | ja/en controlled-language renderer (issue #326): converts an RCIR v1 claim set into `fsl_tools::render_requirements_document` prose |
@@ -79,8 +81,12 @@
 | [`DESIGN-blame-assignment.md`](DESIGN-blame-assignment.md) | Counterexample blame assignment (`fslc verify`/`fslc explain`): false-conjunct identification, per-step guard/effect backward slicing, and vacuity blocking-core localization |
 | [`DESIGN-incremental-verify.md`](DESIGN-incremental-verify.md) | `fslc verify`'s persistent verdict cache (`src/fslc/verify_cache.py`): exhaustive cache-key enumeration, cross-depth counterexample reuse, and the soundness argument for why a cached verdict can never be stale |
 | [`DESIGN-verification-cost.md`](DESIGN-verification-cost.md) | Fixed native/Worker verification cost schema, common Z3 statistics, property attribution, and aggregation semantics |
+| [`DESIGN-ci.md`](DESIGN-ci.md) | Accepted merge and product-validation contract: complete Linux evidence before merge, deferred cross-platform validation, and blocking post-merge promotion evidence |
+| [`DESIGN-fsl-logic-test.md`](DESIGN-fsl-logic-test.md) | Accepted finite direct-spec generation and concrete/symbolic agreement test: detector calibration and exploration, never proof by volume or a public-assurance promotion |
+| [`DESIGN-semantic-mutation-gate.md`](DESIGN-semantic-mutation-gate.md) | Accepted soundness-critical native-Rust mutation gate: reviewed semantic faults and scoped generic mutations calibrate detector power without changing product exits |
 | [`DESIGN-conformance-harness.md`](DESIGN-conformance-harness.md) | Dialect corpus conformance harness (`tests/test_dialect_conformance.py`, `tests/dialect_registry.py`): the Monitor/BMC-agreement/oracle safety net over every `.fsl` under `specs/`/`examples/`, with a loud, reviewable exclusion policy — a manual/reference check today, not a CI gate (see the design doc's "Cost and CI wiring") |
 | [`DESIGN-coupled-change-metatest.md`](DESIGN-coupled-change-metatest.md) | Coupled-change metatests: native LSP corpus/index coverage in `rust/fsl-lsp/tests/corpus.rs`, plus frozen Python compatibility and DESIGN-doc map checks |
+| [`DESIGN-referance-local-audit.md`](DESIGN-referance-local-audit.md) | Accepted opt-in local Referance semantic-drift audit: Store-first provenance evidence with CodeReferance as an auxiliary read-only detector, never a CI, merge, product, promotion, or release gate |
 | [`DESIGN-changelog-fragments.md`](DESIGN-changelog-fragments.md) | Accepted #737 decision record: GO for `CHANGELOG.md` `[Unreleased]` fragments (C1), NO-GO for fragmenting the contract documents (C2), with the replay measurement, six fail-closed controls, migration sites, and rollback/reversal rule; implemented by `tools/aggregate_changelog.sh` and `changelog.d/` |
 | [`DESIGN-rust-components.md`](DESIGN-rust-components.md) | Evidence-backed current design for all eleven Rust crates: responsibility and state ownership, dependency direction, contracts, candidates, uncertainty, and reevaluation triggers |
 | [`DESIGN-rust-component-internals.md`](DESIGN-rust-component-internals.md) | Evidence-backed internal design for all eleven Rust crates: value flow, mutable-state ownership, failure and I/O boundaries, targeted dependency normalization, and touch-driven extraction |
@@ -101,6 +107,7 @@
 | [`DESIGN-ui.md`](DESIGN-ui.md) | fsl-ui (screen-transition dialect): spike findings, proposed expansion rules, go/no-go (#9) |
 | [`DESIGN-domain.md`](DESIGN-domain.md) | fsl-domain (`domain`) Functional DDD / async effect dialect: aggregate ownership, command/event decide/evolve lowering, saga/process-manager actions, effect lifecycle state, findings, multi-target scaffolds, and runtime replay |
 | [`DESIGN-effect.md`](DESIGN-effect.md) | fsl-effect lifecycle semantics used by fsl-domain: correlation, retry, timeout, idempotency, and guarantee boundary |
+| [`DESIGN-saga-history.md`](DESIGN-saga-history.md) | Accepted domain design awaiting follow-up implementation: correlation-indexed saga phases preserve one-hot current-event semantics and prevent cross-correlation discharge |
 | [`DESIGN-db.md`](DESIGN-db.md) | fsl-db (`dbsystem`) database compatibility dialect: multi-environment schema/artifact/feature-flag checks, finding schema, rollout assumptions, SQL/Prisma importers, and external preservation/engine evidence boundaries |
 | [`DESIGN-ai-hard.md`](DESIGN-ai-hard.md) | fsl-ai (`ai_component` / recursive `agent`) dialect: tool authority, human approval, forbidden tools, fallback, event replay, agent scope/grant/orchestration/visibility analysis, finding schema, and guarantee boundaries |
 | [`DESIGN-stochastic.md`](DESIGN-stochastic.md) | fsl-stochastic external evidence layer: precomputed eval JSONL, Wilson-bound threshold rules, statistical result schema, status priority, multiple-slice boundary, and external stochastic boundaries |
