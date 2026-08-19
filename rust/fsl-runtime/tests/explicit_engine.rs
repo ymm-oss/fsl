@@ -225,6 +225,121 @@ fn forall_init_writing_conflicting_values_to_the_same_location_is_unsatisfiable(
     assert!(result.violation.is_none());
 }
 
+/// Issue #821: `docs/LANGUAGE.md`'s "assign exactly once" rule is per
+/// concrete key, not per variable. A `forall i { m[i] = ... }` write and a
+/// later flat `m[K] = ...` write must collide when `K` is one of the keys
+/// the `forall` already covered, whether or not the values agree — before
+/// the fix, `init_write_key` collapsed every forall-indexed write to
+/// `Root(name)` (whole-variable), a different bucket from the flat write's
+/// `ConcreteIndex`, so the overlap was never detected.
+#[test]
+fn init_forall_write_collides_with_later_concrete_write_to_the_same_key() {
+    // Rejecting control (case 1, issue #821): conflicting values on the
+    // same key. Before the fix this fell through to the unrelated
+    // "init constraints are unsatisfiable" diagnostic instead of the
+    // duplicate-write rule's own message.
+    let conflicting = model(
+        "spec Probe { type Idx = 0..2 state { m: Map<Idx, Bool> } \
+         init { forall i: Idx { m[i] = true } m[0] = false } \
+         action noop() { } }",
+    );
+    let error = fsl_runtime::verify_explicit(conflicting, 1, 100)
+        .expect_err("forall write and overlapping concrete write to the same key are rejected");
+    assert_eq!(
+        error.message,
+        "state variable 'm' assigned more than once in init"
+    );
+
+    // Rejecting control (case 2, issue #821): the values happen to agree.
+    // Before the fix this was silently accepted with no error at all.
+    let agreeing = model(
+        "spec Probe { type Idx = 0..2 state { m: Map<Idx, Bool> } \
+         init { forall i: Idx { m[i] = true } m[0] = true } \
+         action noop() { } }",
+    );
+    let error = fsl_runtime::verify_explicit(agreeing, 1, 100).expect_err(
+        "forall write and overlapping concrete write to the same key are rejected even when values agree",
+    );
+    assert_eq!(
+        error.message,
+        "state variable 'm' assigned more than once in init"
+    );
+
+    // Rejecting control: the same overlap through an enum-member key
+    // instead of a numeric literal, exercising the enum-resolution arm of
+    // `assignment_coverage` rather than `Expr::Num`.
+    let enum_overlap = model(
+        "spec Probe { enum Key { A, B } state { m: Map<Key, Bool> } \
+         init { forall k: Key { m[k] = true } m[A] = true } \
+         action noop() { } }",
+    );
+    let error = fsl_runtime::verify_explicit(enum_overlap, 1, 100)
+        .expect_err("forall write and overlapping enum-member concrete write are rejected");
+    assert_eq!(
+        error.message,
+        "state variable 'm' assigned more than once in init"
+    );
+
+    // Accepting control: an injective `forall` write on its own, with no
+    // overlapping concrete write, must stay accepted.
+    let lone_forall = model(
+        "spec Probe { type Idx = 0..2 state { m: Map<Idx, Bool> } \
+         init { forall i: Idx { m[i] = true } } \
+         action noop() { } }",
+    );
+    let result =
+        fsl_runtime::verify_explicit(lone_forall, 1, 100).expect("lone injective forall accepted");
+    assert!(result.violation.is_none());
+
+    // Accepting control: a forall on one map and flat writes to a wholly
+    // separate map are trivially not duplicates (different logical roots,
+    // not disjoint keys on the same map). See the three same-map controls
+    // below for the case this change actually had to get right.
+    let disjoint_variables = model(
+        "spec Probe { type Idx = 0..2 state { m: Map<Idx, Bool>, n: Map<Idx, Bool> } \
+         init { forall i: Idx { m[i] = true } n[0] = true n[1] = false n[2] = true } \
+         action noop() { } }",
+    );
+    let result = fsl_runtime::verify_explicit(disjoint_variables, 1, 100)
+        .expect("forall write and flat writes to an unrelated map's keys are not duplicates");
+    assert!(result.violation.is_none());
+
+    // Accepting control: two `forall` blocks over disjoint subranges of the
+    // *same* map's key domain must not collide with each other.
+    let disjoint_foralls = model(
+        "spec Probe { type Idx = 0..3 state { m: Map<Idx, Bool> } \
+         init { forall i in 0..1 { m[i] = true } forall j in 2..3 { m[j] = false } } \
+         action noop() { } }",
+    );
+    let result = fsl_runtime::verify_explicit(disjoint_foralls, 1, 100)
+        .expect("two foralls over disjoint subranges of the same map do not collide");
+    assert!(result.violation.is_none());
+
+    // Accepting control: a forall covering one subrange and a flat write to
+    // a key outside that subrange, on the *same* map, must not collide.
+    let forall_then_flat = model(
+        "spec Probe { type Idx = 0..2 state { m: Map<Idx, Bool> } \
+         init { forall i in 0..1 { m[i] = true } m[2] = false } \
+         action noop() { } }",
+    );
+    let result = fsl_runtime::verify_explicit(forall_then_flat, 1, 100)
+        .expect("a forall and a same-map flat write to a key it does not cover do not collide");
+    assert!(result.violation.is_none());
+
+    // Accepting control: the same shape in the opposite order -- the flat
+    // write first, the forall second -- since detection must not depend on
+    // statement order.
+    let flat_then_forall = model(
+        "spec Probe { type Idx = 0..2 state { m: Map<Idx, Bool> } \
+         init { m[2] = false forall i in 0..1 { m[i] = true } } \
+         action noop() { } }",
+    );
+    let result = fsl_runtime::verify_explicit(flat_then_forall, 1, 100).expect(
+        "a same-map flat write followed by a forall that does not cover its key do not collide",
+    );
+    assert!(result.violation.is_none());
+}
+
 #[test]
 fn explicit_violation_trace_replays_through_the_monitor() {
     let model = model(

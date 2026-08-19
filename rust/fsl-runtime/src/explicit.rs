@@ -46,7 +46,7 @@ pub struct ExplicitResult {
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum InitWriteKey {
     Root(String),
-    ConcreteIndex(String, String),
+    ConcreteIndex(String, Value),
 }
 
 /// Verify a finite kernel model using level-synchronous concrete BFS.
@@ -654,8 +654,9 @@ fn walk_init(
             Statement::Assign { target, value, .. } => {
                 let logical = logical_var(target)
                     .ok_or_else(|| runtime_error("invalid init assignment target"))?;
-                let key = init_write_key(target, bound_names);
-                if possibly_assigned.contains(&key) {
+                let contribution = assignment_coverage(target, bound_names, model);
+                let keys = init_write_keys(target, contribution.as_ref());
+                if keys.iter().any(|key| possibly_assigned.contains(key)) {
                     let scope = if in_forall { "init forall" } else { "init" };
                     return Err(runtime_error(format!(
                         "state variable '{logical}' assigned more than once in {scope}"
@@ -665,12 +666,12 @@ fn walk_init(
                     check_init_expr(key_expr, &definitely_assigned, model)?;
                 }
                 check_init_expr(value, &definitely_assigned, model)?;
-                if let Some(contribution) = assignment_coverage(target, bound_names, model) {
+                if let Some(contribution) = contribution {
                     let previous = definitely_assigned.remove(logical);
                     definitely_assigned
                         .insert(logical.to_owned(), join_coverage(previous, contribution));
                 }
-                possibly_assigned.insert(key);
+                possibly_assigned.extend(keys);
             }
             Statement::ForAll {
                 binder, statements, ..
@@ -908,26 +909,45 @@ fn logical_var(target: &LValue) -> Option<&str> {
     }
 }
 
-fn init_write_key(
-    target: &LValue,
-    bound_names: &BTreeMap<String, Option<Vec<Value>>>,
-) -> InitWriteKey {
-    if let LValue::Index(name, index) = target {
-        match index {
-            Expr::Var(key) if !bound_names.contains_key(key) => {
-                return InitWriteKey::ConcreteIndex(name.clone(), format!("var:{key}"));
-            }
-            Expr::Num(key) => {
-                return InitWriteKey::ConcreteIndex(name.clone(), format!("num:{key}"));
-            }
-            _ => {}
-        }
+/// Concrete per-key write identities a single init assignment touches, for
+/// duplicate-write detection at the granularity `docs/LANGUAGE.md` §12
+/// requires: "assign exactly once" is per concrete key, not per variable.
+///
+/// This reuses `assignment_coverage`'s resolution rather than computing a
+/// second, independent classification (issue #821): a `forall i { m[i] =
+/// ... }` whose index is the binder itself resolves to `Coverage::Keys` of
+/// every binder value, so it collides key-for-key with a later concrete
+/// write to any of those same keys, and an enum-member key resolves to the
+/// same `Value` a numeric literal denoting it would.
+///
+/// Falls back to `InitWriteKey::Root` (whole-variable) whenever `coverage`
+/// is not `Coverage::Keys` for an `Index` target — including `Full`,
+/// `Fields`, and unresolved (`None`, e.g. a dynamic key or a nested lvalue).
+/// That fallback never *accepts* something the coarser, pre-#821
+/// `Root`-only classification would have rejected: every write this
+/// function buckets under `Root` was already bucketed there before. It is
+/// not, however, "as strict as touching the entire variable" in the
+/// collision sense: `Root(name)` never collides with
+/// `ConcreteIndex(name, _)`, so a `None`-coverage target is simply not
+/// collision-checked against any concrete key at all. A `forall`-bound
+/// index used through a non-`Var` key expression (e.g. `m[i - i]`) is one
+/// such target; two iterations of it aliasing each other, or it aliasing a
+/// separate `m[K] = ...`, can still go undetected here when the values
+/// agree. That gap is pre-existing (identical on `origin/main`) and is not
+/// fixed by this change.
+fn init_write_keys(target: &LValue, coverage: Option<&Coverage>) -> BTreeSet<InitWriteKey> {
+    if let (LValue::Index(name, _), Some(Coverage::Keys(keys))) = (target, coverage) {
+        return keys
+            .iter()
+            .cloned()
+            .map(|key| InitWriteKey::ConcreteIndex(name.clone(), key))
+            .collect();
     }
-    InitWriteKey::Root(
+    BTreeSet::from([InitWriteKey::Root(
         logical_var(target)
             .expect("kernel lvalue has a logical root")
             .to_owned(),
-    )
+    )])
 }
 
 fn binder_name(binder: &Binder) -> &str {
