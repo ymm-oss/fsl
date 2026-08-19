@@ -1358,7 +1358,7 @@ mod tests {
             .sum::<usize>();
         assert_eq!(DECLARATION_KEYWORDS.len(), expected_count);
 
-        for (keywords, role, context) in PRE_REFACTOR_DECLARATION_KEYWORDS {
+        for &(keywords, role, context) in PRE_REFACTOR_DECLARATION_KEYWORDS {
             for keyword in keywords {
                 assert_eq!(
                     declaration_keyword(keyword),
