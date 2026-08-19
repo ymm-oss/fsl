@@ -1261,107 +1261,104 @@ fn contains(range: Range, position: Position) -> bool {
 mod tests {
     use super::*;
 
+    // These expected role/context pairs are transcribed from origin/main's
+    // declaration_keyword match, not derived from the table.
+    const PRE_REFACTOR_DECLARATION_KEYWORDS: &[(&[&str], Option<SymbolRole>, Option<Context>)] = &[
+        (
+            &[
+                "spec",
+                "compose",
+                "requirements",
+                "business",
+                "governance",
+                "refinement",
+                "domain",
+                "dbsystem",
+                "ai_component",
+                "agent",
+                "causal",
+            ],
+            Some(SymbolRole::Namespace),
+            Some(Context::Top),
+        ),
+        (&["type", "number", "entity"], Some(SymbolRole::Type), None),
+        (&["enum"], Some(SymbolRole::Type), Some(Context::Enum)),
+        (
+            &["struct", "table"],
+            Some(SymbolRole::Type),
+            Some(Context::Struct),
+        ),
+        (
+            &[
+                "action",
+                "transition",
+                "tool",
+                "command",
+                "effect",
+                "migration",
+                "decide",
+                "evolve",
+                "def",
+            ],
+            Some(SymbolRole::Function),
+            Some(Context::Action),
+        ),
+        (
+            &[
+                "invariant",
+                "trans",
+                "reachable",
+                "until",
+                "unless",
+                "leadsTo",
+                "property",
+                "requirement",
+                "acceptance",
+                "forbidden",
+                "control",
+                "policy",
+                "goal",
+                "claim",
+                "expectation",
+            ],
+            Some(SymbolRole::Property),
+            Some(Context::Other),
+        ),
+        (
+            &[
+                "const",
+                "actor",
+                "process",
+                "kpi",
+                "authority",
+                "aggregate",
+                "projection",
+                "environment",
+                "artifact",
+                "column",
+                "variable",
+            ],
+            Some(SymbolRole::Variable),
+            Some(Context::Other),
+        ),
+        (
+            &["preservation"],
+            Some(SymbolRole::Namespace),
+            Some(Context::Other),
+        ),
+        (&["state"], None, Some(Context::State)),
+        (&["init", "verify"], None, Some(Context::Other)),
+    ];
+
     #[test]
     fn declaration_keyword_registry_preserves_the_pre_refactor_mapping() {
-        // These expected role/context pairs are transcribed from
-        // origin/main's declaration_keyword match, not derived from the table.
-        let expected = [
-            (
-                &[
-                    "spec",
-                    "compose",
-                    "requirements",
-                    "business",
-                    "governance",
-                    "refinement",
-                    "domain",
-                    "dbsystem",
-                    "ai_component",
-                    "agent",
-                    "causal",
-                ][..],
-                Some(SymbolRole::Namespace),
-                Some(Context::Top),
-            ),
-            (
-                &["type", "number", "entity"][..],
-                Some(SymbolRole::Type),
-                None,
-            ),
-            (&["enum"][..], Some(SymbolRole::Type), Some(Context::Enum)),
-            (
-                &["struct", "table"][..],
-                Some(SymbolRole::Type),
-                Some(Context::Struct),
-            ),
-            (
-                &[
-                    "action",
-                    "transition",
-                    "tool",
-                    "command",
-                    "effect",
-                    "migration",
-                    "decide",
-                    "evolve",
-                    "def",
-                ][..],
-                Some(SymbolRole::Function),
-                Some(Context::Action),
-            ),
-            (
-                &[
-                    "invariant",
-                    "trans",
-                    "reachable",
-                    "until",
-                    "unless",
-                    "leadsTo",
-                    "property",
-                    "requirement",
-                    "acceptance",
-                    "forbidden",
-                    "control",
-                    "policy",
-                    "goal",
-                    "claim",
-                    "expectation",
-                ][..],
-                Some(SymbolRole::Property),
-                Some(Context::Other),
-            ),
-            (
-                &[
-                    "const",
-                    "actor",
-                    "process",
-                    "kpi",
-                    "authority",
-                    "aggregate",
-                    "projection",
-                    "environment",
-                    "artifact",
-                    "column",
-                    "variable",
-                ][..],
-                Some(SymbolRole::Variable),
-                Some(Context::Other),
-            ),
-            (
-                &["preservation"][..],
-                Some(SymbolRole::Namespace),
-                Some(Context::Other),
-            ),
-            (&["state"][..], None, Some(Context::State)),
-            (&["init", "verify"][..], None, Some(Context::Other)),
-        ];
-        let expected_count = expected
+        let expected_count = PRE_REFACTOR_DECLARATION_KEYWORDS
             .iter()
             .map(|(keywords, _, _)| keywords.len())
             .sum::<usize>();
         assert_eq!(DECLARATION_KEYWORDS.len(), expected_count);
 
-        for (keywords, role, context) in expected {
+        for (keywords, role, context) in PRE_REFACTOR_DECLARATION_KEYWORDS {
             for keyword in keywords {
                 assert_eq!(
                     declaration_keyword(keyword),
