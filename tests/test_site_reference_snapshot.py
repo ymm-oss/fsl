@@ -53,6 +53,19 @@ options:
     assert mod._normalize_argparse_help(older) == mod._normalize_argparse_help(newer)
 
 
+def _rejoin_language_md(lead: str, sections: list[tuple[str, str]]) -> str:
+    """Rebuild a LANGUAGE.md-shaped text from split_language_md() output.
+
+    This is the exact inverse of split_language_md(): each (heading, body) pair
+    round-trips as "\\n## {heading}\\n{body}", and a final trailing newline is
+    appended once. A caller that builds a reordered/mutated fixture from this must
+    first verify the *unmutated* round-trip is byte-identical to the real source
+    file — see the assertions in the tests below — before trusting a mutated
+    variant built the same way.
+    """
+    return lead + "".join(f"\n## {heading}\n{body}" for heading, body in sections) + "\n"
+
+
 def test_language_reference_accepts_aligned_real_files():
     """Accepting control: the untouched, correctly section-aligned real files must
     still generate successfully through the heading-correspondence check added for
@@ -74,19 +87,65 @@ def test_language_reference_rejects_reordered_ja_sections(tmp_path, monkeypatch)
     mod = _load_tool()
     ja_text = (REPO_ROOT / "docs" / "LANGUAGE.ja.md").read_text(encoding="utf-8")
     sections = mod.split_language_md(ja_text)
+    lead = ja_text.split("\n## ", 1)[0]
+
+    # The reconstruction must round-trip byte-identically on the *unswapped*
+    # sections before a swapped variant built the same way can be trusted to
+    # test what this test claims it tests.
+    assert _rejoin_language_md(lead, sections) == ja_text
+
     idx2 = next(i for i, (h, _) in enumerate(sections) if h.startswith("2."))
     idx3 = next(i for i, (h, _) in enumerate(sections) if h.startswith("3."))
     swapped = list(sections)
     swapped[idx2], swapped[idx3] = swapped[idx3], swapped[idx2]
     assert len(swapped) == len(sections)  # the count check alone would not catch this
 
-    lead = ja_text.split("\n## ", 1)[0]
-    swapped_text = lead + "".join(f"\n## {heading}{body}" for heading, body in swapped)
     swapped_path = tmp_path / "LANGUAGE.ja.swapped.md"
-    swapped_path.write_text(swapped_text, encoding="utf-8")
+    swapped_path.write_text(_rejoin_language_md(lead, swapped), encoding="utf-8")
     monkeypatch.setattr(mod, "LANGUAGE_MD_JA", swapped_path)
 
     with pytest.raises(SystemExit, match=r"section #3.*does not correspond"):
+        mod.render_language_tree("ja")
+
+
+def test_language_reference_rejects_duplicate_en_section_numbers(tmp_path, monkeypatch):
+    """Rejecting control for the section-number-uniqueness precondition added
+    alongside issue #741's heading-correspondence check: that check only detects a
+    docs/LANGUAGE.ja.md reorder if docs/LANGUAGE.md's numeric section prefixes are
+    themselves unique. If two English sections shared a number, a matching swap on
+    the ja side would be prefix-equal at every position and slip through
+    undetected — so uniqueness must be an enforced precondition, not an unstated
+    assumption. The duplicate-numbered variant is a tmp_path fixture built from the
+    real LANGUAGE.md at test time — the committed docs/LANGUAGE.md is never
+    touched. SECTION_BLURBS is patched only to add an entry for the one renamed
+    heading, so the unrelated "unknown SECTION_BLURBS entry" check does not
+    preempt the check under test.
+    """
+    mod = _load_tool()
+    en_text = (REPO_ROOT / "docs" / "LANGUAGE.md").read_text(encoding="utf-8")
+    sections = mod.split_language_md(en_text)
+    lead = en_text.split("\n## ", 1)[0]
+
+    # Same fidelity guarantee as the reorder control above.
+    assert _rejoin_language_md(lead, sections) == en_text
+
+    idx3 = next(i for i, (h, _) in enumerate(sections) if h.startswith("3."))
+    heading3, body3 = sections[idx3]
+    duplicated_heading = heading3.replace("3.", "2.", 1)
+    monkeypatch.setitem(mod.SECTION_BLURBS, duplicated_heading, mod.SECTION_BLURBS[heading3])
+
+    renumbered = list(sections)
+    renumbered[idx3] = (duplicated_heading, body3)
+    # Now two sections (the original "2." section and this renamed one) share
+    # numeric prefix "2" — a duplicate, not a reorder: count is unchanged and no
+    # section moved position.
+    assert len(renumbered) == len(sections)
+
+    dup_path = tmp_path / "LANGUAGE.duplicate.md"
+    dup_path.write_text(_rejoin_language_md(lead, renumbered), encoding="utf-8")
+    monkeypatch.setattr(mod, "LANGUAGE_MD", dup_path)
+
+    with pytest.raises(SystemExit, match=r"more than one '## ' section numbered"):
         mod.render_language_tree("ja")
 
 

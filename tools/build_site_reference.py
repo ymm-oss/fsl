@@ -209,6 +209,30 @@ def render_language_tree(lang: str) -> str:
                 "(same count, same order) — reconcile docs/LANGUAGE.ja.md with the "
                 "current docs/LANGUAGE.md before regenerating (see docs/DESIGN-docs-site.md D7)."
             )
+
+        # The per-position correspondence check below only detects a reorder if
+        # docs/LANGUAGE.md's numeric section prefixes are unique — two English
+        # sections sharing a number would make a matching ja-side swap
+        # prefix-equal at every position and slip through undetected. Assert the
+        # precondition instead of silently relying on it (docs/DESIGN-docs-site.md
+        # D7's "unique section numbers" addendum).
+        numbers_to_headings: dict[str, list[str]] = {}
+        for en_heading, _ in en_sections:
+            number = _section_number(en_heading)
+            if number is not None:
+                numbers_to_headings.setdefault(number, []).append(en_heading)
+        duplicates = {n: hs for n, hs in numbers_to_headings.items() if len(hs) > 1}
+        if duplicates:
+            number, headings = sorted(duplicates.items())[0]
+            raise SystemExit(
+                "build_site_reference: docs/LANGUAGE.md has more than one '## ' "
+                f"section numbered {number!r}: {headings!r}. The positional "
+                "heading-correspondence check assumes docs/LANGUAGE.md's section "
+                "numbers are unique in order to detect a docs/LANGUAGE.ja.md reorder "
+                "— renumber the duplicate section(s) in docs/LANGUAGE.md before "
+                "regenerating (see docs/DESIGN-docs-site.md D7)."
+            )
+
         for position, ((en_heading, _), (ja_heading, _)) in enumerate(
             zip(en_sections, render_sections), start=1
         ):
