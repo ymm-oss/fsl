@@ -44,11 +44,12 @@ No programming knowledge or Git installation is required — on Mac, open Termin
 run the command above. Windows users should use WSL, or use the developer instructions
 (PowerShell) below.
 
-This places only the versioned release payload under `~/.local/share/fsl`, links the
-commands from `~/.local/bin`, and links the Claude Code skills from `~/.claude/skills/`.
-It does not clone the repository or install examples, documentation, Python sources, or
-Rust sources. `FSL_DATA_DIR` overrides the release-payload location and `FSL_BIN_DIR`
-overrides the command-link location.
+This places only the versioned release payload under `${XDG_DATA_HOME:-~/.local/share}/fsl`,
+links the commands from `~/.local/bin`, and links the Claude Code skills from
+`~/.claude/skills/`. It does not clone the repository or install examples, documentation,
+Python sources, or Rust sources. `FSL_DATA_DIR` overrides the release-payload location
+(taking priority over `XDG_DATA_HOME`) and `FSL_BIN_DIR` overrides the command-link
+location.
 
 What gets installed:
 
@@ -57,9 +58,9 @@ What gets installed:
 - the Claude Code skills (`~/.claude/skills/fsl*`)
 
 The installer verifies both native checksums and rejects a binary whose reported version
-differs from the latest Release tag. It also migrates recognized links to the old Python
-2.7 or `~/.fsl` installations. Use `--no-skill` to skip creating the Claude Code skill
-links.
+differs from the latest Release tag. It also migrates recognized command links that point
+at the old `~/.fsl/.venv/bin` or `~/.fsl/.native/bin` installs (the pre-Rust, fslc
+2.7-era layout). Use `--no-skill` to skip creating the Claude Code skill links.
 
 Uninstall:
 
@@ -68,9 +69,10 @@ rm -rf ~/.local/share/fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skil
 ```
 
 See the [Releases](https://github.com/ymm-oss/fsl/releases) page for the current version. Official releases contain checksummed native binaries,
-the VSCode extension, and Kernel bundles, and — since the v3.0.0 release — a checksummed
-Agent Skill bundle; the installer separately verifies a pinned source-archive checksum for
-compatibility with that original v3.0.0 packaging. The Python compatibility reference
+the VSCode extension, and Kernel bundles; every release after v3.0.0 also contains a
+checksummed Agent Skill bundle, and the installer separately verifies a pinned
+source-archive checksum for the v3.0.0 compatibility path (v3.0.0 predates the checksummed
+skill bundle). The Python compatibility reference
 remains in this repository at version 2.7.0, but this installer does not install it and it
 is not published to PyPI. The Rust workspace crates are not published to crates.io.
 Publishing either surface requires an explicit manifest, workflow, and documentation
@@ -138,8 +140,9 @@ test scaffolds from this spec" or "check whether this log conforms to the spec."
 
 ## Using the CLI directly
 
-Every command below was run against this repository's own `specs/`. Output is JSON on
-stdout (`fslc chain` also writes a human status table to stderr).
+Every command below was run against this repository's own `specs/` (the `document` and
+`ledger` examples below run against `examples/pm/` instead). Except where noted, output
+is JSON on stdout (`fslc chain` also writes a human status table to stderr).
 
 ### Check and verify
 
@@ -167,7 +170,9 @@ full, current list.
 fslc scenarios specs/cart_v1.fsl                          # generate integration-test scaffold JSON
 fslc testgen   specs/cart_v1.fsl -o test_cart_v1.py       # pytest conformance-test scaffold (default target)
 fslc testgen   specs/cart_v1.fsl --target vitest -o cart_v1.test.js
-fslc replay    specs/cart_v1.fsl --trace events.json      # conformance check of a captured full-state trace
+fslc replay    specs/cart_v1.fsl --trace events.json      # conformance check of a captured full-state
+                                                            # trace; events.json is a trace you capture or
+                                                            # build yourself (schema: docs/DESIGN-replay-trace.md)
 fslc replay    specs/cart_v1.fsl --from-log events.jsonl --mapping log_mapping.fsl
                                                             # conformance check of a production event log,
                                                             # mapped into the spec's actions/state by a
@@ -231,7 +236,8 @@ fslc ledger    examples/pm/cancel_system.fsl -o cancel_flow_ledger.md
 ```
 
 `fslc typestate specs/order_workflow.fsl --ts` decides whether typestate (ghost types)
-applies to a design spec and, with `--ts`, emits the TypeScript scaffold directly.
+applies to a design spec and, with `--ts`, emits the TypeScript scaffold directly on
+stdout — TypeScript, not JSON, unlike every other command in this section.
 
 ### The Public Kernel JSON contract
 
@@ -245,9 +251,9 @@ CLI's JSON envelope and this Public Kernel contract**, not a library import. See
 
 ### Editor integration
 
-Every release ships an `fslc-lsp` binary and a VSCode extension (`fsl-vscode-<version>.vsix`).
+Every release ships an `fslc-lsp` binary and a VSCode extension (`fsl-vscode.vsix`).
 Install the extension from the Release page (`code --install-extension
-fsl-vscode-<version>.vsix`, or "Extensions: Install from VSIX…"); it is a thin LSP client
+fsl-vscode.vsix`, or "Extensions: Install from VSIX…"); it is a thin LSP client
 that launches `fslc-lsp` from `PATH` (the install script above puts it there) and gives you
 syntax highlighting, diagnostics, outline, and go-to-definition. See
 [`editors/vscode/README.md`](editors/vscode/README.md).
@@ -257,7 +263,7 @@ syntax highlighting, diagnostics, outline, and go-to-definition. See
 `fslc` has commands not covered above — `version`, `lint`, `migrate`, `fmt`, `sweep`,
 `conformance`, `approval`, and `diff` among them. Run `fslc --help` or `fslc <command>
 --help` for their current arguments, or see [`docs/README.md`](docs/README.md) for the
-design document covering each.
+design document covering most of them (`sweep` has no entry there yet).
 
 `fslc` also has dialect-specific command groups — `ai` (AI hard-contract/agent-structure
 dialect), `domain` (Functional DDD / async effect dialect), `db` (database
@@ -315,8 +321,8 @@ fsl/
 │   └── fsl-lsp/            #   native language server and document index
 ├── src/fslc/               # frozen Python compatibility reference; do not add product behavior here
 ├── docs/                   # docs/README.md maps all of it; LANGUAGE.md is the language reference
-├── specs/                  # sample specs (*.fsl); each file's header comment states the language
-│                           #   feature/idiom it exercises
+├── specs/                  # sample specs (*.fsl); most carry a header comment naming the
+│                           #   language feature/idiom they exercise (not all do — browse the directory)
 ├── examples/               # FSL corpus by audience and topic — pm/, consulting/, e2e/, gallery/, bank/,
 │                           #   layers/, nfr/, domain/, db/, ai/, causal/, and more; see the directory itself
 ├── skills/                 # canonical Agent Skills; .claude/skills/fsl* and .agents/skills/fsl* symlink here
@@ -356,16 +362,33 @@ See [`AGENTS.md`](AGENTS.md) for the full CI-equivalent gate (`cargo fmt`, `carg
 Python is optional and used only for changes explicitly scoped to the frozen
 compatibility reference, or for Python-based repository hooks:
 
+**Mac / Linux:**
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate         # for fish: source .venv/bin/activate.fish
 pip install -e ".[dev]"           # installs lark, z3-solver, pytest, and an editable fslc for differential testing
 ```
 
-`tests/` (101 `test_*.py` files) drives Rust-contract, parity, and frozen-reference
-compatibility checks from Python; it is not the product gate above, and it is not sized
-or timed here since neither is stable across machines — run it (`pytest`) only if you are
-working on the compatibility surface.
+**Windows (PowerShell):**
+
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1        # for cmd: .venv\Scripts\activate.bat
+pip install -e ".[dev]"
+```
+
+You can also run it directly without activating the venv:
+`./.venv/bin/python -m fslc ...` (on Windows, `.venv\Scripts\python -m fslc ...`).
+
+`tests/` drives Rust-contract, parity, and frozen-reference compatibility checks from
+Python; it is not the product gate above — run it (`pytest`) only if you are working on
+the compatibility surface. Alongside the differential tests that cross-check the two
+evaluators (Z3-backed BMC and the concrete Monitor), `tests/oracle.py` is a
+**Z3-independent brute-force oracle**: it enumerates bounded reachable states by driving
+the Monitor directly, to catch false negatives — a case wrongly reported
+`verified`/`proved`/`refines` when the oracle finds a state that should have been
+`violated`/`refinement_failed`.
 
 ## License
 
