@@ -13,9 +13,11 @@ off the English heading text so cross-page links and SECTION_BLURBS stay stable 
 of language. The ja page also adds a Japanese lead paragraph and a Japanese one-line
 description per top-level section, sourced from SECTION_BLURBS below. If LANGUAGE.md grows
 a top-level ("## ") section that isn't in SECTION_BLURBS, or LANGUAGE.md/LANGUAGE.ja.md fall
-out of section-count sync, this script fails loudly instead of silently shipping an
-incomplete or misaligned reference — this is where the "language feature moves all of its
-files together" rule (CLAUDE.md) reaches this site.
+out of section-count sync, or a same-count LANGUAGE.ja.md reorders sections relative to
+LANGUAGE.md (checked by comparing each positional pair's leading numeric section prefix; see
+issue #741), this script fails loudly instead of silently shipping an incomplete or
+misaligned reference — this is where the "language feature moves all of its files together"
+rule (CLAUDE.md) reaches this site.
 
 Output is deterministic (no timestamps/commit hashes) so regeneration produces a clean,
 reviewable diff only when the sources actually changed. Run after any change to
@@ -158,6 +160,17 @@ def split_language_md(text: str):
     return sections
 
 
+_SECTION_NUMBER = re.compile(r"^(\d+)\.")
+
+
+def _section_number(heading: str) -> str | None:
+    """Return a '## ' heading's leading numeric prefix (e.g. "2" from "2. Types"),
+    or None for an unnumbered heading (the lead "Design principles" / "設計原則" section).
+    """
+    m = _SECTION_NUMBER.match(heading)
+    return m.group(1) if m else None
+
+
 GITHUB_BLOB = "https://github.com/ymm-oss/fsl/blob/main/docs/"
 
 # LANGUAGE.md links to sibling docs/ files with bare relative hrefs
@@ -196,6 +209,20 @@ def render_language_tree(lang: str) -> str:
                 "(same count, same order) — reconcile docs/LANGUAGE.ja.md with the "
                 "current docs/LANGUAGE.md before regenerating (see docs/DESIGN-docs-site.md D7)."
             )
+        for position, ((en_heading, _), (ja_heading, _)) in enumerate(
+            zip(en_sections, render_sections), start=1
+        ):
+            en_number = _section_number(en_heading)
+            ja_number = _section_number(ja_heading)
+            if en_number != ja_number:
+                raise SystemExit(
+                    "build_site_reference: docs/LANGUAGE.ja.md section "
+                    f"#{position} ({ja_heading!r}) does not correspond to "
+                    f"docs/LANGUAGE.md section #{position} ({en_heading!r}). The two files "
+                    "must stay section-aligned 1:1 (same count, same order) — reconcile "
+                    "docs/LANGUAGE.ja.md with the current docs/LANGUAGE.md before "
+                    "regenerating (see docs/DESIGN-docs-site.md D7)."
+                )
     else:
         render_sections = en_sections
 
