@@ -562,7 +562,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["mutate", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: MUTATE_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -662,9 +662,10 @@ enum FailureClass {
 /// have one source form; AI semantic cells must cover both component and
 /// project documents, because their dispatch paths are observably distinct.
 /// `check` and `verify` additionally expose distinct AI-project and causal
-/// parse frontends. Requirements-document approval creation is a separate
-/// `--kind` frontend selection. Compose nested-component parsing is a
-/// documented semantic-resolution boundary, not a direct Parse cell.
+/// parse frontends. `mutate` reaches the causal parse frontend through its
+/// baseline verification. Requirements-document approval creation is a
+/// separate `--kind` frontend selection. Compose nested-component parsing is
+/// a documented semantic-resolution boundary, not a direct Parse cell.
 /// AI Literate cells additionally retain the generic Markdown source form and
 /// exercise Markdown documents whose extracted FSL body is each AI shape.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1063,6 +1064,16 @@ const PARSE_KERNEL_COVERAGE: &[FailureCoverage] = &[
         fixture: NAME_FIXTURE,
         uniform: SEMANTIC_UNIFORM,
     },
+];
+const MUTATE_COVERAGE: &[FailureCoverage] = &[
+    PARSE_KERNEL_COVERAGE[0],
+    FailureCoverage {
+        class: FailureClass::Parse,
+        fixture: PARSE_CAUSAL_FIXTURE,
+        uniform: PARSE_UNIFORM,
+    },
+    PARSE_KERNEL_COVERAGE[1],
+    PARSE_KERNEL_COVERAGE[2],
 ];
 const DOCUMENT_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
@@ -1903,7 +1914,7 @@ fn has_literate_not_applicable(entry: &CommandRegistration) -> bool {
 }
 
 fn coverage_input_shape(command: &str, fixture: &str) -> InputShape {
-    if matches!(command, "check" | "verify") {
+    if matches!(command, "check" | "mutate" | "verify") {
         return match fixture {
             PARSE_AI_PROJECT_FIXTURE | PARSE_AI_PROJECT_DUPLICATE_FIXTURE => InputShape::Project,
             PARSE_CAUSAL_FIXTURE => InputShape::Causal,
@@ -1945,11 +1956,14 @@ fn required_input_shapes(
         InputShape::Causal,
         InputShape::Compose,
     ];
+    const MUTATE_PARSE: &[InputShape] = &[InputShape::Source, InputShape::Causal];
     const APPROVAL_CREATE_PARSE: &[InputShape] =
         &[InputShape::Source, InputShape::RequirementsDocument];
 
     if matches!(entry.key, "check" | "verify") && class == FailureClass::Parse {
         CHECK_PARSE
+    } else if entry.key == "mutate" && class == FailureClass::Parse {
+        MUTATE_PARSE
     } else if entry.key == "approval create" && class == FailureClass::Parse {
         APPROVAL_CREATE_PARSE
     } else if matches!(entry.scope, ParityScope::SpecPath { .. }) && entry.key.starts_with("ai ") {
