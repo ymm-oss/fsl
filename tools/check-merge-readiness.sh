@@ -53,6 +53,13 @@ check_automation() {
   # Accepting/rejecting controls for the ruleset drift audit's compareRuleset/
   # validateContract classifier (docs/DESIGN-ci.md, "Ruleset drift audit").
   node --test .github/scripts/audit-ruleset-drift.test.mjs
+  # Accepting/rejecting controls for the Rust toolchain pin. `main` went red on
+  # 2026-08-20 with no repository change because every workflow used the
+  # floating `dtolnay/rust-toolchain@stable` and rustc 1.98.0 had just been
+  # released (#847, fixed by #846). Pinning without a control would let one
+  # reverted reference reintroduce that silently, and a split toolchain also
+  # breaks merge-readiness.yml's restore-only cache-key match against ci.yml.
+  node --test .github/scripts/audit-toolchain-pin.test.mjs
   # Accepting/rejecting controls for the Actions cache budget audit, including
   # the rejecting fixture for `ci.yml`'s `save-if` guard: a pull-request-scoped
   # cache for one of its shared keys must fail the audit, so removing that guard
