@@ -432,7 +432,7 @@ test("replaying an already-summarised run does not PATCH identical content", asy
   assert.equal(client.updatedComments, updatesBeforeReplay);
 });
 
-test("historical summary fixtures are provenance-bound and need no Git history", async () => {
+test("historical summary fixtures have fixed provenance labels and need no Git history", async () => {
   const expectedProvenance = new Map([
     [
       "original-unqualified",
