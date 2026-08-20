@@ -107,14 +107,16 @@ function occurrenceSummaryBody({
   cursor = "12:1",
   count = "7",
   identities = "41:1",
+  extraLines = [],
 } = {}) {
   return [
     "<!-- cache-budget-audit-occurrence-summary -->",
     occurrenceMarker(41, 1),
     ...(cursor === null ? [] : [`<!-- cache-budget-audit-cursor:${cursor} -->`]),
-    "Detailed recurrence comments are capped at 20; this rolling summary records the latest recurrence.",
-    `Coalesced failed attempts: ${count}.`,
-    `Recent coalesced identities: ${identities}.`,
+    ...extraLines,
+    "This rolling summary records coalesced failures and the latest recurrence.",
+    `Observable coalesced failed attempts in this summary interval: ${count}.`,
+    `Recent observable coalesced identities: ${identities}.`,
   ].join("\n");
 }
 
@@ -344,7 +346,7 @@ test("coalesced intermediate failures retain a count and recent identities", asy
   const summary = client.comments.find((comment) =>
     comment.body.includes("cache-budget-audit-occurrence-summary"),
   );
-  assert.match(summary.body, /Coalesced failed attempts: 2\./);
+  assert.match(summary.body, /Observable coalesced failed attempts in this summary interval: 2\./);
   assert.match(summary.body, /41:1, 42:1/);
   assert.match(client.issues[0].body, /cache-budget-audit-occurrence:43:1/);
 });
@@ -364,9 +366,51 @@ test("coalescing records only the latest same-run attempt exposed by the list AP
   const summary = client.comments.find((comment) =>
     comment.body.includes("cache-budget-audit-occurrence-summary"),
   );
-  assert.match(summary.body, /Coalesced failed attempts: 2\./);
+  assert.match(summary.body, /Observable coalesced failed attempts in this summary interval: 2\./);
   assert.match(summary.body, /41:1, 42:2/);
   assert.doesNotMatch(summary.body, new RegExp(`${supersededAttempt.id}:1`));
+});
+
+test("coalescing retains an earlier triggering attempt absent from the list API", async () => {
+  const issue = {
+    number: 100,
+    state: "open",
+    body: cacheBudgetAuditMarker(),
+  };
+  const triggeringAttempt = workflowRun({ id: 42, run_number: 13, run_attempt: 1 });
+  const listedLatestAttempt = workflowRun({
+    id: 42,
+    run_number: 13,
+    run_attempt: 2,
+    conclusion: "success",
+  });
+  const client = new FakeClient({
+    issues: [issue],
+    completedRuns: [listedLatestAttempt],
+  });
+
+  await reconcile(client, triggeringAttempt);
+
+  const summary = client.comments.find((comment) =>
+    comment.body.includes("cache-budget-audit-occurrence-summary"),
+  );
+  assert.match(summary.body, /Observable coalesced failed attempts in this summary interval: 1\./);
+  assert.match(summary.body, /42:1/);
+  assert.doesNotMatch(summary.body, /42:2/);
+});
+
+test("replaying an already-summarised run does not PATCH identical content", async () => {
+  const client = new FakeClient({
+    completedRuns: [workflowRun({ id: 41, run_number: 12 })],
+  });
+  const run = workflowRun({ id: 42, run_number: 13 });
+
+  await reconcile(client, run);
+  const updatesBeforeReplay = client.updatedComments;
+  const result = await reconcile(client, run);
+
+  assert.deepEqual(result, { created: 0, updated: 0, closed: 0, failed: true });
+  assert.equal(client.updatedComments, updatesBeforeReplay);
 });
 
 test("duplicate identical summaries self-heal within the comment bound", async () => {
@@ -406,7 +450,7 @@ test("a non-numeric coalesced count fails closed", async () => {
 
   await assertOccurrenceSummaryRejected(
     client,
-    /coalesced failure count must be a non-negative safe integer/,
+    /coalesced failure count must be a canonical decimal safe integer/,
   );
 });
 
@@ -417,7 +461,7 @@ test("a negative coalesced count fails closed", async () => {
 
   await assertOccurrenceSummaryRejected(
     client,
-    /coalesced failure count must be a non-negative safe integer/,
+    /coalesced failure count must be a canonical decimal safe integer/,
   );
 });
 
@@ -428,8 +472,148 @@ test("an unsafe coalesced count fails closed", async () => {
 
   await assertOccurrenceSummaryRejected(
     client,
-    /coalesced failure count must be a non-negative safe integer/,
+    /coalesced failure count must be a canonical decimal safe integer/,
   );
+});
+
+test("an empty coalesced count fails closed", async () => {
+  const client = clientWithOccurrenceSummary([occurrenceSummaryBody({ count: "" })]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /coalesced failure count must be a canonical decimal safe integer/,
+  );
+});
+
+test("an exponent-form coalesced count fails closed", async () => {
+  const client = clientWithOccurrenceSummary([occurrenceSummaryBody({ count: "1e2" })]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /coalesced failure count must be a canonical decimal safe integer/,
+  );
+});
+
+test("a hexadecimal coalesced count fails closed", async () => {
+  const client = clientWithOccurrenceSummary([occurrenceSummaryBody({ count: "0x10" })]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /coalesced failure count must be a canonical decimal safe integer/,
+  );
+});
+
+test("a whitespace-padded coalesced count fails closed", async () => {
+  const client = clientWithOccurrenceSummary([occurrenceSummaryBody({ count: " 1" })]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /coalesced failure count must be a canonical decimal safe integer/,
+  );
+});
+
+test("an exponent-form cursor fails closed", async () => {
+  const client = clientWithOccurrenceSummary([occurrenceSummaryBody({ cursor: "1e2:1" })]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /cursor run number must be a canonical decimal safe integer/,
+  );
+});
+
+test("an unsafe coalesced identity fails closed", async () => {
+  const client = clientWithOccurrenceSummary([
+    occurrenceSummaryBody({ count: "1", identities: "9007199254740992:1" }),
+  ]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /coalesced identity run ID must be a canonical decimal safe integer/,
+  );
+});
+
+test("a zero coalesced identity fails closed", async () => {
+  const client = clientWithOccurrenceSummary([
+    occurrenceSummaryBody({ count: "0", identities: "0:0" }),
+  ]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /coalesced identity run ID must be a canonical decimal safe integer/,
+  );
+});
+
+test("a coalesced count smaller than its identities fails closed", async () => {
+  const client = clientWithOccurrenceSummary([
+    occurrenceSummaryBody({ count: "1", identities: "41:1, 42:1" }),
+  ]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /coalesced failure count must cover every recorded identity/,
+  );
+});
+
+test("duplicate coalesced identities fail closed", async () => {
+  const client = clientWithOccurrenceSummary([
+    occurrenceSummaryBody({ count: "2", identities: "41:1, 41:1" }),
+  ]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /coalesced identities must be a unique bounded run_id:run_attempt list/,
+  );
+});
+
+test("extra cursor and count lines fail closed", async () => {
+  const client = clientWithOccurrenceSummary([
+    occurrenceSummaryBody({
+      extraLines: [
+        "<!-- cache-budget-audit-cursor:999:1 -->",
+        "Observable coalesced failed attempts in this summary interval: not-a-number.",
+      ],
+    }),
+  ]);
+
+  await assertOccurrenceSummaryRejected(client, /cursor marker must appear exactly once/);
+});
+
+test("an extra coalesced count line fails closed", async () => {
+  const client = clientWithOccurrenceSummary([
+    occurrenceSummaryBody({
+      extraLines: [
+        "Observable coalesced failed attempts in this summary interval: not-a-number.",
+      ],
+    }),
+  ]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /coalesced failure count must appear exactly once/,
+  );
+});
+
+test("a future cursor fails closed rather than moving backward", async () => {
+  const client = clientWithOccurrenceSummary([occurrenceSummaryBody({ cursor: "999:1" })]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /cursor must not be newer than observable trusted health/,
+  );
+});
+
+test("whole-summary deletion deliberately starts a new cumulative interval", async () => {
+  const client = clientWithOccurrenceSummary([occurrenceSummaryBody({ count: "7" })]);
+  client.comments = [];
+  client.completedRuns = [workflowRun({ id: 41, run_number: 12 })];
+
+  await reconcile(client, workflowRun({ id: 50, run_number: 13 }));
+
+  const summary = client.comments.find((comment) =>
+    comment.body.includes("cache-budget-audit-occurrence-summary"),
+  );
+  assert.match(summary.body, /Observable coalesced failed attempts in this summary interval: 1\./);
+  assert.match(summary.body, /41:1/);
 });
 
 test("a valid and malformed duplicate summary fails closed", async () => {
@@ -440,7 +624,7 @@ test("a valid and malformed duplicate summary fails closed", async () => {
 
   await assertOccurrenceSummaryRejected(
     client,
-    /coalesced failure count must be a non-negative safe integer/,
+    /coalesced failure count must be a canonical decimal safe integer/,
   );
 });
 

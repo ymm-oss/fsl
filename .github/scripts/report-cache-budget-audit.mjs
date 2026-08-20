@@ -102,9 +102,9 @@ function occurrenceSummaryComment({ workflowRun, occurrenceRun = workflowRun, co
     occurrenceSummaryMarker(),
     occurrenceMarker(occurrenceRun.id, occurrenceRun.run_attempt),
     coalescingCursorMarker(workflowRun),
-    "Detailed recurrence comments are capped at 20; this rolling summary records the latest recurrence.",
-    `Coalesced failed attempts: ${coalesced.count}.`,
-    `Recent coalesced identities: ${coalesced.identities.length ? coalesced.identities.join(", ") : "none"}.`,
+    "This rolling summary records coalesced failures and the latest recurrence.",
+    `Observable coalesced failed attempts in this summary interval: ${coalesced.count}.`,
+    `Recent observable coalesced identities: ${coalesced.identities.length ? coalesced.identities.join(", ") : "none"}.`,
     "",
     `- Workflow run: [${workflowRun.id}](${workflowRun.html_url})`,
     `- Trigger: \`${workflowRun.event}\``,
@@ -128,10 +128,14 @@ function singleSummaryMatch(body, expression, field) {
   return matches[0];
 }
 
-function nonNegativeSafeInteger(value, field) {
+function canonicalDecimalInteger(value, field, minimum) {
+  const expression = minimum === 0 ? /^(?:0|[1-9]\d*)$/ : /^[1-9]\d*$/;
+  if (typeof value !== "string" || !expression.test(value)) {
+    throw invalidOccurrenceSummary(`${field} must be a canonical decimal safe integer`);
+  }
   const number = Number(value);
-  if (!Number.isSafeInteger(number) || number < 0) {
-    throw invalidOccurrenceSummary(`${field} must be a non-negative safe integer`);
+  if (!Number.isSafeInteger(number) || number < minimum || String(number) !== value) {
+    throw invalidOccurrenceSummary(`${field} must be a canonical decimal safe integer`);
   }
   return number;
 }
@@ -142,34 +146,44 @@ function parsedCursor(comment) {
     /<!-- cache-budget-audit-cursor:([^: >]+):([^ >]+) -->/g,
     "cursor marker",
   );
-  const runNumber = nonNegativeSafeInteger(match[1], "cursor run number");
-  const runAttempt = nonNegativeSafeInteger(match[2], "cursor run attempt");
-  if (runNumber === 0 || runAttempt === 0) {
-    throw invalidOccurrenceSummary("cursor run number and attempt must be positive");
-  }
+  const runNumber = canonicalDecimalInteger(match[1], "cursor run number", 1);
+  const runAttempt = canonicalDecimalInteger(match[2], "cursor run attempt", 1);
   return { run_number: runNumber, run_attempt: runAttempt };
+}
+
+function parsedIdentity(identity) {
+  const [runId, runAttempt, ...rest] = identity.split(":");
+  if (rest.length > 0 || runId === undefined || runAttempt === undefined) {
+    throw invalidOccurrenceSummary("coalesced identities must be a bounded run_id:run_attempt list");
+  }
+  canonicalDecimalInteger(runId, "coalesced identity run ID", 1);
+  canonicalDecimalInteger(runAttempt, "coalesced identity run attempt", 1);
+  return identity;
 }
 
 function parsedCoalesced(comment) {
   const body = comment.body ?? "";
   const countMatch = singleSummaryMatch(
     body,
-    /Coalesced failed attempts: ([^\n]*)\./g,
+    /Observable coalesced failed attempts in this summary interval: ([^\n]*)\./g,
     "coalesced failure count",
   );
   const identitiesMatch = singleSummaryMatch(
     body,
-    /Recent coalesced identities: ([^\n]*)\./g,
+    /Recent observable coalesced identities: ([^\n]*)\./g,
     "coalesced identities",
   );
-  const count = nonNegativeSafeInteger(countMatch[1], "coalesced failure count");
+  const count = canonicalDecimalInteger(countMatch[1], "coalesced failure count", 0);
   const identitiesText = identitiesMatch[1];
-  const identities = identitiesText === "none" ? [] : identitiesText.split(", ");
+  const identities = identitiesText === "none" ? [] : identitiesText.split(", ").map(parsedIdentity);
   if (
     identities.length > MAX_RECENT_COALESCED_IDENTITIES ||
-    identities.some((identity) => !/^\d+:\d+$/.test(identity))
+    new Set(identities).size !== identities.length
   ) {
-    throw invalidOccurrenceSummary("coalesced identities must be a bounded run_id:run_attempt list");
+    throw invalidOccurrenceSummary("coalesced identities must be a unique bounded run_id:run_attempt list");
+  }
+  if (count < identities.length) {
+    throw invalidOccurrenceSummary("coalesced failure count must cover every recorded identity");
   }
   return { count, identities };
 }
@@ -315,9 +329,9 @@ export async function reconcileCacheBudgetAudit({
   const completedRuns = await listAllPages((page) =>
     client.listCompletedWorkflowRuns(workflowRun.workflow_id, defaultBranch, page),
   );
-  // GitHub's workflow-runs list endpoint exposes only the latest attempt for
-  // a run ID. Do not infer superseded attempts this reporter could not observe;
-  // coalesced evidence records only attempts returned by that endpoint.
+  // GitHub's workflow-runs list endpoint exposes only the latest attempt for a
+  // run ID. Preserve any distinct trusted triggering attempt too: coalesced
+  // evidence covers attempts observable through either source, never inferred ones.
   const trustedRuns = [...new Map(
     [...completedRuns, workflowRun]
       .filter((run) => isTrustedAuditRun(run, defaultBranch, repository))
@@ -351,6 +365,9 @@ export async function reconcileCacheBudgetAudit({
   let comments = issue ? await reporterComments(client, issue) : [];
   let summary = issue ? await canonicalOccurrenceSummary(client, comments) : null;
   let cursor = issue ? (summary ? parsedCursor(summary) : recordedCursor(issue, comments, trustedRuns)) : null;
+  if (cursor && isNewerRun(cursor, workflowRun)) {
+    throw invalidOccurrenceSummary("cursor must not be newer than observable trusted health");
+  }
   let coalesced = summary ? parsedCoalesced(summary) : { count: 0, identities: [] };
   let coalescedFailures = trustedRuns.filter(
     (run) =>
@@ -459,10 +476,10 @@ export async function reconcileCacheBudgetAudit({
         ? workflowRun
         : coalescedFailures.at(-1) ?? workflowRun;
       if (summary) {
-        await client.updateIssueComment(
-          summary.id,
-          occurrenceSummaryComment({ workflowRun, occurrenceRun, coalesced }),
-        );
+        const nextSummary = occurrenceSummaryComment({ workflowRun, occurrenceRun, coalesced });
+        if (summary.body !== nextSummary) {
+          await client.updateIssueComment(summary.id, nextSummary);
+        }
       } else if (comments.length >= MAX_REPORTER_COMMENTS) {
         const replacement = comments.at(-1);
         await client.updateIssueComment(

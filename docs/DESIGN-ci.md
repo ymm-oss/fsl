@@ -916,14 +916,15 @@ run numbers establish workflow order and attempts establish re-run order, while 
 can arrive out of order. A delayed event therefore reconciles current completed health rather than
 reopening an issue for stale failure. This is deliberately **latest-health coalescing**, not a claim
 that every completed attempt receives a durable individual comment: the reporter stores a cursor,
-the cumulative number of skipped failing latest attempts returned by the workflow-runs list endpoint,
-and up to 20 recent `run_id:run_attempt` identities from that same endpoint in its rolling recurrence
-summary. That endpoint does not expose an earlier superseded attempt of the same run ID, so the
-summary cannot recover or count such an attempt when no reporter ran for it. Thus a queued reporter
-that observes list-returned failures 41, 42, and 43 records 43 directly and preserves 41/42 as
-coalesced evidence. `cancel-in-progress: false` does not promise that every pending run
-executes—GitHub retains one pending concurrency-group run and may replace an older pending run—so
-this bounded, available evidence is required independently of the concurrency setting.
+the cumulative number of skipped failing attempts observable through either the triggering
+`workflow_run` event or the workflow-runs list endpoint, and up to 20 recent
+`run_id:run_attempt` identities from those sources in its rolling recurrence summary. An earlier
+superseded attempt is not recoverable when it is absent from the list endpoint and did not trigger a
+reporter run. Thus a queued reporter that observes failures 41, 42, and 43 records 43 directly and
+preserves 41/42 as coalesced evidence. `cancel-in-progress: false` does not promise that every
+pending run executes—GitHub retains one pending concurrency-group run and may replace an older
+pending run—so this bounded, observable evidence is required independently of the concurrency
+setting.
 
 The reporter paginates issues, runs, and comments rather than assuming page one is complete. This is
 a scheduled operational path rather than a merge hot path, so the potentially unbounded API scan is
@@ -933,7 +934,12 @@ then creates and updates one rolling recurrence/coalescing summary; it also upda
 recovery summary, for at most 22 reporter-authored comments. Identical occurrence-summary duplicates
 are consolidated. A missing, malformed, or unsafe cursor/count/identity field, or duplicate summaries
 that disagree, instead fails reconciliation without mutation; it is not silently repaired or reset.
-This preserves the meaning of the cumulative count instead of presenting a false repaired value. The
+Summary integers must be canonical decimal safe integers; cursor and identity parts are positive,
+identities are unique, and the count covers every retained identity. A cursor newer than currently
+observable trusted health is rejected rather than moved backward. The visible count is cumulative
+only for its summary interval: deleting the complete summary intentionally resets that interval, and
+the next summary starts a new count rather than claiming to reconstruct deleted evidence. These rules
+preserve the meaning of a retained cumulative count instead of presenting a false repaired value. The
 audit's `push` paths include the reporter workflow, script, and tests, so a merged reporter change
 runs the live audit immediately instead of waiting for the next schedule or manual dispatch.
 
