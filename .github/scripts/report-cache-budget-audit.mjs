@@ -116,28 +116,78 @@ function runIdentity(workflowRun) {
   return `${workflowRun.id}:${workflowRun.run_attempt ?? 1}`;
 }
 
-function parsedCursor(comment) {
-  const match = (comment.body ?? "").match(
-    /<!-- cache-budget-audit-cursor:(\d+):(\d+) -->/,
-  );
-  if (!match) {
-    return null;
+function invalidOccurrenceSummary(message) {
+  return new Error(`invalid cache-budget-audit occurrence summary: ${message}`);
+}
+
+function singleSummaryMatch(body, expression, field) {
+  const matches = [...body.matchAll(expression)];
+  if (matches.length !== 1) {
+    throw invalidOccurrenceSummary(`${field} must appear exactly once`);
   }
-  return { run_number: Number(match[1]), run_attempt: Number(match[2]) };
+  return matches[0];
+}
+
+function nonNegativeSafeInteger(value, field) {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 0) {
+    throw invalidOccurrenceSummary(`${field} must be a non-negative safe integer`);
+  }
+  return number;
+}
+
+function parsedCursor(comment) {
+  const match = singleSummaryMatch(
+    comment.body ?? "",
+    /<!-- cache-budget-audit-cursor:([^: >]+):([^ >]+) -->/g,
+    "cursor marker",
+  );
+  const runNumber = nonNegativeSafeInteger(match[1], "cursor run number");
+  const runAttempt = nonNegativeSafeInteger(match[2], "cursor run attempt");
+  if (runNumber === 0 || runAttempt === 0) {
+    throw invalidOccurrenceSummary("cursor run number and attempt must be positive");
+  }
+  return { run_number: runNumber, run_attempt: runAttempt };
 }
 
 function parsedCoalesced(comment) {
-  const count = Number(
-    (comment.body ?? "").match(/Coalesced failed attempts: (\d+)\./)?.[1] ?? 0,
+  const body = comment.body ?? "";
+  const countMatch = singleSummaryMatch(
+    body,
+    /Coalesced failed attempts: ([^\n]*)\./g,
+    "coalesced failure count",
   );
-  const identities = (comment.body ?? "")
-    .match(/Recent coalesced identities: (.+)\./)?.[1]
-    ?.split(", ")
-    .filter((identity) => identity !== "none") ?? [];
-  return {
-    count: Number.isSafeInteger(count) && count >= 0 ? count : 0,
-    identities,
-  };
+  const identitiesMatch = singleSummaryMatch(
+    body,
+    /Recent coalesced identities: ([^\n]*)\./g,
+    "coalesced identities",
+  );
+  const count = nonNegativeSafeInteger(countMatch[1], "coalesced failure count");
+  const identitiesText = identitiesMatch[1];
+  const identities = identitiesText === "none" ? [] : identitiesText.split(", ");
+  if (
+    identities.length > MAX_RECENT_COALESCED_IDENTITIES ||
+    identities.some((identity) => !/^\d+:\d+$/.test(identity))
+  ) {
+    throw invalidOccurrenceSummary("coalesced identities must be a bounded run_id:run_attempt list");
+  }
+  return { count, identities };
+}
+
+function occurrenceSummaryState(comment) {
+  return { cursor: parsedCursor(comment), coalesced: parsedCoalesced(comment) };
+}
+
+function sameOccurrenceSummaryState(left, right) {
+  return (
+    left.cursor.run_number === right.cursor.run_number &&
+    left.cursor.run_attempt === right.cursor.run_attempt &&
+    left.coalesced.count === right.coalesced.count &&
+    left.coalesced.identities.length === right.coalesced.identities.length &&
+    left.coalesced.identities.every(
+      (identity, index) => identity === right.coalesced.identities[index],
+    )
+  );
 }
 
 function recordedCursor(issue, comments, runs) {
@@ -200,7 +250,29 @@ async function canonicalSummary(client, comments, marker) {
 }
 
 async function canonicalOccurrenceSummary(client, comments) {
-  return canonicalSummary(client, comments, occurrenceSummaryMarker());
+  const summaries = comments.filter((comment) =>
+    (comment.body ?? "").includes(occurrenceSummaryMarker()),
+  );
+  if (summaries.length <= 1) {
+    if (summaries[0]) {
+      occurrenceSummaryState(summaries[0]);
+    }
+    return summaries[0] ?? null;
+  }
+
+  const canonical = summaries.at(-1);
+  const canonicalState = occurrenceSummaryState(canonical);
+  if (
+    summaries
+      .slice(0, -1)
+      .some((summary) => !sameOccurrenceSummaryState(occurrenceSummaryState(summary), canonicalState))
+  ) {
+    throw invalidOccurrenceSummary("duplicate summaries disagree");
+  }
+  await Promise.all(
+    summaries.slice(0, -1).map((summary) => client.deleteIssueComment(summary.id)),
+  );
+  return canonical;
 }
 
 async function canonicalRecoverySummary(client, comments) {
@@ -243,6 +315,9 @@ export async function reconcileCacheBudgetAudit({
   const completedRuns = await listAllPages((page) =>
     client.listCompletedWorkflowRuns(workflowRun.workflow_id, defaultBranch, page),
   );
+  // GitHub's workflow-runs list endpoint exposes only the latest attempt for
+  // a run ID. Do not infer superseded attempts this reporter could not observe;
+  // coalesced evidence records only attempts returned by that endpoint.
   const trustedRuns = [...new Map(
     [...completedRuns, workflowRun]
       .filter((run) => isTrustedAuditRun(run, defaultBranch, repository))
@@ -260,7 +335,6 @@ export async function reconcileCacheBudgetAudit({
   }
   workflowRun.repository = { full_name: repository };
 
-  await client.ensureLabel(CACHE_BUDGET_AUDIT_LABEL);
   const issues = await listAllPages((page) =>
     client.listIssues(CACHE_BUDGET_AUDIT_LABEL, page),
   );
@@ -293,6 +367,7 @@ export async function reconcileCacheBudgetAudit({
     coalescedFailures = coalescedFailures.filter(
       (run) => runIdentity(run) !== runIdentity(directFailure),
     );
+    await client.ensureLabel(CACHE_BUDGET_AUDIT_LABEL);
     issue = await client.createIssue({
       title: "[cache budget audit] Actions cache budget audit failed on main",
       body: issueBody({ repository, workflowRun: directFailure }),

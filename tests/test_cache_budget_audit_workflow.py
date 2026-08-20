@@ -562,6 +562,29 @@ def test_cli_reports_unparseable_yaml(tmp_path: Path):
     assert "Traceback" not in output
 
 
+def test_cli_rejects_a_duplicate_yaml_key_before_wiring_validation(tmp_path: Path):
+    path = tmp_path / "duplicate-key.yml"
+    source = WORKFLOW_PATH.read_text(encoding="utf-8")
+    path.write_text(
+        source.replace(
+            "          persist-credentials: false",
+            "          persist-credentials: true\n          persist-credentials: false",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run_cli(path)
+    output = result.stdout + result.stderr
+
+    assert result.returncode == 1, output
+    assert result.stdout.startswith(
+        "cache-budget-audit workflow wiring: FAIL -- workflow YAML is invalid:"
+    )
+    assert "found duplicate key 'persist-credentials'" in result.stdout
+    assert "Traceback" not in output
+
+
 def test_cli_reports_missing_reporter_workflow_file(tmp_path: Path):
     path = tmp_path / "missing-reporter.yml"
     result = _run_cli(WORKFLOW_PATH, path)

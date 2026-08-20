@@ -70,10 +70,37 @@ REQUIRED_WATCHED_PATHS = {
 class WorkflowLoader(yaml.SafeLoader):
     """SafeLoader with YAML 1.2 boolean spelling for GitHub Actions keys."""
 
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
+        """Construct every mapping while rejecting duplicate keys at parse time."""
+        mapping: dict[Any, Any] = {}
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            try:
+                duplicate = key in mapping
+            except TypeError as error:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    "found an unhashable key",
+                    key_node.start_mark,
+                ) from error
+            if duplicate:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    f"found duplicate key {key!r}",
+                    key_node.start_mark,
+                )
+            mapping[key] = self.construct_object(value_node, deep=deep)
+        return mapping
+
 
 # PyYAML's YAML 1.1 resolver turns the Actions key ``on`` into ``True``.  GitHub
 # Actions uses YAML 1.2 spelling, where only true/false are booleans, so retain
 # those values while treating ``on`` as the string key it is in the workflow.
+# The constructor above covers every mapping the loader touches, including nested
+# step configuration, so a duplicate cannot disappear before a fail-closed
+# approved-mapping check sees the workflow structure.
 WorkflowLoader.yaml_implicit_resolvers = copy.deepcopy(yaml.SafeLoader.yaml_implicit_resolvers)
 for first_character, resolvers in WorkflowLoader.yaml_implicit_resolvers.items():
     WorkflowLoader.yaml_implicit_resolvers[first_character] = [
