@@ -67,6 +67,10 @@ def _reporter_runner_step(document: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _reporter_setup_node_step(document: dict[str, Any]) -> dict[str, Any]:
+    return _reporter_job(document)["steps"][1]
+
+
 def _live_audit_step(document: dict[str, Any]) -> dict[str, Any]:
     return next(
         step
@@ -249,8 +253,16 @@ def _reporter_job_continue_on_error(document: dict[str, Any]) -> None:
     _reporter_job(document)["continue-on-error"] = True
 
 
+def _reporter_job_permissions_override(document: dict[str, Any]) -> None:
+    _reporter_job(document)["permissions"] = validator.REPORTER_PERMISSIONS.copy()
+
+
 def _remove_reporter_steps(document: dict[str, Any]) -> None:
     del _reporter_job(document)["steps"]
+
+
+def _insert_reporter_shell_step(document: dict[str, Any]) -> None:
+    _reporter_job(document)["steps"].insert(2, {"run": "printf compromised"})
 
 
 def _remove_reporter_checkout(document: dict[str, Any]) -> None:
@@ -265,8 +277,20 @@ def _checkout_triggering_sha(document: dict[str, Any]) -> None:
     _reporter_checkout_step(document)["with"]["ref"] = "${{ github.event.workflow_run.head_sha }}"
 
 
+def _checkout_mutable_action_ref(document: dict[str, Any]) -> None:
+    _reporter_checkout_step(document)["uses"] = "actions/checkout@main"
+
+
 def _checkout_persists_credentials(document: dict[str, Any]) -> None:
     _reporter_checkout_step(document)["with"]["persist-credentials"] = True
+
+
+def _setup_node_mutable_action_ref(document: dict[str, Any]) -> None:
+    _reporter_setup_node_step(document)["uses"] = "actions/setup-node@main"
+
+
+def _setup_node_unexpected_config(document: dict[str, Any]) -> None:
+    _reporter_setup_node_step(document)["with"]["cache"] = "npm"
 
 
 def _remove_reporter_runner(document: dict[str, Any]) -> None:
@@ -287,6 +311,10 @@ def _reporter_runner_continue_on_error(document: dict[str, Any]) -> None:
 
 def _append_true_to_reporter_runner(document: dict[str, Any]) -> None:
     _reporter_runner_step(document)["run"] += " || true"
+
+
+def _replace_reporter_runner_token(document: dict[str, Any]) -> None:
+    _reporter_runner_step(document)["env"]["GITHUB_TOKEN"] = "${{ github.token }}"
 
 
 Mutation = tuple[str, Callable[[dict[str, Any]], Any], str]
@@ -359,13 +387,19 @@ REPORTER_MUTATIONS: list[ReporterMutation] = [
     ("enable reporter cancellation", _enable_reporter_cancel_in_progress, "reporter concurrency cancel-in-progress must be false"),
     ("remove reporter jobs", _remove_reporter_jobs, "reporter workflow jobs must be a mapping"),
     ("set reporter job to a list", _set_reporter_job_to_list, "reporter job 'reconcile' must be a mapping"),
+    ("set reporter job permissions", _reporter_job_permissions_override, "reporter job must not declare a permissions override"),
     ("set reporter job continue-on-error", _reporter_job_continue_on_error, "reporter job must not declare 'continue-on-error'"),
     ("replace trusted reporter condition", _replace_reporter_condition, "reporter job must restrict to trusted default-branch schedule, push, or workflow_dispatch audits"),
     ("remove reporter steps", _remove_reporter_steps, "reporter job steps must be a list"),
-    ("remove reporter checkout", _remove_reporter_checkout, "reporter job must contain exactly one checkout step"),
+    ("remove reporter checkout", _remove_reporter_checkout, "reporter job steps must be exactly checkout, setup-node, and reconciliation runner in that order"),
+    ("insert arbitrary reporter shell step", _insert_reporter_shell_step, "reporter job steps must be exactly checkout, setup-node, and reconciliation runner in that order"),
     ("checkout triggering SHA", _checkout_triggering_sha, "reporter checkout must use the repository default branch ref"),
+    ("checkout mutable action ref", _checkout_mutable_action_ref, "reporter checkout action must be pinned to the approved commit"),
     ("persist checkout credentials", _checkout_persists_credentials, "reporter checkout must disable persisted credentials"),
-    ("remove reporter runner", _remove_reporter_runner, "reporter job must contain exactly one named reconciliation runner step"),
+    ("setup-node mutable action ref", _setup_node_mutable_action_ref, "reporter setup-node action must be pinned to the approved commit"),
+    ("setup-node unexpected config", _setup_node_unexpected_config, "reporter setup-node step must use exactly node-version 22"),
+    ("remove reporter runner", _remove_reporter_runner, "reporter job steps must be exactly checkout, setup-node, and reconciliation runner in that order"),
+    ("replace reporter runner token", _replace_reporter_runner_token, "reporter reconciliation runner must bind GITHUB_TOKEN to secrets.GITHUB_TOKEN"),
     ("add an if to reporter runner", _reporter_runner_if, "reporter reconciliation runner must not declare 'if'"),
     ("set reporter runner continue-on-error", _reporter_runner_continue_on_error, "reporter reconciliation runner must not declare 'continue-on-error'"),
     ("append || true to reporter runner", _append_true_to_reporter_runner, "reporter reconciliation command must be exactly 'node .github/scripts/report-cache-budget-audit.mjs'"),

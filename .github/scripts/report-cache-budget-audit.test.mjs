@@ -5,7 +5,9 @@ import test from "node:test";
 
 import {
   CACHE_BUDGET_AUDIT_LABEL,
+  MAX_DETAILED_OCCURRENCE_COMMENTS,
   cacheBudgetAuditMarker,
+  occurrenceMarker,
   reconcileCacheBudgetAudit,
 } from "./report-cache-budget-audit.mjs";
 
@@ -16,22 +18,26 @@ class FakeClient {
     this.completedRuns = completedRuns;
     this.labels = new Set();
     this.nextIssue = 100;
+    this.nextComment = 1000;
+    this.updatedComments = 0;
   }
 
-  async listCompletedWorkflowRuns() {
-    return this.completedRuns;
+  async listCompletedWorkflowRuns(_workflowId, _branch, page) {
+    return this.completedRuns.slice((page - 1) * 100, page * 100);
   }
 
   async ensureLabel(name) {
     this.labels.add(name);
   }
 
-  async listIssues() {
-    return this.issues;
+  async listIssues(_label, page) {
+    return this.issues.slice((page - 1) * 100, page * 100);
   }
 
-  async listIssueComments(number) {
-    return this.comments.filter((comment) => comment.issue === number);
+  async listIssueComments(number, page) {
+    return this.comments
+      .filter((comment) => comment.issue === number)
+      .slice((page - 1) * 100, page * 100);
   }
 
   async createIssue(issue) {
@@ -42,7 +48,19 @@ class FakeClient {
   }
 
   async createIssueComment(number, body) {
-    this.comments.push({ issue: number, body });
+    this.comments.push({
+      id: this.nextComment,
+      issue: number,
+      body,
+      user: { login: "github-actions[bot]" },
+    });
+    this.nextComment += 1;
+  }
+
+  async updateIssueComment(commentId, body) {
+    const comment = this.comments.find((candidate) => candidate.id === commentId);
+    comment.body = body;
+    this.updatedComments += 1;
   }
 
   async updateIssue(number, update) {
@@ -162,4 +180,104 @@ test("a stale failure event reconciles newer recovered health instead", async ()
   });
   assert.equal(client.issues.length, 1);
   assert.equal(client.issues[0].state, "closed");
+});
+
+test("a marker beyond the first comment page remains idempotent", async () => {
+  const run = workflowRun({ id: 42, run_number: 13 });
+  const issue = {
+    number: 100,
+    state: "open",
+    body: cacheBudgetAuditMarker(),
+  };
+  const comments = Array.from({ length: 100 }, (_value, index) => ({
+    id: index + 1,
+    issue: 100,
+    body: `filler ${index}`,
+    user: { login: "github-actions[bot]" },
+  }));
+  comments.push({
+    id: 101,
+    issue: 100,
+    body: occurrenceMarker(run.id, run.run_attempt),
+    user: { login: "github-actions[bot]" },
+  });
+  const client = new FakeClient({ issues: [issue], comments });
+
+  const result = await reconcile(client, run);
+
+  assert.deepEqual(result, { created: 0, updated: 0, closed: 0, failed: true });
+  assert.equal(client.comments.length, 101);
+});
+
+test("a non-bot occurrence marker cannot suppress the reporter audit trail", async () => {
+  const client = new FakeClient();
+  await reconcile(client, workflowRun());
+  const run = workflowRun({ id: 42, run_number: 13 });
+  client.comments.push({
+    id: 1,
+    issue: 100,
+    body: occurrenceMarker(run.id, run.run_attempt),
+    user: { login: "human-reviewer" },
+  });
+
+  const result = await reconcile(client, run);
+
+  assert.equal(result.updated, 1);
+  assert.equal(client.comments.length, 2);
+  assert.equal(client.comments[1].user.login, "github-actions[bot]");
+});
+
+test("recurrence comments are bounded by a rolling summary", async () => {
+  const client = new FakeClient();
+  await reconcile(client, workflowRun());
+
+  for (let offset = 1; offset <= MAX_DETAILED_OCCURRENCE_COMMENTS + 8; offset += 1) {
+    await reconcile(
+      client,
+      workflowRun({
+        id: 41 + offset,
+        run_number: 12 + offset,
+        head_sha: `${offset}`.padStart(40, "0"),
+      }),
+    );
+  }
+
+  assert.equal(client.comments.length, MAX_DETAILED_OCCURRENCE_COMMENTS + 1);
+  assert.equal(client.updatedComments, 7);
+  assert.match(
+    client.comments.at(-1).body,
+    /cache-budget-audit-occurrence-summary/,
+  );
+  assert.ok(
+    client.comments.at(-1).body.includes(
+      occurrenceMarker(41 + MAX_DETAILED_OCCURRENCE_COMMENTS + 8, 1),
+    ),
+  );
+});
+
+test("recovery flapping cannot grow reporter comments without bound", async () => {
+  const client = new FakeClient();
+  await reconcile(client, workflowRun());
+  let runId = 41;
+  let runNumber = 12;
+
+  for (let iteration = 0; iteration < MAX_DETAILED_OCCURRENCE_COMMENTS + 5; iteration += 1) {
+    runId += 1;
+    runNumber += 1;
+    await reconcile(
+      client,
+      workflowRun({ id: runId, run_number: runNumber, conclusion: "success" }),
+    );
+    runId += 1;
+    runNumber += 1;
+    await reconcile(client, workflowRun({ id: runId, run_number: runNumber }));
+  }
+
+  assert.equal(client.comments.length, MAX_DETAILED_OCCURRENCE_COMMENTS + 2);
+  assert.equal(
+    client.comments.filter((comment) =>
+      comment.body.includes("cache-budget-audit-recovery-summary"),
+    ).length,
+    1,
+  );
 });

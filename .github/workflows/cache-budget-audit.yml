@@ -31,7 +31,10 @@ on:
       - .github/scripts/audit-cache-budget.mjs
       - .github/scripts/audit-cache-budget.test.mjs
       - .github/scripts/run-cache-budget-audit.mjs
+      - .github/scripts/report-cache-budget-audit.mjs
+      - .github/scripts/report-cache-budget-audit.test.mjs
       - .github/workflows/cache-budget-audit.yml
+      - .github/workflows/cache-budget-audit-reporter.yml
       - .github/workflows/ci.yml
       - .github/workflows/merge-readiness.yml
 

@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 export const CACHE_BUDGET_AUDIT_LABEL = "ci/cache-budget-audit";
+export const REPORTER_BOT_LOGIN = "github-actions[bot]";
+export const MAX_DETAILED_OCCURRENCE_COMMENTS = 20;
 export const TRUSTED_AUDIT_EVENTS = new Set([
   "push",
   "schedule",
@@ -20,6 +22,14 @@ export function cacheBudgetAuditMarker() {
 
 export function occurrenceMarker(runId, runAttempt) {
   return `<!-- cache-budget-audit-occurrence:${runId}:${runAttempt ?? 1} -->`;
+}
+
+function occurrenceSummaryMarker() {
+  return "<!-- cache-budget-audit-occurrence-summary -->";
+}
+
+function recoverySummaryMarker() {
+  return "<!-- cache-budget-audit-recovery-summary -->";
 }
 
 function recoveryMarker(runId, runAttempt, issueNumber) {
@@ -81,8 +91,21 @@ function occurrenceComment({ workflowRun }) {
   ].join("\n");
 }
 
+function occurrenceSummaryComment({ workflowRun }) {
+  return [
+    occurrenceSummaryMarker(),
+    occurrenceMarker(workflowRun.id, workflowRun.run_attempt),
+    "Detailed recurrence comments are capped at 20; this rolling summary records the latest recurrence.",
+    "",
+    `- Workflow run: [${workflowRun.id}](${workflowRun.html_url})`,
+    `- Trigger: \`${workflowRun.event}\``,
+    `- Conclusion: \`${workflowRun.conclusion ?? "unknown"}\``,
+  ].join("\n");
+}
+
 function recoveryComment({ workflowRun, issue }) {
   return [
+    recoverySummaryMarker(),
     recoveryMarker(workflowRun.id, workflowRun.run_attempt, issue.number),
     `Recovered on [\`${shortSha(workflowRun.head_sha)}\`](https://github.com/${workflowRun.repository.full_name}/commit/${workflowRun.head_sha}).`,
     "",
@@ -90,11 +113,36 @@ function recoveryComment({ workflowRun, issue }) {
   ].join("\n");
 }
 
+async function listAllPages(fetchPage) {
+  const entries = [];
+  for (let page = 1; ; page += 1) {
+    const pageEntries = await fetchPage(page);
+    entries.push(...pageEntries);
+    if (pageEntries.length < 100) {
+      return entries;
+    }
+  }
+}
+
+function isReporterComment(comment) {
+  return comment.user?.login === REPORTER_BOT_LOGIN;
+}
+
+async function reporterComments(client, issue) {
+  // Unbounded pagination is acceptable for this scheduled operational path,
+  // rather than a merge hot path: an old marker must not silently defeat
+  // idempotency after 100 comments.
+  const comments = await listAllPages((page) =>
+    client.listIssueComments(issue.number, page),
+  );
+  return comments.filter(isReporterComment);
+}
+
 async function issueContains(client, issue, marker) {
   if ((issue.body ?? "").includes(marker)) {
     return true;
   }
-  const comments = await client.listIssueComments(issue.number);
+  const comments = await reporterComments(client, issue);
   return comments.some((comment) => (comment.body ?? "").includes(marker));
 }
 
@@ -114,9 +162,8 @@ export async function reconcileCacheBudgetAudit({
   }
 
   const triggeringRunId = workflowRun.id;
-  const completedRuns = await client.listCompletedWorkflowRuns(
-    workflowRun.workflow_id,
-    defaultBranch,
+  const completedRuns = await listAllPages((page) =>
+    client.listCompletedWorkflowRuns(workflowRun.workflow_id, defaultBranch, page),
   );
   const latest = latestTrustedAuditRun(
     [...completedRuns, workflowRun],
@@ -129,7 +176,9 @@ export async function reconcileCacheBudgetAudit({
   workflowRun.repository = { full_name: repository };
 
   await client.ensureLabel(CACHE_BUDGET_AUDIT_LABEL);
-  const issues = await client.listIssues(CACHE_BUDGET_AUDIT_LABEL);
+  const issues = await listAllPages((page) =>
+    client.listIssues(CACHE_BUDGET_AUDIT_LABEL, page),
+  );
   const issue = issues.find(
     (candidate) =>
       !candidate.pull_request &&
@@ -152,7 +201,31 @@ export async function reconcileCacheBudgetAudit({
       let changed = false;
       const occurrence = occurrenceMarker(workflowRun.id, workflowRun.run_attempt);
       if (!(await issueContains(client, issue, occurrence))) {
-        await client.createIssueComment(issue.number, occurrenceComment({ workflowRun }));
+        const comments = await reporterComments(client, issue);
+        const detailedOccurrences = comments.filter((comment) =>
+          (comment.body ?? "").includes("<!-- cache-budget-audit-occurrence:"),
+        );
+        if (detailedOccurrences.length < MAX_DETAILED_OCCURRENCE_COMMENTS) {
+          await client.createIssueComment(
+            issue.number,
+            occurrenceComment({ workflowRun }),
+          );
+        } else {
+          const summary = comments.find((comment) =>
+            (comment.body ?? "").includes(occurrenceSummaryMarker()),
+          );
+          if (summary) {
+            await client.updateIssueComment(
+              summary.id,
+              occurrenceSummaryComment({ workflowRun }),
+            );
+          } else {
+            await client.createIssueComment(
+              issue.number,
+              occurrenceSummaryComment({ workflowRun }),
+            );
+          }
+        }
         changed = true;
       }
       if (issue.state !== "open") {
@@ -171,10 +244,21 @@ export async function reconcileCacheBudgetAudit({
       issue.number,
     );
     if (!(await issueContains(client, issue, recovery))) {
-      await client.createIssueComment(
-        issue.number,
-        recoveryComment({ workflowRun, issue }),
+      const comments = await reporterComments(client, issue);
+      const summary = comments.find((comment) =>
+        (comment.body ?? "").includes(recoverySummaryMarker()),
       );
+      if (summary) {
+        await client.updateIssueComment(
+          summary.id,
+          recoveryComment({ workflowRun, issue }),
+        );
+      } else {
+        await client.createIssueComment(
+          issue.number,
+          recoveryComment({ workflowRun, issue }),
+        );
+      }
     }
     await client.updateIssue(issue.number, { state: "closed" });
     closed = 1;
@@ -229,11 +313,11 @@ export class GitHubRestClient {
     return `/repos/${this.owner}/${this.repo}${suffix}`;
   }
 
-  async listCompletedWorkflowRuns(workflowId, branch) {
+  async listCompletedWorkflowRuns(workflowId, branch, page) {
     const response = await this.request(
       "GET",
       this.repoPath(
-        `/actions/workflows/${workflowId}/runs?branch=${encodeURIComponent(branch)}&status=completed&per_page=100`,
+        `/actions/workflows/${workflowId}/runs?branch=${encodeURIComponent(branch)}&status=completed&per_page=100&page=${page}`,
       ),
     );
     return response.workflow_runs;
@@ -255,19 +339,19 @@ export class GitHubRestClient {
     }
   }
 
-  async listIssues(label) {
+  async listIssues(label, page) {
     return this.request(
       "GET",
       this.repoPath(
-        `/issues?state=all&labels=${encodeURIComponent(label)}&per_page=100`,
+        `/issues?state=all&labels=${encodeURIComponent(label)}&per_page=100&page=${page}`,
       ),
     );
   }
 
-  async listIssueComments(number) {
+  async listIssueComments(number, page) {
     return this.request(
       "GET",
-      this.repoPath(`/issues/${number}/comments?per_page=100`),
+      this.repoPath(`/issues/${number}/comments?per_page=100&page=${page}`),
     );
   }
 
@@ -279,6 +363,14 @@ export class GitHubRestClient {
     return this.request(
       "POST",
       this.repoPath(`/issues/${number}/comments`),
+      { body },
+    );
+  }
+
+  async updateIssueComment(commentId, body) {
+    return this.request(
+      "PATCH",
+      this.repoPath(`/issues/comments/${commentId}`),
       { body },
     );
   }

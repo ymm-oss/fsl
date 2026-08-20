@@ -886,6 +886,43 @@ gating a merge on it would gate on something outside the change under review.
 Issue #747 records the incident. Issue #720's Finding 2 — warming the fault-operator scratch build —
 **adds** a cache and therefore depends on this budget holding first.
 
+### Cache-budget audit failure reporting
+
+`.github/workflows/cache-budget-audit.yml` deliberately remains an observer: it has only
+`actions: read` and `contents: read`, including on `workflow_dispatch`, so it cannot turn a live
+cache observation into repository mutation. `.github/workflows/cache-budget-audit-reporter.yml` is
+the separate, least-privilege writer. It has exactly Actions/contents read plus issues write and
+listens only for completed `cache budget audit` runs. Its job additionally requires the same
+repository, the default branch, and one of `push`, `schedule`, or `workflow_dispatch`; it checks out
+the default branch rather than the triggering SHA. The job has no permission override and exactly
+the pinned checkout, pinned Node setup, and reporter invocation steps, so a mutable action or an
+inserted pre-run shell step cannot alter the checked-out reporter before it receives the write token.
+
+The reporter maintains one canonical issue, identified by the stable hidden marker
+`<!-- cache-budget-audit -->`. Each run attempt has an occurrence marker keyed by
+`run_id:run_attempt`; the initial failure creates the issue, a later failure records a recurrence,
+a successful trusted audit closes the issue with a recovery comment, and a later failure reopens the
+same issue. A human close does not change identity: the next distinct failure reopens the canonical
+issue. Comment markers count only when authored by `github-actions[bot]`, so a user cannot suppress
+the reporter's audit trail by posting a predictable marker.
+
+Before mutation the reporter lists completed default-branch audit runs and chooses the greatest
+`(run_number, run_attempt)` among trusted runs. It intentionally does not use completion timestamps:
+run numbers establish workflow order and attempts establish re-run order, while completion delivery
+can arrive out of order. A delayed event therefore reconciles current completed health rather than
+reopening an issue for stale failure. Reporter runs serialize with `cancel-in-progress: false` to
+avoid duplicate-creation races.
+
+The reporter paginates issues, runs, and comments rather than assuming page one is complete. This is
+a scheduled operational path rather than a merge hot path, so the potentially unbounded API scan is
+acceptable to preserve complete idempotency and recovery evidence. Comment volume is nevertheless
+bounded: it keeps at most 20 detailed recurrence comments, then creates and updates one rolling
+recurrence summary; it also updates one rolling recovery summary. Thus it retains at most 22
+reporter-authored comments and a persistent incident cannot turn one canonical issue into an
+unbounded comment log. The audit's `push` paths include the reporter workflow, script, and tests, so
+a merged reporter change runs the live audit immediately instead of waiting for the next schedule or
+manual dispatch.
+
 ## Required pre-merge contexts, and why the merge queue was rejected
 
 The `main` ruleset (`main safety and CI`, id `19090811`) requires six contexts: `merge readiness`,

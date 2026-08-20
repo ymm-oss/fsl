@@ -34,7 +34,12 @@ REPORTER_PERMISSIONS = {"actions": "read", "contents": "read", "issues": "write"
 REPORTER_WORKFLOW_RUN_SOURCE = "cache budget audit"
 REPORTER_WORKFLOW_RUN_TYPES = ["completed"]
 REPORTER_CONCURRENCY_GROUP = "cache-budget-audit-reporter"
+REPORTER_CHECKOUT_ACTION = "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
 REPORTER_CHECKOUT_REF = "${{ github.event.repository.default_branch }}"
+REPORTER_SETUP_NODE_ACTION = "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020"
+REPORTER_NODE_VERSION = "22"
+REPORTER_TOKEN = "${{ secrets.GITHUB_TOKEN }}"
+REPORTER_RUNNER_STEP_NAME = "Create, update, or resolve cache budget audit issue"
 REPORTER_COMMAND = ["node", ".github/scripts/report-cache-budget-audit.mjs"]
 REPORTER_TRUSTED_CONDITION = " ".join(
     [
@@ -50,7 +55,10 @@ REQUIRED_WATCHED_PATHS = {
     ".github/scripts/audit-cache-budget.mjs",
     ".github/scripts/audit-cache-budget.test.mjs",
     ".github/scripts/run-cache-budget-audit.mjs",
+    ".github/scripts/report-cache-budget-audit.mjs",
+    ".github/scripts/report-cache-budget-audit.test.mjs",
     ".github/workflows/cache-budget-audit.yml",
+    ".github/workflows/cache-budget-audit-reporter.yml",
     ".github/workflows/ci.yml",
     ".github/workflows/merge-readiness.yml",
 }
@@ -246,6 +254,8 @@ def validate_reporter_workflow(document: Any) -> list[str]:
     if job is None:
         return errors
 
+    if "permissions" in job:
+        errors.append("reporter job must not declare a permissions override")
     if "continue-on-error" in job:
         errors.append("reporter job must not declare 'continue-on-error'")
     if _normalized_text(job.get("if")) != REPORTER_TRUSTED_CONDITION:
@@ -258,30 +268,39 @@ def validate_reporter_workflow(document: Any) -> list[str]:
         errors.append("reporter job steps must be a list")
         return errors
     steps = steps_value
-    checkout_indices = [
-        index
-        for index, step in enumerate(steps)
-        if isinstance(step, Mapping)
-        and isinstance(step.get("uses"), str)
-        and step["uses"].startswith("actions/checkout@")
-    ]
-    if len(checkout_indices) != 1:
-        errors.append("reporter job must contain exactly one checkout step")
+    if not (
+        len(steps) == 3
+        and all(isinstance(step, Mapping) for step in steps)
+        and isinstance(steps[0].get("uses"), str)
+        and steps[0]["uses"].startswith("actions/checkout@")
+        and isinstance(steps[1].get("uses"), str)
+        and steps[1]["uses"].startswith("actions/setup-node@")
+        and steps[2].get("name") == REPORTER_RUNNER_STEP_NAME
+    ):
+        errors.append(
+            "reporter job steps must be exactly checkout, setup-node, and reconciliation runner in that order"
+        )
+        return errors
+
+    checkout = steps[0]
+    if checkout.get("uses") != REPORTER_CHECKOUT_ACTION:
+        errors.append("reporter checkout action must be pinned to the approved commit")
     else:
-        checkout = steps[checkout_indices[0]]
         checkout_with = checkout.get("with")
         if not isinstance(checkout_with, Mapping) or checkout_with.get("ref") != REPORTER_CHECKOUT_REF:
             errors.append("reporter checkout must use the repository default branch ref")
         if not isinstance(checkout_with, Mapping) or checkout_with.get("persist-credentials") is not False:
             errors.append("reporter checkout must disable persisted credentials")
 
-    runner_indices = _named_step_indices(
-        steps, "Create, update, or resolve cache budget audit issue"
-    )
-    if len(runner_indices) != 1:
-        errors.append("reporter job must contain exactly one named reconciliation runner step")
-        return errors
-    runner = steps[runner_indices[0]]
+    setup_node = steps[1]
+    if setup_node.get("uses") != REPORTER_SETUP_NODE_ACTION:
+        errors.append("reporter setup-node action must be pinned to the approved commit")
+    if setup_node.get("with") != {"node-version": REPORTER_NODE_VERSION}:
+        errors.append("reporter setup-node step must use exactly node-version 22")
+
+    runner = steps[2]
+    if runner.get("env") != {"GITHUB_TOKEN": REPORTER_TOKEN}:
+        errors.append("reporter reconciliation runner must bind GITHUB_TOKEN to secrets.GITHUB_TOKEN")
     if "if" in runner:
         errors.append("reporter reconciliation runner must not declare 'if'")
     if "continue-on-error" in runner:
