@@ -505,12 +505,32 @@ def validate_reporter_workflow(document: Any) -> list[str]:
     return errors
 
 
+def validate_audit_workflow_name_uniqueness(workflows_directory: Path) -> list[str]:
+    """Reject another workflow that could match the reporter's source name."""
+    errors: list[str] = []
+    matching_workflows = []
+    for path in sorted(workflows_directory.iterdir()):
+        if not path.is_file() or path.suffix not in {".yaml", ".yml"}:
+            continue
+        document = load_workflow(path)
+        if isinstance(document, Mapping) and document.get("name") == AUDIT_WORKFLOW_NAME:
+            matching_workflows.append(path.name)
+
+    if len(matching_workflows) > 1:
+        errors.append(
+            "audit workflow name "
+            f"'{AUDIT_WORKFLOW_NAME}' must be unique; found in: {', '.join(matching_workflows)}"
+        )
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workflow", type=Path, default=DEFAULT_WORKFLOW)
     parser.add_argument("--reporter-workflow", type=Path, default=DEFAULT_REPORTER_WORKFLOW)
     args = parser.parse_args()
 
+    audit_workflow_loaded = False
     try:
         document = load_workflow(args.workflow)
     except FileNotFoundError:
@@ -520,6 +540,7 @@ def main() -> int:
     except yaml.YAMLError as error:
         errors = [f"workflow YAML is invalid: {error}"]
     else:
+        audit_workflow_loaded = True
         errors = validate_workflow(document)
     try:
         reporter_document = load_workflow(args.reporter_workflow)
@@ -533,6 +554,8 @@ def main() -> int:
         errors.append(f"reporter workflow YAML is invalid: {error}")
     else:
         errors.extend(validate_reporter_workflow(reporter_document))
+    if audit_workflow_loaded:
+        errors.extend(validate_audit_workflow_name_uniqueness(args.workflow.parent))
     if errors:
         for error in errors:
             print(f"cache-budget-audit workflow wiring: FAIL -- {error}")

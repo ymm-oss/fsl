@@ -906,6 +906,9 @@ unknown workflow, trigger, concurrency, job, and step keys; jobs other than `aud
 permission overrides; unpinned actions; and any reordered, inserted, or altered calibration/live-audit
 step. It fixes the read-only token binding and command of the live audit, so no job can override the
 read-only top-level permission set or alter the checked-out audit before that command runs.
+The validator also enumerates every `.yml`/`.yaml` workflow in `.github/workflows/` and requires
+`cache budget audit` to be unique, preventing another default-branch workflow from impersonating the
+name that GitHub uses to select `workflow_run` subscribers.
 
 The reporter maintains one canonical issue, identified by the stable hidden marker
 `<!-- cache-budget-audit -->`. The currently reconciled failure has an occurrence marker keyed by
@@ -959,10 +962,11 @@ writer commits at test time: this repository squash-merges pull requests, so tho
 not survive on `main`. Each fixture records its writer commit, writer/output SHA-256 digests, and its
 capture command; regeneration is a deliberate operation that first makes the original writer commit
 available and then refreshes the recorded digests. The test locks each committed body to its recorded
-output digest and fixed writer commit/digest labels while rejecting Git-history lookup; it cannot
-rehash an original writer that squash merge has removed, so the writer digest is an auditable review
-record rather than a run-time source verification. Both the full-history automation checkout and a
-shallow developer clone therefore exercise the same persisted output.
+output digest and fixed writer commit/digest labels, then runs the full reporter test file from a
+non-Git directory with no Git executable; imported modules therefore cannot hide a Git-history
+lookup. It cannot rehash an original writer that squash merge has removed, so the writer digest is an
+auditable review record rather than a run-time source verification. Both the full-history automation
+checkout and a shallow developer clone therefore exercise the same persisted output.
 
 ## Required pre-merge contexts, and why the merge queue was rejected
 

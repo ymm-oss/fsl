@@ -704,6 +704,23 @@ def test_real_cache_budget_audit_reporter_workflow_is_accepted():
     assert validator.validate_reporter_workflow(_real_reporter_workflow()) == []
 
 
+def test_audit_workflow_name_rejects_a_third_same_named_workflow(tmp_path: Path):
+    (tmp_path / WORKFLOW_PATH.name).write_text(WORKFLOW_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / REPORTER_WORKFLOW_PATH.name).write_text(
+        REPORTER_WORKFLOW_PATH.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (tmp_path / "unrelated-cache-audit.yml").write_text(
+        f"name: {validator.AUDIT_WORKFLOW_NAME}\n",
+        encoding="utf-8",
+    )
+
+    assert validator.validate_audit_workflow_name_uniqueness(tmp_path) == [
+        "audit workflow name 'cache budget audit' must be unique; found in: "
+        "cache-budget-audit.yml, unrelated-cache-audit.yml"
+    ]
+
+
 @pytest.mark.parametrize(("description", "mutate", "expected"), MUTATIONS, ids=[item[0] for item in MUTATIONS])
 def test_each_single_wiring_mutation_is_rejected(
     description: str, mutate: Callable[[dict[str, Any]], Any], expected: str

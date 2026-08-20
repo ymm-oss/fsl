@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -19,6 +19,7 @@ import {
 import { HISTORICAL_SUMMARY_FIXTURES } from "./fixtures/cache-budget-audit-summary-fixtures.mjs";
 
 const REPORTER_PATH = fileURLToPath(new URL("./report-cache-budget-audit.mjs", import.meta.url));
+const TEST_PATH = fileURLToPath(import.meta.url);
 
 class FakeClient {
   constructor({ issues = [], comments = [], completedRuns = [] } = {}) {
@@ -475,15 +476,26 @@ test("historical summary fixtures have fixed provenance labels and need no Git h
   }
 
   // merge-readiness.yml's automation-contracts checkout has fetch-depth: 0,
-  // but this control must also pass in a shallow local clone: tests consume
-  // committed outputs and never look up their historical writer commits.
-  const testSource = await readFile(fileURLToPath(import.meta.url), "utf8");
-  const forbiddenHistoryApi = `exec${"FileSync"}`;
-  const forbiddenGitLookup = new RegExp(
-    [String.raw`["']git["']`, String.raw`["']show["']`].join(String.raw`\s*,\s*\[\s*`),
-  );
-  assert.doesNotMatch(testSource, new RegExp(`\\b${forbiddenHistoryApi}\\b`));
-  assert.doesNotMatch(testSource, forbiddenGitLookup);
+  // but this control must also pass in a shallow local clone. Run every
+  // imported fixture path from a non-Git directory with no Git executable.
+  if (process.env.CACHE_BUDGET_AUDIT_NO_GIT_CHILD === "1") {
+    return;
+  }
+  const noGitDirectory = await mkdtemp(join(tmpdir(), "fsl-cache-audit-no-git-"));
+  try {
+    const result = spawnSync(process.execPath, ["--test", TEST_PATH], {
+      cwd: noGitDirectory,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: noGitDirectory,
+        CACHE_BUDGET_AUDIT_NO_GIT_CHILD: "1",
+      },
+    });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally {
+    await rm(noGitDirectory, { force: true, recursive: true });
+  }
 });
 
 test("an original unqualified summary migrates to the qualified format", async () => {
