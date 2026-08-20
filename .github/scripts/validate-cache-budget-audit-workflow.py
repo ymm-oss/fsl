@@ -25,9 +25,18 @@ DEFAULT_REPORTER_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "cache-budget-audit-reporter.yml"
 )
 AUDIT_JOB_ID = "audit"
+AUDIT_CONCURRENCY_GROUP = "cache-budget-audit"
+AUDIT_JOB_NAME = "audit Actions cache budget"
+AUDIT_RUNS_ON = "ubuntu-latest"
+AUDIT_TIMEOUT_MINUTES = 5
+AUDIT_CHECKOUT_ACTION = "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
+AUDIT_SETUP_NODE_ACTION = "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020"
+AUDIT_NODE_VERSION = "22"
 CALIBRATION_STEP_NAME = "Calibrate the audit"
+CALIBRATION_COMMAND = ["node", "--test", ".github/scripts/audit-cache-budget.test.mjs"]
 LIVE_AUDIT_STEP_NAME = "Audit the live cache budget"
 LIVE_AUDIT_COMMAND = ["node", ".github/scripts/run-cache-budget-audit.mjs"]
+AUDIT_TOKEN = "${{ secrets.GITHUB_TOKEN }}"
 REQUIRED_PERMISSIONS = {"actions": "read", "contents": "read"}
 REPORTER_JOB_ID = "reconcile"
 REPORTER_PERMISSIONS = {"actions": "read", "contents": "read", "issues": "write"}
@@ -172,6 +181,7 @@ def validate_workflow(document: Any) -> list[str]:
 
     triggers = _mapping(workflow.get("on"), "workflow 'on'", errors)
     if triggers is not None:
+        _reject_unapproved_keys(triggers, set(REQUIRED_TRIGGERS), "workflow 'on'", errors)
         for trigger in REQUIRED_TRIGGERS:
             if trigger not in triggers:
                 errors.append(f"required trigger '{trigger}' is absent")
@@ -195,6 +205,7 @@ def validate_workflow(document: Any) -> list[str]:
         if "push" in triggers:
             push_mapping = _mapping(push, "trigger 'push'", errors)
             if push_mapping is not None:
+                _reject_unapproved_keys(push_mapping, {"branches", "paths"}, "trigger 'push'", errors)
                 branches = push_mapping.get("branches")
                 if not isinstance(branches, list) or "main" not in branches:
                     errors.append("trigger 'push.branches' must contain 'main'")
@@ -208,6 +219,19 @@ def validate_workflow(document: Any) -> list[str]:
 
     if workflow.get("permissions") != REQUIRED_PERMISSIONS:
         errors.append("top-level permissions must be exactly actions: read and contents: read")
+
+    concurrency = _mapping(workflow.get("concurrency"), "audit concurrency", errors)
+    if concurrency is not None:
+        _reject_unapproved_keys(
+            concurrency,
+            {"group", "cancel-in-progress"},
+            "audit concurrency",
+            errors,
+        )
+        if concurrency.get("group") != AUDIT_CONCURRENCY_GROUP:
+            errors.append("audit concurrency group must be 'cache-budget-audit'")
+        if concurrency.get("cancel-in-progress") is not False:
+            errors.append("audit concurrency cancel-in-progress must be false")
 
     jobs = _mapping(workflow.get("jobs"), "workflow jobs", errors)
     if jobs is None:
@@ -229,6 +253,12 @@ def validate_workflow(document: Any) -> list[str]:
         "audit job",
         errors,
     )
+    if job.get("name") != AUDIT_JOB_NAME:
+        errors.append("audit job name must be exactly 'audit Actions cache budget'")
+    if job.get("runs-on") != AUDIT_RUNS_ON:
+        errors.append("audit job runs-on must be exactly 'ubuntu-latest'")
+    if job.get("timeout-minutes") != AUDIT_TIMEOUT_MINUTES:
+        errors.append("audit job timeout-minutes must be exactly 5")
     steps_value = job.get("steps")
     if not isinstance(steps_value, list):
         errors.append("audit job steps must be a list")
@@ -239,6 +269,7 @@ def validate_workflow(document: Any) -> list[str]:
     live_audit_indices = _named_step_indices(steps, LIVE_AUDIT_STEP_NAME)
     if len(calibration_indices) != 1:
         errors.append("audit job must contain exactly one named calibration step")
+        return errors
     if len(live_audit_indices) != 1:
         errors.append("audit job must contain exactly one named live-audit step")
         return errors
@@ -246,15 +277,67 @@ def validate_workflow(document: Any) -> list[str]:
     live_audit_index = live_audit_indices[0]
     if calibration_indices and calibration_indices[0] >= live_audit_index:
         errors.append("calibration step must precede the live-audit step")
+        return errors
+
+    if not (
+        len(steps) == 4
+        and all(isinstance(step, Mapping) for step in steps)
+        and isinstance(steps[0].get("uses"), str)
+        and steps[0]["uses"].startswith("actions/checkout@")
+        and isinstance(steps[1].get("uses"), str)
+        and steps[1]["uses"].startswith("actions/setup-node@")
+        and steps[2].get("name") == CALIBRATION_STEP_NAME
+        and steps[3].get("name") == LIVE_AUDIT_STEP_NAME
+    ):
+        errors.append(
+            "audit job steps must be exactly checkout, setup-node, calibration, and live-audit runner in that order"
+        )
+        return errors
+
+    checkout = steps[0]
+    _reject_unapproved_keys(checkout, {"uses", "with"}, "audit checkout step", errors)
+    if checkout.get("uses") != AUDIT_CHECKOUT_ACTION:
+        errors.append("audit checkout action must be pinned to the approved commit")
+    else:
+        checkout_with = checkout.get("with")
+        if isinstance(checkout_with, Mapping):
+            _reject_unapproved_keys(
+                checkout_with,
+                {"persist-credentials"},
+                "audit checkout configuration",
+                errors,
+            )
+        if not isinstance(checkout_with, Mapping) or checkout_with.get("persist-credentials") is not False:
+            errors.append("audit checkout must disable persisted credentials")
+
+    setup_node = steps[1]
+    _reject_unapproved_keys(setup_node, {"uses", "with"}, "audit setup-node step", errors)
+    if setup_node.get("uses") != AUDIT_SETUP_NODE_ACTION:
+        errors.append("audit setup-node action must be pinned to the approved commit")
+    if setup_node.get("with") != {"node-version": AUDIT_NODE_VERSION}:
+        errors.append("audit setup-node step must use exactly node-version 22")
+
+    calibration = steps[2]
+    _reject_unapproved_keys(calibration, {"name", "run"}, "audit calibration step", errors)
+    if _normalized_argv(calibration.get("run")) != CALIBRATION_COMMAND:
+        errors.append(
+            "audit calibration command must be exactly "
+            "'node --test .github/scripts/audit-cache-budget.test.mjs'"
+        )
 
     # _named_step_indices selects only Mapping instances, so the unique live
     # step above is necessarily a mapping.  Keeping a defensive non-mapping
     # branch here would create an unreachable, uncalibrated diagnostic.
-    live_step = steps[live_audit_index]
+    live_step = steps[3]
     if "if" in live_step:
         errors.append("live-audit step must not declare 'if'")
+        return errors
     if "continue-on-error" in live_step:
         errors.append("live-audit step must not declare 'continue-on-error'")
+        return errors
+    _reject_unapproved_keys(live_step, {"name", "env", "run"}, "live-audit step", errors)
+    if live_step.get("env") != {"GITHUB_TOKEN": AUDIT_TOKEN}:
+        errors.append("live-audit step must bind GITHUB_TOKEN to secrets.GITHUB_TOKEN")
     if _normalized_argv(live_step.get("run")) != LIVE_AUDIT_COMMAND:
         errors.append(
             "live-audit command must be exactly "

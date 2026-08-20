@@ -16,6 +16,7 @@ export const TRUSTED_AUDIT_EVENTS = new Set([
 
 const CURRENT_COALESCED_COUNT_PREFIX = "Observable coalesced failed attempts since this summary was created";
 const CURRENT_COALESCED_IDENTITIES_PREFIX = "Recent observable coalesced identities";
+const INTERVAL_COALESCED_COUNT_PREFIX = "Observable coalesced failed attempts in this summary interval";
 const LEGACY_COALESCED_COUNT_PREFIX = "Coalesced failed attempts";
 const LEGACY_COALESCED_IDENTITIES_PREFIX = "Recent coalesced identities";
 
@@ -168,17 +169,24 @@ function parsedIdentity(identity) {
 
 function parsedCoalesced(comment) {
   const body = comment.body ?? "";
-  // The immediately preceding writer used the legacy prefixes below. Read them
-  // only to migrate existing summaries; remove this branch only in an explicit
-  // schema migration after verifying that no legacy summaries remain.
+  // Writers before f3b57eb used the interval prefix; the original writer used
+  // the unqualified prefixes. Read both only to migrate existing summaries;
+  // remove them only in an explicit schema migration after verifying no such
+  // summaries remain.
   const countMatch = singleSummaryMatch(
     body,
-    /(?:Observable coalesced failed attempts since this summary was created|Coalesced failed attempts): ([^\n]*)\./g,
+    new RegExp(
+      `(?:${CURRENT_COALESCED_COUNT_PREFIX}|${INTERVAL_COALESCED_COUNT_PREFIX}|${LEGACY_COALESCED_COUNT_PREFIX}): ([^\\n]*)\\.`,
+      "g",
+    ),
     "coalesced failure count",
   );
   const identitiesMatch = singleSummaryMatch(
     body,
-    /(?:Recent observable coalesced identities|Recent coalesced identities): ([^\n]*)\./g,
+    new RegExp(
+      `(?:${CURRENT_COALESCED_IDENTITIES_PREFIX}|${LEGACY_COALESCED_IDENTITIES_PREFIX}): ([^\\n]*)\\.`,
+      "g",
+    ),
     "coalesced identities",
   );
   const count = canonicalDecimalInteger(countMatch[1], "coalesced failure count", 0);
@@ -245,7 +253,7 @@ async function listAllPages(fetchPage) {
 
 function hasReporterCommentPrefix(body) {
   return (
-    body.startsWith("<!-- cache-budget-audit-occurrence:") ||
+    /^<!-- cache-budget-audit-occurrence:[1-9]\d*:[1-9]\d* -->/.test(body) ||
     body.startsWith(occurrenceSummaryMarker()) ||
     body.startsWith(recoverySummaryMarker())
   );
@@ -312,14 +320,18 @@ async function consolidateOccurrenceSummary(client, plan) {
 }
 
 function nextCoalescedState(coalesced, failures) {
-  if (coalesced.count > Number.MAX_SAFE_INTEGER - failures.length) {
+  const recordedIdentities = new Set(coalesced.identities);
+  const unseenFailures = failures.filter(
+    (failure) => !recordedIdentities.has(runIdentity(failure)),
+  );
+  if (coalesced.count > Number.MAX_SAFE_INTEGER - unseenFailures.length) {
     throw invalidOccurrenceSummary("coalesced failure count would exceed the safe integer limit");
   }
   return {
-    count: coalesced.count + failures.length,
+    count: coalesced.count + unseenFailures.length,
     identities: [
       ...coalesced.identities,
-      ...failures.map(runIdentity),
+      ...unseenFailures.map(runIdentity),
     ].slice(-MAX_RECENT_COALESCED_IDENTITIES),
   };
 }

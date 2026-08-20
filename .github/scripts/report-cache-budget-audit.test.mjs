@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   CACHE_BUDGET_AUDIT_LABEL,
@@ -17,6 +17,7 @@ import {
 } from "./report-cache-budget-audit.mjs";
 
 const REPORTER_PATH = fileURLToPath(new URL("./report-cache-budget-audit.mjs", import.meta.url));
+const INTERVAL_WRITER_COMMIT = "0237fb1";
 
 class FakeClient {
   constructor({ issues = [], comments = [], completedRuns = [] } = {}) {
@@ -138,6 +139,42 @@ function legacyOccurrenceSummaryBody(options = {}) {
       "Coalesced failed attempts",
     )
     .replace("Recent observable coalesced identities", "Recent coalesced identities");
+}
+
+async function directParentOccurrenceSummaryBody() {
+  // Commit 0237fb1 is the reviewed predecessor whose writer emitted the
+  // interval wording. Load and run that writer, rather than reconstruct
+  // its output in this test, so compatibility follows actual persisted state.
+  const source = execFileSync(
+    "git",
+    ["show", `${INTERVAL_WRITER_COMMIT}:.github/scripts/report-cache-budget-audit.mjs`],
+    { encoding: "utf8" },
+  );
+  const directory = await mkdtemp(join(tmpdir(), "fsl-cache-audit-parent-writer-"));
+  const parentReporterPath = join(directory, "report-cache-budget-audit.mjs");
+  await writeFile(parentReporterPath, source);
+
+  try {
+    const { reconcileCacheBudgetAudit: reconcileParent } = await import(
+      `${pathToFileURL(parentReporterPath).href}?parent=${INTERVAL_WRITER_COMMIT}`,
+    );
+    const parentClient = new FakeClient({
+      completedRuns: [workflowRun({ id: 41, run_number: 12 })],
+    });
+    await reconcileParent({
+      client: parentClient,
+      repository: "ymm-oss/fsl",
+      defaultBranch: "main",
+      workflowRun: workflowRun({ id: 42, run_number: 13 }),
+    });
+    const summary = parentClient.comments.find((comment) =>
+      comment.body.includes("cache-budget-audit-occurrence-summary"),
+    );
+    assert.ok(summary, "the parent writer must produce an occurrence summary");
+    return summary.body;
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
 }
 
 function clientWithOccurrenceSummary(bodies) {
@@ -437,7 +474,7 @@ test("replaying an already-summarised run does not PATCH identical content", asy
   assert.equal(client.updatedComments, updatesBeforeReplay);
 });
 
-test("a legacy summary migrates to the qualified format", async () => {
+test("an original unqualified summary migrates to the qualified format", async () => {
   const client = clientWithOccurrenceSummary([legacyOccurrenceSummaryBody()]);
 
   await reconcile(client, workflowRun({ id: 50, run_number: 13 }));
@@ -447,6 +484,26 @@ test("a legacy summary migrates to the qualified format", async () => {
     /Observable coalesced failed attempts since this summary was created: 7\./,
   );
   assert.doesNotMatch(client.comments[0].body, /Coalesced failed attempts: 7\./);
+});
+
+test("the direct-parent interval summary migrates to the current format", async () => {
+  const parentSummary = await directParentOccurrenceSummaryBody();
+  assert.match(
+    parentSummary,
+    /Observable coalesced failed attempts in this summary interval: 1\./,
+  );
+  const client = clientWithOccurrenceSummary([parentSummary]);
+
+  await reconcile(client, workflowRun({ id: 50, run_number: 14 }));
+
+  assert.match(
+    client.comments[0].body,
+    /Observable coalesced failed attempts since this summary was created: 1\./,
+  );
+  assert.doesNotMatch(
+    client.comments[0].body,
+    /Observable coalesced failed attempts in this summary interval/,
+  );
 });
 
 test("a bot quote of an occurrence marker cannot suppress a recurrence", async () => {
@@ -467,6 +524,40 @@ test("a bot quote of an occurrence marker cannot suppress a recurrence", async (
     client.comments.filter((comment) => comment.body.startsWith("<!-- cache-budget-audit-occurrence:")).length,
     1,
   );
+});
+
+test("a bot comment with a partial occurrence marker cannot suppress a recurrence", async () => {
+  const client = new FakeClient();
+  await reconcile(client, workflowRun());
+  const run = workflowRun({ id: 42, run_number: 13 });
+  client.comments.push({
+    id: 1,
+    issue: 100,
+    body: "<!-- cache-budget-audit-occurrence:42:",
+    user: { login: "github-actions[bot]" },
+  });
+
+  const result = await reconcile(client, run);
+
+  assert.equal(result.updated, 1);
+  assert.equal(
+    client.comments.filter((comment) => comment.body.startsWith(occurrenceMarker(42, 1))).length,
+    1,
+  );
+});
+
+test("write-side identity deduplication preserves parser round trips", async () => {
+  const client = clientWithOccurrenceSummary([
+    occurrenceSummaryBody({ cursor: "12:1", count: "1", identities: "42:1" }),
+  ]);
+  client.completedRuns = [workflowRun({ id: 42, run_number: 13 })];
+
+  await reconcile(client, workflowRun({ id: 43, run_number: 14, conclusion: "success" }));
+
+  const summary = client.comments[0];
+  assert.match(summary.body, /Observable coalesced failed attempts since this summary was created: 1\./);
+  assert.match(summary.body, /Recent observable coalesced identities: 42:1\./);
+  await reconcile(client, workflowRun({ id: 43, run_number: 14, conclusion: "success" }));
 });
 
 test("a safe-boundary count round-trips and overflow rejects before mutation", async () => {

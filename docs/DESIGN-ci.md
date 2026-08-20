@@ -901,9 +901,11 @@ reporter invocation steps, so a mutable action, alternate checkout source/path, 
 job, or inserted pre-run shell step cannot alter the checked-out reporter before it receives the
 write token. Its YAML loader also rejects duplicate keys while constructing every mapping, before a
 last-key-wins parser could hide an unapproved value from those mapping checks.
-The same validator constrains the read-only audit workflow: it rejects unknown top-level and audit-job
-keys, jobs other than `audit`, and any audit job-level permission override, so no job can override the
-read-only top-level permission set.
+The same validator constrains the read-only audit workflow as a complete approved mapping: it rejects
+unknown workflow, trigger, concurrency, job, and step keys; jobs other than `audit`; job-level
+permission overrides; unpinned actions; and any reordered, inserted, or altered calibration/live-audit
+step. It fixes the read-only token binding and command of the live audit, so no job can override the
+read-only top-level permission set or alter the checked-out audit before that command runs.
 
 The reporter maintains one canonical issue, identified by the stable hidden marker
 `<!-- cache-budget-audit -->`. The currently reconciled failure has an occurrence marker keyed by
@@ -943,10 +945,11 @@ identities are unique, and the count covers every retained identity. A cursor ne
 observable trusted health is rejected rather than moved backward, and the writer rejects an addition
 that would exceed the safe-integer limit. The visible count is cumulative since its summary was
 created: deleting the complete summary intentionally resets that history, and the next summary starts
-a new count rather than claiming to reconstruct deleted evidence. The reader accepts the immediately
-preceding unqualified count and identity phrases only to migrate them on the next write; the writer
-emits qualified phrases exclusively. That compatibility may be removed only in an explicit comment
-schema migration after remaining legacy summaries have been verified absent. These rules preserve the
+a new count rather than claiming to reconstruct deleted evidence. The reader accepts the original
+unqualified count/identity phrases and the preceding `in this summary interval` count phrase only to
+migrate them on the next write; the writer emits the current qualified phrases exclusively. That
+compatibility may be removed only in an explicit comment schema migration after remaining legacy
+summaries have been verified absent. These rules preserve the
 meaning of a retained cumulative count instead of presenting a false repaired value. The audit's
 `push` paths include the reporter workflow, script, and tests, so a merged reporter change runs the
 live audit immediately instead of waiting for the next schedule or manual dispatch.
