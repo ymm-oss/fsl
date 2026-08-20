@@ -439,6 +439,7 @@ test("historical summary fixtures are provenance-bound and need no Git history",
       {
         writerCommit: "cbb00dca5acf99742743a22dd33affa29378d85e",
         writerSha256: "3dc17ad18cd035bb9ef197742e283d47e4d6d00169941255aef837cb673185e9",
+        outputSha256: "6ea77d6d6b95de9f6acbfec0a00cfd4d13aae0135d436969aa1de34d2937d649",
       },
     ],
     [
@@ -446,6 +447,7 @@ test("historical summary fixtures are provenance-bound and need no Git history",
       {
         writerCommit: "0237fb1fe2b30911ddd5cdf60de1020810e72164",
         writerSha256: "d8618cd5d2bf8d8c99c8b0093d7e55b34fd37240f71ee30cfed32a85bea90833",
+        outputSha256: "81b01087c076b23e2a804ff0398d62b84017780d73a07b0d72f113fbe12b1ddf",
       },
     ],
   ]);
@@ -458,6 +460,7 @@ test("historical summary fixtures are provenance-bound and need no Git history",
       {
         writerCommit: fixture.provenance.writerCommit,
         writerSha256: fixture.provenance.writerSha256,
+        outputSha256: fixture.provenance.outputSha256,
       },
       expectedProvenance.get(fixture.id),
     );

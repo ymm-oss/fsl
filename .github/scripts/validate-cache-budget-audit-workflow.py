@@ -25,6 +25,7 @@ DEFAULT_REPORTER_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "cache-budget-audit-reporter.yml"
 )
 AUDIT_JOB_ID = "audit"
+AUDIT_WORKFLOW_NAME = "cache budget audit"
 AUDIT_CONCURRENCY_GROUP = "cache-budget-audit"
 AUDIT_JOB_NAME = "audit Actions cache budget"
 AUDIT_RUNS_ON = "ubuntu-latest"
@@ -40,7 +41,6 @@ AUDIT_TOKEN = "${{ secrets.GITHUB_TOKEN }}"
 REQUIRED_PERMISSIONS = {"actions": "read", "contents": "read"}
 REPORTER_JOB_ID = "reconcile"
 REPORTER_PERMISSIONS = {"actions": "read", "contents": "read", "issues": "write"}
-REPORTER_WORKFLOW_RUN_SOURCE = "cache budget audit"
 REPORTER_WORKFLOW_RUN_TYPES = ["completed"]
 REPORTER_CONCURRENCY_GROUP = "cache-budget-audit-reporter"
 REPORTER_CHECKOUT_ACTION = "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
@@ -178,6 +178,8 @@ def validate_workflow(document: Any) -> list[str]:
         "workflow",
         errors,
     )
+    if workflow.get("name") != AUDIT_WORKFLOW_NAME:
+        errors.append("audit workflow name must be exactly 'cache budget audit'")
 
     triggers = _mapping(workflow.get("on"), "workflow 'on'", errors)
     if triggers is not None:
@@ -379,9 +381,9 @@ def validate_reporter_workflow(document: Any) -> list[str]:
                 "reporter trigger 'workflow_run'",
                 errors,
             )
-            if workflow_run.get("workflows") != [REPORTER_WORKFLOW_RUN_SOURCE]:
+            if workflow_run.get("workflows") != [AUDIT_WORKFLOW_NAME]:
                 errors.append(
-                    "reporter workflow_run.workflows must be exactly ['cache budget audit']"
+                    f"reporter workflow_run.workflows must be exactly ['{AUDIT_WORKFLOW_NAME}']"
                 )
             if workflow_run.get("types") != REPORTER_WORKFLOW_RUN_TYPES:
                 errors.append("reporter workflow_run.types must be exactly ['completed']")

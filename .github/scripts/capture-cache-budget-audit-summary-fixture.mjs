@@ -109,4 +109,4 @@ const summary = client.comments.find((comment) =>
 if (!summary) {
   throw new Error("historical writer did not produce an occurrence summary");
 }
-process.stdout.write(`${summary.body}\n`);
+process.stdout.write(summary.body);

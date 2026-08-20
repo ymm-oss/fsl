@@ -210,6 +210,10 @@ def _add_audit_workflow_key(document: dict[str, Any]) -> None:
     document["defaults"] = {}
 
 
+def _rename_audit_workflow(document: dict[str, Any]) -> None:
+    document["name"] = "renamed cache audit"
+
+
 def _add_audit_job(document: dict[str, Any]) -> None:
     document["jobs"]["attacker"] = {
         "permissions": {"issues": "write"},
@@ -342,6 +346,10 @@ def _add_reporter_workflow_run_key(document: dict[str, Any]) -> None:
 
 def _replace_reporter_source(document: dict[str, Any]) -> None:
     document["on"]["workflow_run"]["workflows"] = ["wrong audit"]
+
+
+def _rename_reporter_subscription(document: dict[str, Any]) -> None:
+    document["on"]["workflow_run"]["workflows"] = ["renamed cache audit"]
 
 
 def _replace_reporter_types(document: dict[str, Any]) -> None:
@@ -504,6 +512,7 @@ Mutation = tuple[str, Callable[[dict[str, Any]], Any], str]
 MUTATIONS: list[Mutation] = [
     ("replace workflow with a YAML list", _replace_workflow_with_list, "workflow must be a mapping"),
     ("add audit workflow key", _add_audit_workflow_key, "workflow must not declare unapproved keys: defaults"),
+    ("rename audit workflow", _rename_audit_workflow, "audit workflow name must be exactly 'cache budget audit'"),
     ("set on to a list", _set_on_to_list, "workflow 'on' must be a mapping"),
     ("empty schedule", _empty_schedule, "trigger 'schedule' must be a non-empty list"),
     ("disable workflow_dispatch", _disable_workflow_dispatch, "trigger 'workflow_dispatch' must be enabled"),
@@ -604,7 +613,8 @@ REPORTER_MUTATIONS: list[ReporterMutation] = [
     ("set reporter workflow_run to a list", _set_reporter_workflow_run_to_list, "reporter trigger 'workflow_run' must be a mapping"),
     ("add reporter trigger", _add_reporter_trigger, "reporter workflow 'on' must not declare unapproved keys: push"),
     ("add reporter workflow_run key", _add_reporter_workflow_run_key, "reporter trigger 'workflow_run' must not declare unapproved keys: branches"),
-    ("replace reporter workflow source", _replace_reporter_source, "reporter workflow_run.workflows must be exactly ['cache budget audit']"),
+    ("replace reporter workflow source", _replace_reporter_source, f"reporter workflow_run.workflows must be exactly ['{validator.AUDIT_WORKFLOW_NAME}']"),
+    ("rename reporter subscription", _rename_reporter_subscription, f"reporter workflow_run.workflows must be exactly ['{validator.AUDIT_WORKFLOW_NAME}']"),
     ("replace reporter workflow types", _replace_reporter_types, "reporter workflow_run.types must be exactly ['completed']"),
     *[
         (

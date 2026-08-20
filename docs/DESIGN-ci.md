@@ -958,9 +958,11 @@ Historical-summary compatibility tests consume committed output fixtures rather 
 writer commits at test time: this repository squash-merges pull requests, so those source commits do
 not survive on `main`. Each fixture records its writer commit, writer/output SHA-256 digests, and its
 capture command; regeneration is a deliberate operation that first makes the original writer commit
-available and then refreshes the recorded digests. The test asserts that provenance and fixture
-integrity while rejecting Git-history lookup, so both the full-history automation checkout and a
-shallow developer clone exercise the same persisted output.
+available and then refreshes the recorded digests. The test locks each committed body to its recorded
+output digest and fixed writer commit/digest labels while rejecting Git-history lookup; it cannot
+rehash an original writer that squash merge has removed, so the writer digest is an auditable review
+record rather than a run-time source verification. Both the full-history automation checkout and a
+shallow developer clone therefore exercise the same persisted output.
 
 ## Required pre-merge contexts, and why the merge queue was rejected
 
