@@ -1072,7 +1072,9 @@ mod tests {
         value
             .as_array()
             .expect("semantic token data")
-            .chunks_exact(5)
+            .as_chunks::<5>()
+            .0
+            .iter()
             .any(|token| {
                 let delta_line = token[0].as_u64().expect("delta line");
                 line += delta_line;
