@@ -603,6 +603,32 @@ fn resolve_enum_key(model: &KernelModel, key_type: &TypeRef, name: &str) -> Opti
         .find(|value| matches!(value, Value::Enum { member, .. } if member == name))
 }
 
+/// Resolve `name` as an integer constant only when `key_type` is integer-valued.
+///
+/// Map-key coverage is typed: an integer constant must not stand in for an enum
+/// member merely because they share a spelling.
+fn resolve_integer_const_key(model: &KernelModel, key_type: &TypeRef, name: &str) -> Option<Value> {
+    let is_integer_key = match key_type {
+        TypeRef::Int | TypeRef::Range(_, _) => true,
+        TypeRef::Named(type_name) => {
+            matches!(model.types.get(type_name), Some(TypeDef::Domain { .. }))
+        }
+        TypeRef::Bool
+        | TypeRef::Map(_, _)
+        | TypeRef::Relation(_, _)
+        | TypeRef::Set(_)
+        | TypeRef::Seq(_, _)
+        | TypeRef::Option(_) => false,
+    };
+    if !is_integer_key {
+        return None;
+    }
+    match model.consts.get(name) {
+        Some(Value::Int(value)) => Some(Value::Int(*value)),
+        _ => None,
+    }
+}
+
 /// The coverage a single assignment statement contributes to its logical
 /// root, independent of whatever the root already had. Returns `None` when
 /// the target's key/field shape carries no provable component information
@@ -623,6 +649,7 @@ fn assignment_coverage(
                         .map(|values| Coverage::Keys(values.into_iter().collect()))
                 } else if let Some(TypeRef::Map(key_ty, _)) = model.state_type(name) {
                     resolve_enum_key(model, key_ty, key)
+                        .or_else(|| resolve_integer_const_key(model, key_ty, key))
                         .map(|value| Coverage::Keys(BTreeSet::from([value])))
                 } else {
                     None

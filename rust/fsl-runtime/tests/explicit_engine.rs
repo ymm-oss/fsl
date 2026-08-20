@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-use fsl_core::{FsResolver, build_model, parse_kernel_source};
+use fsl_core::{FsResolver, TypeDef, TypeRef, build_model, parse_kernel_source};
 
 fn model(source: &str) -> fsl_core::KernelModel {
     build_model(parse_kernel_source(source, &FsResolver::new(".")).expect("parse kernel"))
@@ -193,6 +193,130 @@ fn deterministic_init_tracks_branches_foralls_and_duplicate_locations() {
     let error = fsl_runtime::verify_explicit(nested_forall, 1, 100)
         .expect_err("nested init forall rejected");
     assert_eq!(error.message, "nested forall in init is not supported");
+}
+
+#[test]
+fn init_accepts_distinct_integer_const_keys_for_map_int_and_bounded_maps() {
+    let integer_consts = model(
+        "spec IntegerConstKeys { const K = 0 const J = 1 \
+         state { m: Map<Int, Bool> } \
+         init { m[K] = true m[J] = false } action noop() { } }",
+    );
+    let TypeRef::Map(key_type, _) = integer_consts.state_type("m").expect("map state type") else {
+        panic!("m must be a map");
+    };
+    assert!(matches!(key_type.as_ref(), TypeRef::Int));
+    fsl_runtime::Monitor::new(integer_consts.clone())
+        .expect("Monitor accepts the issue #825 Map<Int, Bool> reproducer");
+    let result = fsl_runtime::verify_explicit(integer_consts, 1, 100)
+        .expect("explicit BFS accepts the issue #825 Map<Int, Bool> reproducer");
+    assert!(result.closure);
+    assert!(result.violation.is_none());
+
+    // A named integer domain lowers to TypeRef::Named. Keep this control so
+    // the TypeDef::Domain arm of resolve_integer_const_key remains covered.
+    let named_domain_consts = model(
+        "spec NamedDomainConstKeys { const K = 0 const J = 1 type Key = 0..1 \
+         state { m: Map<Key, Bool> } \
+         init { m[K] = true m[J] = false } action noop() { } }",
+    );
+    let TypeRef::Map(key_type, _) = named_domain_consts.state_type("m").expect("map state type")
+    else {
+        panic!("m must be a map");
+    };
+    assert!(matches!(
+        key_type.as_ref(),
+        TypeRef::Named(type_name)
+            if matches!(named_domain_consts.types.get(type_name), Some(TypeDef::Domain { .. }))
+    ));
+    fsl_runtime::Monitor::new(named_domain_consts.clone())
+        .expect("Monitor accepts fully covered named-domain const keys");
+    let result = fsl_runtime::verify_explicit(named_domain_consts, 1, 100)
+        .expect("explicit BFS accepts fully covered named-domain const keys");
+    assert!(result.closure);
+    assert!(result.violation.is_none());
+
+    // Inline map bounds lower directly to TypeRef::Range rather than the
+    // named-domain representation above, so exercise that separate type gate.
+    let inline_range_consts = model(
+        "spec InlineRangeConstKeys { const K = 0 const J = 1 \
+         state { m: Map<0..1, Bool> } \
+         init { m[K] = true m[J] = false } action noop() { } }",
+    );
+    let TypeRef::Map(key_type, _) = inline_range_consts.state_type("m").expect("map state type")
+    else {
+        panic!("m must be a map");
+    };
+    assert!(matches!(key_type.as_ref(), TypeRef::Range(0, 1)));
+    fsl_runtime::Monitor::new(inline_range_consts.clone())
+        .expect("Monitor accepts fully covered inline-range const keys");
+    let result = fsl_runtime::verify_explicit(inline_range_consts, 1, 100)
+        .expect("explicit BFS accepts fully covered inline-range const keys");
+    assert!(result.closure);
+    assert!(result.violation.is_none());
+
+    // Regression control: enum-key coverage is still resolved as enum values.
+    let enum_keys = model(
+        "spec EnumKeys { enum Key { A, B } state { m: Map<Key, Bool> } \
+         init { m[A] = true m[B] = false } action noop() { } }",
+    );
+    fsl_runtime::Monitor::new(enum_keys.clone())
+        .expect("Monitor still accepts fully covered enum keys");
+    let result = fsl_runtime::verify_explicit(enum_keys, 1, 100)
+        .expect("explicit BFS still accepts fully covered enum keys");
+    assert!(result.closure);
+    assert!(result.violation.is_none());
+}
+
+#[test]
+fn init_integer_const_keys_preserve_duplicate_and_partial_coverage_rejection() {
+    let duplicate = model(
+        "spec DuplicateConst { const K = 0 state { m: Map<Int, Bool> } \
+         init { m[K] = true m[K] = false } action noop() { } }",
+    );
+    let error = fsl_runtime::verify_explicit(duplicate, 1, 100)
+        .expect_err("the same integer const key remains a duplicate init write");
+    assert_eq!(
+        error.message,
+        "state variable 'm' assigned more than once in init"
+    );
+
+    let bound_alias = model(
+        "spec BoundAlias { const K = 0 const MAX = 1 state { m: Map<Int, Bool> } \
+         init { forall i in 0..MAX { m[i] = true } m[K] = false } action noop() { } }",
+    );
+    let error = fsl_runtime::verify_explicit(bound_alias, 1, 100)
+        .expect_err("a const key still collides with a bound key that can alias it");
+    assert_eq!(
+        error.message,
+        "state variable 'm' assigned more than once in init"
+    );
+
+    let partial = model(
+        "spec PartialConst { const K = 0 const J = 1 type Key = 0..2 \
+         state { m: Map<Key, Bool> } init { m[K] = true m[J] = false } action noop() { } }",
+    );
+    let error = fsl_runtime::verify_explicit(partial, 1, 100)
+        .expect_err("integer constants must not make a partially initialized map complete");
+    assert_eq!(
+        error.message,
+        "init does not assign state variable(s): m (partial component initialization is rejected by the explicit engine)"
+    );
+
+    // For Map<Int, _>, map_key_values covers every integer from zero through
+    // the largest integer constant in the model. An otherwise unused higher
+    // constant therefore makes K and J a partial concrete initialization.
+    let partial_int = model(
+        "spec PartialIntConst { const K = 0 const J = 1 const HIGH = 2 \
+         state { m: Map<Int, Bool> } \
+         init { m[K] = true m[J] = false } action noop() { } }",
+    );
+    let error = fsl_runtime::verify_explicit(partial_int, 1, 100)
+        .expect_err("the derived Map<Int, _> compatibility domain remains partially assigned");
+    assert_eq!(
+        error.message,
+        "init does not assign state variable(s): m (partial component initialization is rejected by the explicit engine)"
+    );
 }
 
 /// Negative control for #480: a `forall` binder over more than one value

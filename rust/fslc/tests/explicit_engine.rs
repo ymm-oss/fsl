@@ -420,6 +420,23 @@ fn explicit_rejects_partial_component_init_coverage() {
 }
 
 #[test]
+fn enum_map_key_name_collision_with_an_integer_const_is_rejected_before_runtime() {
+    let (result, status) = verify(
+        &fixture_path("issue_825_enum_const_name_collision.fsl"),
+        "explicit",
+        4,
+        &[],
+    );
+    assert_eq!(status, 2);
+    assert_eq!(result["result"], "error");
+    assert_eq!(result["kind"], "semantics");
+    assert_eq!(
+        result["message"],
+        "invalid init statement: expression of type Int is not assignable to Named(\"Key\") at 12:5"
+    );
+}
+
+#[test]
 fn explicit_accepts_map_fully_covered_by_separate_concrete_key_statements() {
     // The fsl-db "per-column" pattern: distinct concrete-key writes that
     // together cover the whole enum key domain must count as full coverage.
