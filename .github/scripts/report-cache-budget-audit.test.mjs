@@ -17,6 +17,7 @@ import {
 } from "./report-cache-budget-audit.mjs";
 
 const REPORTER_PATH = fileURLToPath(new URL("./report-cache-budget-audit.mjs", import.meta.url));
+const ORIGINAL_WRITER_COMMIT = "cbb00dc";
 const INTERVAL_WRITER_COMMIT = "0237fb1";
 
 class FakeClient {
@@ -128,26 +129,12 @@ function occurrenceSummaryBody({
   ].join("\n");
 }
 
-function legacyOccurrenceSummaryBody(options = {}) {
-  return occurrenceSummaryBody(options)
-    .replace(
-      "This rolling summary records coalesced failures and its displayed workflow run.",
-      "Detailed recurrence comments are capped at 20; this rolling summary records the latest recurrence.",
-    )
-    .replace(
-      "Observable coalesced failed attempts since this summary was created",
-      "Coalesced failed attempts",
-    )
-    .replace("Recent observable coalesced identities", "Recent coalesced identities");
-}
-
-async function directParentOccurrenceSummaryBody() {
-  // Commit 0237fb1 is the reviewed predecessor whose writer emitted the
-  // interval wording. Load and run that writer, rather than reconstruct
-  // its output in this test, so compatibility follows actual persisted state.
+async function historicalWriterOccurrenceSummaryBody(commit) {
+  // Run the historical writer rather than reconstruct its output in this test,
+  // so each compatibility control follows actual persisted state.
   const source = execFileSync(
     "git",
-    ["show", `${INTERVAL_WRITER_COMMIT}:.github/scripts/report-cache-budget-audit.mjs`],
+    ["show", `${commit}:.github/scripts/report-cache-budget-audit.mjs`],
     { encoding: "utf8" },
   );
   const directory = await mkdtemp(join(tmpdir(), "fsl-cache-audit-parent-writer-"));
@@ -156,7 +143,7 @@ async function directParentOccurrenceSummaryBody() {
 
   try {
     const { reconcileCacheBudgetAudit: reconcileParent } = await import(
-      `${pathToFileURL(parentReporterPath).href}?parent=${INTERVAL_WRITER_COMMIT}`,
+      `${pathToFileURL(parentReporterPath).href}?writer=${commit}`,
     );
     const parentClient = new FakeClient({
       completedRuns: [workflowRun({ id: 41, run_number: 12 })],
@@ -475,19 +462,21 @@ test("replaying an already-summarised run does not PATCH identical content", asy
 });
 
 test("an original unqualified summary migrates to the qualified format", async () => {
-  const client = clientWithOccurrenceSummary([legacyOccurrenceSummaryBody()]);
+  const originalSummary = await historicalWriterOccurrenceSummaryBody(ORIGINAL_WRITER_COMMIT);
+  assert.match(originalSummary, /Coalesced failed attempts: 1\./);
+  const client = clientWithOccurrenceSummary([originalSummary]);
 
   await reconcile(client, workflowRun({ id: 50, run_number: 13 }));
 
   assert.match(
     client.comments[0].body,
-    /Observable coalesced failed attempts since this summary was created: 7\./,
+    /Observable coalesced failed attempts since this summary was created: 1\./,
   );
-  assert.doesNotMatch(client.comments[0].body, /Coalesced failed attempts: 7\./);
+  assert.doesNotMatch(client.comments[0].body, /Coalesced failed attempts: 1\./);
 });
 
 test("the direct-parent interval summary migrates to the current format", async () => {
-  const parentSummary = await directParentOccurrenceSummaryBody();
+  const parentSummary = await historicalWriterOccurrenceSummaryBody(INTERVAL_WRITER_COMMIT);
   assert.match(
     parentSummary,
     /Observable coalesced failed attempts in this summary interval: 1\./,
