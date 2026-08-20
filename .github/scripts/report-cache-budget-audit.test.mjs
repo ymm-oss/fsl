@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import {
   CACHE_BUDGET_AUDIT_LABEL,
@@ -15,10 +16,9 @@ import {
   occurrenceMarker,
   reconcileCacheBudgetAudit,
 } from "./report-cache-budget-audit.mjs";
+import { HISTORICAL_SUMMARY_FIXTURES } from "./fixtures/cache-budget-audit-summary-fixtures.mjs";
 
 const REPORTER_PATH = fileURLToPath(new URL("./report-cache-budget-audit.mjs", import.meta.url));
-const ORIGINAL_WRITER_COMMIT = "cbb00dc";
-const INTERVAL_WRITER_COMMIT = "0237fb1";
 
 class FakeClient {
   constructor({ issues = [], comments = [], completedRuns = [] } = {}) {
@@ -129,39 +129,10 @@ function occurrenceSummaryBody({
   ].join("\n");
 }
 
-async function historicalWriterOccurrenceSummaryBody(commit) {
-  // Run the historical writer rather than reconstruct its output in this test,
-  // so each compatibility control follows actual persisted state.
-  const source = execFileSync(
-    "git",
-    ["show", `${commit}:.github/scripts/report-cache-budget-audit.mjs`],
-    { encoding: "utf8" },
-  );
-  const directory = await mkdtemp(join(tmpdir(), "fsl-cache-audit-parent-writer-"));
-  const parentReporterPath = join(directory, "report-cache-budget-audit.mjs");
-  await writeFile(parentReporterPath, source);
-
-  try {
-    const { reconcileCacheBudgetAudit: reconcileParent } = await import(
-      `${pathToFileURL(parentReporterPath).href}?writer=${commit}`,
-    );
-    const parentClient = new FakeClient({
-      completedRuns: [workflowRun({ id: 41, run_number: 12 })],
-    });
-    await reconcileParent({
-      client: parentClient,
-      repository: "ymm-oss/fsl",
-      defaultBranch: "main",
-      workflowRun: workflowRun({ id: 42, run_number: 13 }),
-    });
-    const summary = parentClient.comments.find((comment) =>
-      comment.body.includes("cache-budget-audit-occurrence-summary"),
-    );
-    assert.ok(summary, "the parent writer must produce an occurrence summary");
-    return summary.body;
-  } finally {
-    await rm(directory, { force: true, recursive: true });
-  }
+function historicalSummaryFixture(id) {
+  const fixture = HISTORICAL_SUMMARY_FIXTURES.find((candidate) => candidate.id === id);
+  assert.ok(fixture, `missing historical summary fixture '${id}'`);
+  return fixture;
 }
 
 function clientWithOccurrenceSummary(bodies) {
@@ -461,10 +432,61 @@ test("replaying an already-summarised run does not PATCH identical content", asy
   assert.equal(client.updatedComments, updatesBeforeReplay);
 });
 
+test("historical summary fixtures are provenance-bound and need no Git history", async () => {
+  const expectedProvenance = new Map([
+    [
+      "original-unqualified",
+      {
+        writerCommit: "cbb00dca5acf99742743a22dd33affa29378d85e",
+        writerSha256: "3dc17ad18cd035bb9ef197742e283d47e4d6d00169941255aef837cb673185e9",
+      },
+    ],
+    [
+      "interval-qualified",
+      {
+        writerCommit: "0237fb1fe2b30911ddd5cdf60de1020810e72164",
+        writerSha256: "d8618cd5d2bf8d8c99c8b0093d7e55b34fd37240f71ee30cfed32a85bea90833",
+      },
+    ],
+  ]);
+  assert.deepEqual(
+    HISTORICAL_SUMMARY_FIXTURES.map((fixture) => fixture.id),
+    [...expectedProvenance.keys()],
+  );
+  for (const fixture of HISTORICAL_SUMMARY_FIXTURES) {
+    assert.deepEqual(
+      {
+        writerCommit: fixture.provenance.writerCommit,
+        writerSha256: fixture.provenance.writerSha256,
+      },
+      expectedProvenance.get(fixture.id),
+    );
+    assert.equal(
+      fixture.provenance.captureCommand,
+      `node .github/scripts/capture-cache-budget-audit-summary-fixture.mjs ${fixture.provenance.writerCommit}`,
+    );
+    assert.equal(
+      createHash("sha256").update(fixture.body).digest("hex"),
+      fixture.provenance.outputSha256,
+    );
+  }
+
+  // merge-readiness.yml's automation-contracts checkout has fetch-depth: 0,
+  // but this control must also pass in a shallow local clone: tests consume
+  // committed outputs and never look up their historical writer commits.
+  const testSource = await readFile(fileURLToPath(import.meta.url), "utf8");
+  const forbiddenHistoryApi = `exec${"FileSync"}`;
+  const forbiddenGitLookup = new RegExp(
+    [String.raw`["']git["']`, String.raw`["']show["']`].join(String.raw`\s*,\s*\[\s*`),
+  );
+  assert.doesNotMatch(testSource, new RegExp(`\\b${forbiddenHistoryApi}\\b`));
+  assert.doesNotMatch(testSource, forbiddenGitLookup);
+});
+
 test("an original unqualified summary migrates to the qualified format", async () => {
-  const originalSummary = await historicalWriterOccurrenceSummaryBody(ORIGINAL_WRITER_COMMIT);
-  assert.match(originalSummary, /Coalesced failed attempts: 1\./);
-  const client = clientWithOccurrenceSummary([originalSummary]);
+  const originalFixture = historicalSummaryFixture("original-unqualified");
+  assert.match(originalFixture.body, /Coalesced failed attempts: 1\./);
+  const client = clientWithOccurrenceSummary([originalFixture.body]);
 
   await reconcile(client, workflowRun({ id: 50, run_number: 13 }));
 
@@ -476,7 +498,7 @@ test("an original unqualified summary migrates to the qualified format", async (
 });
 
 test("the direct-parent interval summary migrates to the current format", async () => {
-  const parentSummary = await historicalWriterOccurrenceSummaryBody(INTERVAL_WRITER_COMMIT);
+  const parentSummary = historicalSummaryFixture("interval-qualified").body;
   assert.match(
     parentSummary,
     /Observable coalesced failed attempts in this summary interval: 1\./,

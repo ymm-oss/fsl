@@ -954,6 +954,14 @@ meaning of a retained cumulative count instead of presenting a false repaired va
 `push` paths include the reporter workflow, script, and tests, so a merged reporter change runs the
 live audit immediately instead of waiting for the next schedule or manual dispatch.
 
+Historical-summary compatibility tests consume committed output fixtures rather than resolving their
+writer commits at test time: this repository squash-merges pull requests, so those source commits do
+not survive on `main`. Each fixture records its writer commit, writer/output SHA-256 digests, and its
+capture command; regeneration is a deliberate operation that first makes the original writer commit
+available and then refreshes the recorded digests. The test asserts that provenance and fixture
+integrity while rejecting Git-history lookup, so both the full-history automation checkout and a
+shallow developer clone exercise the same persisted output.
+
 ## Required pre-merge contexts, and why the merge queue was rejected
 
 The `main` ruleset (`main safety and CI`, id `19090811`) requires six contexts: `merge readiness`,
