@@ -1,1 +1,1 @@
-Fixed (#786): Classify the native-only `enum abstraction` refinement mapping with an exact-path, exact-location parser exclusion.
+Fixed (#786): Prove the native-only `enum abstraction` refinement exclusion by neutralizing only its registered block and reject stale or shadowed registry entries.

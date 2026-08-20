@@ -198,8 +198,8 @@ def _assert_native_only_refinement_failure(case: Classified) -> None:
         f"{entry.line}:{entry.column}; remove or update the exact-path exclusion"
     )
 
-    # Location is load-bearing: any parse failure elsewhere is a regression,
-    # not evidence that this native-only construct still justifies exclusion.
+    # Location is a useful diagnostic, but it is not decisive: Lark can defer
+    # an unrelated malformed block until it reaches this construct.
     try:
         parse_src(source, str(case.path.parent))
     except UnexpectedInput as error:
@@ -214,6 +214,40 @@ def _assert_native_only_refinement_failure(case: Classified) -> None:
             f"{label}: frozen parser now accepts native-only {entry.construct!r}; "
             "remove the stale exclusion"
         )
+
+    neutralized = _neutralize_native_only_refinement_construct(source, entry, label)
+    try:
+        parse_src(neutralized, str(case.path.parent))
+    except UnexpectedInput as error:
+        raise AssertionError(
+            f"{label}: neutralizing only registered native-only construct "
+            f"{entry.construct!r} did not make the rest of the file parse; "
+            f"the parser still fails at {error.line}:{error.column}, so an "
+            "unrelated error prevents this exclusion"
+        ) from error
+
+
+def _neutralize_native_only_refinement_construct(source: str, entry, label: str) -> str:
+    """Remove only the registered block construct, through its matching brace."""
+    lines = source.splitlines(keepends=True)
+    construct_start = sum(len(line) for line in lines[: entry.line - 1]) + entry.column - 1
+    assert source[construct_start:].startswith(entry.construct), (
+        f"{label}: registered construct {entry.construct!r} is absent at "
+        f"{entry.line}:{entry.column}"
+    )
+    opening_brace = source.find("{", construct_start + len(entry.construct))
+    assert opening_brace >= 0, f"{label}: native-only construct has no opening brace"
+
+    depth = 0
+    for index in range(opening_brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[:construct_start] + source[index + 1 :]
+
+    raise AssertionError(f"{label}: native-only construct has no closing brace")
 
 
 @pytest.mark.parametrize("case", NATIVE_ONLY_REFINEMENT_CASES, ids=lambda c: c.id)
@@ -232,10 +266,14 @@ def test_native_only_refinement_exclusion_preserves_ordinary_mapping_parse():
     assert ast[0] == "refinement"
 
 
-def test_native_only_refinement_wrong_location_is_a_regression(tmp_path: Path):
-    registered = NATIVE_ONLY_REFINEMENT_CASES[0]
+@pytest.mark.parametrize("registered", NATIVE_ONLY_REFINEMENT_CASES, ids=lambda c: c.id)
+def test_native_only_refinement_wrong_location_is_a_regression(
+    registered: Classified, tmp_path: Path
+):
     source = registered.path.read_text(encoding="utf-8")
-    broken = source.replace("  impl ReturnImpl", "  invalid ReturnImpl", 1)
+    lines = source.splitlines(keepends=True)
+    lines[0] = "invalid\n"
+    broken = "".join(lines)
     path = tmp_path / "wrong_location.fsl"
     path.write_text(broken, encoding="utf-8")
     case = Classified(path, NATIVE_ONLY_REFINEMENT, reason=registered.reason)
@@ -244,17 +282,48 @@ def test_native_only_refinement_wrong_location_is_a_regression(tmp_path: Path):
         _assert_native_only_refinement_failure(case)
 
 
-def test_native_only_refinement_construct_is_not_excluded_by_shape(tmp_path: Path):
-    registered = NATIVE_ONLY_REFINEMENT_CASES[0]
+@pytest.mark.parametrize("registered", NATIVE_ONLY_REFINEMENT_CASES, ids=lambda c: c.id)
+def test_native_only_refinement_construct_is_not_excluded_by_shape(
+    registered: Classified, tmp_path: Path
+):
     source = registered.path.read_text(encoding="utf-8")
-    path = tmp_path / "unregistered_native_only.fsl"
-    rel = "examples/layers/unregistered_native_only.fsl"
+    path = tmp_path / f"unregistered_{registered.path.name}"
+    rel_path = Path(registered.reason)
+    rel = (rel_path.parent / f"unregistered_{rel_path.name}").as_posix()
     path.write_text(source, encoding="utf-8")
 
     assert rel not in NATIVE_ONLY_REFINEMENT_SYNTAX
     assert _classify_source(path, source, rel).cls == REFINEMENT
     with pytest.raises(UnexpectedInput):
         parse_src(source, str(path.parent))
+
+
+@pytest.mark.parametrize("line_number", (3, 4, 5))
+def test_native_only_refinement_deferred_error_is_a_regression(
+    line_number: int, tmp_path: Path
+):
+    """An unterminated earlier block can otherwise defer to 11:3 unchanged."""
+    registered = next(
+        case
+        for case in NATIVE_ONLY_REFINEMENT_CASES
+        if case.reason == "examples/layers/return_impl_refines.fsl"
+    )
+    source = registered.path.read_text(encoding="utf-8")
+    lines = source.splitlines(keepends=True)
+    lines[line_number - 1] = " preserve progress {\n"
+    broken = "".join(lines)
+    path = tmp_path / f"deferred_error_line_{line_number}.fsl"
+    path.write_text(broken, encoding="utf-8")
+    case = Classified(path, NATIVE_ONLY_REFINEMENT, reason=registered.reason)
+
+    with pytest.raises(UnexpectedInput) as deferred:
+        parse_src(broken, str(path.parent))
+    assert (deferred.value.line, deferred.value.column) == (
+        NATIVE_ONLY_REFINEMENT_SYNTAX[registered.reason].line,
+        NATIVE_ONLY_REFINEMENT_SYNTAX[registered.reason].column,
+    )
+    with pytest.raises(AssertionError, match="neutralizing only registered native-only construct"):
+        _assert_native_only_refinement_failure(case)
 
 
 def _declared_verify_flags(front: list[str]) -> dict:
@@ -332,6 +401,34 @@ def test_registry_floors():
 
     for rel in MONITOR_EXCLUSIONS:
         assert (ROOT / rel).exists(), f"MONITOR_EXCLUSIONS entry {rel} no longer exists on disk"
+
+    for rel, entry in NATIVE_ONLY_REFINEMENT_SYNTAX.items():
+        path = ROOT / rel
+        assert path.exists(), f"NATIVE_ONLY_REFINEMENT_SYNTAX entry {rel} no longer exists on disk"
+        assert entry.path == rel, (
+            f"native-only refinement entry key {rel!r} disagrees with its "
+            f"declared path {entry.path!r}"
+        )
+        source = path.read_text(encoding="utf-8")
+        earlier_classifications = []
+        if rel in MONITOR_EXCLUSIONS:
+            earlier_classifications.append("MONITOR_EXCLUSIONS")
+        if is_ai_project_source(source):
+            earlier_classifications.append("ai-project")
+        if is_ai_agent_source(source):
+            earlier_classifications.append("ai-agent")
+        if is_causal_source(source):
+            earlier_classifications.append("causal")
+        assert not earlier_classifications, (
+            f"{rel}: NATIVE_ONLY_REFINEMENT_SYNTAX is mutually exclusive with "
+            f"earlier classifications {earlier_classifications}; remove the overlap "
+            "instead of silently relying on classifier order"
+        )
+        classified = classify(path)
+        assert classified.cls == NATIVE_ONLY_REFINEMENT, (
+            f"{rel}: native-only refinement registry entry classified as "
+            f"{classified.cls}, not {NATIVE_ONLY_REFINEMENT}"
+        )
 
 
 def test_registry_covers_ai_evidence_constructs():
