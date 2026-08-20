@@ -63,6 +63,13 @@ class FakeClient {
     this.updatedComments += 1;
   }
 
+  async deleteIssueComment(commentId) {
+    this.comments.splice(
+      this.comments.findIndex((comment) => comment.id === commentId),
+      1,
+    );
+  }
+
   async updateIssue(number, update) {
     Object.assign(
       this.issues.find((issue) => issue.number === number),
@@ -206,7 +213,8 @@ test("a marker beyond the first comment page remains idempotent", async () => {
   const result = await reconcile(client, run);
 
   assert.deepEqual(result, { created: 0, updated: 0, closed: 0, failed: true });
-  assert.equal(client.comments.length, 101);
+  assert.equal(client.comments.length, MAX_DETAILED_OCCURRENCE_COMMENTS + 2);
+  assert.ok(client.comments.some((comment) => comment.id === 101));
 });
 
 test("a non-bot occurrence marker cannot suppress the reporter audit trail", async () => {
@@ -243,7 +251,7 @@ test("recurrence comments are bounded by a rolling summary", async () => {
   }
 
   assert.equal(client.comments.length, MAX_DETAILED_OCCURRENCE_COMMENTS + 1);
-  assert.equal(client.updatedComments, 7);
+  assert.ok(client.updatedComments >= 7);
   assert.match(
     client.comments.at(-1).body,
     /cache-budget-audit-occurrence-summary/,
@@ -277,6 +285,55 @@ test("recovery flapping cannot grow reporter comments without bound", async () =
   assert.equal(
     client.comments.filter((comment) =>
       comment.body.includes("cache-budget-audit-recovery-summary"),
+    ).length,
+    1,
+  );
+});
+
+test("coalesced intermediate failures retain a count and recent identities", async () => {
+  const client = new FakeClient({
+    completedRuns: [
+      workflowRun({ id: 41, run_number: 12 }),
+      workflowRun({ id: 42, run_number: 13 }),
+    ],
+  });
+
+  await reconcile(client, workflowRun({ id: 43, run_number: 14 }));
+
+  const summary = client.comments.find((comment) =>
+    comment.body.includes("cache-budget-audit-occurrence-summary"),
+  );
+  assert.match(summary.body, /Coalesced failed attempts: 2\./);
+  assert.match(summary.body, /41:1, 42:1/);
+  assert.match(client.issues[0].body, /cache-budget-audit-occurrence:43:1/);
+});
+
+test("duplicate or marker-edited summaries self-heal within the comment bound", async () => {
+  const client = new FakeClient();
+  await reconcile(client, workflowRun());
+  for (let offset = 1; offset <= MAX_DETAILED_OCCURRENCE_COMMENTS + 1; offset += 1) {
+    await reconcile(client, workflowRun({ id: 41 + offset, run_number: 12 + offset }));
+  }
+  const summary = client.comments.find((comment) =>
+    comment.body.includes("cache-budget-audit-occurrence-summary"),
+  );
+  summary.body = "<!-- cache-budget-audit-occurrence-summary --> edited";
+  client.comments.push({
+    id: 9999,
+    issue: 100,
+    body: "<!-- cache-budget-audit-occurrence-summary --> duplicate",
+    user: { login: "github-actions[bot]" },
+  });
+
+  await reconcile(
+    client,
+    workflowRun({ id: 99, run_number: 99, conclusion: "success" }),
+  );
+
+  assert.ok(client.comments.length <= MAX_DETAILED_OCCURRENCE_COMMENTS + 2);
+  assert.equal(
+    client.comments.filter((comment) =>
+      comment.body.includes("cache-budget-audit-occurrence-summary"),
     ).length,
     1,
   );

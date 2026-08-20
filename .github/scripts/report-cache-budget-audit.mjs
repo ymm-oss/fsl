@@ -6,6 +6,8 @@ import { pathToFileURL } from "node:url";
 export const CACHE_BUDGET_AUDIT_LABEL = "ci/cache-budget-audit";
 export const REPORTER_BOT_LOGIN = "github-actions[bot]";
 export const MAX_DETAILED_OCCURRENCE_COMMENTS = 20;
+export const MAX_RECENT_COALESCED_IDENTITIES = 20;
+export const MAX_REPORTER_COMMENTS = MAX_DETAILED_OCCURRENCE_COMMENTS + 2;
 export const TRUSTED_AUDIT_EVENTS = new Set([
   "push",
   "schedule",
@@ -26,6 +28,10 @@ export function occurrenceMarker(runId, runAttempt) {
 
 function occurrenceSummaryMarker() {
   return "<!-- cache-budget-audit-occurrence-summary -->";
+}
+
+function coalescingCursorMarker(workflowRun) {
+  return `<!-- cache-budget-audit-cursor:${workflowRun.run_number}:${workflowRun.run_attempt ?? 1} -->`;
 }
 
 function recoverySummaryMarker() {
@@ -91,16 +97,57 @@ function occurrenceComment({ workflowRun }) {
   ].join("\n");
 }
 
-function occurrenceSummaryComment({ workflowRun }) {
+function occurrenceSummaryComment({ workflowRun, occurrenceRun = workflowRun, coalesced }) {
   return [
     occurrenceSummaryMarker(),
-    occurrenceMarker(workflowRun.id, workflowRun.run_attempt),
+    occurrenceMarker(occurrenceRun.id, occurrenceRun.run_attempt),
+    coalescingCursorMarker(workflowRun),
     "Detailed recurrence comments are capped at 20; this rolling summary records the latest recurrence.",
+    `Coalesced failed attempts: ${coalesced.count}.`,
+    `Recent coalesced identities: ${coalesced.identities.length ? coalesced.identities.join(", ") : "none"}.`,
     "",
     `- Workflow run: [${workflowRun.id}](${workflowRun.html_url})`,
     `- Trigger: \`${workflowRun.event}\``,
     `- Conclusion: \`${workflowRun.conclusion ?? "unknown"}\``,
   ].join("\n");
+}
+
+function runIdentity(workflowRun) {
+  return `${workflowRun.id}:${workflowRun.run_attempt ?? 1}`;
+}
+
+function parsedCursor(comment) {
+  const match = (comment.body ?? "").match(
+    /<!-- cache-budget-audit-cursor:(\d+):(\d+) -->/,
+  );
+  if (!match) {
+    return null;
+  }
+  return { run_number: Number(match[1]), run_attempt: Number(match[2]) };
+}
+
+function parsedCoalesced(comment) {
+  const count = Number(
+    (comment.body ?? "").match(/Coalesced failed attempts: (\d+)\./)?.[1] ?? 0,
+  );
+  const identities = (comment.body ?? "")
+    .match(/Recent coalesced identities: (.+)\./)?.[1]
+    ?.split(", ")
+    .filter((identity) => identity !== "none") ?? [];
+  return {
+    count: Number.isSafeInteger(count) && count >= 0 ? count : 0,
+    identities,
+  };
+}
+
+function recordedCursor(issue, comments, runs) {
+  const bodies = [issue.body ?? "", ...comments.map((comment) => comment.body ?? "")];
+  return runs
+    .filter((run) => bodies.some((body) => body.includes(occurrenceMarker(run.id, run.run_attempt))))
+    .reduce(
+      (latest, run) => (!latest || isNewerRun(run, latest) ? run : latest),
+      null,
+    );
 }
 
 function recoveryComment({ workflowRun, issue }) {
@@ -138,6 +185,37 @@ async function reporterComments(client, issue) {
   return comments.filter(isReporterComment);
 }
 
+async function canonicalSummary(client, comments, marker) {
+  const summaries = comments.filter((comment) =>
+    (comment.body ?? "").includes(marker),
+  );
+  if (summaries.length <= 1) {
+    return summaries[0] ?? null;
+  }
+  const canonical = summaries.at(-1);
+  await Promise.all(
+    summaries.slice(0, -1).map((summary) => client.deleteIssueComment(summary.id)),
+  );
+  return canonical;
+}
+
+async function canonicalOccurrenceSummary(client, comments) {
+  return canonicalSummary(client, comments, occurrenceSummaryMarker());
+}
+
+async function canonicalRecoverySummary(client, comments) {
+  return canonicalSummary(client, comments, recoverySummaryMarker());
+}
+
+async function enforceCommentBudget(client, comments, protectedCommentId = null) {
+  const removable = comments.filter((comment) => comment.id !== protectedCommentId);
+  while (comments.length > MAX_REPORTER_COMMENTS && removable.length > 0) {
+    const comment = removable.shift();
+    await client.deleteIssueComment(comment.id);
+    comments.splice(comments.indexOf(comment), 1);
+  }
+}
+
 async function issueContains(client, issue, marker) {
   if ((issue.body ?? "").includes(marker)) {
     return true;
@@ -165,8 +243,15 @@ export async function reconcileCacheBudgetAudit({
   const completedRuns = await listAllPages((page) =>
     client.listCompletedWorkflowRuns(workflowRun.workflow_id, defaultBranch, page),
   );
+  const trustedRuns = [...new Map(
+    [...completedRuns, workflowRun]
+      .filter((run) => isTrustedAuditRun(run, defaultBranch, repository))
+      .map((run) => [runIdentity(run), run]),
+  ).values()].sort((left, right) =>
+    isNewerRun(left, right) ? 1 : isNewerRun(right, left) ? -1 : 0,
+  );
   const latest = latestTrustedAuditRun(
-    [...completedRuns, workflowRun],
+    trustedRuns,
     defaultBranch,
     repository,
   );
@@ -179,7 +264,7 @@ export async function reconcileCacheBudgetAudit({
   const issues = await listAllPages((page) =>
     client.listIssues(CACHE_BUDGET_AUDIT_LABEL, page),
   );
-  const issue = issues.find(
+  let issue = issues.find(
     (candidate) =>
       !candidate.pull_request &&
       (candidate.body ?? "").includes(cacheBudgetAuditMarker()),
@@ -189,21 +274,45 @@ export async function reconcileCacheBudgetAudit({
   let updated = 0;
   let closed = 0;
 
+  let comments = issue ? await reporterComments(client, issue) : [];
+  let summary = issue ? await canonicalOccurrenceSummary(client, comments) : null;
+  let cursor = issue ? (summary ? parsedCursor(summary) : recordedCursor(issue, comments, trustedRuns)) : null;
+  let coalesced = summary ? parsedCoalesced(summary) : { count: 0, identities: [] };
+  let coalescedFailures = trustedRuns.filter(
+    (run) =>
+      run.conclusion !== "success" &&
+      (!cursor || isNewerRun(run, cursor)) &&
+      runIdentity(run) !== runIdentity(workflowRun),
+  );
+
+  // A queue may coalesce a failure behind a later successful reporter run.
+  // Preserve that evidence by creating the canonical issue from the newest
+  // unseen failure, then immediately reconciling its latest health below.
+  if (!issue && (failed || coalescedFailures.length > 0)) {
+    const directFailure = failed ? workflowRun : coalescedFailures.at(-1);
+    coalescedFailures = coalescedFailures.filter(
+      (run) => runIdentity(run) !== runIdentity(directFailure),
+    );
+    issue = await client.createIssue({
+      title: "[cache budget audit] Actions cache budget audit failed on main",
+      body: issueBody({ repository, workflowRun: directFailure }),
+      labels: [CACHE_BUDGET_AUDIT_LABEL],
+    });
+    created = 1;
+    comments = [];
+    cursor = directFailure;
+  }
+
   if (failed) {
-    if (!issue) {
-      await client.createIssue({
-        title: "[cache budget audit] Actions cache budget audit failed on main",
-        body: issueBody({ repository, workflowRun }),
-        labels: [CACHE_BUDGET_AUDIT_LABEL],
-      });
-      created = 1;
-    } else {
+    if (issue && created === 0) {
       let changed = false;
       const occurrence = occurrenceMarker(workflowRun.id, workflowRun.run_attempt);
       if (!(await issueContains(client, issue, occurrence))) {
-        const comments = await reporterComments(client, issue);
+        comments = await reporterComments(client, issue);
+        summary = await canonicalOccurrenceSummary(client, comments);
         const detailedOccurrences = comments.filter((comment) =>
-          (comment.body ?? "").includes("<!-- cache-budget-audit-occurrence:"),
+          (comment.body ?? "").includes("<!-- cache-budget-audit-occurrence:") &&
+          !(comment.body ?? "").includes(occurrenceSummaryMarker()),
         );
         if (detailedOccurrences.length < MAX_DETAILED_OCCURRENCE_COMMENTS) {
           await client.createIssueComment(
@@ -211,18 +320,15 @@ export async function reconcileCacheBudgetAudit({
             occurrenceComment({ workflowRun }),
           );
         } else {
-          const summary = comments.find((comment) =>
-            (comment.body ?? "").includes(occurrenceSummaryMarker()),
-          );
           if (summary) {
             await client.updateIssueComment(
               summary.id,
-              occurrenceSummaryComment({ workflowRun }),
+              occurrenceSummaryComment({ workflowRun, coalesced }),
             );
           } else {
             await client.createIssueComment(
               issue.number,
-              occurrenceSummaryComment({ workflowRun }),
+              occurrenceSummaryComment({ workflowRun, coalesced }),
             );
           }
         }
@@ -245,9 +351,7 @@ export async function reconcileCacheBudgetAudit({
     );
     if (!(await issueContains(client, issue, recovery))) {
       const comments = await reporterComments(client, issue);
-      const summary = comments.find((comment) =>
-        (comment.body ?? "").includes(recoverySummaryMarker()),
-      );
+      const summary = await canonicalRecoverySummary(client, comments);
       if (summary) {
         await client.updateIssueComment(
           summary.id,
@@ -262,6 +366,43 @@ export async function reconcileCacheBudgetAudit({
     }
     await client.updateIssue(issue.number, { state: "closed" });
     closed = 1;
+  }
+
+  if (issue) {
+    comments = await reporterComments(client, issue);
+    summary = await canonicalOccurrenceSummary(client, comments);
+    coalesced = summary ? parsedCoalesced(summary) : coalesced;
+    coalesced = {
+      count: coalesced.count + coalescedFailures.length,
+      identities: [
+        ...coalesced.identities,
+        ...coalescedFailures.map(runIdentity),
+      ].slice(-MAX_RECENT_COALESCED_IDENTITIES),
+    };
+    if (summary || coalescedFailures.length > 0) {
+      const occurrenceRun = failed
+        ? workflowRun
+        : coalescedFailures.at(-1) ?? workflowRun;
+      if (summary) {
+        await client.updateIssueComment(
+          summary.id,
+          occurrenceSummaryComment({ workflowRun, occurrenceRun, coalesced }),
+        );
+      } else if (comments.length >= MAX_REPORTER_COMMENTS) {
+        const replacement = comments.at(-1);
+        await client.updateIssueComment(
+          replacement.id,
+          occurrenceSummaryComment({ workflowRun, occurrenceRun, coalesced }),
+        );
+      } else {
+        await client.createIssueComment(
+          issue.number,
+          occurrenceSummaryComment({ workflowRun, occurrenceRun, coalesced }),
+        );
+      }
+    }
+    comments = await reporterComments(client, issue);
+    await enforceCommentBudget(client, comments);
   }
 
   const result = { created, updated, closed, failed };
@@ -372,6 +513,13 @@ export class GitHubRestClient {
       "PATCH",
       this.repoPath(`/issues/comments/${commentId}`),
       { body },
+    );
+  }
+
+  async deleteIssueComment(commentId) {
+    return this.request(
+      "DELETE",
+      this.repoPath(`/issues/comments/${commentId}`),
     );
   }
 

@@ -12,8 +12,10 @@ permissions:
   contents: read
   issues: write
 
-# Do not cancel a pending reconciliation: each runner observes the latest
-# completed trusted audit before it mutates the canonical issue.
+# Do not cancel an in-progress reconciliation. GitHub retains at most one
+# pending concurrency-group run and may replace an older pending run, so the
+# reporter coalesces intermediate failures into its bounded audit summary
+# before it reconciles the latest completed trusted health.
 concurrency:
   group: cache-budget-audit-reporter
   cancel-in-progress: false

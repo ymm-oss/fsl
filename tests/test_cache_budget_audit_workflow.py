@@ -55,7 +55,7 @@ def _reporter_checkout_step(document: dict[str, Any]) -> dict[str, Any]:
     return next(
         step
         for step in _reporter_job(document)["steps"]
-        if isinstance(step.get("uses"), str) and step["uses"].startswith("actions/checkout@")
+        if step.get("uses") == validator.REPORTER_CHECKOUT_ACTION
     )
 
 
@@ -63,7 +63,7 @@ def _reporter_runner_step(document: dict[str, Any]) -> dict[str, Any]:
     return next(
         step
         for step in _reporter_job(document)["steps"]
-        if step.get("name") == "Create, update, or resolve cache budget audit issue"
+        if step.get("name") == validator.REPORTER_RUNNER_STEP_NAME
     )
 
 
@@ -198,12 +198,24 @@ def _replace_reporter_with_list(_document: dict[str, Any]) -> list[str]:
     return ["not a reporter workflow mapping"]
 
 
+def _add_reporter_workflow_key(document: dict[str, Any]) -> None:
+    document["defaults"] = {}
+
+
 def _set_reporter_on_to_list(document: dict[str, Any]) -> None:
     document["on"] = []
 
 
 def _set_reporter_workflow_run_to_list(document: dict[str, Any]) -> None:
     document["on"]["workflow_run"] = []
+
+
+def _add_reporter_trigger(document: dict[str, Any]) -> None:
+    document["on"]["push"] = {"branches": ["main"]}
+
+
+def _add_reporter_workflow_run_key(document: dict[str, Any]) -> None:
+    document["on"]["workflow_run"]["branches"] = ["main"]
 
 
 def _replace_reporter_source(document: dict[str, Any]) -> None:
@@ -229,6 +241,10 @@ def _set_reporter_concurrency_to_list(document: dict[str, Any]) -> None:
     document["concurrency"] = []
 
 
+def _add_reporter_concurrency_key(document: dict[str, Any]) -> None:
+    document["concurrency"]["extra"] = True
+
+
 def _replace_reporter_concurrency_group(document: dict[str, Any]) -> None:
     document["concurrency"]["group"] = "wrong-group"
 
@@ -239,6 +255,10 @@ def _enable_reporter_cancel_in_progress(document: dict[str, Any]) -> None:
 
 def _remove_reporter_jobs(document: dict[str, Any]) -> None:
     del document["jobs"]
+
+
+def _add_reporter_job(document: dict[str, Any]) -> None:
+    document["jobs"]["attacker"] = {"runs-on": "ubuntu-latest", "steps": []}
 
 
 def _set_reporter_job_to_list(document: dict[str, Any]) -> None:
@@ -257,6 +277,10 @@ def _reporter_job_permissions_override(document: dict[str, Any]) -> None:
     _reporter_job(document)["permissions"] = validator.REPORTER_PERMISSIONS.copy()
 
 
+def _add_reporter_job_key(document: dict[str, Any]) -> None:
+    _reporter_job(document)["defaults"] = {"run": {"shell": "bash"}}
+
+
 def _remove_reporter_steps(document: dict[str, Any]) -> None:
     del _reporter_job(document)["steps"]
 
@@ -265,11 +289,25 @@ def _insert_reporter_shell_step(document: dict[str, Any]) -> None:
     _reporter_job(document)["steps"].insert(2, {"run": "printf compromised"})
 
 
+def _add_checkout_key(key: str, value: Any) -> Callable[[dict[str, Any]], None]:
+    def mutate(document: dict[str, Any]) -> None:
+        _reporter_checkout_step(document)["with"][key] = value
+
+    return mutate
+
+
+def _add_checkout_step_key(key: str, value: Any) -> Callable[[dict[str, Any]], None]:
+    def mutate(document: dict[str, Any]) -> None:
+        _reporter_checkout_step(document)[key] = value
+
+    return mutate
+
+
 def _remove_reporter_checkout(document: dict[str, Any]) -> None:
     _reporter_job(document)["steps"] = [
         step
         for step in _reporter_job(document)["steps"]
-        if not (isinstance(step.get("uses"), str) and step["uses"].startswith("actions/checkout@"))
+        if step.get("uses") != validator.REPORTER_CHECKOUT_ACTION
     ]
 
 
@@ -297,7 +335,7 @@ def _remove_reporter_runner(document: dict[str, Any]) -> None:
     _reporter_job(document)["steps"] = [
         step
         for step in _reporter_job(document)["steps"]
-        if step.get("name") != "Create, update, or resolve cache budget audit issue"
+        if step.get("name") != validator.REPORTER_RUNNER_STEP_NAME
     ]
 
 
@@ -315,6 +353,13 @@ def _append_true_to_reporter_runner(document: dict[str, Any]) -> None:
 
 def _replace_reporter_runner_token(document: dict[str, Any]) -> None:
     _reporter_runner_step(document)["env"]["GITHUB_TOKEN"] = "${{ github.token }}"
+
+
+def _add_runner_key(key: str, value: Any) -> Callable[[dict[str, Any]], None]:
+    def mutate(document: dict[str, Any]) -> None:
+        _reporter_runner_step(document)[key] = value
+
+    return mutate
 
 
 Mutation = tuple[str, Callable[[dict[str, Any]], Any], str]
@@ -365,8 +410,11 @@ MUTATIONS: list[Mutation] = [
 ReporterMutation = tuple[str, Callable[[dict[str, Any]], Any], str]
 REPORTER_MUTATIONS: list[ReporterMutation] = [
     ("replace reporter with a YAML list", _replace_reporter_with_list, "reporter workflow must be a mapping"),
+    ("add reporter workflow key", _add_reporter_workflow_key, "reporter workflow must not declare unapproved keys: defaults"),
     ("set reporter on to a list", _set_reporter_on_to_list, "reporter workflow 'on' must be a mapping"),
     ("set reporter workflow_run to a list", _set_reporter_workflow_run_to_list, "reporter trigger 'workflow_run' must be a mapping"),
+    ("add reporter trigger", _add_reporter_trigger, "reporter workflow 'on' must not declare unapproved keys: push"),
+    ("add reporter workflow_run key", _add_reporter_workflow_run_key, "reporter trigger 'workflow_run' must not declare unapproved keys: branches"),
     ("replace reporter workflow source", _replace_reporter_source, "reporter workflow_run.workflows must be exactly ['cache budget audit']"),
     ("replace reporter workflow types", _replace_reporter_types, "reporter workflow_run.types must be exactly ['completed']"),
     *[
@@ -383,16 +431,47 @@ REPORTER_MUTATIONS: list[ReporterMutation] = [
         "reporter permissions must be exactly actions: read, contents: read, and issues: write",
     ),
     ("set reporter concurrency to a list", _set_reporter_concurrency_to_list, "reporter concurrency must be a mapping"),
+    ("add reporter concurrency key", _add_reporter_concurrency_key, "reporter concurrency must not declare unapproved keys: extra"),
     ("replace reporter concurrency group", _replace_reporter_concurrency_group, "reporter concurrency group must be 'cache-budget-audit-reporter'"),
     ("enable reporter cancellation", _enable_reporter_cancel_in_progress, "reporter concurrency cancel-in-progress must be false"),
     ("remove reporter jobs", _remove_reporter_jobs, "reporter workflow jobs must be a mapping"),
+    ("add reporter job", _add_reporter_job, "reporter workflow jobs must not declare unapproved keys: attacker"),
     ("set reporter job to a list", _set_reporter_job_to_list, "reporter job 'reconcile' must be a mapping"),
     ("set reporter job permissions", _reporter_job_permissions_override, "reporter job must not declare a permissions override"),
+    ("add reporter job key", _add_reporter_job_key, "reporter job must not declare unapproved keys: defaults"),
     ("set reporter job continue-on-error", _reporter_job_continue_on_error, "reporter job must not declare 'continue-on-error'"),
     ("replace trusted reporter condition", _replace_reporter_condition, "reporter job must restrict to trusted default-branch schedule, push, or workflow_dispatch audits"),
     ("remove reporter steps", _remove_reporter_steps, "reporter job steps must be a list"),
     ("remove reporter checkout", _remove_reporter_checkout, "reporter job steps must be exactly checkout, setup-node, and reconciliation runner in that order"),
     ("insert arbitrary reporter shell step", _insert_reporter_shell_step, "reporter job steps must be exactly checkout, setup-node, and reconciliation runner in that order"),
+    *[
+        (
+            f"add checkout configuration {key}",
+            _add_checkout_key(key, value),
+            f"reporter checkout configuration must not declare unapproved keys: {key}",
+        )
+        for key, value in [
+            ("repository", "attacker/public-repo"),
+            ("path", "attacker"),
+            ("token", "${{ secrets.GITHUB_TOKEN }}"),
+            ("fetch-depth", 0),
+            ("submodules", True),
+        ]
+    ],
+    *[
+        (
+            f"add checkout step {key}",
+            _add_checkout_step_key(key, value),
+            f"reporter checkout step must not declare unapproved keys: {key}",
+        )
+        for key, value in [
+            ("if", "always()"),
+            ("env", {"X": "1"}),
+            ("id", "checkout"),
+            ("timeout-minutes", 1),
+            ("continue-on-error", True),
+        ]
+    ],
     ("checkout triggering SHA", _checkout_triggering_sha, "reporter checkout must use the repository default branch ref"),
     ("checkout mutable action ref", _checkout_mutable_action_ref, "reporter checkout action must be pinned to the approved commit"),
     ("persist checkout credentials", _checkout_persists_credentials, "reporter checkout must disable persisted credentials"),
@@ -400,6 +479,14 @@ REPORTER_MUTATIONS: list[ReporterMutation] = [
     ("setup-node unexpected config", _setup_node_unexpected_config, "reporter setup-node step must use exactly node-version 22"),
     ("remove reporter runner", _remove_reporter_runner, "reporter job steps must be exactly checkout, setup-node, and reconciliation runner in that order"),
     ("replace reporter runner token", _replace_reporter_runner_token, "reporter reconciliation runner must bind GITHUB_TOKEN to secrets.GITHUB_TOKEN"),
+    *[
+        (
+            f"add reporter runner {key}",
+            _add_runner_key(key, value),
+            f"reporter reconciliation runner must not declare unapproved keys: {key}",
+        )
+        for key, value in [("shell", "bash"), ("working-directory", "attacker"), ("id", "report")]
+    ],
     ("add an if to reporter runner", _reporter_runner_if, "reporter reconciliation runner must not declare 'if'"),
     ("set reporter runner continue-on-error", _reporter_runner_continue_on_error, "reporter reconciliation runner must not declare 'continue-on-error'"),
     ("append || true to reporter runner", _append_true_to_reporter_runner, "reporter reconciliation command must be exactly 'node .github/scripts/report-cache-budget-audit.mjs'"),

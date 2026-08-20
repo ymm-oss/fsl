@@ -41,6 +41,9 @@ REPORTER_NODE_VERSION = "22"
 REPORTER_TOKEN = "${{ secrets.GITHUB_TOKEN }}"
 REPORTER_RUNNER_STEP_NAME = "Create, update, or resolve cache budget audit issue"
 REPORTER_COMMAND = ["node", ".github/scripts/report-cache-budget-audit.mjs"]
+REPORTER_JOB_NAME = "reconcile cache-budget audit issue"
+REPORTER_RUNS_ON = "ubuntu-latest"
+REPORTER_TIMEOUT_MINUTES = 5
 REPORTER_TRUSTED_CONDITION = " ".join(
     [
         "github.event.workflow_run.head_repository.full_name == github.repository &&",
@@ -93,6 +96,14 @@ def _mapping(value: Any, label: str, errors: list[str]) -> Optional[Mapping[str,
         errors.append(f"{label} must be a mapping")
         return None
     return value
+
+
+def _reject_unapproved_keys(
+    mapping: Mapping[str, Any], allowed: set[str], label: str, errors: list[str]
+) -> None:
+    unexpected = sorted(set(mapping).difference(allowed))
+    if unexpected:
+        errors.append(f"{label} must not declare unapproved keys: {', '.join(unexpected)}")
 
 
 def _named_step_indices(steps: list[Any], name: str) -> list[int]:
@@ -221,13 +232,26 @@ def validate_reporter_workflow(document: Any) -> list[str]:
     workflow = _mapping(document, "reporter workflow", errors)
     if workflow is None:
         return errors
+    _reject_unapproved_keys(
+        workflow,
+        {"name", "on", "permissions", "concurrency", "jobs"},
+        "reporter workflow",
+        errors,
+    )
 
     triggers = _mapping(workflow.get("on"), "reporter workflow 'on'", errors)
     if triggers is not None:
+        _reject_unapproved_keys(triggers, {"workflow_run"}, "reporter workflow 'on'", errors)
         workflow_run = _mapping(
             triggers.get("workflow_run"), "reporter trigger 'workflow_run'", errors
         )
         if workflow_run is not None:
+            _reject_unapproved_keys(
+                workflow_run,
+                {"workflows", "types"},
+                "reporter trigger 'workflow_run'",
+                errors,
+            )
             if workflow_run.get("workflows") != [REPORTER_WORKFLOW_RUN_SOURCE]:
                 errors.append(
                     "reporter workflow_run.workflows must be exactly ['cache budget audit']"
@@ -242,6 +266,12 @@ def validate_reporter_workflow(document: Any) -> list[str]:
 
     concurrency = _mapping(workflow.get("concurrency"), "reporter concurrency", errors)
     if concurrency is not None:
+        _reject_unapproved_keys(
+            concurrency,
+            {"group", "cancel-in-progress"},
+            "reporter concurrency",
+            errors,
+        )
         if concurrency.get("group") != REPORTER_CONCURRENCY_GROUP:
             errors.append("reporter concurrency group must be 'cache-budget-audit-reporter'")
         if concurrency.get("cancel-in-progress") is not False:
@@ -250,14 +280,29 @@ def validate_reporter_workflow(document: Any) -> list[str]:
     jobs = _mapping(workflow.get("jobs"), "reporter workflow jobs", errors)
     if jobs is None:
         return errors
+    _reject_unapproved_keys(jobs, {REPORTER_JOB_ID}, "reporter workflow jobs", errors)
     job = _mapping(jobs.get(REPORTER_JOB_ID), f"reporter job '{REPORTER_JOB_ID}'", errors)
     if job is None:
         return errors
 
     if "permissions" in job:
         errors.append("reporter job must not declare a permissions override")
+        return errors
     if "continue-on-error" in job:
         errors.append("reporter job must not declare 'continue-on-error'")
+        return errors
+    _reject_unapproved_keys(
+        job,
+        {"name", "if", "runs-on", "timeout-minutes", "steps"},
+        "reporter job",
+        errors,
+    )
+    if job.get("name") != REPORTER_JOB_NAME:
+        errors.append("reporter job name must be exactly 'reconcile cache-budget audit issue'")
+    if job.get("runs-on") != REPORTER_RUNS_ON:
+        errors.append("reporter job runs-on must be exactly 'ubuntu-latest'")
+    if job.get("timeout-minutes") != REPORTER_TIMEOUT_MINUTES:
+        errors.append("reporter job timeout-minutes must be exactly 5")
     if _normalized_text(job.get("if")) != REPORTER_TRUSTED_CONDITION:
         errors.append(
             "reporter job must restrict to trusted default-branch schedule, push, or workflow_dispatch audits"
@@ -283,28 +328,45 @@ def validate_reporter_workflow(document: Any) -> list[str]:
         return errors
 
     checkout = steps[0]
+    _reject_unapproved_keys(checkout, {"uses", "with"}, "reporter checkout step", errors)
     if checkout.get("uses") != REPORTER_CHECKOUT_ACTION:
         errors.append("reporter checkout action must be pinned to the approved commit")
     else:
         checkout_with = checkout.get("with")
+        if isinstance(checkout_with, Mapping):
+            _reject_unapproved_keys(
+                checkout_with,
+                {"ref", "persist-credentials"},
+                "reporter checkout configuration",
+                errors,
+            )
         if not isinstance(checkout_with, Mapping) or checkout_with.get("ref") != REPORTER_CHECKOUT_REF:
             errors.append("reporter checkout must use the repository default branch ref")
         if not isinstance(checkout_with, Mapping) or checkout_with.get("persist-credentials") is not False:
             errors.append("reporter checkout must disable persisted credentials")
 
     setup_node = steps[1]
+    _reject_unapproved_keys(setup_node, {"uses", "with"}, "reporter setup-node step", errors)
     if setup_node.get("uses") != REPORTER_SETUP_NODE_ACTION:
         errors.append("reporter setup-node action must be pinned to the approved commit")
     if setup_node.get("with") != {"node-version": REPORTER_NODE_VERSION}:
         errors.append("reporter setup-node step must use exactly node-version 22")
 
     runner = steps[2]
-    if runner.get("env") != {"GITHUB_TOKEN": REPORTER_TOKEN}:
-        errors.append("reporter reconciliation runner must bind GITHUB_TOKEN to secrets.GITHUB_TOKEN")
     if "if" in runner:
         errors.append("reporter reconciliation runner must not declare 'if'")
+        return errors
     if "continue-on-error" in runner:
         errors.append("reporter reconciliation runner must not declare 'continue-on-error'")
+        return errors
+    _reject_unapproved_keys(
+        runner,
+        {"name", "env", "run"},
+        "reporter reconciliation runner",
+        errors,
+    )
+    if runner.get("env") != {"GITHUB_TOKEN": REPORTER_TOKEN}:
+        errors.append("reporter reconciliation runner must bind GITHUB_TOKEN to secrets.GITHUB_TOKEN")
     if _normalized_argv(runner.get("run")) != REPORTER_COMMAND:
         errors.append(
             "reporter reconciliation command must be exactly "

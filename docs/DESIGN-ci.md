@@ -894,12 +894,15 @@ cache observation into repository mutation. `.github/workflows/cache-budget-audi
 the separate, least-privilege writer. It has exactly Actions/contents read plus issues write and
 listens only for completed `cache budget audit` runs. Its job additionally requires the same
 repository, the default branch, and one of `push`, `schedule`, or `workflow_dispatch`; it checks out
-the default branch rather than the triggering SHA. The job has no permission override and exactly
-the pinned checkout, pinned Node setup, and reporter invocation steps, so a mutable action or an
-inserted pre-run shell step cannot alter the checked-out reporter before it receives the write token.
+the default branch rather than the triggering SHA. The reporter workflow, trigger, job set, job, and
+each step are checked as approved mappings: unknown keys fail closed, not merely known dangerous
+fields. The job has no permission override and exactly the pinned checkout, pinned Node setup, and
+reporter invocation steps, so a mutable action, alternate checkout source/path, runner shell, extra
+job, or inserted pre-run shell step cannot alter the checked-out reporter before it receives the
+write token.
 
 The reporter maintains one canonical issue, identified by the stable hidden marker
-`<!-- cache-budget-audit -->`. Each run attempt has an occurrence marker keyed by
+`<!-- cache-budget-audit -->`. The currently reconciled failure has an occurrence marker keyed by
 `run_id:run_attempt`; the initial failure creates the issue, a later failure records a recurrence,
 a successful trusted audit closes the issue with a recovery comment, and a later failure reopens the
 same issue. A human close does not change identity: the next distinct failure reopens the canonical
@@ -910,18 +913,25 @@ Before mutation the reporter lists completed default-branch audit runs and choos
 `(run_number, run_attempt)` among trusted runs. It intentionally does not use completion timestamps:
 run numbers establish workflow order and attempts establish re-run order, while completion delivery
 can arrive out of order. A delayed event therefore reconciles current completed health rather than
-reopening an issue for stale failure. Reporter runs serialize with `cancel-in-progress: false` to
-avoid duplicate-creation races.
+reopening an issue for stale failure. This is deliberately **latest-health coalescing**, not a claim
+that every completed attempt receives a durable individual comment: the reporter stores a cursor,
+the cumulative number of skipped failing attempts, and up to 20 recent skipped `run_id:run_attempt`
+identities in its rolling recurrence summary. Thus a queued reporter that observes failures 41, 42,
+and 43 records 43 directly and preserves 41/42 as coalesced evidence. `cancel-in-progress: false`
+does not promise that every pending run executes—GitHub retains one pending concurrency-group run
+and may replace an older pending run—so this coalescing record is required independently of the
+concurrency setting.
 
 The reporter paginates issues, runs, and comments rather than assuming page one is complete. This is
 a scheduled operational path rather than a merge hot path, so the potentially unbounded API scan is
 acceptable to preserve complete idempotency and recovery evidence. Comment volume is nevertheless
 bounded: it keeps at most 20 detailed recurrence comments, then creates and updates one rolling
-recurrence summary; it also updates one rolling recovery summary. Thus it retains at most 22
-reporter-authored comments and a persistent incident cannot turn one canonical issue into an
-unbounded comment log. The audit's `push` paths include the reporter workflow, script, and tests, so
-a merged reporter change runs the live audit immediately instead of waiting for the next schedule or
-manual dispatch.
+recurrence/coalescing summary; it also updates one rolling recovery summary. The reporter
+self-heals duplicate summaries and enforces a maximum of 22 reporter-authored comments, including
+when a marker-intact summary was edited. A persistent incident therefore cannot turn one canonical
+issue into an unbounded comment log. The audit's `push` paths include the reporter workflow, script,
+and tests, so a merged reporter change runs the live audit immediately instead of waiting for the
+next schedule or manual dispatch.
 
 ## Required pre-merge contexts, and why the merge queue was rejected
 
