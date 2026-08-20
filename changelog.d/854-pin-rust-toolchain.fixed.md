@@ -1,4 +1,4 @@
-Fixed (#852): CI pins `dtolnay/rust-toolchain@1.98.0` across all eleven audited
+Fixed (#854): CI pins `dtolnay/rust-toolchain@1.98.0` across all eleven audited
 workflow references instead of the floating `@stable`, so an upstream Rust
 release can no longer turn `main` red with no repository change — the 2026-08-20
 breakage where rustc 1.98.0 shipped and the scheduled product gate began failing
