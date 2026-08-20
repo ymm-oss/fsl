@@ -206,14 +206,45 @@ export async function auditWorkflowDirectory(directory, options = {}) {
   return { audited, exempted, findings };
 }
 
+// The repository must always contain at least this many audited references.
+// Set from the measured count, deliberately as a floor rather than an equality:
+// adding a workflow that installs the toolchain is normal, removing every one of
+// them is not.
+export const MINIMUM_AUDITED_REFERENCES = 11;
+
 async function main() {
   const directory = new URL("../workflows/", import.meta.url);
-  const { audited, exempted, findings } = await auditWorkflowDirectory(directory);
+  let audited;
+  let exempted;
+  let findings;
+  try {
+    ({ audited, exempted, findings } = await auditWorkflowDirectory(directory));
+  } catch (error) {
+    // An unreadable or missing workflows directory must fail, not be reported as
+    // a clean audit.
+    console.error(
+      `FAIL -- could not read the workflow directory: ${error.message}`,
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   if (findings.length > 0) {
     for (const finding of findings) {
       console.error(`FAIL -- ${finding.message}`);
     }
+    process.exitCode = 1;
+    return;
+  }
+
+  // A pin audit that audited nothing and reported PASS would be the exact
+  // defect it exists to prevent: confidence with no evidence behind it.
+  if (audited < MINIMUM_AUDITED_REFERENCES) {
+    console.error(
+      `FAIL -- audited only ${audited} toolchain reference(s); expected at least ` +
+        `${MINIMUM_AUDITED_REFERENCES}. Either the workflows moved, or this audit ` +
+        "stopped seeing them -- both mean it is no longer enforcing the pin.",
+    );
     process.exitCode = 1;
     return;
   }

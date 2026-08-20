@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   ACTION,
   DECLARED_EXEMPTIONS,
   EXPECTED_REF,
+  MINIMUM_AUDITED_REFERENCES,
   auditReferences,
   auditWorkflowDirectory,
   collectCitations,
@@ -108,6 +113,37 @@ test("an undeclared workflow cannot inherit release.yml's exemption", () => {
   });
   assert.equal(findings.length, 1);
   assert.equal(findings[0].class, "floating-channel");
+});
+
+// --- the audit must not pass vacuously ----------------------------------------
+//
+// Review found the CLI reporting `PASS -- 0 audited reference(s)` against a
+// workflow directory with no toolchain references. An audit that audited
+// nothing and reported success is the exact defect this file exists to prevent,
+// so the floor is enforced in the script and pinned here.
+
+test("MINIMUM_AUDITED_REFERENCES matches what the repository actually has", async () => {
+  const { audited } = await auditWorkflowDirectory(WORKFLOWS);
+  assert.equal(audited, MINIMUM_AUDITED_REFERENCES);
+});
+
+test("an empty workflow directory audits nothing, which the CLI must reject", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "toolchain-pin-empty-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+
+  const { audited, exempted, findings } = await auditWorkflowDirectory(
+    pathToFileURL(`${directory}/`),
+  );
+  // The pure function has nothing to complain about -- there are no references
+  // to disagree with. That is precisely why the count, not the findings list,
+  // has to be what fails.
+  assert.deepEqual(findings, []);
+  assert.equal(audited, 0);
+  assert.equal(exempted, 0);
+  assert.ok(
+    audited < MINIMUM_AUDITED_REFERENCES,
+    "an empty directory must fall below the floor",
+  );
 });
 
 // --- escape routes that an earlier revision of this audit did not see ----------
