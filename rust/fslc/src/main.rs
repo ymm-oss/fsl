@@ -8442,8 +8442,7 @@ fn reachable_counterfactuals(path: &Path, depth: usize) -> Value {
         // liveness with mixed fair/non-fair actions (issue #633).
         model.leadstos.clear();
         if fsl_runtime::find_boundary_violation(&model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET)
-            .ok()
-            .is_some_and(|probe| probe.finding.is_some())
+            .is_ok_and(|probe| probe.finding.is_some())
         {
             continue;
         }
@@ -15063,7 +15062,7 @@ fn run_refine_chain(
         first_abstraction.to_path_buf(),
     ];
     let mut mappings = vec![first_mapping.to_path_buf()];
-    for pair in rest.chunks_exact(2) {
+    for pair in rest.as_chunks::<2>().0 {
         specifications.push(pair[0].clone());
         mappings.push(pair[1].clone());
     }

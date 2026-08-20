@@ -389,8 +389,7 @@ fn discover_domain_fixtures() -> Vec<String> {
         .into_iter()
         .filter(|path| {
             fs::read_to_string(path)
-                .ok()
-                .is_some_and(|content| content.lines().any(is_domain_declaration_line))
+                .is_ok_and(|content| content.lines().any(is_domain_declaration_line))
         })
         .map(|path| {
             path.strip_prefix(&root)
