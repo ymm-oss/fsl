@@ -182,6 +182,21 @@ test("a uses: sibling of - name: is collected without the list dash", () => {
   ]);
 });
 
+test("whitespace before the colon does not hide the reference", () => {
+  // `uses : action@ref` is valid YAML whose key is `uses` -- confirmed with a
+  // YAML parser. An earlier revision required `uses:` exactly and missed it.
+  const text = `      - uses : ${ACTION}@stable`;
+  assert.deepEqual(collectReferences("probe.yml", text), [
+    { file: "probe.yml", line: 1, ref: "stable" },
+  ]);
+  const findings = auditReferences({
+    references: collectReferences("probe.yml", text),
+    citations: [],
+  });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].class, "floating-channel");
+});
+
 test("an expression ref is rejected because it cannot be shown to be pinned", () => {
   const text = `      - uses: ${ACTION}@\${{ matrix.toolchain }}`;
   const references = collectReferences("probe.yml", text);

@@ -26,11 +26,23 @@ export const DECLARED_EXEMPTIONS = Object.freeze({
     "not the development toolchain",
 });
 
-// A `uses:` key, with or without the list dash. The dash is optional because
-// `- name:` followed by a sibling `uses:` is ordinary YAML and requiring the
-// dash made every step written that way invisible to this audit -- measured,
-// not hypothesised.
-const USES_KEY_PATTERN = /^\s*(?:-\s*)?uses:\s*(.+?)\s*$/;
+// A `uses:` key, with or without the list dash, and tolerating whitespace
+// before the colon.
+//
+// Every relaxation here was found by probing, not by imagination:
+//   - the dash is optional because `- name:` followed by a sibling `uses:` is
+//     ordinary YAML, and requiring the dash made every step written that way
+//     invisible;
+//   - whitespace may precede the colon because `uses : action@ref` is valid
+//     YAML whose key is `uses` -- confirmed with a YAML parser, not assumed.
+//
+// This is a line scan rather than a YAML parse, which is why each of those was
+// a hole. Keep that in mind before adding a fifth relaxation: at some point the
+// honest fix is to parse the document. It is a line scan today only because the
+// required lane is stdlib/Node-only and adding a YAML dependency to it is a
+// separate decision (see .github/workflows/cache-budget-audit-wiring.yml for
+// why PyYAML lives outside that lane).
+const USES_KEY_PATTERN = /^\s*(?:-\s*)?uses\s*:\s*(.+?)\s*$/;
 
 /** Strip one layer of matching YAML quotes, if present. */
 function unquote(value) {
