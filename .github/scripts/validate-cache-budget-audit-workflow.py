@@ -165,10 +165,10 @@ def validate_workflow(document: Any) -> list[str]:
     if calibration_indices and calibration_indices[0] >= live_audit_index:
         errors.append("calibration step must precede the live-audit step")
 
+    # _named_step_indices selects only Mapping instances, so the unique live
+    # step above is necessarily a mapping.  Keeping a defensive non-mapping
+    # branch here would create an unreachable, uncalibrated diagnostic.
     live_step = steps[live_audit_index]
-    if not isinstance(live_step, Mapping):
-        errors.append("named live-audit step must be a mapping")
-        return errors
     if "if" in live_step:
         errors.append("live-audit step must not declare 'if'")
     if "continue-on-error" in live_step:
@@ -187,7 +187,16 @@ def main() -> int:
     parser.add_argument("--workflow", type=Path, default=DEFAULT_WORKFLOW)
     args = parser.parse_args()
 
-    errors = validate_workflow(load_workflow(args.workflow))
+    try:
+        document = load_workflow(args.workflow)
+    except FileNotFoundError:
+        errors = [f"workflow file '{args.workflow}' does not exist"]
+    except OSError as error:
+        errors = [f"workflow file '{args.workflow}' could not be read: {error.strerror}"]
+    except yaml.YAMLError as error:
+        errors = [f"workflow YAML is invalid: {error}"]
+    else:
+        errors = validate_workflow(document)
     if errors:
         for error in errors:
             print(f"cache-budget-audit workflow wiring: FAIL -- {error}")
