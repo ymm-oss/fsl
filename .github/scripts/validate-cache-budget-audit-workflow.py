@@ -21,11 +21,30 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "cache-budget-audit.yml"
+DEFAULT_REPORTER_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "cache-budget-audit-reporter.yml"
+)
 AUDIT_JOB_ID = "audit"
 CALIBRATION_STEP_NAME = "Calibrate the audit"
 LIVE_AUDIT_STEP_NAME = "Audit the live cache budget"
 LIVE_AUDIT_COMMAND = ["node", ".github/scripts/run-cache-budget-audit.mjs"]
 REQUIRED_PERMISSIONS = {"actions": "read", "contents": "read"}
+REPORTER_JOB_ID = "reconcile"
+REPORTER_PERMISSIONS = {"actions": "read", "contents": "read", "issues": "write"}
+REPORTER_WORKFLOW_RUN_SOURCE = "cache budget audit"
+REPORTER_WORKFLOW_RUN_TYPES = ["completed"]
+REPORTER_CONCURRENCY_GROUP = "cache-budget-audit-reporter"
+REPORTER_CHECKOUT_REF = "${{ github.event.repository.default_branch }}"
+REPORTER_COMMAND = ["node", ".github/scripts/report-cache-budget-audit.mjs"]
+REPORTER_TRUSTED_CONDITION = " ".join(
+    [
+        "github.event.workflow_run.head_repository.full_name == github.repository &&",
+        "github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+        "(github.event.workflow_run.event == 'push' ||",
+        "github.event.workflow_run.event == 'schedule' ||",
+        "github.event.workflow_run.event == 'workflow_dispatch')",
+    ]
+)
 REQUIRED_TRIGGERS = ("schedule", "workflow_dispatch", "push")
 REQUIRED_WATCHED_PATHS = {
     ".github/scripts/audit-cache-budget.mjs",
@@ -182,9 +201,104 @@ def validate_workflow(document: Any) -> list[str]:
     return errors
 
 
+def _normalized_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return " ".join(value.split())
+
+
+def validate_reporter_workflow(document: Any) -> list[str]:
+    """Return every violated cache-budget-audit reporter wiring contract."""
+    errors: list[str] = []
+    workflow = _mapping(document, "reporter workflow", errors)
+    if workflow is None:
+        return errors
+
+    triggers = _mapping(workflow.get("on"), "reporter workflow 'on'", errors)
+    if triggers is not None:
+        workflow_run = _mapping(
+            triggers.get("workflow_run"), "reporter trigger 'workflow_run'", errors
+        )
+        if workflow_run is not None:
+            if workflow_run.get("workflows") != [REPORTER_WORKFLOW_RUN_SOURCE]:
+                errors.append(
+                    "reporter workflow_run.workflows must be exactly ['cache budget audit']"
+                )
+            if workflow_run.get("types") != REPORTER_WORKFLOW_RUN_TYPES:
+                errors.append("reporter workflow_run.types must be exactly ['completed']")
+
+    if workflow.get("permissions") != REPORTER_PERMISSIONS:
+        errors.append(
+            "reporter permissions must be exactly actions: read, contents: read, and issues: write"
+        )
+
+    concurrency = _mapping(workflow.get("concurrency"), "reporter concurrency", errors)
+    if concurrency is not None:
+        if concurrency.get("group") != REPORTER_CONCURRENCY_GROUP:
+            errors.append("reporter concurrency group must be 'cache-budget-audit-reporter'")
+        if concurrency.get("cancel-in-progress") is not False:
+            errors.append("reporter concurrency cancel-in-progress must be false")
+
+    jobs = _mapping(workflow.get("jobs"), "reporter workflow jobs", errors)
+    if jobs is None:
+        return errors
+    job = _mapping(jobs.get(REPORTER_JOB_ID), f"reporter job '{REPORTER_JOB_ID}'", errors)
+    if job is None:
+        return errors
+
+    if "continue-on-error" in job:
+        errors.append("reporter job must not declare 'continue-on-error'")
+    if _normalized_text(job.get("if")) != REPORTER_TRUSTED_CONDITION:
+        errors.append(
+            "reporter job must restrict to trusted default-branch schedule, push, or workflow_dispatch audits"
+        )
+
+    steps_value = job.get("steps")
+    if not isinstance(steps_value, list):
+        errors.append("reporter job steps must be a list")
+        return errors
+    steps = steps_value
+    checkout_indices = [
+        index
+        for index, step in enumerate(steps)
+        if isinstance(step, Mapping)
+        and isinstance(step.get("uses"), str)
+        and step["uses"].startswith("actions/checkout@")
+    ]
+    if len(checkout_indices) != 1:
+        errors.append("reporter job must contain exactly one checkout step")
+    else:
+        checkout = steps[checkout_indices[0]]
+        checkout_with = checkout.get("with")
+        if not isinstance(checkout_with, Mapping) or checkout_with.get("ref") != REPORTER_CHECKOUT_REF:
+            errors.append("reporter checkout must use the repository default branch ref")
+        if not isinstance(checkout_with, Mapping) or checkout_with.get("persist-credentials") is not False:
+            errors.append("reporter checkout must disable persisted credentials")
+
+    runner_indices = _named_step_indices(
+        steps, "Create, update, or resolve cache budget audit issue"
+    )
+    if len(runner_indices) != 1:
+        errors.append("reporter job must contain exactly one named reconciliation runner step")
+        return errors
+    runner = steps[runner_indices[0]]
+    if "if" in runner:
+        errors.append("reporter reconciliation runner must not declare 'if'")
+    if "continue-on-error" in runner:
+        errors.append("reporter reconciliation runner must not declare 'continue-on-error'")
+    if _normalized_argv(runner.get("run")) != REPORTER_COMMAND:
+        errors.append(
+            "reporter reconciliation command must be exactly "
+            "'node .github/scripts/report-cache-budget-audit.mjs'"
+        )
+
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workflow", type=Path, default=DEFAULT_WORKFLOW)
+    parser.add_argument("--reporter-workflow", type=Path, default=DEFAULT_REPORTER_WORKFLOW)
     args = parser.parse_args()
 
     try:
@@ -197,6 +311,18 @@ def main() -> int:
         errors = [f"workflow YAML is invalid: {error}"]
     else:
         errors = validate_workflow(document)
+    try:
+        reporter_document = load_workflow(args.reporter_workflow)
+    except FileNotFoundError:
+        errors.append(f"reporter workflow file '{args.reporter_workflow}' does not exist")
+    except OSError as error:
+        errors.append(
+            f"reporter workflow file '{args.reporter_workflow}' could not be read: {error.strerror}"
+        )
+    except yaml.YAMLError as error:
+        errors.append(f"reporter workflow YAML is invalid: {error}")
+    else:
+        errors.extend(validate_reporter_workflow(reporter_document))
     if errors:
         for error in errors:
             print(f"cache-budget-audit workflow wiring: FAIL -- {error}")

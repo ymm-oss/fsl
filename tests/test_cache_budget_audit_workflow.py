@@ -15,6 +15,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "cache-budget-audit.yml"
+REPORTER_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "cache-budget-audit-reporter.yml"
 VALIDATOR_PATH = REPO_ROOT / ".github" / "scripts" / "validate-cache-budget-audit-workflow.py"
 
 
@@ -38,6 +39,32 @@ def _real_workflow() -> dict[str, Any]:
 
 def _audit_job(document: dict[str, Any]) -> dict[str, Any]:
     return document["jobs"][validator.AUDIT_JOB_ID]
+
+
+def _real_reporter_workflow() -> dict[str, Any]:
+    document = validator.load_workflow(REPORTER_WORKFLOW_PATH)
+    assert isinstance(document, dict)
+    return document
+
+
+def _reporter_job(document: dict[str, Any]) -> dict[str, Any]:
+    return document["jobs"][validator.REPORTER_JOB_ID]
+
+
+def _reporter_checkout_step(document: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        step
+        for step in _reporter_job(document)["steps"]
+        if isinstance(step.get("uses"), str) and step["uses"].startswith("actions/checkout@")
+    )
+
+
+def _reporter_runner_step(document: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        step
+        for step in _reporter_job(document)["steps"]
+        if step.get("name") == "Create, update, or resolve cache budget audit issue"
+    )
 
 
 def _live_audit_step(document: dict[str, Any]) -> dict[str, Any]:
@@ -159,6 +186,109 @@ def _remove_live_audit_run(document: dict[str, Any]) -> None:
     del _live_audit_step(document)["run"]
 
 
+def _add_audit_issue_write_permission(document: dict[str, Any]) -> None:
+    document["permissions"]["issues"] = "write"
+
+
+def _replace_reporter_with_list(_document: dict[str, Any]) -> list[str]:
+    return ["not a reporter workflow mapping"]
+
+
+def _set_reporter_on_to_list(document: dict[str, Any]) -> None:
+    document["on"] = []
+
+
+def _set_reporter_workflow_run_to_list(document: dict[str, Any]) -> None:
+    document["on"]["workflow_run"] = []
+
+
+def _replace_reporter_source(document: dict[str, Any]) -> None:
+    document["on"]["workflow_run"]["workflows"] = ["wrong audit"]
+
+
+def _replace_reporter_types(document: dict[str, Any]) -> None:
+    document["on"]["workflow_run"]["types"] = ["requested"]
+
+
+def _remove_reporter_permission(permission: str) -> Callable[[dict[str, Any]], None]:
+    def mutate(document: dict[str, Any]) -> None:
+        del document["permissions"][permission]
+
+    return mutate
+
+
+def _add_reporter_permission(document: dict[str, Any]) -> None:
+    document["permissions"]["pull-requests"] = "read"
+
+
+def _set_reporter_concurrency_to_list(document: dict[str, Any]) -> None:
+    document["concurrency"] = []
+
+
+def _replace_reporter_concurrency_group(document: dict[str, Any]) -> None:
+    document["concurrency"]["group"] = "wrong-group"
+
+
+def _enable_reporter_cancel_in_progress(document: dict[str, Any]) -> None:
+    document["concurrency"]["cancel-in-progress"] = True
+
+
+def _remove_reporter_jobs(document: dict[str, Any]) -> None:
+    del document["jobs"]
+
+
+def _set_reporter_job_to_list(document: dict[str, Any]) -> None:
+    document["jobs"][validator.REPORTER_JOB_ID] = []
+
+
+def _replace_reporter_condition(document: dict[str, Any]) -> None:
+    _reporter_job(document)["if"] = "github.event.workflow_run.event == 'push'"
+
+
+def _reporter_job_continue_on_error(document: dict[str, Any]) -> None:
+    _reporter_job(document)["continue-on-error"] = True
+
+
+def _remove_reporter_steps(document: dict[str, Any]) -> None:
+    del _reporter_job(document)["steps"]
+
+
+def _remove_reporter_checkout(document: dict[str, Any]) -> None:
+    _reporter_job(document)["steps"] = [
+        step
+        for step in _reporter_job(document)["steps"]
+        if not (isinstance(step.get("uses"), str) and step["uses"].startswith("actions/checkout@"))
+    ]
+
+
+def _checkout_triggering_sha(document: dict[str, Any]) -> None:
+    _reporter_checkout_step(document)["with"]["ref"] = "${{ github.event.workflow_run.head_sha }}"
+
+
+def _checkout_persists_credentials(document: dict[str, Any]) -> None:
+    _reporter_checkout_step(document)["with"]["persist-credentials"] = True
+
+
+def _remove_reporter_runner(document: dict[str, Any]) -> None:
+    _reporter_job(document)["steps"] = [
+        step
+        for step in _reporter_job(document)["steps"]
+        if step.get("name") != "Create, update, or resolve cache budget audit issue"
+    ]
+
+
+def _reporter_runner_if(document: dict[str, Any]) -> None:
+    _reporter_runner_step(document)["if"] = "always()"
+
+
+def _reporter_runner_continue_on_error(document: dict[str, Any]) -> None:
+    _reporter_runner_step(document)["continue-on-error"] = True
+
+
+def _append_true_to_reporter_runner(document: dict[str, Any]) -> None:
+    _reporter_runner_step(document)["run"] += " || true"
+
+
 Mutation = tuple[str, Callable[[dict[str, Any]], Any], str]
 MUTATIONS: list[Mutation] = [
     ("replace workflow with a YAML list", _replace_workflow_with_list, "workflow must be a mapping"),
@@ -179,6 +309,11 @@ MUTATIONS: list[Mutation] = [
     ("set live-step continue-on-error", _step_continue_on_error, "live-audit step must not declare 'continue-on-error'"),
     ("set audit-job continue-on-error", _job_continue_on_error, "audit job must not declare 'continue-on-error'"),
     ("add an if to the live step", _step_if, "live-audit step must not declare 'if'"),
+    (
+        "add issues write to the audit",
+        _add_audit_issue_write_permission,
+        "top-level permissions must be exactly actions: read and contents: read",
+    ),
     *[
         (
             f"remove permission {permission}",
@@ -199,8 +334,50 @@ MUTATIONS: list[Mutation] = [
 ]
 
 
+ReporterMutation = tuple[str, Callable[[dict[str, Any]], Any], str]
+REPORTER_MUTATIONS: list[ReporterMutation] = [
+    ("replace reporter with a YAML list", _replace_reporter_with_list, "reporter workflow must be a mapping"),
+    ("set reporter on to a list", _set_reporter_on_to_list, "reporter workflow 'on' must be a mapping"),
+    ("set reporter workflow_run to a list", _set_reporter_workflow_run_to_list, "reporter trigger 'workflow_run' must be a mapping"),
+    ("replace reporter workflow source", _replace_reporter_source, "reporter workflow_run.workflows must be exactly ['cache budget audit']"),
+    ("replace reporter workflow types", _replace_reporter_types, "reporter workflow_run.types must be exactly ['completed']"),
+    *[
+        (
+            f"remove reporter permission {permission}",
+            _remove_reporter_permission(permission),
+            "reporter permissions must be exactly actions: read, contents: read, and issues: write",
+        )
+        for permission in sorted(validator.REPORTER_PERMISSIONS)
+    ],
+    (
+        "add reporter permission pull-requests",
+        _add_reporter_permission,
+        "reporter permissions must be exactly actions: read, contents: read, and issues: write",
+    ),
+    ("set reporter concurrency to a list", _set_reporter_concurrency_to_list, "reporter concurrency must be a mapping"),
+    ("replace reporter concurrency group", _replace_reporter_concurrency_group, "reporter concurrency group must be 'cache-budget-audit-reporter'"),
+    ("enable reporter cancellation", _enable_reporter_cancel_in_progress, "reporter concurrency cancel-in-progress must be false"),
+    ("remove reporter jobs", _remove_reporter_jobs, "reporter workflow jobs must be a mapping"),
+    ("set reporter job to a list", _set_reporter_job_to_list, "reporter job 'reconcile' must be a mapping"),
+    ("set reporter job continue-on-error", _reporter_job_continue_on_error, "reporter job must not declare 'continue-on-error'"),
+    ("replace trusted reporter condition", _replace_reporter_condition, "reporter job must restrict to trusted default-branch schedule, push, or workflow_dispatch audits"),
+    ("remove reporter steps", _remove_reporter_steps, "reporter job steps must be a list"),
+    ("remove reporter checkout", _remove_reporter_checkout, "reporter job must contain exactly one checkout step"),
+    ("checkout triggering SHA", _checkout_triggering_sha, "reporter checkout must use the repository default branch ref"),
+    ("persist checkout credentials", _checkout_persists_credentials, "reporter checkout must disable persisted credentials"),
+    ("remove reporter runner", _remove_reporter_runner, "reporter job must contain exactly one named reconciliation runner step"),
+    ("add an if to reporter runner", _reporter_runner_if, "reporter reconciliation runner must not declare 'if'"),
+    ("set reporter runner continue-on-error", _reporter_runner_continue_on_error, "reporter reconciliation runner must not declare 'continue-on-error'"),
+    ("append || true to reporter runner", _append_true_to_reporter_runner, "reporter reconciliation command must be exactly 'node .github/scripts/report-cache-budget-audit.mjs'"),
+]
+
+
 def test_real_cache_budget_audit_workflow_is_accepted():
     assert validator.validate_workflow(_real_workflow()) == []
+
+
+def test_real_cache_budget_audit_reporter_workflow_is_accepted():
+    assert validator.validate_reporter_workflow(_real_reporter_workflow()) == []
 
 
 @pytest.mark.parametrize(("description", "mutate", "expected"), MUTATIONS, ids=[item[0] for item in MUTATIONS])
@@ -213,9 +390,28 @@ def test_each_single_wiring_mutation_is_rejected(
     assert errors == [expected], f"{description}: expected {expected!r}, got {errors!r}"
 
 
-def _run_cli(path: Path) -> subprocess.CompletedProcess[str]:
+@pytest.mark.parametrize(
+    ("description", "mutate", "expected"),
+    REPORTER_MUTATIONS,
+    ids=[item[0] for item in REPORTER_MUTATIONS],
+)
+def test_each_single_reporter_wiring_mutation_is_rejected(
+    description: str, mutate: Callable[[dict[str, Any]], Any], expected: str
+):
+    document = copy.deepcopy(_real_reporter_workflow())
+    mutated = mutate(document)
+    errors = validator.validate_reporter_workflow(document if mutated is None else mutated)
+    assert errors == [expected], f"{description}: expected {expected!r}, got {errors!r}"
+
+
+def _run_cli(
+    path: Path, reporter_path: Path | None = None
+) -> subprocess.CompletedProcess[str]:
+    command = [sys.executable, str(VALIDATOR_PATH), "--workflow", str(path)]
+    if reporter_path is not None:
+        command.extend(["--reporter-workflow", str(reporter_path)])
     return subprocess.run(
-        [sys.executable, str(VALIDATOR_PATH), "--workflow", str(path)],
+        command,
         check=False,
         capture_output=True,
         text=True,
@@ -242,6 +438,39 @@ def test_cli_reports_unparseable_yaml(tmp_path: Path):
     output = result.stdout + result.stderr
     assert result.returncode == 1, output
     assert result.stdout.startswith("cache-budget-audit workflow wiring: FAIL -- workflow YAML is invalid:")
+    assert "Traceback" not in output
+
+
+def test_cli_reports_missing_reporter_workflow_file(tmp_path: Path):
+    path = tmp_path / "missing-reporter.yml"
+    result = _run_cli(WORKFLOW_PATH, path)
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    assert result.stdout == f"cache-budget-audit workflow wiring: FAIL -- reporter workflow file '{path}' does not exist\n"
+    assert "Traceback" not in output
+
+
+def test_cli_reports_unparseable_reporter_workflow_yaml(tmp_path: Path):
+    path = tmp_path / "invalid-reporter.yml"
+    path.write_text("on: [\n", encoding="utf-8")
+    result = _run_cli(WORKFLOW_PATH, path)
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    assert result.stdout.startswith(
+        "cache-budget-audit workflow wiring: FAIL -- reporter workflow YAML is invalid:"
+    )
+    assert "Traceback" not in output
+
+
+def test_cli_reports_unreadable_reporter_workflow_file(tmp_path: Path):
+    path = tmp_path / "reporter-directory"
+    path.mkdir()
+    result = _run_cli(WORKFLOW_PATH, path)
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    assert result.stdout.startswith(
+        f"cache-budget-audit workflow wiring: FAIL -- reporter workflow file '{path}' could not be read:"
+    )
     assert "Traceback" not in output
 
 
