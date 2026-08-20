@@ -26,22 +26,48 @@ export const DECLARED_EXEMPTIONS = Object.freeze({
     "not the development toolchain",
 });
 
-const USES_PATTERN = new RegExp(
-  `^\\s*-\\s*uses:\\s*${ACTION.replace("/", "\\/")}@(\\S+)\\s*$`,
-);
+// A `uses:` key, with or without the list dash. The dash is optional because
+// `- name:` followed by a sibling `uses:` is ordinary YAML and requiring the
+// dash made every step written that way invisible to this audit -- measured,
+// not hypothesised.
+const USES_KEY_PATTERN = /^\s*(?:-\s*)?uses:\s*(.+?)\s*$/;
+
+/** Strip one layer of matching YAML quotes, if present. */
+function unquote(value) {
+  const match = /^(['"])(.*)\1$/.exec(value);
+  return match ? match[2] : value;
+}
 
 /**
  * Every `uses:` reference to the toolchain action in one workflow's text.
+ *
+ * The value is unquoted first: `uses: "dtolnay/rust-toolchain@stable"` is valid
+ * YAML and equivalent to the bare form, so a pattern anchored on the bare form
+ * alone would let a quoted floating channel through.
+ *
  * Comments are not `uses:` lines and are not collected here; `auditReferences`
  * checks them separately.
  */
 export function collectReferences(fileName, text) {
   const references = [];
+  const prefix = `${ACTION}@`;
   text.split("\n").forEach((line, index) => {
-    const match = USES_PATTERN.exec(line);
-    if (match) {
-      references.push({ file: fileName, line: index + 1, ref: match[1] });
+    const match = USES_KEY_PATTERN.exec(line);
+    if (!match) {
+      return;
     }
+    // A trailing `# comment` on the same line is not part of the value. Only
+    // strip it when whitespace precedes the `#`, so a `#` inside the ref is
+    // preserved rather than silently truncating the ref we are about to judge.
+    const value = unquote(match[1].replace(/\s+#.*$/, "").trim());
+    if (!value.startsWith(prefix)) {
+      return;
+    }
+    references.push({
+      file: fileName,
+      line: index + 1,
+      ref: value.slice(prefix.length),
+    });
   });
   return references;
 }
@@ -80,6 +106,24 @@ export function auditReferences({ references, citations, expectedRef, exemptions
 
   for (const reference of references) {
     if (Object.hasOwn(declared, reference.file)) {
+      continue;
+    }
+    // A ref computed at run time cannot be statically shown to be pinned, and
+    // `@${{ matrix.toolchain }}` with `stable` in the matrix reintroduces
+    // exactly the drift this audit exists to prevent. Fail closed rather than
+    // pass something unverifiable.
+    if (reference.ref.includes("${{")) {
+      findings.push({
+        class: "expression-ref",
+        file: reference.file,
+        line: reference.line,
+        ref: reference.ref,
+        message:
+          `${reference.file}:${reference.line} resolves ${ACTION} through the ` +
+          `expression \`${reference.ref}\`. A run-time ref cannot be shown to be ` +
+          `pinned, and a matrix containing \`stable\` would reintroduce the drift ` +
+          `this audit prevents; write @${expected} literally.`,
+      });
       continue;
     }
     if (reference.ref === "stable" || reference.ref === "nightly" || reference.ref === "beta") {

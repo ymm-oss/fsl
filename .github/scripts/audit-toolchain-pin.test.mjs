@@ -110,6 +110,63 @@ test("an undeclared workflow cannot inherit release.yml's exemption", () => {
   assert.equal(findings[0].class, "floating-channel");
 });
 
+// --- escape routes that an earlier revision of this audit did not see ----------
+//
+// Each of these was measured against the first implementation and passed
+// silently. A pin audit with holes is worse than no audit, because it creates
+// confidence the pin does not have. Do not relax collectReferences without
+// re-running these.
+
+test("a quoted uses value is collected, not skipped", () => {
+  const text = `      - uses: "${ACTION}@stable"`;
+  assert.deepEqual(collectReferences("probe.yml", text), [
+    { file: "probe.yml", line: 1, ref: "stable" },
+  ]);
+  const findings = auditReferences({
+    references: collectReferences("probe.yml", text),
+    citations: [],
+  });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].class, "floating-channel");
+});
+
+test("a single-quoted uses value is collected too", () => {
+  const text = `      - uses: '${ACTION}@stable'`;
+  assert.deepEqual(collectReferences("probe.yml", text), [
+    { file: "probe.yml", line: 1, ref: "stable" },
+  ]);
+});
+
+test("a uses: sibling of - name: is collected without the list dash", () => {
+  const text = ["      - name: install the toolchain", `        uses: ${ACTION}@stable`].join(
+    "\n",
+  );
+  assert.deepEqual(collectReferences("probe.yml", text), [
+    { file: "probe.yml", line: 2, ref: "stable" },
+  ]);
+});
+
+test("an expression ref is rejected because it cannot be shown to be pinned", () => {
+  const text = `      - uses: ${ACTION}@\${{ matrix.toolchain }}`;
+  const references = collectReferences("probe.yml", text);
+  assert.equal(references.length, 1);
+  const findings = auditReferences({ references, citations: [] });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].class, "expression-ref");
+  assert.match(findings[0].message, /cannot be shown to be\s+pinned/);
+});
+
+test("a trailing comment is not treated as part of the ref", () => {
+  const text = `      - uses: ${ACTION}@1.98.0  # keep in sync with EXPECTED_REF`;
+  assert.deepEqual(collectReferences("probe.yml", text), [
+    { file: "probe.yml", line: 1, ref: "1.98.0" },
+  ]);
+  assert.deepEqual(
+    auditReferences({ references: collectReferences("probe.yml", text), citations: [] }),
+    [],
+  );
+});
+
 // --- the collectors themselves -------------------------------------------------
 
 test("collectReferences reads the ref and the one-based line", () => {
