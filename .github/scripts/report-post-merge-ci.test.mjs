@@ -10,6 +10,7 @@ import {
   isTrustedDefaultBranchWorkflowRun,
   issueMarker,
   reconcilePostMerge as reconcilePostMergeImplementation,
+  TRUSTED_WORKFLOW_EVENTS,
 } from "./report-post-merge-ci.mjs";
 
 const REPOSITORY = "ymm-oss/fsl";
@@ -165,6 +166,11 @@ test("creates one actionable issue for a failed job", async () => {
 
 test("reporter workflow permits exactly the trusted default-branch events", async () => {
   const workflow = await readFile(REPORTER_WORKFLOW, "utf8");
+  const workflowEvents = new Set(
+    [...workflow.matchAll(/github\.event\.workflow_run\.event == '([^']+)'/g)].map(
+      ([, event]) => event,
+    ),
+  );
 
   assert.match(
     workflow,
@@ -174,12 +180,7 @@ test("reporter workflow permits exactly the trusted default-branch events", asyn
     workflow,
     /github\.event\.workflow_run\.head_branch == github\.event\.repository\.default_branch/,
   );
-  assert.match(workflow, /github\.event\.workflow_run\.event == 'push'/);
-  assert.match(workflow, /github\.event\.workflow_run\.event == 'schedule'/);
-  assert.match(
-    workflow,
-    /github\.event\.workflow_run\.event == 'workflow_dispatch'/,
-  );
+  assert.deepEqual(workflowEvents, TRUSTED_WORKFLOW_EVENTS);
 });
 
 test("deduplicates the same run and comments once for a later recurrence", async () => {
