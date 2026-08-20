@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   CACHE_BUDGET_AUDIT_LABEL,
@@ -10,6 +15,8 @@ import {
   occurrenceMarker,
   reconcileCacheBudgetAudit,
 } from "./report-cache-budget-audit.mjs";
+
+const REPORTER_PATH = fileURLToPath(new URL("./report-cache-budget-audit.mjs", import.meta.url));
 
 class FakeClient {
   constructor({ issues = [], comments = [], completedRuns = [] } = {}) {
@@ -114,10 +121,23 @@ function occurrenceSummaryBody({
     occurrenceMarker(41, 1),
     ...(cursor === null ? [] : [`<!-- cache-budget-audit-cursor:${cursor} -->`]),
     ...extraLines,
-    "This rolling summary records coalesced failures and the latest recurrence.",
-    `Observable coalesced failed attempts in this summary interval: ${count}.`,
+    "This rolling summary records coalesced failures and its displayed workflow run.",
+    `Observable coalesced failed attempts since this summary was created: ${count}.`,
     `Recent observable coalesced identities: ${identities}.`,
   ].join("\n");
+}
+
+function legacyOccurrenceSummaryBody(options = {}) {
+  return occurrenceSummaryBody(options)
+    .replace(
+      "This rolling summary records coalesced failures and its displayed workflow run.",
+      "Detailed recurrence comments are capped at 20; this rolling summary records the latest recurrence.",
+    )
+    .replace(
+      "Observable coalesced failed attempts since this summary was created",
+      "Coalesced failed attempts",
+    )
+    .replace("Recent observable coalesced identities", "Recent coalesced identities");
 }
 
 function clientWithOccurrenceSummary(bodies) {
@@ -132,12 +152,16 @@ function clientWithOccurrenceSummary(bodies) {
   });
 }
 
-async function assertOccurrenceSummaryRejected(client, expected) {
+async function assertOccurrenceSummaryRejected(
+  client,
+  expected,
+  run = workflowRun({ id: 50, run_number: 13 }),
+) {
   const issueBefore = structuredClone(client.issues);
   const commentsBefore = structuredClone(client.comments);
 
   await assert.rejects(
-    reconcile(client, workflowRun({ id: 50, run_number: 13 })),
+    reconcile(client, run),
     expected,
   );
 
@@ -256,7 +280,7 @@ test("a marker beyond the first comment page remains idempotent", async () => {
   const result = await reconcile(client, run);
 
   assert.deepEqual(result, { created: 0, updated: 0, closed: 0, failed: true });
-  assert.equal(client.comments.length, MAX_DETAILED_OCCURRENCE_COMMENTS + 2);
+  assert.equal(client.comments.length, 101);
   assert.ok(client.comments.some((comment) => comment.id === 101));
 });
 
@@ -346,7 +370,7 @@ test("coalesced intermediate failures retain a count and recent identities", asy
   const summary = client.comments.find((comment) =>
     comment.body.includes("cache-budget-audit-occurrence-summary"),
   );
-  assert.match(summary.body, /Observable coalesced failed attempts in this summary interval: 2\./);
+  assert.match(summary.body, /Observable coalesced failed attempts since this summary was created: 2\./);
   assert.match(summary.body, /41:1, 42:1/);
   assert.match(client.issues[0].body, /cache-budget-audit-occurrence:43:1/);
 });
@@ -366,7 +390,7 @@ test("coalescing records only the latest same-run attempt exposed by the list AP
   const summary = client.comments.find((comment) =>
     comment.body.includes("cache-budget-audit-occurrence-summary"),
   );
-  assert.match(summary.body, /Observable coalesced failed attempts in this summary interval: 2\./);
+  assert.match(summary.body, /Observable coalesced failed attempts since this summary was created: 2\./);
   assert.match(summary.body, /41:1, 42:2/);
   assert.doesNotMatch(summary.body, new RegExp(`${supersededAttempt.id}:1`));
 });
@@ -394,7 +418,7 @@ test("coalescing retains an earlier triggering attempt absent from the list API"
   const summary = client.comments.find((comment) =>
     comment.body.includes("cache-budget-audit-occurrence-summary"),
   );
-  assert.match(summary.body, /Observable coalesced failed attempts in this summary interval: 1\./);
+  assert.match(summary.body, /Observable coalesced failed attempts since this summary was created: 1\./);
   assert.match(summary.body, /42:1/);
   assert.doesNotMatch(summary.body, /42:2/);
 });
@@ -411,6 +435,73 @@ test("replaying an already-summarised run does not PATCH identical content", asy
 
   assert.deepEqual(result, { created: 0, updated: 0, closed: 0, failed: true });
   assert.equal(client.updatedComments, updatesBeforeReplay);
+});
+
+test("a legacy summary migrates to the qualified format", async () => {
+  const client = clientWithOccurrenceSummary([legacyOccurrenceSummaryBody()]);
+
+  await reconcile(client, workflowRun({ id: 50, run_number: 13 }));
+
+  assert.match(
+    client.comments[0].body,
+    /Observable coalesced failed attempts since this summary was created: 7\./,
+  );
+  assert.doesNotMatch(client.comments[0].body, /Coalesced failed attempts: 7\./);
+});
+
+test("a bot quote of an occurrence marker cannot suppress a recurrence", async () => {
+  const client = new FakeClient();
+  await reconcile(client, workflowRun());
+  const run = workflowRun({ id: 42, run_number: 13 });
+  client.comments.push({
+    id: 1,
+    issue: 100,
+    body: `Quoted reporter marker: ${occurrenceMarker(run.id, run.run_attempt)}`,
+    user: { login: "github-actions[bot]" },
+  });
+
+  const result = await reconcile(client, run);
+
+  assert.equal(result.updated, 1);
+  assert.equal(
+    client.comments.filter((comment) => comment.body.startsWith("<!-- cache-budget-audit-occurrence:")).length,
+    1,
+  );
+});
+
+test("a safe-boundary count round-trips and overflow rejects before mutation", async () => {
+  const boundaryClient = clientWithOccurrenceSummary([
+    occurrenceSummaryBody({ count: `${Number.MAX_SAFE_INTEGER - 1}`, identities: "none" }),
+  ]);
+  boundaryClient.completedRuns = [workflowRun({ id: 42, run_number: 13 })];
+
+  await reconcile(boundaryClient, workflowRun({ id: 43, run_number: 14 }));
+  assert.match(
+    boundaryClient.comments[0].body,
+    new RegExp(`since this summary was created: ${Number.MAX_SAFE_INTEGER}\\.`),
+  );
+  await reconcile(boundaryClient, workflowRun({ id: 43, run_number: 14 }));
+
+  const overflowClient = clientWithOccurrenceSummary([
+    occurrenceSummaryBody({ count: `${Number.MAX_SAFE_INTEGER}`, identities: "none" }),
+  ]);
+  overflowClient.completedRuns = [workflowRun({ id: 42, run_number: 13 })];
+  await assertOccurrenceSummaryRejected(
+    overflowClient,
+    /coalesced failure count would exceed the safe integer limit/,
+    workflowRun({ id: 43, run_number: 14 }),
+  );
+});
+
+test("duplicate future summaries are validated before consolidation", async () => {
+  const futureSummary = occurrenceSummaryBody({ cursor: "999:1" });
+  const client = clientWithOccurrenceSummary([futureSummary, futureSummary]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /cursor must not be newer than observable trusted health/,
+  );
+  assert.equal(client.comments.length, 2);
 });
 
 test("duplicate identical summaries self-heal within the comment bound", async () => {
@@ -565,12 +656,55 @@ test("duplicate coalesced identities fail closed", async () => {
   );
 });
 
+test("a coalesced identity with extra colons fails closed", async () => {
+  const client = clientWithOccurrenceSummary([
+    occurrenceSummaryBody({ count: "1", identities: "41:1:2" }),
+  ]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /coalesced identities must be a bounded run_id:run_attempt list/,
+  );
+});
+
+test("more than twenty persisted coalesced identities fails closed", async () => {
+  const identities = Array.from({ length: 21 }, (_value, index) => `${index + 1}:1`).join(", ");
+  const client = clientWithOccurrenceSummary([
+    occurrenceSummaryBody({ count: "21", identities }),
+  ]);
+
+  await assertOccurrenceSummaryRejected(
+    client,
+    /coalesced identities must be a unique bounded run_id:run_attempt list/,
+  );
+});
+
+test("a missing coalesced identities line fails closed", async () => {
+  const body = occurrenceSummaryBody().replace(
+    "\nRecent observable coalesced identities: 41:1.",
+    "",
+  );
+  const client = clientWithOccurrenceSummary([body]);
+
+  await assertOccurrenceSummaryRejected(client, /coalesced identities must appear exactly once/);
+});
+
+test("a repeated coalesced identities line fails closed", async () => {
+  const client = clientWithOccurrenceSummary([
+    occurrenceSummaryBody({
+      extraLines: ["Recent observable coalesced identities: 41:1."],
+    }),
+  ]);
+
+  await assertOccurrenceSummaryRejected(client, /coalesced identities must appear exactly once/);
+});
+
 test("extra cursor and count lines fail closed", async () => {
   const client = clientWithOccurrenceSummary([
     occurrenceSummaryBody({
       extraLines: [
         "<!-- cache-budget-audit-cursor:999:1 -->",
-        "Observable coalesced failed attempts in this summary interval: not-a-number.",
+        "Observable coalesced failed attempts since this summary was created: not-a-number.",
       ],
     }),
   ]);
@@ -582,7 +716,7 @@ test("an extra coalesced count line fails closed", async () => {
   const client = clientWithOccurrenceSummary([
     occurrenceSummaryBody({
       extraLines: [
-        "Observable coalesced failed attempts in this summary interval: not-a-number.",
+        "Observable coalesced failed attempts since this summary was created: not-a-number.",
       ],
     }),
   ]);
@@ -612,7 +746,7 @@ test("whole-summary deletion deliberately starts a new cumulative interval", asy
   const summary = client.comments.find((comment) =>
     comment.body.includes("cache-budget-audit-occurrence-summary"),
   );
-  assert.match(summary.body, /Observable coalesced failed attempts in this summary interval: 1\./);
+  assert.match(summary.body, /Observable coalesced failed attempts since this summary was created: 1\./);
   assert.match(summary.body, /41:1/);
 });
 
@@ -649,4 +783,32 @@ test("conflicting valid duplicate summaries fail closed", async () => {
     client,
     /duplicate summaries disagree/,
   );
+});
+
+test("the executable wrapper reports an untrusted event on stdout and exits zero", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "fsl-cache-audit-reporter-"));
+  const eventPath = join(directory, "event.json");
+  await writeFile(
+    eventPath,
+    JSON.stringify({
+      repository: { default_branch: "main" },
+      workflow_run: workflowRun({ event: "pull_request" }),
+    }),
+  );
+
+  try {
+    const result = spawnSync(process.execPath, [REPORTER_PATH], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_EVENT_PATH: eventPath,
+        GITHUB_REPOSITORY: "ymm-oss/fsl",
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "Skipping untrusted cache-budget audit run.\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
 });

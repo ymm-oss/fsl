@@ -163,6 +163,12 @@ def validate_workflow(document: Any) -> list[str]:
     workflow = _mapping(document, "workflow", errors)
     if workflow is None:
         return errors
+    _reject_unapproved_keys(
+        workflow,
+        {"name", "on", "permissions", "concurrency", "jobs"},
+        "workflow",
+        errors,
+    )
 
     triggers = _mapping(workflow.get("on"), "workflow 'on'", errors)
     if triggers is not None:
@@ -206,12 +212,23 @@ def validate_workflow(document: Any) -> list[str]:
     jobs = _mapping(workflow.get("jobs"), "workflow jobs", errors)
     if jobs is None:
         return errors
+    _reject_unapproved_keys(jobs, {AUDIT_JOB_ID}, "workflow jobs", errors)
     job = _mapping(jobs.get(AUDIT_JOB_ID), f"job '{AUDIT_JOB_ID}'", errors)
     if job is None:
         return errors
+    if "permissions" in job:
+        errors.append("audit job must not declare a permissions override")
+        return errors
     if "continue-on-error" in job:
         errors.append("audit job must not declare 'continue-on-error'")
+        return errors
 
+    _reject_unapproved_keys(
+        job,
+        {"name", "runs-on", "timeout-minutes", "steps"},
+        "audit job",
+        errors,
+    )
     steps_value = job.get("steps")
     if not isinstance(steps_value, list):
         errors.append("audit job steps must be a list")

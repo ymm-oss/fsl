@@ -194,6 +194,26 @@ def _add_audit_issue_write_permission(document: dict[str, Any]) -> None:
     document["permissions"]["issues"] = "write"
 
 
+def _add_audit_workflow_key(document: dict[str, Any]) -> None:
+    document["defaults"] = {}
+
+
+def _add_audit_job(document: dict[str, Any]) -> None:
+    document["jobs"]["attacker"] = {
+        "permissions": {"issues": "write"},
+        "runs-on": "ubuntu-latest",
+        "steps": [{"run": "printf compromised"}],
+    }
+
+
+def _audit_job_permissions_override(document: dict[str, Any]) -> None:
+    _audit_job(document)["permissions"] = {"issues": "write"}
+
+
+def _add_audit_job_key(document: dict[str, Any]) -> None:
+    _audit_job(document)["defaults"] = {"run": {"shell": "bash"}}
+
+
 def _replace_reporter_with_list(_document: dict[str, Any]) -> list[str]:
     return ["not a reporter workflow mapping"]
 
@@ -365,6 +385,7 @@ def _add_runner_key(key: str, value: Any) -> Callable[[dict[str, Any]], None]:
 Mutation = tuple[str, Callable[[dict[str, Any]], Any], str]
 MUTATIONS: list[Mutation] = [
     ("replace workflow with a YAML list", _replace_workflow_with_list, "workflow must be a mapping"),
+    ("add audit workflow key", _add_audit_workflow_key, "workflow must not declare unapproved keys: defaults"),
     ("set on to a list", _set_on_to_list, "workflow 'on' must be a mapping"),
     ("empty schedule", _empty_schedule, "trigger 'schedule' must be a non-empty list"),
     ("disable workflow_dispatch", _disable_workflow_dispatch, "trigger 'workflow_dispatch' must be enabled"),
@@ -372,7 +393,10 @@ MUTATIONS: list[Mutation] = [
     ("set push to a list", _set_push_to_list, "trigger 'push' must be a mapping"),
     ("set push paths to a mapping", _set_push_paths_to_mapping, "trigger 'push.paths' must be a list"),
     ("remove jobs", _remove_jobs, "workflow jobs must be a mapping"),
+    ("add audit job", _add_audit_job, "workflow jobs must not declare unapproved keys: attacker"),
     ("set audit job to a list", _set_audit_job_to_list, "job 'audit' must be a mapping"),
+    ("set audit job permissions", _audit_job_permissions_override, "audit job must not declare a permissions override"),
+    ("add audit job key", _add_audit_job_key, "audit job must not declare unapproved keys: defaults"),
     ("remove steps", _remove_steps, "audit job steps must be a list"),
     ("remove calibration step", _remove_calibration_step, "audit job must contain exactly one named calibration step"),
     ("remove live-audit step", _remove_live_audit_step, "audit job must contain exactly one named live-audit step"),

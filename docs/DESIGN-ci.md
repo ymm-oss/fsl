@@ -901,14 +901,18 @@ reporter invocation steps, so a mutable action, alternate checkout source/path, 
 job, or inserted pre-run shell step cannot alter the checked-out reporter before it receives the
 write token. Its YAML loader also rejects duplicate keys while constructing every mapping, before a
 last-key-wins parser could hide an unapproved value from those mapping checks.
+The same validator constrains the read-only audit workflow: it rejects unknown top-level and audit-job
+keys, jobs other than `audit`, and any audit job-level permission override, so no job can override the
+read-only top-level permission set.
 
 The reporter maintains one canonical issue, identified by the stable hidden marker
 `<!-- cache-budget-audit -->`. The currently reconciled failure has an occurrence marker keyed by
 `run_id:run_attempt`; the initial failure creates the issue, a later failure records a recurrence,
 a successful trusted audit closes the issue with a recovery comment, and a later failure reopens the
 same issue. A human close does not change identity: the next distinct failure reopens the canonical
-issue. Comment markers count only when authored by `github-actions[bot]`, so a user cannot suppress
-the reporter's audit trail by posting a predictable marker.
+issue. A comment counts as reporter-authored only when it is authored by `github-actions[bot]` and an
+exact cache-budget reporter marker begins its body; a quoted marker or unrelated Actions comment does
+not suppress the reporter's audit trail.
 
 Before mutation the reporter lists completed default-branch audit runs and chooses the greatest
 `(run_number, run_attempt)` among trusted runs. It intentionally does not use completion timestamps:
@@ -936,12 +940,16 @@ are consolidated. A missing, malformed, or unsafe cursor/count/identity field, o
 that disagree, instead fails reconciliation without mutation; it is not silently repaired or reset.
 Summary integers must be canonical decimal safe integers; cursor and identity parts are positive,
 identities are unique, and the count covers every retained identity. A cursor newer than currently
-observable trusted health is rejected rather than moved backward. The visible count is cumulative
-only for its summary interval: deleting the complete summary intentionally resets that interval, and
-the next summary starts a new count rather than claiming to reconstruct deleted evidence. These rules
-preserve the meaning of a retained cumulative count instead of presenting a false repaired value. The
-audit's `push` paths include the reporter workflow, script, and tests, so a merged reporter change
-runs the live audit immediately instead of waiting for the next schedule or manual dispatch.
+observable trusted health is rejected rather than moved backward, and the writer rejects an addition
+that would exceed the safe-integer limit. The visible count is cumulative since its summary was
+created: deleting the complete summary intentionally resets that history, and the next summary starts
+a new count rather than claiming to reconstruct deleted evidence. The reader accepts the immediately
+preceding unqualified count and identity phrases only to migrate them on the next write; the writer
+emits qualified phrases exclusively. That compatibility may be removed only in an explicit comment
+schema migration after remaining legacy summaries have been verified absent. These rules preserve the
+meaning of a retained cumulative count instead of presenting a false repaired value. The audit's
+`push` paths include the reporter workflow, script, and tests, so a merged reporter change runs the
+live audit immediately instead of waiting for the next schedule or manual dispatch.
 
 ## Required pre-merge contexts, and why the merge queue was rejected
 

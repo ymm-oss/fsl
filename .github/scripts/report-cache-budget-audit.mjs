@@ -14,6 +14,11 @@ export const TRUSTED_AUDIT_EVENTS = new Set([
   "workflow_dispatch",
 ]);
 
+const CURRENT_COALESCED_COUNT_PREFIX = "Observable coalesced failed attempts since this summary was created";
+const CURRENT_COALESCED_IDENTITIES_PREFIX = "Recent observable coalesced identities";
+const LEGACY_COALESCED_COUNT_PREFIX = "Coalesced failed attempts";
+const LEGACY_COALESCED_IDENTITIES_PREFIX = "Recent coalesced identities";
+
 function shortSha(sha) {
   return sha?.slice(0, 12) ?? "unknown";
 }
@@ -102,9 +107,9 @@ function occurrenceSummaryComment({ workflowRun, occurrenceRun = workflowRun, co
     occurrenceSummaryMarker(),
     occurrenceMarker(occurrenceRun.id, occurrenceRun.run_attempt),
     coalescingCursorMarker(workflowRun),
-    "This rolling summary records coalesced failures and the latest recurrence.",
-    `Observable coalesced failed attempts in this summary interval: ${coalesced.count}.`,
-    `Recent observable coalesced identities: ${coalesced.identities.length ? coalesced.identities.join(", ") : "none"}.`,
+    "This rolling summary records coalesced failures and its displayed workflow run.",
+    `${CURRENT_COALESCED_COUNT_PREFIX}: ${coalesced.count}.`,
+    `${CURRENT_COALESCED_IDENTITIES_PREFIX}: ${coalesced.identities.length ? coalesced.identities.join(", ") : "none"}.`,
     "",
     `- Workflow run: [${workflowRun.id}](${workflowRun.html_url})`,
     `- Trigger: \`${workflowRun.event}\``,
@@ -163,14 +168,17 @@ function parsedIdentity(identity) {
 
 function parsedCoalesced(comment) {
   const body = comment.body ?? "";
+  // The immediately preceding writer used the legacy prefixes below. Read them
+  // only to migrate existing summaries; remove this branch only in an explicit
+  // schema migration after verifying that no legacy summaries remain.
   const countMatch = singleSummaryMatch(
     body,
-    /Observable coalesced failed attempts in this summary interval: ([^\n]*)\./g,
+    /(?:Observable coalesced failed attempts since this summary was created|Coalesced failed attempts): ([^\n]*)\./g,
     "coalesced failure count",
   );
   const identitiesMatch = singleSummaryMatch(
     body,
-    /Recent observable coalesced identities: ([^\n]*)\./g,
+    /(?:Recent observable coalesced identities|Recent coalesced identities): ([^\n]*)\./g,
     "coalesced identities",
   );
   const count = canonicalDecimalInteger(countMatch[1], "coalesced failure count", 0);
@@ -188,7 +196,7 @@ function parsedCoalesced(comment) {
   return { count, identities };
 }
 
-function occurrenceSummaryState(comment) {
+function parsedOccurrenceSummaryState(comment) {
   return { cursor: parsedCursor(comment), coalesced: parsedCoalesced(comment) };
 }
 
@@ -235,8 +243,19 @@ async function listAllPages(fetchPage) {
   }
 }
 
+function hasReporterCommentPrefix(body) {
+  return (
+    body.startsWith("<!-- cache-budget-audit-occurrence:") ||
+    body.startsWith(occurrenceSummaryMarker()) ||
+    body.startsWith(recoverySummaryMarker())
+  );
+}
+
 function isReporterComment(comment) {
-  return comment.user?.login === REPORTER_BOT_LOGIN;
+  return (
+    comment.user?.login === REPORTER_BOT_LOGIN &&
+    hasReporterCommentPrefix(comment.body ?? "")
+  );
 }
 
 async function reporterComments(client, issue) {
@@ -263,30 +282,46 @@ async function canonicalSummary(client, comments, marker) {
   return canonical;
 }
 
-async function canonicalOccurrenceSummary(client, comments) {
+function occurrenceSummaryPlan(comments) {
   const summaries = comments.filter((comment) =>
     (comment.body ?? "").includes(occurrenceSummaryMarker()),
   );
   if (summaries.length <= 1) {
     if (summaries[0]) {
-      occurrenceSummaryState(summaries[0]);
+      parsedOccurrenceSummaryState(summaries[0]);
     }
-    return summaries[0] ?? null;
+    return { canonical: summaries[0] ?? null, redundant: [] };
   }
 
   const canonical = summaries.at(-1);
-  const canonicalState = occurrenceSummaryState(canonical);
+  const canonicalState = parsedOccurrenceSummaryState(canonical);
   if (
     summaries
       .slice(0, -1)
-      .some((summary) => !sameOccurrenceSummaryState(occurrenceSummaryState(summary), canonicalState))
+      .some((summary) => !sameOccurrenceSummaryState(parsedOccurrenceSummaryState(summary), canonicalState))
   ) {
     throw invalidOccurrenceSummary("duplicate summaries disagree");
   }
+  return { canonical, redundant: summaries.slice(0, -1) };
+}
+
+async function consolidateOccurrenceSummary(client, plan) {
   await Promise.all(
-    summaries.slice(0, -1).map((summary) => client.deleteIssueComment(summary.id)),
+    plan.redundant.map((summary) => client.deleteIssueComment(summary.id)),
   );
-  return canonical;
+}
+
+function nextCoalescedState(coalesced, failures) {
+  if (coalesced.count > Number.MAX_SAFE_INTEGER - failures.length) {
+    throw invalidOccurrenceSummary("coalesced failure count would exceed the safe integer limit");
+  }
+  return {
+    count: coalesced.count + failures.length,
+    identities: [
+      ...coalesced.identities,
+      ...failures.map(runIdentity),
+    ].slice(-MAX_RECENT_COALESCED_IDENTITIES),
+  };
 }
 
 async function canonicalRecoverySummary(client, comments) {
@@ -363,7 +398,8 @@ export async function reconcileCacheBudgetAudit({
   let closed = 0;
 
   let comments = issue ? await reporterComments(client, issue) : [];
-  let summary = issue ? await canonicalOccurrenceSummary(client, comments) : null;
+  let summaryPlan = issue ? occurrenceSummaryPlan(comments) : { canonical: null, redundant: [] };
+  let summary = summaryPlan.canonical;
   let cursor = issue ? (summary ? parsedCursor(summary) : recordedCursor(issue, comments, trustedRuns)) : null;
   if (cursor && isNewerRun(cursor, workflowRun)) {
     throw invalidOccurrenceSummary("cursor must not be newer than observable trusted health");
@@ -375,6 +411,12 @@ export async function reconcileCacheBudgetAudit({
       (!cursor || isNewerRun(run, cursor)) &&
       runIdentity(run) !== runIdentity(workflowRun),
   );
+  nextCoalescedState(coalesced, coalescedFailures);
+  if (summaryPlan.redundant.length > 0) {
+    await consolidateOccurrenceSummary(client, summaryPlan);
+    comments = comments.filter((comment) => !summaryPlan.redundant.includes(comment));
+    summaryPlan = { canonical: summary, redundant: [] };
+  }
 
   // A queue may coalesce a failure behind a later successful reporter run.
   // Preserve that evidence by creating the canonical issue from the newest
@@ -401,7 +443,7 @@ export async function reconcileCacheBudgetAudit({
       const occurrence = occurrenceMarker(workflowRun.id, workflowRun.run_attempt);
       if (!(await issueContains(client, issue, occurrence))) {
         comments = await reporterComments(client, issue);
-        summary = await canonicalOccurrenceSummary(client, comments);
+        summary = occurrenceSummaryPlan(comments).canonical;
         const detailedOccurrences = comments.filter((comment) =>
           (comment.body ?? "").includes("<!-- cache-budget-audit-occurrence:") &&
           !(comment.body ?? "").includes(occurrenceSummaryMarker()),
@@ -462,15 +504,9 @@ export async function reconcileCacheBudgetAudit({
 
   if (issue) {
     comments = await reporterComments(client, issue);
-    summary = await canonicalOccurrenceSummary(client, comments);
+    summary = occurrenceSummaryPlan(comments).canonical;
     coalesced = summary ? parsedCoalesced(summary) : coalesced;
-    coalesced = {
-      count: coalesced.count + coalescedFailures.length,
-      identities: [
-        ...coalesced.identities,
-        ...coalescedFailures.map(runIdentity),
-      ].slice(-MAX_RECENT_COALESCED_IDENTITIES),
-    };
+    coalesced = nextCoalescedState(coalesced, coalescedFailures);
     if (summary || coalescedFailures.length > 0) {
       const occurrenceRun = failed
         ? workflowRun
