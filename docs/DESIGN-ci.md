@@ -886,6 +886,88 @@ gating a merge on it would gate on something outside the change under review.
 Issue #747 records the incident. Issue #720's Finding 2 — warming the fault-operator scratch build —
 **adds** a cache and therefore depends on this budget holding first.
 
+### Cache-budget audit failure reporting
+
+`.github/workflows/cache-budget-audit.yml` deliberately remains an observer: it has only
+`actions: read` and `contents: read`, including on `workflow_dispatch`, so it cannot turn a live
+cache observation into repository mutation. `.github/workflows/cache-budget-audit-reporter.yml` is
+the separate, least-privilege writer. It has exactly Actions/contents read plus issues write and
+listens only for completed `cache budget audit` runs. Its job additionally requires the same
+repository, the default branch, and one of `push`, `schedule`, or `workflow_dispatch`; it checks out
+the default branch rather than the triggering SHA. The reporter workflow, trigger, job set, job, and
+each step are checked as approved mappings: unknown keys fail closed, not merely known dangerous
+fields. The job has no permission override and exactly the pinned checkout, pinned Node setup, and
+reporter invocation steps, so a mutable action, alternate checkout source/path, runner shell, extra
+job, or inserted pre-run shell step cannot alter the checked-out reporter before it receives the
+write token. Its YAML loader also rejects duplicate keys while constructing every mapping, before a
+last-key-wins parser could hide an unapproved value from those mapping checks.
+The same validator constrains the read-only audit workflow as a complete approved mapping: it rejects
+unknown workflow, trigger, concurrency, job, and step keys; jobs other than `audit`; job-level
+permission overrides; unpinned actions; and any reordered, inserted, or altered calibration/live-audit
+step. It fixes the read-only token binding and command of the live audit, so no job can override the
+read-only top-level permission set or alter the checked-out audit before that command runs.
+The validator also enumerates every `.yml`/`.yaml` workflow in `.github/workflows/` and requires
+`cache budget audit` to be unique, preventing another default-branch workflow from impersonating the
+name that GitHub uses to select `workflow_run` subscribers.
+
+The reporter maintains one canonical issue, identified by the stable hidden marker
+`<!-- cache-budget-audit -->`. The currently reconciled failure has an occurrence marker keyed by
+`run_id:run_attempt`; the initial failure creates the issue, a later failure records a recurrence,
+a successful trusted audit closes the issue with a recovery comment, and a later failure reopens the
+same issue. A human close does not change identity: the next distinct failure reopens the canonical
+issue. A comment counts as reporter-authored only when it is authored by `github-actions[bot]` and an
+exact cache-budget reporter marker begins its body; a quoted marker or unrelated Actions comment does
+not suppress the reporter's audit trail.
+
+Before mutation the reporter lists completed default-branch audit runs and chooses the greatest
+`(run_number, run_attempt)` among trusted runs. It intentionally does not use completion timestamps:
+run numbers establish workflow order and attempts establish re-run order, while completion delivery
+can arrive out of order. A delayed event therefore reconciles current completed health rather than
+reopening an issue for stale failure. This is deliberately **latest-health coalescing**, not a claim
+that every completed attempt receives a durable individual comment: the reporter stores a cursor,
+the cumulative number of skipped failing attempts observable through either the triggering
+`workflow_run` event or the workflow-runs list endpoint, and up to 20 recent
+`run_id:run_attempt` identities from those sources in its rolling recurrence summary. An earlier
+superseded attempt is not recoverable when it is absent from the list endpoint and did not trigger a
+reporter run. Thus a queued reporter that observes failures 41, 42, and 43 records 43 directly and
+preserves 41/42 as coalesced evidence. `cancel-in-progress: false` does not promise that every
+pending run executes—GitHub retains one pending concurrency-group run and may replace an older
+pending run—so this bounded, observable evidence is required independently of the concurrency
+setting.
+
+The reporter paginates issues, runs, and comments rather than assuming page one is complete. This is
+a scheduled operational path rather than a merge hot path, so the potentially unbounded API scan is
+acceptable to preserve marker idempotency and all evidence the endpoint makes available. For valid
+reporter-authored state, comment volume is bounded: it keeps at most 20 detailed recurrence comments,
+then creates and updates one rolling recurrence/coalescing summary; it also updates one rolling
+recovery summary, for at most 22 reporter-authored comments. Identical occurrence-summary duplicates
+are consolidated. A missing, malformed, or unsafe cursor/count/identity field, or duplicate summaries
+that disagree, instead fails reconciliation without mutation; it is not silently repaired or reset.
+Summary integers must be canonical decimal safe integers; cursor and identity parts are positive,
+identities are unique, and the count covers every retained identity. A cursor newer than currently
+observable trusted health is rejected rather than moved backward, and the writer rejects an addition
+that would exceed the safe-integer limit. The visible count is cumulative since its summary was
+created: deleting the complete summary intentionally resets that history, and the next summary starts
+a new count rather than claiming to reconstruct deleted evidence. The reader accepts the original
+unqualified count/identity phrases and the preceding `in this summary interval` count phrase only to
+migrate them on the next write; the writer emits the current qualified phrases exclusively. That
+compatibility may be removed only in an explicit comment schema migration after remaining legacy
+summaries have been verified absent. These rules preserve the
+meaning of a retained cumulative count instead of presenting a false repaired value. The audit's
+`push` paths include the reporter workflow, script, and tests, so a merged reporter change runs the
+live audit immediately instead of waiting for the next schedule or manual dispatch.
+
+Historical-summary compatibility tests consume committed output fixtures rather than resolving their
+writer commits at test time: this repository squash-merges pull requests, so those source commits do
+not survive on `main`. Each fixture records its writer commit, writer/output SHA-256 digests, and its
+capture command; regeneration is a deliberate operation that first makes the original writer commit
+available and then refreshes the recorded digests. The test locks each committed body to its recorded
+output digest and fixed writer commit/digest labels, then runs the full reporter test file from a
+non-Git directory with no Git executable; imported modules therefore cannot hide a Git-history
+lookup. It cannot rehash an original writer that squash merge has removed, so the writer digest is an
+auditable review record rather than a run-time source verification. Both the full-history automation
+checkout and a shallow developer clone therefore exercise the same persisted output.
+
 ## Required pre-merge contexts, and why the merge queue was rejected
 
 The `main` ruleset (`main safety and CI`, id `19090811`) requires six contexts: `merge readiness`,

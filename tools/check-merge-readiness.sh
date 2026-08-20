@@ -35,6 +35,10 @@ check_core_contracts() {
 
 check_automation() {
   node --test .github/scripts/report-post-merge-ci.test.mjs
+  # The cache-budget reporter owns a separate issue lifecycle from the
+  # read-only audit. Keep its reconciliation controls in this Node/stdlib-only
+  # pre-merge lane, alongside the established post-merge reporter controls.
+  node --test .github/scripts/report-cache-budget-audit.test.mjs
   # The agent environment is repository-hook infrastructure, not frozen Python
   # product behavior. These zero-argument contract tests use only the standard
   # library, so run them directly without adding pytest to the fail-fast lane.
