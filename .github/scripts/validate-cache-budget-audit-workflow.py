@@ -512,7 +512,17 @@ def validate_audit_workflow_name_uniqueness(workflows_directory: Path) -> list[s
     for path in sorted(workflows_directory.iterdir()):
         if not path.is_file() or path.suffix not in {".yaml", ".yml"}:
             continue
-        document = load_workflow(path)
+        try:
+            document = load_workflow(path)
+        except FileNotFoundError:
+            errors.append(f"workflow file '{path}' does not exist")
+            continue
+        except OSError as error:
+            errors.append(f"workflow file '{path}' could not be read: {error.strerror}")
+            continue
+        except yaml.YAMLError as error:
+            errors.append(f"workflow YAML is invalid: sibling workflow file '{path}': {error}")
+            continue
         if isinstance(document, Mapping) and document.get("name") == AUDIT_WORKFLOW_NAME:
             matching_workflows.append(path.name)
 

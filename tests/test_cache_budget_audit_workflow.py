@@ -759,6 +759,14 @@ def _run_cli(
     )
 
 
+def _copy_validator_workflows(tmp_path: Path) -> tuple[Path, Path]:
+    audit_path = tmp_path / WORKFLOW_PATH.name
+    reporter_path = tmp_path / REPORTER_WORKFLOW_PATH.name
+    audit_path.write_text(WORKFLOW_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    reporter_path.write_text(REPORTER_WORKFLOW_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    return audit_path, reporter_path
+
+
 def _assert_cli_failure(path: Path, expected: str) -> None:
     result = _run_cli(path)
     output = result.stdout + result.stderr
@@ -836,6 +844,30 @@ def test_cli_reports_unreadable_reporter_workflow_file(tmp_path: Path):
         f"cache-budget-audit workflow wiring: FAIL -- reporter workflow file '{path}' could not be read:"
     )
     assert "Traceback" not in output
+
+
+def test_cli_rejects_malformed_sibling_workflow_yaml_without_traceback(tmp_path: Path):
+    audit_path, reporter_path = _copy_validator_workflows(tmp_path)
+    sibling_path = tmp_path / "malformed-sibling.yml"
+    sibling_path.write_text("name: malformed sibling\n  invalid: [\n", encoding="utf-8")
+
+    result = _run_cli(audit_path, reporter_path)
+    output = result.stdout + result.stderr
+    expected = f"workflow YAML is invalid: sibling workflow file '{sibling_path}':"
+
+    assert result.returncode == 1, output
+    assert result.stdout.startswith(f"cache-budget-audit workflow wiring: FAIL -- {expected}")
+    assert "Traceback" not in output
+
+
+def test_cli_accepts_well_formed_unrelated_sibling_workflow(tmp_path: Path):
+    audit_path, reporter_path = _copy_validator_workflows(tmp_path)
+    (tmp_path / "unrelated.yml").write_text("name: unrelated workflow\n", encoding="utf-8")
+
+    result = _run_cli(audit_path, reporter_path)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "cache-budget-audit workflow wiring: PASS\n"
 
 
 @pytest.mark.parametrize(
