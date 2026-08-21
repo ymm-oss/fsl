@@ -12,6 +12,7 @@ import {
   DECLARED_EXEMPTIONS,
   EXPECTED_REF,
   MINIMUM_AUDITED_REFERENCES,
+  MINIMUM_MSRV_REFERENCES,
   auditMsrvReference,
   auditReferences,
   auditWorkflowDirectory,
@@ -102,6 +103,28 @@ test("dropping the toolchain input from release.yml is rejected", () => {
   assert.equal(findings[0].class, "msrv-toolchain-missing");
 });
 
+test("a YAML alias is reported as unresolved, not as a disagreement", () => {
+  // Review probed `toolchain: *msrv` with the anchor defined elsewhere in the
+  // file. The earlier version reported msrv-disagreement, which named a
+  // disagreement it had not established. A line scan cannot resolve an alias, so
+  // the honest finding is that the equality is unproven.
+  const findings = auditMsrvReference({
+    file: "release.yml",
+    line: 54,
+    ref: RELEASE_SHA,
+    toolchainInput: "*msrv",
+    msrv: "1.88",
+  });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].class, "msrv-alias-unresolved");
+  assert.match(findings[0].message, /cannot resolve it/);
+  assert.doesNotMatch(
+    findings[0].message,
+    /must be built at the version/,
+    "must not claim a disagreement it has not established",
+  );
+});
+
 test("a release toolchain that drifts off the declared MSRV is rejected", () => {
   const findings = auditMsrvReference({
     file: "release.yml",
@@ -155,6 +178,67 @@ test("an env: toolchain is not an action input and must not satisfy the contract
 // `uses:`) and one FALSE ACCEPT (a key nested deeper than `with:`). A false
 // reject matters as much as a false accept: it rejects a legitimate spelling,
 // which invites someone to loosen the rule and reopen the hole.
+// Every spelling below was probed against an earlier revision and MISSED, and
+// actionlint accepts each one, so each was a false reject of valid workflow YAML.
+// A false reject invites someone to loosen the rule and reopen the hole it
+// exists to close, which is why they are controls rather than notes.
+test("the with: mapping is recognised whatever its child indentation", () => {
+  // GitHub does not mandate two-space indentation. An earlier revision required
+  // exactly `with:` + 2 and therefore missed a four-space mapping.
+  for (const pad of ["  ", "    ", "      "]) {
+    const text = [
+      `      - uses: ${ACTION}@${RELEASE_SHA}`,
+      "        with:",
+      `        ${pad}toolchain: 1.88.0`,
+    ].join("\n");
+    const references = collectReferences("release.yml", text);
+    assert.equal(
+      collectToolchainInputs(text, references).get(references[0].line),
+      "1.88.0",
+      `child indented by ${pad.length}`,
+    );
+  }
+});
+
+test("a flow mapping spanning several lines is recognised", () => {
+  const text = [
+    `      - uses: ${ACTION}@${RELEASE_SHA}`,
+    "        with: {",
+    "          toolchain: 1.88.0",
+    "        }",
+  ].join("\n");
+  const references = collectReferences("release.yml", text);
+  assert.equal(
+    collectToolchainInputs(text, references).get(references[0].line),
+    "1.88.0",
+  );
+});
+
+test("a trailing comment after a flow mapping is not part of the value", () => {
+  const text = [
+    `      - uses: ${ACTION}@${RELEASE_SHA}`,
+    "        with: {toolchain: 1.88.0} # MSRV, keep in sync with rust/Cargo.toml",
+  ].join("\n");
+  const references = collectReferences("release.yml", text);
+  assert.equal(
+    collectToolchainInputs(text, references).get(references[0].line),
+    "1.88.0",
+  );
+});
+
+test("a declared MSRV path with no reference at all is rejected", async () => {
+  // Review deleted release.yml's toolchain step outright. The required lane
+  // caught it because the test below asserts the count, but the CLI reported
+  // `PASS -- ... 0 reference(s) held to the MSRV contract`: a declared contract
+  // with nothing to apply it to enforces nothing.
+  assert.equal(MINIMUM_MSRV_REFERENCES, Object.keys(DECLARED_EXEMPTIONS).length);
+  const { exempted } = await auditWorkflowDirectory(WORKFLOWS, { msrv: REPO_MSRV });
+  assert.ok(
+    exempted >= MINIMUM_MSRV_REFERENCES,
+    `expected at least ${MINIMUM_MSRV_REFERENCES} MSRV reference(s), saw ${exempted}`,
+  );
+});
+
 test("the with: mapping is recognised in every legitimate spelling", () => {
   const cases = [
     ["block", `      - uses: ${ACTION}@${RELEASE_SHA}\n        with:\n          toolchain: 1.88.0`, "1.88.0"],

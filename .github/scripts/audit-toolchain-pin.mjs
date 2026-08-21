@@ -89,6 +89,24 @@ export function auditMsrvReference({ file, line, ref, toolchainInput, msrv }) {
         `${file}:${line} must pass an explicit \`toolchain:\` input naming the ` +
         `declared MSRV ${msrv}; without it the action's own default applies.`,
     });
+  } else if (toolchainInput.startsWith("*")) {
+    // A YAML alias cannot be resolved by a line scan, and guessing would be
+    // worse than saying so. Review probed `toolchain: *msrv` against an anchor
+    // defined elsewhere in the file; the earlier version reported
+    // `msrv-disagreement`, which named the wrong problem. Fail closed, but with
+    // a diagnostic that states what is actually unproven. Resolving aliases
+    // needs a real YAML parse -- tracked by #856.
+    findings.push({
+      class: "msrv-alias-unresolved",
+      file,
+      line,
+      ref,
+      message:
+        `${file}:${line} passes \`toolchain: ${toolchainInput}\`, a YAML alias. ` +
+        "This audit is a line scan and cannot resolve it, so it cannot show the " +
+        `release toolchain equals rust-version "${msrv}". Write the version ` +
+        "literally, or resolve aliases (see issue #856).",
+    });
   } else if (
     toolchainInput !== msrv &&
     !toolchainInput.startsWith(`${msrv}.`)
@@ -202,25 +220,50 @@ export function collectToolchainInputs(text, references) {
     }
 
     let withIndent = null;
+    let flowDepth = 0;
+    let flowText = "";
+
     for (let i = start; i < end; i += 1) {
       // Normalise the leading dash so `- with:` is seen at its key's column.
-      const line = lines[i].replace(/^(\s*)-(\s)/, "$1 $2");
-      if (line.trim() === "" || /^\s*#/.test(line)) {
-        continue;
-      }
-      const indent = line.length - line.trimStart().length;
+      const raw = lines[i].replace(/^(\s*)-(\s)/, "$1 $2");
 
-      // Flow style: `with: {toolchain: 1.88.0}` is one line and valid YAML.
-      const flow = /^\s*with\s*:\s*\{(.*)\}\s*$/.exec(line);
-      if (flow) {
-        const entry = new RegExp("(?:^|,)\\s*toolchain\\s*:\\s*([^,}]+)").exec(flow[1]);
-        if (entry) {
-          inputs.set(reference.line, unquote(entry[1].trim()));
+      // A flow mapping may span lines, so accumulate until the braces balance.
+      if (flowDepth > 0) {
+        flowText += " " + raw.trim();
+        flowDepth += (raw.match(/\{/g) ?? []).length;
+        flowDepth -= (raw.match(/\}/g) ?? []).length;
+        if (flowDepth === 0) {
+          const entry = /(?:^|,|\{)\s*toolchain\s*:\s*([^,}]+)/.exec(flowText);
+          if (entry) {
+            inputs.set(reference.line, unquote(entry[1].trim()));
+            break;
+          }
         }
         continue;
       }
 
-      if (/^\s*with\s*:\s*$/.test(line)) {
+      if (raw.trim() === "" || /^\s*#/.test(raw)) {
+        continue;
+      }
+      const indent = raw.length - raw.trimStart().length;
+
+      const flowStart = /^\s*with\s*:\s*\{/.exec(raw);
+      if (flowStart) {
+        // Drop a trailing `# comment`, which is not part of the mapping.
+        flowText = raw.replace(/\s+#.*$/, "").trim();
+        flowDepth =
+          (flowText.match(/\{/g) ?? []).length - (flowText.match(/\}/g) ?? []).length;
+        if (flowDepth === 0) {
+          const entry = /(?:^|,|\{)\s*toolchain\s*:\s*([^,}]+)/.exec(flowText);
+          if (entry) {
+            inputs.set(reference.line, unquote(entry[1].trim()));
+            break;
+          }
+        }
+        continue;
+      }
+
+      if (/^\s*with\s*:\s*$/.test(raw)) {
         withIndent = indent;
         continue;
       }
@@ -230,16 +273,41 @@ export function collectToolchainInputs(text, references) {
       if (withIndent === null) {
         continue;
       }
-      // Only a DIRECT child of `with:` is an action input. A key nested deeper
-      // belongs to some other input's value, so it must not count.
-      const match = /^\s*toolchain\s*:\s*(.+?)\s*$/.exec(line);
-      if (match && indent === withIndent + 2) {
-        inputs.set(reference.line, unquote(match[1].replace(/\s+#.*$/, "").trim()));
-        break;
+      // A direct child of `with:` is any key indented FURTHER than `with:` but
+      // not nested under another key of it. YAML does not mandate two spaces,
+      // so the first child's indent defines the level for this mapping.
+      const match = /^\s*toolchain\s*:\s*(.+?)\s*$/.exec(raw);
+      if (match) {
+        const childIndent = firstChildIndent(lines, i, withIndent);
+        if (indent === childIndent) {
+          inputs.set(reference.line, unquote(match[1].replace(/\s+#.*$/, "").trim()));
+          break;
+        }
       }
     }
   }
   return inputs;
+}
+
+/**
+ * The indentation of the first key directly under a `with:` at `withIndent`,
+ * searching back from `from`. GitHub does not require two-space indentation, so
+ * hardcoding `withIndent + 2` falsely rejected a mapping indented by four.
+ */
+function firstChildIndent(lines, from, withIndent) {
+  let candidate = null;
+  for (let i = from; i >= 0; i -= 1) {
+    const raw = lines[i].replace(/^(\s*)-(\s)/, "$1 $2");
+    if (raw.trim() === "" || /^\s*#/.test(raw)) {
+      continue;
+    }
+    const indent = raw.length - raw.trimStart().length;
+    if (indent <= withIndent) {
+      break;
+    }
+    candidate = indent;
+  }
+  return candidate;
 }
 
 /**
@@ -410,6 +478,14 @@ export async function auditWorkflowDirectory(directory, options = {}) {
 // them is not.
 export const MINIMUM_AUDITED_REFERENCES = 11;
 
+// Each declared MSRV path must actually contain a toolchain reference. Review
+// deleted release.yml's toolchain step entirely and the CLI reported
+// `PASS -- ... 0 reference(s) held to the MSRV contract`: a declared contract
+// with nothing to apply it to is the same vacuous pass the audited floor exists
+// to prevent. The required lane already caught it, because its test asserts the
+// count; the CLI did not.
+export const MINIMUM_MSRV_REFERENCES = Object.keys(DECLARED_EXEMPTIONS).length;
+
 async function main() {
   const directory = new URL("../workflows/", import.meta.url);
   let audited;
@@ -450,6 +526,17 @@ async function main() {
       `FAIL -- audited only ${audited} toolchain reference(s); expected at least ` +
         `${MINIMUM_AUDITED_REFERENCES}. Either the workflows moved, or this audit ` +
         "stopped seeing them -- both mean it is no longer enforcing the pin.",
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  if (exempted < MINIMUM_MSRV_REFERENCES) {
+    console.error(
+      `FAIL -- ${exempted} reference(s) held to the MSRV contract; expected ` +
+        `${MINIMUM_MSRV_REFERENCES}, one per declared path ` +
+        `(${Object.keys(DECLARED_EXEMPTIONS).join(", ")}). A declared contract ` +
+        "with no reference to apply it to enforces nothing.",
     );
     process.exitCode = 1;
     return;
