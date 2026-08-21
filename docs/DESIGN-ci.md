@@ -1030,8 +1030,13 @@ this repository's source authority.
 The privileged post-merge reporter receives `issues: write`, so its workflow
 also has a deliberately narrow parser-backed shape contract. It requires the
 fixed `jobs.reconcile` boundary, the exact trusted default-branch condition,
-and one direct literal reporter command in that job only. The runtime reporter
-and YAML validator both read `.github/scripts/trusted-workflow-events.json`:
+and exactly four ordered steps: commit-pinned checkout of the repository's
+default branch with persisted credentials disabled, commit-pinned Node setup,
+calibration, and one direct literal reporter command. Every workflow, job,
+step, and action-input mapping has an allowlist, so unapproved keys such as a
+checkout `repository:` override, shell, working directory, or redirected
+environment fail closed. The runtime reporter and YAML validator both read
+`.github/scripts/trusted-workflow-events.json`:
 the JavaScript exports its set from that file and the validator constructs the
 condition from it, preventing their event lists from drifting. The contract
 rejects environment-built commands, shell indirection, and composite-action

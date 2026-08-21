@@ -22,8 +22,28 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "post-merge-ci-reporter.yml"
 TRUSTED_EVENTS_PATH = REPO_ROOT / ".github" / "scripts" / "trusted-workflow-events.json"
 
+WORKFLOW_NAME = "post-merge CI reporter"
+WORKFLOW_RUN_NAME = "product gate"
+WORKFLOW_PERMISSIONS = {
+    "actions": "read",
+    "contents": "read",
+    "issues": "write",
+    "pull-requests": "read",
+}
+CONCURRENCY_GROUP = "post-merge-ci-reporter"
 RECONCILE_JOB = "reconcile"
+RECONCILE_JOB_NAME = "reconcile post-merge CI issue"
+RECONCILE_RUNS_ON = "ubuntu-latest"
+RECONCILE_TIMEOUT_MINUTES = "5"
+CHECKOUT_ACTION = "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
+CHECKOUT_REF = "${{ github.event.repository.default_branch }}"
+SETUP_NODE_ACTION = "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020"
+NODE_VERSION = "22"
+CALIBRATION_STEP_NAME = "Test reporter contract"
+CALIBRATION_COMMAND = "node --test .github/scripts/report-post-merge-ci.test.mjs"
+WRITER_STEP_NAME = "Create, update, or resolve CI issues"
 WRITER_COMMAND = "node .github/scripts/report-post-merge-ci.mjs"
+GITHUB_TOKEN = "${{ secrets.GITHUB_TOKEN }}"
 
 
 class WorkflowLoader(yaml.SafeLoader):
@@ -101,69 +121,126 @@ def _normalise(expression: str) -> str:
     return " ".join(expression.split())
 
 
-def _direct_writer_steps(job: yaml.MappingNode) -> list[yaml.MappingNode]:
-    steps = _entry(job, "steps")
-    if not isinstance(steps, yaml.SequenceNode):
-        return []
-    return [
-        step
-        for step in steps.value
-        if isinstance(step, yaml.MappingNode) and _scalar(_entry(step, "run")) == WRITER_COMMAND
-    ]
+def _reject_unapproved_keys(
+    mapping: yaml.MappingNode, allowed: set[str], label: str, errors: list[str], path: str
+) -> None:
+    """Fail closed on every key outside one approved structural shape."""
+    unexpected = sorted(
+        key
+        for key_node, _value_node in mapping.value
+        if (key := _scalar(key_node)) is None or key not in allowed
+    )
+    if unexpected:
+        errors.append(
+            f"{path}:{_line(mapping)}: {label} must not declare unapproved keys: "
+            f"{', '.join(unexpected)}"
+        )
 
 
-def _indirect_writer_steps(job: yaml.MappingNode) -> list[yaml.MappingNode]:
-    """Find visible attempts to place the writer command behind shell/env syntax."""
-    steps = _entry(job, "steps")
-    if not isinstance(steps, yaml.SequenceNode):
-        return []
-    indirect: list[yaml.MappingNode] = []
-    for step in steps.value:
-        if not isinstance(step, yaml.MappingNode):
-            continue
-        run = _scalar(_entry(step, "run"))
-        if run is None or run == WRITER_COMMAND:
-            continue
-        if WRITER_COMMAND in run:
-            indirect.append(step)
-            continue
-        # A literal note in ``env`` is not an invocation. Only a command that
-        # asks Node to evaluate a shell-expanded value is an attempted writer
-        # indirection; this catches ``node \"$REPORTER\"`` without treating a
-        # decoy ``env: NOTE: ...`` as executable behavior.
-        if run.lstrip().startswith("node ") and "$" in run:
-            indirect.append(step)
-    return indirect
+def _expect_mapping(
+    node: yaml.Node | None, label: str, errors: list[str], path: str
+) -> yaml.MappingNode | None:
+    if not isinstance(node, yaml.MappingNode):
+        errors.append(f"{path}:{_line(node)}: {label} must be a mapping")
+        return None
+    return node
 
 
-def _local_composite_steps(job: yaml.MappingNode) -> list[yaml.MappingNode]:
-    """Local composites can hide a writer command from this static boundary."""
-    steps = _entry(job, "steps")
-    if not isinstance(steps, yaml.SequenceNode):
-        return []
-    return [
-        step
-        for step in steps.value
-        if isinstance(step, yaml.MappingNode)
-        and (_scalar(_entry(step, "uses")) or "").startswith("./")
-    ]
+def _expect_scalar(
+    node: yaml.Node | None, expected: str, label: str, errors: list[str], path: str
+) -> None:
+    if _scalar(node) != expected:
+        errors.append(f"{path}:{_line(node)}: {label} must be exactly {expected!r}")
+
+
+def _expect_scalar_mapping(
+    node: yaml.Node | None,
+    expected: dict[str, str],
+    label: str,
+    errors: list[str],
+    path: str,
+) -> None:
+    mapping = _expect_mapping(node, label, errors, path)
+    if mapping is None:
+        return
+    _reject_unapproved_keys(mapping, set(expected), label, errors, path)
+    for key, value in expected.items():
+        _expect_scalar(_entry(mapping, key), value, f"{label}.{key}", errors, path)
 
 
 def validate_document(document: yaml.Node | None, events: tuple[str, ...], path: str) -> list[str]:
     """Return every structural contract violation in one parsed workflow."""
     errors: list[str] = []
-    jobs = _entry(document, "jobs")
+    workflow = _expect_mapping(document, "workflow", errors, path)
+    if workflow is None:
+        return errors
+    _reject_unapproved_keys(
+        workflow,
+        {"name", "on", "permissions", "concurrency", "jobs"},
+        "workflow",
+        errors,
+        path,
+    )
+    _expect_scalar(_entry(workflow, "name"), WORKFLOW_NAME, "workflow name", errors, path)
+    trigger = _expect_mapping(_entry(workflow, "on"), "workflow on", errors, path)
+    if trigger is not None:
+        _reject_unapproved_keys(trigger, {"workflow_run"}, "workflow on", errors, path)
+        workflow_run = _expect_mapping(_entry(trigger, "workflow_run"), "workflow_run trigger", errors, path)
+        if workflow_run is not None:
+            _reject_unapproved_keys(workflow_run, {"workflows", "types"}, "workflow_run trigger", errors, path)
+            workflows = _entry(workflow_run, "workflows")
+            types = _entry(workflow_run, "types")
+            if not isinstance(workflows, yaml.SequenceNode) or [_scalar(item) for item in workflows.value] != [WORKFLOW_RUN_NAME]:
+                errors.append(f"{path}:{_line(workflows)}: workflow_run.workflows must be exactly ['{WORKFLOW_RUN_NAME}']")
+            if not isinstance(types, yaml.SequenceNode) or [_scalar(item) for item in types.value] != ["completed"]:
+                errors.append(f"{path}:{_line(types)}: workflow_run.types must be exactly ['completed']")
+    _expect_scalar_mapping(_entry(workflow, "permissions"), WORKFLOW_PERMISSIONS, "workflow permissions", errors, path)
+    concurrency = _expect_mapping(_entry(workflow, "concurrency"), "workflow concurrency", errors, path)
+    if concurrency is not None:
+        _reject_unapproved_keys(concurrency, {"group", "cancel-in-progress"}, "workflow concurrency", errors, path)
+        _expect_scalar(_entry(concurrency, "group"), CONCURRENCY_GROUP, "workflow concurrency.group", errors, path)
+        _expect_scalar(
+            _entry(concurrency, "cancel-in-progress"),
+            "false",
+            "workflow concurrency.cancel-in-progress",
+            errors,
+            path,
+        )
+
+    jobs = _entry(workflow, "jobs")
     if not isinstance(jobs, yaml.MappingNode):
         return [f"{path}: workflow must declare a top-level `jobs:` mapping"]
 
-    job_nodes = {
-        name: job
-        for key, job in jobs.value
-        if (name := _scalar(key)) is not None and isinstance(job, yaml.MappingNode)
-    }
-    reconcile = job_nodes.get(RECONCILE_JOB)
+    _reject_unapproved_keys(jobs, {RECONCILE_JOB}, "workflow jobs", errors, path)
+    if _entry(jobs, RECONCILE_JOB) is None:
+        return [*errors, f"{path}: privileged reporter must declare the `{RECONCILE_JOB}` job"]
+    reconcile = _expect_mapping(
+        _entry(jobs, RECONCILE_JOB), f"`{RECONCILE_JOB}` job", errors, path
+    )
     if reconcile is None:
-        return [f"{path}: privileged reporter must declare the `{RECONCILE_JOB}` job"]
+        return errors
+
+    if _entry(reconcile, "permissions") is not None:
+        errors.append(
+            f"{path}:{_line(_entry(reconcile, 'permissions'))}: `{RECONCILE_JOB}` must not declare "
+            "a permissions override"
+        )
+    _reject_unapproved_keys(
+        reconcile,
+        {"name", "if", "runs-on", "timeout-minutes", "steps"},
+        f"`{RECONCILE_JOB}` job",
+        errors,
+        path,
+    )
+    _expect_scalar(_entry(reconcile, "name"), RECONCILE_JOB_NAME, "reconcile job name", errors, path)
+    _expect_scalar(_entry(reconcile, "runs-on"), RECONCILE_RUNS_ON, "reconcile job runs-on", errors, path)
+    _expect_scalar(
+        _entry(reconcile, "timeout-minutes"),
+        RECONCILE_TIMEOUT_MINUTES,
+        "reconcile job timeout-minutes",
+        errors,
+        path,
+    )
 
     condition = _scalar(_entry(reconcile, "if"))
     expected = expected_condition(events)
@@ -175,41 +252,61 @@ def validate_document(document: yaml.Node | None, events: tuple[str, ...], path:
             "the shared trusted-event condition exactly"
         )
 
-    direct_in_reconcile = _direct_writer_steps(reconcile)
-    if len(direct_in_reconcile) != 1:
+    steps = _entry(reconcile, "steps")
+    if not isinstance(steps, yaml.SequenceNode):
         errors.append(
-            f"{path}:{_line(reconcile)}: `{RECONCILE_JOB}` must contain exactly one direct literal "
-            f"`run: {WRITER_COMMAND}` step"
+            f"{path}:{_line(steps)}: `{RECONCILE_JOB}` steps must be a sequence"
         )
-    for step in _indirect_writer_steps(reconcile):
+        return errors
+    if not (
+        len(steps.value) == 4
+        and all(isinstance(step, yaml.MappingNode) for step in steps.value)
+        and (_scalar(_entry(steps.value[0], "uses")) or "").startswith("actions/checkout@")
+        and (_scalar(_entry(steps.value[1], "uses")) or "").startswith("actions/setup-node@")
+        and _scalar(_entry(steps.value[2], "name")) == CALIBRATION_STEP_NAME
+        and _scalar(_entry(steps.value[3], "name")) == WRITER_STEP_NAME
+    ):
         errors.append(
-            f"{path}:{_line(step)}: `{RECONCILE_JOB}` must not invoke the reporter through "
-            "environment or shell indirection"
+            f"{path}:{_line(steps)}: `{RECONCILE_JOB}` steps must be exactly checkout, setup-node, "
+            "reporter calibration, and direct writer in that order"
         )
-    for step in _local_composite_steps(reconcile):
-        errors.append(
-            f"{path}:{_line(step)}: `{RECONCILE_JOB}` must not invoke a local composite action; "
-            "the reporter writer must remain a direct literal run step"
+        return errors
+
+    checkout, setup_node, calibration, writer = steps.value
+    _reject_unapproved_keys(checkout, {"uses", "with"}, "checkout step", errors, path)
+    _expect_scalar(_entry(checkout, "uses"), CHECKOUT_ACTION, "checkout action", errors, path)
+    checkout_with = _expect_mapping(_entry(checkout, "with"), "checkout configuration", errors, path)
+    if checkout_with is not None:
+        _reject_unapproved_keys(
+            checkout_with, {"ref", "persist-credentials"}, "checkout configuration", errors, path
+        )
+        _expect_scalar(_entry(checkout_with, "ref"), CHECKOUT_REF, "checkout ref", errors, path)
+        _expect_scalar(
+            _entry(checkout_with, "persist-credentials"),
+            "false",
+            "checkout persist-credentials",
+            errors,
+            path,
         )
 
-    for job_name, job in job_nodes.items():
-        if job_name == RECONCILE_JOB:
-            continue
-        for step in _direct_writer_steps(job):
-            errors.append(
-                f"{path}:{_line(step)}: reporter writer command may appear only in `{RECONCILE_JOB}`, "
-                f"not `{job_name}`"
-            )
-        for step in _indirect_writer_steps(job):
-            errors.append(
-                f"{path}:{_line(step)}: reporter writer command may not be invoked through "
-                f"environment or shell indirection in `{job_name}`"
-            )
-        for step in _local_composite_steps(job):
-            errors.append(
-                f"{path}:{_line(step)}: local composite actions are not permitted in `{job_name}`; "
-                "they could hide the reporter writer"
-            )
+    _reject_unapproved_keys(setup_node, {"uses", "with"}, "setup-node step", errors, path)
+    _expect_scalar(_entry(setup_node, "uses"), SETUP_NODE_ACTION, "setup-node action", errors, path)
+    setup_with = _expect_mapping(_entry(setup_node, "with"), "setup-node configuration", errors, path)
+    if setup_with is not None:
+        _reject_unapproved_keys(setup_with, {"node-version"}, "setup-node configuration", errors, path)
+        _expect_scalar(_entry(setup_with, "node-version"), NODE_VERSION, "setup-node version", errors, path)
+
+    _reject_unapproved_keys(calibration, {"name", "run"}, "reporter calibration step", errors, path)
+    _expect_scalar(_entry(calibration, "name"), CALIBRATION_STEP_NAME, "calibration step name", errors, path)
+    _expect_scalar(_entry(calibration, "run"), CALIBRATION_COMMAND, "calibration command", errors, path)
+
+    _reject_unapproved_keys(writer, {"name", "env", "run"}, "reporter writer step", errors, path)
+    _expect_scalar(_entry(writer, "name"), WRITER_STEP_NAME, "writer step name", errors, path)
+    writer_env = _expect_mapping(_entry(writer, "env"), "writer environment", errors, path)
+    if writer_env is not None:
+        _reject_unapproved_keys(writer_env, {"GITHUB_TOKEN"}, "writer environment", errors, path)
+        _expect_scalar(_entry(writer_env, "GITHUB_TOKEN"), GITHUB_TOKEN, "writer GITHUB_TOKEN", errors, path)
+    _expect_scalar(_entry(writer, "run"), WRITER_COMMAND, "writer command", errors, path)
     return errors
 
 
