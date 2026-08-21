@@ -1618,6 +1618,15 @@ fail closed です。compose は、明示の検査済み names/order ブリッ�
 Public Kernel は不完全なマルチファイルの provenance を意図的に拒否するためです。
 エクスポートエラーの後のフォールバックではなく、同じアダプタに入ります。
 
+固定シードのウォークは 100 ステップを上限とする具象 Monitor の実行であり、
+enabled な action が無くなればそこで止まります。`--depth` には束縛され **ません**。
+したがって、`testgen` が先に実行する depth 以内の有界検証が「違反なし」と証明した
+違反に、ウォークが到達し得ます。Monitor は違反したステップを rollback するため、
+そのステップを記録することは「その action は no-op である」と述べることになり、
+これは FSL のどの契約も述べていない期待値です。`testgen` は代わりに、`verify` が
+返すのと同じ `result:"violated"` エンベロープ、終了コード、プロパティ、ステップ、
+再生可能なトレースで違反を報告し、ハーネスを書きません。
+
 - `--target pytest`(デフォルト): `fslc.runtime.Monitor` をインポートし、オラクル
   としてランダムウォークをライブで駆動する Python テストを出力します。
 - `--target vitest`: 自己完結の TypeScript(Vitest)ファイルを出力します。決定的な

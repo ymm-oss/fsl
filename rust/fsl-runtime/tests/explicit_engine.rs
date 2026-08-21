@@ -151,8 +151,9 @@ fn deterministic_init_tracks_branches_foralls_and_duplicate_locations() {
          init { flag = false if flag { value = true } else { value = false } } \
          action stay() { flag = flag value = value } }",
     );
-    fsl_runtime::verify_explicit(both_branches, 1, 100)
+    let both = fsl_runtime::verify_explicit(both_branches, 1, 100)
         .expect("both init branches definitely assign value");
+    assert_eq!(both.violation, None, "{both:?}");
 
     let one_branch = model(
         "spec OneBranch { state { flag: Bool, value: Bool } \
@@ -171,8 +172,9 @@ fn deterministic_init_tracks_branches_foralls_and_duplicate_locations() {
          init { values[A] = false values[B] = true } \
          action stay() { values[A] = values[A] } }",
     );
-    fsl_runtime::verify_explicit(distinct_keys, 1, 100)
+    let distinct = fsl_runtime::verify_explicit(distinct_keys, 1, 100)
         .expect("separate concrete map keys are not duplicate init writes");
+    assert_eq!(distinct.violation, None, "{distinct:?}");
 
     let duplicate = model(
         "spec Duplicate { state { value: Bool } init { value = false value = true } \

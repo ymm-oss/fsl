@@ -62,7 +62,11 @@ spec Agreement {
         .first()
         .cloned()
     {
-        monitor.step(&action).expect("step monitor");
+        let stepped = monitor.step(&action).expect("step monitor");
+        assert_eq!(
+            stepped.violation, None,
+            "agreement states must be legal: {stepped:?}"
+        );
         states.push(monitor.state.clone());
     }
     for state in states {
@@ -128,7 +132,11 @@ fn elaborated_enum_conversion_agrees_concretely_symbolically_and_in_preserved_pr
     let mut monitor = fsl_runtime::Monitor::new(implementation.clone()).expect("monitor");
     let mut states = vec![monitor.state.clone()];
     let action = monitor.enabled().expect("enabled")[0].clone();
-    monitor.step(&action).expect("step");
+    let stepped = monitor.step(&action).expect("step");
+    assert_eq!(
+        stepped.violation, None,
+        "agreement states must be legal: {stepped:?}"
+    );
     states.push(monitor.state.clone());
     for state in states {
         let expected = fsl_runtime::eval(expression, &state, &mut BTreeMap::new(), &merged, None)

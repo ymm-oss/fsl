@@ -38,6 +38,7 @@ use crate::value::{
 /// One proven solver-dependent vacuity fact, carried backend-neutrally to the
 /// frontend that renders warning JSON.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub enum VacuityFinding {
     /// A user invariant that holds for every dynamics because the state it
     /// depends on is pinned by init and never assigned by any action.

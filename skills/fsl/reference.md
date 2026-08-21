@@ -1634,6 +1634,14 @@ state/action/parameter names, and spec-name mismatches fail closed. Compose is t
 Public Kernel rejects incomplete multi-file provenance; checked names/order feed
 the same adapter until truthful compose export is available.
 
+The fixed-seed walk is capped at 100 steps and is **not** bounded by `--depth`, so
+it can reach a violation the bounded verification `testgen` runs first proved
+absent within `depth`. The Monitor rolls a violating step back, so recording it
+would bake "this action is a no-op" as an expectation the spec never states.
+`testgen` therefore refuses: it emits the same `result:"violated"` envelope, exit
+code, property, step, and trace `verify` emits, and writes no harness. Raise
+`--depth` until `verify` is clean at the depth the walk reaches, or fix the spec.
+
 `--target` chooses the harness; the scenario-collection core is shared, so both
 emit the same scenarios:
 - `pytest` (default): Python tests; the random walk imports `fslc.runtime.Monitor`

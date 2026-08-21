@@ -129,6 +129,7 @@ const VALID_DOMAIN_FIXTURES: &[&str] = &[
     "rust/fslc/tests/fixtures/domain_legacy_enum_union.fsl",
     "rust/fslc/tests/fixtures/domain_origin_violation.fsl",
     "rust/fslc/tests/fixtures/domain_saga_compensation_dual_guard.fsl",
+    "rust/fslc/tests/fixtures/domain_testgen_walk_late_violation.fsl",
     "rust/fslc/tests/fixtures/issue_515_domain_broken_invariant.fsl",
     "rust/fslc/tests/fixtures/issue_515_domain_clean_invariant.fsl",
     "rust/fslc/tests/fixtures/issue_518_domain_replay.fsl",

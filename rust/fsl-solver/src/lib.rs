@@ -36,6 +36,7 @@ pub enum ModelValue {
 
 /// Result of a satisfiability query.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use = "a SatResult is the solver's verdict: dropping it silently loses sat/unsat/unknown"]
 pub enum SatResult {
     Sat,
     Unsat,

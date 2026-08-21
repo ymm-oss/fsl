@@ -521,6 +521,7 @@ pub fn validate_lifecycle_chain(
 
 /// Per-artifact, per-claim applicability outcome.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct Applicability {
     pub evidence_id: String,
     pub claim_id: String,
@@ -535,6 +536,7 @@ pub struct Applicability {
 
 /// Deterministic per-claim support aggregation input and result.
 #[derive(Clone, Debug)]
+#[must_use]
 pub struct SupportOverlay {
     /// Claim id -> `causal_support` value.
     pub support: BTreeMap<String, String>,
@@ -732,7 +734,8 @@ fn evidence_finding(
 /// Aggregate deterministic per-claim `causal_support` from validated
 /// artifacts plus applicability findings. Nothing here touches
 /// `formal_assurance`.
-#[must_use]
+// No fn-level `#[must_use]`: `SupportOverlay` carries it on the type, which is
+// strictly stronger (issue #858), and both together is `double_must_use`.
 #[allow(clippy::too_many_lines)]
 pub fn aggregate_support(
     model: &CausalModel,

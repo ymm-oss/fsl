@@ -23,6 +23,7 @@ use crate::value::{
 use crate::violation_kind;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct BmcViolation {
     pub kind: String,
     pub name: String,
@@ -33,6 +34,10 @@ pub struct BmcViolation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+// Inert today: no function returns this, it exists only as
+// `BmcViolation.leads_to`. Annotated because it is an outcome, so a future
+// accessor cannot be discarded silently.
+#[must_use]
 pub struct LeadsToViolation {
     pub bindings: BTreeMap<String, FslValue>,
     pub pending_since: usize,
@@ -44,6 +49,7 @@ pub struct LeadsToViolation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct ReachableWitness {
     pub step: usize,
     pub trace: Vec<TraceStep>,
@@ -52,6 +58,7 @@ pub struct ReachableWitness {
 /// One static constraint in an irreducible explanation for an unreachable
 /// state predicate.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct ReachableBlocker {
     pub kind: String,
     pub name: String,
@@ -60,11 +67,13 @@ pub struct ReachableBlocker {
 /// A depth-independent diagnosis for a reachable target that is
 /// unsatisfiable under the model's type bounds and invariants.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct ReachableDiagnosis {
     pub blocking: Vec<ReachableBlocker>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct BmcResult {
     pub spec: String,
     pub depth: usize,

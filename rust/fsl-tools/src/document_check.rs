@@ -41,6 +41,7 @@ fn reason(kind: &str, code: &str) -> DriftReason {
     }
 }
 
+#[must_use]
 pub struct DocumentCheckReport {
     pub reasons: Vec<DriftReason>,
 }

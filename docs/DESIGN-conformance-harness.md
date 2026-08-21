@@ -777,7 +777,7 @@ frozen session corpus and mapping from
 `:426-445`, and the negative controls from `:488-504,620-636`. Exit semantics
 come from `docs/LANGUAGE.md:940-961`. The compound table independently
 enumerates the 65 result values registered by
-`rust/fslc/src/outcome.rs:82-216`; unknown values and incomplete sibling-field
+`rust/fslc/src/outcome.rs:86-218`; unknown values and incomplete sibling-field
 envelopes are errors, never default successes or failures. Chain uses a
 command-specific adapter because a layer additionally depends on its integer
 `exit_code`, nested `detail.implements.result`, and the implementation-command

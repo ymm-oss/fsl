@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+//
+// #843: `domain testgen` wraps the generic testgen path, so it must inherit
+// the fixed-seed walk's refusal. The violation is at walk step 30, past the
+// default verification depth of 8, so the walk reaches it after the bounded
+// verification reports clean.
+domain DomainWalkCounter {
+  aggregate Counter {
+    state { c: Int = 0; }
+    command Bump {}
+    event Bumped {}
+    decide Bump {
+      requires c < 30
+      emits Bumped
+    }
+    evolve Bumped { c = c + 1 }
+    invariant atMost29 { c <= 29 }
+  }
+}
