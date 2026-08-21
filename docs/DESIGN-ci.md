@@ -587,7 +587,7 @@ some other event on the same workflow saving a `main`-branch copy to restore fro
 it would make every pull request permanently cold — the workflow would never save a cache under its
 own key, from any event. `merge-readiness.yml`'s two `Swatinem/rust-cache` steps instead go
 **restore-only against `ci.yml`'s own `rust-workspace` key** (`shared-key: rust-workspace`,
-`save-if: false`): both jobs run `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same
+`save-if: false`): both jobs run `dtolnay/rust-toolchain@1.98.0` on `ubuntu-latest` against the same
 checkout as `ci.yml`'s `rust workspace` job, and `Swatinem/rust-cache` derives its key from the
 rustc version, `CARGO`/`CC`/`CFLAGS`/`CXX`/`CMAKE`/`RUST`-prefixed env vars, and the workspace
 lockfiles — none of which differ between the two workflows. That mechanism-derived expectation is now
@@ -1009,6 +1009,23 @@ auditable review record rather than a run-time source verification. Both the ful
 checkout and a shallow developer clone therefore exercise the same persisted output.
 
 ## Required pre-merge contexts, and why the merge queue was rejected
+
+### Automation contracts use parser-backed workflow inspection
+
+`merge readiness / automation contracts` is a required pre-merge lane, so it
+installs Python 3.12 and the repository's `.[dev]` dependencies before running
+the parser-backed Rust-toolchain pin audit. The former Node/stdlib-only
+line-scanner was rewritten fourteen times because valid YAML grammar (quoted
+values, comments, folded scalars, indentation, and flow mappings) repeatedly
+diverged from its regular expressions. `.github/scripts/validate_toolchain_pin.py`
+therefore composes each workflow with PyYAML, rejects duplicate mapping keys,
+and retains source-line diagnostics. Its pytest calibration suite binds each
+historical false accept or false reject, and the live audit holds ordinary
+repository-owned workflow and composite-action uses to `@1.98.0`. The release
+workflow is not exempt: its commit-pinned action must receive the MSRV declared
+by `rust/Cargo.toml` through a direct `with: toolchain:` input. Local reusable
+workflows are audited as workflow files; external reusable workflows are outside
+this repository's source authority.
 
 The `main` ruleset (`main safety and CI`, id `19090811`) requires six contexts: `merge readiness`,
 `rust workspace`, `WASM`, `semantic mutation (changed)`, and `FSL Logic Test (pr)` (applied

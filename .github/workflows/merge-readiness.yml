@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -40,7 +40,7 @@ jobs:
           # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
           # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace
           # lockfiles. This job and `ci.yml`'s `rust workspace` job both run
-          # `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same checkout.
+          # `dtolnay/rust-toolchain@1.98.0` on `ubuntu-latest` against the same checkout.
           # The expected exact key match is directly observed in four pull-request logs:
           # run 31581715093 attempt 1 logged it for core contracts at 09:11:00.77Z and Rust compile
           # at 09:11:04.76Z; run 31583381471 attempt 1 logged it at 09:33:03.06Z and 09:33:05.55Z,
@@ -77,7 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt
 
@@ -96,7 +96,7 @@ jobs:
           # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
           # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace
           # lockfiles. This job and `ci.yml`'s `rust workspace` job both run
-          # `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same checkout.
+          # `dtolnay/rust-toolchain@1.98.0` on `ubuntu-latest` against the same checkout.
           # The expected exact key match is directly observed in four pull-request logs:
           # run 31581715093 attempt 1 logged it for core contracts at 09:11:00.77Z and Rust compile
           # at 09:11:04.76Z; run 31583381471 attempt 1 logged it at 09:33:03.06Z and 09:33:05.55Z,
@@ -138,6 +138,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      # The toolchain-pin audit parses YAML with PyYAML; line scanning had
+      # repeatedly missed valid workflow grammar and is deliberately retired.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install automation audit dependencies
+        run: python -m pip install ".[dev]"
 
       - name: Test post-merge issue reconciliation
         run: ./tools/check-merge-readiness.sh automation
