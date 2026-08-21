@@ -169,8 +169,9 @@ run. A missing base/head SHA, a failed `git diff`, or an event the script does n
 resolve to `run=true` — never to a stub. The `main` push, schedule, and dispatch triggers carry no
 exemption at all: `tools/check-product-gate-scope.sh` returns `run=true` unconditionally for
 those events, so every merged `main` state still receives the complete product evidence, and a
-wrongly exempted defect surfaces through the existing post-merge reporting contract below instead
-of reaching `production`. And a pull request into `production` that matches the list is blocked
+wrongly exempted defect surfaces through the existing post-merge reporting contract below for a
+trusted default-branch push, schedule, or dispatch run instead of reaching `production`. And a
+pull request into `production` that matches the list is blocked
 rather than waved through: the script's `production` branch always returns `run=true`, so the
 production ruleset's required contexts (`rust workspace`, `WASM`, the `native Z3 4.16` matrix)
 still report real evidence — such a pull request should not exist, and the gate does not invent a
@@ -1159,8 +1160,9 @@ suite above, not a live run.
 ## Failure reporting contract
 
 `.github/workflows/post-merge-ci-reporter.yml` listens for completed `product gate` runs. It acts
-only when the triggering run was a push to the repository's default branch. The workflow receives
-read access to Actions, contents, and pull requests, and write access only to issues.
+only for a run from this repository's default branch whose event is `push`, `schedule`, or
+`workflow_dispatch`; pull-request and foreign-repository runs cannot mutate issues. The workflow
+receives read access to Actions, contents, and pull requests, and write access only to issues.
 
 For each failed, timed-out, cancelled, stale, startup-failed, or action-required job, the reporter:
 
@@ -1169,16 +1171,22 @@ For each failed, timed-out, cancelled, stale, startup-failed, or action-required
   the same issue after a later recurrence;
 - records the commit, associated merged pull request, run, job, conclusion, and failed step names;
 - copies no build log text or secret-bearing output into the issue;
-- adds one occurrence comment for a later failing run instead of opening a duplicate;
+- adds one occurrence comment for a later failing run instead of opening a duplicate, including
+  the triggering event so scheduled drift is distinguishable from a merged-commit failure;
 - closes the matching issue only after that job, or the complete product gate, succeeds on a later
   `main` run.
 
 An unsuccessful workflow with no failed-job metadata gets a workflow-level issue, so startup and
 orchestration failures do not disappear. Re-running the reporter for the same product-gate run is
-idempotent. Before mutating issues, the reporter queries the latest completed trusted push run for
-the same workflow. When an older `run_number`/`run_attempt` event arrives, it reconciles that latest
-run instead of the stale trigger; out-of-order platform completion cannot overwrite newer
-default-branch health or cancel the only reporter for a persistent newer failure.
+idempotent. The canonical marker remains keyed by workflow ID and stable job name, not event:
+push, scheduled, and manual runs all measure the same default-branch job health, so separate
+issues would duplicate one unresolved breakage. Before mutating issues, the reporter queries the
+latest completed trusted run for the same workflow by making one event-filtered request for each
+of `push`, `schedule`, and `workflow_dispatch`; this keeps a page of pull-request runs from
+displacing trusted evidence. When an older `run_number`/`run_attempt` event arrives, it reconciles
+that latest run instead of the stale trigger; GitHub numbers runs per workflow across events, so
+out-of-order platform completion cannot overwrite newer default-branch health or cancel the only
+reporter for a persistent newer failure.
 
 Reporter jobs are also serialized to avoid duplicate-creation races. When product gates finish
 faster than reporting, GitHub may coalesce pending reporter runs toward the newest default-branch

@@ -1,11 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
-  reconcilePostMerge,
+  GitHubRestClient,
+  isTrustedDefaultBranchWorkflowRun,
+  issueMarker,
+  reconcilePostMerge as reconcilePostMergeImplementation,
+  TRUSTED_WORKFLOW_EVENTS,
 } from "./report-post-merge-ci.mjs";
+
+const REPOSITORY = "ymm-oss/fsl";
+const DEFAULT_BRANCH = "main";
+const REPORTER_WORKFLOW = fileURLToPath(
+  new URL("../workflows/post-merge-ci-reporter.yml", import.meta.url),
+);
+
+function reconcilePostMerge(options) {
+  return reconcilePostMergeImplementation({
+    defaultBranch: DEFAULT_BRANCH,
+    ...options,
+  });
+}
 
 class FakeClient {
   constructor({
@@ -14,12 +33,14 @@ class FakeClient {
     comments = [],
     pulls = [],
     latestRun = null,
+    jobsByRun = new Map(),
   } = {}) {
     this.jobs = jobs;
     this.issues = issues;
     this.comments = comments;
     this.pulls = pulls;
     this.latestRun = latestRun;
+    this.jobsByRun = jobsByRun;
     this.labels = new Set();
     this.nextIssue = 100;
   }
@@ -28,8 +49,8 @@ class FakeClient {
     this.labels.add(name);
   }
 
-  async listJobs() {
-    return this.jobs;
+  async listJobs(runId) {
+    return this.jobsByRun.get(runId) ?? this.jobs;
   }
 
   async latestCompletedWorkflowRun() {
@@ -80,6 +101,7 @@ function workflowRun(overrides = {}) {
     conclusion: "failure",
     event: "push",
     head_branch: "main",
+    head_repository: { full_name: REPOSITORY },
     head_sha: "0123456789abcdef0123456789abcdef01234567",
     html_url: "https://github.com/ymm-oss/fsl/actions/runs/41",
     ...overrides,
@@ -140,6 +162,292 @@ test("creates one actionable issue for a failed job", async () => {
   assert.match(client.issues[0].body, /Test pinned native solver/);
   assert.match(client.issues[0].body, /#247/);
   assert.doesNotMatch(client.issues[0].body, /log output/i);
+});
+
+/**
+ * The `if:` expression of the **`reconcile` job specifically**, normalised to one
+ * line the way a YAML folded scalar joins it.
+ *
+ * Three revisions of this control were bypassed, each teaching the same lesson.
+ *
+ * First it regex-scanned the whole file, so a commented-out predicate could
+ * counterfeit a deleted one. Then it compared the SET of event-name tokens,
+ * which is not the same thing as comparing the expression: review passed
+ * `event == 'schedule' && false ||` (set unchanged, schedules rejected), and a
+ * blank line followed by `&& ... != 'schedule'` (helper stopped at the blank
+ * line, suffix ignored). It also located the first `if:` in the file, so a decoy
+ * job carrying the approved expression let the real one drop `schedule`.
+ *
+ * All three recreated #847 with the control green and `actionlint` clean. So this
+ * pins the whole expression by equality, anchored at `jobs.reconcile`, and reads
+ * to the end of the block rather than to the first blank line.
+ */
+function reconcileIfExpression(workflow) {
+  const lines = workflow.split("\n");
+
+  const jobsAt = lines.findIndex((line) => /^jobs:\s*$/.test(line));
+  assert.notEqual(jobsAt, -1, "the workflow must declare `jobs:`");
+
+  // Find the job by WHAT IT DOES, not by what it is called. Review renamed the
+  // live job to `report`, dropped `schedule` from its condition, and appended a
+  // compliant decoy named `reconcile`: actionlint accepted it, every test
+  // passed, and scheduled failures skipped the real reporter -- #847 again. The
+  // job that runs the writer is the one whose condition matters.
+  const WRITER = "node .github/scripts/report-post-merge-ci.mjs";
+  const jobStarts = [];
+  for (let i = jobsAt + 1; i < lines.length; i += 1) {
+    if (/^\s{2}[A-Za-z0-9_-]+:\s*$/.test(lines[i])) {
+      jobStarts.push(i);
+    }
+  }
+  assert.ok(jobStarts.length > 0, "the workflow must declare at least one job");
+
+  const writerJobs = jobStarts.filter((startLine, index) => {
+    const endLine = jobStarts[index + 1] ?? lines.length;
+    return lines
+      .slice(startLine, endLine)
+      .some((line) => line.includes(WRITER) && !line.includes("--test"));
+  });
+  assert.equal(
+    writerJobs.length,
+    1,
+    `exactly one job must run \`${WRITER}\`; found ${writerJobs.length}`,
+  );
+  const writerAt = writerJobs[0];
+
+  const jobIndent = 2;
+  let ifAt = -1;
+  for (let i = writerAt + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.trim() === "") {
+      continue;
+    }
+    const indent = line.length - line.trimStart().length;
+    if (indent <= jobIndent) {
+      break;
+    }
+    if (/^\s*if:\s*>-\s*$/.test(line)) {
+      ifAt = i;
+      break;
+    }
+  }
+  assert.notEqual(
+    ifAt,
+    -1,
+    "the job running the reporter must carry an `if: >-` block scalar",
+  );
+
+  const keyIndent = lines[ifAt].length - lines[ifAt].trimStart().length;
+  const body = [];
+  for (let i = ifAt + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    // A blank line inside a block scalar does NOT end it. Stopping at one is how
+    // a negating suffix went unread in an earlier revision.
+    if (line.trim() === "") {
+      continue;
+    }
+    const indent = line.length - line.trimStart().length;
+    if (indent <= keyIndent) {
+      break;
+    }
+    body.push(line.trim());
+  }
+  assert.ok(body.length > 0, "the `if:` block must not be empty");
+  return body.join(" ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The exact expression `jobs.reconcile` must carry, built from
+ * `TRUSTED_WORKFLOW_EVENTS` so the YAML and the JavaScript cannot drift apart.
+ */
+function expectedReconcileCondition() {
+  const events = [...TRUSTED_WORKFLOW_EVENTS]
+    .map((event) => `github.event.workflow_run.event == '${event}'`)
+    .join(" || ");
+  return [
+    "github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    `(${events})`,
+  ].join(" ");
+}
+
+test("the reconcile job's if: expression is exactly the trusted condition", async () => {
+  const workflow = await readFile(REPORTER_WORKFLOW, "utf8");
+  // Equality of the whole expression, not of the event tokens inside it. A set
+  // comparison cannot see `&& false`, a negating suffix, or a decoy job.
+  assert.equal(reconcileIfExpression(workflow), expectedReconcileCondition());
+});
+
+test("a commented-out event cannot counterfeit the workflow gate", () => {
+  const counterfeit = [
+    "# github.event.workflow_run.event == 'schedule'",
+    "jobs:",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
+  ].join("\n");
+  assert.notEqual(reconcileIfExpression(counterfeit), expectedReconcileCondition());
+});
+
+test("a negated event inside the disjunction is rejected", () => {
+  // `event == 'schedule' && false ||` keeps the token set intact and rejects
+  // schedules. Review passed this through the previous control.
+  const negated = [
+    "jobs:",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'schedule' && false ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
+  ].join("\n");
+  assert.notEqual(reconcileIfExpression(negated), expectedReconcileCondition());
+});
+
+test("a suffix after a blank line inside the scalar is not ignored", () => {
+  // YAML keeps this inside the block scalar; the earlier helper stopped reading
+  // at the blank line and never saw the negation.
+  const suffixed = [
+    "jobs:",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'schedule' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "",
+    "      && github.event.workflow_run.event != 'schedule'",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
+  ].join("\n");
+  assert.notEqual(reconcileIfExpression(suffixed), expectedReconcileCondition());
+});
+
+test("a decoy job carrying the approved expression is not read instead", () => {
+  // The earlier helper took the FIRST `if:` in the file.
+  const decoyed = [
+    "jobs:",
+    "  decoy:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'schedule' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
+  ].join("\n");
+  assert.notEqual(reconcileIfExpression(decoyed), expectedReconcileCondition());
+});
+
+test("renaming the writer job and leaving a compliant decoy is rejected", () => {
+  // Review's bypass: the control bound the condition to the job ID `reconcile`,
+  // not to the job that runs the reporter. Rename the live job, drop `schedule`
+  // from its condition, and name a decoy `reconcile`. actionlint accepted it and
+  // every test passed while scheduled failures skipped the real reporter.
+  const renamed = [
+    "jobs:",
+    "  report:",
+    "    if: >-",
+    "      github.event.workflow_run.event == 'push' &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'schedule' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: 'true'",
+  ].join("\n");
+  // The helper must read the `report` job, because that is where the writer is.
+  assert.notEqual(reconcileIfExpression(renamed), expectedReconcileCondition());
+});
+
+test("two jobs both running the reporter is rejected as ambiguous", () => {
+  // Splitting the writer across two jobs would leave one of them unchecked.
+  const twoWriters = [
+    "jobs:",
+    "  a:",
+    "    if: >-",
+    "      github.event.workflow_run.event == 'push'",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
+    "  b:",
+    "    if: >-",
+    "      github.event.workflow_run.event == 'schedule'",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
+  ].join("\n");
+  assert.throws(
+    () => reconcileIfExpression(twoWriters),
+    /exactly one job must run/,
+  );
+});
+
+test("a workflow with no job running the reporter is rejected", () => {
+  const noWriter = [
+    "jobs:",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'schedule' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: 'true'",
+  ].join("\n");
+  assert.throws(
+    () => reconcileIfExpression(noWriter),
+    /exactly one job must run/,
+  );
+});
+
+test("a condition folded across lines is still recognised", () => {
+  const folded = [
+    "jobs:",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event",
+    "      == 'schedule' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
+  ].join("\n");
+  assert.equal(reconcileIfExpression(folded), expectedReconcileCondition());
 });
 
 test("deduplicates the same run and comments once for a later recurrence", async () => {
@@ -259,6 +567,7 @@ test("redirects an out-of-order event to the latest completed product gate", asy
       conclusion: "failure",
       event: "push",
       head_branch: "main",
+      head_repository: { full_name: REPOSITORY },
       head_sha: "4123456789abcdef0123456789abcdef01234567",
       html_url: "https://github.com/ymm-oss/fsl/actions/runs/50",
     },
@@ -368,4 +677,163 @@ test("records recovery separately for repeated attempts of one workflow run", as
   assert.equal(recoveryComments.length, 2);
   assert.notEqual(recoveryComments[0].body, recoveryComments[1].body);
   assert.equal(client.issues[0].state, "closed");
+});
+
+test("reports a trusted scheduled failure in the canonical post-merge issue", async () => {
+  const client = new FakeClient({ jobs: [failedWindowsJob()] });
+  const pushedFailure = workflowRun();
+  await reconcilePostMerge({
+    client,
+    repository: REPOSITORY,
+    workflowRun: pushedFailure,
+  });
+
+  const scheduledFailure = workflowRun({
+    id: 42,
+    run_number: 13,
+    event: "schedule",
+    head_sha: "1123456789abcdef0123456789abcdef01234567",
+  });
+  client.jobs = [failedWindowsJob({ id: 91 })];
+  const result = await reconcilePostMerge({
+    client,
+    repository: REPOSITORY,
+    workflowRun: scheduledFailure,
+  });
+
+  assert.equal(
+    isTrustedDefaultBranchWorkflowRun({
+      workflowRun: scheduledFailure,
+      repository: REPOSITORY,
+      defaultBranch: DEFAULT_BRANCH,
+    }),
+    true,
+  );
+  assert.deepEqual(result, {
+    created: 0,
+    updated: 1,
+    closed: 0,
+    failures: 1,
+  });
+  assert.equal(client.issues.length, 1);
+  assert.ok(
+    client.issues[0].body.includes(
+      issueMarker(scheduledFailure.workflow_id, failedWindowsJob().name),
+    ),
+  );
+  assert.match(client.comments[0].body, /- Event: `schedule`/);
+});
+
+test("does not let an older successful push close a newer scheduled failure", async () => {
+  const olderSuccessfulPush = workflowRun({
+    id: 49,
+    run_number: 12,
+    conclusion: "success",
+  });
+  const scheduledFailure = workflowRun({
+    id: 50,
+    run_number: 13,
+    event: "schedule",
+    html_url: "https://github.com/ymm-oss/fsl/actions/runs/50",
+  });
+  const client = new FakeClient({
+    latestRun: olderSuccessfulPush,
+    jobsByRun: new Map([
+      [olderSuccessfulPush.id, [failedWindowsJob({ conclusion: "success" })]],
+      [scheduledFailure.id, [failedWindowsJob()]],
+    ]),
+  });
+
+  const result = await reconcilePostMerge({
+    client,
+    repository: REPOSITORY,
+    workflowRun: scheduledFailure,
+  });
+
+  assert.deepEqual(result, {
+    created: 1,
+    updated: 0,
+    closed: 0,
+    failures: 1,
+  });
+  assert.equal(client.issues[0].state, "open");
+  assert.match(client.issues[0].body, /actions\/runs\/50/);
+});
+
+test("queries each trusted event feed and selects the newer scheduled run", async (t) => {
+  const olderSuccessfulPush = workflowRun({
+    id: 49,
+    run_number: 12,
+    conclusion: "success",
+  });
+  const newerScheduledFailure = workflowRun({
+    id: 50,
+    run_number: 13,
+    event: "schedule",
+  });
+  const runsByEvent = new Map([
+    ["push", [olderSuccessfulPush]],
+    ["schedule", [newerScheduledFailure]],
+    ["workflow_dispatch", []],
+  ]);
+  const originalFetch = globalThis.fetch;
+  const queriedEvents = [];
+  globalThis.fetch = async (url) => {
+    const requestUrl = new URL(url);
+    const event = requestUrl.searchParams.get("event");
+    queriedEvents.push(event);
+    return new Response(
+      JSON.stringify({ workflow_runs: runsByEvent.get(event) }),
+      { status: 200 },
+    );
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const client = new GitHubRestClient({
+    token: "test-token",
+    repository: REPOSITORY,
+  });
+  const latest = await client.latestCompletedWorkflowRun(7, DEFAULT_BRANCH);
+
+  assert.equal(latest.id, newerScheduledFailure.id);
+  assert.equal(latest.event, "schedule");
+  assert.deepEqual(queriedEvents.sort(), [
+    "push",
+    "schedule",
+    "workflow_dispatch",
+  ]);
+});
+
+test("ignores non-default-branch and foreign-repository workflow runs", async () => {
+  for (const ignoredRun of [
+    workflowRun({ head_branch: "feature/future" }),
+    workflowRun({ head_repository: { full_name: "attacker/fsl" } }),
+  ]) {
+    const client = new FakeClient({ jobs: [failedWindowsJob()] });
+    const result = await reconcilePostMerge({
+      client,
+      repository: REPOSITORY,
+      workflowRun: ignoredRun,
+    });
+
+    assert.equal(
+      isTrustedDefaultBranchWorkflowRun({
+        workflowRun: ignoredRun,
+        repository: REPOSITORY,
+        defaultBranch: DEFAULT_BRANCH,
+      }),
+      false,
+    );
+    assert.deepEqual(result, {
+      created: 0,
+      updated: 0,
+      closed: 0,
+      failures: 0,
+      ignored: true,
+    });
+    assert.equal(client.labels.size, 0);
+    assert.equal(client.issues.length, 0);
+  }
 });
