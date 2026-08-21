@@ -1,0 +1,1 @@
+Fixed (#861): make the release Linux linkage guard reject binaries dynamically linked to libz3, with accepting and rejecting ldd fixtures. The separate GLIBC behavioral-control finding is tracked in #865.

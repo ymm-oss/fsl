@@ -94,8 +94,8 @@ jobs:
             required=$(readelf --version-info "$binary" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)
             test -n "$required"
             test "$(printf '%s\n' GLIBC_2.39 "$required" | sort -V | tail -1)" = GLIBC_2.39
-            ! ldd "$binary" | grep -q libz3
           done
+          ./tools/check-release-binary-linkage.sh rust/target/release/fslc rust/target/release/fslc-lsp
 
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
