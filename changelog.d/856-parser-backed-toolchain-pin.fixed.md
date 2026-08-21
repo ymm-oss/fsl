@@ -1,1 +1,1 @@
-Fixed (#856): Replaced the workflow toolchain-pin line scanner with a PyYAML-backed required audit that preserves source diagnostics and rejects ambiguous YAML.
+Fixed (#856): Replaced workflow line scanners with required PyYAML-backed audits that preserve source diagnostics, reject ambiguous YAML, and pin the privileged post-merge reporter shape.

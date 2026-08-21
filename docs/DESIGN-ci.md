@@ -1014,7 +1014,7 @@ checkout and a shallow developer clone therefore exercise the same persisted out
 
 `merge readiness / automation contracts` is a required pre-merge lane, so it
 installs Python 3.12 and the repository's `.[dev]` dependencies before running
-the parser-backed Rust-toolchain pin audit. The former Node/stdlib-only
+the parser-backed workflow-contract audits. The former Node/stdlib-only
 line-scanner was rewritten fourteen times because valid YAML grammar (quoted
 values, comments, folded scalars, indentation, and flow mappings) repeatedly
 diverged from its regular expressions. `.github/scripts/validate_toolchain_pin.py`
@@ -1026,6 +1026,17 @@ workflow is not exempt: its commit-pinned action must receive the MSRV declared
 by `rust/Cargo.toml` through a direct `with: toolchain:` input. Local reusable
 workflows are audited as workflow files; external reusable workflows are outside
 this repository's source authority.
+
+The privileged post-merge reporter receives `issues: write`, so its workflow
+also has a deliberately narrow parser-backed shape contract. It requires the
+fixed `jobs.reconcile` boundary, the exact trusted default-branch condition,
+and one direct literal reporter command in that job only. The runtime reporter
+and YAML validator both read `.github/scripts/trusted-workflow-events.json`:
+the JavaScript exports its set from that file and the validator constructs the
+condition from it, preventing their event lists from drifting. The contract
+rejects environment-built commands, shell indirection, and composite-action
+substitution; its calibrated controls cover comments, blank scalar lines,
+semantic suffixes, decoys, renamed writers, and duplicate writers.
 
 The `main` ruleset (`main safety and CI`, id `19090811`) requires six contexts: `merge readiness`,
 `rust workspace`, `WASM`, `semantic mutation (changed)`, and `FSL Logic Test (pr)` (applied

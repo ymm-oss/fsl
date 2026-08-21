@@ -2,13 +2,13 @@
 
 import { appendFile, readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import trustedWorkflowEvents from "./trusted-workflow-events.json" with { type: "json" };
 
 export const POST_MERGE_LABEL = "ci/post-merge";
-export const TRUSTED_WORKFLOW_EVENTS = new Set([
-  "push",
-  "schedule",
-  "workflow_dispatch",
-]);
+// The parser-backed workflow contract imports the same JSON value.  Keep this
+// set as the runtime-facing API while making one repository file the authority
+// for which workflow-run events may create or resolve privileged issues.
+export const TRUSTED_WORKFLOW_EVENTS = new Set(trustedWorkflowEvents);
 
 const FAILURE_CONCLUSIONS = new Set([
   "action_required",

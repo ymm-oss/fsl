@@ -35,6 +35,11 @@ check_core_contracts() {
 
 check_automation() {
   node --test .github/scripts/report-post-merge-ci.test.mjs
+  # The privileged post-merge reporter has issues: write. Its separate
+  # parser-backed workflow-shape controls reject comments, decoys, and shell
+  # indirection rather than trying to infer behavior from line substrings.
+  python3 -m pytest tests/test_post_merge_reporter_workflow.py -v
+  python3 .github/scripts/validate_post_merge_reporter_workflow.py
   # The Rust toolchain pin is an Actions YAML contract.  Its fourteen
   # line-scanner failures showed that a regex verdict is not trustworthy, so
   # this required lane installs PyYAML and runs both the calibrated controls and
