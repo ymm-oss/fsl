@@ -6,11 +6,12 @@
 // released 2026-08-18 and the scheduled product gate began failing on a
 // zero-line diff).
 //
-// `release.yml` is deliberately exempt: it pins the MSRV declared by
-// `rust/Cargo.toml`'s `rust-version`, not the development toolchain, and it
-// pins the action by commit SHA rather than by version branch. Its exemption is
-// declared here by exact path so that renaming or removing that workflow is a
-// visible change rather than a silent widening.
+// `release.yml` is held to a different contract rather than skipped: it builds
+// the release artifact at the MSRV declared by `rust/Cargo.toml`'s
+// `rust-version`, pinned by action commit SHA rather than by version branch, so
+// it is audited against that instead of against `EXPECTED_REF`. It is named by
+// exact path, so renaming or removing that workflow is a visible change rather
+// than a silent widening.
 
 import { readdir, readFile } from "node:fs/promises";
 
@@ -18,13 +19,95 @@ export const ACTION = "dtolnay/rust-toolchain";
 
 export const EXPECTED_REF = "1.98.0";
 
-// Exempt path => the reason it is exempt. An entry here is a declared decision,
-// not a wildcard: a path not listed is audited.
+// Paths held to the MSRV contract instead of the development-toolchain pin.
+//
+// This is deliberately NOT a skip list. Review probed the earlier version by
+// flipping `release.yml` to `@stable` and the audit reported nothing, which made
+// "exempt" mean "anything goes here" -- so the MSRV guarantee could have been
+// dropped silently, which is the same class of drift this audit exists to catch,
+// just on a different axis. An entry here now means: audited against a different
+// contract, stated below and enforced by `auditMsrvReference`.
 export const DECLARED_EXEMPTIONS = Object.freeze({
   "release.yml":
-    "pins the MSRV from rust/Cargo.toml's rust-version, by action commit SHA, " +
-    "not the development toolchain",
+    "builds the release artifact at the MSRV declared by rust/Cargo.toml's " +
+    "rust-version, pinned by action commit SHA rather than by version branch",
 });
+
+/** A 40-character git commit SHA, the only ref form that pins action code. */
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
+
+/**
+ * The MSRV declared by `rust/Cargo.toml`'s `rust-version`, or null when the
+ * declaration cannot be found. A null is a finding, not a pass: the contract
+ * cannot be checked against a value that is missing.
+ */
+export function declaredMsrv(cargoTomlText) {
+  const match = /^\s*rust-version\s*=\s*"([^"]+)"/m.exec(cargoTomlText);
+  return match ? match[1] : null;
+}
+
+/**
+ * Audit a path held to the MSRV contract rather than to `EXPECTED_REF`.
+ *
+ * Two things must hold, and both were previously unchecked:
+ *   - the action ref is a commit SHA, so the action code itself is pinned;
+ *   - the `toolchain:` input names the declared MSRV, so the release artifact
+ *     is built at the version the crates claim to support.
+ */
+export function auditMsrvReference({ file, line, ref, toolchainInput, msrv }) {
+  const findings = [];
+  if (!COMMIT_SHA.test(ref)) {
+    findings.push({
+      class: "msrv-ref-not-pinned",
+      file,
+      line,
+      ref,
+      message:
+        `${file}:${line} uses ${ACTION}@${ref}, but this workflow builds the ` +
+        "release artifact and must pin the action by 40-character commit SHA. " +
+        "A branch or channel here would let the release toolchain change " +
+        "without a reviewed diff.",
+    });
+  }
+  if (msrv === null) {
+    findings.push({
+      class: "msrv-undeclared",
+      file,
+      line,
+      ref,
+      message:
+        `${file}:${line} is held to the MSRV contract, but rust/Cargo.toml ` +
+        "declares no rust-version to check it against.",
+    });
+  } else if (toolchainInput === null) {
+    findings.push({
+      class: "msrv-toolchain-missing",
+      file,
+      line,
+      ref,
+      message:
+        `${file}:${line} must pass an explicit \`toolchain:\` input naming the ` +
+        `declared MSRV ${msrv}; without it the action's own default applies.`,
+    });
+  } else if (
+    toolchainInput !== msrv &&
+    !toolchainInput.startsWith(`${msrv}.`)
+  ) {
+    // `rust-version = "1.88"` is satisfied by `toolchain: 1.88.0`; it is not
+    // satisfied by 1.89.0 or by a channel name.
+    findings.push({
+      class: "msrv-disagreement",
+      file,
+      line,
+      ref,
+      message:
+        `${file}:${line} passes \`toolchain: ${toolchainInput}\` but ` +
+        `rust/Cargo.toml declares rust-version "${msrv}". The release artifact ` +
+        "must be built at the version the crates claim to support.",
+    });
+  }
+  return findings;
+}
 
 // A `uses:` key, with or without the list dash, and tolerating whitespace
 // before the colon.
@@ -85,6 +168,31 @@ export function collectReferences(fileName, text) {
 }
 
 /**
+ * The `toolchain:` input belonging to each toolchain-action `uses:` line, keyed
+ * by that line's one-based number. Read from the `with:` block that follows,
+ * stopping at the next `- ` list item so a later step's input cannot be
+ * attributed to this one.
+ */
+export function collectToolchainInputs(text, references) {
+  const lines = text.split("\n");
+  const inputs = new Map();
+  for (const reference of references) {
+    for (let i = reference.line; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (/^\s*-\s/.test(line)) {
+        break;
+      }
+      const match = /^\s*toolchain\s*:\s*(.+?)\s*$/.exec(line);
+      if (match) {
+        inputs.set(reference.line, unquote(match[1].replace(/\s+#.*$/, "").trim()));
+        break;
+      }
+    }
+  }
+  return inputs;
+}
+
+/**
  * Every comment line that names the action with an explicit `@ref`. These are
  * cited justifications -- `merge-readiness.yml` explains its restore-only cache
  * key by naming the action and ref that produce the matching key -- so a ref
@@ -111,13 +219,34 @@ export function collectCitations(fileName, text) {
  * Returns a finding per disagreement. An empty array means the workflow agrees
  * with `EXPECTED_REF`, or is a declared exemption.
  */
-export function auditReferences({ references, citations, expectedRef, exemptions }) {
+export function auditReferences({
+  references,
+  citations,
+  expectedRef,
+  exemptions,
+  msrv,
+  toolchainInputs,
+}) {
   const findings = [];
   const declared = exemptions ?? DECLARED_EXEMPTIONS;
   const expected = expectedRef ?? EXPECTED_REF;
+  const inputs = toolchainInputs ?? new Map();
 
   for (const reference of references) {
     if (Object.hasOwn(declared, reference.file)) {
+      // Held to the MSRV contract, not skipped. `msrv` is only undefined when a
+      // caller audits references in isolation; a real run always supplies it.
+      if (msrv !== undefined) {
+        findings.push(
+          ...auditMsrvReference({
+            file: reference.file,
+            line: reference.line,
+            ref: reference.ref,
+            toolchainInput: inputs.get(reference.line) ?? null,
+            msrv,
+          }),
+        );
+      }
       continue;
     }
     // A ref computed at run time cannot be statically shown to be pinned, and
@@ -205,6 +334,7 @@ export async function auditWorkflowDirectory(directory, options = {}) {
     if (references.length === 0 && citations.length === 0) {
       continue;
     }
+    const toolchainInputs = collectToolchainInputs(text, references);
     // Count exempt references separately. Reporting them as "at the expected
     // ref" would be false -- release.yml is pinned by commit SHA to the MSRV.
     if (Object.hasOwn(declared, entry.name)) {
@@ -212,7 +342,9 @@ export async function auditWorkflowDirectory(directory, options = {}) {
     } else {
       audited += references.length;
     }
-    findings.push(...auditReferences({ references, citations, ...options }));
+    findings.push(
+      ...auditReferences({ references, citations, toolchainInputs, ...options }),
+    );
   }
 
   return { audited, exempted, findings };
@@ -230,7 +362,15 @@ async function main() {
   let exempted;
   let findings;
   try {
-    ({ audited, exempted, findings } = await auditWorkflowDirectory(directory));
+    // The MSRV contract needs the declaration to check against, so read it here
+    // rather than letting a missing file quietly turn that check off.
+    const cargoToml = await readFile(
+      new URL("../../rust/Cargo.toml", import.meta.url),
+      "utf8",
+    );
+    ({ audited, exempted, findings } = await auditWorkflowDirectory(directory, {
+      msrv: declaredMsrv(cargoToml),
+    }));
   } catch (error) {
     // An unreadable or missing workflows directory must fail, not be reported as
     // a clean audit.
@@ -261,10 +401,10 @@ async function main() {
     return;
   }
 
-  const exempt = Object.keys(DECLARED_EXEMPTIONS).join(", ");
+  const msrvPaths = Object.keys(DECLARED_EXEMPTIONS).join(", ");
   console.log(
-    `rust toolchain pin: PASS -- ${audited} audited reference(s) at @${EXPECTED_REF}, ` +
-      `${exempted} exempt reference(s) in ${exempt}`,
+    `rust toolchain pin: PASS -- ${audited} reference(s) at @${EXPECTED_REF}, ` +
+      `${exempted} reference(s) held to the MSRV contract in ${msrvPaths}`,
   );
 }
 

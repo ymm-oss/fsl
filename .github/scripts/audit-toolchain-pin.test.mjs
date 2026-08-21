@@ -12,10 +12,13 @@ import {
   DECLARED_EXEMPTIONS,
   EXPECTED_REF,
   MINIMUM_AUDITED_REFERENCES,
+  auditMsrvReference,
   auditReferences,
   auditWorkflowDirectory,
   collectCitations,
   collectReferences,
+  collectToolchainInputs,
+  declaredMsrv,
 } from "./audit-toolchain-pin.mjs";
 
 const WORKFLOWS = new URL("../workflows/", import.meta.url);
@@ -36,15 +39,97 @@ test("the committed workflows agree on one pinned toolchain", async () => {
   assert.equal(exempted, 1, `expected 1 exempt reference, saw ${exempted}`);
 });
 
-test("the declared exemption is release.yml and it is not audited", async () => {
+// --- release.yml is held to the MSRV contract, not skipped --------------------
+//
+// Review probed the earlier version by flipping release.yml to @stable and the
+// audit reported nothing: "exempt" meant "anything goes here", so the MSRV
+// guarantee could have been dropped silently. Each mutation below was measured
+// against the replacement.
+
+const RELEASE_SHA = "4cda84d5c5c54efe2404f9d843567869ab1699d4";
+
+test("release.yml as committed satisfies the MSRV contract", () => {
   assert.deepEqual(Object.keys(DECLARED_EXEMPTIONS), ["release.yml"]);
-  const findings = auditReferences({
-    references: [
-      { file: "release.yml", line: 54, ref: "4cda84d5c5c54efe2404f9d843567869ab1699d4" },
-    ],
-    citations: [],
+  assert.deepEqual(
+    auditMsrvReference({
+      file: "release.yml",
+      line: 54,
+      ref: RELEASE_SHA,
+      toolchainInput: "1.88.0",
+      msrv: "1.88",
+    }),
+    [],
+    "rust-version 1.88 must be satisfied by toolchain 1.88.0",
+  );
+});
+
+test("flipping release.yml to a floating channel is rejected", () => {
+  const findings = auditMsrvReference({
+    file: "release.yml",
+    line: 54,
+    ref: "stable",
+    toolchainInput: "1.88.0",
+    msrv: "1.88",
   });
-  assert.deepEqual(findings, []);
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].class, "msrv-ref-not-pinned");
+  assert.match(findings[0].message, /40-character commit SHA/);
+});
+
+test("dropping the toolchain input from release.yml is rejected", () => {
+  const findings = auditMsrvReference({
+    file: "release.yml",
+    line: 54,
+    ref: RELEASE_SHA,
+    toolchainInput: null,
+    msrv: "1.88",
+  });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].class, "msrv-toolchain-missing");
+});
+
+test("a release toolchain that drifts off the declared MSRV is rejected", () => {
+  const findings = auditMsrvReference({
+    file: "release.yml",
+    line: 54,
+    ref: RELEASE_SHA,
+    toolchainInput: "1.89.0",
+    msrv: "1.88",
+  });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].class, "msrv-disagreement");
+});
+
+test("a missing rust-version declaration is a finding, not a pass", () => {
+  const findings = auditMsrvReference({
+    file: "release.yml",
+    line: 54,
+    ref: RELEASE_SHA,
+    toolchainInput: "1.88.0",
+    msrv: null,
+  });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].class, "msrv-undeclared");
+});
+
+test("declaredMsrv reads rust-version and reports absence as null", () => {
+  assert.equal(declaredMsrv('[workspace.package]\nrust-version = "1.88"\n'), "1.88");
+  assert.equal(declaredMsrv("[workspace.package]\nedition = \"2021\"\n"), null);
+});
+
+test("collectToolchainInputs attributes the input to its own step", () => {
+  const text = [
+    `      - uses: ${ACTION}@${RELEASE_SHA}`,
+    "        with:",
+    "          toolchain: 1.88.0",
+    "      - uses: actions/checkout@v4",
+    "        with:",
+    "          toolchain: 9.9.9",
+  ].join("\n");
+  const references = collectReferences("release.yml", text);
+  assert.equal(references.length, 1);
+  const inputs = collectToolchainInputs(text, references);
+  assert.equal(inputs.get(1), "1.88.0", "must not read the next step's input");
 });
 
 test("an unrelated workflow with no toolchain reference is not a finding", () => {
