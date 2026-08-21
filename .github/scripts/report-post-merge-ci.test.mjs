@@ -165,74 +165,95 @@ test("creates one actionable issue for a failed job", async () => {
 });
 
 /**
- * The reconcile job's `if:` expression, with the block scalar folded back into
- * one line.
+ * The `if:` expression of the **`reconcile` job specifically**, normalised to one
+ * line the way a YAML folded scalar joins it.
  *
- * This must read the expression itself, not the workflow source. Review showed
- * why: an earlier version regex-scanned the whole file, so deleting the live
- * `schedule` predicate and adding
+ * Three revisions of this control were bypassed, each teaching the same lesson.
  *
- *     # github.event.workflow_run.event == 'schedule'
+ * First it regex-scanned the whole file, so a commented-out predicate could
+ * counterfeit a deleted one. Then it compared the SET of event-name tokens,
+ * which is not the same thing as comparing the expression: review passed
+ * `event == 'schedule' && false ||` (set unchanged, schedules rejected), and a
+ * blank line followed by `&& ... != 'schedule'` (helper stopped at the blank
+ * line, suffix ignored). It also located the first `if:` in the file, so a decoy
+ * job carrying the approved expression let the real one drop `schedule`.
  *
- * as a COMMENT kept the extracted set complete, the equality assertion passed,
- * actionlint accepted the file, and scheduled runs silently skipped the
- * reporter -- reproducing #847 exactly. The same scan also rejected a condition
- * legitimately split across lines inside the existing `>-` scalar, because it
- * compared spelling rather than meaning.
+ * All three recreated #847 with the control green and `actionlint` clean. So this
+ * pins the whole expression by equality, anchored at `jobs.reconcile`, and reads
+ * to the end of the block rather than to the first blank line.
  */
 function reconcileIfExpression(workflow) {
   const lines = workflow.split("\n");
-  const start = lines.findIndex((line) => /^\s*if:\s*>-\s*$/.test(line));
-  assert.notEqual(start, -1, "the reconcile job must use an `if: >-` block");
-  const indent =
-    lines[start + 1].length - lines[start + 1].trimStart().length;
-  const body = [];
-  for (let i = start + 1; i < lines.length; i += 1) {
+
+  const jobsAt = lines.findIndex((line) => /^jobs:\s*$/.test(line));
+  assert.notEqual(jobsAt, -1, "the workflow must declare `jobs:`");
+  const reconcileAt = lines.findIndex(
+    (line, i) => i > jobsAt && /^\s{2}reconcile:\s*$/.test(line),
+  );
+  assert.notEqual(reconcileAt, -1, "the reporting job must be named `reconcile`");
+
+  // The job's keys are indented further than its own name; anything at or below
+  // that column starts a sibling job.
+  const jobIndent = 2;
+  let ifAt = -1;
+  for (let i = reconcileAt + 1; i < lines.length; i += 1) {
     const line = lines[i];
     if (line.trim() === "") {
+      continue;
+    }
+    const indent = line.length - line.trimStart().length;
+    if (indent <= jobIndent) {
       break;
     }
-    const thisIndent = line.length - line.trimStart().length;
-    if (thisIndent < indent) {
+    if (/^\s*if:\s*>-?\s*$/.test(line)) {
+      ifAt = i;
       break;
     }
-    // A `#` inside a block scalar is literal text, not a comment, so nothing is
-    // stripped here -- but a comment OUTSIDE the scalar is never reached.
+  }
+  assert.notEqual(ifAt, -1, "`jobs.reconcile` must carry an `if:` block scalar");
+
+  const keyIndent = lines[ifAt].length - lines[ifAt].trimStart().length;
+  const body = [];
+  for (let i = ifAt + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    // A blank line inside a block scalar does NOT end it. Stopping at one is how
+    // a suffix after a blank line went unread.
+    if (line.trim() === "") {
+      continue;
+    }
+    const indent = line.length - line.trimStart().length;
+    if (indent <= keyIndent) {
+      break;
+    }
     body.push(line.trim());
   }
   assert.ok(body.length > 0, "the `if:` block must not be empty");
-  // Folded scalars join with single spaces, which is what GitHub evaluates.
-  return body.join(" ").replace(/\s+/g, " ");
+  return body.join(" ").replace(/\s+/g, " ").trim();
 }
 
-test("reporter workflow permits exactly the trusted default-branch events", async () => {
+/**
+ * The exact expression `jobs.reconcile` must carry, built from
+ * `TRUSTED_WORKFLOW_EVENTS` so the YAML and the JavaScript cannot drift apart.
+ */
+function expectedReconcileCondition() {
+  const events = [...TRUSTED_WORKFLOW_EVENTS]
+    .map((event) => `github.event.workflow_run.event == '${event}'`)
+    .join(" || ");
+  return [
+    "github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    `(${events})`,
+  ].join(" ");
+}
+
+test("the reconcile job's if: expression is exactly the trusted condition", async () => {
   const workflow = await readFile(REPORTER_WORKFLOW, "utf8");
-  const condition = reconcileIfExpression(workflow);
-
-  const workflowEvents = new Set(
-    [...condition.matchAll(/github\.event\.workflow_run\.event == '([^']+)'/g)].map(
-      ([, event]) => event,
-    ),
-  );
-
-  assert.match(
-    condition,
-    /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/,
-  );
-  assert.match(
-    condition,
-    /github\.event\.workflow_run\.head_branch == github\.event\.repository\.default_branch/,
-  );
-  assert.deepEqual(workflowEvents, TRUSTED_WORKFLOW_EVENTS);
+  // Equality of the whole expression, not of the event tokens inside it. A set
+  // comparison cannot see `&& false`, a negating suffix, or a decoy job.
+  assert.equal(reconcileIfExpression(workflow), expectedReconcileCondition());
 });
 
 test("a commented-out event cannot counterfeit the workflow gate", () => {
-  // The mutation review found: remove the live predicate, restate it in a
-  // comment. The extraction must not see the comment.
-  //
-  // Built from a literal rather than by patching the committed file, so a change
-  // to how that file spells its condition cannot make this control silently
-  // stop constructing the mutation it exists to reject.
   const counterfeit = [
     "# github.event.workflow_run.event == 'schedule'",
     "jobs:",
@@ -244,22 +265,69 @@ test("a commented-out event cannot counterfeit the workflow gate", () => {
     "      github.event.workflow_run.event == 'workflow_dispatch')",
     "    runs-on: ubuntu-latest",
   ].join("\n");
-  const condition = reconcileIfExpression(counterfeit);
-  const events = new Set(
-    [...condition.matchAll(/github\.event\.workflow_run\.event == '([^']+)'/g)].map(
-      ([, event]) => event,
-    ),
-  );
-  assert.ok(
-    !events.has("schedule"),
-    "a comment must not supply a missing predicate",
-  );
-  assert.notDeepEqual(events, TRUSTED_WORKFLOW_EVENTS);
+  assert.notEqual(reconcileIfExpression(counterfeit), expectedReconcileCondition());
+});
+
+test("a negated event inside the disjunction is rejected", () => {
+  // `event == 'schedule' && false ||` keeps the token set intact and rejects
+  // schedules. Review passed this through the previous control.
+  const negated = [
+    "jobs:",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'schedule' && false ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+  ].join("\n");
+  assert.notEqual(reconcileIfExpression(negated), expectedReconcileCondition());
+});
+
+test("a suffix after a blank line inside the scalar is not ignored", () => {
+  // YAML keeps this inside the block scalar; the earlier helper stopped reading
+  // at the blank line and never saw the negation.
+  const suffixed = [
+    "jobs:",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'schedule' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "",
+    "      && github.event.workflow_run.event != 'schedule'",
+    "    runs-on: ubuntu-latest",
+  ].join("\n");
+  assert.notEqual(reconcileIfExpression(suffixed), expectedReconcileCondition());
+});
+
+test("a decoy job carrying the approved expression is not read instead", () => {
+  // The earlier helper took the FIRST `if:` in the file.
+  const decoyed = [
+    "jobs:",
+    "  decoy:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'schedule' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+  ].join("\n");
+  assert.notEqual(reconcileIfExpression(decoyed), expectedReconcileCondition());
 });
 
 test("a condition folded across lines is still recognised", () => {
-  // Valid inside a `>-` scalar, and falsely rejected by the earlier source scan.
-  // Also built from a literal, for the same reason as above.
   const folded = [
     "jobs:",
     "  reconcile:",
@@ -272,13 +340,7 @@ test("a condition folded across lines is still recognised", () => {
     "      github.event.workflow_run.event == 'workflow_dispatch')",
     "    runs-on: ubuntu-latest",
   ].join("\n");
-  const condition = reconcileIfExpression(folded);
-  const events = new Set(
-    [...condition.matchAll(/github\.event\.workflow_run\.event == '([^']+)'/g)].map(
-      ([, event]) => event,
-    ),
-  );
-  assert.deepEqual(events, TRUSTED_WORKFLOW_EVENTS);
+  assert.equal(reconcileIfExpression(folded), expectedReconcileCondition());
 });
 
 test("deduplicates the same run and comments once for a later recurrence", async () => {
