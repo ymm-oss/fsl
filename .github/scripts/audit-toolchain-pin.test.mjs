@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -22,6 +22,13 @@ import {
 } from "./audit-toolchain-pin.mjs";
 
 const WORKFLOWS = new URL("../workflows/", import.meta.url);
+const CARGO_TOML = new URL("../../rust/Cargo.toml", import.meta.url);
+
+// The suite must audit the repository the way the CLI does, MSRV included.
+// Review found that scanning without the MSRV made the required lane skip the
+// release contract entirely, so a floating release.yml passed the gate while
+// only the standalone CLI caught it. Read the real declaration here.
+const REPO_MSRV = declaredMsrv(await readFile(CARGO_TOML, "utf8"));
 
 function usesLine(ref) {
   return `      - uses: ${ACTION}@${ref}`;
@@ -29,8 +36,15 @@ function usesLine(ref) {
 
 // --- accepting: the repository as committed ------------------------------------
 
+test("the declared MSRV is readable, so the contract below is not vacuous", () => {
+  assert.ok(REPO_MSRV, "rust/Cargo.toml must declare a rust-version");
+});
+
 test("the committed workflows agree on one pinned toolchain", async () => {
-  const { audited, exempted, findings } = await auditWorkflowDirectory(WORKFLOWS);
+  // Passing the MSRV is what makes this exercise the release contract too.
+  const { audited, exempted, findings } = await auditWorkflowDirectory(WORKFLOWS, {
+    msrv: REPO_MSRV,
+  });
   assert.deepEqual(findings, [], JSON.stringify(findings, null, 2));
   // A pin audit that audited nothing would pass vacuously. Assert it saw work,
   // and that the exempt reference is counted separately rather than reported as
@@ -107,6 +121,54 @@ test("a missing rust-version declaration is a finding, not a pass", () => {
     ref: RELEASE_SHA,
     toolchainInput: "1.88.0",
     msrv: null,
+  });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].class, "msrv-undeclared");
+});
+
+test("an env: toolchain is not an action input and must not satisfy the contract", () => {
+  // Review probed this and it passed BOTH the suite and the standalone CLI:
+  // the action receives no input from `env:`, so the audit was satisfied by
+  // something that does nothing.
+  const text = [
+    `      - uses: ${ACTION}@${RELEASE_SHA}`,
+    "        env:",
+    "          toolchain: 1.88.0",
+  ].join("\n");
+  const references = collectReferences("release.yml", text);
+  assert.equal(references.length, 1);
+  const inputs = collectToolchainInputs(text, references);
+  assert.equal(inputs.get(1), undefined, "env: must not be read as an input");
+
+  const findings = auditReferences({
+    references,
+    citations: [],
+    msrv: "1.88",
+    toolchainInputs: inputs,
+  });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].class, "msrv-toolchain-missing");
+});
+
+test("a with: toolchain in a LATER step is not attributed to this one", () => {
+  const text = [
+    `      - uses: ${ACTION}@${RELEASE_SHA}`,
+    "      - uses: actions/checkout@v4",
+    "        with:",
+    "          toolchain: 1.88.0",
+  ].join("\n");
+  const references = collectReferences("release.yml", text);
+  const inputs = collectToolchainInputs(text, references);
+  assert.equal(inputs.get(1), undefined, "the next step's with: is not ours");
+});
+
+test("omitting the MSRV is a finding rather than a silent skip", () => {
+  // The earlier version skipped the whole contract when msrv was undefined,
+  // which is how the required lane came to never run it.
+  const findings = auditReferences({
+    references: [{ file: "release.yml", line: 54, ref: RELEASE_SHA }],
+    citations: [],
+    toolchainInputs: new Map([[54, "1.88.0"]]),
   });
   assert.equal(findings.length, 1);
   assert.equal(findings[0].class, "msrv-undeclared");

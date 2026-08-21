@@ -169,18 +169,46 @@ export function collectReferences(fileName, text) {
 
 /**
  * The `toolchain:` input belonging to each toolchain-action `uses:` line, keyed
- * by that line's one-based number. Read from the `with:` block that follows,
- * stopping at the next `- ` list item so a later step's input cannot be
- * attributed to this one.
+ * by that line's one-based number.
+ *
+ * The key must sit inside the step's `with:` mapping. Review found that an
+ * earlier version accepted
+ *
+ *     - uses: dtolnay/rust-toolchain@<sha>
+ *       env:
+ *         toolchain: 1.88.0
+ *
+ * because it matched any later `toolchain:` line. The action receives no input
+ * there, so the audit was satisfied by something that does nothing: `env:` and
+ * `with:` are different mappings and only `with:` supplies action inputs.
+ *
+ * Scanning stops at the next `- ` list item, so a following step's `with:`
+ * cannot be attributed to this one.
  */
 export function collectToolchainInputs(text, references) {
   const lines = text.split("\n");
   const inputs = new Map();
   for (const reference of references) {
+    let withIndent = null;
     for (let i = reference.line; i < lines.length; i += 1) {
       const line = lines[i];
       if (/^\s*-\s/.test(line)) {
         break;
+      }
+      if (line.trim() === "" || /^\s*#/.test(line)) {
+        continue;
+      }
+      const indent = line.length - line.trimStart().length;
+      if (withIndent !== null && indent <= withIndent) {
+        // Dedented back out of the `with:` mapping without finding the key.
+        withIndent = null;
+      }
+      if (/^\s*with\s*:\s*$/.test(line)) {
+        withIndent = indent;
+        continue;
+      }
+      if (withIndent === null) {
+        continue;
       }
       const match = /^\s*toolchain\s*:\s*(.+?)\s*$/.exec(line);
       if (match) {
@@ -234,19 +262,23 @@ export function auditReferences({
 
   for (const reference of references) {
     if (Object.hasOwn(declared, reference.file)) {
-      // Held to the MSRV contract, not skipped. `msrv` is only undefined when a
-      // caller audits references in isolation; a real run always supplies it.
-      if (msrv !== undefined) {
-        findings.push(
-          ...auditMsrvReference({
-            file: reference.file,
-            line: reference.line,
-            ref: reference.ref,
-            toolchainInput: inputs.get(reference.line) ?? null,
-            msrv,
-          }),
-        );
-      }
+      // Held to the MSRV contract, not skipped.
+      //
+      // An earlier version skipped this whole branch when `msrv` was undefined.
+      // Review showed the consequence: the repository-level suite scanned the
+      // workflows without supplying it, so the required lane never ran the MSRV
+      // contract at all and a floating `release.yml` passed. Omitting the MSRV
+      // is now a finding rather than a silent pass -- a caller that forgets it
+      // gets told, instead of getting a green audit of nothing.
+      findings.push(
+        ...auditMsrvReference({
+          file: reference.file,
+          line: reference.line,
+          ref: reference.ref,
+          toolchainInput: inputs.get(reference.line) ?? null,
+          msrv: msrv === undefined ? null : msrv,
+        }),
+      );
       continue;
     }
     // A ref computed at run time cannot be statically shown to be pinned, and

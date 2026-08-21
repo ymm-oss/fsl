@@ -586,10 +586,24 @@ some other event on the same workflow saving a `main`-branch copy to restore fro
 it would make every pull request permanently cold — the workflow would never save a cache under its
 own key, from any event. `merge-readiness.yml`'s two `Swatinem/rust-cache` steps instead go
 **restore-only against `ci.yml`'s own `rust-workspace` key** (`shared-key: rust-workspace`,
-`save-if: false`): both jobs run `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same
-checkout as `ci.yml`'s `rust workspace` job, and `Swatinem/rust-cache` derives its key from the
-rustc version, `CARGO`/`CC`/`CFLAGS`/`CXX`/`CMAKE`/`RUST`-prefixed env vars, and the workspace
-lockfiles — none of which differ between the two workflows. That mechanism-derived expectation is now
+`save-if: false`): both jobs run the same pinned `dtolnay/rust-toolchain` reference on
+`ubuntu-latest` against the same checkout as `ci.yml`'s `rust workspace` job, and
+`Swatinem/rust-cache` derives its key from **every installed** Rust toolchain's release, host triple
+and commit hash, the `CARGO`/`CC`/`CFLAGS`/`CXX`/`CMAKE`/`RUST`-prefixed env vars, and the workspace
+lockfiles — none of which differ between the two workflows.
+
+Two corrections to that sentence, both measured while #854 pinned the toolchain. The reference is no
+longer `@stable`; it is the version pinned in all three workflows, and keeping them equal is what
+preserves this key match, which is why a split toolchain is a finding in
+`.github/scripts/audit-toolchain-pin.mjs`. And the key hashes the **set** of installed toolchains,
+not a single selected version: on `chore/pin-rust-toolchain` the `Rust Versions` list was
+`1.97.1` (the runner image's own) *and* `1.98.0` (installed by the action), keying
+`...-718c915e-...`, where the floating reference had listed only `1.98.0` and keyed
+`...-0b9fd15e-...`. Equal references therefore do not guarantee a match across a runner-image
+rollover, and unequal references do not invariably cause a miss. What the equality buys is that the
+two workflows agree with each other, which is the property this paragraph is about; the
+cross-workflow match was re-measured as identical on PR #854 (`merge readiness / core contracts` and
+`rust checks` both `...-718c915e-9efe1eb7`). That mechanism-derived expectation is now
 supported by direct pull-request log evidence: on run `31581715093` attempt 1, `merge readiness / core
 contracts` logged `Restored from cache key
 "v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53" full match: true.` at 09:11:00.77Z and
