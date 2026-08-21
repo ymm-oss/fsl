@@ -696,6 +696,45 @@ mutation lanes was considered and rejected: it would cost the operators shards a
 run (~35 min measured cold vs. ~5 min warm) for less budget relief than `fsl-logic` gives for
 near-zero cost.
 
+**A cold `rust tests` shard has now timed out, which this section previously recorded as
+unobserved.** The passage above says of a 30-minute budget that "whether a cold build here would
+finish inside 30 minutes is not observed" and that a warm baseline "is not evidence that a cold run
+would succeed rather than time out." That gap is now closed by observation, on a different job than
+the one it was written about.
+
+Pull request #854 pins the Rust toolchain, which changes the `Swatinem/rust-cache` environment hash
+and therefore the cache key, so its own runs build cold. Measured on run `32430070397`
+(`chore/pin-rust-toolchain`, head `cddc70f`, `run_attempt=1`), every `rust tests` shard logged
+`No cache found.`:
+
+| job | cold duration | budget | outcome |
+|---|---|---|---|
+| `rust checks` | 16m35s | 20m | success, 83% of budget |
+| `rust tests (3/3)` | 24m59s | 30m | success |
+| `rust tests (2/3)` | 27m12s | 30m | success |
+| `rust tests (1/3)` | **30m04s** | 30m | **cancelled at the budget** |
+| `WASM` | 20m58s | 30m | success, 70% of budget |
+
+The aggregate `rust workspace` job then failed correctly, reporting
+`rust-checks=success rust-tests=cancelled` -- the shard-completeness guard converting a cancelled
+shard into a failed required context rather than treating it as success.
+
+The warm contrast is from pull request #853's run `32426383423`, which leaves the floating ref in
+place and hit the cache: `rust checks` 2m, `rust tests` 11m / 11m / 9m. So the cache is worth roughly
+2.5x on these lanes, and the budgets were provisioned for the warm case with no margin for the cold
+one.
+
+Cold builds are not exotic here. #747 records the mechanism: two concurrent pull requests running
+the full product gate exceed the repository's 10 GiB Actions cache ceiling and evict each other,
+and because `main` carried no Rust build cache, an evicted pull request paid a cold build every
+time. A budget with zero cold-build margin therefore converts a routine cache eviction into a red
+required context.
+
+`rust tests` moves from 30 to 45 minutes and `rust checks` from 20 to 30, sized from the measured
+cold durations above rather than from a guess. `WASM` (70% of its budget cold) and `fsl-logic` (no
+cold observation) are deliberately left unchanged: the change covers what was measured, and
+extending it further would be the same unevidenced provisioning this entry exists to correct.
+
 **Historical cold-run observations and the combined #752 change.** `gh api` reports
 `run_attempt=1` for `main` run `31086789147`, PR #743 run `31077948474`, and PR #744 run
 `31083643650`; each recorded cold `mutation operators` shard(s) cancelled at the old 30-minute
