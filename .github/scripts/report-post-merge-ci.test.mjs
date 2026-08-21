@@ -164,23 +164,121 @@ test("creates one actionable issue for a failed job", async () => {
   assert.doesNotMatch(client.issues[0].body, /log output/i);
 });
 
+/**
+ * The reconcile job's `if:` expression, with the block scalar folded back into
+ * one line.
+ *
+ * This must read the expression itself, not the workflow source. Review showed
+ * why: an earlier version regex-scanned the whole file, so deleting the live
+ * `schedule` predicate and adding
+ *
+ *     # github.event.workflow_run.event == 'schedule'
+ *
+ * as a COMMENT kept the extracted set complete, the equality assertion passed,
+ * actionlint accepted the file, and scheduled runs silently skipped the
+ * reporter -- reproducing #847 exactly. The same scan also rejected a condition
+ * legitimately split across lines inside the existing `>-` scalar, because it
+ * compared spelling rather than meaning.
+ */
+function reconcileIfExpression(workflow) {
+  const lines = workflow.split("\n");
+  const start = lines.findIndex((line) => /^\s*if:\s*>-\s*$/.test(line));
+  assert.notEqual(start, -1, "the reconcile job must use an `if: >-` block");
+  const indent =
+    lines[start + 1].length - lines[start + 1].trimStart().length;
+  const body = [];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.trim() === "") {
+      break;
+    }
+    const thisIndent = line.length - line.trimStart().length;
+    if (thisIndent < indent) {
+      break;
+    }
+    // A `#` inside a block scalar is literal text, not a comment, so nothing is
+    // stripped here -- but a comment OUTSIDE the scalar is never reached.
+    body.push(line.trim());
+  }
+  assert.ok(body.length > 0, "the `if:` block must not be empty");
+  // Folded scalars join with single spaces, which is what GitHub evaluates.
+  return body.join(" ").replace(/\s+/g, " ");
+}
+
 test("reporter workflow permits exactly the trusted default-branch events", async () => {
   const workflow = await readFile(REPORTER_WORKFLOW, "utf8");
+  const condition = reconcileIfExpression(workflow);
+
   const workflowEvents = new Set(
-    [...workflow.matchAll(/github\.event\.workflow_run\.event == '([^']+)'/g)].map(
+    [...condition.matchAll(/github\.event\.workflow_run\.event == '([^']+)'/g)].map(
       ([, event]) => event,
     ),
   );
 
   assert.match(
-    workflow,
+    condition,
     /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/,
   );
   assert.match(
-    workflow,
+    condition,
     /github\.event\.workflow_run\.head_branch == github\.event\.repository\.default_branch/,
   );
   assert.deepEqual(workflowEvents, TRUSTED_WORKFLOW_EVENTS);
+});
+
+test("a commented-out event cannot counterfeit the workflow gate", () => {
+  // The mutation review found: remove the live predicate, restate it in a
+  // comment. The extraction must not see the comment.
+  //
+  // Built from a literal rather than by patching the committed file, so a change
+  // to how that file spells its condition cannot make this control silently
+  // stop constructing the mutation it exists to reject.
+  const counterfeit = [
+    "# github.event.workflow_run.event == 'schedule'",
+    "jobs:",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+  ].join("\n");
+  const condition = reconcileIfExpression(counterfeit);
+  const events = new Set(
+    [...condition.matchAll(/github\.event\.workflow_run\.event == '([^']+)'/g)].map(
+      ([, event]) => event,
+    ),
+  );
+  assert.ok(
+    !events.has("schedule"),
+    "a comment must not supply a missing predicate",
+  );
+  assert.notDeepEqual(events, TRUSTED_WORKFLOW_EVENTS);
+});
+
+test("a condition folded across lines is still recognised", () => {
+  // Valid inside a `>-` scalar, and falsely rejected by the earlier source scan.
+  // Also built from a literal, for the same reason as above.
+  const folded = [
+    "jobs:",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event",
+    "      == 'schedule' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+  ].join("\n");
+  const condition = reconcileIfExpression(folded);
+  const events = new Set(
+    [...condition.matchAll(/github\.event\.workflow_run\.event == '([^']+)'/g)].map(
+      ([, event]) => event,
+    ),
+  );
+  assert.deepEqual(events, TRUSTED_WORKFLOW_EVENTS);
 });
 
 test("deduplicates the same run and comments once for a later recurrence", async () => {
