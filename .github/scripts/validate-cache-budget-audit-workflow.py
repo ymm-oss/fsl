@@ -13,6 +13,7 @@ import argparse
 import copy
 import re
 import shlex
+import unicodedata
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Optional
@@ -127,6 +128,21 @@ def load_workflow(path: Path) -> Any:
     return yaml.load(path.read_text(encoding="utf-8"), Loader=WorkflowLoader)
 
 
+def _normalized_workflow_name(value: Any) -> str | None:
+    """Return the fail-closed comparison key for a workflow display name."""
+    if not isinstance(value, str):
+        return None
+    return unicodedata.normalize("NFKC", value).strip().casefold()
+
+
+def _is_audit_workflow_name(value: Any) -> bool:
+    return _normalized_workflow_name(value) == AUDIT_WORKFLOW_NAME
+
+
+def _is_audit_workflow_subscription(value: Any) -> bool:
+    return isinstance(value, list) and len(value) == 1 and _is_audit_workflow_name(value[0])
+
+
 def _mapping(value: Any, label: str, errors: list[str]) -> Optional[Mapping[str, Any]]:
     if not isinstance(value, Mapping):
         errors.append(f"{label} must be a mapping")
@@ -178,8 +194,8 @@ def validate_workflow(document: Any) -> list[str]:
         "workflow",
         errors,
     )
-    if workflow.get("name") != AUDIT_WORKFLOW_NAME:
-        errors.append("audit workflow name must be exactly 'cache budget audit'")
+    if not _is_audit_workflow_name(workflow.get("name")):
+        errors.append("audit workflow name must match 'cache budget audit'")
 
     triggers = _mapping(workflow.get("on"), "workflow 'on'", errors)
     if triggers is not None:
@@ -381,7 +397,7 @@ def validate_reporter_workflow(document: Any) -> list[str]:
                 "reporter trigger 'workflow_run'",
                 errors,
             )
-            if workflow_run.get("workflows") != [AUDIT_WORKFLOW_NAME]:
+            if not _is_audit_workflow_subscription(workflow_run.get("workflows")):
                 errors.append(
                     f"reporter workflow_run.workflows must be exactly ['{AUDIT_WORKFLOW_NAME}']"
                 )
@@ -523,7 +539,7 @@ def validate_audit_workflow_name_uniqueness(workflows_directory: Path) -> list[s
         except yaml.YAMLError as error:
             errors.append(f"workflow YAML is invalid: sibling workflow file '{path}': {error}")
             continue
-        if isinstance(document, Mapping) and document.get("name") == AUDIT_WORKFLOW_NAME:
+        if isinstance(document, Mapping) and _is_audit_workflow_name(document.get("name")):
             matching_workflows.append(path.name)
 
     if len(matching_workflows) > 1:
