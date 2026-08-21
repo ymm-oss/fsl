@@ -187,16 +187,37 @@ function reconcileIfExpression(workflow) {
 
   const jobsAt = lines.findIndex((line) => /^jobs:\s*$/.test(line));
   assert.notEqual(jobsAt, -1, "the workflow must declare `jobs:`");
-  const reconcileAt = lines.findIndex(
-    (line, i) => i > jobsAt && /^\s{2}reconcile:\s*$/.test(line),
-  );
-  assert.notEqual(reconcileAt, -1, "the reporting job must be named `reconcile`");
 
-  // The job's keys are indented further than its own name; anything at or below
-  // that column starts a sibling job.
+  // Find the job by WHAT IT DOES, not by what it is called. Review renamed the
+  // live job to `report`, dropped `schedule` from its condition, and appended a
+  // compliant decoy named `reconcile`: actionlint accepted it, every test
+  // passed, and scheduled failures skipped the real reporter -- #847 again. The
+  // job that runs the writer is the one whose condition matters.
+  const WRITER = "node .github/scripts/report-post-merge-ci.mjs";
+  const jobStarts = [];
+  for (let i = jobsAt + 1; i < lines.length; i += 1) {
+    if (/^\s{2}[A-Za-z0-9_-]+:\s*$/.test(lines[i])) {
+      jobStarts.push(i);
+    }
+  }
+  assert.ok(jobStarts.length > 0, "the workflow must declare at least one job");
+
+  const writerJobs = jobStarts.filter((startLine, index) => {
+    const endLine = jobStarts[index + 1] ?? lines.length;
+    return lines
+      .slice(startLine, endLine)
+      .some((line) => line.includes(WRITER) && !line.includes("--test"));
+  });
+  assert.equal(
+    writerJobs.length,
+    1,
+    `exactly one job must run \`${WRITER}\`; found ${writerJobs.length}`,
+  );
+  const writerAt = writerJobs[0];
+
   const jobIndent = 2;
   let ifAt = -1;
-  for (let i = reconcileAt + 1; i < lines.length; i += 1) {
+  for (let i = writerAt + 1; i < lines.length; i += 1) {
     const line = lines[i];
     if (line.trim() === "") {
       continue;
@@ -205,19 +226,23 @@ function reconcileIfExpression(workflow) {
     if (indent <= jobIndent) {
       break;
     }
-    if (/^\s*if:\s*>-?\s*$/.test(line)) {
+    if (/^\s*if:\s*>-\s*$/.test(line)) {
       ifAt = i;
       break;
     }
   }
-  assert.notEqual(ifAt, -1, "`jobs.reconcile` must carry an `if:` block scalar");
+  assert.notEqual(
+    ifAt,
+    -1,
+    "the job running the reporter must carry an `if: >-` block scalar",
+  );
 
   const keyIndent = lines[ifAt].length - lines[ifAt].trimStart().length;
   const body = [];
   for (let i = ifAt + 1; i < lines.length; i += 1) {
     const line = lines[i];
     // A blank line inside a block scalar does NOT end it. Stopping at one is how
-    // a suffix after a blank line went unread.
+    // a negating suffix went unread in an earlier revision.
     if (line.trim() === "") {
       continue;
     }
@@ -264,6 +289,8 @@ test("a commented-out event cannot counterfeit the workflow gate", () => {
     "      (github.event.workflow_run.event == 'push' ||",
     "      github.event.workflow_run.event == 'workflow_dispatch')",
     "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
   ].join("\n");
   assert.notEqual(reconcileIfExpression(counterfeit), expectedReconcileCondition());
 });
@@ -281,6 +308,8 @@ test("a negated event inside the disjunction is rejected", () => {
     "      github.event.workflow_run.event == 'schedule' && false ||",
     "      github.event.workflow_run.event == 'workflow_dispatch')",
     "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
   ].join("\n");
   assert.notEqual(reconcileIfExpression(negated), expectedReconcileCondition());
 });
@@ -300,6 +329,8 @@ test("a suffix after a blank line inside the scalar is not ignored", () => {
     "",
     "      && github.event.workflow_run.event != 'schedule'",
     "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
   ].join("\n");
   assert.notEqual(reconcileIfExpression(suffixed), expectedReconcileCondition());
 });
@@ -323,8 +354,82 @@ test("a decoy job carrying the approved expression is not read instead", () => {
     "      (github.event.workflow_run.event == 'push' ||",
     "      github.event.workflow_run.event == 'workflow_dispatch')",
     "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
   ].join("\n");
   assert.notEqual(reconcileIfExpression(decoyed), expectedReconcileCondition());
+});
+
+test("renaming the writer job and leaving a compliant decoy is rejected", () => {
+  // Review's bypass: the control bound the condition to the job ID `reconcile`,
+  // not to the job that runs the reporter. Rename the live job, drop `schedule`
+  // from its condition, and name a decoy `reconcile`. actionlint accepted it and
+  // every test passed while scheduled failures skipped the real reporter.
+  const renamed = [
+    "jobs:",
+    "  report:",
+    "    if: >-",
+    "      github.event.workflow_run.event == 'push' &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'schedule' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: 'true'",
+  ].join("\n");
+  // The helper must read the `report` job, because that is where the writer is.
+  assert.notEqual(reconcileIfExpression(renamed), expectedReconcileCondition());
+});
+
+test("two jobs both running the reporter is rejected as ambiguous", () => {
+  // Splitting the writer across two jobs would leave one of them unchecked.
+  const twoWriters = [
+    "jobs:",
+    "  a:",
+    "    if: >-",
+    "      github.event.workflow_run.event == 'push'",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
+    "  b:",
+    "    if: >-",
+    "      github.event.workflow_run.event == 'schedule'",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
+  ].join("\n");
+  assert.throws(
+    () => reconcileIfExpression(twoWriters),
+    /exactly one job must run/,
+  );
+});
+
+test("a workflow with no job running the reporter is rejected", () => {
+  const noWriter = [
+    "jobs:",
+    "  reconcile:",
+    "    if: >-",
+    "      github.event.workflow_run.head_repository.full_name == github.repository &&",
+    "      github.event.workflow_run.head_branch == github.event.repository.default_branch &&",
+    "      (github.event.workflow_run.event == 'push' ||",
+    "      github.event.workflow_run.event == 'schedule' ||",
+    "      github.event.workflow_run.event == 'workflow_dispatch')",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: 'true'",
+  ].join("\n");
+  assert.throws(
+    () => reconcileIfExpression(noWriter),
+    /exactly one job must run/,
+  );
 });
 
 test("a condition folded across lines is still recognised", () => {
@@ -339,6 +444,8 @@ test("a condition folded across lines is still recognised", () => {
     "      == 'schedule' ||",
     "      github.event.workflow_run.event == 'workflow_dispatch')",
     "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: node .github/scripts/report-post-merge-ci.mjs",
   ].join("\n");
   assert.equal(reconcileIfExpression(folded), expectedReconcileCondition());
 });
