@@ -188,30 +188,52 @@ export function collectReferences(fileName, text) {
 export function collectToolchainInputs(text, references) {
   const lines = text.split("\n");
   const inputs = new Map();
+
   for (const reference of references) {
+    // A step is a list item, so scan from its `- ` line to the next one. The
+    // `uses:` key may appear anywhere inside it, including after `with:`.
+    let start = reference.line - 1;
+    while (start > 0 && !/^\s*-\s/.test(lines[start])) {
+      start -= 1;
+    }
+    let end = reference.line;
+    while (end < lines.length && !/^\s*-\s/.test(lines[end])) {
+      end += 1;
+    }
+
     let withIndent = null;
-    for (let i = reference.line; i < lines.length; i += 1) {
-      const line = lines[i];
-      if (/^\s*-\s/.test(line)) {
-        break;
-      }
+    for (let i = start; i < end; i += 1) {
+      // Normalise the leading dash so `- with:` is seen at its key's column.
+      const line = lines[i].replace(/^(\s*)-(\s)/, "$1 $2");
       if (line.trim() === "" || /^\s*#/.test(line)) {
         continue;
       }
       const indent = line.length - line.trimStart().length;
-      if (withIndent !== null && indent <= withIndent) {
-        // Dedented back out of the `with:` mapping without finding the key.
-        withIndent = null;
+
+      // Flow style: `with: {toolchain: 1.88.0}` is one line and valid YAML.
+      const flow = /^\s*with\s*:\s*\{(.*)\}\s*$/.exec(line);
+      if (flow) {
+        const entry = new RegExp("(?:^|,)\\s*toolchain\\s*:\\s*([^,}]+)").exec(flow[1]);
+        if (entry) {
+          inputs.set(reference.line, unquote(entry[1].trim()));
+        }
+        continue;
       }
+
       if (/^\s*with\s*:\s*$/.test(line)) {
         withIndent = indent;
         continue;
       }
+      if (withIndent !== null && indent <= withIndent) {
+        withIndent = null;
+      }
       if (withIndent === null) {
         continue;
       }
+      // Only a DIRECT child of `with:` is an action input. A key nested deeper
+      // belongs to some other input's value, so it must not count.
       const match = /^\s*toolchain\s*:\s*(.+?)\s*$/.exec(line);
-      if (match) {
+      if (match && indent === withIndent + 2) {
         inputs.set(reference.line, unquote(match[1].replace(/\s+#.*$/, "").trim()));
         break;
       }

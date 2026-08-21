@@ -150,6 +150,53 @@ test("an env: toolchain is not an action input and must not satisfy the contract
   assert.equal(findings[0].class, "msrv-toolchain-missing");
 });
 
+// Probed by hand after the with:-mapping rule was added. Three of these were
+// wrong on the first attempt -- two FALSE REJECTS (flow style, `with:` before
+// `uses:`) and one FALSE ACCEPT (a key nested deeper than `with:`). A false
+// reject matters as much as a false accept: it rejects a legitimate spelling,
+// which invites someone to loosen the rule and reopen the hole.
+test("the with: mapping is recognised in every legitimate spelling", () => {
+  const cases = [
+    ["block", `      - uses: ${ACTION}@${RELEASE_SHA}\n        with:\n          toolchain: 1.88.0`, "1.88.0"],
+    ["flow", `      - uses: ${ACTION}@${RELEASE_SHA}\n        with: {toolchain: 1.88.0}`, "1.88.0"],
+    [
+      "comment between",
+      `      - uses: ${ACTION}@${RELEASE_SHA}\n        with:\n          # pinned MSRV\n          toolchain: 1.88.0`,
+      "1.88.0",
+    ],
+    [
+      "with: before uses:",
+      `      - with:\n          toolchain: 1.88.0\n        uses: ${ACTION}@${RELEASE_SHA}`,
+      "1.88.0",
+    ],
+  ];
+  for (const [label, text, expected] of cases) {
+    const references = collectReferences("release.yml", text);
+    assert.equal(references.length, 1, label);
+    assert.equal(
+      collectToolchainInputs(text, references).get(references[0].line),
+      expected,
+      label,
+    );
+  }
+});
+
+test("a toolchain key nested deeper than with: is not an action input", () => {
+  const text = [
+    `      - uses: ${ACTION}@${RELEASE_SHA}`,
+    "        with:",
+    "          extra:",
+    "            toolchain: 1.88.0",
+  ].join("\n");
+  const references = collectReferences("release.yml", text);
+  const inputs = collectToolchainInputs(text, references);
+  assert.equal(
+    inputs.get(references[0].line),
+    undefined,
+    "only a direct child of with: is an input",
+  );
+});
+
 test("a with: toolchain in a LATER step is not attributed to this one", () => {
   const text = [
     `      - uses: ${ACTION}@${RELEASE_SHA}`,
