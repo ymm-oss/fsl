@@ -989,7 +989,9 @@ mod tests {
 
     #[test]
     fn legacy_quantifier_colons_become_idempotent_braces() {
-        let source = include_str!("../../../specs/cart_buggy.fsl");
+        let source = "spec LegacyQuantifierColons { const MAXI = 1 const MAXU = 1 \
+            state { flag: Bool } init { forall i in 0..MAXI: { flag = false } } \
+            action keep() { forall i in 0..MAXU: { flag = flag } } }";
         let once = format_source(source, FormatEdition::Next).expect("format quantifiers");
         let twice = format_source(&once, FormatEdition::Next).expect("format twice");
         assert_eq!(once, twice);

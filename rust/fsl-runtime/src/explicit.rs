@@ -606,17 +606,20 @@ fn resolve_enum_key(model: &KernelModel, key_type: &TypeRef, name: &str) -> Opti
         .find(|value| matches!(value, Value::Enum { member, .. } if member == name))
 }
 
-/// Resolve `name` as an integer constant only when `key_type` is integer-valued.
+/// Resolve `name` as an integer constant only for bounded integer key types.
 ///
 /// Map-key coverage is typed: an integer constant must not stand in for an enum
 /// member merely because they share a spelling.
 fn resolve_integer_const_key(model: &KernelModel, key_type: &TypeRef, name: &str) -> Option<Value> {
     let is_integer_key = match key_type {
-        TypeRef::Int | TypeRef::Range(_, _) => true,
+        TypeRef::Range(_, _) => true,
         TypeRef::Named(type_name) => {
             matches!(model.types.get(type_name), Some(TypeDef::Domain { .. }))
         }
-        TypeRef::Bool
+        // Source-level `Map<Int, _>` is rejected by `build_model`; fail closed
+        // if an internal caller ever bypasses that construction path.
+        TypeRef::Int
+        | TypeRef::Bool
         | TypeRef::Map(_, _)
         | TypeRef::Relation(_, _)
         | TypeRef::Set(_)
