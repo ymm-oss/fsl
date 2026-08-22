@@ -50,6 +50,7 @@ use serde_json::{Map, Value};
 
 /// The two classes the Verdict Conservation Law is stated over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
 pub enum OutcomeClass {
     /// Exit zero is permitted.
     Success,
@@ -79,7 +80,8 @@ impl OutcomeClass {
 /// rather than absorbed by the catch-all. Merging the two, as
 /// `clippy::match_same_arms` suggests, would delete the registry and leave only
 /// the safety net.
-#[must_use]
+// No fn-level `#[must_use]`: `OutcomeClass` carries it on the type, which is
+// strictly stronger (issue #858), and both together is `double_must_use`.
 #[allow(clippy::match_same_arms)]
 pub fn outcome_class(output: &Value) -> OutcomeClass {
     let Some(result) = output.get("result").and_then(Value::as_str) else {

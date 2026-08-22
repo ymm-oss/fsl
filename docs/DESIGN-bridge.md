@@ -238,6 +238,54 @@ pseudorandom walk and `pathlib` for resolving the SPEC path):
    N=100 steps, and on every step assert `adapter.step(...)` → `observe() == mon.state`.
    If the Monitor side produces a violation (invariant etc.), distinguish it in
    the fail message as **a bug in the spec itself**.
+
+   **Superseded on the native path by issue #843: the native CLI refuses to
+   generate at all when the fixed-seed walk violates.** The clause above is
+   sound only for a target whose walk runs live against the Monitor at test
+   time, i.e. `--target pytest`. The five baked targets embed
+   `(action, params, expected_state)` as a static fixture, and the Monitor
+   rolls a violating step back, so there is no run-time oracle left to
+   "distinguish in the fail message" — the rolled-back state was recorded as
+   that step's `expected`, asserting a no-op the spec never states. That made a
+   conforming implementation fail and an implementation that silently did
+   nothing pass.
+
+   The native fix is uniform across all six targets rather than pytest-only,
+   because #843's required target-parity control is that one spec and seed
+   yield the *same* conclusion everywhere; generating for pytest while refusing
+   the baked five would re-break parity in the opposite direction. A walk
+   violation is therefore reported as `result:"violated"` with `verify`'s
+   envelope, exit code, property, location, and replayable trace, and no
+   harness is written (see §3.0 below). This resolves the conflict between this
+   clause and #843's control by adopting the stricter behavior on the
+   authoritative implementation; the clause remains an accurate description of
+   the frozen Python reference, which behaves differently (see §3.0).
+
+#### 3.0 Walk-violation behavior differs across implementations (issue #843)
+
+The fixed-seed walk is a concrete Monitor run capped at 100 steps and is **not**
+bounded by `--depth`, so it can reach a violation the bounded verification
+`testgen` performs first proved absent within `depth`. The three observable
+behaviors for that input are:
+
+| Implementation | Behavior on a violating fixed-seed walk |
+|---|---|
+| Frozen Python (`src/fslc/testgen.py`, `_bake_random_walk`) | bakes the violation-free prefix only and exits 0 |
+| Native Rust before #843 | baked the full 100 steps with the rolled-back state as `expected` — the defect |
+| Native Rust after #843 | writes no harness; `result:"violated"`, exit 1, `verify`'s envelope and trace |
+
+The frozen Python never had the defect: it inspects the step result and breaks
+before appending. Its truncation is nonetheless a *different* answer from the
+native one, and it is silent — a caller cannot tell a spec bug from a short
+walk. The native path fails closed instead, because a green harness generated
+from a spec with a reachable violation is the false-negative direction
+`AGENTS.md` ranks above a crash.
+
+This divergence is deliberate and is **not** a parity defect to be allowlisted:
+the Rust workspace is the authoritative implementation and the Python package
+is a frozen compatibility reference (`AGENTS.md`). No parity gate compares
+walk-violation behavior across the two implementations today, so nothing
+enforces either side; this table is the record.
 4. While the Adapter is unimplemented (NotImplementedError), make all tests
    `pytest.skip`, so that pytest does not error even right after generation.
 

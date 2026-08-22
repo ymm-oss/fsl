@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+
+// #843: the `requirements` scenario walk has the same discarded-`StepResult`
+// shape as testgen, but `validate_requirement_trace_source` runs first on the
+// only path that reaches it and already rejects a violating acceptance trace.
+// This fixture pins that ordering, so the fail-closed guard added at the walk
+// stays a preservation control rather than silently becoming reachable.
+requirements RequirementsAcceptanceWalkViolation {
+  type N = 0..3
+  state { c: N }
+  init { c = 0 }
+  requirement REQ-1 "the counter increments" {
+    fair action inc() { requires c < 3  c = c + 1 }
+    invariant AtMost1 { c <= 1 }
+  }
+  acceptance AC-1 "two increments" {
+    inc()
+    inc()
+    expect c == 2
+  }
+}

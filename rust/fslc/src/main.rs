@@ -5329,7 +5329,22 @@ fn requirement_trace_scenarios_from_source(
                     .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
                     .collect(),
             );
-            monitor.step(&instance).map_err(|error| error.to_string())?;
+            let stepped = monitor.step(&instance).map_err(|error| error.to_string())?;
+            // `validate_requirement_trace_source` already rejected this case
+            // if any acceptance step violates, so reaching a violation here means
+            // the validator and this walk disagree about the same Monitor run.
+            // Fail closed rather than record the rolled-back state as this
+            // step's `expected_states` entry, which would publish a no-op the
+            // spec never states (issue #843).
+            if let Some(violation) = stepped.violation {
+                return Err(format!(
+                    "acceptance '{}' step {} violated {} '{}' after validation accepted the trace",
+                    case.id,
+                    steps.len(),
+                    violation.kind,
+                    display(&violation.name),
+                ));
+            }
             steps.push(json!({"action":display(&instance.action),"params":params}));
             states.push(fslc_rust::state_json(&monitor.state));
         }
@@ -5363,7 +5378,22 @@ fn requirement_trace_scenarios_from_source(
                     .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
                     .collect(),
             );
-            monitor.step(&instance).map_err(|error| error.to_string())?;
+            let stepped = monitor.step(&instance).map_err(|error| error.to_string())?;
+            // `validate_requirement_trace_source` already rejected this case
+            // if any forbidden setup step violates, so reaching a violation here means
+            // the validator and this walk disagree about the same Monitor run.
+            // Fail closed rather than record the rolled-back state as this
+            // step's `expected_states` entry, which would publish a no-op the
+            // spec never states (issue #843).
+            if let Some(violation) = stepped.violation {
+                return Err(format!(
+                    "forbidden setup '{}' step {} violated {} '{}' after validation accepted the trace",
+                    case.id,
+                    steps.len(),
+                    violation.kind,
+                    display(&violation.name),
+                ));
+            }
             steps.push(json!({"action":display(&instance.action),"params":params}));
             states.push(fslc_rust::state_json(&monitor.state));
         }
@@ -10733,6 +10763,135 @@ fn generated_content_result(
     (Value::Object(output), 0)
 }
 
+/// Render a fixed-seed conformance-walk violation as `testgen`'s verdict.
+///
+/// The walk is a concrete Monitor run and is NOT bounded by `--depth` (it
+/// stops at its own 100-step cap or when no action is enabled), so it can
+/// reach a violation the bounded verification `run_testgen` performs first
+/// proved absent within `depth`. That is a real counterexample, not an input
+/// error, so it must carry the verdict `verify`/`scenarios` would carry
+/// instead of being reclassified as an exit-2 `kind:"semantics"` error with
+/// the trace destroyed (the failure mode #472 fixed for depth-visible
+/// violations). No harness is written -- `testgen-trace.v1` cannot express a
+/// violating step, and the Monitor's rollback would otherwise be baked as a
+/// no-op `expected` the spec never states (issue #843).
+///
+/// The concrete result is projected onto [`fsl_verifier::BmcResult`] and
+/// rendered through `render_bmc_output`, exactly as
+/// `render_explicit_output` projects the solver-free explicit engine. Going
+/// straight to `render_boundary_output` instead would silently change the
+/// envelope: that renderer is `verify`'s `partial_op`/`type_bound` path, and
+/// for an `invariant`, `trans`, or `ensures` violation it drops `loc`,
+/// `violating_bindings`, and `blame`, and reports `trace_type` as the raw
+/// kind rather than `"sla"` for a generated `_deadline_` property. Dispatching
+/// by kind through `render_bmc_output` keeps every field identical to
+/// `verify`'s for the same violation, which the JSON-envelope and location
+/// contract in `AGENTS.md` requires.
+fn testgen_walk_violation_output(
+    model: &KernelModel,
+    violation: &fsl_runtime::Violation,
+    trace: &[fsl_core::TraceStep],
+    deadlock_mode: &str,
+) -> (Value, i32) {
+    let deadlock = match fslc_rust::verification_output::DeadlockMode::parse(deadlock_mode) {
+        Ok(mode) => mode,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    // Mirror `verify`'s ACTUAL routing, which is split across two places:
+    // `prepare_bmc`'s concrete boundary pre-pass renders a `type_bound`
+    // finding through `render_boundary_output` (`verification.rs`, gated on
+    // `violation.kind != "partial_op"`, over a probe that only ever returns
+    // `partial_op`/`type_bound`), and `render_bmc_output` renders `partial_op`
+    // through the same renderer. Every other kind reaches `render_violation`.
+    //
+    // The two renderers are NOT interchangeable, and they diverge in opposite
+    // directions: `render_violation` supplies `loc`/`violating_bindings`/
+    // `blame` for a declared property and `trace_type:"sla"` for a generated
+    // `_deadline_` name, while `render_boundary_output` supplies
+    // `violating_bindings`/`blame` for a generated `_bounds_*` name that
+    // `render_violation` cannot resolve to a declared property. Sending every
+    // kind to either one produces an envelope that differs from `verify`'s for
+    // the same violation, which the JSON-envelope and location contract in
+    // `AGENTS.md` forbids. Both directions were measured on this PR's
+    // fixtures before this dispatch was written.
+    if matches!(violation.kind.as_str(), "partial_op" | "type_bound") {
+        let statistics = fsl_solver::VerificationStatistics::default();
+        return fslc_rust::verification_output::render_boundary_output(
+            envelope(),
+            model,
+            violation,
+            trace,
+            &fslc_rust::verification_output::BmcOutputOptions {
+                // INERT on this path, and required only because the field is
+                // not optional. `render_boundary_output` reads `statistics`
+                // and `elapsed_s` (via `finish`) but never `depth`: `depth`
+                // reaches an envelope only through `add_common`, `render_success`,
+                // `render_reachable_failure`, `render_leadsto_failure`, or the
+                // explicit renderers, none of which a violation render calls.
+                // Verified by mutation: setting this to 0 changes no field of
+                // the emitted JSON. `violation.step` is passed anyway because
+                // it is the value that stays correct if a violation render ever
+                // does surface `depth` -- the walk checked one concrete path to
+                // this step, and reporting the requested `--depth` instead would
+                // contradict `violated_at_step`.
+                depth: violation.step,
+                deadlock,
+                checked_bounds: None,
+                elapsed_s: 0.0,
+                statistics: &statistics,
+                skip_vacuity_probe: false,
+            },
+        );
+    }
+    let result = fsl_verifier::BmcResult {
+        spec: model.name.clone(),
+        // Also inert here: `render_bmc_output`'s violation branch hands the
+        // `BmcViolation` to `render_violation` and never reads `result.depth`,
+        // which only the explicit-engine renderers and `explicit_as_bmc`
+        // consume. Same mutation evidence, same reason for the value chosen.
+        depth: violation.step,
+        violation: Some(fsl_verifier::BmcViolation {
+            kind: violation.kind.clone(),
+            name: violation.name.clone(),
+            step: violation.step,
+            last_action: trace
+                .last()
+                .and_then(|entry| entry.action.as_ref())
+                .map(|action| action.name.clone()),
+            trace: trace.to_vec(),
+            leads_to: None,
+        }),
+        leadsto_violation: None,
+        // A violation short-circuits `render_bmc_output` before it reads any
+        // of these, and `render_violation` derives no `warnings`, so the walk
+        // contributes no reachability or coverage claims it did not make.
+        reachables: std::collections::BTreeMap::new(),
+        reachable_diagnostics: std::collections::BTreeMap::new(),
+        deadlock_step: None,
+        deadlock_trace: None,
+        action_coverage: std::collections::BTreeMap::new(),
+        frontier_progress: false,
+        vacuity: Vec::new(),
+    };
+    let statistics = fsl_solver::VerificationStatistics::default();
+    fslc_rust::verification_output::render_bmc_output(
+        envelope(),
+        model,
+        &result,
+        fslc_rust::verification_output::BmcOutputOptions {
+            // Inert for the same reason as the boundary arm above; see there.
+            depth: violation.step,
+            deadlock,
+            checked_bounds: None,
+            elapsed_s: 0.0,
+            statistics: &statistics,
+            // The violation branch never emits `warnings`, so the vacuity
+            // probe is never reached from here.
+            skip_vacuity_probe: false,
+        },
+    )
+}
+
 fn run_testgen(
     path: &Path,
     depth: usize,
@@ -10760,7 +10919,10 @@ fn run_testgen(
         return (scenarios, status);
     }
     let walk = match fslc_rust::testgen_trace_vectors(&model) {
-        Ok(walk) => walk,
+        Ok(fslc_rust::TestgenWalk::Clean(walk)) => walk,
+        Ok(fslc_rust::TestgenWalk::Violated { violation, trace }) => {
+            return testgen_walk_violation_output(&model, &violation, &trace, deadlock_mode);
+        }
         Err(error) => return (semantic_error_output(&error), 2),
     };
     let path_context = match testgen_path_context(path, output_path) {
@@ -16622,7 +16784,13 @@ spec AltFixture {
         // bound to A rather than whatever is currently on disk.
         let (kernel, model) =
             load_kernel_model_from_source(&fixture.path, &captured).expect("lower source A");
-        let walk = fslc_rust::testgen_trace_vectors(&model).expect("build trace vectors from A");
+        let walk =
+            match fslc_rust::testgen_trace_vectors(&model).expect("build trace vectors from A") {
+                fslc_rust::TestgenWalk::Clean(walk) => walk,
+                fslc_rust::TestgenWalk::Violated { violation, .. } => {
+                    panic!("source A's fixed-seed walk must not violate: {violation:?}")
+                }
+            };
         let path_context =
             testgen_path_context(&fixture.path, None).expect("build testgen path context");
         let input = fsl_core::public_kernel_contract(

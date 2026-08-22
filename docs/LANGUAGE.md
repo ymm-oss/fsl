@@ -1667,6 +1667,15 @@ malformed input fail closed. Compose uses an explicit checked names/order bridge
 Public Kernel intentionally rejects incomplete multi-file provenance; it enters
 the same adapter rather than falling back after an export error.
 
+The fixed-seed walk is a concrete Monitor run capped at 100 steps, and it stops
+early when no action is enabled; it is **not** bounded by `--depth`. It can
+therefore reach a violation that the bounded verification `testgen` runs first
+proved absent within `depth`. Because the Monitor rolls a violating step back,
+recording that step would state that the action is a no-op -- an expectation no
+FSL contract makes. `testgen` instead reports the violation with the same
+`result:"violated"` envelope, exit code, property, step, and replayable trace
+`verify` reports, and writes no harness.
+
 - `--target pytest` (default): emits Python tests that import `fslc.runtime.Monitor`
   and drive the random walk live as the oracle.
 - `--target vitest`: emits a self-contained TypeScript (Vitest) file. Deterministic

@@ -16,18 +16,21 @@ use super::{
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct ExplicitViolation {
     pub violation: Violation,
     pub trace: Vec<TraceStep>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct ExplicitReachableWitness {
     pub step: usize,
     pub trace: Vec<TraceStep>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct ExplicitResult {
     pub spec: String,
     pub depth: usize,

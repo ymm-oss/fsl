@@ -17,6 +17,7 @@ use crate::value::{
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub enum ImplicationResult {
     Implied,
     Counterexample(BTreeMap<String, FslValue>),

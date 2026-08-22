@@ -24,6 +24,7 @@ pub struct InductionCti {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct InductionResult {
     pub k_used: BTreeMap<String, usize>,
     pub cti: Option<InductionCti>,
@@ -71,6 +72,7 @@ pub struct RankFailure {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct RankedLeadstoResult {
     pub proofs: Vec<RankProof>,
     pub failure: Option<RankFailure>,

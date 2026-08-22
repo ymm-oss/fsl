@@ -8,6 +8,7 @@ use fsl_solver::SmtSolver;
 use crate::{BmcViolation, VerifyError, verify_bounded};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct ProgressCheck {
     pub violation: Option<BmcViolation>,
     pub checked: BTreeMap<String, Vec<String>>,

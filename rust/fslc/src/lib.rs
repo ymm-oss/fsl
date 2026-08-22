@@ -291,17 +291,46 @@ fn ordered_object(value: &Value, order: &[String]) -> Value {
     Value::Object(result)
 }
 
+/// The outcome of the fixed-seed conformance walk.
+///
+/// The walk is a concrete Monitor run bounded only by its own step cap, so it
+/// can reach a violation that bounded verification at `--depth` did not see.
+/// `testgen-trace.v1` has no way to express "this step violates", and the
+/// Monitor rolls a violating step back, so continuing would bake the
+/// pre-step state as that step's `expected` -- a no-op the spec never states
+/// (issue #843). The two cases are therefore kept distinct in the type.
+#[derive(Clone, Debug)]
+#[must_use = "a TestgenWalk may carry a Monitor violation: dropping it bakes the rolled-back state as an expectation"]
+pub enum TestgenWalk {
+    /// Every step was violation-free; the versioned trace is safe to bake.
+    Clean(Value),
+    /// The walk reached a state the concrete Monitor rejects. No trace is
+    /// returned: no prefix of a walk whose continuation violates may be
+    /// presented as a conformance expectation without saying so.
+    Violated {
+        /// The Monitor's verdict for the violating step.
+        violation: fsl_runtime::Violation,
+        /// The full replayable path from the initial state through the
+        /// violating step, whose entry carries `attempted_state`.
+        trace: Vec<fsl_core::TraceStep>,
+    },
+}
+
 /// Build the versioned fixed-seed conformance trace consumed by native testgen.
 ///
 /// Unlike the exhaustive bounded conformance corpus, this contract records one
 /// deterministic path and retains ordinary Monitor JSON values so existing
 /// generated harness bytes remain stable.
 ///
+/// Returns [`TestgenWalk::Violated`] instead of a trace when the walk reaches
+/// a violation, so no caller can bake a rolled-back step as an expectation
+/// (issue #843).
+///
 /// # Errors
 ///
 /// Returns an error when concrete initialization, enabled-action enumeration,
 /// or stepping fails.
-pub fn testgen_trace_vectors(model: &KernelModel) -> Result<Value, String> {
+pub fn testgen_trace_vectors(model: &KernelModel) -> Result<TestgenWalk, String> {
     let mut monitor =
         fsl_runtime::Monitor::new(model.clone()).map_err(|error| error.to_string())?;
     let state_order = model
@@ -311,8 +340,14 @@ pub fn testgen_trace_vectors(model: &KernelModel) -> Result<Value, String> {
         .collect::<Vec<_>>();
     let initial = ordered_object(&state_json(&monitor.state), &state_order);
     let mut steps = Vec::new();
+    let mut trace = vec![fsl_core::TraceStep {
+        step: 0,
+        state: monitor.state.clone(),
+        action: None,
+        changes: BTreeMap::new(),
+    }];
     let mut random = PythonRandom::seeded_zero();
-    for _ in 0..100 {
+    for index in 0..100 {
         let enabled = monitor.enabled().map_err(|error| error.to_string())?;
         if enabled.is_empty() {
             break;
@@ -337,14 +372,29 @@ pub fn testgen_trace_vectors(model: &KernelModel) -> Result<Value, String> {
             .map(|(name, value)| (name.clone(), fsl_value_json(value)))
             .collect::<serde_json::Map<_, _>>();
         let params = ordered_object(&Value::Object(params), &param_order);
-        monitor.step(choice).map_err(|error| error.to_string())?;
+        let before = monitor.state.clone();
+        let stepped = monitor.step(choice).map_err(|error| error.to_string())?;
+        // The Monitor rolls a violating step back, so `monitor.state` here is
+        // the PRE-step state. Baking it as this step's `expected` would assert
+        // that the action is a no-op, which no FSL contract states, and would
+        // make a conforming implementation fail while an implementation that
+        // silently does nothing passes (issue #843).
+        trace.push(fsl_runtime::trace_step_from_result(
+            index + 1,
+            &before,
+            choice,
+            &stepped,
+        ));
+        if let Some(violation) = stepped.violation {
+            return Ok(TestgenWalk::Violated { violation, trace });
+        }
         steps.push(json!({
             "action": display_name(&action),
             "params": params,
             "expected": ordered_object(&state_json(&monitor.state), &state_order)
         }));
     }
-    Ok(json!({
+    Ok(TestgenWalk::Clean(json!({
         "$schema": fsl_core::TESTGEN_TRACE_V1_SCHEMA_ID,
         "schema_version": fsl_core::TESTGEN_TRACE_V1_SCHEMA_VERSION,
         "kernel_schema_version": fsl_core::KERNEL_SCHEMA_VERSION,
@@ -352,7 +402,7 @@ pub fn testgen_trace_vectors(model: &KernelModel) -> Result<Value, String> {
         "spec": model.name,
         "initial": initial,
         "steps": steps
-    }))
+    })))
 }
 
 fn conformance_state_json(

@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+
+// #843: the fixed-seed conformance walk is a concrete Monitor run capped at
+// 100 steps and is NOT bounded by `--depth`, so it reaches this invariant
+// violation at step 30 -- well past testgen's default verification depth of
+// 8. Before the fix the Monitor's rollback was baked as that step's
+// `expected`, asserting a no-op the spec never states.
+spec TestgenWalkLateViolation {
+  type N = 0..30
+  state { c: N }
+  init { c = 0 }
+  action inc() {
+    requires c < 30
+    c = c + 1
+  }
+  invariant AtMost29 { c <= 29 }
+}

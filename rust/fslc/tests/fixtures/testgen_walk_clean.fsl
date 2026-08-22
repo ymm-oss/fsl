@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+
+// #843 acceptance control: identical to `testgen_walk_late_violation.fsl`
+// except that the invariant admits the whole declared range, so the walk
+// runs to its natural end (`inc` stops being enabled at c = 30) with no
+// violation and generation must still succeed.
+spec TestgenWalkClean {
+  type N = 0..30
+  state { c: N }
+  init { c = 0 }
+  action inc() {
+    requires c < 30
+    c = c + 1
+  }
+  invariant AtMost30 { c <= 30 }
+}
