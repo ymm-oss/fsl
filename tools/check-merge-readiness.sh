@@ -46,6 +46,12 @@ check_automation() {
   # the live parser-backed audit.
   python3 -m pytest tests/test_toolchain_pin.py -v
   python3 .github/scripts/validate_toolchain_pin.py
+  # The cache-budget reporter subscribes by workflow display name. Its
+  # parser-backed uniqueness control must be able to block a merge, not merely
+  # report red in a non-required workflow, so run its calibrated controls and
+  # live audit in this required lane.
+  python3 -m pytest tests/test_cache_budget_audit_workflow.py -v
+  python3 .github/scripts/validate-cache-budget-audit-workflow.py
   # The cache-budget reporter owns a separate issue lifecycle from the
   # read-only audit. Keep its reconciliation controls in this pre-merge lane,
   # alongside the established post-merge reporter controls.
