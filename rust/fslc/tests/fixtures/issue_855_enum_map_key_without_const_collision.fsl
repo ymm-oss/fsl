@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec EnumMapKeyWithoutConstCollision {
+  enum Key { A, B }
+
+  state {
+    m: Map<Key, Bool>
+  }
+
+  init {
+    m[A] = true
+    m[B] = false
+  }
+
+  action noop() { }
+}
