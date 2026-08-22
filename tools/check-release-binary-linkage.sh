@@ -40,8 +40,9 @@ run_self_test() {
     >"$fixture/bin/ldd"
   chmod +x "$fixture/bin/ldd"
 
-  # Calibration: this is the pre-fix loop. A bad non-final binary is accepted
-  # because the final clean iteration supplies the loop's successful status.
+  # Calibration: this is the pre-fix loop. `!` exempts the failing pipeline
+  # from errexit, so a bad non-final binary does not abort; the final clean
+  # iteration then supplies the loop's successful status.
   unfixed="$fixture/unfixed-guard.sh"
   printf '%s\n' \
     '#!/usr/bin/env bash' \
