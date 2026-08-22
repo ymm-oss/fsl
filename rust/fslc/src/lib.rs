@@ -16,6 +16,10 @@ pub mod frontend_output;
 #[cfg(feature = "native-cli")]
 pub mod literate_access;
 pub mod migration;
+// Repository-local cargo-mutants configuration generation has no Worker or
+// LSP surface, so keep it out of the default-features-disabled consumers.
+#[cfg(feature = "native-cli")]
+pub mod mutants_config;
 pub mod origin_coverage;
 // The one definition of the success/failure classes (issue #537 C2). It is
 // declared on the library side rather than as a `main.rs` bin module so the

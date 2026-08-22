@@ -38,10 +38,12 @@ maps a mutant back to the nearest containing decision region. A bare function
 name is never emitted as a substitute for decision traceability.
 
 Line-scoped generic exclusions are allowed only for a uniquely anchored
-decision that is explicitly outside the pilot. The manifest validator derives
-the cargo-mutants line expression from that anchor and requires the TOML set to
-match exactly, so source movement fails before a stale line exclusion can hide
-a mutant. Such exclusions are scope declarations, not equivalent mutants.
+decision that is explicitly outside the pilot. The generator derives the
+cargo-mutants line expression from that anchor into
+`rust/.cargo/mutants.toml`; its freshness check refuses a stale generated file
+with the regeneration command, so source movement cannot leave a hand-copied
+line exclusion behind. Such exclusions are scope declarations, not equivalent
+mutants.
 
 The P2 pilot covers:
 
