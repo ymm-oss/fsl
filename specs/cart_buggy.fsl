@@ -4,34 +4,37 @@ spec ShoppingCart {
   const MAXU = 1   // user id: 0..1
   const MAXI = 1   // product id: 0..1
 
+  type UserId = 0..MAXU
+  type ItemId = 0..MAXI
+
   state {
-    stock: Map<Int, Int>,   // stock count per product
-    cart:  Map<Int, Int>    // product in each user's cart (-1 = empty)
+    stock: Map<ItemId, Int>,          // stock count per product
+    cart:  Map<UserId, Option<ItemId>> // product in each user's cart
   }
 
   init {
-    forall i in 0..MAXI: { stock[i] = 1 }
-    forall u in 0..MAXU: { cart[u] = -1 }
+    forall i: ItemId { stock[i] = 1 }
+    forall u: UserId { cart[u] = none }
   }
 
-  action add_to_cart(u in 0..MAXU, i in 0..MAXI) {
-    requires cart[u] == -1
-    cart[u] = i
+  action add_to_cart(u: UserId, i: ItemId) {
+    requires cart[u] == none
+    cart[u] = some(i)
   }
 
-  action remove_from_cart(u in 0..MAXU) {
-    requires cart[u] != -1
-    cart[u] = -1
+  action remove_from_cart(u: UserId) {
+    requires cart[u] != none
+    cart[u] = none
   }
 
-  action checkout(u in 0..MAXU) {
-    requires cart[u] != -1
+  action checkout(u: UserId) {
+    requires cart[u] is some(i)
     // Bug: decrements stock without checking whether any is available
-    stock[cart[u]] = stock[cart[u]] - 1
-    cart[u] = -1
+    stock[i] = stock[i] - 1
+    cart[u] = none
   }
 
   invariant NoNegativeStock {
-    forall i in 0..MAXI: stock[i] >= 0
+    forall i: ItemId { stock[i] >= 0 }
   }
 }

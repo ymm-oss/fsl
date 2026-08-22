@@ -536,7 +536,7 @@ by itself prove the per-entity decrease required by the `helpful` form.)
 | enum | `enum St { Open, Closed }` | Members are referenced by their bare name in expressions |
 | struct | `struct Order { st: St, item: Option<ItemId>, qty: Qty }` | Fields are scalars or `Option<scalar>` |
 | `Option<T>` | `cart: Option<ItemId>` | `none` / `some(e)`. Used instead of a sentinel value |
-| `Map<K, V>` | `stock: Map<ItemId, Qty>` | K is recommended to be a bounded scalar (domain type / enum / Bool) |
+| `Map<K, V>` | `stock: Map<ItemId, Qty>` | K must be a bounded scalar (domain type / enum / Bool) |
 | `Set<T>` | `shipped: Set<OrderId>` | T is a bounded scalar |
 | `Seq<T, N>` | `queue: Seq<JobId, 3>` | A sequence (FIFO) of capacity N. T is a scalar, N is a constant |
 | `relation A -> B` | `delegates: relation User -> User` | A bounded binary relation over bounded scalar endpoints |
@@ -565,7 +565,8 @@ scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
   `Option<Option<...>>`, and `Option<Set/Map/Seq/struct>` are not allowed
   (rejected at check time with a hint). Optional scalar fields can be written
   directly inside a struct as of v2.1.
-- `Map<Int, V>` works but emits a deprecation warning. Use a domain-type key.
+- `Map<Int, V>` is rejected by `check`. Declare a bounded key type, for example
+  `type ItemId = 0..<max>`, and use `Map<ItemId, V>`.
 - `symmetric type` and `symmetric enum` mark values as interchangeable entity
   identities for liveness symmetry reduction. During `leadsTo` lasso/stall
   search, fslc uses one canonical representative for per-entity rows built from

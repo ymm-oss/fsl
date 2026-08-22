@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec MapBoundedKeyAccepted {
+  type ProductId = 0..1
+
+  state {
+    stock: Map<ProductId, Int>
+  }
+
+  init {
+    forall i: ProductId { stock[i] = 0 }
+  }
+
+  invariant StockNonnegative {
+    forall i: ProductId { stock[i] >= 0 }
+  }
+}

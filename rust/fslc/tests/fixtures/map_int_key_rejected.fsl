@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec MapIntKeyRejected {
+  state {
+    stock: Map<Int, Int>
+  }
+
+  init {
+    forall i in 0..1 { stock[i] = 0 }
+  }
+
+  invariant StockNonnegative {
+    forall i in 0..1 { stock[i] >= 0 }
+  }
+}

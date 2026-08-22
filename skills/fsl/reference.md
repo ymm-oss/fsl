@@ -735,7 +735,7 @@ implementation Map (for example `Column -> DesignColumn`).
 | symmetric enum | `symmetric enum Worker { A, B }` | Same as enum, plus liveness symmetry reduction |
 | struct | `struct S { f: Qty, o: Option<K> }` | field = scalar or Option<scalar> only |
 | Option<T> | `c: Option<ItemId>` | T is a scalar. `none` / `some(e)` |
-| Map<K, V> | `m: Map<ItemId, Qty>` | K is a bounded scalar (Int keys give a deprecation warning) |
+| Map<K, V> | `m: Map<ItemId, Qty>` | K must be a bounded scalar; `Map<Int, V>` is rejected by `check` |
 | Set<T> | `s: Set<OrderId>` | T is a bounded scalar |
 | Seq<T, N> | `q: Seq<JobId, CAP>` | T is a scalar, N is a positive constant. FIFO |
 | relation A -> B | `r: relation User -> Role` | Binary relation over bounded scalar endpoints |

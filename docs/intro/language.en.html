@@ -587,7 +587,7 @@ by itself prove the per-entity decrease required by the <code>helpful</code> for
 <tr>
 <td><code>Map&lt;K, V&gt;</code></td>
 <td><code>stock: Map&lt;ItemId, Qty&gt;</code></td>
-<td>K is recommended to be a bounded scalar (domain type / enum / Bool)</td>
+<td>K must be a bounded scalar (domain type / enum / Bool)</td>
 </tr>
 <tr>
 <td><code>Set&lt;T&gt;</code></td>
@@ -628,7 +628,8 @@ scalar | <code>Option&lt;scalar&gt;</code> | struct (scalar / <code>Option&lt;sc
   <code>Option&lt;Option&lt;...&gt;&gt;</code>, and <code>Option&lt;Set/Map/Seq/struct&gt;</code> are not allowed
   (rejected at check time with a hint). Optional scalar fields can be written
   directly inside a struct as of v2.1.</li>
-<li><code>Map&lt;Int, V&gt;</code> works but emits a deprecation warning. Use a domain-type key.</li>
+<li><code>Map&lt;Int, V&gt;</code> is rejected by <code>check</code>. Declare a bounded key type, for example
+  <code>type ItemId = 0..&lt;max&gt;</code>, and use <code>Map&lt;ItemId, V&gt;</code>.</li>
 <li><code>symmetric type</code> and <code>symmetric enum</code> mark values as interchangeable entity
   identities for liveness symmetry reduction. During <code>leadsTo</code> lasso/stall
   search, fslc uses one canonical representative for per-entity rows built from
