@@ -90,11 +90,6 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          for binary in rust/target/release/fslc rust/target/release/fslc-lsp; do
-            required=$(readelf --version-info "$binary" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1)
-            test -n "$required"
-            test "$(printf '%s\n' GLIBC_2.39 "$required" | sort -V | tail -1)" = GLIBC_2.39
-          done
           ./tools/check-release-binary-linkage.sh rust/target/release/fslc rust/target/release/fslc-lsp
 
       - name: Smoke test (Windows)
