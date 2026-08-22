@@ -116,8 +116,11 @@ inventory, and promotion changes run the `scheduled` tier.
   when the change is reverted and establishes only that unrelated behavior was not disturbed. A
   preservation control presented as a detector is a false coverage claim. Report the produced value
   beside the expected one — "the test failed" does not establish that it failed for the right reason.
-  Apply one mutation at a time, or a failure is unattributable, and prove the revert by count
-  (`grep -c` returning zero), because a pattern match can match a different site than the one mutated.
+  Isolate mutations unless a compound mutant's compound expectation is stated before it is applied.
+  Prove the revert by exact equality to the named baseline — an empty `git diff` against it. A `grep -c`
+  returning zero is supporting evidence only when the mutation introduced a unique token: a mutation
+  that edits or deletes text leaves a correct revert with a nonzero count, and a pattern can match a
+  sibling site rather than the mutated one.
 - A comparison control's scope is part of the control. When a control asserts that two outputs agree,
   compare them in full. Give every excluded field a written reason it *cannot* be compared, not a
   category label asserting that it varies; build the exclusion list from the observed output, never
