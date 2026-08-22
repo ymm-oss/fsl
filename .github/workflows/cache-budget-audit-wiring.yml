@@ -3,20 +3,19 @@
 name: cache budget audit wiring
 
 # This is configuration-conformance evidence for cache-budget-audit.yml, not
-# product verification in docs/DESIGN-ci.md's Rust/WASM/native-Z3 sense.  It
-# uses PyYAML, a third-party repository-tooling dependency, so it deliberately
-# runs in its own workflow rather than in merge-readiness.yml's stdlib-only
-# automation-contracts lane (see tools/check-merge-readiness.sh).
+# product verification in docs/DESIGN-ci.md's Rust/WASM/native-Z3 sense. It
+# remains an unfiltered corroborating check for pull requests outside
+# merge-readiness.yml's main-branch scope; merge readiness now supplies the
+# required blocking property for main-bound changes (see issue #845).
 #
 # The install step defers to pyproject.toml's unpinned dev extra, just as
 # site-reference-freshness.yml does for pytest and markdown.  That declaration
 # is the dependency authority: installing the whole extra prevents a
 # hand-maintained package list from silently becoming stale.
 #
-# This context is intentionally not required yet.  Making it required needs a
-# coordinated, separate rollout through the ruleset contract, fixtures, design
-# record, and live ruleset; this workflow is unfiltered so that future rollout
-# can be evaluated without a path-filter reporting gap.  See issue #845.
+# This context remains non-required. Its pytest control is intentionally
+# duplicated in merge readiness, where the live parser-backed audit makes a
+# workflow-name collision block a main merge without changing the ruleset.
 
 on:
   pull_request:
