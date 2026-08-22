@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec NestedBoundedMap {
+  type Id = 0..1
+  type K = 0..1
+  state {
+    m: Map<Id, Map<K, Bool>>
+  }
+  action stay() { }
+  invariant BoundedKeys { true }
+}

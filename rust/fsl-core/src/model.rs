@@ -1020,6 +1020,9 @@ impl ModelBuilder {
                 // `TypeExpr` carries no span of its own, so the declaration's
                 // span is the closest true location a field-level type
                 // diagnostic can report (issue 555).
+                for (field, ty) in fields {
+                    reject_map_int_key(&format!("{name}.{field}"), ty, *span)?;
+                }
                 let resolved = fields
                     .iter()
                     .map(|(field, ty)| Ok((field.clone(), self.resolve_type(ty)?)))
@@ -1970,11 +1973,28 @@ fn model_error(message: impl Into<String>) -> ModelError {
 }
 
 fn reject_map_int_key(name: &str, ty: &TypeExpr, span: Span) -> Result<(), ModelError> {
-    if matches!(ty, TypeExpr::Map(key, _) if matches!(key.as_ref(), TypeExpr::Int)) {
+    if contains_map_int_key(ty) {
         return Err(model_error(format!(
             "Map<Int, ...> on '{name}' is rejected; use a bounded domain type as key; declare `type K = 0..<max>` and use `Map<K, ...>`"
         ))
         .at(span));
     }
     Ok(())
+}
+
+fn contains_map_int_key(ty: &TypeExpr) -> bool {
+    match ty {
+        TypeExpr::Int | TypeExpr::Bool | TypeExpr::Range(_, _) | TypeExpr::Name(_) => false,
+        TypeExpr::Map(key, value) => {
+            matches!(key.as_ref(), TypeExpr::Int)
+                || contains_map_int_key(key)
+                || contains_map_int_key(value)
+        }
+        TypeExpr::Relation(source, target) => {
+            contains_map_int_key(source) || contains_map_int_key(target)
+        }
+        TypeExpr::Set(inner) | TypeExpr::Seq(inner, _) | TypeExpr::Option(inner) => {
+            contains_map_int_key(inner)
+        }
+    }
 }
