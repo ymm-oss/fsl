@@ -567,6 +567,12 @@ fn moved_explicit_render_branches_match_the_normalized_raw_golden() {
     if std::env::var_os("FSLC_DUMP_VERIFICATION_GOLDEN").is_some() {
         eprintln!("{actual}");
     }
+    if std::env::var_os("FSLC_UPDATE_VERIFICATION_GOLDEN").is_some() {
+        let golden = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/goldens/verification_explicit_rendering.json");
+        std::fs::write(golden, &actual).expect("update verification golden");
+        return;
+    }
     let expected = str::from_utf8(include_bytes!(
         "goldens/verification_explicit_rendering.json"
     ))

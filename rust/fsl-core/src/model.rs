@@ -617,6 +617,7 @@ impl ModelBuilder {
                             .at(field.span)
                             .into_name_resolution());
                         }
+                        reject_map_int_key(&field.name, &field.ty, field.span)?;
                         if let Some(initializer) = &field.initializer {
                             if let Some(form) = unsupported_inline_form(initializer) {
                                 return Err(model_error(format!(
@@ -1966,4 +1967,14 @@ fn model_error(message: impl Into<String>) -> ModelError {
         span: None,
         name_resolution: false,
     }
+}
+
+fn reject_map_int_key(name: &str, ty: &TypeExpr, span: Span) -> Result<(), ModelError> {
+    if matches!(ty, TypeExpr::Map(key, _) if matches!(key.as_ref(), TypeExpr::Int)) {
+        return Err(model_error(format!(
+            "Map<Int, ...> on '{name}' is rejected; use a bounded domain type as key; declare `type K = 0..<max>` and use `Map<K, ...>`"
+        ))
+        .at(span));
+    }
+    Ok(())
 }
