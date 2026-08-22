@@ -841,6 +841,9 @@ fn run_causal_observe_expectations(
         }
     }
 
+    // Track per-expectation verdicts and violation step.
+    let mut verdicts: Vec<Option<usize>> = vec![None; compiled.len()];
+
     // Observe initial state (step 0).
     let init_state = monitor.state.clone();
     for (index, (expectation, liveness)) in compiled
@@ -849,22 +852,26 @@ fn run_causal_observe_expectations(
         .enumerate()
     {
         let extended = extend_with_ghost(&init_state, expectation, "", &spec_model);
-        if let Err(error) = liveness.observe(&extended, 0) {
-            return (
-                error_output(
-                    "internal",
-                    &format!(
-                        "liveness observe init for '{}': {error}",
-                        compiled[index].id
+        match liveness.observe(&extended, 0) {
+            Ok(Some(_violation)) => {
+                verdicts[index] = Some(0);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return (
+                    error_output(
+                        "internal",
+                        &format!(
+                            "liveness observe init for '{}': {error}",
+                            compiled[index].id
+                        ),
                     ),
-                ),
-                3,
-            );
+                    3,
+                );
+            }
         }
     }
 
-    // Track per-expectation verdicts and violation step.
-    let mut verdicts: Vec<Option<usize>> = vec![None; compiled.len()];
     let mut events_observed = 0_usize;
     let events_unmapped = 0_usize;
 
