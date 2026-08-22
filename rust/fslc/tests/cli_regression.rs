@@ -87,6 +87,33 @@ fn native_check_and_verify_share_the_core_duplicate_write_gate() {
 }
 
 #[test]
+fn native_check_rejects_map_int_keys_with_a_located_bounded_key_replacement() {
+    let (value, status) = run_cli(&["check", "rust/fslc/tests/fixtures/map_int_key_rejected.fsl"]);
+
+    assert_eq!(
+        value["message"],
+        "Map<Int, ...> on 'stock' is rejected; use a bounded domain type as key; declare `type K = 0..<max>` and use `Map<K, ...>`"
+    );
+    assert_eq!(value["result"], "error");
+    assert_eq!(value["kind"], "type");
+    assert_eq!(value["loc"], serde_json::json!({"line": 5, "column": 5}));
+    assert!(value.get("hint").is_none(), "{value}");
+    assert_eq!(status, 2, "{value}");
+}
+
+#[test]
+fn native_check_accepts_a_bounded_map_key() {
+    let (value, status) = run_cli(&[
+        "check",
+        "rust/fslc/tests/fixtures/map_bounded_key_accepted.fsl",
+    ]);
+
+    assert_eq!(status, 0, "{value}");
+    assert_eq!(value["result"], "ok");
+    assert!(value["warnings"].as_array().is_some_and(Vec::is_empty));
+}
+
+#[test]
 fn native_check_rejects_an_incomplete_governance_contract() {
     let (value, status) = run_cli(&[
         "check",
