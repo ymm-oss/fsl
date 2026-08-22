@@ -512,7 +512,7 @@ Mutation = tuple[str, Callable[[dict[str, Any]], Any], str]
 MUTATIONS: list[Mutation] = [
     ("replace workflow with a YAML list", _replace_workflow_with_list, "workflow must be a mapping"),
     ("add audit workflow key", _add_audit_workflow_key, "workflow must not declare unapproved keys: defaults"),
-    ("rename audit workflow", _rename_audit_workflow, "audit workflow name must be exactly 'cache budget audit'"),
+    ("rename audit workflow", _rename_audit_workflow, "audit workflow name must match 'cache budget audit'"),
     ("set on to a list", _set_on_to_list, "workflow 'on' must be a mapping"),
     ("empty schedule", _empty_schedule, "trigger 'schedule' must be a non-empty list"),
     ("disable workflow_dispatch", _disable_workflow_dispatch, "trigger 'workflow_dispatch' must be enabled"),
@@ -704,6 +704,22 @@ def test_real_cache_budget_audit_reporter_workflow_is_accepted():
     assert validator.validate_reporter_workflow(_real_reporter_workflow()) == []
 
 
+@pytest.mark.parametrize("name", ["Cache Budget Audit", "CACHE BUDGET AUDIT", " cache budget audit "])
+def test_audit_workflow_name_uses_the_collision_comparison_key(name: str):
+    document = _real_workflow()
+    document["name"] = name
+
+    assert validator.validate_workflow(document) == []
+
+
+@pytest.mark.parametrize("name", ["Cache Budget Audit", "CACHE BUDGET AUDIT", " cache budget audit "])
+def test_reporter_subscription_uses_the_collision_comparison_key(name: str):
+    document = _real_reporter_workflow()
+    document["on"]["workflow_run"]["workflows"] = [name]
+
+    assert validator.validate_reporter_workflow(document) == []
+
+
 def test_audit_workflow_name_rejects_a_third_same_named_workflow(tmp_path: Path):
     (tmp_path / WORKFLOW_PATH.name).write_text(WORKFLOW_PATH.read_text(encoding="utf-8"), encoding="utf-8")
     (tmp_path / REPORTER_WORKFLOW_PATH.name).write_text(
@@ -718,6 +734,30 @@ def test_audit_workflow_name_rejects_a_third_same_named_workflow(tmp_path: Path)
     assert validator.validate_audit_workflow_name_uniqueness(tmp_path) == [
         "audit workflow name 'cache budget audit' must be unique; found in: "
         "cache-budget-audit.yml, unrelated-cache-audit.yml"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("sibling_name", "sibling_filename"),
+    [
+        ("Cache Budget Audit", "sibling-title-case.yml"),
+        ("CACHE BUDGET AUDIT", "sibling-upper-case.yml"),
+        (" cache budget audit ", "sibling-surrounding-space.yml"),
+    ],
+)
+def test_audit_workflow_name_rejects_casefolded_or_trimmed_sibling_workflow(
+    tmp_path: Path, sibling_name: str, sibling_filename: str
+):
+    (tmp_path / WORKFLOW_PATH.name).write_text(WORKFLOW_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / REPORTER_WORKFLOW_PATH.name).write_text(
+        REPORTER_WORKFLOW_PATH.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (tmp_path / sibling_filename).write_text(f"name: {sibling_name!r}\n", encoding="utf-8")
+
+    assert validator.validate_audit_workflow_name_uniqueness(tmp_path) == [
+        "audit workflow name 'cache budget audit' must be unique; found in: "
+        f"cache-budget-audit.yml, {sibling_filename}"
     ]
 
 
