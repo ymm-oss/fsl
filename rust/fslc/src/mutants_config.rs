@@ -99,6 +99,10 @@ fn toml_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+fn normalize_crlf(value: &str) -> String {
+    value.replace("\r\n", "\n")
+}
+
 fn first_difference(actual: &str, expected: &str) -> (usize, String, String) {
     let actual = actual.split_inclusive('\n').collect::<Vec<_>>();
     let expected = expected.split_inclusive('\n').collect::<Vec<_>>();
@@ -153,9 +157,11 @@ pub fn render(root: &Path) -> Result<String, String> {
 /// unreadable, or it differs from the rendered configuration.
 pub fn check(root: &Path) -> Result<(), String> {
     let config_path = root.join(CONFIG_PATH);
-    let actual = std::fs::read_to_string(&config_path)
-        .map_err(|error| format!("cannot read {}: {error}", config_path.display()))?;
-    let expected = render(root)?;
+    let actual = normalize_crlf(
+        &std::fs::read_to_string(&config_path)
+            .map_err(|error| format!("cannot read {}: {error}", config_path.display()))?,
+    );
+    let expected = normalize_crlf(&render(root)?);
     if actual == expected {
         return Ok(());
     }
