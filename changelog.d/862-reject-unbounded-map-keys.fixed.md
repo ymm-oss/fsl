@@ -1,1 +1,1 @@
-Fixed (#862): `Map<Int, V>` is rejected at check time with a bounded-key replacement, preventing verification from materializing an unbounded key domain and failing to terminate after an ignored deprecation warning.
+Fixed (#862): `Map<Int, V>` is rejected at check time in every grammar-reachable type position, preventing verification from materializing an unbounded key domain.

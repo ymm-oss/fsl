@@ -101,7 +101,7 @@ fn native_check_rejects_map_int_keys_with_a_located_bounded_key_replacement() {
     assert_eq!(status, 2, "{value}");
 }
 
-fn assert_map_int_rejected(fixture: &str, name: &str, expected_loc: serde_json::Value) {
+fn assert_map_int_rejected(fixture: &str, name: &str, expected_loc: &serde_json::Value) {
     let (value, status) = run_cli(&["check", fixture]);
     assert_eq!(
         value["message"],
@@ -112,7 +112,7 @@ fn assert_map_int_rejected(fixture: &str, name: &str, expected_loc: serde_json::
     );
     assert_eq!(value["result"], "error", "{fixture}: {value}");
     assert_eq!(value["kind"], "type", "{fixture}: {value}");
-    assert_eq!(value["loc"], expected_loc, "{fixture}: {value}");
+    assert_eq!(&value["loc"], expected_loc, "{fixture}: {value}");
     assert_eq!(status, 2, "{fixture}: {value}");
 }
 
@@ -121,7 +121,7 @@ fn native_check_rejects_map_int_keys_nested_in_map_values() {
     assert_map_int_rejected(
         "rust/fslc/tests/fixtures/map_int_nested_value_rejected.fsl",
         "m",
-        serde_json::json!({"line": 6, "column": 5}),
+        &serde_json::json!({"line": 6, "column": 5}),
     );
 }
 
@@ -130,7 +130,7 @@ fn native_check_rejects_map_int_keys_nested_in_map_keys() {
     assert_map_int_rejected(
         "rust/fslc/tests/fixtures/map_int_nested_key_rejected.fsl",
         "m",
-        serde_json::json!({"line": 6, "column": 5}),
+        &serde_json::json!({"line": 6, "column": 5}),
     );
 }
 
@@ -139,7 +139,7 @@ fn native_check_rejects_map_int_keys_nested_in_set_elements() {
     assert_map_int_rejected(
         "rust/fslc/tests/fixtures/map_int_set_element_rejected.fsl",
         "m",
-        serde_json::json!({"line": 6, "column": 5}),
+        &serde_json::json!({"line": 6, "column": 5}),
     );
 }
 
@@ -148,7 +148,7 @@ fn native_check_rejects_map_int_keys_nested_in_seq_elements() {
     assert_map_int_rejected(
         "rust/fslc/tests/fixtures/map_int_seq_element_rejected.fsl",
         "m",
-        serde_json::json!({"line": 6, "column": 5}),
+        &serde_json::json!({"line": 6, "column": 5}),
     );
 }
 
@@ -157,7 +157,7 @@ fn native_check_rejects_map_int_keys_nested_in_option_elements() {
     assert_map_int_rejected(
         "rust/fslc/tests/fixtures/map_int_option_element_rejected.fsl",
         "m",
-        serde_json::json!({"line": 6, "column": 5}),
+        &serde_json::json!({"line": 6, "column": 5}),
     );
 }
 
@@ -166,7 +166,7 @@ fn native_check_rejects_map_int_keys_nested_in_relation_sources() {
     assert_map_int_rejected(
         "rust/fslc/tests/fixtures/map_int_relation_source_rejected.fsl",
         "m",
-        serde_json::json!({"line": 6, "column": 5}),
+        &serde_json::json!({"line": 6, "column": 5}),
     );
 }
 
@@ -175,7 +175,7 @@ fn native_check_rejects_map_int_keys_nested_in_relation_targets() {
     assert_map_int_rejected(
         "rust/fslc/tests/fixtures/map_int_relation_target_rejected.fsl",
         "m",
-        serde_json::json!({"line": 6, "column": 5}),
+        &serde_json::json!({"line": 6, "column": 5}),
     );
 }
 
@@ -184,7 +184,7 @@ fn native_check_rejects_map_int_keys_in_struct_fields() {
     assert_map_int_rejected(
         "rust/fslc/tests/fixtures/map_int_struct_field_rejected.fsl",
         "Payload.inner",
-        serde_json::json!({"line": 4, "column": 3}),
+        &serde_json::json!({"line": 4, "column": 3}),
     );
 }
 
