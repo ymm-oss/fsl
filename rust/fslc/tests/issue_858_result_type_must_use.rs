@@ -90,6 +90,14 @@ const EXCLUDED: [(&str, &str); 7] = [
     ("DomainRetry", "a surface AST node, not an outcome"),
 ];
 
+/// Read scanned Rust source with canonical line endings so adjacent-line
+/// assertions retain their meaning even when a checkout uses CRLF.
+fn read_source(path: &Path) -> String {
+    std::fs::read_to_string(path)
+        .expect("read source")
+        .replace("\r\n", "\n")
+}
+
 /// What the rule below actually matches today. #858 reports 33 types from a
 /// hand-curated table; this rule -- #858's, extended with the `*Violation`
 /// suffix -- selects 16, all of which are in `ANNOTATED`. Both numbers are pinned so
@@ -171,7 +179,7 @@ fn carries_an_outcome(name: &str, body: &str) -> bool {
 fn census() -> BTreeMap<String, bool> {
     let mut found = BTreeMap::new();
     for file in crate_sources() {
-        let text = std::fs::read_to_string(&file).expect("read source");
+        let text = read_source(&file);
         let product = text.split("#[cfg(test)]").next().expect("product body");
         let lines: Vec<&str> = product.lines().collect();
         for (index, line) in lines.iter().enumerate() {
@@ -246,7 +254,7 @@ fn every_discovered_outcome_type_is_must_use() {
 fn the_reviewed_annotation_decision_is_intact() {
     let sources: Vec<String> = crate_sources()
         .into_iter()
-        .map(|path| std::fs::read_to_string(path).expect("read source"))
+        .map(|path| read_source(&path))
         .collect();
 
     let mut declarations = 0;
@@ -310,7 +318,7 @@ fn step_result_is_must_use_with_a_reason() {
         .parent()
         .expect("rust workspace directory")
         .join("fsl-runtime/src/lib.rs");
-    let text = std::fs::read_to_string(source).expect("read fsl-runtime");
+    let text = read_source(&source);
     let declaration = text
         .find("\npub struct StepResult {")
         .expect("StepResult declaration");
@@ -328,4 +336,19 @@ fn step_result_is_must_use_with_a_reason() {
         attribute_line.contains("violation"),
         "the reason must name what is lost: {attribute_line}"
     );
+}
+
+#[test]
+fn source_reader_normalizes_crlf_for_adjacent_line_controls() {
+    let path = std::env::temp_dir().join(format!("fslc-issue-858-crlf-{}.rs", std::process::id()));
+    std::fs::write(
+        &path,
+        "#[must_use = \"a StepResult carries a violation\"]\r\npub struct StepResult {}\r\n",
+    )
+    .expect("write CRLF source fixture");
+    assert_eq!(
+        read_source(&path),
+        "#[must_use = \"a StepResult carries a violation\"]\npub struct StepResult {}\n"
+    );
+    std::fs::remove_file(path).expect("remove CRLF source fixture");
 }

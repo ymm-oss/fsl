@@ -1,3 +1,5 @@
+* text=auto eol=lf
+
 *.fsl text eol=lf
 
 # This generated file is compared to freshly rendered bytes by the mandatory
