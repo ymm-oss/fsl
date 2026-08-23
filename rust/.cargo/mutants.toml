@@ -26,6 +26,9 @@ examine_re = [
 # These line-scoped exclusions are coupled to unique source anchors. Liveness
 # is deliberately outside the initial P2 symbolic-witness pilot rather than
 # being treated as equivalent. The generated file contains their current lines.
+# cargo-mutants 27.1.0 emits both `replace && with || in verify_bounded_config`
+# and `delete ! in verify_bounded_config` at each of the first two anchors, so
+# line-free exclude_re patterns cannot preserve this exact three-exclusion scope.
 exclude_re = [
   "^fsl-verifier/src/bmc\\.rs:429:.* in verify_bounded_config$",
   "^fsl-verifier/src/bmc\\.rs:436:.* in verify_bounded_config$",

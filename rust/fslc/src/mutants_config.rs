@@ -60,11 +60,26 @@ fn generic_exclusions(root: &Path) -> Result<Vec<String>, String> {
             .and_then(Value::as_u64)
             .filter(|occurrence| *occurrence > 0)
             .ok_or_else(|| format!("generic exclusion '{id}' has no positive occurrence"))?;
+        let expected_occurrences = exclusion
+            .get("expected_occurrences")
+            .and_then(Value::as_u64)
+            .filter(|count| *count > 0)
+            .ok_or_else(|| {
+                format!("generic exclusion '{id}' has no positive expected_occurrences")
+            })?;
         let matching_lines = read_source(&root.join(path))?
             .lines()
             .enumerate()
             .filter_map(|(index, line)| line.contains(anchor).then_some(index + 1))
             .collect::<Vec<_>>();
+        if u64::try_from(matching_lines.len()).map_err(|error| error.to_string())?
+            != expected_occurrences
+        {
+            return Err(format!(
+                "generic exclusion '{id}' anchor occurrence count changed in {path}: expected {expected_occurrences}, actual {}; update the scope anchor/count, then regenerate",
+                matching_lines.len()
+            ));
+        }
         let line = matching_lines
             .get(usize::try_from(occurrence - 1).map_err(|error| error.to_string())?)
             .copied()
@@ -82,6 +97,28 @@ fn generic_exclusions(root: &Path) -> Result<Vec<String>, String> {
 
 fn toml_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn first_difference(actual: &str, expected: &str) -> (usize, String, String) {
+    let actual = actual.split_inclusive('\n').collect::<Vec<_>>();
+    let expected = expected.split_inclusive('\n').collect::<Vec<_>>();
+    let line = actual
+        .iter()
+        .zip(expected.iter())
+        .position(|(actual, expected)| actual != expected)
+        .unwrap_or(actual.len().min(expected.len()));
+
+    let render = |value: Option<&&str>| match value {
+        Some(value) if value.ends_with('\n') => value.trim_end_matches('\n').to_owned(),
+        Some(value) => format!("{value}\n\\ No newline at end of file"),
+        None => "<end of file>".to_owned(),
+    };
+
+    (
+        line + 1,
+        render(actual.get(line)),
+        render(expected.get(line)),
+    )
 }
 
 /// Render `rust/.cargo/mutants.toml` from the source template and scope manifest.
@@ -122,8 +159,9 @@ pub fn check(root: &Path) -> Result<(), String> {
     if actual == expected {
         return Ok(());
     }
+    let (line, actual_line, expected_line) = first_difference(&actual, &expected);
     Err(format!(
-        "generated mutation runner configuration is stale; run `{REGENERATE_COMMAND}` to regenerate {CONFIG_PATH}\n--- {CONFIG_PATH}\n+++ generated"
+        "generated mutation runner configuration is stale; run `{REGENERATE_COMMAND}` to regenerate {CONFIG_PATH}\n--- {CONFIG_PATH}\n+++ generated\n@@ line {line} @@\n-{actual_line}\n+{expected_line}"
     ))
 }
 

@@ -388,6 +388,7 @@ fn generated_mutants_config_rejects_line_drift_and_stale_anchor() {
             "function": "verify_bounded_config",
             "anchor": "let anchor = true;",
             "occurrence": 1,
+            "expected_occurrences": 1,
             "reason": "calibration exclusion"
         }]
     });
@@ -412,13 +413,42 @@ fn generated_mutants_config_rejects_line_drift_and_stale_anchor() {
 
     std::fs::write(
         &source_path,
+        "let anchor = true;\nbefore\nlet anchor = true;\nafter\n",
+    )
+    .expect("insert duplicate anchor before selected anchor");
+    let duplicate =
+        mutants_config::check(&root).expect_err("duplicate anchor must fail generation");
+    assert!(duplicate.contains("anchor occurrence count changed"));
+    assert!(duplicate.contains("expected 1, actual 2"));
+
+    std::fs::write(
+        &source_path,
         "before\ninserted line\nlet anchor = true;\nafter\n",
     )
     .expect("shift source anchor");
     let drift = mutants_config::check(&root).expect_err("line drift must stale generated config");
     assert!(drift.contains("generated mutation runner configuration is stale"));
     assert!(drift.contains(mutants_config::regenerate_command()));
-    assert!(drift.contains("--- rust/.cargo/mutants.toml\n+++ generated"));
+    assert!(drift.contains("@@ line 2 @@"));
+    assert!(drift.contains("-  \"^fsl-verifier/src/bmc\\\\.rs:2:.* in verify_bounded_config$\","));
+    assert!(drift.contains("+  \"^fsl-verifier/src/bmc\\\\.rs:3:.* in verify_bounded_config$\","));
+
+    std::fs::write(&source_path, "before\nlet anchor = true;\nafter\n")
+        .expect("restore source fixture");
+    mutants_config::check(&root).expect("restored generated fixture");
+    let config_path = root.join("rust/.cargo/mutants.toml");
+    let config = std::fs::read_to_string(&config_path).expect("read generated fixture");
+    std::fs::write(
+        &config_path,
+        config
+            .strip_suffix('\n')
+            .expect("generated fixture has trailing newline"),
+    )
+    .expect("remove generated fixture trailing newline");
+    let eof = mutants_config::check(&root).expect_err("missing final newline must stale config");
+    assert!(eof.contains("\\ No newline at end of file"));
+    assert!(eof.contains("-]\n\\ No newline at end of file"));
+    assert!(eof.contains("+]"));
 
     scope["generic_exclusions"][0]["anchor"] = serde_json::Value::String("stale anchor".to_owned());
     std::fs::write(
@@ -427,7 +457,8 @@ fn generated_mutants_config_rejects_line_drift_and_stale_anchor() {
     )
     .expect("write stale scope fixture");
     let stale_anchor = mutants_config::check(&root).expect_err("stale anchor must fail generation");
-    assert!(stale_anchor.contains("anchor occurrence 1 is stale"));
+    assert!(stale_anchor.contains("anchor occurrence count changed"));
+    assert!(stale_anchor.contains("expected 1, actual 0"));
 
     std::fs::remove_dir_all(&root).expect("remove temporary generator fixture");
 }
