@@ -146,9 +146,8 @@ fn a_walk_violation_past_the_verified_depth_aborts_generation() {
 /// `assert_envelope_parity` listed eight "run-dependent" fields of which seven
 /// (`elapsed_s`, `depth`, `engine`, `closure`, `states_explored`,
 /// `max_frontier_width`, `statistics`) appear in NEITHER envelope on this path
-/// -- the list had been copied from `BmcOutputOptions`' field names rather than
-/// read off the emitted JSON. Editing the list closes that instance; this check
-/// closes the class.
+/// -- the list was not read off the emitted JSON. Editing the list closes that
+/// instance; this check closes the class.
 ///
 /// Deliberately NOT applied to `VERIFY_ONLY`: `cache`'s absence is a legitimate
 /// cold-cache state, so requiring its presence would reintroduce the ambient
@@ -188,10 +187,12 @@ fn assert_exclusions_are_live(
 /// so while excluding eight "run-dependent" fields, of which SEVEN
 /// (`elapsed_s`, `depth`, `engine`, `closure`, `states_explored`,
 /// `max_frontier_width`, `statistics`) appear in NEITHER envelope on this
-/// path -- the list was copied from `BmcOutputOptions`' field names, not read
-/// off the JSON, so it excluded nothing and merely looked considered. The
-/// `assert_exclusions_are_live` above exists so a dead exclusion cannot sit
-/// there again.
+/// path, so it excluded nothing and merely looked considered. Only three of
+/// those seven (`depth`, `elapsed_s`, `statistics`) are even fields of
+/// `BmcOutputOptions`, so an earlier revision of this comment named the wrong
+/// origin; what is established is that the list was not read off the emitted
+/// JSON, not where it came from. The `assert_exclusions_are_live` above exists
+/// so a dead exclusion cannot sit there again.
 ///
 /// Two revisions of the fix under test diverged from `verify` in OPPOSITE
 /// directions and both passed a hand-picked field list, which is why the
