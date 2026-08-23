@@ -519,7 +519,7 @@ instances 数から独立です — `Case` のサイズが `verify { instances C
 | enum | `enum St { Open, Closed }` | メンバーは式の中で裸の名前で参照する |
 | struct | `struct Order { st: St, item: Option<ItemId>, qty: Qty }` | フィールドはスカラーまたは `Option<スカラー>` |
 | `Option<T>` | `cart: Option<ItemId>` | `none` / `some(e)`。番兵値の代わりに使う |
-| `Map<K, V>` | `stock: Map<ItemId, Qty>` | K は有界スカラー(ドメイン型 / enum / Bool)を推奨 |
+| `Map<K, V>` | `stock: Map<ItemId, Qty>` | K は有界スカラー(ドメイン型 / enum / Bool)でなければならない |
 | `Set<T>` | `shipped: Set<OrderId>` | T は有界スカラー |
 | `Seq<T, N>` | `queue: Seq<JobId, 3>` | 容量 N の列(FIFO)。T はスカラー、N は定数 |
 | `relation A -> B` | `delegates: relation User -> User` | 有界スカラーの端点上の有界な二項関係 |
@@ -546,8 +546,8 @@ induction、Public Kernel v1 は、等価な `init` ブロックと同じ意味�
   `Option<Option<...>>`、`Option<Set/Map/Seq/struct>` は許されません
   (check 時にヒント付きで拒否されます)。省略可能なスカラーのフィールドは、
   v2.1 以降 struct の中に直接書けます。
-- `Map<Int, V>` は動作しますが非推奨の警告を出します。ドメイン型のキーを使って
-  ください。
+- `Map<Int, V>` は `check` で拒否されます。`type ItemId = 0..<max>` のような
+  有界キー型を宣言し、`Map<ItemId, V>` を使ってください。
 - `symmetric type` と `symmetric enum` は、liveness の対称性簡約のために、値を
   交換可能なエンティティ同一性としてマークします。`leadsTo` の lasso/停滞探索の
   間、fslc は `Map<SymmetricType, V>` と `Set<SymmetricType>` の状態から作られる

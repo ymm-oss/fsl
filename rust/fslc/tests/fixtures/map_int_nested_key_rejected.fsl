@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec NestedKeyMapInt {
+  type Id = 0..1
+  state {
+    m: Map<Map<Int, Bool>, Id>
+  }
+  action stay() { }
+}

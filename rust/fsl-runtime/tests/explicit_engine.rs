@@ -186,9 +186,12 @@ fn deterministic_init_tracks_branches_foralls_and_duplicate_locations() {
         error.message,
         "state variable 'value' assigned more than once in init"
     );
+}
 
+#[test]
+fn deterministic_init_rejects_nested_forall_with_bounded_map_keys() {
     let nested_forall = model(
-        "spec Nested { const MAX = 1 state { values: Map<Int, Int> } \
+        "spec Nested { const MAX = 1 type Key = 0..1 state { values: Map<Key, Int> } \
          init { forall i in 0..MAX: { forall j in 0..MAX: { values[i] = j } } } \
          action stay() { values[0] = values[0] } }",
     );
@@ -198,23 +201,7 @@ fn deterministic_init_tracks_branches_foralls_and_duplicate_locations() {
 }
 
 #[test]
-fn init_accepts_distinct_integer_const_keys_for_map_int_and_bounded_maps() {
-    let integer_consts = model(
-        "spec IntegerConstKeys { const K = 0 const J = 1 \
-         state { m: Map<Int, Bool> } \
-         init { m[K] = true m[J] = false } action noop() { } }",
-    );
-    let TypeRef::Map(key_type, _) = integer_consts.state_type("m").expect("map state type") else {
-        panic!("m must be a map");
-    };
-    assert!(matches!(key_type.as_ref(), TypeRef::Int));
-    fsl_runtime::Monitor::new(integer_consts.clone())
-        .expect("Monitor accepts the issue #825 Map<Int, Bool> reproducer");
-    let result = fsl_runtime::verify_explicit(integer_consts, 1, 100)
-        .expect("explicit BFS accepts the issue #825 Map<Int, Bool> reproducer");
-    assert!(result.closure);
-    assert!(result.violation.is_none());
-
+fn init_accepts_distinct_integer_const_keys_for_bounded_maps() {
     // A named integer domain lowers to TypeRef::Named. Keep this control so
     // the TypeDef::Domain arm of resolve_integer_const_key remains covered.
     let named_domain_consts = model(
@@ -271,9 +258,9 @@ fn init_accepts_distinct_integer_const_keys_for_map_int_and_bounded_maps() {
 }
 
 #[test]
-fn init_integer_const_keys_preserve_duplicate_and_partial_coverage_rejection() {
+fn init_integer_const_key_duplicate_assignment_is_rejected_for_bounded_maps() {
     let duplicate = model(
-        "spec DuplicateConst { const K = 0 state { m: Map<Int, Bool> } \
+        "spec DuplicateConst { const K = 0 type Key = 0..1 state { m: Map<Key, Bool> } \
          init { m[K] = true m[K] = false } action noop() { } }",
     );
     let error = fsl_runtime::verify_explicit(duplicate, 1, 100)
@@ -282,9 +269,12 @@ fn init_integer_const_keys_preserve_duplicate_and_partial_coverage_rejection() {
         error.message,
         "state variable 'm' assigned more than once in init"
     );
+}
 
+#[test]
+fn init_integer_const_key_bound_aliasing_is_rejected_for_bounded_maps() {
     let bound_alias = model(
-        "spec BoundAlias { const K = 0 const MAX = 1 state { m: Map<Int, Bool> } \
+        "spec BoundAlias { const K = 0 const MAX = 1 type Key = 0..1 state { m: Map<Key, Bool> } \
          init { forall i in 0..MAX { m[i] = true } m[K] = false } action noop() { } }",
     );
     let error = fsl_runtime::verify_explicit(bound_alias, 1, 100)
@@ -293,28 +283,16 @@ fn init_integer_const_keys_preserve_duplicate_and_partial_coverage_rejection() {
         error.message,
         "state variable 'm' assigned more than once in init"
     );
+}
 
+#[test]
+fn init_integer_const_keys_reject_partial_bounded_map_initialization() {
     let partial = model(
         "spec PartialConst { const K = 0 const J = 1 type Key = 0..2 \
          state { m: Map<Key, Bool> } init { m[K] = true m[J] = false } action noop() { } }",
     );
     let error = fsl_runtime::verify_explicit(partial, 1, 100)
         .expect_err("integer constants must not make a partially initialized map complete");
-    assert_eq!(
-        error.message,
-        "init does not assign state variable(s): m (partial component initialization is rejected by the explicit engine)"
-    );
-
-    // For Map<Int, _>, map_key_values covers every integer from zero through
-    // the largest integer constant in the model. An otherwise unused higher
-    // constant therefore makes K and J a partial concrete initialization.
-    let partial_int = model(
-        "spec PartialIntConst { const K = 0 const J = 1 const HIGH = 2 \
-         state { m: Map<Int, Bool> } \
-         init { m[K] = true m[J] = false } action noop() { } }",
-    );
-    let error = fsl_runtime::verify_explicit(partial_int, 1, 100)
-        .expect_err("the derived Map<Int, _> compatibility domain remains partially assigned");
     assert_eq!(
         error.message,
         "init does not assign state variable(s): m (partial component initialization is rejected by the explicit engine)"

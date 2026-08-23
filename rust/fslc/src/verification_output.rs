@@ -231,6 +231,7 @@ pub fn semantic_error_kind(message: &str) -> &'static str {
         "vacuous"
     } else if message.starts_with("unknown type '")
         || message.starts_with("cannot coerce symbolic value")
+        || message.starts_with("Map<Int, ...> on '") && message.contains("' is rejected;")
         || message.starts_with("struct field '") && message.ends_with(" has non-scalar type")
     {
         "type"
