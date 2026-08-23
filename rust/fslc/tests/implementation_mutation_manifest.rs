@@ -411,6 +411,17 @@ fn generated_mutants_config_rejects_line_drift_and_stale_anchor() {
         .expect("write generated fixture");
     mutants_config::check(&root).expect("fresh generated fixture");
 
+    let config_path = root.join("rust/.cargo/mutants.toml");
+    let config = std::fs::read_to_string(&config_path).expect("read generated fixture");
+    std::fs::write(&config_path, config.replace('\n', "\r\n"))
+        .expect("write CRLF generated fixture");
+    mutants_config::check(&root).expect("CRLF generated fixture must be fresh");
+    std::fs::write(
+        &config_path,
+        mutants_config::render(&root).expect("restore LF generated fixture"),
+    )
+    .expect("restore LF generated fixture");
+
     std::fs::write(
         &source_path,
         "let anchor = true;\nbefore\nlet anchor = true;\nafter\n",
@@ -436,7 +447,6 @@ fn generated_mutants_config_rejects_line_drift_and_stale_anchor() {
     std::fs::write(&source_path, "before\nlet anchor = true;\nafter\n")
         .expect("restore source fixture");
     mutants_config::check(&root).expect("restored generated fixture");
-    let config_path = root.join("rust/.cargo/mutants.toml");
     let config = std::fs::read_to_string(&config_path).expect("read generated fixture");
     std::fs::write(
         &config_path,
