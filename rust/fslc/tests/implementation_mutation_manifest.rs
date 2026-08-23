@@ -2,7 +2,9 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use fslc_rust::mutants_config;
 use serde_json::Value;
 
 const REQUIRED_P2_FAULT_CLASSES: &[&str] = &[
@@ -48,70 +50,6 @@ fn required_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| format!("missing non-empty string '{key}'"))
-}
-
-fn validate_generic_exclusions(root: &Path, manifest: &Value, config: &str) -> Result<(), String> {
-    let exclude_block = config
-        .split_once("exclude_re = [")
-        .and_then(|(_, tail)| tail.split_once(']'))
-        .map(|(block, _)| block)
-        .ok_or_else(|| "mutation runner config has no closed exclude_re list".to_owned())?;
-    let actual_exclusions = exclude_block
-        .lines()
-        .map(str::trim)
-        .filter(|line| line.starts_with('"'))
-        .map(|line| {
-            line.trim_end_matches(',')
-                .trim_matches('"')
-                .replace("\\\\", "\\")
-        })
-        .collect::<BTreeSet<_>>();
-    let exclusions = manifest
-        .get("generic_exclusions")
-        .and_then(Value::as_array)
-        .filter(|entries| !entries.is_empty())
-        .ok_or_else(|| "scope declares no generic mutation exclusions".to_owned())?;
-    let mut expected_exclusions = BTreeSet::new();
-    let mut exclusion_ids = BTreeSet::new();
-    for exclusion in exclusions {
-        let id = required_string(exclusion, "id")?;
-        if !exclusion_ids.insert(id) {
-            return Err(format!("duplicate generic exclusion id '{id}'"));
-        }
-        let path = required_string(exclusion, "path")?;
-        let function = required_string(exclusion, "function")?;
-        let anchor = required_string(exclusion, "anchor")?;
-        let occurrence = exclusion
-            .get("occurrence")
-            .and_then(Value::as_u64)
-            .filter(|occurrence| *occurrence > 0)
-            .ok_or_else(|| format!("generic exclusion '{id}' has no positive occurrence"))?;
-        required_string(exclusion, "reason")?;
-        let source = read_source(&root.join(path))
-            .map_err(|error| format!("generic exclusion '{id}' cannot read '{path}': {error}"))?;
-        let matching_lines = source
-            .lines()
-            .enumerate()
-            .filter_map(|(index, line)| line.contains(anchor).then_some(index + 1))
-            .collect::<Vec<_>>();
-        let line = matching_lines
-            .get(usize::try_from(occurrence - 1).map_err(|error| error.to_string())?)
-            .copied()
-            .ok_or_else(|| {
-                format!(
-                    "generic exclusion '{id}' anchor occurrence {occurrence} is stale in {path}"
-                )
-            })?;
-        let runner_path = path.strip_prefix("rust/").unwrap_or(path);
-        let escaped_path = runner_path.replace('.', "\\.");
-        expected_exclusions.insert(format!("^{escaped_path}:{line}:.* in {function}$"));
-    }
-    if actual_exclusions != expected_exclusions {
-        return Err(format!(
-            "generic mutation exclusions drifted from scope: expected={expected_exclusions:?} actual={actual_exclusions:?}"
-        ));
-    }
-    Ok(())
 }
 
 fn validate_generic_functions(manifest: &Value, config: &str) -> Result<(), String> {
@@ -185,8 +123,8 @@ fn validate_scope(root: &Path, manifest: &Value) -> Result<(), String> {
         .ok_or_else(|| "runner has no config path".to_owned())?;
     let config = std::fs::read_to_string(root.join(config_path))
         .map_err(|error| format!("cannot read mutation runner config '{config_path}': {error}"))?;
+    mutants_config::check(root)?;
     validate_generic_functions(manifest, &config)?;
-    validate_generic_exclusions(root, manifest, &config)?;
     validate_detector_selection(&config)?;
 
     let decisions = manifest
@@ -391,6 +329,19 @@ fn gate_classification(outcome: &str, reviewed_equivalent: bool) -> Result<&'sta
     }
 }
 
+fn temporary_mutants_config_root() -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock after Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "fsl-mutants-config-test-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root).expect("create temporary generator fixture");
+    root
+}
+
 #[test]
 fn multiline_anchor_matching_is_line_ending_independent() {
     let anchor = "if let Some(violation) = &result.violation {\n    replay(&violation.trace)?;\n}";
@@ -417,6 +368,99 @@ fn p2_critical_scope_and_equivalence_manifests_are_current() {
             .expect("read operator inventory"),
     )
     .expect("valid semantic operator inventory");
+}
+
+#[test]
+fn generated_mutants_config_rejects_line_drift_and_stale_anchor() {
+    let root = temporary_mutants_config_root();
+    let source_path = root.join("rust/fsl-verifier/src/bmc.rs");
+    std::fs::create_dir_all(source_path.parent().expect("source parent"))
+        .expect("create source fixture parent");
+    std::fs::write(&source_path, "before\nlet anchor = true;\nafter\n")
+        .expect("write source fixture");
+    let scope_path = root.join("rust/fslc/tests/implementation_mutation/scope.v1.json");
+    std::fs::create_dir_all(scope_path.parent().expect("scope parent"))
+        .expect("create scope fixture parent");
+    let mut scope = serde_json::json!({
+        "generic_exclusions": [{
+            "id": "calibration.anchor",
+            "path": "rust/fsl-verifier/src/bmc.rs",
+            "function": "verify_bounded_config",
+            "anchor": "let anchor = true;",
+            "occurrence": 1,
+            "expected_occurrences": 1,
+            "reason": "calibration exclusion"
+        }]
+    });
+    std::fs::write(
+        &scope_path,
+        serde_json::to_vec(&scope).expect("serialize scope fixture"),
+    )
+    .expect("write scope fixture");
+    let template_path = root.join("rust/.cargo/mutants.toml.in");
+    std::fs::create_dir_all(template_path.parent().expect("template parent"))
+        .expect("create template fixture parent");
+    std::fs::write(
+        &template_path,
+        "exclude_re = [\n{{GENERATED_EXCLUDE_RE}}\n]\n",
+    )
+    .expect("write template fixture");
+    let rendered = mutants_config::render(&root).expect("render fresh fixture");
+    assert!(rendered.contains(r"fsl-verifier/src/bmc\\.rs:2:"));
+    std::fs::write(root.join("rust/.cargo/mutants.toml"), rendered)
+        .expect("write generated fixture");
+    mutants_config::check(&root).expect("fresh generated fixture");
+
+    std::fs::write(
+        &source_path,
+        "let anchor = true;\nbefore\nlet anchor = true;\nafter\n",
+    )
+    .expect("insert duplicate anchor before selected anchor");
+    let duplicate =
+        mutants_config::check(&root).expect_err("duplicate anchor must fail generation");
+    assert!(duplicate.contains("anchor occurrence count changed"));
+    assert!(duplicate.contains("expected 1, actual 2"));
+
+    std::fs::write(
+        &source_path,
+        "before\ninserted line\nlet anchor = true;\nafter\n",
+    )
+    .expect("shift source anchor");
+    let drift = mutants_config::check(&root).expect_err("line drift must stale generated config");
+    assert!(drift.contains("generated mutation runner configuration is stale"));
+    assert!(drift.contains(mutants_config::regenerate_command()));
+    assert!(drift.contains("@@ line 2 @@"));
+    assert!(drift.contains("-  \"^fsl-verifier/src/bmc\\\\.rs:2:.* in verify_bounded_config$\","));
+    assert!(drift.contains("+  \"^fsl-verifier/src/bmc\\\\.rs:3:.* in verify_bounded_config$\","));
+
+    std::fs::write(&source_path, "before\nlet anchor = true;\nafter\n")
+        .expect("restore source fixture");
+    mutants_config::check(&root).expect("restored generated fixture");
+    let config_path = root.join("rust/.cargo/mutants.toml");
+    let config = std::fs::read_to_string(&config_path).expect("read generated fixture");
+    std::fs::write(
+        &config_path,
+        config
+            .strip_suffix('\n')
+            .expect("generated fixture has trailing newline"),
+    )
+    .expect("remove generated fixture trailing newline");
+    let eof = mutants_config::check(&root).expect_err("missing final newline must stale config");
+    assert!(eof.contains("\\ No newline at end of file"));
+    assert!(eof.contains("-]\n\\ No newline at end of file"));
+    assert!(eof.contains("+]"));
+
+    scope["generic_exclusions"][0]["anchor"] = serde_json::Value::String("stale anchor".to_owned());
+    std::fs::write(
+        &scope_path,
+        serde_json::to_vec(&scope).expect("serialize stale scope fixture"),
+    )
+    .expect("write stale scope fixture");
+    let stale_anchor = mutants_config::check(&root).expect_err("stale anchor must fail generation");
+    assert!(stale_anchor.contains("anchor occurrence count changed"));
+    assert!(stale_anchor.contains("expected 1, actual 0"));
+
+    std::fs::remove_dir_all(&root).expect("remove temporary generator fixture");
 }
 
 #[test]
