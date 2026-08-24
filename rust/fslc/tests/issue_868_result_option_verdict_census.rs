@@ -1022,16 +1022,18 @@ fn discover_signatures(path: &str, source: &str) -> BTreeSet<FoundSignature> {
     discover_signatures_with_aliases(path, source, &aliases)
 }
 
+fn repository_relative_identity(relative: &Path) -> String {
+    relative.to_string_lossy().replace('\\', "/")
+}
+
 fn rust_source_contents() -> Vec<(String, String)> {
     let root = repository_root();
     rust_sources()
         .into_iter()
         .map(|path| {
-            let relative = path
-                .strip_prefix(&root)
-                .expect("source below repository")
-                .to_string_lossy()
-                .into_owned();
+            let relative = repository_relative_identity(
+                path.strip_prefix(&root).expect("source below repository"),
+            );
             let source = std::fs::read_to_string(path).expect("read Rust source");
             (relative, source)
         })
@@ -1220,11 +1222,9 @@ fn live_consumer_findings() -> Vec<ConsumerFinding> {
     rust_sources()
         .into_iter()
         .flat_map(|path| {
-            let relative = path
-                .strip_prefix(&root)
-                .expect("source below repository")
-                .to_string_lossy()
-                .into_owned();
+            let relative = repository_relative_identity(
+                path.strip_prefix(&root).expect("source below repository"),
+            );
             let source = std::fs::read_to_string(&path).expect("read Rust source");
             consumer_findings(&relative, &source, &verdict_definitions)
         })
@@ -1507,5 +1507,77 @@ fn stale_classification_entry_is_detected() {
     assert_eq!(
         classification_drift(&discovered, &configured),
         (Vec::new(), vec![stale])
+    );
+}
+
+#[test]
+fn repository_relative_identity_normalizes_windows_and_preserves_forward_slashes() {
+    assert_eq!(
+        repository_relative_identity(Path::new(r"rust\fsl-runtime\src\lib.rs")),
+        "rust/fsl-runtime/src/lib.rs"
+    );
+    assert_eq!(
+        repository_relative_identity(Path::new("rust/fsl-runtime/src/lib.rs")),
+        "rust/fsl-runtime/src/lib.rs"
+    );
+}
+
+#[test]
+fn unnormalized_windows_path_identity_reports_missing_and_stale_classifications() {
+    let unnormalized = SignatureIdentity {
+        path: r"rust\fsl-runtime\src\lib.rs".to_owned(),
+        function: "probe".to_owned(),
+        shape: Shape::Direct,
+    };
+    let normalized = SignatureIdentity {
+        path: "rust/fsl-runtime/src/lib.rs".to_owned(),
+        function: "probe".to_owned(),
+        shape: Shape::Direct,
+    };
+    assert_eq!(
+        classification_drift(
+            &BTreeSet::from([unnormalized.clone()]),
+            &BTreeSet::from([normalized.clone()]),
+        ),
+        (vec![unnormalized], vec![normalized])
+    );
+}
+
+#[test]
+fn normalized_windows_path_identity_resolves_classification_drift() {
+    let normalized_path = repository_relative_identity(Path::new(r"rust\fsl-runtime\src\lib.rs"));
+    let discovered = BTreeSet::from([SignatureIdentity {
+        path: normalized_path,
+        function: "probe".to_owned(),
+        shape: Shape::Direct,
+    }]);
+    let configured = BTreeSet::from([SignatureIdentity {
+        path: "rust/fsl-runtime/src/lib.rs".to_owned(),
+        function: "probe".to_owned(),
+        shape: Shape::Direct,
+    }]);
+    assert_eq!(
+        classification_drift(&discovered, &configured),
+        (Vec::new(), Vec::new())
+    );
+}
+
+#[test]
+fn normalized_windows_consumer_path_detects_a_discarded_verdict() {
+    let path = repository_relative_identity(Path::new(r"rust\fsl-runtime\src\lib.rs"));
+    let source = "fn synthetic_probe() -> Result<Option<Signal>, Error> { Ok(None) }\n\
+                  fn consumer() -> Result<(), Error> { synthetic_probe()?; Ok(()) }\n";
+    let verdict_definitions = BTreeMap::from([(
+        "synthetic_probe".to_owned(),
+        BTreeSet::from(["rust/fsl-runtime/src/lib.rs".to_owned()]),
+    )]);
+    assert_eq!(
+        consumer_findings(&path, source, &verdict_definitions),
+        vec![ConsumerFinding {
+            path: "rust/fsl-runtime/src/lib.rs".to_owned(),
+            line: 2,
+            function: "synthetic_probe".to_owned(),
+            kind: ConsumerFindingKind::DiscardedStatement,
+        }]
     );
 }
