@@ -322,7 +322,7 @@ test:
 |---|---|
 | kernel/dialect spec, bare `check` | `corpus_check_sweep.rs::every_corpus_spec_checks_ok_or_declares_its_error` |
 | `check` envelope/exit conservation law | `corpus_check_sweep.rs::check_result_and_exit_status_never_contradict` |
-| `verify` envelope/exit conservation law | `corpus_check_sweep.rs::verify_result_and_exit_status_never_contradict` |
+| `verify` envelope/exact-exit conservation law | `corpus_check_sweep.rs::verify_result_and_exit_status_never_contradict` |
 | `ledger` vs its `verify` baseline | `corpus_check_sweep.rs::ledger_exit_status_agrees_with_its_verify_baseline` |
 | refinement mapping | `refine_corpus_parity.rs` (this section, above) |
 | declared `examples/gallery/{valid,errors,adversarial}` fixture | `corpus_expectation_manifest.rs` |

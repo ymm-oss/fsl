@@ -32,7 +32,9 @@
 //! per-file rule remains deliberately narrower than an oracle: a file that
 //! declares no error anywhere must not fail `check` unexpectedly. The
 //! independent `check` and `verify` Verdict Conservation Laws below bind
-//! their envelopes to process exits without declaring a per-file result.
+//! their envelopes to process exits without declaring a per-file result; the
+//! verify owner checks the exact public 0/1/2/3 mapping, not only zero versus
+//! non-zero.
 //! Splitting these properties prevents a gap, not a hole:
 //! `corpus_expectation_manifest.rs`'s roster is derived from the same header
 //! convention this sweep reads, so a `check`-targeted declared fixture cannot
@@ -149,6 +151,21 @@ fn run_verify(path: &Path) -> (Value, i32) {
         )
     });
     (value, status)
+}
+
+/// Exact public exit contract for a top-level `fslc verify` envelope.
+/// Keep this independent from the CLI's final process-status normalization so
+/// a production mapping mutation cannot change both produced and expected.
+fn expected_verify_exit(envelope: &Value) -> i32 {
+    match envelope.get("result").and_then(Value::as_str) {
+        Some("verified" | "proved") => 0,
+        Some("violated" | "reachable_failed" | "unknown_cti" | "unknown_budget") => 1,
+        Some("error") if envelope.get("kind").and_then(Value::as_str) == Some("internal") => 3,
+        Some("error") => 2,
+        result => panic!(
+            "unregistered `fslc verify` result {result:?}; update the public exact-exit contract"
+        ),
+    }
 }
 
 #[test]
@@ -282,11 +299,11 @@ fn check_result_and_exit_status_never_contradict() {
     );
 }
 
-/// Verdict Conservation Law for `fslc verify` over the complete corpus.
+/// Exact Verdict Conservation Law for `fslc verify` over the complete corpus.
 /// Like the check-side owner above, this has no per-file expected verdict:
-/// it binds the production result class to the process status for every
-/// accepted, deliberately failing, and structurally inapplicable corpus
-/// file without exclusions.
+/// it derives the exact expected exit from each envelope's public result/kind
+/// class and binds it to the process status for every accepted, deliberately
+/// failing, and structurally inapplicable corpus file without exclusions.
 #[test]
 fn verify_result_and_exit_status_never_contradict() {
     let root = root();
@@ -300,7 +317,6 @@ fn verify_result_and_exit_status_never_contradict() {
 
     let mut failures = Vec::new();
     let mut observed_results = BTreeSet::new();
-    let mut saw_failure_class = false;
 
     for path in &files {
         let rel = repo_relative(&root, path);
@@ -320,28 +336,60 @@ fn verify_result_and_exit_status_never_contradict() {
         };
 
         observed_results.insert(result.to_owned());
-        let is_success = fslc_rust::outcome::outcome_class(&envelope).is_success();
-        saw_failure_class |= !is_success;
-        if is_success && exit != 0 {
+        let expected_exit = expected_verify_exit(&envelope);
+        if exit != expected_exit {
             failures.push(format!(
-                "{rel}: verify result={result:?} is success-class; produced exit={exit}, \
-                 expected exit=0 (false red)"
+                "{rel}: verify result={result:?}; produced exit={exit}, expected \
+                 exit={expected_exit} from the public exact-exit contract"
             ));
-        } else if !is_success && exit == 0 {
+        }
+
+        let produced_success_class = fslc_rust::outcome::outcome_class(&envelope).is_success();
+        let expected_success_class = expected_exit == 0;
+        if produced_success_class != expected_success_class {
             failures.push(format!(
-                "{rel}: verify result={result:?} is failure-class per \
-                 `fslc_rust::outcome::outcome_class`; produced exit=0, expected exit!=0 \
-                 (false green). If this is a new success-class result, register it there -- \
-                 not here"
+                "{rel}: verify result={result:?}; production outcome_class produced \
+                 success={produced_success_class}, expected success={expected_success_class} \
+                 from exact exit={expected_exit}"
             ));
         }
     }
 
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert!(
-        saw_failure_class,
-        "expected at least one failure-class verify result; got {observed_results:?} -- \
-         the false-green arm of this law is untested"
+    for required in ["verified", "violated", "reachable_failed", "error"] {
+        assert!(
+            observed_results.contains(required),
+            "expected corpus verify to exercise result={required:?}; got {observed_results:?}"
+        );
+    }
+}
+
+#[test]
+fn verify_result_classes_map_to_exact_public_exit_codes() {
+    for result in ["verified", "proved"] {
+        assert_eq!(
+            expected_verify_exit(&serde_json::json!({"result": result})),
+            0
+        );
+    }
+    for result in [
+        "violated",
+        "reachable_failed",
+        "unknown_cti",
+        "unknown_budget",
+    ] {
+        assert_eq!(
+            expected_verify_exit(&serde_json::json!({"result": result})),
+            1
+        );
+    }
+    assert_eq!(
+        expected_verify_exit(&serde_json::json!({"result": "error", "kind": "semantics"})),
+        2
+    );
+    assert_eq!(
+        expected_verify_exit(&serde_json::json!({"result": "error", "kind": "internal"})),
+        3
     );
 }
 
