@@ -37,17 +37,22 @@ resolution, and the stdio lifecycle.
 
 ## 2. DESIGN-doc coverage (dialect/feature ↔ docs/DESIGN-*.md)
 
-`tests/test_coupled_change_meta.py` keeps five tests grouped into three
-obligations whose inspected surfaces remain frozen-Python-owned or
-language-neutral:
+`tests/test_coupled_change_meta.py` keeps five tests whose inspected surfaces
+remain frozen-Python-owned or language-neutral:
 
-1. **README map is bidirectional** — the `DESIGN-*.md` links in
+1. **`test_retained_python_dialect_registry_matches_native_authority`** — the
+   frozen Python dialect registry exactly matches the native dispatch registry.
+   This is compatibility evidence, not an evolving language authority.
+2. **`test_native_ai_project_block_gate_matches_retained_parser`** — the native
+   AI project-block gate exactly matches the retained Python parser's block set.
+3. **`test_design_docs_readme_map_bidirectional`** — the `DESIGN-*.md` links in
    `docs/README.md` exactly match the design files on disk.
-2. **Frozen Python dialect registry remains explicit** — its registered
-   dialects and AI project blocks are compared with the native authority. This
-   is compatibility evidence, not an evolving language authority.
-3. **Frozen Python CLI map remains explicit** — every compatibility CLI command
-   maps to an existing design document or a reviewed waiver reason.
+4. **`test_top_level_dialects_map_to_design_docs`** — the frozen Python
+   grammar's `top_def` alternatives exactly match `TOP_DEF_DESIGN_DOCS`, and
+   every mapped design document exists.
+5. **`test_cli_commands_map_to_design_docs`** — every frozen Python
+   compatibility CLI command maps to an existing design document or a reviewed
+   waiver reason.
 
 These five Python tests run as required pre-merge repository/compatibility
 evidence through `tools/check-merge-readiness.sh automation` and the
