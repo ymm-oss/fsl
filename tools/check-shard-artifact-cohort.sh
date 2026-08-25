@@ -35,6 +35,14 @@ expect_equal() {
   [ "$actual" = "$expected" ] || fail "$artifact: $label mismatch: expected '$expected', actual '$actual'"
 }
 
+enumerate_sorted_paths() {
+  local destination="$1" label="$2"
+  shift 2
+  local unsorted="$destination.unsorted"
+  find "$@" -print0 >"$unsorted" || fail "$label enumeration failed"
+  sort -z "$unsorted" >"$destination" || fail "$label sorting failed"
+}
+
 check_cohort() {
   local mode="$1" cohort="$2" expected_run_id="$3" current_attempt="$4" expected_revision="$5" expected_total="$6"
   [[ "$mode" = rust || "$mode" = semantic ]] || fail "mode must be 'rust' or 'semantic', got '$mode'"
@@ -52,21 +60,28 @@ check_cohort() {
     prefix="semantic-mutation-operators"
   fi
 
+  local work
+  work="$(mktemp -d)"
   local -a artifact_dirs=() recursive_provenances=() provenances=()
-  mapfile -t artifact_dirs < <(find "$cohort" -mindepth 1 -maxdepth 1 -type d | sort)
+  enumerate_sorted_paths "$work/artifact-directories" "$expected_lane: artifact directory" \
+    "$cohort" -mindepth 1 -maxdepth 1 -type d
+  mapfile -d '' -t artifact_dirs <"$work/artifact-directories" \
+    || fail "$expected_lane: artifact directory result read failed"
   if [ "${#artifact_dirs[@]}" -ne "$expected_total" ]; then
     fail "$expected_lane: expected $expected_total artifact directories, found ${#artifact_dirs[@]}"
   fi
-  mapfile -t recursive_provenances < <(find "$cohort" -type f -name artifact-provenance.v1.json | sort)
+  enumerate_sorted_paths "$work/recursive-provenances" "$expected_lane: recursive provenance" \
+    "$cohort" -type f -name artifact-provenance.v1.json
+  mapfile -d '' -t recursive_provenances <"$work/recursive-provenances" \
+    || fail "$expected_lane: recursive provenance result read failed"
   if [ "${#recursive_provenances[@]}" -ne "$expected_total" ]; then
     fail "$expected_lane: expected $expected_total provenance sidecars, found ${#recursive_provenances[@]}"
   fi
 
-  local work
-  work="$(mktemp -d)"
   local -a seen=() attempts=() fulls=() shards=() manifests=()
-  local artifact_dir
+  local artifact_dir artifact_ordinal=0
   for artifact_dir in "${artifact_dirs[@]}"; do
+    artifact_ordinal=$((artifact_ordinal + 1))
     local artifact_name
     artifact_name="$(basename "$artifact_dir")"
     if [[ ! "$artifact_name" =~ ^${prefix}-([1-9][0-9]*)-${expected_run_id}$ ]]; then
@@ -74,7 +89,10 @@ check_cohort() {
     fi
 
     local -a direct_provenances=()
-    mapfile -t direct_provenances < <(find "$artifact_dir" -mindepth 1 -maxdepth 1 -type f -name artifact-provenance.v1.json | sort)
+    enumerate_sorted_paths "$work/direct-provenances-$artifact_ordinal" "$artifact_name: direct provenance" \
+      "$artifact_dir" -mindepth 1 -maxdepth 1 -type f -name artifact-provenance.v1.json
+    mapfile -d '' -t direct_provenances <"$work/direct-provenances-$artifact_ordinal" \
+      || fail "$artifact_name: direct provenance result read failed"
     if [ "${#direct_provenances[@]}" -ne 1 ]; then
       fail "$artifact_name: expected exactly 1 direct provenance sidecar, found ${#direct_provenances[@]}"
     fi
@@ -276,7 +294,7 @@ expect_rejected() {
 selftest() {
   local tmp
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
+  trap 'chmod u+rwx "$tmp/unreadable-nested/rust-test-shard-1-77/nested" 2>/dev/null || true; chmod -R u+rwx "$tmp" 2>/dev/null || true; rm -rf "$tmp"' RETURN
 
   make_rust_fixture "$tmp/partial" 1,2,1
   check_cohort rust "$tmp/partial" 77 2 rev-good 3 >/dev/null
@@ -340,6 +358,16 @@ selftest() {
   expect_rejected surplus-nested-provenance \
     "expected 3 provenance sidecars, found 4" \
     check_cohort rust "$tmp/surplus-nested-provenance" 77 2 rev-good 3
+
+  cp -R "$tmp/partial" "$tmp/unreadable-nested"
+  mkdir -p "$tmp/unreadable-nested/rust-test-shard-1-77/nested"
+  cp "$tmp/unreadable-nested/rust-test-shard-1-77/artifact-provenance.v1.json" \
+    "$tmp/unreadable-nested/rust-test-shard-1-77/nested/artifact-provenance.v1.json"
+  chmod 000 "$tmp/unreadable-nested/rust-test-shard-1-77/nested"
+  expect_rejected unreadable-nested-provenance \
+    "rust-tests: recursive provenance enumeration failed" \
+    check_cohort rust "$tmp/unreadable-nested" 77 2 rev-good 3
+  chmod u+rwx "$tmp/unreadable-nested/rust-test-shard-1-77/nested"
 
   cp -R "$tmp/partial" "$tmp/future"
   jq '.run_attempt = 3' "$tmp/future/rust-test-shard-2-77/artifact-provenance.v1.json" >"$tmp/mutated.json"
