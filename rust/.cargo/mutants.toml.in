@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+# cargo-mutants 27.1.0 configuration for the accepted P2 pilot.
+#
+# This template's liveness exclusions are generated from the authoritative
+# source anchors in rust/fslc/tests/implementation_mutation/scope.v1.json.
+# Do not edit rust/.cargo/mutants.toml by hand; regenerate it with:
+#   cargo run --manifest-path rust/Cargo.toml -p fslc-rust --example generate_mutants_config
+
+examine_globs = [
+  "fsl-verifier/src/bmc.rs",
+  "fsl-verifier/src/trace.rs",
+  "fslc/src/verification_output.rs",
+]
+
+examine_re = [
+  "(replace verify_bounded_config( ->| with)| in verify_bounded_config$)",
+  "(replace check_state_properties( ->| with)| in check_state_properties$)",
+  "(replace make_violation( ->| with)| in make_violation$)",
+  "(replace probe( ->| with)| in probe$)",
+  "(replace project_trace( ->| with)| in project_trace$)",
+  "(replace project_action( ->| with)| in project_action$)",
+  "(replace replay_bmc_witnesses( ->| with)| in replay_bmc_witnesses$)",
+  "(replace render_violation( ->| with)| in render_violation$)",
+]
+
+# These line-scoped exclusions are coupled to unique source anchors. Liveness
+# is deliberately outside the initial P2 symbolic-witness pilot rather than
+# being treated as equivalent. The generated file contains their current lines.
+# cargo-mutants 27.1.0 emits both `replace && with || in verify_bounded_config`
+# and `delete ! in verify_bounded_config` at each of the first two anchors, so
+# line-free exclude_re patterns cannot preserve this exact three-exclusion scope.
+exclude_re = [
+{{GENERATED_EXCLUDE_RE}}
+]
+
+# Changed-mode diff filtering may select only fsl-verifier as the mutated
+# package. cargo-mutants still prefixes that package to its cargo invocation,
+# so name fslc-rust again in the appended arguments to resolve these detector
+# targets from both packages instead of applying them only to fsl-verifier.
+test_package = ["fslc-rust"]
+additional_cargo_test_args = ["--package", "fslc-rust", "--test", "solver_fail_closed", "--test", "triangulated_assurance"]
+timeout_multiplier = 3.0
+build_timeout_multiplier = 3.0
+minimum_test_timeout = 30.0
+cap_lints = true
+gitignore = true
+copy_vcs = true

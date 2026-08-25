@@ -38,10 +38,15 @@ maps a mutant back to the nearest containing decision region. A bare function
 name is never emitted as a substitute for decision traceability.
 
 Line-scoped generic exclusions are allowed only for a uniquely anchored
-decision that is explicitly outside the pilot. The manifest validator derives
-the cargo-mutants line expression from that anchor and requires the TOML set to
-match exactly, so source movement fails before a stale line exclusion can hide
-a mutant. Such exclusions are scope declarations, not equivalent mutants.
+decision that is explicitly outside the pilot. An exclusion records its
+selected `occurrence` and the anchor's `expected_occurrences` total; generation
+refuses any source whose actual total differs, so a comment or code duplicate
+cannot silently rebind a positional occurrence. The generator derives the
+cargo-mutants line expression from that checked anchor into
+`rust/.cargo/mutants.toml`; its freshness check reports the first differing
+generated line and the regeneration command, so source movement cannot leave a
+hand-copied line exclusion behind. Such exclusions are scope declarations, not
+equivalent mutants.
 
 The P2 pilot covers:
 
@@ -154,12 +159,17 @@ tier (`changed`/`complete`), with the same classifications and the same evidence
   equivalents check) would add real risk for no measured wall-clock gain.
 - The `semantic-mutation` aggregator requires both lanes to report `success` (`if: always()`, so a
   failing shard cannot be masked by a GitHub-treated-as-satisfied *skip* of the aggregator), then
-  downloads every operator shard's `shard-manifest.v1.json` and enforces completeness: identical
-  `base_revision` and `table_operators` across all three manifests, and the disjoint union of their
+  downloads every stable-name operator shard artifact. The names omit `run_attempt`, so a partial
+  rerun may validly aggregate compatible attempts such as `[N,N+1,N]`. Before content completeness,
+  `tools/check-shard-artifact-cohort.sh semantic` requires exactly one provenance sidecar for each
+  logical shard and validates its schema, lane/run/revision/shard identity, bounded attempt, and
+  canonical payload checksums. It then enforces identical `base_revision` and raw JSON-array-exact
+  `table_operators` across all three manifests (canonicalization is only for checksums and set-union
+  input), and the disjoint union of their
   `executed_operators` equal to `table_operators` exactly (via `tools/check-shard-union.sh`, the same
   fail-closed subset/disjoint/union-equality primitive used by the `rust workspace` split). A shard
-  writes its manifest only after it succeeds, so a failed shard cannot contribute a manifest that
-  reads as complete.
+  writes its manifest and provenance only after it succeeds, so a failed shard cannot contribute
+  evidence that reads as complete; its `if: always()` upload remains diagnostic only.
 
 With no `--lane` flag, `tools/run-semantic-mutation-gate.sh`'s behavior is unchanged from before this
 split: the same manifest test, the same unsharded `run-fault-operators.sh` call, and the same

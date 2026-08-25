@@ -730,6 +730,90 @@ fn run_observe(extra: &[&str]) -> (Value, i32) {
     run_cli(&args)
 }
 
+const INITIAL_LIVENESS_EXPECTATION: &str = r#"causal ImmediateLiveness {
+  uses ops from "incident_system.fsl"
+
+  timebase day
+  horizon 1
+
+  clock ops_clock {
+    kernel ops
+    1 tick = 1 day
+  }
+
+  expectation E_Immediate {
+    trigger predicate ops { guardrails >= 1 }
+    response predicate ops { alert_precision >= 4 }
+    within 0
+    clock ops_clock
+  }
+}
+"#;
+
+fn observe_initial_liveness(initial_guardrails: u8, log: &Path) -> (Value, i32) {
+    let scratch = tempfile_dir();
+    let model = scratch.join("immediate_liveness.causal.fsl");
+    let companion = scratch.join("incident_system.fsl");
+    std::fs::write(&model, INITIAL_LIVENESS_EXPECTATION).expect("write causal model");
+    let kernel =
+        std::fs::read_to_string(repository_root().join("examples/causal/incident_system.fsl"))
+            .expect("read companion kernel")
+            .replace(
+                "guardrails = 0",
+                &format!("guardrails = {initial_guardrails}"),
+            );
+    std::fs::write(&companion, kernel).expect("write companion kernel");
+
+    run_cli(&[
+        "causal",
+        "observe-expectations",
+        model.to_str().expect("utf-8 model path"),
+        "--from-log",
+        log.to_str().expect("utf-8 log path"),
+        "--mapping",
+        OBS_MAPPING,
+        "--scope",
+        OBS_SCOPE,
+        "--period-start",
+        "2026-01-01",
+        "--period-end",
+        "2026-03-31",
+    ])
+}
+
+fn empty_observation_log() -> PathBuf {
+    let log = tempfile_dir().join("empty.jsonl");
+    std::fs::write(&log, "").expect("write empty observation log");
+    log
+}
+
+fn later_enabled_observation_log() -> PathBuf {
+    let log = tempfile_dir().join("later.jsonl");
+    std::fs::write(
+        &log,
+        r#"{"action":"tune_alerts","params":{},"state":{"guardrails":1,"alert_precision":4,"mttr_hours":24}}
+"#,
+    )
+    .expect("write later observation log");
+    log
+}
+
+fn remove_observed_event_counts(envelope: &mut Value) {
+    envelope
+        .as_object_mut()
+        .expect("observation envelope")
+        .remove("events_observed");
+    for expectation in envelope["expectations"]
+        .as_array_mut()
+        .expect("expectations")
+    {
+        expectation["event_counts"]
+            .as_object_mut()
+            .expect("event counts")
+            .remove("observed");
+    }
+}
+
 fn generated_evidence_paths(directory: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let mut evidence = Vec::new();
     let mut lifecycle = Vec::new();
@@ -813,6 +897,66 @@ fn observe_expectations_pass_and_violated_golden() {
             "must include temporal co-occurrence caveat"
         );
     }
+}
+
+#[test]
+fn observe_expectations_reports_initial_liveness_violation() {
+    let log = empty_observation_log();
+    let (output, status) = observe_initial_liveness(1, &log);
+
+    assert_eq!(status, 0, "{output}");
+    assert_eq!(output["result"], "causal_expectations_observed");
+    assert_eq!(output["expectations"][0]["verdict"], "violated");
+}
+
+#[test]
+fn observe_expectations_keeps_clean_initial_liveness_pass() {
+    let log = empty_observation_log();
+    let (output, status) = observe_initial_liveness(0, &log);
+
+    assert_eq!(status, 0, "{output}");
+    assert_eq!(output["result"], "causal_expectations_observed");
+    assert_eq!(output["expectations"][0]["verdict"], "pass");
+}
+
+#[test]
+fn observe_expectations_initial_liveness_violation_skips_later_events() {
+    let log = later_enabled_observation_log();
+    let (output, status) = observe_initial_liveness(1, &log);
+
+    assert_eq!(status, 0, "{output}");
+    assert_eq!(output["result"], "causal_expectations_observed");
+    assert_eq!(output["expectations"][0]["verdict"], "violated");
+}
+
+#[test]
+fn observe_expectations_initial_and_later_liveness_violations_have_matching_envelopes() {
+    let initial_log = empty_observation_log();
+    let (initial, initial_status) = observe_initial_liveness(1, &initial_log);
+    let (later, later_status) = observe_initial_liveness(0, &repository_root().join(OBS_LOG));
+
+    assert_eq!(initial_status, 0, "{initial}");
+    assert_eq!(later_status, 0, "{later}");
+    assert_eq!(initial["expectations"][0]["verdict"], "violated");
+    assert_eq!(later["expectations"][0]["verdict"], "violated");
+    assert_eq!(initial["events_observed"], 0);
+    assert!(
+        later["events_observed"]
+            .as_u64()
+            .is_some_and(|count| count > 0)
+    );
+    assert_eq!(initial["expectations"][0]["event_counts"]["observed"], 0);
+    assert!(
+        later["expectations"][0]["event_counts"]["observed"]
+            .as_u64()
+            .is_some_and(|count| count > 0)
+    );
+
+    let mut comparable_initial = initial;
+    let mut comparable_later = later;
+    remove_observed_event_counts(&mut comparable_initial);
+    remove_observed_event_counts(&mut comparable_later);
+    assert_eq!(comparable_initial, comparable_later);
 }
 
 #[test]

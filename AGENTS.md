@@ -111,6 +111,34 @@ inventory, and promotion changes run the `scheduled` tier.
 - Every formal-to-implementation conformance anchor must include a negative control that rejects a
   known contract-violating trace, transition, or mutation. A green positive path alone does not
   establish that the anchor can detect drift.
+- Label each control by what it establishes, and prove the label by executing the mutation. A
+  *detector* fails under the mutation it is cited for; a *preservation control* correctly keeps passing
+  when the change is reverted and establishes only that unrelated behavior was not disturbed. A
+  preservation control presented as a detector is a false coverage claim. Report the produced value
+  beside the expected one — "the test failed" does not establish that it failed for the right reason.
+  Isolate mutations unless a compound mutant's compound expectation is stated before it is applied.
+  Prove the revert by exact equality to the named baseline — an empty `git diff` against it. A `grep -c`
+  returning zero is supporting evidence only when the mutation introduced a unique token: a mutation
+  that edits or deletes text leaves a correct revert with a nonzero count, and a pattern can match a
+  sibling site rather than the mutated one.
+- A comparison control's scope is part of the control. When a control asserts that two outputs agree,
+  compare them in full. Give every excluded field a written reason it *cannot* be compared, not a
+  category label asserting that it varies; build the exclusion list from the observed output, never
+  from a type's field names; and pair it with a check that fails when an excluded key is absent from
+  both sides. A dead exclusion weakens nothing while looking deliberate, so reading cannot distinguish
+  it from a considered one. A hand-picked field list has let two opposite-direction wrong
+  implementations both pass.
+- A control whose verdict depends on ambient state is not a control. If an observable it compares can
+  vary with cache state, environment, filesystem residue, or execution order, split it: compare stable
+  observables exactly and check ambient ones for membership rather than equality. Run a new or changed
+  control at least twice in one session before reporting it green — the first fix for this class
+  commonly inverts the flake rather than removing it, and a single run cannot tell those apart.
+- Confirm what a state *is* before reporting an observation about it. Name the commit, the built
+  binary, and any mutation currently applied. A working tree under a calibration mutation is not the
+  committed implementation; a worktree behind `origin/main` is not `main`; a binary built before the
+  change does not exercise the change; a run's creation timestamp is not a job's elapsed time. Each of
+  these has produced a confidently reported defect that did not exist, or a passing verdict that the
+  change had not earned.
 - A soundness-critical claim marked triangulated must follow
   `docs/DESIGN-triangulated-assurance.md`: preserve the pre-classification raw observation, declare
   two reviewably independent semantic lineages, execute all three agreement edges, and calibrate

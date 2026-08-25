@@ -572,7 +572,7 @@ instances 数から独立です — <code>Case</code> のサイズが <code>veri
 <tr>
 <td><code>Map&lt;K, V&gt;</code></td>
 <td><code>stock: Map&lt;ItemId, Qty&gt;</code></td>
-<td>K は有界スカラー(ドメイン型 / enum / Bool)を推奨</td>
+<td>K は有界スカラー(ドメイン型 / enum / Bool)でなければならない</td>
 </tr>
 <tr>
 <td><code>Set&lt;T&gt;</code></td>
@@ -611,8 +611,8 @@ induction、Public Kernel v1 は、等価な <code>init</code> ブロックと�
   <code>Option&lt;Option&lt;...&gt;&gt;</code>、<code>Option&lt;Set/Map/Seq/struct&gt;</code> は許されません
   (check 時にヒント付きで拒否されます)。省略可能なスカラーのフィールドは、
   v2.1 以降 struct の中に直接書けます。</li>
-<li><code>Map&lt;Int, V&gt;</code> は動作しますが非推奨の警告を出します。ドメイン型のキーを使って
-  ください。</li>
+<li><code>Map&lt;Int, V&gt;</code> は <code>check</code> で拒否されます。<code>type ItemId = 0..&lt;max&gt;</code> のような
+  有界キー型を宣言し、<code>Map&lt;ItemId, V&gt;</code> を使ってください。</li>
 <li><code>symmetric type</code> と <code>symmetric enum</code> は、liveness の対称性簡約のために、値を
   交換可能なエンティティ同一性としてマークします。<code>leadsTo</code> の lasso/停滞探索の
   間、fslc は <code>Map&lt;SymmetricType, V&gt;</code> と <code>Set&lt;SymmetricType&gt;</code> の状態から作られる
@@ -1646,6 +1646,14 @@ fslc scenarios specs/order_system.fsl
 fail closed です。compose は、明示の検査済み names/order ブリッジを使います。
 Public Kernel は不完全なマルチファイルの provenance を意図的に拒否するためです。
 エクスポートエラーの後のフォールバックではなく、同じアダプタに入ります。</p>
+<p>固定シードのウォークは 100 ステップを上限とする具象 Monitor の実行であり、
+enabled な action が無くなればそこで止まります。<code>--depth</code> には束縛され <strong>ません</strong>。
+したがって、<code>testgen</code> が先に実行する depth 以内の有界検証が「違反なし」と証明した
+違反に、ウォークが到達し得ます。Monitor は違反したステップを rollback するため、
+そのステップを記録することは「その action は no-op である」と述べることになり、
+これは FSL のどの契約も述べていない期待値です。<code>testgen</code> は代わりに、<code>verify</code> が
+返すのと同じ <code>result:"violated"</code> エンベロープ、終了コード、プロパティ、ステップ、
+再生可能なトレースで違反を報告し、ハーネスを書きません。</p>
 <ul>
 <li><code>--target pytest</code>(デフォルト): <code>fslc.runtime.Monitor</code> をインポートし、オラクル
   としてランダムウォークをライブで駆動する Python テストを出力します。</li>

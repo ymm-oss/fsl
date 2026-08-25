@@ -38,6 +38,7 @@ check_rust() {
 # using `cargo-nextest`, which nextest cannot do for doctests. Doctests
 # therefore stay here, explicit and unsharded, rather than silently dropped.
 check_rust_checks() {
+  ./tools/check-release-binary-linkage.sh --self-test
   check_stack_parity
   cargo fmt --manifest-path rust/Cargo.toml --all -- --check
   cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings

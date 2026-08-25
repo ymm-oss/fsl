@@ -757,7 +757,7 @@ enum FoldClass {
 }
 
 /// Independent fold registry. The 65 registered result literals are
-/// transcribed from `rust/fslc/src/outcome.rs:82-216`; sibling-field semantics
+/// transcribed from `rust/fslc/src/outcome.rs:86-218`; sibling-field semantics
 /// are documented at `docs/LANGUAGE.md:940-961`. This function deliberately
 /// does not call the production classifier.
 #[allow(clippy::too_many_lines)]
@@ -877,7 +877,7 @@ fn fold_action(output: &Value) -> Result<Value, String> {
 }
 
 /// Exact compound result/exit pairs follow `docs/LANGUAGE.md:940-961` and the
-/// command contracts at `main.rs:3533-3589,4000-4051,13309-13338`.
+/// command contracts at `main.rs:3533-3589,4000-4051,13422-13451`.
 fn finalize_action(command: CompoundCommand, top: &RawCliOutput) -> Result<Value, String> {
     let result = top
         .output

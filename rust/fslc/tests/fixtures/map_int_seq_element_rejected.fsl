@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec SeqMapInt {
+  type Id = 0..1
+  state {
+    m: Seq<Map<Int, Bool>, 1>
+  }
+  action stay() { }
+}

@@ -16,18 +16,21 @@ use super::{
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct ExplicitViolation {
     pub violation: Violation,
     pub trace: Vec<TraceStep>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct ExplicitReachableWitness {
     pub step: usize,
     pub trace: Vec<TraceStep>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct ExplicitResult {
     pub spec: String,
     pub depth: usize,
@@ -46,7 +49,7 @@ pub struct ExplicitResult {
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum InitWriteKey {
     Root(String),
-    ConcreteIndex(String, String),
+    ConcreteIndex(String, Value),
 }
 
 /// Verify a finite kernel model using level-synchronous concrete BFS.
@@ -603,6 +606,35 @@ fn resolve_enum_key(model: &KernelModel, key_type: &TypeRef, name: &str) -> Opti
         .find(|value| matches!(value, Value::Enum { member, .. } if member == name))
 }
 
+/// Resolve `name` as an integer constant only for bounded integer key types.
+///
+/// Map-key coverage is typed: an integer constant must not stand in for an enum
+/// member merely because they share a spelling.
+fn resolve_integer_const_key(model: &KernelModel, key_type: &TypeRef, name: &str) -> Option<Value> {
+    let is_integer_key = match key_type {
+        TypeRef::Range(_, _) => true,
+        TypeRef::Named(type_name) => {
+            matches!(model.types.get(type_name), Some(TypeDef::Domain { .. }))
+        }
+        // Source-level `Map<Int, _>` is rejected by `build_model`; fail closed
+        // if an internal caller ever bypasses that construction path.
+        TypeRef::Int
+        | TypeRef::Bool
+        | TypeRef::Map(_, _)
+        | TypeRef::Relation(_, _)
+        | TypeRef::Set(_)
+        | TypeRef::Seq(_, _)
+        | TypeRef::Option(_) => false,
+    };
+    if !is_integer_key {
+        return None;
+    }
+    match model.consts.get(name) {
+        Some(Value::Int(value)) => Some(Value::Int(*value)),
+        _ => None,
+    }
+}
+
 /// The coverage a single assignment statement contributes to its logical
 /// root, independent of whatever the root already had. Returns `None` when
 /// the target's key/field shape carries no provable component information
@@ -623,6 +655,7 @@ fn assignment_coverage(
                         .map(|values| Coverage::Keys(values.into_iter().collect()))
                 } else if let Some(TypeRef::Map(key_ty, _)) = model.state_type(name) {
                     resolve_enum_key(model, key_ty, key)
+                        .or_else(|| resolve_integer_const_key(model, key_ty, key))
                         .map(|value| Coverage::Keys(BTreeSet::from([value])))
                 } else {
                     None
@@ -654,8 +687,9 @@ fn walk_init(
             Statement::Assign { target, value, .. } => {
                 let logical = logical_var(target)
                     .ok_or_else(|| runtime_error("invalid init assignment target"))?;
-                let key = init_write_key(target, bound_names);
-                if possibly_assigned.contains(&key) {
+                let contribution = assignment_coverage(target, bound_names, model);
+                let keys = init_write_keys(target, contribution.as_ref());
+                if keys.iter().any(|key| possibly_assigned.contains(key)) {
                     let scope = if in_forall { "init forall" } else { "init" };
                     return Err(runtime_error(format!(
                         "state variable '{logical}' assigned more than once in {scope}"
@@ -665,12 +699,12 @@ fn walk_init(
                     check_init_expr(key_expr, &definitely_assigned, model)?;
                 }
                 check_init_expr(value, &definitely_assigned, model)?;
-                if let Some(contribution) = assignment_coverage(target, bound_names, model) {
+                if let Some(contribution) = contribution {
                     let previous = definitely_assigned.remove(logical);
                     definitely_assigned
                         .insert(logical.to_owned(), join_coverage(previous, contribution));
                 }
-                possibly_assigned.insert(key);
+                possibly_assigned.extend(keys);
             }
             Statement::ForAll {
                 binder, statements, ..
@@ -908,26 +942,45 @@ fn logical_var(target: &LValue) -> Option<&str> {
     }
 }
 
-fn init_write_key(
-    target: &LValue,
-    bound_names: &BTreeMap<String, Option<Vec<Value>>>,
-) -> InitWriteKey {
-    if let LValue::Index(name, index) = target {
-        match index {
-            Expr::Var(key) if !bound_names.contains_key(key) => {
-                return InitWriteKey::ConcreteIndex(name.clone(), format!("var:{key}"));
-            }
-            Expr::Num(key) => {
-                return InitWriteKey::ConcreteIndex(name.clone(), format!("num:{key}"));
-            }
-            _ => {}
-        }
+/// Concrete per-key write identities a single init assignment touches, for
+/// duplicate-write detection at the granularity `docs/LANGUAGE.md` §12
+/// requires: "assign exactly once" is per concrete key, not per variable.
+///
+/// This reuses `assignment_coverage`'s resolution rather than computing a
+/// second, independent classification (issue #821): a `forall i { m[i] =
+/// ... }` whose index is the binder itself resolves to `Coverage::Keys` of
+/// every binder value, so it collides key-for-key with a later concrete
+/// write to any of those same keys, and an enum-member key resolves to the
+/// same `Value` a numeric literal denoting it would.
+///
+/// Falls back to `InitWriteKey::Root` (whole-variable) whenever `coverage`
+/// is not `Coverage::Keys` for an `Index` target — including `Full`,
+/// `Fields`, and unresolved (`None`, e.g. a dynamic key or a nested lvalue).
+/// That fallback never *accepts* something the coarser, pre-#821
+/// `Root`-only classification would have rejected: every write this
+/// function buckets under `Root` was already bucketed there before. It is
+/// not, however, "as strict as touching the entire variable" in the
+/// collision sense: `Root(name)` never collides with
+/// `ConcreteIndex(name, _)`, so a `None`-coverage target is simply not
+/// collision-checked against any concrete key at all. A `forall`-bound
+/// index used through a non-`Var` key expression (e.g. `m[i - i]`) is one
+/// such target; two iterations of it aliasing each other, or it aliasing a
+/// separate `m[K] = ...`, can still go undetected here when the values
+/// agree. That gap is pre-existing (identical on `origin/main`) and is not
+/// fixed by this change.
+fn init_write_keys(target: &LValue, coverage: Option<&Coverage>) -> BTreeSet<InitWriteKey> {
+    if let (LValue::Index(name, _), Some(Coverage::Keys(keys))) = (target, coverage) {
+        return keys
+            .iter()
+            .cloned()
+            .map(|key| InitWriteKey::ConcreteIndex(name.clone(), key))
+            .collect();
     }
-    InitWriteKey::Root(
+    BTreeSet::from([InitWriteKey::Root(
         logical_var(target)
             .expect("kernel lvalue has a logical root")
             .to_owned(),
-    )
+    )])
 }
 
 fn binder_name(binder: &Binder) -> &str {

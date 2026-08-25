@@ -87,6 +87,132 @@ fn native_check_and_verify_share_the_core_duplicate_write_gate() {
 }
 
 #[test]
+fn native_check_rejects_map_int_keys_with_a_located_bounded_key_replacement() {
+    let (value, status) = run_cli(&["check", "rust/fslc/tests/fixtures/map_int_key_rejected.fsl"]);
+
+    assert_eq!(
+        value["message"],
+        "Map<Int, ...> on 'stock' is rejected; use a bounded domain type as key; declare `type K = 0..<max>` and use `Map<K, ...>`"
+    );
+    assert_eq!(value["result"], "error");
+    assert_eq!(value["kind"], "type");
+    assert_eq!(value["loc"], serde_json::json!({"line": 5, "column": 5}));
+    assert!(value.get("hint").is_none(), "{value}");
+    assert_eq!(status, 2, "{value}");
+}
+
+fn assert_map_int_rejected(fixture: &str, name: &str, expected_loc: &serde_json::Value) {
+    let (value, status) = run_cli(&["check", fixture]);
+    assert_eq!(
+        value["message"],
+        format!(
+            "Map<Int, ...> on '{name}' is rejected; use a bounded domain type as key; declare `type K = 0..<max>` and use `Map<K, ...>`"
+        ),
+        "{fixture}: {value}"
+    );
+    assert_eq!(value["result"], "error", "{fixture}: {value}");
+    assert_eq!(value["kind"], "type", "{fixture}: {value}");
+    assert_eq!(&value["loc"], expected_loc, "{fixture}: {value}");
+    assert_eq!(status, 2, "{fixture}: {value}");
+}
+
+#[test]
+fn native_check_rejects_map_int_keys_nested_in_map_values() {
+    assert_map_int_rejected(
+        "rust/fslc/tests/fixtures/map_int_nested_value_rejected.fsl",
+        "m",
+        &serde_json::json!({"line": 6, "column": 5}),
+    );
+}
+
+#[test]
+fn native_check_rejects_map_int_keys_nested_in_map_keys() {
+    assert_map_int_rejected(
+        "rust/fslc/tests/fixtures/map_int_nested_key_rejected.fsl",
+        "m",
+        &serde_json::json!({"line": 6, "column": 5}),
+    );
+}
+
+#[test]
+fn native_check_rejects_map_int_keys_nested_in_set_elements() {
+    assert_map_int_rejected(
+        "rust/fslc/tests/fixtures/map_int_set_element_rejected.fsl",
+        "m",
+        &serde_json::json!({"line": 6, "column": 5}),
+    );
+}
+
+#[test]
+fn native_check_rejects_map_int_keys_nested_in_seq_elements() {
+    assert_map_int_rejected(
+        "rust/fslc/tests/fixtures/map_int_seq_element_rejected.fsl",
+        "m",
+        &serde_json::json!({"line": 6, "column": 5}),
+    );
+}
+
+#[test]
+fn native_check_rejects_map_int_keys_nested_in_option_elements() {
+    assert_map_int_rejected(
+        "rust/fslc/tests/fixtures/map_int_option_element_rejected.fsl",
+        "m",
+        &serde_json::json!({"line": 6, "column": 5}),
+    );
+}
+
+#[test]
+fn native_check_rejects_map_int_keys_nested_in_relation_sources() {
+    assert_map_int_rejected(
+        "rust/fslc/tests/fixtures/map_int_relation_source_rejected.fsl",
+        "m",
+        &serde_json::json!({"line": 6, "column": 5}),
+    );
+}
+
+#[test]
+fn native_check_rejects_map_int_keys_nested_in_relation_targets() {
+    assert_map_int_rejected(
+        "rust/fslc/tests/fixtures/map_int_relation_target_rejected.fsl",
+        "m",
+        &serde_json::json!({"line": 6, "column": 5}),
+    );
+}
+
+#[test]
+fn native_check_rejects_map_int_keys_in_struct_fields() {
+    assert_map_int_rejected(
+        "rust/fslc/tests/fixtures/map_int_struct_field_rejected.fsl",
+        "Payload.inner",
+        &serde_json::json!({"line": 4, "column": 3}),
+    );
+}
+
+#[test]
+fn native_check_accepts_a_bounded_map_key() {
+    let (value, status) = run_cli(&[
+        "check",
+        "rust/fslc/tests/fixtures/map_bounded_key_accepted.fsl",
+    ]);
+
+    assert_eq!(status, 0, "{value}");
+    assert_eq!(value["result"], "ok");
+    assert!(value["warnings"].as_array().is_some_and(Vec::is_empty));
+}
+
+#[test]
+fn native_check_accepts_nested_bounded_map_keys() {
+    let (value, status) = run_cli(&[
+        "check",
+        "rust/fslc/tests/fixtures/map_nested_bounded_key_accepted.fsl",
+    ]);
+
+    assert_eq!(status, 0, "{value}");
+    assert_eq!(value["result"], "ok");
+    assert!(value["warnings"].as_array().is_some_and(Vec::is_empty));
+}
+
+#[test]
 fn native_check_rejects_an_incomplete_governance_contract() {
     let (value, status) = run_cli(&[
         "check",

@@ -29,6 +29,7 @@ use crate::{DocumentIndex, SourceDiagnostic, SymbolRole};
 const KEYWORDS: &[&str] = &[
     "spec",
     "compose",
+    "use",
     "requirements",
     "business",
     "governance",
@@ -870,6 +871,183 @@ mod tests {
     use lsp_server::RequestId;
     use lsp_types::Range;
 
+    struct CompletionKeywordExclusion {
+        keywords: &'static [&'static str],
+        reason: &'static str,
+    }
+
+    /// Keywords rejected by rename validation but intentionally absent from
+    /// generic completion. Each group records the context needed to decide
+    /// whether a future keyword belongs in completion instead.
+    const COMPLETION_KEYWORD_EXCLUSIONS: &[CompletionKeywordExclusion] = &[
+        CompletionKeywordExclusion {
+            keywords: &["causal"],
+            reason: "the review-only causal profile has its own source grammar and is not a generic completion starter",
+        },
+        CompletionKeywordExclusion {
+            keywords: &[
+                "table",
+                "transition",
+                "tool",
+                "command",
+                "effect",
+                "migration",
+                "decide",
+                "evolve",
+                "def",
+                "property",
+                "requirement",
+                "acceptance",
+                "forbidden",
+                "control",
+                "policy",
+                "goal",
+                "claim",
+                "expectation",
+                "actor",
+                "process",
+                "kpi",
+                "authority",
+                "aggregate",
+                "projection",
+                "environment",
+                "artifact",
+                "column",
+                "variable",
+                "preservation",
+                "verify",
+            ],
+            reason: "these declaration forms require a selected dialect or declaration context, so generic completion does not offer them",
+        },
+        CompletionKeywordExclusion {
+            keywords: &["as", "from", "internal", "symmetric", "fair"],
+            reason: "these compose modifiers complete only after their owning declaration has established context",
+        },
+        CompletionKeywordExclusion {
+            keywords: &[
+                "let",
+                "in",
+                "where",
+                "decreases",
+                "within",
+                "helpful",
+                "relation",
+                "acyclic",
+                "functional",
+                "injective",
+                "map",
+                "maps",
+                "auto",
+                "impl",
+                "abs",
+                "preserve",
+                "progress",
+                "respond",
+                "by",
+                "implements",
+                "expect",
+                "rejected",
+            ],
+            reason: "these binders and clause modifiers are meaningful only within their owning grammar production",
+        },
+        CompletionKeywordExclusion {
+            keywords: &[
+                "time",
+                "urgent",
+                "age",
+                "while",
+                "deadline",
+                "with",
+                "stages",
+                "initial",
+                "when",
+                "set",
+                "covers",
+                "count",
+                "owner",
+                "severity",
+                "applies_to",
+                "satisfies",
+                "responds",
+                "every",
+                "reaching",
+                "must",
+                "have",
+                "passed",
+                "through",
+                "eventually",
+                "be",
+                "some",
+                "can",
+                "reach",
+                "all",
+                "owns",
+                "delegates",
+                "require",
+                "satisfied_by",
+                "before",
+                "after",
+                "checked_by",
+            ],
+            reason: "these requirements, business, and temporal clauses need a surrounding declaration to be useful",
+        },
+        CompletionKeywordExclusion {
+            keywords: &[
+                "Int",
+                "Bool",
+                "Map",
+                "Set",
+                "Seq",
+                "Option",
+                "is",
+                "and",
+                "or",
+                "not",
+                "sum",
+                "min",
+                "max",
+                "old",
+                "unique",
+                "exactlyOne",
+                "add",
+                "remove",
+                "push",
+                "pop",
+                "head",
+                "at",
+                "size",
+                "contains",
+            ],
+            reason: "these types, operators, and member names require expression or type context rather than generic completion",
+        },
+        CompletionKeywordExclusion {
+            keywords: &[
+                "timebase",
+                "horizon",
+                "scope",
+                "clock",
+                "feedback",
+                "evidence",
+                "polarity",
+                "lag",
+                "persists",
+                "basis",
+                "status",
+                "version",
+                "binds",
+                "observes",
+                "latent",
+                "proxy",
+                "cadence",
+                "trigger",
+                "response",
+                "derived_from_claim",
+                "uses",
+            ],
+            reason: "these causal-profile declarations and clauses require causal grammar context rather than generic completion",
+        },
+    ];
+
     fn request(state: &ServerState, method: &str, params: serde_json::Value) -> serde_json::Value {
         let (sender, receiver) = crossbeam_channel::unbounded();
         handle_request(
@@ -894,7 +1072,9 @@ mod tests {
         value
             .as_array()
             .expect("semantic token data")
-            .chunks_exact(5)
+            .as_chunks::<5>()
+            .0
+            .iter()
             .any(|token| {
                 let delta_line = token[0].as_u64().expect("delta line");
                 line += delta_line;
@@ -946,6 +1126,46 @@ mod tests {
         assert!(!valid_identifier("state"));
         assert!(!valid_identifier("use"));
         assert!(!valid_identifier("two names"));
+    }
+
+    #[test]
+    fn completion_and_rename_keyword_populations_are_accounted_for() {
+        let completion = KEYWORDS.iter().copied().collect::<HashSet<_>>();
+        let mut exclusions = HashSet::new();
+
+        for keyword in KEYWORDS {
+            assert!(
+                crate::index::is_keyword(keyword),
+                "completion offers {keyword:?}, but rename validation does not recognize it"
+            );
+        }
+        for exclusion in COMPLETION_KEYWORD_EXCLUSIONS {
+            assert!(
+                !exclusion.reason.trim().is_empty(),
+                "completion exclusion {:?} needs a reason",
+                exclusion.keywords
+            );
+            for keyword in exclusion.keywords {
+                assert!(
+                    crate::index::is_keyword(keyword),
+                    "completion exclusion {keyword:?} is stale: rename validation no longer recognizes it"
+                );
+                assert!(
+                    !completion.contains(keyword),
+                    "completion exclusion {keyword:?} is now offered; remove the stale exclusion"
+                );
+                assert!(
+                    exclusions.insert(*keyword),
+                    "completion exclusion {keyword:?} is listed more than once"
+                );
+            }
+        }
+        for keyword in crate::index::recognized_keywords() {
+            assert!(
+                completion.contains(keyword) || exclusions.contains(keyword),
+                "rename validation recognizes {keyword:?}, but completion neither offers it nor records a reasoned exclusion"
+            );
+        }
     }
 
     #[test]

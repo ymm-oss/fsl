@@ -169,8 +169,9 @@ run. A missing base/head SHA, a failed `git diff`, or an event the script does n
 resolve to `run=true` — never to a stub. The `main` push, schedule, and dispatch triggers carry no
 exemption at all: `tools/check-product-gate-scope.sh` returns `run=true` unconditionally for
 those events, so every merged `main` state still receives the complete product evidence, and a
-wrongly exempted defect surfaces through the existing post-merge reporting contract below instead
-of reaching `production`. And a pull request into `production` that matches the list is blocked
+wrongly exempted defect surfaces through the existing post-merge reporting contract below for a
+trusted default-branch push, schedule, or dispatch run instead of reaching `production`. And a
+pull request into `production` that matches the list is blocked
 rather than waved through: the script's `production` branch always returns `run=true`, so the
 production ruleset's required contexts (`rust workspace`, `WASM`, the `native Z3 4.16` matrix)
 still report real evidence — such a pull request should not exist, and the gate does not invent a
@@ -290,9 +291,36 @@ one failed, so it can fail loudly instead of disappearing. The aggregator job **
 required-context set (`rust workspace`, `semantic mutation (changed)`) both keep working without
 their own edit.
 
-**Union-completeness guards.** A scheduling change must not be able to silently narrow what runs, so
-each aggregator downloads its shards' inventories and proves the split is a true partition of the
-unsharded set before trusting a `success` result:
+**Stable shard artifacts and cohort guards.** Each sharded artifact has a stable logical name scoped
+to its run and shard (`rust-test-shard-<K>-<run_id>` or
+`semantic-mutation-operators-<K>-<run_id>`), with `overwrite: true`. The name intentionally omits
+`run_attempt`: after `rerun --failed`, an unchanged successful shard may remain from attempt N while
+the rerun shard is replaced by attempt N+1. The aggregator therefore admits a mixed cohort such as
+`[N,N+1,N]`; it does not require all attempts to match, but requires every recorded attempt to be an
+integer in `1..github.run_attempt`. It never searches another run id or chooses a "newest" artifact
+from an ambiguous set.
+
+Each successful producer writes `artifact-provenance.v1.json` before its `if: always()` upload. The
+sidecar schema `fslc.shard-artifact-provenance.v1` records the fixed lane, string `run_id`, integer
+`run_attempt`, producer checkout's `head_revision`, integer shard index/total, and SHA-256 digests of
+the canonical full and shard payloads. A failed shard can still upload diagnostic files, but cannot
+create complete provenance after its test/operator step failed; the dependency-result guard remains
+the first boundary against treating that upload as successful evidence.
+
+`tools/check-shard-artifact-cohort.sh` fails closed unless exactly three sidecars exist and their
+schema/types, lane, run id, head revision, shard total, unique indices `{1,2,3}`, stable artifact
+directory names, bounded attempts, payload checksums, and full-universe digests agree. It then
+preserves the prior lane-specific guarantees: Rust full inventories are byte-identical; semantic
+manifests share `base_revision` and raw JSON-array-exact `table_operators` (the canonical form is
+used only for payload checksums and set-union input); and both lanes call
+`tools/check-shard-union.sh` for exact subset/disjoint/union equality. A checksum is an artifact
+identity control, not a replacement for these content-completeness controls. An older attempt with
+identical compatible content is valid by policy; an incompatible older payload is rejected by its
+checksum, universe, manifest, or exact-union diagnostic.
+
+A scheduling change must not be able to silently narrow what runs, so each aggregator downloads its
+shards' inventories and proves the split is a true partition of the unsharded set before trusting a
+`success` result:
 
 - `rust-workspace` downloads the three `rust-tests` shards' `full.txt`/`shard.txt` (written by
   `check_rust_tests` in `tools/check-native-integration.sh` *before* the shard's tests run, so the
@@ -315,6 +343,43 @@ shard entry, an empty shard list, and an entire binary's tests dropped from ever
 no longer has, and one binary pinned to two shards). It is wired into
 `tools/check-merge-readiness.sh`'s `check_automation`, alongside
 `check-product-gate-scope.sh selftest`.
+
+The cohort helper's selftest calibrates compatible partial/all-current cohorts and isolated
+rejecting mutations for missing shards, nested foreign artifact names, unchanged-sidecar payload
+edits, incompatible universes, foreign lane/run/revision/index provenance, future attempts,
+semantic base-revision drift, and raw-array `table_operators` drift. Each
+rejection asserts the produced value beside the expected diagnostic. The parser-backed
+`.github/scripts/validate-shard-artifact-workflow.py` and
+`tests/test_shard_artifact_workflow.py` additionally reject one-sided name/pattern drift, lost
+overwrite/provenance/helper wiring, lost aggregator/dependency guards, and accidental changes to
+both unsharded attempt-scoped artifacts (`semantic-mutation-mutants` and `fsl-logic`). All are
+required by `check-merge-readiness.sh automation`.
+
+This local evidence does not establish GitHub's cross-attempt `upload-artifact@v4` overwrite scope,
+the visibility of an unchanged attempt-N artifact to an attempt-N+1 download, or duplicate-name
+selection behavior. The implementation must not merge until a controlled Actions probe has observed
+one shard failing only after its attempt-1 upload, `rerun --failed` producing attempts `[1,2,1]`, one
+artifact per stable logical name, and successful aggregation in both directory shapes. The run id,
+attempts, artifact ids/names/timestamps, sidecar attempts, and aggregator diagnostics must then be
+recorded here. If the probe contradicts stable-slot semantics, this design is not accepted for merge;
+it must return to the bounded same-run resolver alternative rather than interpreting ambiguity as
+green.
+
+**Controlled probe observation (recorded 2026-08-25, run `32798975136` on PR #891).** Attempt 1
+failed exactly the two probe steps ("Controlled partial-rerun probe after test-shard upload" /
+"... after operator-shard upload") on shard 2 of both lanes, after their uploads; the two aggregator
+failures were their dependent evidence guards. `gh run rerun --failed` produced attempt 2 in which
+only shard 2 of each lane re-ran, and the run completed `success`. The artifact inventory after
+attempt 2 held exactly one artifact per stable logical name: `rust-test-shard-{1,2,3}-32798975136`
+(ids 9546136831 / 9546640389 / 9546005874; shard 2 created 02:28:37Z by attempt 2, shards 1/3
+keeping their attempt-1 timestamps 02:03:52Z / 01:57:24Z) and
+`semantic-mutation-operators-{1,2,3}-32798975136` (ids 9545933248 / 9546534454 / 9546403892; shard 2
+created 02:23:50Z by attempt 2). The unsharded `semantic-mutation-mutants-32798975136-1` and
+`fsl-logic-32798975136-1` stayed attempt-scoped. Both aggregators accepted the mixed cohort with the
+expected diagnostics: `check-shard-artifact-cohort: PASS -- lane=rust-tests run_id=32798975136
+attempts=1,2,1 shards=1,2,3` and `check-shard-artifact-cohort: PASS --
+lane=semantic-mutation-operators run_id=32798975136 attempts=1,2,1 shards=1,2,3`. This satisfies the
+probe precondition above; the probe commit itself was then removed from the branch.
 
 **Agent-configuration-exempt pull requests still work.** Every shard job runs
 `check-product-gate-scope.sh` itself and early-exits its own later steps when `run=false`, so the
@@ -586,7 +651,7 @@ some other event on the same workflow saving a `main`-branch copy to restore fro
 it would make every pull request permanently cold — the workflow would never save a cache under its
 own key, from any event. `merge-readiness.yml`'s two `Swatinem/rust-cache` steps instead go
 **restore-only against `ci.yml`'s own `rust-workspace` key** (`shared-key: rust-workspace`,
-`save-if: false`): both jobs run `dtolnay/rust-toolchain@stable` on `ubuntu-latest` against the same
+`save-if: false`): both jobs run `dtolnay/rust-toolchain@1.98.0` on `ubuntu-latest` against the same
 checkout as `ci.yml`'s `rust workspace` job, and `Swatinem/rust-cache` derives its key from the
 rustc version, `CARGO`/`CC`/`CFLAGS`/`CXX`/`CMAKE`/`RUST`-prefixed env vars, and the workspace
 lockfiles — none of which differ between the two workflows. That mechanism-derived expectation is now
@@ -695,6 +760,45 @@ would succeed rather than time out. A `cache-targets: false` lever on the
 mutation lanes was considered and rejected: it would cost the operators shards a cold build every
 run (~35 min measured cold vs. ~5 min warm) for less budget relief than `fsl-logic` gives for
 near-zero cost.
+
+**A cold `rust tests` shard has now timed out, which this section previously recorded as
+unobserved.** The passage above says of a 30-minute budget that "whether a cold build here would
+finish inside 30 minutes is not observed" and that a warm baseline "is not evidence that a cold run
+would succeed rather than time out." That gap is now closed by observation, on a different job than
+the one it was written about.
+
+Pull request #854 pins the Rust toolchain, which changes the `Swatinem/rust-cache` environment hash
+and therefore the cache key, so its own runs build cold. Measured on run `32430070397`
+(`chore/pin-rust-toolchain`, head `cddc70f`, `run_attempt=1`), every `rust tests` shard logged
+`No cache found.`:
+
+| job | cold duration | budget | outcome |
+|---|---|---|---|
+| `rust checks` | 16m35s | 20m | success, 83% of budget |
+| `rust tests (3/3)` | 24m59s | 30m | success |
+| `rust tests (2/3)` | 27m12s | 30m | success |
+| `rust tests (1/3)` | **30m04s** | 30m | **cancelled at the budget** |
+| `WASM` | 20m58s | 30m | success, 70% of budget |
+
+The aggregate `rust workspace` job then failed correctly, reporting
+`rust-checks=success rust-tests=cancelled` -- the shard-completeness guard converting a cancelled
+shard into a failed required context rather than treating it as success.
+
+The warm contrast is from pull request #853's run `32426383423`, which leaves the floating ref in
+place and hit the cache: `rust checks` 2m, `rust tests` 11m / 11m / 9m. So the cache is worth roughly
+2.5x on these lanes, and the budgets were provisioned for the warm case with no margin for the cold
+one.
+
+Cold builds are not exotic here. #747 records the mechanism: two concurrent pull requests running
+the full product gate exceed the repository's 10 GiB Actions cache ceiling and evict each other,
+and because `main` carried no Rust build cache, an evicted pull request paid a cold build every
+time. A budget with zero cold-build margin therefore converts a routine cache eviction into a red
+required context.
+
+`rust tests` moves from 30 to 45 minutes and `rust checks` from 20 to 30, sized from the measured
+cold durations above rather than from a guess. `WASM` (70% of its budget cold) and `fsl-logic` (no
+cold observation) are deliberately left unchanged: the change covers what was measured, and
+extending it further would be the same unevidenced provisioning this entry exists to correct.
 
 **Historical cold-run observations and the combined #752 change.** `gh api` reports
 `run_attempt=1` for `main` run `31086789147`, PR #743 run `31077948474`, and PR #744 run
@@ -886,7 +990,122 @@ gating a merge on it would gate on something outside the change under review.
 Issue #747 records the incident. Issue #720's Finding 2 — warming the fault-operator scratch build —
 **adds** a cache and therefore depends on this budget holding first.
 
+### Cache-budget audit failure reporting
+
+`.github/workflows/cache-budget-audit.yml` deliberately remains an observer: it has only
+`actions: read` and `contents: read`, including on `workflow_dispatch`, so it cannot turn a live
+cache observation into repository mutation. `.github/workflows/cache-budget-audit-reporter.yml` is
+the separate, least-privilege writer. It has exactly Actions/contents read plus issues write and
+listens only for completed `cache budget audit` runs. Its job additionally requires the same
+repository, the default branch, and one of `push`, `schedule`, or `workflow_dispatch`; it checks out
+the default branch rather than the triggering SHA. The reporter workflow, trigger, job set, job, and
+each step are checked as approved mappings: unknown keys fail closed, not merely known dangerous
+fields. The job has no permission override and exactly the pinned checkout, pinned Node setup, and
+reporter invocation steps, so a mutable action, alternate checkout source/path, runner shell, extra
+job, or inserted pre-run shell step cannot alter the checked-out reporter before it receives the
+write token. Its YAML loader also rejects duplicate keys while constructing every mapping, before a
+last-key-wins parser could hide an unapproved value from those mapping checks.
+The same validator constrains the read-only audit workflow as a complete approved mapping: it rejects
+unknown workflow, trigger, concurrency, job, and step keys; jobs other than `audit`; job-level
+permission overrides; unpinned actions; and any reordered, inserted, or altered calibration/live-audit
+step. It fixes the read-only token binding and command of the live audit, so no job can override the
+read-only top-level permission set or alter the checked-out audit before that command runs.
+The validator also enumerates every `.yml`/`.yaml` workflow in `.github/workflows/` and requires
+`cache budget audit` to be unique, preventing another default-branch workflow from impersonating the
+name that GitHub uses to select `workflow_run` subscribers.
+
+The reporter maintains one canonical issue, identified by the stable hidden marker
+`<!-- cache-budget-audit -->`. The currently reconciled failure has an occurrence marker keyed by
+`run_id:run_attempt`; the initial failure creates the issue, a later failure records a recurrence,
+a successful trusted audit closes the issue with a recovery comment, and a later failure reopens the
+same issue. A human close does not change identity: the next distinct failure reopens the canonical
+issue. A comment counts as reporter-authored only when it is authored by `github-actions[bot]` and an
+exact cache-budget reporter marker begins its body; a quoted marker or unrelated Actions comment does
+not suppress the reporter's audit trail.
+
+Before mutation the reporter lists completed default-branch audit runs and chooses the greatest
+`(run_number, run_attempt)` among trusted runs. It intentionally does not use completion timestamps:
+run numbers establish workflow order and attempts establish re-run order, while completion delivery
+can arrive out of order. A delayed event therefore reconciles current completed health rather than
+reopening an issue for stale failure. This is deliberately **latest-health coalescing**, not a claim
+that every completed attempt receives a durable individual comment: the reporter stores a cursor,
+the cumulative number of skipped failing attempts observable through either the triggering
+`workflow_run` event or the workflow-runs list endpoint, and up to 20 recent
+`run_id:run_attempt` identities from those sources in its rolling recurrence summary. An earlier
+superseded attempt is not recoverable when it is absent from the list endpoint and did not trigger a
+reporter run. Thus a queued reporter that observes failures 41, 42, and 43 records 43 directly and
+preserves 41/42 as coalesced evidence. `cancel-in-progress: false` does not promise that every
+pending run executes—GitHub retains one pending concurrency-group run and may replace an older
+pending run—so this bounded, observable evidence is required independently of the concurrency
+setting.
+
+The reporter paginates issues, runs, and comments rather than assuming page one is complete. This is
+a scheduled operational path rather than a merge hot path, so the potentially unbounded API scan is
+acceptable to preserve marker idempotency and all evidence the endpoint makes available. For valid
+reporter-authored state, comment volume is bounded: it keeps at most 20 detailed recurrence comments,
+then creates and updates one rolling recurrence/coalescing summary; it also updates one rolling
+recovery summary, for at most 22 reporter-authored comments. Identical occurrence-summary duplicates
+are consolidated. A missing, malformed, or unsafe cursor/count/identity field, or duplicate summaries
+that disagree, instead fails reconciliation without mutation; it is not silently repaired or reset.
+Summary integers must be canonical decimal safe integers; cursor and identity parts are positive,
+identities are unique, and the count covers every retained identity. A cursor newer than currently
+observable trusted health is rejected rather than moved backward, and the writer rejects an addition
+that would exceed the safe-integer limit. The visible count is cumulative since its summary was
+created: deleting the complete summary intentionally resets that history, and the next summary starts
+a new count rather than claiming to reconstruct deleted evidence. The reader accepts the original
+unqualified count/identity phrases and the preceding `in this summary interval` count phrase only to
+migrate them on the next write; the writer emits the current qualified phrases exclusively. That
+compatibility may be removed only in an explicit comment schema migration after remaining legacy
+summaries have been verified absent. These rules preserve the
+meaning of a retained cumulative count instead of presenting a false repaired value. The audit's
+`push` paths include the reporter workflow, script, and tests, so a merged reporter change runs the
+live audit immediately instead of waiting for the next schedule or manual dispatch.
+
+Historical-summary compatibility tests consume committed output fixtures rather than resolving their
+writer commits at test time: this repository squash-merges pull requests, so those source commits do
+not survive on `main`. Each fixture records its writer commit, writer/output SHA-256 digests, and its
+capture command; regeneration is a deliberate operation that first makes the original writer commit
+available and then refreshes the recorded digests. The test locks each committed body to its recorded
+output digest and fixed writer commit/digest labels, then runs the full reporter test file from a
+non-Git directory with no Git executable; imported modules therefore cannot hide a Git-history
+lookup. It cannot rehash an original writer that squash merge has removed, so the writer digest is an
+auditable review record rather than a run-time source verification. Both the full-history automation
+checkout and a shallow developer clone therefore exercise the same persisted output.
+
 ## Required pre-merge contexts, and why the merge queue was rejected
+
+### Automation contracts use parser-backed workflow inspection
+
+`merge readiness / automation contracts` is a required pre-merge lane, so it
+installs Python 3.12 and the repository's `.[dev]` dependencies before running
+the parser-backed workflow-contract audits. The former Node/stdlib-only
+line-scanner was rewritten fourteen times because valid YAML grammar (quoted
+values, comments, folded scalars, indentation, and flow mappings) repeatedly
+diverged from its regular expressions. `.github/scripts/validate_toolchain_pin.py`
+therefore composes each workflow with PyYAML, rejects duplicate mapping keys,
+and retains source-line diagnostics. Its pytest calibration suite binds each
+historical false accept or false reject, and the live audit holds ordinary
+repository-owned workflow and composite-action uses to `@1.98.0`. The release
+workflow is not exempt: its commit-pinned action must receive the MSRV declared
+by `rust/Cargo.toml` through a direct `with: toolchain:` input. Local reusable
+workflows are audited as workflow files; external reusable workflows are outside
+this repository's source authority.
+
+The privileged post-merge reporter receives `issues: write`, so its workflow
+also has a deliberately narrow parser-backed shape contract. It requires the
+fixed `jobs.reconcile` boundary, the exact trusted default-branch condition,
+and exactly four ordered steps: commit-pinned checkout of the repository's
+default branch with persisted credentials disabled, commit-pinned Node setup,
+calibration, and one direct literal reporter command. Every workflow, job,
+step, and action-input mapping has an allowlist, so unapproved keys such as a
+checkout `repository:` override, shell, working directory, or redirected
+environment fail closed. The runtime reporter and YAML validator both read
+`.github/scripts/trusted-workflow-events.json`:
+the JavaScript exports its set from that file and the validator constructs the
+condition from it, preventing their event lists from drifting. The contract
+rejects environment-built commands, shell indirection, and composite-action
+substitution; its calibrated controls cover comments, blank scalar lines,
+semantic suffixes, decoys, renamed writers, and duplicate writers.
 
 The `main` ruleset (`main safety and CI`, id `19090811`) requires six contexts: `merge readiness`,
 `rust workspace`, `WASM`, `semantic mutation (changed)`, and `FSL Logic Test (pr)` (applied
@@ -1038,8 +1257,9 @@ suite above, not a live run.
 ## Failure reporting contract
 
 `.github/workflows/post-merge-ci-reporter.yml` listens for completed `product gate` runs. It acts
-only when the triggering run was a push to the repository's default branch. The workflow receives
-read access to Actions, contents, and pull requests, and write access only to issues.
+only for a run from this repository's default branch whose event is `push`, `schedule`, or
+`workflow_dispatch`; pull-request and foreign-repository runs cannot mutate issues. The workflow
+receives read access to Actions, contents, and pull requests, and write access only to issues.
 
 For each failed, timed-out, cancelled, stale, startup-failed, or action-required job, the reporter:
 
@@ -1048,16 +1268,22 @@ For each failed, timed-out, cancelled, stale, startup-failed, or action-required
   the same issue after a later recurrence;
 - records the commit, associated merged pull request, run, job, conclusion, and failed step names;
 - copies no build log text or secret-bearing output into the issue;
-- adds one occurrence comment for a later failing run instead of opening a duplicate;
+- adds one occurrence comment for a later failing run instead of opening a duplicate, including
+  the triggering event so scheduled drift is distinguishable from a merged-commit failure;
 - closes the matching issue only after that job, or the complete product gate, succeeds on a later
   `main` run.
 
 An unsuccessful workflow with no failed-job metadata gets a workflow-level issue, so startup and
 orchestration failures do not disappear. Re-running the reporter for the same product-gate run is
-idempotent. Before mutating issues, the reporter queries the latest completed trusted push run for
-the same workflow. When an older `run_number`/`run_attempt` event arrives, it reconciles that latest
-run instead of the stale trigger; out-of-order platform completion cannot overwrite newer
-default-branch health or cancel the only reporter for a persistent newer failure.
+idempotent. The canonical marker remains keyed by workflow ID and stable job name, not event:
+push, scheduled, and manual runs all measure the same default-branch job health, so separate
+issues would duplicate one unresolved breakage. Before mutating issues, the reporter queries the
+latest completed trusted run for the same workflow by making one event-filtered request for each
+of `push`, `schedule`, and `workflow_dispatch`; this keeps a page of pull-request runs from
+displacing trusted evidence. When an older `run_number`/`run_attempt` event arrives, it reconciles
+that latest run instead of the stale trigger; GitHub numbers runs per workflow across events, so
+out-of-order platform completion cannot overwrite newer default-branch health or cancel the only
+reporter for a persistent newer failure.
 
 Reporter jobs are also serialized to avoid duplicate-creation races. When product gates finish
 faster than reporting, GitHub may coalesce pending reporter runs toward the newest default-branch

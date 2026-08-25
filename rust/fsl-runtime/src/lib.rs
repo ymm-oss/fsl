@@ -742,6 +742,7 @@ pub struct EnabledAction {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct Violation {
     pub kind: String,
     pub name: String,
@@ -749,6 +750,7 @@ pub struct Violation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use = "a StepResult carries `violation`: dropping it discards the Monitor's verdict for this step"]
 pub struct StepResult {
     pub action: String,
     pub params: BTreeMap<String, Value>,
@@ -758,6 +760,11 @@ pub struct StepResult {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+// NOTE: inert on `BoundedLivenessMonitor::observe`, which returns
+// `Result<Option<Self>, _>` -- `#[must_use]` does not propagate through
+// `Option` and `Option` is not itself `#[must_use]` (issue #868). Annotated
+// anyway: it is an outcome, and this catches any future bare return.
+#[must_use]
 pub struct BoundedLivenessViolation {
     pub property: String,
     pub bindings: Bindings,
@@ -1291,11 +1298,13 @@ fn is_partial_operation_error(message: &str) -> bool {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct ReachableWitness {
     pub step: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct BfsResult {
     pub spec: String,
     pub depth: usize,
@@ -1319,6 +1328,7 @@ pub struct RefinementFailure {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct RefinementCheck {
     pub implementation: String,
     pub abstraction: String,
@@ -2092,6 +2102,7 @@ pub const CONCRETE_PROBE_BUDGET: usize = 50_000;
 
 /// The outcome of a budgeted [`find_boundary_violation`] search.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct BoundaryProbe {
     /// The first concrete `partial_op`/`type_bound` violation found, with its
     /// full replayable trace from the initial state.
@@ -3142,7 +3153,13 @@ fn response_pending_at_inner(
     Ok(None)
 }
 
-fn trace_step_from_result(
+/// Project one executed [`StepResult`] onto the shared trace-entry shape.
+///
+/// The recorded state is `attempted_state` when the Monitor rolled the step
+/// back, so a violating entry carries the successor the spec states rather
+/// than the pre-step state the rollback restored (issue #843).
+#[must_use]
+pub fn trace_step_from_result(
     step: usize,
     before: &State,
     instance: &EnabledAction,

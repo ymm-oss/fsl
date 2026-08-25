@@ -68,7 +68,12 @@ fn response_on_the_deadline_and_simultaneous_zero_window_response_satisfy() {
     let model = checked_model(&LATE_Q.replace("within 1", "within 2"));
     let mut state = Monitor::new(model.clone()).expect("state monitor");
     let mut liveness = BoundedLivenessMonitor::new(model).expect("liveness monitor");
-    liveness.observe(&state.state, 0).expect("initial");
+    assert!(
+        liveness
+            .observe(&state.state, 0)
+            .expect("initial")
+            .is_none()
+    );
     for observation in 1..=3 {
         step(&mut state, "step", &BTreeMap::new());
         assert!(
@@ -131,7 +136,12 @@ spec Bound {
     );
     let mut state = Monitor::new(bound.clone()).expect("state monitor");
     let mut liveness = BoundedLivenessMonitor::new(bound).expect("liveness monitor");
-    liveness.observe(&state.state, 0).expect("initial");
+    assert!(
+        liveness
+            .observe(&state.state, 0)
+            .expect("initial")
+            .is_none()
+    );
     step(
         &mut state,
         "complete",
@@ -152,9 +162,19 @@ fn finite_prefix_reports_pending_and_unbounded_properties_separately() {
     ));
     let mut state = Monitor::new(model.clone()).expect("state monitor");
     let mut liveness = BoundedLivenessMonitor::new(model).expect("liveness monitor");
-    liveness.observe(&state.state, 0).expect("initial");
+    assert!(
+        liveness
+            .observe(&state.state, 0)
+            .expect("initial")
+            .is_none()
+    );
     step(&mut state, "step", &BTreeMap::new());
-    liveness.observe(&state.state, 1).expect("trigger");
+    assert!(
+        liveness
+            .observe(&state.state, 1)
+            .expect("trigger")
+            .is_none()
+    );
     let status = liveness.status();
     assert_eq!(status.checked_properties, ["Progress"]);
     assert_eq!(status.unbounded_properties, ["Eventually"]);
@@ -172,9 +192,19 @@ fn static_range_binders_use_the_shared_concrete_expansion() {
     }];
     let mut state = Monitor::new(model.clone()).expect("state monitor");
     let mut liveness = BoundedLivenessMonitor::new(model).expect("liveness monitor");
-    liveness.observe(&state.state, 0).expect("initial");
+    assert!(
+        liveness
+            .observe(&state.state, 0)
+            .expect("initial")
+            .is_none()
+    );
     step(&mut state, "step", &BTreeMap::new());
-    liveness.observe(&state.state, 1).expect("trigger");
+    assert!(
+        liveness
+            .observe(&state.state, 1)
+            .expect("trigger")
+            .is_none()
+    );
     step(&mut state, "step", &BTreeMap::new());
     let violation = liveness
         .observe(&state.state, 2)

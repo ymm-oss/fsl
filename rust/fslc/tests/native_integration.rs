@@ -420,7 +420,13 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
         assert!(workflow.contains(&format!("target: {target}")));
     }
     assert!(workflow.contains("os: ubuntu-24.04\n            target: linux-x64"));
-    assert!(workflow.contains("GLIBC_2.39"));
+    assert!(workflow.contains(
+        "./tools/check-release-binary-linkage.sh rust/target/release/fslc rust/target/release/fslc-lsp"
+    ));
+    let release_abi = std::fs::read_to_string(root.join("tools/check-release-binary-linkage.sh"))
+        .expect("release ABI guard");
+    assert!(release_abi.contains("readelf --version-info"));
+    assert!(release_abi.contains("GLIBC_2.39"));
     assert!(!workflow.contains("target: macos-x64"));
     assert!(workflow.contains("\"fslc ${GITHUB_REF_NAME#v}\""));
     assert_windows_release_smoke(&workflow);

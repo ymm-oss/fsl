@@ -29,7 +29,7 @@
 //! (`leadsTo`, `deadlock`); the plain-BMC values mirror
 //! `fsl_runtime::Monitor`'s own registered `outcome.kind` spelling
 //! (`OUTCOME_FEATURE_KEYS` already has `invariant`/`trans`/`ensures`) and are
-//! that registry's concern, not this one's. `fslc`'s `main.rs:14741`
+//! that registry's concern, not this one's. `fslc`'s `main.rs:14854`
 //! (`refine`'s progress-check rendering, also `"leadsTo"`) and
 //! `verification.rs:537` (`"leadsTo_rank"`, a fixed envelope-shape tag with
 //! no corresponding `RankFailure.kind` value) are likewise out of Slice 1's

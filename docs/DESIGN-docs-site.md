@@ -187,11 +187,16 @@ readable in Japanese, accepting the resulting maintenance cost.
   keys/values, and every fenced code block are left untranslated/byte-identical to the English
   source — only heading text and prose are translated.
 - **How the site stays honest about drift:** `render_language_tree("ja")` in
-  `tools/build_site_reference.py` reads `docs/LANGUAGE.ja.md` and compares its section count
-  against `docs/LANGUAGE.md`'s. A mismatch raises `SystemExit` at generation time rather than
-  silently shipping a page with a missing or misplaced section — the same "fail loudly on drift"
-  discipline D4/the original docstring already used for `SECTION_BLURBS` coverage, now also
-  covering section-count parity between the two language files.
+  `tools/build_site_reference.py` reads `docs/LANGUAGE.ja.md`, compares its section count against
+  `docs/LANGUAGE.md`'s, checks that `docs/LANGUAGE.md`'s own numeric section prefixes are unique,
+  and then checks that every positional pair of headings actually corresponds by numeric prefix
+  (see the "heading-correspondence check, not just count" addendum below — count parity alone does
+  not imply order parity, and per-position prefix matching alone does not imply the prefixes are
+  unambiguous). A mismatch on any of these checks raises `SystemExit` at generation time rather
+  than silently shipping a page with a missing, misplaced, duplicated, or reordered section — the
+  same "fail loudly on drift" discipline D4/the original docstring already used for
+  `SECTION_BLURBS` coverage, now also covering section-count and section-order parity between the
+  two language files.
 - **Anchors and blurbs stay keyed off English.** Both the `<details id="...">` slug and the
   `SECTION_BLURBS` lookup are computed from the **English** heading (via `zip(en_sections,
   render_sections)`), never the Japanese one. This keeps `#7-the-verifier-fslc`-style cross-page
@@ -205,9 +210,10 @@ readable in Japanese, accepting the resulting maintenance cost.
   `docs/LANGUAGE.md` for this reason.
 - **Out of scope for this document:** any machine-translation or CI-enforced
   translation-freshness pipeline (e.g. auto-flagging which English section changed since the last
-  Japanese sync) is a separate future task, not implemented here. Today the only enforcement is
-  the section-count parity check above — it catches an added/removed/reordered section, not a
-  paragraph that changed English wording without a matching Japanese edit.
+  Japanese sync) is a separate future task, not implemented here. Today the enforcement above (the
+  section-count check plus the "heading-correspondence check, not just count" addendum's order and
+  uniqueness checks) catches an added/removed/reordered section; it does not catch a paragraph that
+  changed English wording without a matching Japanese edit.
 - **Addendum (#630) — CI enforcement of generated-page freshness, and where it lives.**
   `tests/test_site_reference_snapshot.py` — the check D4 flagged as "recommended for the separate
   generation-pipeline task" — already existed and already regenerates both pages into memory and
@@ -257,6 +263,39 @@ readable in Japanese, accepting the resulting maintenance cost.
   `#688` frozen-`cli.py` asymmetry this addendum flagged is unchanged by any of this and stays
   open: requiring the check makes a frozen-reference argparse edit force a site update exactly as
   before, and the two surfaces' actual flag/subcommand parity remains unmeasured.
+- **Addendum (#741) — heading-correspondence check, not just count.** `render_language_tree()`'s
+  section-count comparison (above) only asserted `len(ja_sections) == len(en_sections)`; it paired
+  the two languages **positionally** (`zip(en_sections, render_sections)`) and never compared the
+  paired headings. Swapping two `## ` sections in `docs/LANGUAGE.ja.md` left the count unchanged,
+  so generation succeeded and silently attached each swapped Japanese section body to the **wrong**
+  English anchor/blurb (verified: both real files have 18 sections — the unnumbered lead
+  "設計原則"/"Design principles" plus `## 1.` … `## 17.` in identical order in both languages — and
+  a reordering fixture reproduced the mispairing before the fix). The fix adds a second check in
+  the same function: for every positional pair, the leading numeric prefix of the heading (`"2"`
+  from `"2. Types"`/`"2. 型"`; `None` for the unnumbered lead section) must match, raising
+  `SystemExit` naming both headings and the 1-based position on a mismatch, in the same style as
+  the count-mismatch message. This needs no new maintained ja↔en heading-name table because both
+  files already share one numbering scheme. Two residual limits are explicit rather than silently
+  assumed: it would not detect a reorder among sections that do not carry a numeric prefix, but
+  only the lead section lacks one today and there is only one such section, so no such reorder is
+  currently possible today; and the per-position check is only sound if `docs/LANGUAGE.md`'s
+  numeric prefixes are themselves unique — two English sections sharing a number would make a
+  matching ja-side swap of just those two prefix-equal at every position and slip through
+  undetected — so `render_language_tree()` also asserts that uniqueness directly, over
+  `docs/LANGUAGE.md`'s sections alone, and raises `SystemExit` naming the duplicated number and its
+  headings before the per-position loop ever runs, rather than leaving uniqueness an unstated
+  precondition.
+- **Addendum (#741) — the freshness gate cannot substitute for the correspondence check, by
+  construction.**
+  `tests/test_site_reference_snapshot.py` and the `site reference freshness` required context
+  (Addendum (#630) above) only compare the **committed** `docs/intro/*.html` against a **fresh
+  regeneration** from the same current sources. That construction can only ever catch a *stale*
+  page — one that no longer matches what today's sources would produce. It structurally cannot
+  catch a page that is *wrongly* generated from correctly-committed-but-misaligned sources: if a
+  reordered `docs/LANGUAGE.ja.md` were ever committed alongside its (mispaired) regenerated HTML,
+  the freshness gate would see them agree and pass, enforcing the drift instead of catching it.
+  Order correctness has to be asserted inside the generator itself (the check above), not
+  delegated to the freshness comparison.
 
 ## 2. Chapter → category mapping
 

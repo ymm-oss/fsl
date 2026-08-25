@@ -2,8 +2,13 @@
 
 import { appendFile, readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import trustedWorkflowEvents from "./trusted-workflow-events.json" with { type: "json" };
 
 export const POST_MERGE_LABEL = "ci/post-merge";
+// The parser-backed workflow contract imports the same JSON value.  Keep this
+// set as the runtime-facing API while making one repository file the authority
+// for which workflow-run events may create or resolve privileged issues.
+export const TRUSTED_WORKFLOW_EVENTS = new Set(trustedWorkflowEvents);
 
 const FAILURE_CONCLUSIONS = new Set([
   "action_required",
@@ -42,6 +47,18 @@ export function isNewerRun(candidate, current) {
     return candidate.run_number > current.run_number;
   }
   return (candidate.run_attempt ?? 1) > (current.run_attempt ?? 1);
+}
+
+export function isTrustedDefaultBranchWorkflowRun({
+  workflowRun,
+  repository,
+  defaultBranch,
+}) {
+  return (
+    workflowRun.head_repository?.full_name === repository &&
+    workflowRun.head_branch === defaultBranch &&
+    TRUSTED_WORKFLOW_EVENTS.has(workflowRun.event)
+  );
 }
 
 function recoveryMarker(runId, runAttempt, issueNumber) {
@@ -107,6 +124,7 @@ export function buildIssueBody({ repository, workflowRun, job, pullRequests }) {
     "",
     `- Commit: [\`${shortSha(workflowRun.head_sha)}\`](${commitUrl})`,
     `- Workflow run: [${workflowRun.id}](${workflowRun.html_url})`,
+    `- Event: \`${workflowRun.event}\``,
     `- Job: ${jobLine}`,
     `- Conclusion: \`${job.conclusion}\``,
     `- Associated PR: ${pullRequestSummary(pullRequests)}`,
@@ -123,6 +141,7 @@ function occurrenceComment({ workflowRun, job }) {
     `The failure recurred on [\`${shortSha(workflowRun.head_sha)}\`](https://github.com/${workflowRun.repository.full_name}/commit/${workflowRun.head_sha}).`,
     "",
     `- Workflow run: [${workflowRun.id}](${workflowRun.html_url})`,
+    `- Event: \`${workflowRun.event}\``,
     `- Job: [${job.name}](${job.html_url ?? workflowRun.html_url})`,
     `- Conclusion: \`${job.conclusion}\``,
   ].join("\n");
@@ -149,13 +168,36 @@ async function issueContains(client, issue, marker) {
   return comments.some((comment) => (comment.body ?? "").includes(marker));
 }
 
-export async function reconcilePostMerge({ client, repository, workflowRun }) {
+export async function reconcilePostMerge({
+  client,
+  repository,
+  defaultBranch,
+  workflowRun,
+}) {
+  if (
+    !isTrustedDefaultBranchWorkflowRun({
+      workflowRun,
+      repository,
+      defaultBranch,
+    })
+  ) {
+    return { created: 0, updated: 0, closed: 0, failures: 0, ignored: true };
+  }
+
   const triggeringRunId = workflowRun.id;
   const latestCompletedRun = await client.latestCompletedWorkflowRun(
     workflowRun.workflow_id,
     workflowRun.head_branch,
   );
-  if (latestCompletedRun && isNewerRun(latestCompletedRun, workflowRun)) {
+  if (
+    latestCompletedRun &&
+    isTrustedDefaultBranchWorkflowRun({
+      workflowRun: latestCompletedRun,
+      repository,
+      defaultBranch,
+    }) &&
+    isNewerRun(latestCompletedRun, workflowRun)
+  ) {
     workflowRun = latestCompletedRun;
   }
   workflowRun.repository = { full_name: repository };
@@ -305,13 +347,17 @@ export class GitHubRestClient {
   }
 
   async latestCompletedWorkflowRun(workflowId, branch) {
-    const response = await this.request(
-      "GET",
-      this.repoPath(
-        `/actions/workflows/${workflowId}/runs?branch=${encodeURIComponent(branch)}&event=push&status=completed&per_page=100`,
+    const responses = await Promise.all(
+      [...TRUSTED_WORKFLOW_EVENTS].map((event) =>
+        this.request(
+          "GET",
+          this.repoPath(
+            `/actions/workflows/${workflowId}/runs?branch=${encodeURIComponent(branch)}&event=${encodeURIComponent(event)}&status=completed&per_page=100`,
+          ),
+        ),
       ),
     );
-    return response.workflow_runs.reduce(
+    return responses.flatMap((response) => response.workflow_runs).reduce(
       (latest, run) => (!latest || isNewerRun(run, latest) ? run : latest),
       null,
     );
@@ -385,11 +431,12 @@ async function main() {
   const repository =
     event.repository?.full_name ?? process.env.GITHUB_REPOSITORY;
 
-  if (
-    workflowRun.event !== "push" ||
-    workflowRun.head_branch !== event.repository.default_branch
-  ) {
-    console.log("Ignoring a workflow run that is not a default-branch push.");
+  if (!isTrustedDefaultBranchWorkflowRun({
+    workflowRun,
+    repository,
+    defaultBranch: event.repository.default_branch,
+  })) {
+    console.log("Ignoring a workflow run that is not a trusted default-branch run.");
     return;
   }
 
@@ -400,6 +447,7 @@ async function main() {
   const result = await reconcilePostMerge({
     client,
     repository,
+    defaultBranch: event.repository.default_branch,
     workflowRun,
   });
   const summary = `Post-merge CI reconciliation: ${JSON.stringify(result)}`;

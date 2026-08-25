@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: cache budget audit reporter
+
+on:
+  workflow_run:
+    workflows: ["cache budget audit"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+# Do not cancel an in-progress reconciliation. GitHub retains at most one
+# pending concurrency-group run and may replace an older pending run, so the
+# reporter coalesces intermediate failures into its bounded audit summary
+# before it reconciles the latest completed trusted health.
+concurrency:
+  group: cache-budget-audit-reporter
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: reconcile cache-budget audit issue
+    if: >-
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      (github.event.workflow_run.event == 'push' ||
+      github.event.workflow_run.event == 'schedule' ||
+      github.event.workflow_run.event == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Create, update, or resolve cache budget audit issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/report-cache-budget-audit.mjs

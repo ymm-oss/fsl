@@ -330,7 +330,11 @@ domain ExplicitEffectSuccess {
         .into_iter()
         .find(|action| action.action == "request_start")
         .expect("request start action");
-    monitor.step(&start).expect("start effect");
+    let started = monitor.step(&start).expect("start effect");
+    assert_eq!(
+        started.violation, None,
+        "request_start must be legal: {started:?}"
+    );
 
     let completion = monitor
         .enabled()
@@ -1217,7 +1221,7 @@ fn stale_and_out_of_domain_calls_are_absent_from_the_symbolic_relation() {
             action.action == "select" && action.params.get("v") == Some(&FslValue::Int(0))
         })
         .expect("select lower bound");
-    monitor.step(&selected).expect("select value");
+    assert_eq!(monitor.step(&selected).expect("select").violation, None);
     let selected_state = monitor.state.clone();
     let enabled = monitor
         .enabled()
@@ -1264,7 +1268,7 @@ fn stale_and_out_of_domain_calls_are_absent_from_the_symbolic_relation() {
 
     let rejected = BTreeMap::from([("raw".to_owned(), FslValue::Int(2))]);
     let mut attempted = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
-    attempted.step(&selected).expect("select value");
+    assert_eq!(attempted.step(&selected).expect("select").violation, None);
     let result = attempted
         .attempt("execute", &rejected)
         .expect("raw input belongs to its API domain");

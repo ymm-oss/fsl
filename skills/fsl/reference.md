@@ -735,7 +735,7 @@ implementation Map (for example `Column -> DesignColumn`).
 | symmetric enum | `symmetric enum Worker { A, B }` | Same as enum, plus liveness symmetry reduction |
 | struct | `struct S { f: Qty, o: Option<K> }` | field = scalar or Option<scalar> only |
 | Option<T> | `c: Option<ItemId>` | T is a scalar. `none` / `some(e)` |
-| Map<K, V> | `m: Map<ItemId, Qty>` | K is a bounded scalar (Int keys give a deprecation warning) |
+| Map<K, V> | `m: Map<ItemId, Qty>` | K must be a bounded scalar; `Map<Int, V>` is rejected by `check` |
 | Set<T> | `s: Set<OrderId>` | T is a bounded scalar |
 | Seq<T, N> | `q: Seq<JobId, CAP>` | T is a scalar, N is a positive constant. FIFO |
 | relation A -> B | `r: relation User -> Role` | Binary relation over bounded scalar endpoints |
@@ -1633,6 +1633,14 @@ model or AST. Public Kernel/trace schema mismatches, malformed vectors, unknown
 state/action/parameter names, and spec-name mismatches fail closed. Compose is the explicit exception at the producer boundary because
 Public Kernel rejects incomplete multi-file provenance; checked names/order feed
 the same adapter until truthful compose export is available.
+
+The fixed-seed walk is capped at 100 steps and is **not** bounded by `--depth`, so
+it can reach a violation the bounded verification `testgen` runs first proved
+absent within `depth`. The Monitor rolls a violating step back, so recording it
+would bake "this action is a no-op" as an expectation the spec never states.
+`testgen` therefore refuses: it emits the same `result:"violated"` envelope, exit
+code, property, step, and trace `verify` emits, and writes no harness. Raise
+`--depth` until `verify` is clean at the depth the walk reaches, or fix the spec.
 
 `--target` chooses the harness; the scenario-collection core is shared, so both
 emit the same scenarios:

@@ -420,6 +420,48 @@ fn explicit_rejects_partial_component_init_coverage() {
 }
 
 #[test]
+fn enum_map_key_name_collision_with_an_integer_const_is_rejected_before_runtime() {
+    let (result, status) = verify(
+        &fixture_path("issue_825_enum_const_name_collision.fsl"),
+        "explicit",
+        4,
+        &[],
+    );
+    assert_eq!(status, 2);
+    assert_eq!(result["result"], "error");
+    assert_eq!(result["kind"], "semantics");
+    assert_eq!(
+        result["message"],
+        "invalid init statement: expression of type Int is not assignable to Named(\"Key\"); cause: map key 'A' resolves to const A = 0 (Int), not to member A of enum Key because a const shadows an enum member of the same name; hint: rename the const or enum member to make the map key unambiguous at 12:5"
+    );
+    assert_eq!(result["loc"], json!({"line": 12, "column": 5}));
+}
+
+#[test]
+fn explicit_accepts_enum_map_key_without_a_colliding_const() {
+    let (result, status) = verify(
+        &fixture_path("issue_855_enum_map_key_without_const_collision.fsl"),
+        "explicit",
+        4,
+        &[],
+    );
+    assert_eq!(status, 0);
+    assert_eq!(result["result"], "proved");
+}
+
+#[test]
+fn explicit_accepts_unrelated_const_beside_an_enum_map_key() {
+    let (result, status) = verify(
+        &fixture_path("issue_855_enum_map_key_with_unrelated_const.fsl"),
+        "explicit",
+        4,
+        &[],
+    );
+    assert_eq!(status, 0);
+    assert_eq!(result["result"], "proved");
+}
+
+#[test]
 fn explicit_accepts_map_fully_covered_by_separate_concrete_key_statements() {
     // The fsl-db "per-column" pattern: distinct concrete-key writes that
     // together cover the whole enum key domain must count as full coverage.

@@ -25,6 +25,7 @@
       "function": "verify_bounded_config",
       "anchor": "if result.leadsto_violation.is_none() && !model.leadstos.is_empty() {",
       "occurrence": 1,
+      "expected_occurrences": 2,
       "reason": "Leadsto/liveness semantics are outside the initial P2 symbolic-witness pilot."
     },
     {
@@ -33,6 +34,7 @@
       "function": "verify_bounded_config",
       "anchor": "if result.leadsto_violation.is_none() && !model.leadstos.is_empty() {",
       "occurrence": 2,
+      "expected_occurrences": 2,
       "reason": "Leadsto/liveness semantics are outside the initial P2 symbolic-witness pilot."
     },
     {
@@ -41,6 +43,7 @@
       "function": "verify_bounded_config",
       "anchor": "let unrolled_depth = states.len() - 1;",
       "occurrence": 1,
+      "expected_occurrences": 1,
       "reason": "Leadsto/liveness semantics are outside the initial P2 symbolic-witness pilot."
     }
   ],

@@ -86,6 +86,13 @@ exhaustively; the registry says what may exist there.
   individual files the frozen Python Monitor legitimately rejects. Each entry
   names its active native or BMC-side coverage, and a stale entry fails the
   harness once the Monitor starts accepting it.
+- `NATIVE_ONLY_REFINEMENT_SYNTAX: dict[str, NativeOnlyRefinementSyntax]` —
+  repo-relative exact path → native-only refinement parser boundary. Each entry
+  records the construct text and source location plus the accepted design and
+  native owner. The registry is mutually exclusive with `MONITOR_EXCLUSIONS`
+  and every earlier whole-file classification: every entry must exist on disk
+  and classify as `NATIVE_ONLY_REFINEMENT`, rather than silently winning or
+  losing by classifier order.
 
 ## Classification (automatic, in the harness)
 
@@ -93,15 +100,20 @@ exhaustively; the registry says what may exist there.
 
 1. `EXCLUDED` — `is_ai_project_source` / `is_ai_agent_source` / `is_causal_source`
    match, or path in `MONITOR_EXCLUSIONS`.
-2. `REFINEMENT` — top-level keyword `refinement` (mapping files are not state
+2. `NATIVE_ONLY_REFINEMENT` — an exact registered refinement path whose frozen
+   parser rejects a native-only construct. The harness confirms the parser's
+   diagnostic location, then removes only that registered block construct and
+   requires the rest of the source to parse; success proves the native syntax,
+   rather than another deferred error, is the sole exclusion reason.
+3. `REFINEMENT` — top-level keyword `refinement` (mapping files are not state
    machines; refine semantics are covered by `test_refine*.py` and the
    refinement fixtures in `test_oracle_agreement.py`).
-3. `DECLARED_ERROR` — front matter `// expected-result: error` (gallery error /
+4. `DECLARED_ERROR` — front matter `// expected-result: error` (gallery error /
    adversarial fixtures that must fail at parse/type/semantics/acceptance).
-4. `INJECTED` — `// inject:` / `// expect-detector:` front matter
+5. `INJECTED` — `// inject:` / `// expect-detector:` front matter
    (`examples/gallery/injected/`, the detector benchmark corpus of
    `test_injection_bench.py`).
-5. `CONFORMANCE` — everything else; the top-level keyword must match a
+6. `CONFORMANCE` — everything else; the top-level keyword must match a
    `DIALECTS` construct. **An unknown construct fails the run** with
    "register the new dialect in tests/dialect_registry.py".
 
@@ -132,6 +144,7 @@ One parametrized test per class; every obligation is an `assert`, never a skip.
 |---|---|
 | CONFORMANCE / INJECTED | full pipeline below |
 | REFINEMENT | `parse_src` succeeds and `ast[0] == "refinement"` |
+| NATIVE_ONLY_REFINEMENT | frozen `parse_src` still rejects the registered construct, and removing only that construct's matched-brace span lets the remainder parse; any other error makes the exclusion invalid |
 | DECLARED_ERROR | build or `run_verify` still yields `result:"error"` — a fixture that starts passing is a stale declaration and fails |
 | EXCLUDED | the documented reason still holds (Monitor load still raises / construct still matches) — a stale exclusion fails and must be deleted |
 
@@ -159,7 +172,9 @@ Full pipeline per file (depth from the file's dialect entry, default 4):
 Two meta-tests close the structural hole: `test_corpus_fully_claimed` (no
 UNKNOWN construct anywhere under `SCAN_ROOTS`) and `test_registry_floors`
 (per-dialect scan count ≥ `min_files`; also asserts every `MONITOR_EXCLUSIONS`
-path exists). Regression for the harness itself: reverting `470c75c` locally makes
+and `NATIVE_ONLY_REFINEMENT_SYNTAX` path exists, and that each native-only
+entry is not shadowed by an earlier classification). Regression for the harness
+itself: reverting `470c75c` locally makes
 the db corpus fail stage 1 loudly (verified once at PR time; the assert-not-skip
 structure keeps it true).
 
@@ -762,7 +777,7 @@ frozen session corpus and mapping from
 `:426-445`, and the negative controls from `:488-504,620-636`. Exit semantics
 come from `docs/LANGUAGE.md:940-961`. The compound table independently
 enumerates the 65 result values registered by
-`rust/fslc/src/outcome.rs:82-216`; unknown values and incomplete sibling-field
+`rust/fslc/src/outcome.rs:86-218`; unknown values and incomplete sibling-field
 envelopes are errors, never default successes or failures. Chain uses a
 command-specific adapter because a layer additionally depends on its integer
 `exit_code`, nested `detail.implements.result`, and the implementation-command

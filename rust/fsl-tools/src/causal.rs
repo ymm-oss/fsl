@@ -23,6 +23,7 @@ pub const SCOPE_DIMENSIONS: &[&str] = &["population", "environment", "segment"];
 
 /// A fatal well-formedness error (analysis never starts).
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct CausalError {
     pub kind: &'static str,
     pub message: String,
@@ -43,6 +44,7 @@ impl CausalError {
 
 /// A non-fatal review warning emitted by `causal check`.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct CausalWarning {
     pub kind: &'static str,
     pub message: String,

@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+
+//! Regression coverage for issue #818: a compose document with an undeclared
+//! component alias inside a top-level `init` block's `forall` binder used to
+//! panic the process (`rewrite_compose_statements`'s
+//! `.expect("compose alias validation occurs during lowering")` in
+//! `rust/fsl-core/src/compose.rs`) instead of surfacing the `CoreError` its
+//! own signature promised. The panic unwound past the public API boundary,
+//! so a caller of `fsl_core::parse_kernel_source` got no `Result` to handle.
+//!
+//! Both controls go through `parse_kernel_source` directly -- the public
+//! entry point named in the issue -- not an internal helper, because the
+//! defect was specifically that the panic escaped that boundary.
+
+use std::collections::BTreeMap;
+
+use fsl_core::{CoreError, FileResolver, parse_kernel_source};
+
+struct MemoryResolver(BTreeMap<String, String>);
+
+impl FileResolver for MemoryResolver {
+    fn read(&self, path: &str) -> Result<String, CoreError> {
+        self.0.get(path).cloned().ok_or_else(|| CoreError {
+            message: format!("missing {path}"),
+            line: 1,
+            column: 1,
+            origin: None,
+            name_resolution: false,
+        })
+    }
+}
+
+const CORE_COMPONENT: &str = "spec Core { \
+    type UserId = 0..1 \
+    state { flag: Map<UserId, Bool> } \
+    init { forall u: UserId { flag[u] = false } } \
+    action noop() {} \
+}";
+
+fn resolver() -> MemoryResolver {
+    MemoryResolver(BTreeMap::from([(
+        "core.fsl".to_owned(),
+        CORE_COMPONENT.to_owned(),
+    )]))
+}
+
+/// Rejecting control: an undeclared alias referenced in a top-level `init`
+/// block's `forall` binder must return `Err(CoreError)` through
+/// `parse_kernel_source`, not panic.
+#[test]
+fn undeclared_alias_in_forall_binder_returns_core_error_not_panic() {
+    let source = "compose Broken { \
+        state { x: Int } \
+        init { forall u: nonexistent.UserId { x = 0 } } \
+    }";
+
+    let error = parse_kernel_source(source, &resolver())
+        .expect_err("an undeclared alias must fail, not panic");
+
+    assert_eq!(error.message, "unknown alias 'nonexistent'");
+    // This location is a placeholder, not a real source position: the
+    // qualified-name resolver (`resolve_alias_qualified_name`) has no span
+    // to draw from, so it always reports (1, 1) regardless of where the
+    // binder actually appears.
+    assert_eq!(error.line, 1);
+    assert_eq!(error.column, 1);
+}
+
+/// Accepting control: a correctly declared alias used the same way (in a
+/// top-level `init` block's `forall` binder) must still lower successfully,
+/// so the fix does not reject valid compose documents.
+#[test]
+fn declared_alias_in_forall_binder_still_lowers() {
+    let source = "compose Works { \
+        use Core as core from \"core.fsl\" \
+        state { x: Int } \
+        init { forall u: core.UserId { x = 0 } } \
+    }";
+
+    parse_kernel_source(source, &resolver())
+        .expect("a declared alias in a forall binder must lower successfully");
+}

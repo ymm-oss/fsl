@@ -35,6 +35,27 @@ check_core_contracts() {
 
 check_automation() {
   node --test .github/scripts/report-post-merge-ci.test.mjs
+  # The privileged post-merge reporter has issues: write. Its separate
+  # parser-backed workflow-shape controls reject comments, decoys, and shell
+  # indirection rather than trying to infer behavior from line substrings.
+  python3 -m pytest tests/test_post_merge_reporter_workflow.py -v
+  python3 .github/scripts/validate_post_merge_reporter_workflow.py
+  # The Rust toolchain pin is an Actions YAML contract.  Its fourteen
+  # line-scanner failures showed that a regex verdict is not trustworthy, so
+  # this required lane installs PyYAML and runs both the calibrated controls and
+  # the live parser-backed audit.
+  python3 -m pytest tests/test_toolchain_pin.py -v
+  python3 .github/scripts/validate_toolchain_pin.py
+  # The cache-budget reporter subscribes by workflow display name. Its
+  # parser-backed uniqueness control must be able to block a merge, not merely
+  # report red in a non-required workflow, so run its calibrated controls and
+  # live audit in this required lane.
+  python3 -m pytest tests/test_cache_budget_audit_workflow.py -v
+  python3 .github/scripts/validate-cache-budget-audit-workflow.py
+  # The cache-budget reporter owns a separate issue lifecycle from the
+  # read-only audit. Keep its reconciliation controls in this pre-merge lane,
+  # alongside the established post-merge reporter controls.
+  node --test .github/scripts/report-cache-budget-audit.test.mjs
   # The agent environment is repository-hook infrastructure, not frozen Python
   # product behavior. These zero-argument contract tests use only the standard
   # library, so run them directly without adding pytest to the fail-fast lane.
@@ -46,6 +67,13 @@ check_automation() {
   # `rust workspace` and `semantic mutation` aggregators depend on
   # (docs/DESIGN-ci.md, "Sharded pre-merge Linux evidence").
   ./tools/check-shard-union.sh selftest
+  # Stable logical shard artifacts deliberately admit a compatible mixed-
+  # attempt cohort after a partial rerun. Calibrate the provenance/checksum/
+  # identity policy, then audit the live workflow through its parsed YAML
+  # structure so one producer or aggregator cannot drift independently.
+  ./tools/check-shard-artifact-cohort.sh selftest
+  python3 -m pytest tests/test_shard_artifact_workflow.py -v
+  python3 .github/scripts/validate-shard-artifact-workflow.py
   # Accepting/rejecting controls for the ruleset drift audit's compareRuleset/
   # validateContract classifier (docs/DESIGN-ci.md, "Ruleset drift audit").
   node --test .github/scripts/audit-ruleset-drift.test.mjs

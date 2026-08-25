@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec SetMapInt {
+  type Id = 0..1
+  state {
+    m: Set<Map<Int, Bool>>
+  }
+  action stay() { }
+}

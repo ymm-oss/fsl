@@ -2,7 +2,7 @@
 
 //! Checked-model expression and statement type validation.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use fsl_syntax::{
@@ -1007,10 +1007,57 @@ fn validate_lvalue(
     }
 }
 
+fn validate_map_key_const_shadowing(
+    target: &LValue,
+    env: &TypeEnv,
+    model: &KernelModel,
+    visible_consts: &BTreeSet<String>,
+    span: Span,
+) -> Result<(), TypecheckError> {
+    match target {
+        LValue::Var(_) => Ok(()),
+        LValue::Index(name, index) => {
+            let (TypeRef::Map(key, _) | TypeRef::Relation(key, _)) = resolve(
+                model,
+                env.get(name)
+                    .ok_or_else(|| error(format!("unknown update target '{name}'")))?,
+            )?
+            else {
+                return Ok(());
+            };
+            let (Expr::Var(member), TypeRef::Named(enum_name)) = (index, key.as_ref()) else {
+                return Ok(());
+            };
+            let Some(TypeDef::Enum { members, .. }) = model.types.get(enum_name) else {
+                return Ok(());
+            };
+            let Some(value) = model.consts.get(member) else {
+                return Ok(());
+            };
+            if !visible_consts.contains(member) || !members.contains(member) {
+                return Ok(());
+            }
+            let (value, actual) = match value {
+                crate::FslValue::Int(value) => (value.to_string(), TypeRef::Int),
+                crate::FslValue::Bool(value) => (value.to_string(), TypeRef::Bool),
+                _ => return Ok(()),
+            };
+            Err(error(format!(
+                "expression of type {actual:?} is not assignable to {key:?}; cause: map key '{member}' resolves to const {member} = {value} ({actual:?}), not to member {member} of enum {enum_name} because a const shadows an enum member of the same name; hint: rename the const or enum member to make the map key unambiguous"
+            ))
+            .with_span(span))
+        }
+        LValue::Field(base, _) => {
+            validate_map_key_const_shadowing(base, env, model, visible_consts, span)
+        }
+    }
+}
+
 fn validate_statement_assignments(
     statement: &Statement,
     env: &TypeEnv,
     model: &KernelModel,
+    visible_consts: &BTreeSet<String>,
 ) -> Result<(), TypecheckError> {
     match statement {
         Statement::Assign {
@@ -1020,6 +1067,7 @@ fn validate_statement_assignments(
         } => {
             let ty = lvalue_type(target, env, model)?;
             ensure_assignable(value, &ty, env, model, *span)?;
+            validate_map_key_const_shadowing(target, env, model, visible_consts, *span)?;
             validate_lvalue(target, env, model, *span)?;
             validate_expression(value, env, model, *span, Some(&ty))
         }
@@ -1030,7 +1078,7 @@ fn validate_statement_assignments(
         } => then_statements
             .iter()
             .chain(else_statements)
-            .try_for_each(|item| validate_statement_assignments(item, env, model)),
+            .try_for_each(|item| validate_statement_assignments(item, env, model, visible_consts)),
         Statement::ForAll {
             binder, statements, ..
         } => {
@@ -1051,9 +1099,11 @@ fn validate_statement_assignments(
             };
             let mut local = env.clone();
             local.insert(name.clone(), ty);
-            statements
-                .iter()
-                .try_for_each(|item| validate_statement_assignments(item, &local, model))
+            let mut local_visible_consts = visible_consts.clone();
+            local_visible_consts.remove(name);
+            statements.iter().try_for_each(|item| {
+                validate_statement_assignments(item, &local, model, &local_visible_consts)
+            })
         }
     }
 }
@@ -1091,7 +1141,18 @@ pub(crate) fn validate_statement_types(
     statement: &Statement,
     model: &KernelModel,
 ) -> Result<(), TypecheckError> {
-    validate_statement_assignments(statement, &base_env(model), model)
+    let visible_consts = model
+        .consts
+        .keys()
+        .filter(|name| {
+            !model
+                .state
+                .iter()
+                .any(|(state_name, _)| state_name == *name)
+        })
+        .cloned()
+        .collect();
+    validate_statement_assignments(statement, &base_env(model), model, &visible_consts)
 }
 
 pub(crate) fn validate_checked_model_types(model: &KernelModel) -> Result<(), TypecheckError> {

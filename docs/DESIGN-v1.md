@@ -3,8 +3,9 @@
 This document defines the v1 design of FSL (AI-Native Formal Specification Language).
 It carries forward the concepts of the v0 prototype ([`LANGUAGE.md`](LANGUAGE.md))
 and answers the limitations made explicit in v0 (impoverished types, safety only,
-bounded only, no bridge to implementation). **v1 is a complete superset of v0**:
-existing `.fsl` files verify unchanged.
+bounded only, no bridge to implementation). v1 retains v0 syntax except that
+`Map<Int, V>` must be migrated to a bounded key type before `check` or
+verification.
 
 ---
 
@@ -16,7 +17,7 @@ Every v1 feature addition or rejection was judged against the following 5 criter
 | # | Criterion | Meaning |
 |---|---|---|
 | G1 | **Generation probability** | Maximize the probability that an LLM writes it correctly on the first try. Choose syntax close to the training distribution (TS/Python/Rust-like), and as a rule provide exactly one way to write a given thing |
-| G2 | **Repairability** | When it fails, "where, why, and how to fix it" is mechanically determined from the output JSON alone. Every diagnostic carries location information and a repair hint |
+| G2 | **Repairability** | When it fails, "where, why, and how to fix it" is mechanically determined from the output JSON alone. Diagnostics carry location information and repair guidance in their JSON envelope |
 | G3 | **Verification responsiveness** | Returns in seconds. Bounded and small-scope by default. The latency of the write→verify→repair loop comes first |
 | G4 | **Semantic simplicity** | Do not add semantics beyond "one step = atomic execution of one action" and "simultaneous assignment." Every new construct must be explainable as sugar over existing semantics or as bounded expansion |
 | G5 | **Structural elimination of pitfalls** | Remove "spec bugs LLMs tend to make" — sentinel values (-1), unbounded quantification, vacuous specs, implicit range escapes — from the language itself, via types and automatic checks |
@@ -179,9 +180,10 @@ state {
 - `Map<K, V>`: **K must be a bounded type (domain type or enum)**. This makes
   the trace display total and keeps quantification and aggregation always
   bounded.
-- v0 compatibility: `Map<Int, ·>` is still accepted, but `fslc check` /
-  `verify` puts a deprecation warning and a mechanical rewrite hint
-  ("declare `type K = 0..N` and replace") in `warnings`.
+- `Map<Int, ·>` is rejected by `fslc check`. Declare a bounded domain key, for
+  example `type K = 0..<max>`, and use `Map<K, ·>`. The guidance is part of
+  the located `message`: the semantic-error envelope has no general `hint`
+  field.
 
 ### 3.8 Int / Bool
 
@@ -513,9 +515,7 @@ Differences from v0:
   "result": "error",
   "kind": "type",            // "parse" | "name" | "type" | "semantics" | "io" | "internal"
   "loc": { "line": 12, "column": 18 },
-  "message": "map key type must be a bounded type (domain or enum), got Int",
-  "expected": "a declared domain type, e.g. `type ItemId = 0..N`",
-  "hint": "declare `type K = 0..<max>` and use `Map<K, ...>`"
+  "message": "Map<Int, ...> on 'stock' is rejected; use a bounded domain type as key; declare `type K = 0..<max>` and use `Map<K, ...>`"
 }
 ```
 
@@ -655,14 +655,14 @@ central bet of FSL's AI-native design in v1.
 
 ## 11. Migration from v0
 
-v0 specs pass through the v1 verifier unmodified (a complete superset). However,
-the following deprecation warnings appear in `warnings`, each accompanied by a
-mechanical rewrite hint:
+v0 specs pass through the v1 verifier unmodified except `Map<Int, V>`, which
+`check` rejects because verification must not materialize an unbounded map-key
+domain. Rewrite it to a bounded key type before verification:
 
 | v0 style | v1 recommendation |
 |---|---|
 | `const MAXI = 1` + `i in 0..MAXI` | `type ItemId = 0..1` + `i: ItemId` |
-| `Map<Int, V>` | `Map<ItemId, V>` (bounded key) |
+| `Map<Int, V>` | `type ItemId = 0..N` + `Map<ItemId, V>` (required bounded key) |
 | Sentinel value (`-1` = empty) | `Option<T>` |
 | Hand-written invariant "value is ≥ 0" | Automatic bounds checking of a domain type |
 

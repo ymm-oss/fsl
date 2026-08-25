@@ -228,13 +228,13 @@ observable source facts:
    already has `invariant`/`trans`/`ensures` rows), so unifying them is that
    registry's concern, not a gap in this one. Revisiting this is in-scope
    for a future slice if the two registries are ever meant to merge.
-2. `fslc`'s `main.rs:14741` (the `refine` command's progress-check
+2. `fslc`'s `main.rs:14854` (the `refine` command's progress-check
    rendering, also a `"leadsTo"` literal reading a `BmcViolation`-shaped
    value) and `verification.rs:537` (`"leadsTo_rank"`, a fixed envelope-shape
    tag with no corresponding `RankFailure.kind` value — the granular ranked
    kind renders separately, in the `rank_failure` JSON field) are outside
    this slice's file scope (`bmc.rs`/`induction.rs`/`verification_output.rs`
-   only, per the accepted brief). `main.rs:14741` duplicates an
+   only, per the accepted brief). `main.rs:14854` duplicates an
    already-registered value and is a reasonable target for the same
    constant in a later slice; `verification.rs:537` is a different
    vocabulary entirely (JSON envelope shape tags, not `Violation.kind`) and

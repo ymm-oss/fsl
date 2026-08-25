@@ -11,7 +11,7 @@ mod fifo_snapshot;
 use std::process::Command;
 
 #[cfg(unix)]
-use fifo_snapshot::{TwoSnapshotFifo, wait_for_output};
+use fifo_snapshot::{ReapedChild, TwoSnapshotFifo, WriterOutcome, wait_for_output};
 #[cfg(unix)]
 use serde_json::Value;
 
@@ -23,28 +23,30 @@ fn verify_against_two_snapshot_fifo(engine: &str, edition: &str) -> (Value, i32)
     let source_b = "not valid FSL source";
     let mut fixture = TwoSnapshotFifo::new("verify", source_a, source_b);
     let path = fixture.fifo.to_string_lossy().into_owned();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .args([
-            "verify",
-            &path,
-            "--depth",
-            "4",
-            "--engine",
-            engine,
-            "--edition",
-            edition,
-            "--no-cache",
-        ])
-        .current_dir(fifo_snapshot::root())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn native fslc against FIFO");
+    let mut child = ReapedChild::new(
+        Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args([
+                "verify",
+                &path,
+                "--depth",
+                "4",
+                "--engine",
+                engine,
+                "--edition",
+                edition,
+                "--no-cache",
+            ])
+            .current_dir(fifo_snapshot::root())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn native fslc against FIFO"),
+    );
     let output = wait_for_output(&mut child);
 
     // This is the correctness oracle. Cleanup opens B only after this point.
     fixture.assert_no_second_open();
-    fixture.release_writer();
+    assert_eq!(fixture.release_writer(), WriterOutcome::Finished, "verify");
 
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(

@@ -536,7 +536,7 @@ by itself prove the per-entity decrease required by the `helpful` form.)
 | enum | `enum St { Open, Closed }` | Members are referenced by their bare name in expressions |
 | struct | `struct Order { st: St, item: Option<ItemId>, qty: Qty }` | Fields are scalars or `Option<scalar>` |
 | `Option<T>` | `cart: Option<ItemId>` | `none` / `some(e)`. Used instead of a sentinel value |
-| `Map<K, V>` | `stock: Map<ItemId, Qty>` | K is recommended to be a bounded scalar (domain type / enum / Bool) |
+| `Map<K, V>` | `stock: Map<ItemId, Qty>` | K must be a bounded scalar (domain type / enum / Bool) |
 | `Set<T>` | `shipped: Set<OrderId>` | T is a bounded scalar |
 | `Seq<T, N>` | `queue: Seq<JobId, 3>` | A sequence (FIFO) of capacity N. T is a scalar, N is a constant |
 | `relation A -> B` | `delegates: relation User -> User` | A bounded binary relation over bounded scalar endpoints |
@@ -565,7 +565,8 @@ scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
   `Option<Option<...>>`, and `Option<Set/Map/Seq/struct>` are not allowed
   (rejected at check time with a hint). Optional scalar fields can be written
   directly inside a struct as of v2.1.
-- `Map<Int, V>` works but emits a deprecation warning. Use a domain-type key.
+- `Map<Int, V>` is rejected by `check`. Declare a bounded key type, for example
+  `type ItemId = 0..<max>`, and use `Map<ItemId, V>`.
 - `symmetric type` and `symmetric enum` mark values as interchangeable entity
   identities for liveness symmetry reduction. During `leadsTo` lasso/stall
   search, fslc uses one canonical representative for per-entity rows built from
@@ -1666,6 +1667,15 @@ Schema/version/spec mismatches, unknown state/action/parameter names, and
 malformed input fail closed. Compose uses an explicit checked names/order bridge because
 Public Kernel intentionally rejects incomplete multi-file provenance; it enters
 the same adapter rather than falling back after an export error.
+
+The fixed-seed walk is a concrete Monitor run capped at 100 steps, and it stops
+early when no action is enabled; it is **not** bounded by `--depth`. It can
+therefore reach a violation that the bounded verification `testgen` runs first
+proved absent within `depth`. Because the Monitor rolls a violating step back,
+recording that step would state that the action is a no-op -- an expectation no
+FSL contract makes. `testgen` instead reports the violation with the same
+`result:"violated"` envelope, exit code, property, step, and replayable trace
+`verify` reports, and writes no harness.
 
 - `--target pytest` (default): emits Python tests that import `fslc.runtime.Monitor`
   and drive the random walk live as the oracle.

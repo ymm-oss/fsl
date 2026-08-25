@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+//
+// #843: a walk violation whose kind is `type_bound` rather than `invariant`.
+// `inc` has no `requires`, so at c = 30 the successor 31 leaves the declared
+// range and the Monitor reports `_bounds_c` at step 31 -- past the default
+// verification depth of 8.
+//
+// This kind takes a DIFFERENT renderer from `invariant`: `verify` routes
+// `type_bound` through `render_boundary_output` (its concrete boundary
+// pre-pass in `prepare_bmc`) and `invariant` through `render_violation`. The
+// two are not interchangeable, so both kinds need their own parity control.
+spec TestgenWalkLateTypeBound {
+  type N = 0..30
+  state { c: N }
+  init { c = 0 }
+  action inc() { c = c + 1 }
+  invariant NonNegative { c >= 0 }
+}

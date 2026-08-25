@@ -18,7 +18,8 @@ fn monitor_enforces_guards_and_updates_state() {
     let mut monitor = fsl_runtime::Monitor::new(model).expect("initialize monitor");
     for expected in [1, 2] {
         let action = monitor.enabled().expect("enabled actions")[0].clone();
-        monitor.step(&action).expect("step monitor");
+        let stepped = monitor.step(&action).expect("step monitor");
+        assert_eq!(stepped.violation, None, "clean increment: {stepped:?}");
         assert_eq!(monitor.state["count"], FslValue::Int(expected));
     }
     assert!(monitor.enabled().expect("enabled actions").is_empty());
@@ -105,7 +106,8 @@ fn replay_rejects_a_trace_that_is_not_enabled() {
     );
     let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("initialize monitor");
     let action = monitor.enabled().expect("enabled actions")[0].clone();
-    monitor.step(&action).expect("step monitor");
+    let stepped = monitor.step(&action).expect("step monitor");
+    assert_eq!(stepped.violation, None, "clean finish: {stepped:?}");
     let trace_action = fsl_core::TraceAction {
         name: action.action.clone(),
         params: action.params.clone(),
@@ -217,7 +219,8 @@ fn stale_enabled_action_is_rejected_after_state_change() {
     let mut monitor = fsl_runtime::Monitor::new(model).expect("initialize monitor");
     let action = monitor.enabled().expect("enabled actions")[0].clone();
 
-    monitor.step(&action).expect("first step");
+    let stepped = monitor.step(&action).expect("first step");
+    assert_eq!(stepped.violation, None, "clean first step: {stepped:?}");
     let state_after_first_step = monitor.state.clone();
     let error = monitor.step(&action).expect_err("stale action must fail");
 
@@ -300,12 +303,16 @@ fn wide_named_domain_parameter_validation_does_not_enumerate_for_direct_attempts
     );
     let mut monitor = fsl_runtime::Monitor::new(model).expect("initialize monitor");
 
-    monitor
+    let attempted = monitor
         .attempt(
             "accept",
             &BTreeMap::from([("v".to_owned(), FslValue::Int(1_000_000_000))]),
         )
         .expect("upper bound validates without domain enumeration");
+    assert_eq!(
+        attempted.violation, None,
+        "the upper bound of the declared domain is in range: {attempted:?}"
+    );
 }
 
 #[test]

@@ -884,7 +884,7 @@ Promote it out of the gate when a Worker or LSP consumer actually appears.
 Three properties are load-bearing:
 
 - **It takes the envelope, not the result string.** `approval check` derives its exit from
-  `status == "signature-invalid"` (`main.rs:11134`), not from `result:"approval_check"`, which is
+  `status == "signature-invalid"` (`main.rs:11247`), not from `result:"approval_check"`, which is
   the same value for `approved`, `drifted`, and `signature-invalid`. A `&str` signature cannot
   express that family and would force a second classifier beside the first — the defect being
   removed.

@@ -1,4 +1,12 @@
+* text=auto eol=lf
+
 *.fsl text eol=lf
+
+# This generated file is compared to freshly rendered bytes by the mandatory
+# mutation-scope control. Keep both the committed artifact and its template LF
+# on every checkout; the Rust check separately accepts CRLF at read time.
+rust/.cargo/mutants.toml text eol=lf
+rust/.cargo/mutants.toml.in text eol=lf
 
 # Every checked-in fixture under this directory is compared byte-for-byte
 # against a CLI envelope, so a platform-dependent checkout changes what the

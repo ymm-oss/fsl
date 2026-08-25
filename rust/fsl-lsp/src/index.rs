@@ -86,6 +86,13 @@ enum Context {
     Other,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DeclarationKeyword {
+    value: &'static str,
+    role: Option<SymbolRole>,
+    context: Option<Context>,
+}
+
 impl DocumentIndex {
     /// Build an editor projection only after the authoritative Rust frontend accepts the source.
     ///
@@ -743,30 +750,300 @@ fn import_bindings(source: &str, tokens: &[Token]) -> Vec<ImportBinding> {
     bindings
 }
 
+const DECLARATION_KEYWORDS: &[DeclarationKeyword] = &[
+    // Top-level declarations.
+    DeclarationKeyword {
+        value: "spec",
+        role: Some(SymbolRole::Namespace),
+        context: Some(Context::Top),
+    },
+    DeclarationKeyword {
+        value: "compose",
+        role: Some(SymbolRole::Namespace),
+        context: Some(Context::Top),
+    },
+    DeclarationKeyword {
+        value: "requirements",
+        role: Some(SymbolRole::Namespace),
+        context: Some(Context::Top),
+    },
+    DeclarationKeyword {
+        value: "business",
+        role: Some(SymbolRole::Namespace),
+        context: Some(Context::Top),
+    },
+    DeclarationKeyword {
+        value: "governance",
+        role: Some(SymbolRole::Namespace),
+        context: Some(Context::Top),
+    },
+    DeclarationKeyword {
+        value: "refinement",
+        role: Some(SymbolRole::Namespace),
+        context: Some(Context::Top),
+    },
+    DeclarationKeyword {
+        value: "domain",
+        role: Some(SymbolRole::Namespace),
+        context: Some(Context::Top),
+    },
+    DeclarationKeyword {
+        value: "dbsystem",
+        role: Some(SymbolRole::Namespace),
+        context: Some(Context::Top),
+    },
+    DeclarationKeyword {
+        value: "ai_component",
+        role: Some(SymbolRole::Namespace),
+        context: Some(Context::Top),
+    },
+    DeclarationKeyword {
+        value: "agent",
+        role: Some(SymbolRole::Namespace),
+        context: Some(Context::Top),
+    },
+    DeclarationKeyword {
+        value: "causal",
+        role: Some(SymbolRole::Namespace),
+        context: Some(Context::Top),
+    },
+    // Type declarations.
+    DeclarationKeyword {
+        value: "type",
+        role: Some(SymbolRole::Type),
+        context: None,
+    },
+    DeclarationKeyword {
+        value: "number",
+        role: Some(SymbolRole::Type),
+        context: None,
+    },
+    DeclarationKeyword {
+        value: "entity",
+        role: Some(SymbolRole::Type),
+        context: None,
+    },
+    DeclarationKeyword {
+        value: "enum",
+        role: Some(SymbolRole::Type),
+        context: Some(Context::Enum),
+    },
+    DeclarationKeyword {
+        value: "struct",
+        role: Some(SymbolRole::Type),
+        context: Some(Context::Struct),
+    },
+    DeclarationKeyword {
+        value: "table",
+        role: Some(SymbolRole::Type),
+        context: Some(Context::Struct),
+    },
+    // Action declarations.
+    DeclarationKeyword {
+        value: "action",
+        role: Some(SymbolRole::Function),
+        context: Some(Context::Action),
+    },
+    DeclarationKeyword {
+        value: "transition",
+        role: Some(SymbolRole::Function),
+        context: Some(Context::Action),
+    },
+    DeclarationKeyword {
+        value: "tool",
+        role: Some(SymbolRole::Function),
+        context: Some(Context::Action),
+    },
+    DeclarationKeyword {
+        value: "command",
+        role: Some(SymbolRole::Function),
+        context: Some(Context::Action),
+    },
+    DeclarationKeyword {
+        value: "effect",
+        role: Some(SymbolRole::Function),
+        context: Some(Context::Action),
+    },
+    DeclarationKeyword {
+        value: "migration",
+        role: Some(SymbolRole::Function),
+        context: Some(Context::Action),
+    },
+    DeclarationKeyword {
+        value: "decide",
+        role: Some(SymbolRole::Function),
+        context: Some(Context::Action),
+    },
+    DeclarationKeyword {
+        value: "evolve",
+        role: Some(SymbolRole::Function),
+        context: Some(Context::Action),
+    },
+    DeclarationKeyword {
+        value: "def",
+        role: Some(SymbolRole::Function),
+        context: Some(Context::Action),
+    },
+    // Property declarations.
+    DeclarationKeyword {
+        value: "invariant",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "trans",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "reachable",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "until",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "unless",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "leadsTo",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "property",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "requirement",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "acceptance",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "forbidden",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "control",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "policy",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "goal",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "claim",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "expectation",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    // Variable declarations.
+    DeclarationKeyword {
+        value: "const",
+        role: Some(SymbolRole::Variable),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "actor",
+        role: Some(SymbolRole::Variable),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "process",
+        role: Some(SymbolRole::Variable),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "kpi",
+        role: Some(SymbolRole::Variable),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "authority",
+        role: Some(SymbolRole::Variable),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "aggregate",
+        role: Some(SymbolRole::Variable),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "projection",
+        role: Some(SymbolRole::Variable),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "environment",
+        role: Some(SymbolRole::Variable),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "artifact",
+        role: Some(SymbolRole::Variable),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "column",
+        role: Some(SymbolRole::Variable),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "variable",
+        role: Some(SymbolRole::Variable),
+        context: Some(Context::Other),
+    },
+    // Context-only declarations.
+    DeclarationKeyword {
+        value: "preservation",
+        role: Some(SymbolRole::Namespace),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "state",
+        role: None,
+        context: Some(Context::State),
+    },
+    DeclarationKeyword {
+        value: "init",
+        role: None,
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "verify",
+        role: None,
+        context: Some(Context::Other),
+    },
+];
+
 fn declaration_keyword(value: &str) -> Option<(Option<SymbolRole>, Option<Context>)> {
-    let declaration = match value {
-        "spec" | "compose" | "requirements" | "business" | "governance" | "refinement"
-        | "domain" | "dbsystem" | "ai_component" | "agent" | "causal" => {
-            (Some(SymbolRole::Namespace), Some(Context::Top))
-        }
-        "type" | "number" | "entity" => (Some(SymbolRole::Type), None),
-        "enum" => (Some(SymbolRole::Type), Some(Context::Enum)),
-        "struct" | "table" => (Some(SymbolRole::Type), Some(Context::Struct)),
-        "action" | "transition" | "tool" | "command" | "effect" | "migration" | "decide"
-        | "evolve" | "def" => (Some(SymbolRole::Function), Some(Context::Action)),
-        "invariant" | "trans" | "reachable" | "until" | "unless" | "leadsTo" | "property"
-        | "requirement" | "acceptance" | "forbidden" | "control" | "policy" | "goal" | "claim"
-        | "expectation" => (Some(SymbolRole::Property), Some(Context::Other)),
-        "const" | "actor" | "process" | "kpi" | "authority" | "aggregate" | "projection"
-        | "environment" | "artifact" | "column" | "variable" => {
-            (Some(SymbolRole::Variable), Some(Context::Other))
-        }
-        "preservation" => (Some(SymbolRole::Namespace), Some(Context::Other)),
-        "state" => (None, Some(Context::State)),
-        "init" | "verify" => (None, Some(Context::Other)),
-        _ => return None,
-    };
-    Some(declaration)
+    DECLARATION_KEYWORDS
+        .iter()
+        .find(|keyword| keyword.value == value)
+        .map(|keyword| (keyword.role, keyword.context))
 }
 
 const INDEX_KEYWORDS: &[&str] = &[
@@ -896,6 +1173,14 @@ pub(crate) fn is_keyword(value: &str) -> bool {
     declaration_keyword(value).is_some() || INDEX_KEYWORDS.contains(&value)
 }
 
+#[cfg(test)]
+pub(crate) fn recognized_keywords() -> impl Iterator<Item = &'static str> {
+    DECLARATION_KEYWORDS
+        .iter()
+        .map(|keyword| keyword.value)
+        .chain(INDEX_KEYWORDS.iter().copied())
+}
+
 fn add_symbol(
     source: &str,
     token: &Token,
@@ -975,6 +1260,115 @@ fn contains(range: Range, position: Position) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // These expected role/context pairs are transcribed from origin/main's
+    // declaration_keyword match, not derived from the table.
+    const PRE_REFACTOR_DECLARATION_KEYWORDS: &[(&[&str], Option<SymbolRole>, Option<Context>)] = &[
+        (
+            &[
+                "spec",
+                "compose",
+                "requirements",
+                "business",
+                "governance",
+                "refinement",
+                "domain",
+                "dbsystem",
+                "ai_component",
+                "agent",
+                "causal",
+            ],
+            Some(SymbolRole::Namespace),
+            Some(Context::Top),
+        ),
+        (&["type", "number", "entity"], Some(SymbolRole::Type), None),
+        (&["enum"], Some(SymbolRole::Type), Some(Context::Enum)),
+        (
+            &["struct", "table"],
+            Some(SymbolRole::Type),
+            Some(Context::Struct),
+        ),
+        (
+            &[
+                "action",
+                "transition",
+                "tool",
+                "command",
+                "effect",
+                "migration",
+                "decide",
+                "evolve",
+                "def",
+            ],
+            Some(SymbolRole::Function),
+            Some(Context::Action),
+        ),
+        (
+            &[
+                "invariant",
+                "trans",
+                "reachable",
+                "until",
+                "unless",
+                "leadsTo",
+                "property",
+                "requirement",
+                "acceptance",
+                "forbidden",
+                "control",
+                "policy",
+                "goal",
+                "claim",
+                "expectation",
+            ],
+            Some(SymbolRole::Property),
+            Some(Context::Other),
+        ),
+        (
+            &[
+                "const",
+                "actor",
+                "process",
+                "kpi",
+                "authority",
+                "aggregate",
+                "projection",
+                "environment",
+                "artifact",
+                "column",
+                "variable",
+            ],
+            Some(SymbolRole::Variable),
+            Some(Context::Other),
+        ),
+        (
+            &["preservation"],
+            Some(SymbolRole::Namespace),
+            Some(Context::Other),
+        ),
+        (&["state"], None, Some(Context::State)),
+        (&["init", "verify"], None, Some(Context::Other)),
+    ];
+
+    #[test]
+    fn declaration_keyword_registry_preserves_the_pre_refactor_mapping() {
+        let expected_count = PRE_REFACTOR_DECLARATION_KEYWORDS
+            .iter()
+            .map(|(keywords, _, _)| keywords.len())
+            .sum::<usize>();
+        assert_eq!(DECLARATION_KEYWORDS.len(), expected_count);
+
+        for &(keywords, role, context) in PRE_REFACTOR_DECLARATION_KEYWORDS {
+            for keyword in keywords {
+                assert_eq!(
+                    declaration_keyword(keyword),
+                    Some((role, context)),
+                    "{keyword} changed from its origin/main declaration mapping"
+                );
+            }
+        }
+        assert!(recognized_keywords().all(is_keyword));
+    }
 
     #[test]
     fn indexes_authoritatively_parsed_declarations_and_references() {
