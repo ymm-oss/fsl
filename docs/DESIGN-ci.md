@@ -1091,6 +1091,13 @@ by `rust/Cargo.toml` through a direct `with: toolchain:` input. Local reusable
 workflows are audited as workflow files; external reusable workflows are outside
 this repository's source authority.
 
+The same automation lane runs the five tests in
+`tests/test_coupled_change_meta.py`. They keep the frozen Python dialect, AI
+project-block, grammar, and CLI registries coupled to their native or
+DESIGN-document counterparts, and keep the DESIGN-document index bidirectional.
+This is required pre-merge repository/compatibility evidence, not product
+evidence, and it does not add Python to `./tools/check-native-integration.sh`.
+
 The privileged post-merge reporter receives `issues: write`, so its workflow
 also has a deliberately narrow parser-backed shape contract. It requires the
 fixed `jobs.reconcile` boundary, the exact trusted default-branch condition,
