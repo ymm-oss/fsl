@@ -52,10 +52,14 @@ check_cohort() {
     prefix="semantic-mutation-operators"
   fi
 
-  local -a artifact_dirs=() provenances=()
+  local -a artifact_dirs=() recursive_provenances=() provenances=()
   mapfile -t artifact_dirs < <(find "$cohort" -mindepth 1 -maxdepth 1 -type d | sort)
   if [ "${#artifact_dirs[@]}" -ne "$expected_total" ]; then
     fail "$expected_lane: expected $expected_total artifact directories, found ${#artifact_dirs[@]}"
+  fi
+  mapfile -t recursive_provenances < <(find "$cohort" -type f -name artifact-provenance.v1.json | sort)
+  if [ "${#recursive_provenances[@]}" -ne "$expected_total" ]; then
+    fail "$expected_lane: expected $expected_total provenance sidecars, found ${#recursive_provenances[@]}"
   fi
 
   local work
@@ -152,6 +156,12 @@ check_cohort() {
     expect_equal full_sha256 "$expected_full_hash" "$actual_full_hash" "$artifact_name"
     expect_equal shard_sha256 "$expected_shard_hash" "$actual_shard_hash" "$artifact_name"
   done
+
+  if ! cmp -s \
+    <(printf '%s\n' "${recursive_provenances[@]}") \
+    <(printf '%s\n' "${provenances[@]}" | sort); then
+    fail "$expected_lane: provenance sidecar set mismatch: recursive cohort set must equal selected direct sidecar set"
+  fi
 
   local sorted_indices
   sorted_indices="$(printf '%s\n' "${seen[@]}" | sort -n | paste -sd, -)"
@@ -321,6 +331,15 @@ selftest() {
   expect_rejected nested-foreign-artifact-name \
     "artifact_name mismatch: expected 'rust-test-shard-<shard.index>-77', actual 'rust-test-shard-foreign-1-77'" \
     check_cohort rust "$tmp/nested-foreign" 77 2 rev-good 3
+
+  cp -R "$tmp/partial" "$tmp/surplus-nested-provenance"
+  mkdir -p "$tmp/surplus-nested-provenance/rust-test-shard-1-77/nested"
+  jq '.run_id = "88"' \
+    "$tmp/surplus-nested-provenance/rust-test-shard-1-77/artifact-provenance.v1.json" \
+    >"$tmp/surplus-nested-provenance/rust-test-shard-1-77/nested/artifact-provenance.v1.json"
+  expect_rejected surplus-nested-provenance \
+    "expected 3 provenance sidecars, found 4" \
+    check_cohort rust "$tmp/surplus-nested-provenance" 77 2 rev-good 3
 
   cp -R "$tmp/partial" "$tmp/future"
   jq '.run_attempt = 3' "$tmp/future/rust-test-shard-2-77/artifact-provenance.v1.json" >"$tmp/mutated.json"
