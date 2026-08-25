@@ -91,6 +91,8 @@ check_automation() {
   # split check-product-gate-scope.sh's own `selftest` versus its real
   # `diff_scope` invocation uses.
   ./tools/aggregate_changelog.sh selftest
+  python3 tools/check-design-citation-headings.py selftest
+  python3 tools/check-design-citation-headings.py check
 }
 
 case "${1:-all}" in
