@@ -210,6 +210,10 @@ jobs:
           retention-days: 14
           overwrite: true
 
+      - name: Controlled partial-rerun probe after test-shard upload
+        if: matrix.shard == 2 && github.run_attempt == 1
+        run: exit 1
+
   rust-workspace:
     name: rust workspace
     if: always()
@@ -533,6 +537,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           overwrite: true
+
+      - name: Controlled partial-rerun probe after operator-shard upload
+        if: matrix.shard == 2 && github.run_attempt == 1
+        run: exit 1
 
   semantic-mutation-mutants:
     name: mutation mutants
