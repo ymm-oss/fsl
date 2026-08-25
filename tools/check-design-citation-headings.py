@@ -22,7 +22,7 @@ CITATION_PATTERNS = (
     re.compile(
         DESIGN_PATH
         + r"(?:'s|’s)?"
-        + r"(?:\s*,\s*|\s*\(\s*|\s+)"
+        + r"(?:\s*,\s*|\s*:\s*|\s*\(\s*|\s+section\s+|\s+)"
         + QUOTED_TITLE
     ),
     re.compile(QUOTED_TITLE + r"\s+(?:section\s+)?(?:in|of)\s+" + DESIGN_PATH),
@@ -172,8 +172,10 @@ def headings_in(root: Path, relative: Path) -> set[str]:
 
 
 def audit(root: Path, files: Iterable[Path]) -> tuple[list[Citation], list[Finding]]:
+    audited_files = sorted(set(files))
+    audited_file_set = set(audited_files)
     citations: list[Citation] = []
-    for relative in files:
+    for relative in audited_files:
         citations.extend(citations_in(relative, read_utf8(root, relative)))
     citations.sort()
 
@@ -181,6 +183,9 @@ def audit(root: Path, files: Iterable[Path]) -> tuple[list[Citation], list[Findi
     findings: list[Finding] = []
     for citation in citations:
         design_relative = Path(citation.design_path)
+        if design_relative not in audited_file_set:
+            findings.append(Finding(citation, "design document is not tracked"))
+            continue
         if not (root / design_relative).is_file():
             findings.append(Finding(citation, "design document does not exist"))
             continue
@@ -213,6 +218,14 @@ def selftest(repository_root: Path) -> int:
     fixtures = repository_root / "tests/fixtures/design-citation-headings"
     accepting_citations, accepting_findings = fixture_audit(fixtures / "accepting")
     stale_citations, stale_findings = fixture_audit(fixtures / "stale-435b0f6")
+    separator_citations, separator_findings = fixture_audit(
+        fixtures / "stale-new-separators"
+    )
+    untracked_root = fixtures / "untracked-design"
+    untracked_source = Path("tools/untracked-target-reference.txt")
+    untracked_citations, untracked_findings = audit(
+        untracked_root, [untracked_source]
+    )
 
     expected_accepting = sorted(
         [
@@ -227,6 +240,8 @@ def selftest(repository_root: Path) -> int:
             ),
             ("Sharded pre-merge Linux evidence", ".github/workflows/ci.yml"),
             ("Ruleset drift audit", ".github/workflows/ci.yml"),
+            ("Merge readiness contract", "tools/colon-reference.txt"),
+            ("Merge readiness contract", "tools/section-word-reference.txt"),
         ]
     )
     produced_accepting = sorted(
@@ -249,10 +264,50 @@ def selftest(repository_root: Path) -> int:
         )
         for finding in stale_findings
     ]
+    expected_separator_findings = [
+        (
+            "tools/broken-separators.txt",
+            1,
+            "Colon heading removed",
+            "quoted heading does not exist",
+        ),
+        (
+            "tools/broken-separators.txt",
+            2,
+            "Section-word heading removed",
+            "quoted heading does not exist",
+        ),
+    ]
+    produced_separator_findings = [
+        (
+            finding.citation.source.as_posix(),
+            finding.citation.line,
+            finding.citation.title,
+            finding.reason,
+        )
+        for finding in separator_findings
+    ]
+    expected_untracked_findings = [
+        (
+            "tools/untracked-target-reference.txt",
+            1,
+            "Ambient-only heading",
+            "design document is not tracked",
+        )
+    ]
+    produced_untracked_findings = [
+        (
+            finding.citation.source.as_posix(),
+            finding.citation.line,
+            finding.citation.title,
+            finding.reason,
+        )
+        for finding in untracked_findings
+    ]
     checks = (
         assert_selftest("accepting citations", produced_accepting, expected_accepting),
         assert_selftest("accepting findings", accepting_findings, []),
-        assert_selftest("historical CHANGELOG exclusion", len(accepting_citations), 5),
+        assert_selftest("historical CHANGELOG exclusion", len(accepting_citations), 7),
         assert_selftest("435b0f6 citations", len(stale_citations), 4),
         assert_selftest("435b0f6 exact findings", produced_stale, expected_stale),
         assert_selftest(
@@ -260,12 +315,25 @@ def selftest(repository_root: Path) -> int:
             {finding.reason for finding in stale_findings},
             {"quoted heading does not exist"},
         ),
+        assert_selftest("new separator citations", len(separator_citations), 2),
+        assert_selftest(
+            "new separator exact findings",
+            produced_separator_findings,
+            expected_separator_findings,
+        ),
+        assert_selftest("untracked target citations", len(untracked_citations), 1),
+        assert_selftest(
+            "untracked target exact findings",
+            produced_untracked_findings,
+            expected_untracked_findings,
+        ),
     )
     if not all(checks):
         return 1
     print(
-        "selftest: PASS: produced=5 accepting/0 findings and "
-        "3 issue citations/3 exact stale findings; expected=same"
+        "selftest: PASS: produced=7 accepting/0 findings, "
+        "3 issue citations/3 exact stale findings, 2 new-separator findings, "
+        "and 1 untracked-target finding; expected=same"
     )
     return 0
 

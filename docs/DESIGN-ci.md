@@ -82,7 +82,10 @@ independent lanes succeed:
    `.github/`, `tools/`, `rust/`, `docs/`, and `skills/`; a quoted section paired with a
    `docs/DESIGN-*.md` path must exactly match an H2-H6 ATX heading after symmetric normalization of
    presentation-only numbering, inline-code backticks, whitespace, and issue/slice suffixes. It
-   reports every source location and fails closed on unreadable input or a missing document.
+   recognizes comma, colon, parenthesis, possessive, and explicit `section` separators, reports every
+   source location, and fails closed on unreadable input, a missing document, or a citation target
+   outside the same Git-tracked input set. An untracked worktree document therefore cannot satisfy a
+   tracked citation.
    Repository-root `CHANGELOG.md` is deliberately outside that scope because it is an immutable
    historical record whose old section names must not make current automation fail.
 
