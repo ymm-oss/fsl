@@ -475,8 +475,8 @@ fn reachability(
     closure
 }
 
-/// Compute the six documented `agent_structural_violation` finding kinds
-/// (`docs/DESIGN-ai-hard.md` "Rules enforced as stable semantics") over an
+/// Compute the six documented `agent_structural_violation` finding kinds from
+/// `docs/DESIGN-ai-hard.md` "Recursive Agent Composition" over an
 /// already-validated agent tree.
 #[allow(clippy::too_many_lines)]
 fn agent_findings(
