@@ -1,7 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare direct Rust kernel lowering with Python ``parse_src`` output."""
+"""Optional developer-run compatibility check for Python-shaped kernel lowering.
+
+Run only when intentionally changing compatible lowering or its frozen-Python
+projection. It compares registered specification/compose kernel ASTs exactly. It must
+not replace or redefine the authoritative native v1/v2 Kernel goldens and is not
+product verification or a CI/promotion/release gate.
+"""
 from __future__ import annotations
 
 import argparse

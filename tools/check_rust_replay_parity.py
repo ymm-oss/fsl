@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare the public native and Python replay command contracts."""
+"""Compare the public native and Python replay command contracts.
+
+Deletion deferred (F7): there is no focused native owner for the legacy
+unversioned ``{"events": [...]}`` wrapper. Deletion requires positive and
+rejecting native tests for that wrapper and its public projection.
+"""
 from __future__ import annotations
 
 import argparse

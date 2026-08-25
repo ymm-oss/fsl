@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare native and Python business/requirements/governance envelopes."""
+"""Compare native and Python business/requirements/governance envelopes.
+
+Deletion deferred (F2): dialect dispatch is covered, but there is no focused
+native induction output contract for all three paths. Deletion requires those
+native induction cases.
+"""
 from __future__ import annotations
 
 import argparse
