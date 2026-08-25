@@ -5,6 +5,151 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-08-25
+
+- Changed (#760): native CLI tests now cover deterministic DOT and Mermaid
+  analysis export, DOT escaping from valid FSL input, and rejection of non-graph
+  export requests.
+- Fixed (#617): Normalize Windows source-path separators in the optional-verdict census so classifications and consumer checks remain live across platforms.
+- Fixed (#741): `tools/build_site_reference.py` now rejects a `docs/LANGUAGE.ja.md` that
+  reorders `## ` sections relative to `docs/LANGUAGE.md` while keeping the section count equal.
+  `render_language_tree()` previously compared only `len(ja_sections) == len(en_sections)` and
+  then paired the two files positionally, so a same-count reorder passed generation silently and
+  attached a Japanese section body to the wrong English anchor and blurb — exactly the drift
+  `docs/DESIGN-docs-site.md` D7 and this tool's own docstring already claimed was caught. The
+  fix checks each positional pair's leading numeric section prefix (`"2"` from `"2. Types"`/
+  `"2. 型"`) and raises `SystemExit` naming both headings and the position on a mismatch, needing
+  no new maintained ja/en heading-name table. That per-position check is only sound if
+  `docs/LANGUAGE.md`'s own numbers are unique, so a second assertion now rejects a duplicated
+  English section number directly, naming the duplicate, instead of leaving uniqueness an
+  unstated precondition. Rejecting controls (a same-count reordering fixture and a duplicate-number
+  fixture) and an accepting control (the real, untouched files) are all in
+  `tests/test_site_reference_snapshot.py`.
+- Fixed (#757): sharded Rust and semantic-mutation artifacts now use stable logical names so a failed
+  shard can be rerun without discarding successful peers. Provenance, checksums, shard identity, and
+  exact-union controls reject incomplete or incompatible mixed-attempt cohorts.
+- Fixed (#762): restore the native root CLI-help contract formatting while retaining concise summaries for every top-level command.
+- Fixed (#786): Prove the native-only `enum abstraction` refinement exclusion by neutralizing only its registered block and reject stale or shadowed registry entries.
+- Fixed (#795): failed trusted Actions cache-budget audits now maintain one deduplicated issue and close it after recovery.
+- Fixed (#818): a compose document with an undeclared component alias inside a
+  top-level `init` block's `forall` binder no longer panics past the public
+  API boundary. `rewrite_compose_statements` now returns `Result` and its
+  caller in `lower_compose` propagates with `?`, so `fsl_core::parse_kernel_source`
+  returns `Err(CoreError)` with the "unknown alias" message instead of the
+  process aborting. A rejecting control exercises the reproduction through
+  `parse_kernel_source`; an accepting control confirms a correctly declared
+  alias used in a `forall` binder still lowers successfully.
+- Fixed (#821): the explicit-engine init duplicate-write check now rejects a `forall i { m[i]
+  = ... }` write that overlaps a later flat `m[K] = ...` write to the same concrete key `K`,
+  whether or not the two values agree. It previously tracked forall-indexed writes at
+  whole-variable granularity while flat writes were tracked per key, so an overlapping flat
+  write with an agreeing value was silently accepted and one with a conflicting value fell
+  through to the unrelated "init constraints are unsatisfiable" diagnostic instead of the
+  duplicate-write rule's own message.
+- Fixed (#822): Offer `use` in LSP completion and enforce reasoned parity with rename-validation keywords.
+- Fixed (#840): Cache-budget audit wiring validation now reports malformed sibling workflows without a traceback.
+- Fixed (#843): `fslc testgen` no longer bakes a Monitor rollback as a conformance expectation. The
+  fixed-seed walk is a concrete Monitor run capped at 100 steps and independent of
+  `--depth`, so it could reach a violation the bounded verification `testgen` runs
+  first proved absent within `depth`; the violating `StepResult` was discarded and
+  the rolled-back (unchanged) state was recorded as that step's `expected`. A
+  conforming implementation failed the generated test, an implementation that
+  silently did nothing passed it, and `--target pytest` -- which drives the walk live
+  -- reached the opposite conclusion from the five baked targets on the same input.
+  The walk now fails closed, reporting the violation with the same
+  `result:"violated"` envelope, exit code, property, step, and replayable trace
+  `verify` reports, and writing no harness.
+- Fixed (#846): the Rust workspace is clean again under `clippy` 1.98.0, whose
+  new deny-by-default `manual_is_variant_and` and `chunks_exact_to_as_chunks`
+  lints turned `main` red with no repository change, because every CI job uses
+  the unpinned `dtolnay/rust-toolchain@stable`. Both rewrites are
+  semantics-preserving. CI named only two sites, since cargo aborts at the first
+  failing crate; enumerating with `--keep-going` found four, and the fix was
+  also checked against the pinned 1.88.0 MSRV that `release.yml` uses so
+  `as_chunks` cannot break the release build after PR CI passes on stable.
+- Fixed (#847): Scheduled and manually dispatched product-gate failures now reconcile through the post-merge CI reporter.
+- Fixed (#851): Cache-budget audit workflow-name validation now rejects case-only,
+  surrounding-whitespace, and compatibility-Unicode collisions with the reporter source.
+- Fixed (#855): map-key diagnostics now explain when a `const` shadows a member of
+  the map key enum and advise renaming one of the colliding declarations.
+- Fixed (#856): Replaced workflow line scanners with required PyYAML-backed audits that preserve source diagnostics, reject ambiguous YAML, and pin the privileged post-merge reporter checkout and execution shape.
+- Fixed (#857): `rust tests` and `rust checks` have cold-build margin. A cold
+  `rust tests` shard was measured at 30m04s against its 30-minute budget and was
+  cancelled, turning the aggregate `rust workspace` required context red;
+  `docs/DESIGN-ci.md` had recorded that outcome as an unobserved risk. The budgets
+  move to 45 and 30 minutes, sized from measured cold durations (24m59s / 27m12s /
+  30m04s for the shards, 16m35s for `rust checks`) against warm baselines of
+  9-11m and 2m. #747 records why cold builds recur: two concurrent pull requests
+  exceed the 10 GiB Actions cache ceiling and evict each other, so a budget with
+  no cold margin turns a routine eviction into a failed required context.
+- Fixed (#858): the public types that carry a verification outcome are now `#[must_use]` on the
+  type rather than only on the functions returning them. `Result` is already
+  `#[must_use]`, so `monitor.step(x).map_err(..)?;` satisfied the compiler while the
+  inner `StepResult` -- which owns `violation` -- was dropped as a statement value;
+  annotating the function is redundant against `Result` and closed nothing. With the
+  attribute on the type, `cargo clippy -- -D warnings` rejects the discard **where
+  the outcome is returned directly**, which is the shape behind the `testgen` walk
+  bug. It does not reach an outcome wrapped in `Option`: `#[must_use]` does not
+  propagate through `Option`, and `Option` is not itself `#[must_use]`, so a
+  `-> Result<Option<Outcome>, E>` signature stays undetectable by this mechanism
+  (issue #868).
+- Fixed (#860): recognize integer constants as distinct concrete keys when checking `init` coverage for integer-keyed maps.
+- Fixed (#861): make the release Linux linkage guard reject binaries dynamically linked to libz3, with accepting and rejecting ldd fixtures. The separate GLIBC behavioral-control finding is tracked in #865.
+- Fixed (#862): `Map<Int, V>` is rejected at check time in every grammar-reachable type position, preventing verification from materializing an unbounded key domain.
+- Fixed (#868): Detect discarded optional verification verdicts through direct and source-declared alias return types, and assert expected bounded-liveness observations.
+- Fixed (#871): Corrected the release-linkage calibration to name both conditions
+  behind the former hole: `!` exempted the failing pipeline from `errexit`, and
+  the final clean iteration then supplied the loop's status.
+- Fixed (#873): generated cargo-mutants liveness exclusions now derive their
+  line-scoped expressions from the maintained source anchors instead of requiring
+  hand-copied line numbers.
+- Fixed (#875): causal expectation replay now reports a `within 0` liveness
+  violation found in the initial state instead of returning a false `pass`.
+- Fixed (#882): the generated cargo-mutants configuration's freshness check no longer fails unconditionally on a CRLF checkout. `mutants.toml` and its template are pinned to LF via `.gitattributes` and the comparison normalises line endings, so the gate's verdict does not depend on checkout configuration. Found by the promotion-only Windows solver lane after #880 merged, because that lane is skipped on pull requests.
+- Fixed (#883): text checkouts are pinned to LF and #858's source-inspection control normalises CRLF reads, so its adjacent-line assertions do not depend on checkout configuration.
+- Required (#802): cache-budget audit workflow wiring now has parsed-YAML calibration controls for every validator rejection and diagnostic CLI input failures.
+- Required (#812): `mutate` now preserves malformed causal parser diagnostics through an executable error-envelope parity control.
+- Required (#845): cache-budget audit workflow-name uniqueness now blocks main
+  merges through merge readiness.
+- Required (#850): Native CLI regression coverage now detects incorrect failed-link
+  identities and composed action maps in multi-link `fslc refine` chains.
+- Required (#865): Added accepting and rejecting fixture controls for the Linux
+  release GLIBC ABI guard. The required product gate now exercises the deployed
+  guard with compliant GLIBC_2.39 and rejecting GLIBC_2.40 `readelf` fixtures.
+- Required (#879): `AGENTS.md` now requires four pieces of control evidence beyond a negative control's existence: each control labelled as a detector or a preservation control and the label proven by executing the mutation, one mutation at a time with the revert proven by count; a full-output comparison whose every exclusion carries a reason it cannot be compared, is built from observed output rather than a type's field names, and fails when an excluded key is absent from both sides; ambient observables checked for membership rather than equality, with a new or changed control run at least twice before being reported green; and the commit, built binary, and any applied mutation named before an observation about repository state is reported.
+- Unified (#819): the two-inode FIFO read-count oracle used by all six #796/#808
+  CLI-level snapshot controls now lives once, in
+  `rust/fslc/tests/support/fifo_snapshot.rs`, carrying the cleanup hardening
+  `issue_796_domain_command_validation.rs`'s independent copy grew during its
+  own review: nonblocking cleanup reader descriptors, a
+  `WriterOutcome`/`WriterMode`-driven writer thread, and a `ReapedChild` guard
+  that reaps unconditionally even when `kill` itself fails. The previously
+  unhardened shared copy could hang instead of fail when the CLI under test
+  exited before ever opening the FIFO path -- the exact incident during #813's
+  development that cancelled a CI job after 30 minutes and hung a local run for
+  1h33m. A new negative control in `fifo_snapshot_hardening.rs`,
+  `release_writer_completes_when_cli_never_opens_the_path`, reproduces that
+  scenario directly and proves cleanup now terminates instead of hanging.
+- Documented (#746): Index every accepted design record in docs/README.md.
+- Documented (#821): corrected `docs/DESIGN-bridge.md` §1.3's init-determinism
+  bullet, whose limiting clause ("... rather than a `forall`-bound variable")
+  described the pre-fix explicit-engine behavior instead of the per-concrete-key
+  contract `docs/LANGUAGE.md` already stated. The bullet now says a later flat
+  `m[K] = ...` write to a key a `forall` bulk assignment already covered is a
+  duplicate too, matching the corrected runtime check.
+- Documented (#827): the root `README.md` rebuilt around the native Rust
+  workspace (`rust/`) as the authoritative implementation, replacing the stale
+  "Lark + Z3" / `src/fslc/` product framing, a 47-line directory tree with no
+  `rust/` entry, a `pytest` / "Library API" contract that `AGENTS.md` no longer
+  treats as the product gate, and three overlapping, self-contradicting install
+  paths. In their place: one consolidated install section with a chooser, a
+  `rust/` crate layout, the native CLI surface that was missing (`kernel`,
+  `document`, `ledger`, multi-target `testgen`, `replay --from-log/--mapping`,
+  `--engine explicit|auto`, `analyze` projections), editor integration, and the
+  Public Kernel JSON contract as the supported programmatic surface in place of
+  a Python library import. The `specs/`/`examples/` per-file inventories are
+  deliberately not restored -- a hand-maintained list is what went stale.
+
 ## [4.3.0] - 2026-08-18
 
 - Fixed (#753): `git apply` silently skips every file in a patch, and exits zero, when the
@@ -5496,7 +5641,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.3.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.4.0...HEAD
+[4.4.0]: https://github.com/ymm-oss/fsl/compare/v4.3.0...v4.4.0
 [4.3.0]: https://github.com/ymm-oss/fsl/compare/v4.2.0...v4.3.0
 [4.2.0]: https://github.com/ymm-oss/fsl/compare/v4.1.0...v4.2.0
 [4.1.0]: https://github.com/ymm-oss/fsl/compare/v4.0.0...v4.1.0
