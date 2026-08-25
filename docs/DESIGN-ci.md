@@ -365,6 +365,22 @@ recorded here. If the probe contradicts stable-slot semantics, this design is no
 it must return to the bounded same-run resolver alternative rather than interpreting ambiguity as
 green.
 
+**Controlled probe observation (recorded 2026-08-25, run `32798975136` on PR #891).** Attempt 1
+failed exactly the two probe steps ("Controlled partial-rerun probe after test-shard upload" /
+"... after operator-shard upload") on shard 2 of both lanes, after their uploads; the two aggregator
+failures were their dependent evidence guards. `gh run rerun --failed` produced attempt 2 in which
+only shard 2 of each lane re-ran, and the run completed `success`. The artifact inventory after
+attempt 2 held exactly one artifact per stable logical name: `rust-test-shard-{1,2,3}-32798975136`
+(ids 9546136831 / 9546640389 / 9546005874; shard 2 created 02:28:37Z by attempt 2, shards 1/3
+keeping their attempt-1 timestamps 02:03:52Z / 01:57:24Z) and
+`semantic-mutation-operators-{1,2,3}-32798975136` (ids 9545933248 / 9546534454 / 9546403892; shard 2
+created 02:23:50Z by attempt 2). The unsharded `semantic-mutation-mutants-32798975136-1` and
+`fsl-logic-32798975136-1` stayed attempt-scoped. Both aggregators accepted the mixed cohort with the
+expected diagnostics: `check-shard-artifact-cohort: PASS -- lane=rust-tests run_id=32798975136
+attempts=1,2,1 shards=1,2,3` and `check-shard-artifact-cohort: PASS --
+lane=semantic-mutation-operators run_id=32798975136 attempts=1,2,1 shards=1,2,3`. This satisfies the
+probe precondition above; the probe commit itself was then removed from the branch.
+
 **Agent-configuration-exempt pull requests still work.** Every shard job runs
 `check-product-gate-scope.sh` itself and early-exits its own later steps when `run=false`, so the
 shard's job result is still `success` and no artifact is ever uploaded. Both aggregators therefore
