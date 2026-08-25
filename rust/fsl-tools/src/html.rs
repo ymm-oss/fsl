@@ -588,7 +588,7 @@ fn assurance(verification: &Value) -> String {
 }
 
 /// The html property `kind` to the ledger's element group
-/// (`docs/DESIGN-assurance-classes.md`: "Assurance column per property row
+/// (`docs/DESIGN-assurance-classes.md` defines "Assurance column per property row
 /// via `classify_element` (kind->group: invariant->invariants,
 /// leadsTo->leadstos, reachable->reachables, trans->transitions)").
 fn property_group(kind: &str) -> Option<&'static str> {

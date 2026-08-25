@@ -117,8 +117,8 @@ impl Claim {
 }
 
 /// One semantic-surface axis of the assurance matrix: a set of rows, a set
-/// of *declared* columns (the axis's own required scope -- see
-/// `docs/DESIGN-assurance-matrix.md`'s "required" definition), and the
+/// of *declared* columns (the axis's own required scope -- see the
+/// `docs/DESIGN-assurance-matrix.md` "Cell vocabulary"), and the
 /// `Claim` for every `(row, column)` pair the axis declares as required.
 pub struct Axis {
     pub name: &'static str,

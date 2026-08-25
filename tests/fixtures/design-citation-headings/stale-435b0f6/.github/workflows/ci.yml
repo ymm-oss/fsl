@@ -1,0 +1,8 @@
+# First issue citation.
+# See docs/DESIGN-ci.md, "Merge queue (planned, not yet enabled)".
+
+# Second issue citation in a coordinated list.
+# See docs/DESIGN-ci.md, "Required pre-merge contexts, and why the merge queue was rejected" and "Merge queue (planned, not yet enabled)".
+
+# Enabling FSL_MERGE_QUEUE_CI is the only remaining step. This deliberately
+# uncited premise is outside the syntax lint's contract.
