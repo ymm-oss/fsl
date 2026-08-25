@@ -74,6 +74,10 @@ check_automation() {
   ./tools/check-shard-artifact-cohort.sh selftest
   python3 -m pytest tests/test_shard_artifact_workflow.py -v
   python3 .github/scripts/validate-shard-artifact-workflow.py
+  # The frozen Python compatibility registries and DESIGN-document index must
+  # move together. Keep this detector in required pre-merge repository
+  # evidence; it is not part of the Rust-native product gate.
+  python3 -m pytest tests/test_coupled_change_meta.py -v
   # Accepting/rejecting controls for the ruleset drift audit's compareRuleset/
   # validateContract classifier (docs/DESIGN-ci.md, "Ruleset drift audit").
   node --test .github/scripts/audit-ruleset-drift.test.mjs
@@ -91,6 +95,8 @@ check_automation() {
   # split check-product-gate-scope.sh's own `selftest` versus its real
   # `diff_scope` invocation uses.
   ./tools/aggregate_changelog.sh selftest
+  python3 tools/check-design-citation-headings.py selftest
+  python3 tools/check-design-citation-headings.py check
 }
 
 case "${1:-all}" in

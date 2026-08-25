@@ -89,7 +89,17 @@ independent lanes succeed:
    recurrence updates, recovery closure, and workflow-level failure handling. It also runs the
    checked-in Codex/Claude task-harness contracts with the system Python: a discovered soundness
    finding must remain in the worktree ledger until fixed, linked to an issue, or explicitly marked
-   as awaiting issue-creation authorization.
+   as awaiting issue-creation authorization. The same lane runs the standard-library-only DESIGN
+   section-citation selftest and live audit. The audit examines Git-tracked UTF-8 text under
+   `.github/`, `tools/`, `rust/`, `docs/`, and `skills/`; a quoted section paired with a
+   `docs/DESIGN-*.md` path must exactly match an H2-H6 ATX heading after symmetric normalization of
+   presentation-only numbering, inline-code backticks, whitespace, and issue/slice suffixes. It
+   recognizes comma, colon, parenthesis, possessive, and explicit `section` separators, reports every
+   source location, and fails closed on unreadable input, a missing document, or a citation target
+   outside the same Git-tracked input set. An untracked worktree document therefore cannot satisfy a
+   tracked citation.
+   Repository-root `CHANGELOG.md` is deliberately outside that scope because it is an immutable
+   historical record whose old section names must not make current automation fail.
 
 The lanes run in parallel through `tools/check-merge-readiness.sh`. Native-CLI/default-feature
 compilation, all-target compilation, Clippy, native Z3 verification, the complete LSP/corpus suites,
@@ -1102,6 +1112,13 @@ workflow is not exempt: its commit-pinned action must receive the MSRV declared
 by `rust/Cargo.toml` through a direct `with: toolchain:` input. Local reusable
 workflows are audited as workflow files; external reusable workflows are outside
 this repository's source authority.
+
+The same automation lane runs the five tests in
+`tests/test_coupled_change_meta.py`. They keep the frozen Python dialect, AI
+project-block, grammar, and CLI registries coupled to their native or
+DESIGN-document counterparts, and keep the DESIGN-document index bidirectional.
+This is required pre-merge repository/compatibility evidence, not product
+evidence, and it does not add Python to `./tools/check-native-integration.sh`.
 
 The privileged post-merge reporter receives `issues: write`, so its workflow
 also has a deliberately narrow parser-backed shape contract. It requires the

@@ -7,8 +7,8 @@
 //! dispatch registry (`frontends!`): a causal model is a sidecar hypothesis
 //! graph, never a kernel spec, and registering it would force the frozen
 //! Python dialect registry to move (see `docs/DESIGN-causal.md` §2 and the
-//! parity check in `tests/test_coupled_change_meta.py` — a manual
-//! compatibility check, not a CI gate; see
+//! parity check in `tests/test_coupled_change_meta.py` — required pre-merge
+//! repository evidence through the automation lane, not a product-gate check; see
 //! `docs/DESIGN-coupled-change-metatest.md`). Consumers detect a causal
 //! document with [`is_causal_source`] before dialect dispatch, the same
 //! pre-dispatch sniff pattern used for legacy AI project files.

@@ -1,0 +1,2 @@
+See docs/DESIGN-ci.md: "Colon heading removed".
+See docs/DESIGN-ci.md section "Section-word heading removed".
