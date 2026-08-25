@@ -1,0 +1,1 @@
+Required (#761): native Rust tests now bind every corpus `verify` result class to its process exit and pin the business, requirements, and governance induction CLI contracts before the Python parity harnesses are retired.

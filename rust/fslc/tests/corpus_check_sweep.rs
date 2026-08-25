@@ -28,23 +28,25 @@
 //! fails under `check`. That assertion now belongs to
 //! `corpus_expectation_manifest.rs`, which runs every header's declared
 //! command verbatim (not just `check`) and compares `result`/`kind`/exit
-//! against the declaration (issue #645, #537 C4 residual). This file keeps
-//! exactly two properties, deliberately narrower than a per-file oracle:
-//! (i) a file that declares no error anywhere must not fail `check`
-//! unexpectedly, and (ii) the Verdict Conservation Law below. Splitting the
-//! two prevents a gap, not a hole: `corpus_expectation_manifest.rs`'s roster
-//! is derived from the same header convention this sweep reads, so a
-//! `check`-targeted declared fixture cannot lose its owner by falling
-//! between the two files.
+//! against the declaration (issue #645, #537 C4 residual). This file's
+//! per-file rule remains deliberately narrower than an oracle: a file that
+//! declares no error anywhere must not fail `check` unexpectedly. The
+//! independent `check` and `verify` Verdict Conservation Laws below bind
+//! their envelopes to process exits without declaring a per-file result.
+//! Splitting these properties prevents a gap, not a hole:
+//! `corpus_expectation_manifest.rs`'s roster is derived from the same header
+//! convention this sweep reads, so a `check`-targeted declared fixture cannot
+//! lose its owner by falling between the two files.
 //!
-//! `check_result_and_exit_status_never_contradict` below is a second,
-//! independent property over the same corpus sweep (issue #537 C2, Verdict
-//! Conservation Law). It holds no per-file oracle and needs none of the
-//! exclusions above: unlike "does this file check clean", "does the exit
-//! status agree with the result class" is a closed law that every corpus
-//! file -- including deliberately-failing fixtures and the
+//! `check_result_and_exit_status_never_contradict` and
+//! `verify_result_and_exit_status_never_contradict` are independent
+//! properties over the same corpus sweep (issue #537 C2 and issue #761 F1,
+//! Verdict Conservation Law). They hold no per-file oracle and need none of
+//! the exclusions above: unlike "does this file check clean", "does the exit
+//! status agree with the result class" is a closed law that every corpus file
+//! -- including deliberately-failing fixtures and the
 //! `refinement`/`examples/gallery/injected/` categories excluded above --
-//! must satisfy. Its class definition is production code
+//! must satisfy. Their class definition is production code
 //! (`fslc_rust::outcome::outcome_class`), not a list in this file.
 
 use std::collections::BTreeSet;
@@ -109,6 +111,40 @@ fn run_check(path: &Path) -> (Value, i32) {
     let status = output.status.code().unwrap_or_else(|| {
         panic!(
             "`fslc check {}` terminated by signal, no exit code",
+            path.display()
+        )
+    });
+    (value, status)
+}
+
+/// Runs the bounded BMC baseline used by the corpus-wide verify/exit
+/// conservation law. These arguments also match the verify side of the
+/// ledger comparison below.
+fn run_verify(path: &Path) -> (Value, i32) {
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args([
+            "verify",
+            path.to_str().expect("utf8 path"),
+            "--depth",
+            "2",
+            "--deadlock",
+            "ignore",
+            "--engine",
+            "bmc",
+        ])
+        .current_dir(root())
+        .output()
+        .expect("run native CLI");
+    let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "invalid JSON for `fslc verify {}`: {error}; stderr={}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    let status = output.status.code().unwrap_or_else(|| {
+        panic!(
+            "`fslc verify {}` terminated by signal, no exit code",
             path.display()
         )
     });
@@ -246,6 +282,69 @@ fn check_result_and_exit_status_never_contradict() {
     );
 }
 
+/// Verdict Conservation Law for `fslc verify` over the complete corpus.
+/// Like the check-side owner above, this has no per-file expected verdict:
+/// it binds the production result class to the process status for every
+/// accepted, deliberately failing, and structurally inapplicable corpus
+/// file without exclusions.
+#[test]
+fn verify_result_and_exit_status_never_contradict() {
+    let root = root();
+    let files = corpus_files(&root);
+    assert!(
+        files.len() > 150,
+        "corpus scan floor: found only {} .fsl files under specs/+examples/, expected 150+ \
+         (the directory walk may be broken)",
+        files.len()
+    );
+
+    let mut failures = Vec::new();
+    let mut observed_results = BTreeSet::new();
+    let mut saw_failure_class = false;
+
+    for path in &files {
+        let rel = repo_relative(&root, path);
+        let (envelope, exit) = run_verify(path);
+
+        let Some(object) = envelope.as_object() else {
+            failures.push(format!(
+                "{rel}: `fslc verify` stdout is not a JSON object: {envelope}"
+            ));
+            continue;
+        };
+        let Some(result) = object.get("result").and_then(Value::as_str) else {
+            failures.push(format!(
+                "{rel}: `fslc verify` envelope has no string `result` field: {envelope}"
+            ));
+            continue;
+        };
+
+        observed_results.insert(result.to_owned());
+        let is_success = fslc_rust::outcome::outcome_class(&envelope).is_success();
+        saw_failure_class |= !is_success;
+        if is_success && exit != 0 {
+            failures.push(format!(
+                "{rel}: verify result={result:?} is success-class; produced exit={exit}, \
+                 expected exit=0 (false red)"
+            ));
+        } else if !is_success && exit == 0 {
+            failures.push(format!(
+                "{rel}: verify result={result:?} is failure-class per \
+                 `fslc_rust::outcome::outcome_class`; produced exit=0, expected exit!=0 \
+                 (false green). If this is a new success-class result, register it there -- \
+                 not here"
+            ));
+        }
+    }
+
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert!(
+        saw_failure_class,
+        "expected at least one failure-class verify result; got {observed_results:?} -- \
+         the false-green arm of this law is untested"
+    );
+}
+
 /// Runs `fslc` with `args` and returns only its exit status -- `ledger`
 /// prints rendered Markdown (not JSON) to stdout when `-o` is omitted, so
 /// unlike `run_check` there is no envelope here to parse.
@@ -292,16 +391,7 @@ fn ledger_exit_status_agrees_with_its_verify_baseline() {
     for path in &files {
         let rel = repo_relative(&root, path);
         let path_str = path.to_str().expect("utf8 path");
-        let verify_exit = run_exit_status(&[
-            "verify",
-            path_str,
-            "--depth",
-            "2",
-            "--deadlock",
-            "ignore",
-            "--engine",
-            "bmc",
-        ]);
+        let (_verify_envelope, verify_exit) = run_verify(path);
         let ledger_exit = run_exit_status(&["ledger", path_str, "--depth", "2"]);
 
         if verify_exit != 0 {
