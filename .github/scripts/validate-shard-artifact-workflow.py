@@ -162,16 +162,29 @@ def audit_workflow(document: Mapping[str, Any]) -> list[str]:
 
     # These unsharded artifacts are intentionally attempt-scoped and guard the
     # audit against an indiscriminate global replacement.
-    mutants = _named_step(_mapping(jobs.get("semantic-mutation-mutants")), "Preserve mutation evidence")
-    if mutants is None:
-        errors.append("semantic-mutation-mutants: expected unsharded upload step")
-    else:
-        _require_scalar(
-            errors,
-            "semantic-mutation-mutants upload name",
-            _mapping(mutants.get("with")).get("name"),
+    unsharded_uploads = (
+        (
+            "semantic-mutation-mutants",
+            "Preserve mutation evidence",
             "semantic-mutation-mutants-${{ github.run_id }}-${{ github.run_attempt }}",
-        )
+        ),
+        (
+            "fsl-logic",
+            "Preserve FSL Logic evidence",
+            "fsl-logic-${{ github.run_id }}-${{ github.run_attempt }}",
+        ),
+    )
+    for job_name, step_name, expected_name in unsharded_uploads:
+        upload = _named_step(_mapping(jobs.get(job_name)), step_name)
+        if upload is None:
+            errors.append(f"{job_name}: expected unsharded upload step")
+        else:
+            _require_scalar(
+                errors,
+                f"{job_name} upload name",
+                _mapping(upload.get("with")).get("name"),
+                expected_name,
+            )
     return errors
 
 

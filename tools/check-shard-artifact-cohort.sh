@@ -57,39 +57,47 @@ check_cohort() {
   if [ "${#artifact_dirs[@]}" -ne "$expected_total" ]; then
     fail "$expected_lane: expected $expected_total artifact directories, found ${#artifact_dirs[@]}"
   fi
-  mapfile -t provenances < <(find "$cohort" -name artifact-provenance.v1.json -type f | sort)
-  if [ "${#provenances[@]}" -ne "$expected_total" ]; then
-    fail "$expected_lane: expected $expected_total provenance sidecars, found ${#provenances[@]}"
-  fi
 
   local work
   work="$(mktemp -d)"
-  local -a seen=() fulls=() shards=() manifests=()
-  local provenance
-  for provenance in "${provenances[@]}"; do
-    jq -e '
-      type == "object" and
-      .schema == "fslc.shard-artifact-provenance.v1" and
-      (.lane | type == "string") and
-      (.run_id | type == "string" and test("^[1-9][0-9]*$")) and
-      (.run_attempt | type == "number" and floor == .) and
-      (.head_revision | type == "string" and length > 0) and
-      (.shard | type == "object") and
-      (.shard.index | type == "number" and floor == .) and
-      (.shard.total | type == "number" and floor == .) and
-      (.full_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
-      (.shard_sha256 | type == "string" and test("^[0-9a-f]{64}$"))
-    ' "$provenance" >/dev/null || fail "'$provenance' does not match provenance schema fslc.shard-artifact-provenance.v1"
-
-    local artifact_dir artifact_name lane run_id attempt revision index total expected_name
-    artifact_dir="$(dirname "$provenance")"
+  local -a seen=() attempts=() fulls=() shards=() manifests=()
+  local artifact_dir
+  for artifact_dir in "${artifact_dirs[@]}"; do
+    local artifact_name
     artifact_name="$(basename "$artifact_dir")"
-    lane="$(jq -r '.lane' "$provenance")"
-    run_id="$(jq -r '.run_id' "$provenance")"
-    attempt="$(jq -r '.run_attempt' "$provenance")"
-    revision="$(jq -r '.head_revision' "$provenance")"
-    index="$(jq -r '.shard.index' "$provenance")"
-    total="$(jq -r '.shard.total' "$provenance")"
+    if [[ ! "$artifact_name" =~ ^${prefix}-([1-9][0-9]*)-${expected_run_id}$ ]]; then
+      fail "$artifact_name: artifact_name mismatch: expected '$prefix-<shard.index>-$expected_run_id', actual '$artifact_name'"
+    fi
+
+    local -a direct_provenances=()
+    mapfile -t direct_provenances < <(find "$artifact_dir" -mindepth 1 -maxdepth 1 -type f -name artifact-provenance.v1.json | sort)
+    if [ "${#direct_provenances[@]}" -ne 1 ]; then
+      fail "$artifact_name: expected exactly 1 direct provenance sidecar, found ${#direct_provenances[@]}"
+    fi
+    local provenance="${direct_provenances[0]}"
+    provenances+=("$provenance")
+
+    local provenance_row
+    provenance_row="$(jq -er '
+      select(
+        type == "object" and
+        .schema == "fslc.shard-artifact-provenance.v1" and
+        (.lane | type == "string") and
+        (.run_id | type == "string" and test("^[1-9][0-9]*$")) and
+        (.run_attempt | type == "number" and floor == .) and
+        (.head_revision | type == "string" and length > 0) and
+        (.shard | type == "object") and
+        (.shard.index | type == "number" and floor == .) and
+        (.shard.total | type == "number" and floor == .) and
+        (.full_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+        (.shard_sha256 | type == "string" and test("^[0-9a-f]{64}$"))
+      ) |
+      [.lane, .run_id, .run_attempt, .head_revision, .shard.index, .shard.total,
+       .full_sha256, .shard_sha256] | @tsv
+    ' "$provenance")" || fail "'$provenance' does not match provenance schema fslc.shard-artifact-provenance.v1"
+
+    local lane run_id attempt revision index total expected_full_hash expected_shard_hash expected_name
+    IFS=$'\t' read -r lane run_id attempt revision index total expected_full_hash expected_shard_hash <<<"$provenance_row"
     expected_name="$prefix-$index-$expected_run_id"
 
     expect_equal lane "$expected_lane" "$lane" "$artifact_name"
@@ -105,6 +113,7 @@ check_cohort() {
       fail "$artifact_name: duplicate shard.index: expected unique '1..$expected_total', actual '$index'"
     fi
     seen+=("$index")
+    attempts+=("$attempt")
 
     local full_payload shard_payload
     if [ "$mode" = rust ]; then
@@ -137,10 +146,8 @@ check_cohort() {
       manifests+=("$manifest")
     fi
 
-    local expected_full_hash actual_full_hash expected_shard_hash actual_shard_hash
-    expected_full_hash="$(jq -r '.full_sha256' "$provenance")"
+    local actual_full_hash actual_shard_hash
     actual_full_hash="$(sha256_file "$full_payload")"
-    expected_shard_hash="$(jq -r '.shard_sha256' "$provenance")"
     actual_shard_hash="$(sha256_file "$shard_payload")"
     expect_equal full_sha256 "$expected_full_hash" "$actual_full_hash" "$artifact_name"
     expect_equal shard_sha256 "$expected_shard_hash" "$actual_shard_hash" "$artifact_name"
@@ -165,19 +172,24 @@ check_cohort() {
       fi
     done
   else
-    local expected_base
+    local expected_base expected_table_operators
     expected_base="$(jq -er '.base_revision | select(type == "string" and length > 0)' "${manifests[0]}")" \
       || fail "'${manifests[0]}' has invalid base_revision"
+    expected_table_operators="$(jq -ec '.table_operators' "${manifests[0]}")" \
+      || fail "'${manifests[0]}' has invalid table_operators"
     for index in "${!manifests[@]}"; do
-      local actual_base
+      local actual_base actual_table_operators
       actual_base="$(jq -er '.base_revision | select(type == "string" and length > 0)' "${manifests[$index]}")" \
         || fail "'${manifests[$index]}' has invalid base_revision"
+      actual_table_operators="$(jq -ec '.table_operators' "${manifests[$index]}")" \
+        || fail "'${manifests[$index]}' has invalid table_operators"
       expect_equal base_revision "$expected_base" "$actual_base" "$(basename "$(dirname "${manifests[$index]}")")"
+      expect_equal table_operators "$expected_table_operators" "$actual_table_operators" "$(basename "$(dirname "${manifests[$index]}")")"
     done
   fi
 
   "$root/tools/check-shard-union.sh" "${fulls[0]}" "${shards[@]}"
-  echo "check-shard-artifact-cohort: PASS -- lane=$expected_lane run_id=$expected_run_id attempts=$(for provenance in "${provenances[@]}"; do jq -r '.run_attempt' "$provenance"; done | paste -sd, -) shards=$expected_indices"
+  echo "check-shard-artifact-cohort: PASS -- lane=$expected_lane run_id=$expected_run_id attempts=$(printf '%s\n' "${attempts[@]}" | paste -sd, -) shards=$expected_indices"
   rm -rf "$work"
 }
 
@@ -297,6 +309,19 @@ selftest() {
   mv "$tmp/mutated.json" "$tmp/foreign-index/rust-test-shard-1-77/artifact-provenance.v1.json"
   expect_rejected foreign-shard-index "artifact_name mismatch: expected 'rust-test-shard-2-77', actual 'rust-test-shard-1-77'" check_cohort rust "$tmp/foreign-index" 77 2 rev-good 3
 
+  cp -R "$tmp/partial" "$tmp/nested-foreign"
+  local index
+  for index in 1 2 3; do
+    mv "$tmp/nested-foreign/rust-test-shard-$index-77" "$tmp/nested-foreign/rust-test-shard-foreign-$index-77"
+    mkdir -p "$tmp/nested-foreign/rust-test-shard-foreign-$index-77/rust-test-shard-$index-77"
+    find "$tmp/nested-foreign/rust-test-shard-foreign-$index-77" -mindepth 1 -maxdepth 1 \
+      ! -name "rust-test-shard-$index-77" \
+      -exec mv {} "$tmp/nested-foreign/rust-test-shard-foreign-$index-77/rust-test-shard-$index-77/" \;
+  done
+  expect_rejected nested-foreign-artifact-name \
+    "artifact_name mismatch: expected 'rust-test-shard-<shard.index>-77', actual 'rust-test-shard-foreign-1-77'" \
+    check_cohort rust "$tmp/nested-foreign" 77 2 rev-good 3
+
   cp -R "$tmp/partial" "$tmp/future"
   jq '.run_attempt = 3' "$tmp/future/rust-test-shard-2-77/artifact-provenance.v1.json" >"$tmp/mutated.json"
   mv "$tmp/mutated.json" "$tmp/future/rust-test-shard-2-77/artifact-provenance.v1.json"
@@ -306,6 +331,14 @@ selftest() {
   jq '.base_revision = "base-foreign"' "$tmp/semantic-base/semantic-mutation-operators-2-77/shard-manifest.v1.json" >"$tmp/mutated.json"
   mv "$tmp/mutated.json" "$tmp/semantic-base/semantic-mutation-operators-2-77/shard-manifest.v1.json"
   expect_rejected semantic-base-revision "base_revision mismatch: expected 'base-good', actual 'base-foreign'" check_cohort semantic "$tmp/semantic-base" 77 2 rev-good 3
+
+  cp -R "$tmp/semantic-partial" "$tmp/semantic-table-exact"
+  jq '.table_operators += ["op-a"]' \
+    "$tmp/semantic-table-exact/semantic-mutation-operators-2-77/shard-manifest.v1.json" >"$tmp/mutated.json"
+  mv "$tmp/mutated.json" "$tmp/semantic-table-exact/semantic-mutation-operators-2-77/shard-manifest.v1.json"
+  expect_rejected semantic-table-operators-exact \
+    "table_operators mismatch: expected '[\"op-a\",\"op-b\",\"op-c\",\"op-d\",\"op-e\",\"op-f\"]', actual '[\"op-a\",\"op-b\",\"op-c\",\"op-d\",\"op-e\",\"op-f\",\"op-a\"]'" \
+    check_cohort semantic "$tmp/semantic-table-exact" 77 2 rev-good 3
 
   echo "check-shard-artifact-cohort selftest: all assertions passed"
 }

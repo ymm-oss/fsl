@@ -311,7 +311,8 @@ the first boundary against treating that upload as successful evidence.
 schema/types, lane, run id, head revision, shard total, unique indices `{1,2,3}`, stable artifact
 directory names, bounded attempts, payload checksums, and full-universe digests agree. It then
 preserves the prior lane-specific guarantees: Rust full inventories are byte-identical; semantic
-manifests share `base_revision` and canonical `table_operators`; and both lanes call
+manifests share `base_revision` and raw JSON-array-exact `table_operators` (the canonical form is
+used only for payload checksums and set-union input); and both lanes call
 `tools/check-shard-union.sh` for exact subset/disjoint/union equality. A checksum is an artifact
 identity control, not a replacement for these content-completeness controls. An older attempt with
 identical compatible content is valid by policy; an incompatible older payload is rejected by its
@@ -344,13 +345,15 @@ no longer has, and one binary pinned to two shards). It is wired into
 `check-product-gate-scope.sh selftest`.
 
 The cohort helper's selftest calibrates compatible partial/all-current cohorts and isolated
-rejecting mutations for missing shards, unchanged-sidecar payload edits, incompatible universes,
-foreign lane/run/revision/index provenance, future attempts, and semantic base-revision drift. Each
+rejecting mutations for missing shards, nested foreign artifact names, unchanged-sidecar payload
+edits, incompatible universes, foreign lane/run/revision/index provenance, future attempts,
+semantic base-revision drift, and raw-array `table_operators` drift. Each
 rejection asserts the produced value beside the expected diagnostic. The parser-backed
 `.github/scripts/validate-shard-artifact-workflow.py` and
 `tests/test_shard_artifact_workflow.py` additionally reject one-sided name/pattern drift, lost
 overwrite/provenance/helper wiring, lost aggregator/dependency guards, and accidental changes to
-unsharded attempt-scoped artifacts. All are required by `check-merge-readiness.sh automation`.
+both unsharded attempt-scoped artifacts (`semantic-mutation-mutants` and `fsl-logic`). All are
+required by `check-merge-readiness.sh automation`.
 
 This local evidence does not establish GitHub's cross-attempt `upload-artifact@v4` overwrite scope,
 the visibility of an unchanged attempt-N artifact to an attempt-N+1 download, or duplicate-name

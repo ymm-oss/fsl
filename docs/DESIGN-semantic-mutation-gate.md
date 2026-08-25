@@ -163,8 +163,9 @@ tier (`changed`/`complete`), with the same classifications and the same evidence
   rerun may validly aggregate compatible attempts such as `[N,N+1,N]`. Before content completeness,
   `tools/check-shard-artifact-cohort.sh semantic` requires exactly one provenance sidecar for each
   logical shard and validates its schema, lane/run/revision/shard identity, bounded attempt, and
-  canonical payload checksums. It then enforces identical `base_revision` and canonical
-  `table_operators` across all three manifests, and the disjoint union of their
+  canonical payload checksums. It then enforces identical `base_revision` and raw JSON-array-exact
+  `table_operators` across all three manifests (canonicalization is only for checksums and set-union
+  input), and the disjoint union of their
   `executed_operators` equal to `table_operators` exactly (via `tools/check-shard-union.sh`, the same
   fail-closed subset/disjoint/union-equality primitive used by the `rust workspace` split). A shard
   writes its manifest and provenance only after it succeeds, so a failed shard cannot contribute

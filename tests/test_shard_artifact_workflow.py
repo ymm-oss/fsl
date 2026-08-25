@@ -89,7 +89,26 @@ def test_dependency_result_guard_removal_is_rejected(workflow: dict) -> None:
     assert_rejected(workflow, "dependency guard env: expected 'SEMANTIC_MUTATION_OPERATORS'")
 
 
-def test_unsharded_artifact_attempt_scope_is_preserved(workflow: dict) -> None:
-    upload = step(workflow, "semantic-mutation-mutants", "Preserve mutation evidence")
-    upload["with"]["name"] = "semantic-mutation-mutants-${{ github.run_id }}"
-    assert_rejected(workflow, "semantic-mutation-mutants upload name")
+@pytest.mark.parametrize(
+    ("job", "step_name", "mutated_name", "diagnostic"),
+    [
+        (
+            "semantic-mutation-mutants",
+            "Preserve mutation evidence",
+            "semantic-mutation-mutants-${{ github.run_id }}",
+            "semantic-mutation-mutants upload name",
+        ),
+        (
+            "fsl-logic",
+            "Preserve FSL Logic evidence",
+            "fsl-logic-${{ github.run_id }}",
+            "fsl-logic upload name",
+        ),
+    ],
+)
+def test_unsharded_artifact_attempt_scope_is_preserved(
+    workflow: dict, job: str, step_name: str, mutated_name: str, diagnostic: str
+) -> None:
+    upload = step(workflow, job, step_name)
+    upload["with"]["name"] = mutated_name
+    assert_rejected(workflow, diagnostic)
