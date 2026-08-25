@@ -199,9 +199,9 @@ enforces that `MetaTag.id` never becomes an origin identity). Each claim carries
   `generated_from_source`, `generated_only`, `unknown`.
 
 **The origin registry (`OriginChain`/`OriginSite`) is sparse outside the domain
-dialect today** (`docs/DESIGN-kernel-origin-v2.md`: "the carrier is currently
-richest for the domain dialect"); a real `requirements`/`spec` spec's actions and
-properties routinely have zero bound `OriginChain`s. Relying on the registry alone
+dialect today** (`docs/DESIGN-kernel-origin-v2.md` records that "the carrier is
+currently richest for the domain dialect"); a real `requirements`/`spec` spec's actions
+and properties routinely have zero bound `OriginChain`s. Relying on the registry alone
 would report `unknown` for nearly every claim in the two dialects RCIR v1 targets,
 which is truthful but not useful. `provenance_for` therefore prefers the origin
 registry when it has a chain for a target (it is the richer signal where present,

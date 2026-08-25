@@ -692,8 +692,8 @@ fn migration_op_findings(
 
 /// The `accepts`/`responds`/`provides` capability set contributed by every
 /// `active` or `supported` artifact live at `(schema, flags)`. `may_exist`
-/// artifacts are never providers (`docs/DESIGN-db.md` "an active or
-/// supported provider").
+/// artifacts are never providers; see `docs/DESIGN-db.md` "Generic Artifact
+/// Capabilities and AI Components".
 fn provided_capability(
     environment: &DbEnvironment,
     system: &DbSystem,
