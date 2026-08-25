@@ -291,9 +291,35 @@ one failed, so it can fail loudly instead of disappearing. The aggregator job **
 required-context set (`rust workspace`, `semantic mutation (changed)`) both keep working without
 their own edit.
 
-**Union-completeness guards.** A scheduling change must not be able to silently narrow what runs, so
-each aggregator downloads its shards' inventories and proves the split is a true partition of the
-unsharded set before trusting a `success` result:
+**Stable shard artifacts and cohort guards.** Each sharded artifact has a stable logical name scoped
+to its run and shard (`rust-test-shard-<K>-<run_id>` or
+`semantic-mutation-operators-<K>-<run_id>`), with `overwrite: true`. The name intentionally omits
+`run_attempt`: after `rerun --failed`, an unchanged successful shard may remain from attempt N while
+the rerun shard is replaced by attempt N+1. The aggregator therefore admits a mixed cohort such as
+`[N,N+1,N]`; it does not require all attempts to match, but requires every recorded attempt to be an
+integer in `1..github.run_attempt`. It never searches another run id or chooses a "newest" artifact
+from an ambiguous set.
+
+Each successful producer writes `artifact-provenance.v1.json` before its `if: always()` upload. The
+sidecar schema `fslc.shard-artifact-provenance.v1` records the fixed lane, string `run_id`, integer
+`run_attempt`, producer checkout's `head_revision`, integer shard index/total, and SHA-256 digests of
+the canonical full and shard payloads. A failed shard can still upload diagnostic files, but cannot
+create complete provenance after its test/operator step failed; the dependency-result guard remains
+the first boundary against treating that upload as successful evidence.
+
+`tools/check-shard-artifact-cohort.sh` fails closed unless exactly three sidecars exist and their
+schema/types, lane, run id, head revision, shard total, unique indices `{1,2,3}`, stable artifact
+directory names, bounded attempts, payload checksums, and full-universe digests agree. It then
+preserves the prior lane-specific guarantees: Rust full inventories are byte-identical; semantic
+manifests share `base_revision` and canonical `table_operators`; and both lanes call
+`tools/check-shard-union.sh` for exact subset/disjoint/union equality. A checksum is an artifact
+identity control, not a replacement for these content-completeness controls. An older attempt with
+identical compatible content is valid by policy; an incompatible older payload is rejected by its
+checksum, universe, manifest, or exact-union diagnostic.
+
+A scheduling change must not be able to silently narrow what runs, so each aggregator downloads its
+shards' inventories and proves the split is a true partition of the unsharded set before trusting a
+`success` result:
 
 - `rust-workspace` downloads the three `rust-tests` shards' `full.txt`/`shard.txt` (written by
   `check_rust_tests` in `tools/check-native-integration.sh` *before* the shard's tests run, so the
@@ -316,6 +342,25 @@ shard entry, an empty shard list, and an entire binary's tests dropped from ever
 no longer has, and one binary pinned to two shards). It is wired into
 `tools/check-merge-readiness.sh`'s `check_automation`, alongside
 `check-product-gate-scope.sh selftest`.
+
+The cohort helper's selftest calibrates compatible partial/all-current cohorts and isolated
+rejecting mutations for missing shards, unchanged-sidecar payload edits, incompatible universes,
+foreign lane/run/revision/index provenance, future attempts, and semantic base-revision drift. Each
+rejection asserts the produced value beside the expected diagnostic. The parser-backed
+`.github/scripts/validate-shard-artifact-workflow.py` and
+`tests/test_shard_artifact_workflow.py` additionally reject one-sided name/pattern drift, lost
+overwrite/provenance/helper wiring, lost aggregator/dependency guards, and accidental changes to
+unsharded attempt-scoped artifacts. All are required by `check-merge-readiness.sh automation`.
+
+This local evidence does not establish GitHub's cross-attempt `upload-artifact@v4` overwrite scope,
+the visibility of an unchanged attempt-N artifact to an attempt-N+1 download, or duplicate-name
+selection behavior. The implementation must not merge until a controlled Actions probe has observed
+one shard failing only after its attempt-1 upload, `rerun --failed` producing attempts `[1,2,1]`, one
+artifact per stable logical name, and successful aggregation in both directory shapes. The run id,
+attempts, artifact ids/names/timestamps, sidecar attempts, and aggregator diagnostics must then be
+recorded here. If the probe contradicts stable-slot semantics, this design is not accepted for merge;
+it must return to the bounded same-run resolver alternative rather than interpreting ambiguity as
+green.
 
 **Agent-configuration-exempt pull requests still work.** Every shard job runs
 `check-product-gate-scope.sh` itself and early-exits its own later steps when `run=false`, so the

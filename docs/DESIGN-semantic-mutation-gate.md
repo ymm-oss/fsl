@@ -159,12 +159,16 @@ tier (`changed`/`complete`), with the same classifications and the same evidence
   equivalents check) would add real risk for no measured wall-clock gain.
 - The `semantic-mutation` aggregator requires both lanes to report `success` (`if: always()`, so a
   failing shard cannot be masked by a GitHub-treated-as-satisfied *skip* of the aggregator), then
-  downloads every operator shard's `shard-manifest.v1.json` and enforces completeness: identical
-  `base_revision` and `table_operators` across all three manifests, and the disjoint union of their
+  downloads every stable-name operator shard artifact. The names omit `run_attempt`, so a partial
+  rerun may validly aggregate compatible attempts such as `[N,N+1,N]`. Before content completeness,
+  `tools/check-shard-artifact-cohort.sh semantic` requires exactly one provenance sidecar for each
+  logical shard and validates its schema, lane/run/revision/shard identity, bounded attempt, and
+  canonical payload checksums. It then enforces identical `base_revision` and canonical
+  `table_operators` across all three manifests, and the disjoint union of their
   `executed_operators` equal to `table_operators` exactly (via `tools/check-shard-union.sh`, the same
   fail-closed subset/disjoint/union-equality primitive used by the `rust workspace` split). A shard
-  writes its manifest only after it succeeds, so a failed shard cannot contribute a manifest that
-  reads as complete.
+  writes its manifest and provenance only after it succeeds, so a failed shard cannot contribute
+  evidence that reads as complete; its `if: always()` upload remains diagnostic only.
 
 With no `--lane` flag, `tools/run-semantic-mutation-gate.sh`'s behavior is unchanged from before this
 split: the same manifest test, the same unsharded `run-fault-operators.sh` call, and the same
