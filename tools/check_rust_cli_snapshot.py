@@ -1,7 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare the Rust native CLI projection with the shared-language golden."""
+"""Optional developer-run check of a bounded frozen-Python CLI snapshot.
+
+Run only for an explicitly scoped frozen-Python CLI compatibility change. The snapshot
+is a historical 190-entry subset, not the current corpus authority: record provenance,
+never regenerate it merely to accept native evolution, and never present a pass as
+product verification. This script is not a CI/promotion/release gate; native CLI,
+schema, corpus, and Worker tests remain authoritative.
+"""
 from __future__ import annotations
 
 import argparse

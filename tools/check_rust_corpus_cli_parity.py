@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare stable Python/Rust CLI verdicts across the complete FSL corpus."""
+"""Compare stable Python/Rust CLI verdicts across the complete FSL corpus.
+
+Deletion deferred (F1): no native corpus control binds every
+``verify`` envelope result class to its process exit. Deletion requires that
+native control plus a rejecting mutation.
+"""
 from __future__ import annotations
 
 import argparse

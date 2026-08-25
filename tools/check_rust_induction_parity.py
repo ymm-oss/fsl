@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare native and Python k-induction envelopes over focused corpus slices."""
+"""Compare native and Python k-induction envelopes over focused corpus slices.
+
+Deletion deferred (F3): native CLI ownership covers only part of the
+16-case envelope/exit matrix. Deletion requires native cases for its stable
+fields and exits, with explicit exclusions and negative controls.
+"""
 from __future__ import annotations
 
 import argparse

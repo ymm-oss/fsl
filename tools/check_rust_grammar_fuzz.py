@@ -1,7 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Deterministic grammar-derived expression fuzzing across Python and Rust."""
+"""Optional developer-run compatibility fuzzing for shared expression grammar.
+
+Run only when intentionally changing shared expression syntax or its frozen-Python
+projection. It compares 256 generated ASTs exactly with seed 195; preserve that seed
+and comparison, and never convert divergences into broad allowlists. This is not
+product verification or a CI/promotion/release gate; native parser tests are authoritative.
+"""
 
 from __future__ import annotations
 
