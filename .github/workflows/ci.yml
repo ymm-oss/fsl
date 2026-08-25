@@ -178,12 +178,34 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         run: ./tools/check-native-integration.sh rust-tests ${{ matrix.shard }}/3
 
+      - name: Record test-shard provenance
+        if: steps.scope.outputs.run == 'true'
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          evidence=rust/target/test-shards
+          jq -n \
+            --arg lane rust-tests \
+            --arg run_id "$RUN_ID" \
+            --argjson run_attempt "$RUN_ATTEMPT" \
+            --arg head_revision "$(git rev-parse HEAD)" \
+            --argjson shard_index "$SHARD_INDEX" \
+            --arg full_sha256 "$(sha256sum "$evidence/full.txt" | awk '{print $1}')" \
+            --arg shard_sha256 "$(sha256sum "$evidence/shard.txt" | awk '{print $1}')" \
+            '{schema:"fslc.shard-artifact-provenance.v1", lane:$lane,
+              run_id:$run_id, run_attempt:$run_attempt, head_revision:$head_revision,
+              shard:{index:$shard_index,total:3}, full_sha256:$full_sha256,
+              shard_sha256:$shard_sha256}' >"$evidence/artifact-provenance.v1.json"
+
       - name: Preserve test-shard inventory
         if: always() && steps.scope.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: rust-test-shard-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: rust/target/test-shards/*.txt
+          name: rust-test-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: rust/target/test-shards/*
           if-no-files-found: error
           retention-days: 14
           overwrite: true
@@ -234,28 +256,12 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         uses: actions/download-artifact@v4
         with:
-          pattern: rust-test-shard-*-${{ github.run_id }}-${{ github.run_attempt }}
+          pattern: rust-test-shard-*-${{ github.run_id }}
           path: rust-test-shards
 
       - name: Verify shard completeness
         if: steps.scope.outputs.run == 'true'
-        run: |
-          set -euo pipefail
-          mapfile -t fulls < <(find rust-test-shards -name full.txt | sort)
-          mapfile -t shards < <(find rust-test-shards -name shard.txt | sort)
-          if [ "${#fulls[@]}" -ne 3 ] || [ "${#shards[@]}" -ne 3 ]; then
-            echo "rust workspace: expected 3 shard inventories, found ${#fulls[@]} full.txt and ${#shards[@]} shard.txt" >&2
-            exit 1
-          fi
-          # Three independently computed listings must agree exactly -- a
-          # divergence means the shards did not see the same workspace.
-          if ! cmp -s "${fulls[0]}" "${fulls[1]}" || ! cmp -s "${fulls[1]}" "${fulls[2]}"; then
-            echo "rust workspace: the three shards computed different full test listings" >&2
-            diff "${fulls[0]}" "${fulls[1]}" || true
-            diff "${fulls[1]}" "${fulls[2]}" || true
-            exit 1
-          fi
-          ./tools/check-shard-union.sh "${fulls[0]}" "${shards[@]}"
+        run: ./tools/check-shard-artifact-cohort.sh rust rust-test-shards "${{ github.run_id }}" "${{ github.run_attempt }}" "$(git rev-parse HEAD)" 3
 
   wasm:
     name: WASM
@@ -492,11 +498,37 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         run: ./tools/run-semantic-mutation-gate.sh "${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production')) && 'changed' || 'complete' }}" --lane operators --shard ${{ matrix.shard }}/3
 
+      - name: Record operator-shard provenance
+        if: steps.scope.outputs.run == 'true'
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          evidence=rust/target/fault-operators/logs
+          manifest="$evidence/shard-manifest.v1.json"
+          work="$(mktemp -d)"
+          jq -r '.table_operators[]' "$manifest" | sort -u >"$work/full.txt"
+          jq -r '.executed_operators[]' "$manifest" | sort -u >"$work/shard.txt"
+          jq -n \
+            --arg lane semantic-mutation-operators \
+            --arg run_id "$RUN_ID" \
+            --argjson run_attempt "$RUN_ATTEMPT" \
+            --arg head_revision "$(git rev-parse HEAD)" \
+            --argjson shard_index "$SHARD_INDEX" \
+            --arg full_sha256 "$(sha256sum "$work/full.txt" | awk '{print $1}')" \
+            --arg shard_sha256 "$(sha256sum "$work/shard.txt" | awk '{print $1}')" \
+            '{schema:"fslc.shard-artifact-provenance.v1", lane:$lane,
+              run_id:$run_id, run_attempt:$run_attempt, head_revision:$head_revision,
+              shard:{index:$shard_index,total:3}, full_sha256:$full_sha256,
+              shard_sha256:$shard_sha256}' >"$evidence/artifact-provenance.v1.json"
+
       - name: Preserve operator shard evidence
         if: always() && steps.scope.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: semantic-mutation-operators-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: semantic-mutation-operators-${{ matrix.shard }}-${{ github.run_id }}
           path: rust/target/fault-operators/logs/**
           if-no-files-found: error
           retention-days: 14
@@ -620,35 +652,12 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         uses: actions/download-artifact@v4
         with:
-          pattern: semantic-mutation-operators-*-${{ github.run_id }}-${{ github.run_attempt }}
+          pattern: semantic-mutation-operators-*-${{ github.run_id }}
           path: semantic-mutation-operators
 
       - name: Verify operator shard completeness
         if: steps.scope.outputs.run == 'true'
-        run: |
-          set -euo pipefail
-          mapfile -t manifests < <(find semantic-mutation-operators -name shard-manifest.v1.json | sort)
-          if [ "${#manifests[@]}" -ne 3 ]; then
-            echo "semantic mutation: expected 3 operator shard manifests, found ${#manifests[@]}" >&2
-            exit 1
-          fi
-          base_revision="$(jq -r '.base_revision' "${manifests[0]}")"
-          table_operators="$(jq -c '.table_operators' "${manifests[0]}")"
-          work="$(mktemp -d)"
-          for index in "${!manifests[@]}"; do
-            manifest="${manifests[$index]}"
-            if [ "$(jq -r '.base_revision' "$manifest")" != "$base_revision" ]; then
-              echo "semantic mutation: $manifest disagrees with ${manifests[0]} on base_revision" >&2
-              exit 1
-            fi
-            if [ "$(jq -c '.table_operators' "$manifest")" != "$table_operators" ]; then
-              echo "semantic mutation: $manifest disagrees with ${manifests[0]} on table_operators" >&2
-              exit 1
-            fi
-            jq -r '.executed_operators[]' "$manifest" | sort -u >"$work/shard-$index.txt"
-          done
-          jq -r '.[]' <<<"$table_operators" | sort -u >"$work/full.txt"
-          ./tools/check-shard-union.sh "$work/full.txt" "$work"/shard-*.txt
+        run: ./tools/check-shard-artifact-cohort.sh semantic semantic-mutation-operators "${{ github.run_id }}" "${{ github.run_attempt }}" "$(git rev-parse HEAD)" 3
 
   # M13 deterministic finite-model agreement (#673). The report begins
   # incomplete and becomes complete only after every selected case and edge

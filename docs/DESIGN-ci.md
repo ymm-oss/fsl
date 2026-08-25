@@ -291,9 +291,36 @@ one failed, so it can fail loudly instead of disappearing. The aggregator job **
 required-context set (`rust workspace`, `semantic mutation (changed)`) both keep working without
 their own edit.
 
-**Union-completeness guards.** A scheduling change must not be able to silently narrow what runs, so
-each aggregator downloads its shards' inventories and proves the split is a true partition of the
-unsharded set before trusting a `success` result:
+**Stable shard artifacts and cohort guards.** Each sharded artifact has a stable logical name scoped
+to its run and shard (`rust-test-shard-<K>-<run_id>` or
+`semantic-mutation-operators-<K>-<run_id>`), with `overwrite: true`. The name intentionally omits
+`run_attempt`: after `rerun --failed`, an unchanged successful shard may remain from attempt N while
+the rerun shard is replaced by attempt N+1. The aggregator therefore admits a mixed cohort such as
+`[N,N+1,N]`; it does not require all attempts to match, but requires every recorded attempt to be an
+integer in `1..github.run_attempt`. It never searches another run id or chooses a "newest" artifact
+from an ambiguous set.
+
+Each successful producer writes `artifact-provenance.v1.json` before its `if: always()` upload. The
+sidecar schema `fslc.shard-artifact-provenance.v1` records the fixed lane, string `run_id`, integer
+`run_attempt`, producer checkout's `head_revision`, integer shard index/total, and SHA-256 digests of
+the canonical full and shard payloads. A failed shard can still upload diagnostic files, but cannot
+create complete provenance after its test/operator step failed; the dependency-result guard remains
+the first boundary against treating that upload as successful evidence.
+
+`tools/check-shard-artifact-cohort.sh` fails closed unless exactly three sidecars exist and their
+schema/types, lane, run id, head revision, shard total, unique indices `{1,2,3}`, stable artifact
+directory names, bounded attempts, payload checksums, and full-universe digests agree. It then
+preserves the prior lane-specific guarantees: Rust full inventories are byte-identical; semantic
+manifests share `base_revision` and raw JSON-array-exact `table_operators` (the canonical form is
+used only for payload checksums and set-union input); and both lanes call
+`tools/check-shard-union.sh` for exact subset/disjoint/union equality. A checksum is an artifact
+identity control, not a replacement for these content-completeness controls. An older attempt with
+identical compatible content is valid by policy; an incompatible older payload is rejected by its
+checksum, universe, manifest, or exact-union diagnostic.
+
+A scheduling change must not be able to silently narrow what runs, so each aggregator downloads its
+shards' inventories and proves the split is a true partition of the unsharded set before trusting a
+`success` result:
 
 - `rust-workspace` downloads the three `rust-tests` shards' `full.txt`/`shard.txt` (written by
   `check_rust_tests` in `tools/check-native-integration.sh` *before* the shard's tests run, so the
@@ -316,6 +343,43 @@ shard entry, an empty shard list, and an entire binary's tests dropped from ever
 no longer has, and one binary pinned to two shards). It is wired into
 `tools/check-merge-readiness.sh`'s `check_automation`, alongside
 `check-product-gate-scope.sh selftest`.
+
+The cohort helper's selftest calibrates compatible partial/all-current cohorts and isolated
+rejecting mutations for missing shards, nested foreign artifact names, unchanged-sidecar payload
+edits, incompatible universes, foreign lane/run/revision/index provenance, future attempts,
+semantic base-revision drift, and raw-array `table_operators` drift. Each
+rejection asserts the produced value beside the expected diagnostic. The parser-backed
+`.github/scripts/validate-shard-artifact-workflow.py` and
+`tests/test_shard_artifact_workflow.py` additionally reject one-sided name/pattern drift, lost
+overwrite/provenance/helper wiring, lost aggregator/dependency guards, and accidental changes to
+both unsharded attempt-scoped artifacts (`semantic-mutation-mutants` and `fsl-logic`). All are
+required by `check-merge-readiness.sh automation`.
+
+This local evidence does not establish GitHub's cross-attempt `upload-artifact@v4` overwrite scope,
+the visibility of an unchanged attempt-N artifact to an attempt-N+1 download, or duplicate-name
+selection behavior. The implementation must not merge until a controlled Actions probe has observed
+one shard failing only after its attempt-1 upload, `rerun --failed` producing attempts `[1,2,1]`, one
+artifact per stable logical name, and successful aggregation in both directory shapes. The run id,
+attempts, artifact ids/names/timestamps, sidecar attempts, and aggregator diagnostics must then be
+recorded here. If the probe contradicts stable-slot semantics, this design is not accepted for merge;
+it must return to the bounded same-run resolver alternative rather than interpreting ambiguity as
+green.
+
+**Controlled probe observation (recorded 2026-08-25, run `32798975136` on PR #891).** Attempt 1
+failed exactly the two probe steps ("Controlled partial-rerun probe after test-shard upload" /
+"... after operator-shard upload") on shard 2 of both lanes, after their uploads; the two aggregator
+failures were their dependent evidence guards. `gh run rerun --failed` produced attempt 2 in which
+only shard 2 of each lane re-ran, and the run completed `success`. The artifact inventory after
+attempt 2 held exactly one artifact per stable logical name: `rust-test-shard-{1,2,3}-32798975136`
+(ids 9546136831 / 9546640389 / 9546005874; shard 2 created 02:28:37Z by attempt 2, shards 1/3
+keeping their attempt-1 timestamps 02:03:52Z / 01:57:24Z) and
+`semantic-mutation-operators-{1,2,3}-32798975136` (ids 9545933248 / 9546534454 / 9546403892; shard 2
+created 02:23:50Z by attempt 2). The unsharded `semantic-mutation-mutants-32798975136-1` and
+`fsl-logic-32798975136-1` stayed attempt-scoped. Both aggregators accepted the mixed cohort with the
+expected diagnostics: `check-shard-artifact-cohort: PASS -- lane=rust-tests run_id=32798975136
+attempts=1,2,1 shards=1,2,3` and `check-shard-artifact-cohort: PASS --
+lane=semantic-mutation-operators run_id=32798975136 attempts=1,2,1 shards=1,2,3`. This satisfies the
+probe precondition above; the probe commit itself was then removed from the branch.
 
 **Agent-configuration-exempt pull requests still work.** Every shard job runs
 `check-product-gate-scope.sh` itself and early-exits its own later steps when `run=false`, so the

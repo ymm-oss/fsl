@@ -67,6 +67,13 @@ check_automation() {
   # `rust workspace` and `semantic mutation` aggregators depend on
   # (docs/DESIGN-ci.md, "Sharded pre-merge Linux evidence").
   ./tools/check-shard-union.sh selftest
+  # Stable logical shard artifacts deliberately admit a compatible mixed-
+  # attempt cohort after a partial rerun. Calibrate the provenance/checksum/
+  # identity policy, then audit the live workflow through its parsed YAML
+  # structure so one producer or aggregator cannot drift independently.
+  ./tools/check-shard-artifact-cohort.sh selftest
+  python3 -m pytest tests/test_shard_artifact_workflow.py -v
+  python3 .github/scripts/validate-shard-artifact-workflow.py
   # Accepting/rejecting controls for the ruleset drift audit's compareRuleset/
   # validateContract classifier (docs/DESIGN-ci.md, "Ruleset drift audit").
   node --test .github/scripts/audit-ruleset-drift.test.mjs
