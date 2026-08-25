@@ -758,13 +758,15 @@ def _business_action_actor_map(abs_ast):
     return actors
 
 
-def _check_auto_mapped_process_actors(processes, abs_ast):
+def _check_auto_mapped_process_actors(processes, abs_ast, explicit_action_names):
     business_actors = _business_action_actor_map(abs_ast)
     if not business_actors:
         return
     for proc in processes:
         for tr in proc["transitions"]:
             name = tr["name"]
+            if name in explicit_action_names:
+                continue
             biz_actor = business_actors.get(name)
             if biz_actor is None:
                 continue
@@ -1039,14 +1041,18 @@ def _expand_requirements_with_display(ast, base_dir, bounds_overrides=None):
     )
 
     if implements is not None:
-        _check_auto_mapped_process_actors(processes, implements["abs_ast"])
+        explicit_action_names = {
+            item[1] for item in implements["maps"] if item[0] == "action_map"
+        }
+        _check_auto_mapped_process_actors(
+            processes,
+            implements["abs_ast"],
+            explicit_action_names,
+        )
         mapping_items = [("impl", name), ("abs", implements["abs"])]
         mapping_items.extend(implements["maps"])
         mapping_items.extend(auto_state_maps)
         mapping_items.extend(action_maps)
-        explicit_action_names = {
-            item[1] for item in implements["maps"] if item[0] == "action_map"
-        }
         # Process transitions synthesize same-name correspondences. An explicit
         # inline entry is the override for cases such as an arity-changing lower
         # action; retaining both would turn a valid override into a duplicate.

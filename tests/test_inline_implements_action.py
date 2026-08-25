@@ -210,6 +210,54 @@ def test_inline_action_map_overrides_process_auto_map_only():
     ]
 
 
+BUSINESS_PROCESS_ACTOR_OVERRIDE = '''business ActorOverrideBiz {
+  actor Employee, Manager
+  entity Claim
+
+  process Claim {
+    stages Draft, Submitted
+    initial Draft
+    transition submit Draft -> Submitted by Employee
+    transition review Draft -> Submitted by Manager
+  }
+}
+verify {
+  instances Claim = 1
+}
+'''
+
+REQUIREMENTS_PROCESS_ACTOR_OVERRIDE = '''requirements ActorOverrideReq {
+  implements ActorOverrideBiz from "biz.fsl" {
+    action submit(c) -> review(c)
+  }
+
+  process Claim {
+    stages Draft, Submitted
+    initial Draft
+    transition submit Draft -> Submitted by Manager
+  }
+}
+verify {
+  instances Claim = 1
+}
+'''
+
+
+def test_inline_action_map_override_skips_auto_map_actor_validation(tmp_path):
+    _write(tmp_path, {
+        "biz.fsl": BUSINESS_PROCESS_ACTOR_OVERRIDE,
+        "req.fsl": REQUIREMENTS_PROCESS_ACTOR_OVERRIDE,
+    })
+
+    checked = run_check(str(tmp_path / "req.fsl"))
+
+    assert checked["result"] == "ok", checked
+    assert checked["implements"] == {
+        "abs": "ActorOverrideBiz",
+        "result": "refines",
+    }
+
+
 ABS_BRANCH = '''spec AbsBranch73 {
   type CaseId = 0..1
   state { done: Map<CaseId, Bool> }
