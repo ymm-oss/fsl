@@ -56,7 +56,8 @@ honest v1:
   a plausible-looking document whose source-only declarations are silently
   unaccounted for.
 - **`compose` needs nothing new.** It is already rejected at two independent
-  layers: the Public Kernel export contract (`docs/DESIGN-kernel-contract.md`:
+  layers: the Public Kernel export contract in `docs/DESIGN-kernel-contract.md`
+  states that
   "Compose lowering currently loses the component filename... Public Kernel
   v1 therefore rejects `compose` input explicitly... A future schema version
   may add multi-source provenance once it is retained by the checked

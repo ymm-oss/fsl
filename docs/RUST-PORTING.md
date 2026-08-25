@@ -137,8 +137,11 @@ and liveness verification, full native CLI envelopes, replay, scenarios,
 snapshot projection, and bidirectional counterexample gates all pass their
 declared corpora. Phase 2 is complete without changing these Phase-1 contracts.
 Phase 4's production Worker and cancellation/native-verdict gates are also
-complete. Phase 3 is complete: its large raw-output/report bodies and stable
-projections pass command-by-command parity without a Python command fallback.
+complete. Phase 3's historical Python/Rust comparison is not product evidence. Its
+script remains parked as a developer-run diagnostic because `ai compare` does not yet
+have a focused native metric/delta contract test; AI work is currently parked, so the
+missing owner is follow-up work. Native command tests and the Rust/WASM envelope
+comparison remain authoritative for the command families they own.
 The native release binaries provide `fslc` and `fslc-lsp`; the Python package
 remains available only as the frozen compatibility/parity oracle.
 
@@ -162,31 +165,68 @@ failure reporting, and release-blocking semantics.
 
 ## 5. Commands
 
+The current 17-harness disposition is authoritative for maintenance work:
+
+| Disposition | Harnesses | Preconditions / scope |
+|---|---|---|
+| Manual compatibility (5) | `ast_parity`, `grammar_fuzz`, `surface_parity`, `kernel_parity`, `cli_snapshot` | Run only for an intentional change to the named frozen-Python projection; never product-gate evidence. |
+| F1 deletion deferred | `corpus_cli_parity` | Bind every corpus `verify` result class to its process exit and calibrate a rejecting mutation. |
+| F2 deletion deferred | `dialect_parity` | Add focused induction output contracts for the business, requirements, and governance paths. |
+| F3 deletion deferred | `induction_parity` | Own the 16-case CLI stable fields/exits with explicit exclusions and negative controls. |
+| F4 deletion deferred | `leadsto_parity` | Add a native liveness-lasso replay matrix with isolated state/action/loop corruptions. |
+| F5 deletion deferred | `phase2_commands` | Assert `--keep-going` failure continuation and the human-readable `Layer` stderr table. |
+| F6 deletion deferred | `refinement_parity` | Compare the complete observed stable projection with reasoned exclusions and dead-exclusion checks. |
+| F7 deletion deferred | `replay_parity` | Add positive and rejecting native tests for the legacy unversioned `{ "events": [...] }` wrapper. |
+| Deletion-ready after helper move (1) | `full_envelope` | Native/Worker parity owns the detector; first move `_diff`/`_normalize` without breaking its three consumers. |
+| Parked (1) | `phase3_commands` | Add a focused native `ai compare` metric/delta contract; AI work is currently parked. |
+| Native migration phase (3) | `bfs_parity`, `bmc_parity`, `scenarios_parity` | Complete the native BFS/BMC/deadlock/reachability/action-coverage/witness matrix before deletion. |
+
 ```bash
-# Python reference AST is deterministic and covers the whole corpus.
+# Historical migration inventory; not a current product gate.
 PYTHONPATH=src python tools/export_ast.py --corpus --compact > /tmp/fsl-python-ast.json
 PYTHONPATH=src python tools/inventory_rust_port.py --check rust/phase0-inventory.json
 
-# Rust syntax checks and live Python↔Rust expression differential.
+# Authoritative native workspace checks.
 cd rust
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo build --workspace --locked
 cd ..
+
+# Optional frozen-Python compatibility checks. Run only when intentionally changing
+# the named shared projection; none belongs to merge readiness, product, promotion,
+# or release gates, and none can waive native evidence.
 PYTHONPATH=src python tools/check_rust_ast_parity.py
+PYTHONPATH=src python tools/check_rust_grammar_fuzz.py
 PYTHONPATH=src python tools/check_rust_surface_parity.py
 PYTHONPATH=src python tools/check_rust_kernel_parity.py
+PYTHONPATH=src python tools/check_rust_cli_snapshot.py
+
+# A nonzero result requires an explicit compatible-subset decision. Do not turn
+# native-only evolution into a broad allowlist or regenerate the snapshot to pass.
+
+# Deletion deferred: related native coverage does not yet own the exact detector.
+# F1-F7 above name the required native controls for these seven scripts.
+PYTHONPATH=src python tools/check_rust_corpus_cli_parity.py --depth 3
+PYTHONPATH=src python tools/check_rust_dialect_parity.py
+PYTHONPATH=src python tools/check_rust_induction_parity.py
+PYTHONPATH=src python tools/check_rust_leadsto_parity.py --depth 5
+PYTHONPATH=src python tools/check_rust_phase2_commands.py
+PYTHONPATH=src python tools/check_rust_refinement_parity.py
+PYTHONPATH=src python tools/check_rust_replay_parity.py
+
+# Native owner confirmed, but deletion waits for shared-helper extraction because
+# dialect, induction, and Phase-2 tools import `_diff`/`_normalize` from this module.
+PYTHONPATH=src python tools/check_rust_full_envelope.py --depth 5
+
+# Awaiting native semantic migration; not part of the bounded manual suite above.
 PYTHONPATH=src python tools/check_rust_bfs_parity.py --depth 3
 PYTHONPATH=src python tools/check_rust_bmc_parity.py --depth 3
-PYTHONPATH=src python tools/check_rust_cli_snapshot.py
-PYTHONPATH=src python tools/check_rust_full_envelope.py --depth 5
-PYTHONPATH=src python tools/check_rust_leadsto_parity.py --depth 5
-PYTHONPATH=src python tools/check_rust_induction_parity.py
-PYTHONPATH=src python tools/check_rust_refinement_parity.py
 PYTHONPATH=src python tools/check_rust_scenarios_parity.py --depth 5
-PYTHONPATH=src python tools/check_rust_replay_parity.py
-PYTHONPATH=src python tools/check_rust_corpus_cli_parity.py --depth 3
+
+# Parked: not a gate and not safe to delete until `ai compare` has a focused native owner.
+PYTHONPATH=src python tools/check_rust_phase3_commands.py
 
 # Official npm backend spike.
 cd rust/spikes/z3js-worker

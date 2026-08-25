@@ -202,7 +202,7 @@ fn record_outcome(record: &Value) -> bool {
 
 /// The first `(case_id, slice, metric)` collision, or a record missing one
 /// of those required fields; `None` if the dataset is well-formed
-/// (`docs/DESIGN-stochastic.md`: "A missing required slice field is
+/// (`docs/DESIGN-stochastic.md` states that "A missing required slice field is
 /// `dataset_invalid`. Duplicate `(case_id, slice, metric)` records are
 /// `dataset_invalid`.").
 fn duplicate_eval_key(records: &[Value]) -> Option<Value> {

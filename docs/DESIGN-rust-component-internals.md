@@ -584,7 +584,12 @@ altered symbolic successors, and corrupted outcome evidence. A refinement contro
 prefilter and `Monitor::step` disagree deliberately and reject the result rather than report
 `abs_requires_failed` as a trustworthy refinement failure.
 
-The legacy `bfs` currently has only its bundled `fsl-bfs` binary consumer and no Rust agreement test.
+The legacy `bfs` is exercised directly by `rust/fslc/tests/typed_agreement.rs` and its
+`typed_agreement/engines.rs` support, which compare Monitor, legacy BFS, explicit BFS, and BMC
+semantic outcomes. Its bundled `fsl-bfs` process driver also owns the focused runtime memory-ceiling
+contract. Earliest-deadlock and auxiliary witness-field agreement remain migration work before the
+old BFS/BMC Python harnesses can be retired; general cross-engine state-count equality is not a
+language contract.
 Before any runtime move, add a three-way anchor over the same finite deterministic models and depth:
 symbolic verification, direct Monitor enumeration, and legacy BFS must agree on accepted
 successors, bounded invariant/reachability verdicts, earliest deadlock, and action coverage. Its
@@ -944,10 +949,14 @@ rediscovering, one incident at a time, keys the frozen reference had never remov
 narrow `PROJECTED_KERNEL_KEYS` again should read that history first — the pre-migration behavior for
 `domain check` was "project nothing", not "project these sixteen".
 
-The difference survived from the migration to #663 because it lived *inside* `kernel`, and the parity
-harness covering these commands excludes that object from comparison
-(`tools/check_rust_phase3_commands.py`'s `project()`); the harness was also never wired into any
-runner. That blind spot is its own issue, #689, and it is still what hides #687.
+The difference survived from the migration to #663 because it lived *inside* `kernel`, and the
+parked developer-run comparison in `tools/check_rust_phase3_commands.py` excludes that object from
+comparison; the harness is not wired into any runner. It must not be deleted until its still-unowned
+`ai compare` metric/delta contract has a focused native owner. AI work is currently parked, so that
+prerequisite is follow-up work rather than part of #761's current deletion set. The historical blind
+spot is tracked by #689 and is still what hides #687; the authoritative DB/domain projection owners
+are `issue_663_kernel_projection_owner.rs`, `issue_600_db_check_folds_kernel_verdict.rs`, and
+`issue_515_domain_check_false_green.rs`.
 
 `rust/fslc/src/outcome.rs` owns the single answer: `classify_kernel_key(key: &str) ->
 Option<KernelKeyFate>`, its `PROJECTED_KERNEL_KEYS` emission order, and `project_kernel(kernel:

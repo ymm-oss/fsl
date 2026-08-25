@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare bounded native refinement envelopes with the Python reference."""
+"""Compare bounded native refinement envelopes with the Python reference.
+
+Deletion deferred (F6): the native manifest is broader in cases but
+not in output fields. Deletion requires a complete observed stable projection,
+reasoned exclusions, and dead-exclusion checks.
+"""
 from __future__ import annotations
 
 import argparse

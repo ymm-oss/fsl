@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare Python and Rust CLI envelopes with a narrow reviewed allowlist."""
+"""Compare Python and Rust CLI envelopes with a narrow reviewed allowlist.
+
+Disposition: calibrated native/Worker parity owns this
+detector, so deletion is permitted once its shared ``_diff``/``_normalize``
+helpers move without breaking the retained dialect/induction/Phase-2 tools.
+"""
 from __future__ import annotations
 
 import argparse

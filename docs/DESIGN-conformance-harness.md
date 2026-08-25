@@ -232,16 +232,24 @@ inputs.
   `fslc ai`/`db import`/domain replay) are out of scope by extension — the scan
   is `*.fsl` only.
 
+The frozen-Python compatibility checks are a separate developer-run boundary, not part of this
+conformance harness or any CI/product gate. The bounded command list lives in `RUST-PORTING.md`;
+its parser/kernel/snapshot comparisons preserve only explicitly shared compatibility projections
+and cannot waive native corpus, Kernel, replay, or Worker evidence.
+
 ## Refinement mapping manifest (#537 C4, issue #593)
 
 The corpus sweeps above are `check`-shaped, and `check` is structurally blind to a
 refinement mapping: a mapping file has no `state` block, so `fslc check` answers
 `semantics`/"spec has no state block" for one whether or not the mapping is sound.
-A green corpus therefore said nothing about `fslc refine`. Until this manifest only
-6 of the 28 corpus mappings had ever been run through `refine`, by a script
-(`tools/check_rust_refinement_parity.py`) that no workflow and no
+A green corpus therefore said nothing about `fslc refine`. Before this manifest only
+6 of the 28 corpus mappings had ever been run through `refine`, by the retained
+`tools/check_rust_refinement_parity.py` comparison script that no workflow and no
 `tools/check-native-integration.sh` lane invoked. The other 22 were executed by
-nothing.
+nothing. `rust/fslc/tests/refine_corpus_parity.rs` is now the native owner; it derives
+the complete mapping roster and checks declared result, violation kind, and exit status. It does
+not yet own the Python harness's broader stable envelope projection (F6 in `RUST-PORTING.md`), so the script
+remains pending a complete observed-field comparison with reasoned, self-retiring exclusions.
 
 `rust/fslc/tests/refine_corpus_parity.rs` owns the mapping corpus the way
 `tests/dialect_registry.py` owns the dialect corpus, on three rules:

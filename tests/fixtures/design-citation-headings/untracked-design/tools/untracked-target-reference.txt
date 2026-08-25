@@ -1,0 +1,1 @@
+See docs/DESIGN-ambient.md: "Ambient-only heading".

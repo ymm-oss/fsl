@@ -261,11 +261,11 @@ identity, while the generated invariant separately points to the authored rule,
 artifact/environment entry, and column declarations that caused it.
 
 `tools/check_rust_surface_parity.py`'s `SUPPORTED_SPECIALIZED_FRONTENDS`
-already includes `ai-component`/`db`/`domain`; since no new field was
-projected into any of these three dialects' `kernel_ast_v1()`, corpus parity is
-unaffected by construction (the tool is not CI-wired — see the Python
-compatibility gate note in the repository's CLAUDE.md — but was still run
-manually against the corpus to confirm).
+includes `ai-component`/`db`/`domain`. The tool is an optional developer-run
+frozen-Python compatibility check, triggered only by an intentional change to
+that registered subset or its parse-error locations; it is not CI or product
+evidence and must not constrain Rust-only language evolution. The browser runner's
+document-kind selection is candidate routing, not a surface-AST comparison.
 
 ## Validation and semantic isolation
 

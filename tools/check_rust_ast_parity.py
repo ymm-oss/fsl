@@ -1,7 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare Rust expression ASTs with the authoritative Python parser."""
+"""Optional developer-run compatibility check for the shared expression subset.
+
+Run only when intentionally changing shared expression syntax or its frozen-Python
+projection. It compares the 20 registered expression fixtures exactly; it is not a
+general parser-correctness test, product verification, or a CI/promotion/release gate.
+The native parser tests remain authoritative.
+"""
 from __future__ import annotations
 
 import argparse
