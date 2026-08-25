@@ -1,7 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare Rust shared surface ASTs with the Python parser corpus."""
+"""Optional developer-run surface compatibility check for the registered subset.
+
+Run only when intentionally changing the shared frozen-Python surface subset. It
+compares registered surface ASTs exactly and parse-error line/column locations; a
+Python-only accepted construct must not constrain native evolution unless compatibility
+is explicitly changed. This is not product verification, browser AST coverage, or a
+CI/promotion/release gate; native parser/corpus tests remain authoritative.
+"""
 from __future__ import annotations
 
 import argparse

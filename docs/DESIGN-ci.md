@@ -18,6 +18,18 @@ A post-merge failure can therefore still expose a temporarily broken `main`, but
 platform-specific defect. The failed check and its deduplicated issue are blocking evidence for
 production/release promotion and must be repaired or reverted; they are not informational warnings.
 
+`tools/check_rust_*.py` is not a discovery convention: no workflow or native gate runs files merely
+because they match that name. The five bounded frozen-Python compatibility checks documented in
+`RUST-PORTING.md` are developer-run only, triggered by an intentional change to their shared
+projection. They are outside merge readiness, the product gate, scheduled promotion, and release,
+and a manual pass cannot replace or waive native evidence. Native/Worker full-envelope comparison
+is owned by `rust/fsl-wasm/test-browser.mjs`; native semantic agreement is owned by the Rust
+agreement and replay suites. The Phase-3 Python comparison is separately parked until `ai compare`
+has a focused native contract test. #761's documentation phase deletes no harness:
+`check_rust_full_envelope.py` is deletion-ready only after its shared helpers move safely; seven
+parity harnesses remain because related native coverage does not yet detect their exact drift
+(F1–F7 in `RUST-PORTING.md`); and the BFS/BMC/scenarios trio remains pending native semantic migration.
+
 ### Why the split falls here
 
 Measured on the batch that motivated this revision:

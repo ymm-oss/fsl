@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare bounded leadsTo decisions and cross-replay liveness witnesses."""
+"""Compare bounded leadsTo decisions and cross-replay liveness witnesses.
+
+Deletion deferred (F4): calibrated invariant replay exists, but no native
+liveness-lasso replay matrix. Deletion requires isolated state/action/loop
+corruption controls for these witnesses.
+"""
 from __future__ import annotations
 
 import argparse
