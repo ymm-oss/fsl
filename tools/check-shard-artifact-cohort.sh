@@ -8,7 +8,14 @@
 
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
+script_dir="$(dirname "$0")" || {
+  echo "check-shard-artifact-cohort: script directory resolution failed" >&2
+  exit 1
+}
+root="$(cd "$script_dir/.." && pwd)" || {
+  echo "check-shard-artifact-cohort: repository root resolution failed" >&2
+  exit 1
+}
 
 fail() {
   echo "check-shard-artifact-cohort: $*" >&2
@@ -43,6 +50,17 @@ enumerate_sorted_paths() {
   sort -z "$unsorted" >"$destination" || fail "$label sorting failed"
 }
 
+checked_sort_file() {
+  local source="$1" destination="$2" label="$3"
+  shift 3
+  sort "$@" "$source" >"$destination" || fail "$label sorting failed"
+}
+
+checked_join_file() {
+  local source="$1" destination="$2" delimiter="$3" label="$4"
+  paste -sd "$delimiter" "$source" >"$destination" || fail "$label joining failed"
+}
+
 check_cohort() {
   local mode="$1" cohort="$2" expected_run_id="$3" current_attempt="$4" expected_revision="$5" expected_total="$6"
   [[ "$mode" = rust || "$mode" = semantic ]] || fail "mode must be 'rust' or 'semantic', got '$mode'"
@@ -61,7 +79,7 @@ check_cohort() {
   fi
 
   local work
-  work="$(mktemp -d)"
+  work="$(mktemp -d)" || fail "$expected_lane: temporary directory creation failed"
   local -a artifact_dirs=() recursive_provenances=() provenances=()
   enumerate_sorted_paths "$work/artifact-directories" "$expected_lane: artifact directory" \
     "$cohort" -mindepth 1 -maxdepth 1 -type d
@@ -83,7 +101,8 @@ check_cohort() {
   for artifact_dir in "${artifact_dirs[@]}"; do
     artifact_ordinal=$((artifact_ordinal + 1))
     local artifact_name
-    artifact_name="$(basename "$artifact_dir")"
+    artifact_name="$(basename "$artifact_dir")" \
+      || fail "$expected_lane: artifact name extraction failed"
     if [[ ! "$artifact_name" =~ ^${prefix}-([1-9][0-9]*)-${expected_run_id}$ ]]; then
       fail "$artifact_name: artifact_name mismatch: expected '$prefix-<shard.index>-$expected_run_id', actual '$artifact_name'"
     fi
@@ -157,8 +176,13 @@ check_cohort() {
         (.table_operators | type == "array" and length > 0 and all(.[]; type == "string")) and
         (.executed_operators | type == "array" and length > 0 and all(.[]; type == "string"))
       ' "$manifest" >/dev/null || fail "'$manifest' does not match semantic shard-manifest schema"
-      expect_equal manifest.shard.index "$index" "$(jq -r '.shard.index' "$manifest")" "$artifact_name"
-      expect_equal manifest.shard.total "$total" "$(jq -r '.shard.total' "$manifest")" "$artifact_name"
+      local manifest_index manifest_total
+      manifest_index="$(jq -r '.shard.index' "$manifest")" \
+        || fail "'$manifest' shard.index extraction failed"
+      manifest_total="$(jq -r '.shard.total' "$manifest")" \
+        || fail "'$manifest' shard.total extraction failed"
+      expect_equal manifest.shard.index "$index" "$manifest_index" "$artifact_name"
+      expect_equal manifest.shard.total "$total" "$manifest_total" "$artifact_name"
       full_payload="$work/full-$index.txt"
       shard_payload="$work/shard-$index.txt"
       canonical_array "$manifest" table_operators "$full_payload"
@@ -169,28 +193,50 @@ check_cohort() {
     fi
 
     local actual_full_hash actual_shard_hash
-    actual_full_hash="$(sha256_file "$full_payload")"
-    actual_shard_hash="$(sha256_file "$shard_payload")"
+    actual_full_hash="$(sha256_file "$full_payload")" \
+      || fail "'$full_payload' hashing failed"
+    actual_shard_hash="$(sha256_file "$shard_payload")" \
+      || fail "'$shard_payload' hashing failed"
     expect_equal full_sha256 "$expected_full_hash" "$actual_full_hash" "$artifact_name"
     expect_equal shard_sha256 "$expected_shard_hash" "$actual_shard_hash" "$artifact_name"
   done
 
-  if ! cmp -s \
-    <(printf '%s\n' "${recursive_provenances[@]}") \
-    <(printf '%s\n' "${provenances[@]}" | sort); then
+  printf '%s\0' "${provenances[@]}" >"$work/selected-provenances.unsorted" \
+    || fail "$expected_lane: selected direct provenance serialization failed"
+  checked_sort_file "$work/selected-provenances.unsorted" "$work/selected-provenances" \
+    "$expected_lane: selected direct provenance" -z -u
+  if ! cmp -s "$work/recursive-provenances" "$work/selected-provenances"; then
     fail "$expected_lane: provenance sidecar set mismatch: recursive cohort set must equal selected direct sidecar set"
   fi
 
+  printf '%s\n' "${seen[@]}" >"$work/seen-indices.unsorted" \
+    || fail "$expected_lane: observed shard index serialization failed"
+  checked_sort_file "$work/seen-indices.unsorted" "$work/seen-indices" \
+    "$expected_lane: observed shard index" -n
+  checked_join_file "$work/seen-indices" "$work/seen-indices.csv" , \
+    "$expected_lane: observed shard index"
   local sorted_indices
-  sorted_indices="$(printf '%s\n' "${seen[@]}" | sort -n | paste -sd, -)"
+  IFS= read -r sorted_indices <"$work/seen-indices.csv" \
+    || fail "$expected_lane: observed shard index result read failed"
+  seq 1 "$expected_total" >"$work/expected-indices" \
+    || fail "$expected_lane: expected shard index generation failed"
+  checked_join_file "$work/expected-indices" "$work/expected-indices.csv" , \
+    "$expected_lane: expected shard index"
   local expected_indices
-  expected_indices="$(seq 1 "$expected_total" | paste -sd, -)"
+  IFS= read -r expected_indices <"$work/expected-indices.csv" \
+    || fail "$expected_lane: expected shard index result read failed"
   expect_equal shard.indices "$expected_indices" "$sorted_indices" "$expected_lane"
 
   local first_full_hash index
-  first_full_hash="$(sha256_file "${fulls[0]}")"
+  first_full_hash="$(sha256_file "${fulls[0]}")" \
+    || fail "'${fulls[0]}' baseline full-universe hashing failed"
   for index in "${!fulls[@]}"; do
-    expect_equal full_universe_sha256 "$first_full_hash" "$(sha256_file "${fulls[$index]}")" "$(basename "$(dirname "${fulls[$index]}")")"
+    local actual_universe_hash universe_parent universe_artifact
+    actual_universe_hash="$(sha256_file "${fulls[$index]}")" \
+      || fail "'${fulls[$index]}' full-universe hashing failed"
+    universe_parent="${fulls[$index]%/*}"
+    universe_artifact="${universe_parent##*/}"
+    expect_equal full_universe_sha256 "$first_full_hash" "$actual_universe_hash" "$universe_artifact"
   done
 
   if [ "$mode" = rust ]; then
@@ -211,21 +257,34 @@ check_cohort() {
         || fail "'${manifests[$index]}' has invalid base_revision"
       actual_table_operators="$(jq -ec '.table_operators' "${manifests[$index]}")" \
         || fail "'${manifests[$index]}' has invalid table_operators"
-      expect_equal base_revision "$expected_base" "$actual_base" "$(basename "$(dirname "${manifests[$index]}")")"
-      expect_equal table_operators "$expected_table_operators" "$actual_table_operators" "$(basename "$(dirname "${manifests[$index]}")")"
+      local manifest_parent manifest_artifact
+      manifest_parent="${manifests[$index]%/*}"
+      manifest_artifact="${manifest_parent##*/}"
+      expect_equal base_revision "$expected_base" "$actual_base" "$manifest_artifact"
+      expect_equal table_operators "$expected_table_operators" "$actual_table_operators" "$manifest_artifact"
     done
   fi
 
   "$root/tools/check-shard-union.sh" "${fulls[0]}" "${shards[@]}"
-  echo "check-shard-artifact-cohort: PASS -- lane=$expected_lane run_id=$expected_run_id attempts=$(printf '%s\n' "${attempts[@]}" | paste -sd, -) shards=$expected_indices"
+  printf '%s\n' "${attempts[@]}" >"$work/attempts" \
+    || fail "$expected_lane: attempt serialization failed"
+  FSL_COHORT_JOIN_CONTEXT=attempts \
+    checked_join_file "$work/attempts" "$work/attempts.csv" , "$expected_lane: attempt display"
+  local attempts_csv
+  IFS= read -r attempts_csv <"$work/attempts.csv" \
+    || fail "$expected_lane: attempt display result read failed"
+  echo "check-shard-artifact-cohort: PASS -- lane=$expected_lane run_id=$expected_run_id attempts=$attempts_csv shards=$expected_indices"
   rm -rf "$work"
 }
 
 write_provenance() {
   local artifact="$1" lane="$2" run_id="$3" attempt="$4" revision="$5" index="$6" total="$7" full="$8" shard="$9"
+  local full_sha256 shard_sha256
+  full_sha256="$(sha256_file "$full")" || fail "'$full' provenance hashing failed"
+  shard_sha256="$(sha256_file "$shard")" || fail "'$shard' provenance hashing failed"
   jq -n --arg lane "$lane" --arg run_id "$run_id" --argjson attempt "$attempt" \
     --arg revision "$revision" --argjson index "$index" --argjson total "$total" \
-    --arg full_sha256 "$(sha256_file "$full")" --arg shard_sha256 "$(sha256_file "$shard")" \
+    --arg full_sha256 "$full_sha256" --arg shard_sha256 "$shard_sha256" \
     '{schema:"fslc.shard-artifact-provenance.v1", lane:$lane, run_id:$run_id,
       run_attempt:$attempt, head_revision:$revision, shard:{index:$index,total:$total},
       full_sha256:$full_sha256, shard_sha256:$shard_sha256}' >"$artifact/artifact-provenance.v1.json"
@@ -293,7 +352,7 @@ expect_rejected() {
 
 selftest() {
   local tmp
-  tmp="$(mktemp -d)"
+  tmp="$(mktemp -d)" || fail "selftest temporary directory creation failed"
   trap 'chmod u+rwx "$tmp/unreadable-nested/rust-test-shard-1-77/nested" 2>/dev/null || true; chmod -R u+rwx "$tmp" 2>/dev/null || true; rm -rf "$tmp"' RETURN
 
   make_rust_fixture "$tmp/partial" 1,2,1
@@ -304,6 +363,40 @@ selftest() {
   check_cohort semantic "$tmp/semantic-partial" 77 2 rev-good 3 >/dev/null
   make_semantic_fixture "$tmp/semantic-current" 2,2,2
   check_cohort semantic "$tmp/semantic-current" 77 2 rev-good 3 >/dev/null
+
+  local real_sort real_paste
+  real_sort="$(command -v sort)" || fail "selftest could not resolve sort"
+  real_paste="$(command -v paste)" || fail "selftest could not resolve paste"
+  mkdir -p "$tmp/failing-sort" "$tmp/failing-paste"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'for argument in "$@"; do' \
+    '  if [ "$argument" = "-u" ]; then' \
+    '    "$REAL_SORT" "$@"' \
+    '    echo "injected comparison sort failure" >&2' \
+    '    exit 42' \
+    '  fi' \
+    'done' \
+    'exec "$REAL_SORT" "$@"' >"$tmp/failing-sort/sort" \
+    || fail "selftest comparison-sort wrapper creation failed"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [ "${FSL_COHORT_JOIN_CONTEXT:-}" = "attempts" ]; then' \
+    '  "$REAL_PASTE" "$@"' \
+    '  echo "injected attempt paste failure" >&2' \
+    '  exit 44' \
+    'fi' \
+    'exec "$REAL_PASTE" "$@"' >"$tmp/failing-paste/paste" \
+    || fail "selftest attempt-paste wrapper creation failed"
+  chmod +x "$tmp/failing-sort/sort" "$tmp/failing-paste/paste"
+  expect_rejected comparison-sort-failure \
+    "rust-tests: selected direct provenance sorting failed" \
+    env PATH="$tmp/failing-sort:$PATH" REAL_SORT="$real_sort" \
+    "$root/tools/check-shard-artifact-cohort.sh" rust "$tmp/partial" 77 2 rev-good 3
+  expect_rejected attempt-paste-failure \
+    "rust-tests: attempt display joining failed" \
+    env PATH="$tmp/failing-paste:$PATH" REAL_PASTE="$real_paste" \
+    "$root/tools/check-shard-artifact-cohort.sh" rust "$tmp/partial" 77 2 rev-good 3
 
   cp -R "$tmp/partial" "$tmp/missing"
   rm -rf "$tmp/missing/rust-test-shard-3-77"
