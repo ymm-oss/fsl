@@ -37,8 +37,9 @@ resolution, and the stdio lifecycle.
 
 ## 2. DESIGN-doc coverage (dialect/feature ↔ docs/DESIGN-*.md)
 
-`tests/test_coupled_change_meta.py` keeps three assertions whose inspected
-surfaces remain Python-owned or language-neutral:
+`tests/test_coupled_change_meta.py` keeps five tests grouped into three
+obligations whose inspected surfaces remain frozen-Python-owned or
+language-neutral:
 
 1. **README map is bidirectional** — the `DESIGN-*.md` links in
    `docs/README.md` exactly match the design files on disk.
@@ -48,9 +49,12 @@ surfaces remain Python-owned or language-neutral:
 3. **Frozen Python CLI map remains explicit** — every compatibility CLI command
    maps to an existing design document or a reviewed waiver reason.
 
-These Python checks remain manual compatibility evidence. The native LSP corpus
-test runs as part of the Rust workspace and the required
-`./tools/check-native-integration.sh` product gate.
+These five Python tests run as required pre-merge repository/compatibility
+evidence through `tools/check-merge-readiness.sh automation` and the
+`merge readiness / automation contracts` job. They are not product evidence
+and are not invoked by the Rust-native `./tools/check-native-integration.sh`
+gate. The native LSP corpus/index test remains part of the Rust workspace and
+the required product gate.
 
 ## Non-goals
 
