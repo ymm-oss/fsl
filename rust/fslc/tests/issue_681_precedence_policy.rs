@@ -318,7 +318,7 @@ verify { instances Item = 1 }
 
 #[test]
 fn unknown_and_ambiguous_references_fail_with_policy_identity_and_location() {
-    for (name, process, policy, expected) in [
+    for (name, process, policy, expected, expected_line) in [
         (
             "unknown-stage",
             r"process Return {
@@ -327,7 +327,8 @@ fn unknown_and_ambiguous_references_fail_with_policy_identity_and_location() {
     transition refund Requested -> Refunded by Manager
   }",
             "every Return reaching Refunded must have passed through Missing",
-            "stage 'Missing' is not declared",
+            "stage 'Missing' is not declared for process 'Return'",
+            9,
         ),
         (
             "unknown-entity",
@@ -338,6 +339,7 @@ fn unknown_and_ambiguous_references_fail_with_policy_identity_and_location() {
   }",
             "every Invoice reaching Refunded must have passed through Requested",
             "entity 'Invoice' has no process",
+            9,
         ),
         (
             "ambiguous-entity",
@@ -352,7 +354,8 @@ fn unknown_and_ambiguous_references_fail_with_policy_identity_and_location() {
     transition legacyRefund Requested -> Refunded by Manager
   }",
             "every Return reaching Refunded must have passed through Requested",
-            "multiple processes; precedence policy is ambiguous",
+            "entity 'Return' has multiple processes; precedence policy is ambiguous",
+            14,
         ),
     ] {
         let source = format!(
@@ -371,9 +374,19 @@ verify {{ instances Return = 1 }}
         assert_eq!(status, 2, "{output:#}");
         assert_eq!(output["kind"], "semantics", "{output:#}");
         let message = output["message"].as_str().expect("diagnostic message");
-        assert!(message.contains("policy 'CTRL-BAD'"), "{output:#}");
-        assert!(message.contains(expected), "{output:#}");
-        assert!(output["loc"]["line"].as_u64().is_some(), "{output:#}");
-        assert!(output["loc"]["column"].as_u64().is_some(), "{output:#}");
+        assert_eq!(
+            message,
+            format!("policy 'CTRL-BAD': {expected} at {expected_line}:3"),
+            "{output:#}"
+        );
+        let policy_line = source
+            .lines()
+            .nth(expected_line - 1)
+            .expect("diagnostic line exists in authored source");
+        assert_eq!(policy_line.find("policy").map(|offset| offset + 1), Some(3));
+        assert!(
+            output.get("loc").is_none(),
+            "unproven CoreError coordinates must not become public loc: {output:#}"
+        );
     }
 }
