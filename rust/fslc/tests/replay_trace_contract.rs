@@ -348,21 +348,22 @@ fn legacy_object_wrapper_keeps_the_pre_v1_public_projection() {
         {"action":"select","params":{"i":0}},
         {"action":"finish","params":{}}
     ]}));
-    assert!(output.status.success());
-    let value = json(&output);
-    assert_eq!(value["result"], "conformant");
-    assert_eq!(value["spec"], "ReplayTrace");
-    assert_eq!(value["steps_checked"], 2);
+    assert_eq!(output.status.code(), Some(0));
     assert_eq!(
-        value["final_state"],
+        json(&output),
         json!({
-            "count":{"0":1,"1":0},
-            "phase":"Done",
-            "selected":0
+            "fsl":"1.0",
+            "result":"conformant",
+            "spec":"ReplayTrace",
+            "steps_checked":2,
+            "final_state":{
+                "count":{"0":1,"1":0},
+                "phase":"Done",
+                "selected":0
+            },
+            "note":"leadsTo properties are not checked by replay (finite logs only)"
         })
     );
-    assert!(value.get("trace_schema_version").is_none());
-    assert!(value.get("kernel_schema_version").is_none());
 }
 
 #[test]
@@ -373,20 +374,48 @@ fn legacy_object_wrapper_rejects_a_forbidden_call_with_public_diagnostics() {
         {"action":"select","params":{"i":1}}
     ]}));
     assert_eq!(output.status.code(), Some(1));
-    let value = json(&output);
-    assert_eq!(value["result"], "nonconformant");
-    assert_eq!(value["spec"], "ReplayTrace");
-    assert_eq!(value["failed_at_event"], 2);
-    assert_eq!(value["violation"]["kind"], "requires_failed");
-    assert_eq!(value["violation"]["action"], "select");
     assert_eq!(
-        value["state_before"],
+        json(&output),
         json!({
-            "count":{"0":1,"1":0},
-            "phase":"Done",
-            "selected":0
+            "fsl":"1.0",
+            "result":"nonconformant",
+            "spec":"ReplayTrace",
+            "failed_at_event":2,
+            "violation":{
+                "kind":"requires_failed",
+                "check":"safety",
+                "name":"_requires_failed_select",
+                "action":"select",
+                "params":{"i":1}
+            },
+            "state_before":{
+                "count":{"0":1,"1":0},
+                "phase":"Done",
+                "selected":0
+            },
+            "hint":"the implementation performed an action the spec forbids at this state (or reached a state violating an invariant)",
+            "note":"leadsTo properties are not checked by replay (finite logs only)"
         })
     );
+}
+
+#[test]
+fn legacy_object_wrapper_rejects_wrong_key_type_and_extra_keys_exactly() {
+    let expected = json!({
+        "fsl":"1.0",
+        "result":"error",
+        "kind":"io",
+        "message":"trace JSON must be a public replay trace, an array, or {\"events\": [...]}"
+    });
+    for (shape, input) in [
+        ("key", json!({"eventz":[]})),
+        ("type", json!({"events":{}})),
+        ("extra", json!({"events":[],"extra":true})),
+    ] {
+        let output = replay_value(&input);
+        assert_eq!(output.status.code(), Some(2), "{shape}");
+        assert_eq!(json(&output), expected, "{shape}");
+    }
 }
 
 #[test]

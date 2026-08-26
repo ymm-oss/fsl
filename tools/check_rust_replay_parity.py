@@ -3,11 +3,11 @@
 
 """Compare the public native and Python replay command contracts.
 
-Deletion deferred (F7): there is no focused native owner for the legacy
-unversioned ``{"events": [...]}`` wrapper. Deletion requires positive and
-rejecting native tests for that wrapper and its public projection.
-Native owner on this branch: ``legacy_object_wrapper_*`` in
-``rust/fslc/tests/replay_trace_contract.rs``.
+Deletion remains deferred (F7). Candidate native owner
+``legacy_object_wrapper_*`` in ``rust/fslc/tests/replay_trace_contract.rs``
+compares complete success/rejection envelopes and rejects wrong keys, value
+types, and extra root keys; harness retirement still requires review of that
+evidence.
 """
 from __future__ import annotations
 

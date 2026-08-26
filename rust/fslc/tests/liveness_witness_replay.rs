@@ -1,14 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
-use fsl_core::{FsResolver, FslValue, KernelModel};
+use fsl_core::{FsResolver, FslValue, KernelModel, TraceAction, TraceChange, TraceStep};
 use fsl_verifier::BmcResult;
 
 const DEPTH: usize = 5;
+
+#[derive(Debug)]
+struct LassoCase {
+    name: &'static str,
+    model: KernelModel,
+    trace: Vec<TraceStep>,
+    loop_start: usize,
+    corrupted_loop_start: usize,
+}
 
 fn repository_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -41,25 +51,108 @@ fn verify(model: &KernelModel) -> BmcResult {
     block_on(fsl_verifier::verify_bounded(model, &mut solver, DEPTH)).expect("verify leadsTo case")
 }
 
-fn replay_liveness_witness(model: &KernelModel, result: &BmcResult) -> Result<(), String> {
-    fslc_rust::verification_output::replay_bmc_witnesses(model, result, None)?;
-    let violation = result
-        .leadsto_violation
-        .as_ref()
-        .ok_or_else(|| "missing leadsTo violation".to_owned())?;
-    let details = violation
-        .leads_to
-        .as_ref()
-        .ok_or_else(|| "missing leadsTo lasso metadata".to_owned())?;
-    let loop_start = details
-        .loop_start
-        .ok_or_else(|| "witness is a stall, not a lasso".to_owned())?;
-    let loop_head = violation
-        .trace
+fn state_changes(
+    before: &BTreeMap<String, FslValue>,
+    after: &BTreeMap<String, FslValue>,
+) -> BTreeMap<String, TraceChange> {
+    after
+        .iter()
+        .filter_map(|(name, value)| {
+            let old = &before[name];
+            (old != value).then(|| {
+                (
+                    name.clone(),
+                    TraceChange {
+                        from: old.clone(),
+                        to: value.clone(),
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+fn native_cycle(
+    name: &'static str,
+    relative: &str,
+    actions: &[&str],
+    loop_start: usize,
+    corrupted_loop_start: usize,
+) -> LassoCase {
+    let model = load_model(relative);
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("initialize native cycle");
+    let mut trace = vec![TraceStep {
+        step: 0,
+        state: monitor.state.clone(),
+        action: None,
+        changes: BTreeMap::new(),
+    }];
+    for (index, action_name) in actions.iter().enumerate() {
+        let enabled = monitor
+            .enabled()
+            .expect("enumerate enabled actions")
+            .into_iter()
+            .find(|action| action.action == *action_name)
+            .unwrap_or_else(|| panic!("{name}: action {action_name} must be enabled"));
+        let before = monitor.state.clone();
+        let stepped = monitor.step(&enabled).expect("execute native cycle action");
+        assert_eq!(stepped.violation, None, "{name}: clean cycle action");
+        trace.push(TraceStep {
+            step: index + 1,
+            changes: state_changes(&before, &stepped.state),
+            state: stepped.state,
+            action: Some(TraceAction {
+                name: enabled.action,
+                params: enabled.params,
+            }),
+        });
+    }
+    assert_eq!(
+        trace[loop_start].state,
+        trace.last().expect("cycle tail").state,
+        "{name}: declared loop must close"
+    );
+    LassoCase {
+        name,
+        model,
+        trace,
+        loop_start,
+        corrupted_loop_start,
+    }
+}
+
+fn cases() -> [LassoCase; 3] {
+    [
+        native_cycle(
+            "starvation",
+            "examples/gallery/errors/violated_leads_to_starvation.fsl",
+            &["request", "idle"],
+            1,
+            0,
+        ),
+        native_cycle(
+            "simultaneous",
+            "examples/gallery/adversarial/simultaneous_leads_to_satisfaction.fsl",
+            &["reset", "start_and_finish"],
+            0,
+            1,
+        ),
+        native_cycle(
+            "tcp",
+            "examples/gallery/valid/small_tcp_handshake.fsl",
+            &["send_syn", "recv_syn_ack", "close"],
+            0,
+            1,
+        ),
+    ]
+}
+
+fn replay_lasso(model: &KernelModel, trace: &[TraceStep], loop_start: usize) -> Result<(), String> {
+    fsl_runtime::replay_trace(model.clone(), trace).map_err(|error| error.to_string())?;
+    let loop_head = trace
         .get(loop_start)
         .ok_or_else(|| format!("loop_start {loop_start} is outside the witness trace"))?;
-    let loop_tail = violation
-        .trace
+    let loop_tail = trace
         .last()
         .ok_or_else(|| "empty leadsTo witness trace".to_owned())?;
     if loop_head.state != loop_tail.state {
@@ -72,7 +165,7 @@ fn replay_liveness_witness(model: &KernelModel, result: &BmcResult) -> Result<()
 }
 
 #[test]
-fn deleted_leadsto_matrix_has_native_verdicts_and_replays_every_lasso() {
+fn deleted_leadsto_matrix_keeps_native_verdicts_and_replays_each_cycle() {
     for (relative, expected_lasso) in [
         (
             "examples/gallery/errors/violated_leads_to_starvation.fsl",
@@ -84,8 +177,7 @@ fn deleted_leadsto_matrix_has_native_verdicts_and_replays_every_lasso() {
         ),
         ("examples/gallery/valid/small_tcp_handshake.fsl", false),
     ] {
-        let model = load_model(relative);
-        let result = verify(&model);
+        let result = verify(&load_model(relative));
         assert!(
             result.violation.is_none(),
             "unexpected safety violation for {relative}: {:?}",
@@ -96,59 +188,56 @@ fn deleted_leadsto_matrix_has_native_verdicts_and_replays_every_lasso() {
             expected_lasso,
             "unexpected leadsTo verdict for {relative}"
         );
-        if expected_lasso {
-            replay_liveness_witness(&model, &result)
-                .unwrap_or_else(|error| panic!("native lasso replay rejected {relative}: {error}"));
-        }
+    }
+    for case in cases() {
+        replay_lasso(&case.model, &case.trace, case.loop_start)
+            .unwrap_or_else(|error| panic!("{} baseline cycle rejected: {error}", case.name));
     }
 }
 
 #[test]
-fn isolated_state_action_and_loop_corruptions_are_rejected() {
-    let model = load_model("examples/gallery/errors/violated_leads_to_starvation.fsl");
-    let baseline = verify(&model);
-    replay_liveness_witness(&model, &baseline).expect("baseline lasso replays");
+fn all_nine_case_by_corruption_cells_are_rejected_exactly() {
+    for case in cases() {
+        let mut state = case.trace.clone();
+        state[1]
+            .state
+            .insert("corrupted".to_owned(), FslValue::Bool(true));
 
-    let mut state = baseline.clone();
-    state
-        .leadsto_violation
-        .as_mut()
-        .expect("leadsTo violation")
-        .trace[1]
-        .state
-        .insert("corrupted".to_owned(), FslValue::Bool(true));
+        let mut action = case.trace.clone();
+        action[1].action.as_mut().expect("first cycle action").name = "corrupted_action".to_owned();
 
-    let mut action = baseline.clone();
-    action
-        .leadsto_violation
-        .as_mut()
-        .expect("leadsTo violation")
-        .trace[1]
-        .action
-        .as_mut()
-        .expect("request action")
-        .name = "corrupted_action".to_owned();
-
-    let mut loop_start = baseline;
-    loop_start
-        .leadsto_violation
-        .as_mut()
-        .expect("leadsTo violation")
-        .leads_to
-        .as_mut()
-        .expect("leadsTo metadata")
-        .loop_start = Some(0);
-
-    for (field, corrupted, expected) in [
-        ("state", state, "trace state mismatch"),
-        ("action", action, "is not enabled"),
-        ("loop", loop_start, "lasso loop state mismatch"),
-    ] {
-        let produced = replay_liveness_witness(&model, &corrupted)
-            .expect_err("corrupted lasso must be rejected");
-        assert!(
-            produced.contains(expected),
-            "{field} corruption produced {produced:?}; expected diagnostic containing {expected:?}"
+        let loop_expected = format!(
+            "lasso loop state mismatch: trace[{}] != trace[{}]",
+            case.corrupted_loop_start,
+            case.trace.last().expect("cycle tail").step
         );
+        for (corruption, trace, loop_start, expected) in [
+            (
+                "state",
+                state,
+                case.loop_start,
+                "trace state mismatch at step 1".to_owned(),
+            ),
+            (
+                "action",
+                action,
+                case.loop_start,
+                "trace action 'corrupted_action' is not enabled at step 1".to_owned(),
+            ),
+            (
+                "loop",
+                case.trace.clone(),
+                case.corrupted_loop_start,
+                loop_expected,
+            ),
+        ] {
+            let produced = replay_lasso(&case.model, &trace, loop_start)
+                .expect_err("corrupted lasso must be rejected");
+            assert_eq!(
+                produced, expected,
+                "{} × {corruption} produced an unexpected diagnostic",
+                case.name
+            );
+        }
     }
 }
