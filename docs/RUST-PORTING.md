@@ -175,7 +175,7 @@ The current 17-harness disposition is authoritative for maintenance work:
 | F3 deletion deferred | `induction_parity` | Own the 16-case CLI stable fields/exits with explicit exclusions and negative controls. |
 | F4 deletion deferred | `leadsto_parity` | Add a native liveness-lasso replay matrix with isolated state/action/loop corruptions. |
 | F5 deletion deferred | `phase2_commands` | Assert `--keep-going` failure continuation and the human-readable `Layer` stderr table. |
-| F6 deletion deferred | `refinement_parity` | Compare the complete observed stable projection with reasoned exclusions and dead-exclusion checks. |
+| F6 native-owned; harness retained | `refinement_parity` | `refine_corpus_parity` compares the complete observed stable projection, excludes only the solver-selected `impl_trace` witness with a stated reason, and rejects a dead exclusion. |
 | F7 deletion deferred | `replay_parity` | Add positive and rejecting native tests for the legacy unversioned `{ "events": [...] }` wrapper. |
 | Deletion-ready after helper move (1) | `full_envelope` | Native/Worker parity owns the detector; first move `_diff`/`_normalize` without breaking its three consumers. |
 | Parked (1) | `phase3_commands` | Add a focused native `ai compare` metric/delta contract; AI work is currently parked. |

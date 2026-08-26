@@ -1,0 +1,864 @@
+{
+  "specs/cart_refines.fsl": {
+    "fsl": "1.0",
+    "impl": "CartImpl",
+    "abs": "ShoppingCart",
+    "result": "refines",
+    "checked_to_depth": 8,
+    "action_map": {
+      "add_to_cart": "add_to_cart",
+      "impl_checkout": "checkout",
+      "remove_from_cart": "remove_from_cart",
+      "reserve": "stutter"
+    },
+    "note": "abs ensures are not checked during refinement; verify/prove the abstract spec separately"
+  },
+  "specs/seat_refines.fsl": {
+    "fsl": "1.0",
+    "impl": "SeatBookingImpl",
+    "abs": "SeatBooking",
+    "result": "refines",
+    "checked_to_depth": 6,
+    "action_map": {
+      "cancel_sold": "cancel",
+      "confirm": "book",
+      "hold": "stutter",
+      "release": "stutter"
+    }
+  },
+  "specs/bank_refines.fsl": {
+    "fsl": "1.0",
+    "impl": "BankAccountImpl",
+    "abs": "BankAccount",
+    "result": "refines",
+    "checked_to_depth": 6,
+    "action_map": {
+      "settle": "stutter",
+      "submit_deposit": "deposit",
+      "withdraw_cleared": "withdraw"
+    },
+    "note": "abs ensures are not checked during refinement; verify/prove the abstract spec separately"
+  },
+  "examples/gallery/errors/refinement_failed_map.fsl": {
+    "fsl": "1.0",
+    "impl": "GalleryRefinementImpl",
+    "abs": "GalleryRefinementAbs",
+    "result": "refinement_failed",
+    "kind": "abs_requires_failed",
+    "at": "step",
+    "violated_at_step": 1,
+    "impl_action": {
+      "name": "quick_pay_i",
+      "params": {
+        "k": 0
+      },
+      "loc": {
+        "line": 10,
+        "column": 3
+      }
+    },
+    "abs_before": {
+      "approved": false,
+      "paid": false
+    },
+    "abs_after_expected": {
+      "approved": false,
+      "paid": true
+    },
+    "abs_after_actual": {
+      "approved": false,
+      "paid": true
+    },
+    "mismatch": [],
+    "trace_type": "refinement",
+    "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action"
+  },
+  "examples/gallery/adversarial/refine_mapping_boundary_map.fsl": {
+    "fsl": "1.0",
+    "impl": "GalleryAdversarialRefineImpl",
+    "abs": "GalleryAdversarialRefineAbs",
+    "result": "refinement_failed",
+    "kind": "abs_state_mismatch",
+    "at": "step",
+    "violated_at_step": 1,
+    "impl_action": {
+      "name": "jump",
+      "params": {
+        "i": 0
+      },
+      "loc": {
+        "line": 7,
+        "column": 3
+      }
+    },
+    "abs_before": {
+      "n": 0
+    },
+    "abs_after_expected": {
+      "n": 1
+    },
+    "abs_after_actual": {
+      "n": 2
+    },
+    "mismatch": [
+      "n"
+    ],
+    "trace_type": "refinement",
+    "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action"
+  },
+  "examples/gallery/adversarial/governance_semantic_mapping.fsl": {
+    "fsl": "1.0",
+    "result": "error",
+    "kind": "type",
+    "message": "unknown type 'Missing'",
+    "loc": {
+      "line": 4,
+      "column": 11
+    }
+  },
+  "examples/refinement_liveness/design_drops_liveness_refines.fsl": {
+    "fsl": "1.0",
+    "impl": "DesignDropsLiveness",
+    "abs": "ClaimPolicy",
+    "result": "refines",
+    "checked_to_depth": 8,
+    "action_map": {
+      "approve": "approve",
+      "heartbeat": "stutter",
+      "pay": "pay",
+      "reject": "reject",
+      "route": "stutter"
+    }
+  },
+  "examples/refinement_liveness/design_keeps_liveness_refines.fsl": {
+    "fsl": "1.0",
+    "impl": "DesignKeepsLiveness",
+    "abs": "ClaimPolicy",
+    "result": "refines",
+    "checked_to_depth": 8,
+    "action_map": {
+      "approve": "approve",
+      "heartbeat": "stutter",
+      "pay": "pay",
+      "reject": "reject",
+      "route": "stutter"
+    }
+  },
+  "examples/refinement_liveness/design_drops_liveness_progress_refines.fsl": {
+    "fsl": "1.0",
+    "impl": "DesignDropsLiveness",
+    "abs": "ClaimPolicy",
+    "result": "refinement_failed",
+    "kind": "progress_lost",
+    "progress_failure": "lasso_blocks_progress",
+    "violation_kind": "leadsTo",
+    "invariant": "EveryClaimDecided",
+    "bindings": {},
+    "pending_since": 0,
+    "stutter": false,
+    "trace_type": "refinement",
+    "progress": {
+      "leadsTo": "EveryClaimDecided",
+      "actions": [
+        "approve",
+        "reject"
+      ]
+    },
+    "hint": "the impl refines the abstract safety contract, but admits an execution where the pulled-back abstract leadsTo remains pending. Fairness must come from lower-layer `fair action` declarations for the implementation actions named by preserve progress; action mappings do not create fairness or prove implementation conformance by themselves",
+    "loc": {
+      "line": 25,
+      "column": 3
+    },
+    "loop_start": 1,
+    "faithfulness_class": "liveness_not_refined",
+    "recommended_action": "re-prove liveness at each layer or add preserve progress to the refinement mapping"
+  },
+  "examples/refinement_liveness/design_keeps_liveness_progress_refines.fsl": {
+    "fsl": "1.0",
+    "impl": "DesignKeepsLiveness",
+    "abs": "ClaimPolicy",
+    "result": "refines",
+    "checked_to_depth": 8,
+    "action_map": {
+      "approve": "approve",
+      "heartbeat": "stutter",
+      "pay": "pay",
+      "reject": "reject",
+      "route": "stutter"
+    },
+    "progress": {
+      "EveryClaimDecided": {
+        "checked_to_depth": 8,
+        "actions": [
+          "approve",
+          "reject"
+        ]
+      }
+    }
+  },
+  "examples/refinement_liveness/design_bypasses_control_refines.fsl": {
+    "fsl": "1.0",
+    "impl": "DesignBypassesControl",
+    "abs": "ClaimPolicy",
+    "result": "refinement_failed",
+    "kind": "abs_requires_failed",
+    "at": "step",
+    "violated_at_step": 1,
+    "impl_action": {
+      "name": "fast_pay",
+      "params": {},
+      "loc": {
+        "line": 23,
+        "column": 3
+      }
+    },
+    "abs_before": {
+      "s": "Submitted"
+    },
+    "abs_after_expected": {
+      "s": "Paid"
+    },
+    "abs_after_actual": {
+      "s": "Paid"
+    },
+    "mismatch": [],
+    "trace_type": "refinement",
+    "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action"
+  },
+  "examples/ui_spike/ui_refines_req.fsl": {
+    "fsl": "1.0",
+    "impl": "ReturnUI",
+    "abs": "ReturnReqMin",
+    "result": "refines",
+    "checked_to_depth": 8,
+    "action_map": {
+      "enter_amount": "stutter",
+      "mgr_approved": "approve",
+      "pay": "pay",
+      "resp_auto": "approve",
+      "resp_error": "stutter",
+      "resp_mgr": "stutter",
+      "retry": "stutter",
+      "submit": "stutter"
+    }
+  },
+  "examples/layers/return_impl_refines.fsl": {
+    "fsl": "1.0",
+    "impl": "ReturnImpl",
+    "abs": "ReturnSystemReq",
+    "result": "refines",
+    "checked_to_depth": 5,
+    "action_map": {
+      "mgr_approve": "mgr_approve",
+      "mgr_reject": "mgr_reject",
+      "outbox_send": "stutter",
+      "pay_confirm": "stutter",
+      "pay_submit": "pay",
+      "submit_large": "submit.b2",
+      "submit_small": "submit.b1"
+    }
+  },
+  "examples/consulting/tobe_refines_asis.fsl": {
+    "fsl": "1.0",
+    "impl": "ToBeExpense",
+    "abs": "AsIsExpense",
+    "result": "refines",
+    "checked_to_depth": 6,
+    "action_map": {
+      "auto_approve": "mgr_approve",
+      "mgr_approve": "mgr_approve",
+      "pay": "pay",
+      "reject": "reject",
+      "submit": "submit"
+    }
+  },
+  "examples/e2e/3_refines_2.fsl": {
+    "fsl": "1.0",
+    "impl": "ExpenseDesign",
+    "abs": "ExpenseRequirements",
+    "result": "refines",
+    "checked_to_depth": 8,
+    "action_map": {
+      "auto_approve": "auto_approve",
+      "mgr_approve": "mgr_approve",
+      "mgr_reject": "reject",
+      "outbox_send": "stutter",
+      "pay_confirm": "stutter",
+      "pay_submit": "pay",
+      "submit_large": "submit",
+      "submit_small": "submit"
+    }
+  },
+  "examples/refinement_chain/bot_refines_mid.fsl": {
+    "fsl": "1.0",
+    "impl": "ChainBot",
+    "abs": "ChainMid",
+    "result": "refines",
+    "checked_to_depth": 6,
+    "action_map": {
+      "audit": "stutter",
+      "finish": "finish",
+      "start_review": "start_review"
+    }
+  },
+  "examples/refinement_chain/mid_refines_top.fsl": {
+    "fsl": "1.0",
+    "impl": "ChainMid",
+    "abs": "ChainTop",
+    "result": "refines",
+    "checked_to_depth": 6,
+    "action_map": {
+      "finish": "finish",
+      "start_review": "stutter"
+    }
+  },
+  "examples/nfr/sla_worker_refines.fsl": {
+    "fsl": "1.0",
+    "impl": "SlaWorkerDesign",
+    "abs": "SlaWorker",
+    "result": "refines",
+    "checked_to_depth": 6,
+    "action_map": {
+      "audit": "stutter",
+      "finish": "finish",
+      "start": "start",
+      "submit": "submit",
+      "tick": "tick"
+    }
+  },
+  "examples/validation/order_refund_windowed_refines.fsl": {
+    "fsl": "1.0",
+    "impl": "OrderRefundWindowed",
+    "abs": "OrderRefund",
+    "result": "refines",
+    "checked_to_depth": 8,
+    "action_map": {
+      "cancel": "cancel",
+      "pay": "pay",
+      "refund": "refund",
+      "ship": "ship",
+      "tick": "stutter"
+    }
+  },
+  "examples/validation/order_refund_instant_refines.fsl": {
+    "fsl": "1.0",
+    "impl": "OrderRefundInstant",
+    "abs": "OrderRefund",
+    "result": "refinement_failed",
+    "kind": "abs_requires_failed",
+    "at": "step",
+    "violated_at_step": 2,
+    "impl_action": {
+      "name": "instant_refund",
+      "params": {
+        "o": 0
+      },
+      "loc": {
+        "line": 38,
+        "column": 3
+      }
+    },
+    "abs_before": {
+      "order": {
+        "0": "Paid",
+        "1": "Cart",
+        "2": "Cart"
+      },
+      "refunded_total": 0,
+      "stock": 1
+    },
+    "abs_after_expected": {
+      "order": {
+        "0": "Refunded",
+        "1": "Cart",
+        "2": "Cart"
+      },
+      "refunded_total": 1,
+      "stock": 2
+    },
+    "abs_after_actual": {
+      "order": {
+        "0": "Refunded",
+        "1": "Cart",
+        "2": "Cart"
+      },
+      "refunded_total": 1,
+      "stock": 2
+    },
+    "mismatch": [],
+    "trace_type": "refinement",
+    "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action"
+  },
+  "examples/agentic_rag/agentic_rag_requirements_refines_business.fsl": {
+    "fsl": "1.0",
+    "impl": "AgenticRagRequirements",
+    "abs": "AgenticRagBusiness",
+    "result": "refines",
+    "checked_to_depth": 7,
+    "action_map": {
+      "answer": "answer",
+      "approve_tool": "approve_tool",
+      "classify_answer": "stutter",
+      "classify_tool": "stutter",
+      "deny_tool": "deny_tool",
+      "draft_answer": "stutter",
+      "execute_tool": "execute_tool",
+      "grant_operator": "stutter",
+      "output_guard_fail": "stutter",
+      "output_guard_pass": "clear_response",
+      "receive": "receive",
+      "refuse_guard_failure": "cannot_answer",
+      "refuse_low_evidence": "cannot_answer",
+      "request_tool_approval": "request_approval",
+      "retrieve_empty": "stutter",
+      "retrieve_success": "stutter",
+      "retry_retrieve": "stutter",
+      "review_guard_failure": "escalate",
+      "review_low_evidence": "escalate"
+    },
+    "progress": {
+      "BP1": {
+        "checked_to_depth": 7,
+        "actions": [
+          "output_guard_pass",
+          "refuse_low_evidence",
+          "review_low_evidence",
+          "refuse_guard_failure",
+          "review_guard_failure",
+          "request_tool_approval"
+        ]
+      },
+      "BP2": {
+        "checked_to_depth": 7,
+        "actions": [
+          "answer"
+        ]
+      },
+      "BP3": {
+        "checked_to_depth": 7,
+        "actions": [
+          "approve_tool",
+          "deny_tool"
+        ]
+      },
+      "BP4": {
+        "checked_to_depth": 7,
+        "actions": [
+          "execute_tool"
+        ]
+      }
+    }
+  },
+  "examples/agentic_rag/agentic_rag_design_refines_requirements.fsl": {
+    "fsl": "1.0",
+    "impl": "AgenticRagDesign",
+    "abs": "AgenticRagRequirements",
+    "result": "refines",
+    "checked_to_depth": 6,
+    "action_map": {
+      "accept_request": "stutter",
+      "approve_tool": "approve_tool",
+      "deny_tool": "deny_tool",
+      "draft_answer": "draft_answer",
+      "enqueue_draft": "stutter",
+      "enqueue_router": "stutter",
+      "evaluate_adequate": "retrieve_success",
+      "evaluate_inadequate": "retrieve_empty",
+      "execute_tool": "execute_tool",
+      "output_guard_fail": "output_guard_fail",
+      "output_guard_pass": "output_guard_pass",
+      "plan_tool": "stutter",
+      "publish_answer": "answer",
+      "refuse_guard_failure": "refuse_guard_failure",
+      "refuse_low_evidence": "refuse_low_evidence",
+      "request_tool_approval": "request_tool_approval",
+      "rerank": "stutter",
+      "rerank_retry": "stutter",
+      "review_guard_failure": "review_guard_failure",
+      "review_low_evidence": "review_low_evidence",
+      "route_answer": "classify_answer",
+      "route_tool": "classify_tool",
+      "schedule_retry": "retry_retrieve",
+      "set_operator": "grant_operator",
+      "start_output_guard": "stutter",
+      "vector_search": "stutter",
+      "vector_search_retry": "stutter",
+      "write_audit": "receive"
+    },
+    "progress": {
+      "RequestEventuallyHandled": {
+        "checked_to_depth": 6,
+        "actions": [
+          "publish_answer",
+          "refuse_low_evidence",
+          "review_low_evidence",
+          "refuse_guard_failure",
+          "review_guard_failure",
+          "deny_tool",
+          "execute_tool"
+        ]
+      }
+    }
+  },
+  "examples/agentic_rag/negative/guard_bypass_refines_requirements.fsl": {
+    "fsl": "1.0",
+    "impl": "AgenticRagGuardBypassDesign",
+    "abs": "AgenticRagRequirements",
+    "result": "refinement_failed",
+    "kind": "abs_requires_failed",
+    "at": "step",
+    "violated_at_step": 5,
+    "impl_action": {
+      "name": "publish_without_guard",
+      "params": {
+        "r": 0
+      },
+      "loc": {
+        "line": 87,
+        "column": 3
+      }
+    },
+    "abs_before": {
+      "req": {
+        "0": {
+          "approval": "NoApproval",
+          "audit": true,
+          "citation_ok": true,
+          "evidence": "Adequate",
+          "guard": "Unchecked",
+          "needs_tool": false,
+          "retry": 2,
+          "role": "Public",
+          "st": "Drafted"
+        },
+        "1": {
+          "approval": "NoApproval",
+          "audit": false,
+          "citation_ok": false,
+          "evidence": "Missing",
+          "guard": "Unchecked",
+          "needs_tool": false,
+          "retry": 2,
+          "role": "Public",
+          "st": "New"
+        }
+      }
+    },
+    "abs_after_expected": {
+      "req": {
+        "0": {
+          "approval": "NoApproval",
+          "audit": true,
+          "citation_ok": true,
+          "evidence": "Adequate",
+          "guard": "Unchecked",
+          "needs_tool": false,
+          "retry": 2,
+          "role": "Public",
+          "st": "Answered"
+        },
+        "1": {
+          "approval": "NoApproval",
+          "audit": false,
+          "citation_ok": false,
+          "evidence": "Missing",
+          "guard": "Unchecked",
+          "needs_tool": false,
+          "retry": 2,
+          "role": "Public",
+          "st": "New"
+        }
+      }
+    },
+    "abs_after_actual": {
+      "req": {
+        "0": {
+          "approval": "NoApproval",
+          "audit": true,
+          "citation_ok": true,
+          "evidence": "Adequate",
+          "guard": "Unchecked",
+          "needs_tool": false,
+          "retry": 2,
+          "role": "Public",
+          "st": "Answered"
+        },
+        "1": {
+          "approval": "NoApproval",
+          "audit": false,
+          "citation_ok": false,
+          "evidence": "Missing",
+          "guard": "Unchecked",
+          "needs_tool": false,
+          "retry": 2,
+          "role": "Public",
+          "st": "New"
+        }
+      }
+    },
+    "mismatch": [],
+    "trace_type": "refinement",
+    "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action"
+  },
+  "examples/agentic_rag/negative/tool_approval_bypass_refines_requirements.fsl": {
+    "fsl": "1.0",
+    "impl": "AgenticRagToolApprovalBypassDesign",
+    "abs": "AgenticRagRequirements",
+    "result": "refinement_failed",
+    "kind": "abs_requires_failed",
+    "at": "step",
+    "violated_at_step": 6,
+    "impl_action": {
+      "name": "execute_without_approval",
+      "params": {
+        "r": 0
+      },
+      "loc": {
+        "line": 91,
+        "column": 3
+      }
+    },
+    "abs_before": {
+      "req": {
+        "0": {
+          "approval": "Requested",
+          "audit": true,
+          "citation_ok": true,
+          "evidence": "Adequate",
+          "guard": "Unchecked",
+          "needs_tool": true,
+          "retry": 2,
+          "role": "Operator",
+          "st": "ToolApproval"
+        },
+        "1": {
+          "approval": "NoApproval",
+          "audit": false,
+          "citation_ok": false,
+          "evidence": "Missing",
+          "guard": "Unchecked",
+          "needs_tool": false,
+          "retry": 2,
+          "role": "Public",
+          "st": "New"
+        }
+      }
+    },
+    "abs_after_expected": {
+      "req": {
+        "0": {
+          "approval": "Requested",
+          "audit": true,
+          "citation_ok": true,
+          "evidence": "Adequate",
+          "guard": "Unchecked",
+          "needs_tool": true,
+          "retry": 2,
+          "role": "Operator",
+          "st": "ActionExecuted"
+        },
+        "1": {
+          "approval": "NoApproval",
+          "audit": false,
+          "citation_ok": false,
+          "evidence": "Missing",
+          "guard": "Unchecked",
+          "needs_tool": false,
+          "retry": 2,
+          "role": "Public",
+          "st": "New"
+        }
+      }
+    },
+    "abs_after_actual": {
+      "req": {
+        "0": {
+          "approval": "Requested",
+          "audit": true,
+          "citation_ok": true,
+          "evidence": "Adequate",
+          "guard": "Unchecked",
+          "needs_tool": true,
+          "retry": 2,
+          "role": "Operator",
+          "st": "ActionExecuted"
+        },
+        "1": {
+          "approval": "NoApproval",
+          "audit": false,
+          "citation_ok": false,
+          "evidence": "Missing",
+          "guard": "Unchecked",
+          "needs_tool": false,
+          "retry": 2,
+          "role": "Public",
+          "st": "New"
+        }
+      }
+    },
+    "mismatch": [],
+    "trace_type": "refinement",
+    "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action"
+  },
+  "examples/agentic_rag/negative/liveness_drop_refines_requirements.fsl": {
+    "fsl": "1.0",
+    "impl": "AgenticRagLivenessDropDesign",
+    "abs": "AgenticRagLivenessRequirements",
+    "result": "refinement_failed",
+    "kind": "progress_lost",
+    "progress_failure": "lasso_blocks_progress",
+    "violation_kind": "leadsTo",
+    "invariant": "RequestEventuallyHandled",
+    "bindings": {},
+    "pending_since": 0,
+    "stutter": false,
+    "trace_type": "refinement",
+    "progress": {
+      "leadsTo": "RequestEventuallyHandled",
+      "actions": [
+        "publish_answer"
+      ]
+    },
+    "hint": "the impl refines the abstract safety contract, but admits an execution where the pulled-back abstract leadsTo remains pending. Fairness must come from lower-layer `fair action` declarations for the implementation actions named by preserve progress; action mappings do not create fairness or prove implementation conformance by themselves",
+    "loc": {
+      "line": 65,
+      "column": 5
+    },
+    "loop_start": 0,
+    "faithfulness_class": "liveness_not_refined",
+    "recommended_action": "re-prove liveness at each layer or add preserve progress to the refinement mapping"
+  },
+  "examples/multi_agent_system/multi_agent_requirements_refines_business.fsl": {
+    "fsl": "1.0",
+    "impl": "MultiAgentRequirements",
+    "abs": "MultiAgentBusiness",
+    "result": "refines",
+    "checked_to_depth": 8,
+    "action_map": {
+      "aggregate_results": "collect",
+      "aggregate_revision_results": "stutter",
+      "approve_tool": "approve_effect",
+      "assign_revision_workers": "stutter",
+      "assign_workers": "delegate",
+      "critic_pass": "approve_result",
+      "critic_requests_revision": "stutter",
+      "deliver_answer": "deliver",
+      "deny_tool": "deny_effect",
+      "escalate_after_revision": "escalate_review",
+      "execute_tool": "run_effect",
+      "plan_work": "stutter",
+      "receive": "submit",
+      "reject_after_revision": "reject_result",
+      "request_tool_approval": "request_effect_approval",
+      "revise_plan": "stutter",
+      "scope_high": "stutter",
+      "scope_low": "stutter",
+      "start_critic": "stutter",
+      "worker_a_finish": "stutter",
+      "worker_b_finish": "stutter"
+    },
+    "progress": {
+      "BP1": {
+        "checked_to_depth": 8,
+        "actions": [
+          "assign_workers",
+          "reject_after_revision",
+          "escalate_after_revision"
+        ]
+      },
+      "BP2": {
+        "checked_to_depth": 8,
+        "actions": [
+          "aggregate_results",
+          "escalate_after_revision"
+        ]
+      },
+      "BP3": {
+        "checked_to_depth": 8,
+        "actions": [
+          "critic_pass",
+          "reject_after_revision",
+          "escalate_after_revision"
+        ]
+      },
+      "BP4": {
+        "checked_to_depth": 8,
+        "actions": [
+          "deliver_answer",
+          "request_tool_approval"
+        ]
+      },
+      "BP5": {
+        "checked_to_depth": 8,
+        "actions": [
+          "approve_tool",
+          "deny_tool"
+        ]
+      },
+      "BP6": {
+        "checked_to_depth": 8,
+        "actions": [
+          "execute_tool"
+        ]
+      }
+    }
+  },
+  "examples/multi_agent_system/multi_agent_design_refines_requirements.fsl": {
+    "fsl": "1.0",
+    "impl": "MultiAgentDesign",
+    "abs": "MultiAgentRequirements",
+    "result": "refines",
+    "checked_to_depth": 8,
+    "action_map": {
+      "accept_work": "stutter",
+      "aggregate_results": "aggregate_results",
+      "aggregate_revision_results": "aggregate_revision_results",
+      "approve_tool": "approve_tool",
+      "assign_revision_workers": "assign_revision_workers",
+      "assign_workers": "assign_workers",
+      "classify_high": "scope_high",
+      "classify_low": "scope_low",
+      "critic_pass": "critic_pass",
+      "critic_requests_revision": "critic_requests_revision",
+      "deny_tool": "deny_tool",
+      "enqueue_critic": "stutter",
+      "enqueue_plan": "plan_work",
+      "enqueue_tool": "stutter",
+      "enqueue_workers": "stutter",
+      "escalate_after_revision": "escalate_after_revision",
+      "execute_tool": "execute_tool",
+      "finish_plan": "stutter",
+      "publish_answer": "deliver_answer",
+      "reject_after_revision": "reject_after_revision",
+      "request_tool_approval": "request_tool_approval",
+      "requeue_plan": "revise_plan",
+      "start_critic": "start_critic",
+      "start_planner": "stutter",
+      "worker_a_finish": "worker_a_finish",
+      "worker_b_finish": "worker_b_finish",
+      "write_audit": "receive"
+    },
+    "progress": {
+      "WorkEventuallyHandled": {
+        "checked_to_depth": 8,
+        "actions": [
+          "publish_answer",
+          "reject_after_revision",
+          "escalate_after_revision",
+          "deny_tool",
+          "execute_tool"
+        ]
+      },
+      "WorkOpenUntilHandled": {
+        "checked_to_depth": 8,
+        "actions": [
+          "publish_answer",
+          "reject_after_revision",
+          "escalate_after_revision",
+          "deny_tool",
+          "execute_tool"
+        ]
+      }
+    }
+  }
+}

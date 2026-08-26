@@ -23,10 +23,11 @@
 //!    corpus, never hard-coded, so adding a mapping fails this test until it
 //!    is registered. A hard-coded list is precisely the shape #577 retired
 //!    28 stale instances of.
-//! 2. `native_refine_matches_the_declared_result_and_exit_for_every_registered_mapping`
-//!    runs each live row and compares `result`, `kind`, **and** the process
-//!    exit code (#537 C4 requires both; a JSON envelope that disagrees with
-//!    the exit status is how #554 and #600 escaped).
+//! 2. `native_refine_matches_the_declared_projection_and_exit_for_every_registered_mapping`
+//!    runs each live row and compares the complete observed stable JSON
+//!    projection plus the process exit code (#537 C4 requires both; a JSON
+//!    envelope that disagrees with the exit status is how #554 and #600
+//!    escaped).
 //! 3. `every_exclusion_premise_still_holds` re-measures each exclusion's
 //!    recorded premise and fails when it no longer holds — the self-retiring
 //!    shape #568 introduced for the Worker parity corpus. An exclusion here
@@ -50,7 +51,7 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 #[path = "support/mod.rs"]
 mod support;
@@ -101,6 +102,76 @@ struct Case {
 struct Declaration {
     path: &'static str,
     anchor: &'static str,
+}
+
+/// A public envelope field that cannot be compared with its checked-in
+/// observation. This registry is deliberately read from emitted JSON rather
+/// than from a Rust output type: changing an internal type does not establish
+/// that a public key is present, and a dead exclusion must fail.
+struct ProjectionExclusion {
+    key: &'static str,
+    reason: &'static str,
+}
+
+/// The only observed field outside the stable projection.
+///
+/// `impl_trace` is a bounded solver witness: several traces can establish the
+/// same refinement failure, and solver enumeration may select a different one
+/// between executions. Its verdict-bearing summary remains fully compared:
+/// `kind`, `at`, `violated_at_step`, `impl_action`, abstract before/after
+/// states, `mismatch`, `progress_failure`, `hint`, and `trace_type` wherever
+/// emitted. `fsl`, `impl`, `abs`, `result`, `checked_to_depth`, `action_map`,
+/// and `note` are stable and are therefore compared rather than classified as
+/// metadata.
+const PROJECTION_EXCLUSIONS: &[ProjectionExclusion] = &[ProjectionExclusion {
+    key: "impl_trace",
+    reason: "a refinement failure may have several valid bounded implementation witnesses, so \
+             solver enumeration can select a different trace while every stable summary field \
+             remains identical",
+}];
+
+fn expected_projections() -> Map<String, Value> {
+    serde_json::from_str::<Value>(include_str!("goldens/refine_corpus_projection.v1.json"))
+        .expect("valid refinement corpus projection golden")
+        .as_object()
+        .expect("refinement corpus projection golden must be an object")
+        .clone()
+}
+
+fn stable_projection(mut envelope: Value) -> Value {
+    let object = envelope
+        .as_object_mut()
+        .expect("`fslc refine` envelope must be a JSON object");
+    for exclusion in PROJECTION_EXCLUSIONS {
+        object.remove(exclusion.key);
+    }
+    envelope
+}
+
+/// Fail if an exclusion names a key neither the emitted nor expected
+/// envelopes carry. A dead exclusion weakens nothing while looking like a
+/// considered exception, so it is itself a test failure.
+fn assert_projection_exclusions_are_live(actual: &[Value], expected: &Map<String, Value>) {
+    for exclusion in PROJECTION_EXCLUSIONS {
+        let actual_has_key = actual.iter().any(|value| {
+            value
+                .as_object()
+                .is_some_and(|object| object.contains_key(exclusion.key))
+        });
+        let expected_has_key = expected.values().any(|value| {
+            value
+                .as_object()
+                .is_some_and(|object| object.contains_key(exclusion.key))
+        });
+        assert!(
+            actual_has_key || expected_has_key,
+            "projection exclusion {:?} is dead: neither emitted nor expected envelopes carry \
+             that key, so it excludes nothing. Delete it instead of retaining a decorative \
+             exception. Recorded reason: {}",
+            exclusion.key,
+            exclusion.reason
+        );
+    }
 }
 
 const CASES: &[Case] = &[
@@ -813,14 +884,16 @@ fn every_corpus_refinement_mapping_is_registered() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Each live row must reproduce the `result`, the `kind`, **and** the exit
-/// code its `declared_by` citation states (#537 C4: stdout JSON and process
-/// status, both). A mapping or a semantics change that breaks the declared
-/// correspondence fails here by name, the way #466, #483, #493, #494, and
-/// #512 did not.
+/// Each live row must reproduce its complete observed stable envelope and the
+/// exit code its `declared_by` citation states (#537 C4: stdout JSON and
+/// process status, both). The checked-in projection is deliberately broader
+/// than the declaration-backed `result`/`kind`: it binds every observed
+/// stable public field, while the assertions below keep the declared verdict
+/// authoritative over the observation.
 #[test]
-fn native_refine_matches_the_declared_result_and_exit_for_every_registered_mapping() {
-    let failures = for_each_parallel(CASES.len(), |index| {
+fn native_refine_matches_the_declared_projection_and_exit_for_every_registered_mapping() {
+    let observations = Mutex::new(Vec::with_capacity(CASES.len()));
+    let run_failures = for_each_parallel(CASES.len(), |index| {
         let case = &CASES[index];
         let (output, status) = run_refine(
             case.implementation,
@@ -828,37 +901,92 @@ fn native_refine_matches_the_declared_result_and_exit_for_every_registered_mappi
             case.mapping,
             case.depth,
         );
-        let result = output["result"].as_str().unwrap_or_else(|| {
-            panic!(
-                "{}: `fslc refine` envelope has no string `result` field: {output}",
-                case.mapping
-            )
-        });
-
-        if result != case.expected_result {
-            return Some(format!(
-                "{}: declared result={:?} ({}), got result={result:?} ({output})",
-                case.mapping, case.expected_result, case.declared_by
-            ));
-        }
-        if let Some(expected_kind) = case.expected_kind {
-            let kind = output["kind"].as_str();
-            if kind != Some(expected_kind) {
-                return Some(format!(
-                    "{}: declared kind={expected_kind:?} ({}), got kind={kind:?} ({output})",
-                    case.mapping, case.declared_by
-                ));
-            }
-        }
-        let expected_exit = expected_status(case.expected_result);
-        if status != expected_exit {
-            return Some(format!(
-                "{}: result={result:?} binds exit={expected_exit}, got exit={status}",
-                case.mapping
-            ));
-        }
+        observations
+            .lock()
+            .expect("observation list")
+            .push((index, output, status));
         None
     });
+    assert!(run_failures.is_empty(), "{}", run_failures.join("\n"));
+
+    let mut observations = observations.into_inner().expect("observation list");
+    observations.sort_by_key(|(index, _, _)| *index);
+    let raw_outputs = observations
+        .iter()
+        .map(|(_, output, _)| output.clone())
+        .collect::<Vec<_>>();
+
+    if std::env::var_os("UPDATE_FSL_REFINEMENT_GOLDEN").is_some() {
+        let projection = observations
+            .iter()
+            .map(|(index, output, _)| {
+                (
+                    CASES[*index].mapping.to_owned(),
+                    stable_projection(output.clone()),
+                )
+            })
+            .collect::<Map<_, _>>();
+        let path = root().join("rust/fslc/tests/goldens/refine_corpus_projection.v1.json");
+        let rendered = serde_json::to_string_pretty(&projection)
+            .expect("serialize refinement corpus projection golden");
+        std::fs::write(&path, format!("{rendered}\n")).expect("update refinement golden");
+        return;
+    }
+
+    let expected = expected_projections();
+    let expected_rows = expected.keys().map(String::as_str).collect::<BTreeSet<_>>();
+    let manifest_rows = CASES
+        .iter()
+        .map(|case| case.mapping)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        expected_rows, manifest_rows,
+        "the projection golden and live CASES must have exactly the same rows; regenerate only \
+         after reviewing the observed envelope diff"
+    );
+
+    // Run this before equality so a dead exclusion reports its own failure
+    // instead of being obscured by whatever newly unexcluded field differs.
+    assert_projection_exclusions_are_live(&raw_outputs, &expected);
+
+    let mut failures = Vec::new();
+    for (index, output, status) in observations {
+        let case = &CASES[index];
+        let expected_output = &expected[case.mapping];
+
+        if expected_output["result"] != case.expected_result {
+            failures.push(format!(
+                "{}: golden result={} contradicts declared result={:?} ({})",
+                case.mapping, expected_output["result"], case.expected_result, case.declared_by
+            ));
+            continue;
+        }
+        if let Some(expected_kind) = case.expected_kind
+            && expected_output["kind"] != expected_kind
+        {
+            failures.push(format!(
+                "{}: golden kind={} contradicts declared kind={expected_kind:?} ({})",
+                case.mapping, expected_output["kind"], case.declared_by
+            ));
+            continue;
+        }
+
+        let actual_projection = stable_projection(output);
+        if actual_projection != *expected_output {
+            failures.push(format!(
+                "{}: complete stable projection differs\nexpected={expected_output:#}\nproduced={actual_projection:#}",
+                case.mapping
+            ));
+        }
+
+        let expected_exit = expected_status(case.expected_result);
+        if status != expected_exit {
+            failures.push(format!(
+                "{}: result={:?} binds exit={expected_exit}, got exit={status}",
+                case.mapping, case.expected_result
+            ));
+        }
+    }
 
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
