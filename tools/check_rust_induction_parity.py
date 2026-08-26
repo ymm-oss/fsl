@@ -3,9 +3,10 @@
 
 """Compare native and Python k-induction envelopes over focused corpus slices.
 
-Deletion deferred (F3): native CLI ownership covers only part of the
-16-case envelope/exit matrix. Deletion requires native cases for its stable
-fields and exits, with explicit exclusions and negative controls.
+Deletion disposition (F3): ``rust/fslc/tests/induction_cli_contract.rs`` owns
+all 16 native CLI stable-envelope/exit cases with live exclusions and negative
+controls. Retain this harness only while its Python compatibility comparison is
+still required by the broader parity-harness retirement.
 """
 from __future__ import annotations
 
