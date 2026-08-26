@@ -105,7 +105,7 @@
           "checks": 54,
           "conflicts": 15,
           "decisions": 11,
-          "memory_mb": 17.27,
+          "memory_mb": "<memory-mb>",
           "propagations": 40
         }
       },
@@ -221,7 +221,7 @@
           "checks": 36,
           "conflicts": 11,
           "decisions": 4,
-          "memory_mb": 17.27,
+          "memory_mb": "<memory-mb>",
           "propagations": 42
         }
       },
@@ -356,7 +356,7 @@
           "checks": 38,
           "conflicts": 22,
           "decisions": 21,
-          "memory_mb": 17.27,
+          "memory_mb": "<memory-mb>",
           "propagations": 286
         }
       },
@@ -529,7 +529,7 @@
           "checks": 82,
           "conflicts": 322,
           "decisions": 682,
-          "memory_mb": 17.84,
+          "memory_mb": "<memory-mb>",
           "propagations": 13461
         }
       },
@@ -698,7 +698,7 @@
           "checks": 106,
           "conflicts": 1145,
           "decisions": 3032,
-          "memory_mb": 19.13,
+          "memory_mb": "<memory-mb>",
           "propagations": 136921
         }
       },
@@ -825,7 +825,7 @@
           "checks": 42,
           "conflicts": 11,
           "decisions": null,
-          "memory_mb": 17.27,
+          "memory_mb": "<memory-mb>",
           "propagations": 24
         }
       },
@@ -940,7 +940,7 @@
           "checks": 44,
           "conflicts": 11,
           "decisions": null,
-          "memory_mb": 17.27,
+          "memory_mb": "<memory-mb>",
           "propagations": 24
         }
       },
@@ -1059,7 +1059,7 @@
           "checks": 120,
           "conflicts": 83,
           "decisions": 4,
-          "memory_mb": 17.27,
+          "memory_mb": "<memory-mb>",
           "propagations": 124
         }
       },
@@ -1187,7 +1187,7 @@
           "checks": 120,
           "conflicts": 83,
           "decisions": 4,
-          "memory_mb": 17.27,
+          "memory_mb": "<memory-mb>",
           "propagations": 124
         }
       },
@@ -1320,7 +1320,7 @@
           "checks": 119,
           "conflicts": 83,
           "decisions": 4,
-          "memory_mb": 17.27,
+          "memory_mb": "<memory-mb>",
           "propagations": 124
         }
       },
@@ -1454,7 +1454,7 @@
           "checks": 43,
           "conflicts": 20,
           "decisions": 20,
-          "memory_mb": 17.17,
+          "memory_mb": "<memory-mb>",
           "propagations": 303
         }
       },
@@ -1595,7 +1595,7 @@
           "checks": 31,
           "conflicts": 8,
           "decisions": 24,
-          "memory_mb": 17.17,
+          "memory_mb": "<memory-mb>",
           "propagations": 123
         }
       },
@@ -1733,7 +1733,7 @@
           "checks": 28,
           "conflicts": 5,
           "decisions": 1,
-          "memory_mb": 17.17,
+          "memory_mb": "<memory-mb>",
           "propagations": 19
         }
       },
@@ -1911,7 +1911,7 @@
           "checks": 408,
           "conflicts": 1173,
           "decisions": 22019,
-          "memory_mb": 18.13,
+          "memory_mb": "<memory-mb>",
           "propagations": 54060
         }
       },
@@ -2065,7 +2065,7 @@
           "checks": 112,
           "conflicts": 90,
           "decisions": 165,
-          "memory_mb": 17.36,
+          "memory_mb": "<memory-mb>",
           "propagations": 1254
         }
       },
@@ -2209,7 +2209,7 @@
           "checks": 33,
           "conflicts": 187,
           "decisions": 613,
-          "memory_mb": 17.66,
+          "memory_mb": "<memory-mb>",
           "propagations": 6223
         }
       },

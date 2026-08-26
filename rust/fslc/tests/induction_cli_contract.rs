@@ -162,6 +162,11 @@ const EXCLUSIONS: &[Exclusion] = &[
         reason: "blame binding values derive from the non-unique BMC witness; their complete structural shape remains compared",
         treatment: Treatment::ValueShape,
     },
+    Exclusion {
+        path: "$.cost.solver.memory_mb",
+        reason: "solver memory usage varies with the allocator and host (observed 17.24 vs 17.27 MB for one case across environments); its presence remains compared via the mask",
+        treatment: Treatment::Mask("<memory-mb>"),
+    },
 ];
 
 fn repository_root() -> PathBuf {
@@ -218,6 +223,8 @@ fn exclusion_index(path: &str) -> Option<usize> {
         Some(5)
     } else if path.starts_with("$.blame.conjuncts.") && path.ends_with(".violating_bindings") {
         Some(6)
+    } else if path == "$.cost.solver.memory_mb" {
+        Some(7)
     } else {
         None
     }
