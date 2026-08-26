@@ -1315,6 +1315,24 @@ pub struct BfsResult {
     pub action_coverage: BTreeMap<String, bool>,
 }
 
+fn terminal_holds(monitor: &Monitor) -> Result<bool, RuntimeError> {
+    let Some(terminal) = &monitor.model.terminal else {
+        return Ok(false);
+    };
+    with_total_division(|| {
+        match eval(
+            terminal,
+            &monitor.state,
+            &mut Bindings::new(),
+            &monitor.model,
+            None,
+        )? {
+            Value::Bool(value) => Ok(value),
+            _ => Err(runtime_error("terminal expression must be Boolean")),
+        }
+    })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RefinementFailure {
     pub kind: String,
@@ -2024,7 +2042,28 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
         scratch.step = step;
         let enabled = scratch.enabled()?;
         if enabled.is_empty() {
-            result.deadlock_step = Some(result.deadlock_step.map_or(step, |old| old.min(step)));
+            let terminal = match terminal_holds(&scratch) {
+                Ok(value) => value,
+                Err(error) if is_partial_operation_error(&error.message) => {
+                    let violation = Violation {
+                        kind: "partial_op".to_owned(),
+                        name: "_partial_property_terminal".to_owned(),
+                        step,
+                    };
+                    if result
+                        .violation
+                        .as_ref()
+                        .is_none_or(|old| violation.step < old.step)
+                    {
+                        result.violation = Some(violation);
+                    }
+                    return Ok(result);
+                }
+                Err(error) => return Err(error),
+            };
+            if !terminal {
+                result.deadlock_step = Some(result.deadlock_step.map_or(step, |old| old.min(step)));
+            }
         }
         for instance in &enabled {
             result.action_coverage.insert(instance.action.clone(), true);

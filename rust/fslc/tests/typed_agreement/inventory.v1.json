@@ -44,6 +44,7 @@
     "monitor_bfs",
     "bfs_explicit",
     "explicit_bmc",
+    "earliest_deadlock",
     "generated_expectation",
     "depth_completeness",
     "trace_explicit_bmc",
@@ -52,7 +53,6 @@
     "successor_admission"
   ],
   "excluded_observation_fields": {
-    "deadlock_step": "Terminal-state handling makes BFS deadlock_step and explicit deadlock_step intentionally non-identical; terminal verdict and action coverage remain required.",
     "auxiliary_observations_after_violation": "Engines intentionally stop at different points after the first violation; reachable steps and action coverage are equated only for clean bounded runs.",
     "states_explored": "Symbolic BMC has no concrete state-count analogue.",
     "symbolic_frontier_vs_concrete_closure": "Monitor and explicit concrete closure are equated. BMC frontier progress uses a different bounded symbolic proof domain, so both values are reported without pretending they are identical."

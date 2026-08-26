@@ -77,4 +77,21 @@ fn generation_inventory_is_coupled_to_registries_and_test_anchors() {
         BTreeSet::from(["head", "pop", "at", "index", "divide", "remainder"]),
         "head/pop/at/index/divide/remainder inventory must stay complete"
     );
+
+    let excluded = inventory["excluded_observation_fields"]
+        .as_object()
+        .expect("excluded observation fields");
+    let required_edges = inventory["required_edges"]
+        .as_array()
+        .expect("required agreement edges");
+    assert!(
+        !excluded.contains_key("deadlock_step"),
+        "terminal-aware legacy BFS must not retain the deadlock_step exclusion"
+    );
+    assert!(
+        required_edges
+            .iter()
+            .any(|edge| edge == "earliest_deadlock"),
+        "removing the deadlock_step exclusion must promote earliest_deadlock to a required edge"
+    );
 }
