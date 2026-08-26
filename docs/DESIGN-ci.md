@@ -443,6 +443,15 @@ attempts=1,2,1 shards=1,2,3` and `check-shard-artifact-cohort: PASS --
 lane=semantic-mutation-operators run_id=32798975136 attempts=1,2,1 shards=1,2,3`. This satisfies the
 probe precondition above; the probe commit itself was then removed from the branch.
 
+**First natural production observation (recorded 2026-08-26, run `32931874941` on PR #908).**
+A docs-only PR's `rust tests (3/3)` shard failed on a GitHub-side transient — five
+`ArtifactService/ListArtifacts` and `CreateArtifact` request timeouts with the tests themselves
+green — exactly the transient class this design targets. `gh run rerun --failed` re-ran only that
+shard; attempt 2 completed `success` overall and the aggregator accepted the mixed cohort:
+`check-shard-artifact-cohort: PASS -- lane=rust-tests run_id=32931874941 attempts=1,1,2
+shards=1,2,3`. Before this design, that recovery would have required a full ~60-minute re-run of
+every shard.
+
 **Agent-configuration-exempt pull requests still work.** Every shard job runs
 `check-product-gate-scope.sh` itself and early-exits its own later steps when `run=false`, so the
 shard's job result is still `success` and no artifact is ever uploaded. Both aggregators therefore
