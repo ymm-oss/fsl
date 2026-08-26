@@ -110,6 +110,7 @@
         }
       },
       "engine": "induction",
+      "fsl": "1.0",
       "invariants_checked": [
         "_bounds_entries",
         "LockedOrOpen"
@@ -225,6 +226,7 @@
         }
       },
       "engine": "induction",
+      "fsl": "1.0",
       "invariants_checked": [
         "_bounds_light",
         "AlwaysAColor"
@@ -359,6 +361,7 @@
         }
       },
       "engine": "induction",
+      "fsl": "1.0",
       "invariants_checked": [
         "_bounds_n",
         "NeverAboveCap"
@@ -531,6 +534,7 @@
         }
       },
       "engine": "induction",
+      "fsl": "1.0",
       "invariants_checked": [
         "_bounds_floor",
         "_bounds_target",
@@ -699,6 +703,7 @@
         }
       },
       "engine": "induction",
+      "fsl": "1.0",
       "invariants_checked": [
         "_bounds_jobs",
         "_bounds_active",
@@ -828,6 +833,7 @@
         "states": "<nondeterministic-cti>",
         "violated_at": 1
       },
+      "fsl": "1.0",
       "hint": "this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run",
       "invariant": "Sync",
       "k": 1,
@@ -942,6 +948,7 @@
         "states": "<nondeterministic-cti>",
         "violated_at": 3
       },
+      "fsl": "1.0",
       "hint": "this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run",
       "invariant": "Sync",
       "k": 3,
@@ -1057,6 +1064,7 @@
         }
       },
       "engine": "induction",
+      "fsl": "1.0",
       "invariants_checked": [
         "XRange"
       ],
@@ -1187,6 +1195,7 @@
         "states": "<nondeterministic-cti>",
         "violated_at": 1
       },
+      "fsl": "1.0",
       "hint": "from every state where P holds and Q is false, each enabled action must either make Q true, or keep P true and strictly decrease the measure",
       "invariant": "ReachFive",
       "last_action": {
@@ -1319,6 +1328,7 @@
         "states": "<nondeterministic-cti>",
         "violated_at": 0
       },
+      "fsl": "1.0",
       "hint": "the decreases measure must be non-negative whenever the leadsTo trigger is pending (P holds and Q is false); add an invariant or use a bounded domain that proves the measure is >= 0",
       "invariant": "ReachFive",
       "loc": {
@@ -1449,6 +1459,7 @@
         }
       },
       "engine": "induction",
+      "fsl": "1.0",
       "invariants_checked": [
         "_bounds_level",
         "NonNeg"
@@ -1592,6 +1603,7 @@
         "states": "<nondeterministic-cti>",
         "violated_at": 0
       },
+      "fsl": "1.0",
       "helpful": [
         "step(c)"
       ],
@@ -1729,6 +1741,7 @@
         "states": "<nondeterministic-cti>",
         "violated_at": 0
       },
+      "fsl": "1.0",
       "helpful": [
         "step(c)"
       ],
@@ -1906,6 +1919,7 @@
         "states": "<nondeterministic-cti>",
         "violated_at": 1
       },
+      "fsl": "1.0",
       "helpful": [
         "helpEven()",
         "helpOdd()"
@@ -2059,6 +2073,7 @@
         "states": "<nondeterministic-cti>",
         "violated_at": 1
       },
+      "fsl": "1.0",
       "helpful": [
         "work()"
       ],
@@ -2198,6 +2213,7 @@
           "propagations": 6223
         }
       },
+      "fsl": "1.0",
       "invariant": "NoNegativeStock",
       "last_action": {
         "loc": {
