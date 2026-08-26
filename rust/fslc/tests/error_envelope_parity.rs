@@ -2176,8 +2176,10 @@ fn required_input_shapes(
     INPUT_SHAPE_POPULATIONS
         .iter()
         .find(|population| population.command == entry.key)
-        .map(|population| population.profile.shapes(class))
-        .unwrap_or_else(|| panic!("{} is absent from INPUT_SHAPE_POPULATIONS", entry.key))
+        .map_or_else(
+            || panic!("{} is absent from INPUT_SHAPE_POPULATIONS", entry.key),
+            |population| population.profile.shapes(class),
+        )
 }
 
 fn owner_contains(command: &str, class: FailureClass, shape: InputShape) -> bool {
