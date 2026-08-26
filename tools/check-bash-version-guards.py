@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Require an immediate Bash 4+ guard when repository scripts need it."""
+"""Require an immediate Bash 4+ guard for direct syntactic feature use.
+
+This lint detects direct shell syntax. Dynamic execution through ``eval`` or a
+variable-expanded command word is outside its static-detection boundary and is
+not part of its detection claim.
+"""
 
 from __future__ import annotations
 
@@ -112,11 +117,71 @@ def consume_backticks(source: str, start: int) -> tuple[str, int]:
     return source[start + 1 :], len(source)
 
 
+def consume_heredoc_delimiter(source: str, start: int) -> tuple[str, int]:
+    """Apply shell quote removal to one heredoc delimiter word."""
+    delimiter: list[str] = []
+    index = start
+    while index < len(source) and source[index] not in " \t\r\n;&|(){}<>":
+        char = source[index]
+        if char == "\\":
+            if index + 1 < len(source):
+                delimiter.append(source[index + 1])
+                index += 2
+            else:
+                index += 1
+            continue
+        if char == "'":
+            end = source.find("'", index + 1)
+            if end < 0:
+                delimiter.append(source[index + 1 :])
+                return "".join(delimiter), len(source)
+            delimiter.append(source[index + 1 : end])
+            index = end + 1
+            continue
+        if char == '"':
+            index += 1
+            while index < len(source) and source[index] != '"':
+                if source[index] == "\\" and index + 1 < len(source):
+                    escaped = source[index + 1]
+                    if escaped in {'$', '`', '"', "\\"}:
+                        delimiter.append(escaped)
+                    elif escaped != "\n":
+                        delimiter.extend(("\\", escaped))
+                    index += 2
+                else:
+                    delimiter.append(source[index])
+                    index += 1
+            index += index < len(source)
+            continue
+        delimiter.append(char)
+        index += 1
+    return "".join(delimiter), index
+
+
+def consume_heredoc_bodies(
+    source: str, start: int, delimiters: list[tuple[str, bool]]
+) -> int:
+    """Return the offset after parser-validated heredoc bodies and terminators."""
+    index = start
+    for delimiter, strip_tabs in delimiters:
+        while index < len(source):
+            newline = source.find("\n", index)
+            line_end = len(source) if newline < 0 else newline
+            line = source[index:line_end]
+            comparison = line.lstrip("\t") if strip_tabs else line
+            index = len(source) if newline < 0 else newline + 1
+            if comparison == delimiter:
+                break
+    return index
+
+
 def lex_shell(source: str) -> LexedShell:
     """Tokenize enough parsed Bash structure to classify executed simple commands."""
     result = LexedShell()
     word: list[str] = []
     word_active = False
+    heredoc_delimiters: list[tuple[str, bool]] = []
+    expect_heredoc_delimiter: bool | None = None
     index = 0
 
     def flush_word() -> None:
@@ -135,6 +200,14 @@ def lex_shell(source: str) -> LexedShell:
 
     while index < len(source):
         char = source[index]
+        if expect_heredoc_delimiter is not None:
+            if char in " \t\r":
+                index += 1
+                continue
+            delimiter, index = consume_heredoc_delimiter(source, index)
+            heredoc_delimiters.append((delimiter, expect_heredoc_delimiter))
+            expect_heredoc_delimiter = None
+            continue
         if char in " \t\r":
             flush_word()
             index += 1
@@ -143,6 +216,9 @@ def lex_shell(source: str) -> LexedShell:
             flush_word()
             result.tokens.append(Token("operator", "\n"))
             index += 1
+            if heredoc_delimiters:
+                index = consume_heredoc_bodies(source, index, heredoc_delimiters)
+                heredoc_delimiters.clear()
             continue
         if char == "#" and not word_active:
             newline = source.find("\n", index)
@@ -215,8 +291,14 @@ def lex_shell(source: str) -> LexedShell:
             continue
         if char in ";&|(){}<>":
             flush_word()
-            operator = char
-            if index + 1 < len(source) and source[index : index + 2] in {
+            if source.startswith("<<<", index):
+                operator = "<<<"
+                index += 3
+            elif source.startswith("<<-", index):
+                operator = "<<-"
+                index += 3
+                expect_heredoc_delimiter = True
+            elif index + 1 < len(source) and source[index : index + 2] in {
                 "&&",
                 "||",
                 ";;",
@@ -229,10 +311,13 @@ def lex_shell(source: str) -> LexedShell:
             }:
                 operator = source[index : index + 2]
                 index += 2
+                if operator == "<<":
+                    expect_heredoc_delimiter = False
                 if operator == ";;" and index < len(source) and source[index] == "&":
                     operator = ";;&"
                     index += 1
             else:
+                operator = char
                 index += 1
             result.tokens.append(Token("operator", operator))
             continue
@@ -418,6 +503,27 @@ FEATURE_CASES = (
     ),
     ("nounset disabled", "set +u\nvalues=()\nprintf '%s' \"${values[@]}\"\n", []),
     ("nounset positional argument", "set -- -u\nvalues=()\nprintf '%s' \"${values[@]}\"\n", []),
+    (
+        "quoted heredoc data",
+        "cat <<'EOF'\nmapfile -t values </dev/null\nEOF\n",
+        [],
+    ),
+    (
+        "tab-stripped heredoc data",
+        "cat <<-EOF\n\tlocal -A values=()\n\tEOF\n",
+        [],
+    ),
+    (
+        "code after heredoc",
+        "cat <<EOF\nmapfile data only\nEOF\nmapfile -t values </dev/null\n",
+        ["mapfile/readarray"],
+    ),
+    ("literal eval is outside boundary", "eval 'mapfile -t values </dev/null'\n", []),
+    (
+        "variable command is outside boundary",
+        "command_name=mapfile\n\"$command_name\" -t values </dev/null\n",
+        [],
+    ),
 )
 
 
@@ -463,6 +569,8 @@ def selftest(root: Path) -> int:
         "late-guard": ["require the fail-closed guard"],
         "quoted-decoy": [],
         "double-quoted-decoy": [],
+        "heredoc-data": [],
+        "heredoc-followed-by-code": ["mapfile/readarray"],
         "indented-declare": ["associative array"],
         "local-associative": ["associative array"],
     }
@@ -505,7 +613,7 @@ def selftest(root: Path) -> int:
     if ok:
         print(
             f"selftest: PASS: feature_cases={len(FEATURE_CASES)} "
-            "guard_accepting=3 guard_rejecting=4"
+            "guard_accepting=4 guard_rejecting=5"
         )
         return 0
     return 1

@@ -1,1 +1,1 @@
-Required (#898): Merge readiness now runs ShellCheck with masked-return analysis and fail-closed tracked-script enumeration, plus a calibrated token-aware Bash-version guard lint over repository shell tooling.
+Required (#898): Merge readiness now runs ShellCheck with masked-return analysis and fail-closed tracked-script enumeration, plus a calibrated direct-syntax Bash-version guard lint that excludes heredoc data and documents its dynamic-execution boundary.
