@@ -93,6 +93,20 @@ fn check_rejects_unknown_member_in_invariant_binder_at_authored_location() {
     );
 }
 
+/// Rejecting detector for the shared typed-binder gate: requirements process
+/// lowering must not let an unknown invariant binder pass `check` and fail only
+/// when `verify` tries to enumerate its finite domain. The binder is authored
+/// on line 8, where the invariant declaration owns the property diagnostic.
+#[test]
+fn check_rejects_unknown_requirements_binder_at_authored_property_location() {
+    assert_rejected_by_check_and_verify(
+        "requirements_missing_binder",
+        "semantics",
+        "invalid model expression: unknown type 'Missing' at 8:3",
+        &json!({"line": 8, "column": 3}),
+    );
+}
+
 /// Rejecting detector B: `init if` conditions receive the same name/type gate
 /// as assignment right-hand sides.
 #[test]
@@ -114,6 +128,16 @@ fn check_accepts_real_alias_type_and_declared_alias_condition() {
         assert_eq!(status, 0, "{name}: {value}");
         assert_eq!(value["result"], "ok", "{name}: {value}");
     }
+}
+
+/// Accepting control for the shared gate: a process entity is a real lowered
+/// type and remains valid as an invariant binder.
+#[test]
+fn check_accepts_real_requirements_process_binder() {
+    let path = fixture("requirements_real_binder");
+    let (value, status) = run_cli(&["check", &path]);
+    assert_eq!(status, 0, "{value}");
+    assert_eq!(value["result"], "ok", "{value}");
 }
 
 /// Preservation control: the pre-existing assignment-RHS rejection remains

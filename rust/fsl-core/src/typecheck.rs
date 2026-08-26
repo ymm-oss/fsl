@@ -123,7 +123,15 @@ pub(crate) fn binder_type(
     model: &KernelModel,
 ) -> Result<TypeRef, TypecheckError> {
     match binder {
-        Binder::Typed { type_name, .. } => Ok(TypeRef::Named(qualified_name(type_name)?)),
+        Binder::Typed { type_name, .. } => {
+            let name = qualified_name(type_name)?;
+            match name.as_str() {
+                "Bool" => Ok(TypeRef::Bool),
+                "Int" => Ok(TypeRef::Int),
+                _ if model.types.contains_key(&name) => Ok(TypeRef::Named(name)),
+                _ => Err(error(format!("unknown type '{name}'"))),
+            }
+        }
         Binder::Range { lo, hi, .. } => {
             ensure_assignable(lo, &TypeRef::Int, env, model, unknown_span())?;
             ensure_assignable(hi, &TypeRef::Int, env, model, unknown_span())?;
@@ -759,7 +767,7 @@ fn validate_binder(
     model: &KernelModel,
     span: Span,
 ) -> Result<TypeRef, TypecheckError> {
-    let ty = binder_type(binder, env, model)?;
+    let ty = binder_type(binder, env, model).map_err(|error| error.with_span(span))?;
     let (name, where_expr) = match binder {
         Binder::Typed {
             name, where_expr, ..
@@ -1086,25 +1094,14 @@ fn validate_statement_assignments(
                 })
         }
         Statement::ForAll {
-            binder, statements, ..
+            binder,
+            statements,
+            span,
         } => {
-            let (name, ty) = match binder {
-                Binder::Typed {
-                    name, type_name, ..
-                } => (name, TypeRef::Named(qualified_name(type_name)?)),
-                Binder::Range { name, .. } => (name, TypeRef::Int),
-                Binder::Collection {
-                    name, collection, ..
-                } => {
-                    let collection_ty = resolve(model, &infer_type(collection, env, model, None)?)?;
-                    let (TypeRef::Set(item) | TypeRef::Seq(item, _)) = collection_ty else {
-                        return Err(error("collection binder requires Set or Seq"));
-                    };
-                    (name, *item)
-                }
-            };
+            let name = binder_name(binder);
+            let ty = validate_binder(binder, env, model, *span)?;
             let mut local = env.clone();
-            local.insert(name.clone(), ty);
+            local.insert(name.to_owned(), ty);
             let mut local_visible_consts = visible_consts.clone();
             local_visible_consts.remove(name);
             statements.iter().try_for_each(|item| {
