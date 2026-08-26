@@ -80,16 +80,21 @@ impl SemanticDiagnostic {
     /// frontend's name-resolution classification.
     #[must_use]
     pub fn from_core_error(error: &fsl_core::CoreError) -> Self {
+        // Compose's authored lowering diagnostics historically render without
+        // a file prefix. Their new origin exists to prove the span is real,
+        // not to change that public message contract. Component-load origins
+        // have a non-empty declaration path and keep their file-qualified
+        // rendering.
+        let authored_compose_error = error.origin.as_deref().is_some_and(|origin| {
+            origin.dialect == "compose" && origin.id.0.starts_with("compose:error:")
+        });
         Self {
-            message: error.to_string(),
-            loc: crate::verification_output::origin_loc(error.origin.as_deref()).or_else(|| {
-                (error.line != 0).then(|| {
-                    json!({
-                        "line": error.line,
-                        "column": error.column,
-                    })
-                })
-            }),
+            message: if authored_compose_error {
+                format!("{} at {}:{}", error.message, error.line, error.column)
+            } else {
+                error.to_string()
+            },
+            loc: crate::verification_output::origin_loc(error.origin.as_deref()),
             name_resolution: error.name_resolution,
         }
     }

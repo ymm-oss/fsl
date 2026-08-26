@@ -30,6 +30,30 @@ fn fixture(name: &str) -> String {
     format!("{FIXTURES}/{name}.fsl")
 }
 
+#[test]
+fn compose_core_error_origin_preserves_the_existing_message_shape() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root");
+    let path = root.join(fixture("shape_a"));
+    let source = std::fs::read_to_string(&path).expect("shape A source");
+    let resolver = fsl_core::FsResolver::new(path.parent().expect("fixture directory"));
+    let error = fsl_core::parse_kernel_source_with_file(
+        &source,
+        &resolver,
+        path.strip_prefix(root)
+            .expect("relative fixture path")
+            .display()
+            .to_string(),
+    )
+    .expect_err("shape A must fail");
+    let diagnostic = fslc_rust::spec_load::SemanticDiagnostic::from_core_error(&error);
+
+    assert_eq!(diagnostic.message, "unknown type 'core.NoSuchType' at 7:5");
+    assert_eq!(diagnostic.loc, Some(json!({"line": 7, "column": 5})));
+}
+
 fn assert_rejected_by_check_and_verify(name: &str, kind: &str, message: &str, loc: &Value) {
     let path = fixture(name);
     for args in [
@@ -54,6 +78,18 @@ fn check_rejects_unknown_member_of_declared_alias() {
         "type",
         "unknown type 'core.NoSuchType' at 7:5",
         &json!({"line": 7, "column": 5}),
+    );
+}
+
+/// Rejecting detector for the expression-binder path: an invariant's typed
+/// `forall` reports its authored location instead of the `(1, 1)` placeholder.
+#[test]
+fn check_rejects_unknown_member_in_invariant_binder_at_authored_location() {
+    assert_rejected_by_check_and_verify(
+        "expr_binder",
+        "type",
+        "unknown type 'core.NoSuchType' at 4:5",
+        &json!({"line": 4, "column": 5}),
     );
 }
 
@@ -90,4 +126,27 @@ fn assignment_rhs_rejection_is_preserved() {
         "invalid init statement: public Kernel cannot type identifier 'nonexistent' at 7:5",
         &json!({"line": 7, "column": 5}),
     );
+}
+
+/// Negative location control: CLI scope overrides own no source construct, so
+/// their placeholder `(1, 1)` must never be promoted into a public `loc`.
+#[test]
+fn sweep_scope_error_does_not_fabricate_source_location() {
+    let (value, status) = run_cli(&[
+        "sweep",
+        "examples/e2e/3_design.fsl",
+        "--instances",
+        "Typo=1..1",
+        "--depth",
+        "1..1",
+    ]);
+
+    assert_eq!(status, 2, "{value}");
+    assert_eq!(value["result"], "error", "{value}");
+    assert_eq!(value["kind"], "semantics", "{value}");
+    assert_eq!(
+        value["message"], "verify instances references undeclared entity 'Typo' at 1:1",
+        "{value}"
+    );
+    assert!(value.get("loc").is_none(), "fabricated loc: {value}");
 }
