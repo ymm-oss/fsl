@@ -145,21 +145,29 @@ check() {
 
 selftest() {
   local failures=0
+  local actual
 
+  actual="$(printf 'src/main.rs\nrust/fsl-core/src/lib.rs\n' | classify_diff)" || return 1
   check "all-product-paths" product \
-    "$(printf 'src/main.rs\nrust/fsl-core/src/lib.rs\n' | classify_diff)" || failures=$((failures + 1))
+    "$actual" || failures=$((failures + 1))
+  actual="$(printf '.claude/skills/x/SKILL.md\nCHANGELOG.md\n' | classify_diff)" || return 1
   check "mixed exempt + CHANGELOG.md" exempt \
-    "$(printf '.claude/skills/x/SKILL.md\nCHANGELOG.md\n' | classify_diff)" || failures=$((failures + 1))
+    "$actual" || failures=$((failures + 1))
+  actual="$(printf '.claude/skills/x/SKILL.md\nrust/fsl-core/src/lib.rs\n' | classify_diff)" || return 1
   check "mixed exempt + product" product \
-    "$(printf '.claude/skills/x/SKILL.md\nrust/fsl-core/src/lib.rs\n' | classify_diff)" || failures=$((failures + 1))
+    "$actual" || failures=$((failures + 1))
+  actual="$(printf 'CLAUDE.md.d/x\n' | classify_diff)" || return 1
   check "filename-prefix near-miss" product \
-    "$(printf 'CLAUDE.md.d/x\n' | classify_diff)" || failures=$((failures + 1))
+    "$actual" || failures=$((failures + 1))
+  actual="$(printf '' | classify_diff)" || return 1
   check "empty input fail-closed" product \
-    "$(printf '' | classify_diff)" || failures=$((failures + 1))
+    "$actual" || failures=$((failures + 1))
+  actual="$(printf 'changelog.d/691-a.added.md\n' | classify_diff)" || return 1
   check "changelog.d/ fragment is exempt" exempt \
-    "$(printf 'changelog.d/691-a.added.md\n' | classify_diff)" || failures=$((failures + 1))
+    "$actual" || failures=$((failures + 1))
+  actual="$(printf 'changelog.dx/y\n' | classify_diff)" || return 1
   check "changelog.d/ directory-prefix near-miss" product \
-    "$(printf 'changelog.dx/y\n' | classify_diff)" || failures=$((failures + 1))
+    "$actual" || failures=$((failures + 1))
 
   if [ "$failures" -ne 0 ]; then
     echo "check-product-gate-scope.sh selftest: $failures assertion(s) failed" >&2

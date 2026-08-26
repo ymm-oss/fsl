@@ -98,6 +98,13 @@ independent lanes succeed:
    source location, and fails closed on unreadable input, a missing document, or a citation target
    outside the same Git-tracked input set. An untracked worktree document therefore cannot satisfy a
    tracked citation.
+   The lane also runs ShellCheck over every `tools/*.sh` and `.github/scripts/*.sh`, explicitly
+   enabling `check-extra-masked-returns` (SC2312), and rejects suppressions without an inline reason.
+   A standard-library Python lint first asks Bash to parse each script, then requires scripts using
+   `mapfile`/`readarray`, associative arrays, or array expansion under `set -u` to put a fail-closed
+   Bash-4+ guard immediately after the shebang. The checker has accepting, missing-guard,
+   late-guard, and quoted-decoy fixtures. Local macOS development requires `brew install shellcheck`;
+   a missing executable fails the lane instead of skipping it.
    Repository-root `CHANGELOG.md` is deliberately outside that scope because it is an immutable
    historical record whose old section names must not make current automation fail.
 

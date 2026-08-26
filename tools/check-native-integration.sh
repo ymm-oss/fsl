@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+(( BASH_VERSINFO[0] >= 4 )) || { echo "check-native-integration.sh requires Bash 4 or newer" >&2; exit 1; }
 # SPDX-License-Identifier: Apache-2.0
 
 set -euo pipefail
@@ -103,10 +104,13 @@ check_rust_tests() {
     exit 2
   fi
 
-  local installed
-  installed="$(cargo nextest --version 2>&1 | awk -F': ' '/^release:/ {print $2}')"
+  local installed nextest_version_output
+  installed="$(cargo nextest --version 2>&1 | awk -F': ' '/^release:/ {print $2}')" \
+    || { echo "check-native-integration: could not inspect cargo-nextest version" >&2; exit 1; }
   if [ "$installed" != "$NEXTEST_VERSION" ]; then
-    echo "check-native-integration: requires exactly cargo-nextest $NEXTEST_VERSION; observed release '$installed' (raw: $(cargo nextest --version 2>&1 | head -n1))" >&2
+    # The raw output is diagnostic only after the authoritative comparison failed.
+    nextest_version_output="$(cargo nextest --version 2>&1 || true)"
+    echo "check-native-integration: requires exactly cargo-nextest $NEXTEST_VERSION; observed release '$installed' (raw: ${nextest_version_output%%$'\n'*})" >&2
     exit 1
   fi
 
@@ -224,7 +228,9 @@ check_rust_tests() {
     echo "check-native-integration: shard $spec listed zero tests -- N is likely larger than the test count, or the partition math is wrong" >&2
     exit 1
   }
-  if [ -n "$(comm -23 <(sort -u "$shard") <(sort -u "$full"))" ]; then
+  local shard_extra
+  shard_extra="$(comm -23 "$shard" "$full")"
+  if [ -n "$shard_extra" ]; then
     echo "check-native-integration: shard $spec names tests absent from the full workspace listing" >&2
     exit 1
   fi

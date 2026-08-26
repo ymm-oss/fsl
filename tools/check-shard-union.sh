@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+(( BASH_VERSINFO[0] >= 4 )) || { echo "check-shard-union.sh requires Bash 4 or newer" >&2; exit 1; }
 # SPDX-License-Identifier: Apache-2.0
 #
 # Generic, line-set based shard-completeness guard (issue: CI wall-clock
@@ -72,7 +73,8 @@ check_union() {
 
   local -a shard_paths=("$@")
   local -a shard_sets=()
-  local index
+  local index comparison_dir
+  comparison_dir="$(mktemp -d)" || fail "could not create comparison directory"
   for index in "${!shard_paths[@]}"; do
     shard_sets+=("$(line_set "${shard_paths[$index]}")")
   done
@@ -80,9 +82,14 @@ check_union() {
   # Each shard must be a subset of full.
   for index in "${!shard_paths[@]}"; do
     local extra
-    extra="$(comm -23 <(printf '%s\n' "${shard_sets[$index]}") <(printf '%s\n' "$full") || true)"
+    printf '%s\n' "${shard_sets[$index]}" >"$comparison_dir/left"
+    printf '%s\n' "$full" >"$comparison_dir/right"
+    extra="$(comm -23 "$comparison_dir/left" "$comparison_dir/right")"
     if [ -n "$extra" ]; then
-      fail "shard '${shard_paths[$index]}' names entries absent from '$full_path': $(printf '%s' "$extra" | tr '\n' ' ')"
+      extra_display="$(printf '%s' "$extra" | tr '\n' ' ')" \
+        || { rm -rf "$comparison_dir"; fail "could not format extra shard entries"; }
+      rm -rf "$comparison_dir"
+      fail "shard '${shard_paths[$index]}' names entries absent from '$full_path': $extra_display"
     fi
   done
 
@@ -91,9 +98,14 @@ check_union() {
   for ((i = 0; i < ${#shard_paths[@]}; i++)); do
     for ((j = i + 1; j < ${#shard_paths[@]}; j++)); do
       local overlap
-      overlap="$(comm -12 <(printf '%s\n' "${shard_sets[$i]}") <(printf '%s\n' "${shard_sets[$j]}") || true)"
+      printf '%s\n' "${shard_sets[$i]}" >"$comparison_dir/left"
+      printf '%s\n' "${shard_sets[$j]}" >"$comparison_dir/right"
+      overlap="$(comm -12 "$comparison_dir/left" "$comparison_dir/right")"
       if [ -n "$overlap" ]; then
-        fail "shard '${shard_paths[$i]}' and shard '${shard_paths[$j]}' both name: $(printf '%s' "$overlap" | tr '\n' ' ')"
+        overlap_display="$(printf '%s' "$overlap" | tr '\n' ' ')" \
+          || { rm -rf "$comparison_dir"; fail "could not format overlapping shard entries"; }
+        rm -rf "$comparison_dir"
+        fail "shard '${shard_paths[$i]}' and shard '${shard_paths[$j]}' both name: $overlap_display"
       fi
     done
   done
@@ -102,18 +114,34 @@ check_union() {
   local union
   union="$(printf '%s\n' "${shard_sets[@]}" | sort -u)"
   local missing
-  missing="$(comm -23 <(printf '%s\n' "$full") <(printf '%s\n' "$union") || true)"
+  printf '%s\n' "$full" >"$comparison_dir/left"
+  printf '%s\n' "$union" >"$comparison_dir/right"
+  missing="$(comm -23 "$comparison_dir/left" "$comparison_dir/right")"
   if [ -n "$missing" ]; then
-    fail "$(printf '%s' "$missing" | grep -c . ) entr$([ "$(printf '%s' "$missing" | grep -c .)" = 1 ] && echo y || echo ies) in '$full_path' covered by no shard (silent coverage loss): $(printf '%s' "$missing" | tr '\n' ' ')"
+    local missing_count missing_suffix missing_display
+    missing_count="$(printf '%s' "$missing" | grep -c .)" \
+      || { rm -rf "$comparison_dir"; fail "could not count missing shard entries"; }
+    if [ "$missing_count" -eq 1 ]; then missing_suffix=y; else missing_suffix=ies; fi
+    missing_display="$(printf '%s' "$missing" | tr '\n' ' ')" \
+      || { rm -rf "$comparison_dir"; fail "could not format missing shard entries"; }
+    rm -rf "$comparison_dir"
+    fail "$missing_count entr$missing_suffix in '$full_path' covered by no shard (silent coverage loss): $missing_display"
   fi
 
   local extra_union
-  extra_union="$(comm -13 <(printf '%s\n' "$full") <(printf '%s\n' "$union") || true)"
+  extra_union="$(comm -13 "$comparison_dir/left" "$comparison_dir/right")"
   if [ -n "$extra_union" ]; then
-    fail "union names entries absent from '$full_path': $(printf '%s' "$extra_union" | tr '\n' ' ')"
+    extra_union_display="$(printf '%s' "$extra_union" | tr '\n' ' ')" \
+      || { rm -rf "$comparison_dir"; fail "could not format extra union entries"; }
+    rm -rf "$comparison_dir"
+    fail "union names entries absent from '$full_path': $extra_union_display"
   fi
 
-  echo "check-shard-union: PASS -- $(printf '%s\n' "$full" | grep -c .) entries in '$full_path', $(( ${#shard_paths[@]} )) shard(s), union matches exactly"
+  local full_count
+  full_count="$(printf '%s\n' "$full" | grep -c .)" \
+    || { rm -rf "$comparison_dir"; fail "could not count full-list entries"; }
+  rm -rf "$comparison_dir"
+  echo "check-shard-union: PASS -- $full_count entries in '$full_path', $(( ${#shard_paths[@]} )) shard(s), union matches exactly"
 }
 
 # See the "check-groups" usage block above. Format: non-comment, non-blank
