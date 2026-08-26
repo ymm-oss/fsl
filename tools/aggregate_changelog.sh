@@ -621,6 +621,12 @@ is_release_bump_path() {
     rust/Cargo.lock) return 0 ;;
     rust/Cargo.toml) return 0 ;;
     rust/fslc/tests/fixtures/domain_characterization/baseline.v1.json) return 0 ;;
+    # #906's induction contract golden records each envelope's `versions`
+    # block, so a release bump regenerates it for the same reason as the
+    # characterization baseline above. Observed on the v4.4.1 candidate: the
+    # complete product gate failed comparing 4.4.0 against 4.4.1 before this
+    # path was named here.
+    rust/fslc/tests/goldens/induction_cli_contract.json) return 0 ;;
     *) return 1 ;;
   esac
 }
