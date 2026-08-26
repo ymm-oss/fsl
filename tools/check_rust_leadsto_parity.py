@@ -6,6 +6,7 @@
 Deletion deferred (F4): calibrated invariant replay exists, but no native
 liveness-lasso replay matrix. Deletion requires isolated state/action/loop
 corruption controls for these witnesses.
+Native owner on this branch: ``rust/fslc/tests/liveness_witness_replay.rs``.
 """
 from __future__ import annotations
 

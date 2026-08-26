@@ -6,6 +6,8 @@
 Deletion deferred (F7): there is no focused native owner for the legacy
 unversioned ``{"events": [...]}`` wrapper. Deletion requires positive and
 rejecting native tests for that wrapper and its public projection.
+Native owner on this branch: ``legacy_object_wrapper_*`` in
+``rust/fslc/tests/replay_trace_contract.rs``.
 """
 from __future__ import annotations
 

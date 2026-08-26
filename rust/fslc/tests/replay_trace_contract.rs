@@ -343,6 +343,53 @@ fn legacy_action_only_arrays_keep_the_pre_v1_result_shape() {
 }
 
 #[test]
+fn legacy_object_wrapper_keeps_the_pre_v1_public_projection() {
+    let output = replay_value(&json!({"events":[
+        {"action":"select","params":{"i":0}},
+        {"action":"finish","params":{}}
+    ]}));
+    assert!(output.status.success());
+    let value = json(&output);
+    assert_eq!(value["result"], "conformant");
+    assert_eq!(value["spec"], "ReplayTrace");
+    assert_eq!(value["steps_checked"], 2);
+    assert_eq!(
+        value["final_state"],
+        json!({
+            "count":{"0":1,"1":0},
+            "phase":"Done",
+            "selected":0
+        })
+    );
+    assert!(value.get("trace_schema_version").is_none());
+    assert!(value.get("kernel_schema_version").is_none());
+}
+
+#[test]
+fn legacy_object_wrapper_rejects_a_forbidden_call_with_public_diagnostics() {
+    let output = replay_value(&json!({"events":[
+        {"action":"select","params":{"i":0}},
+        {"action":"finish","params":{}},
+        {"action":"select","params":{"i":1}}
+    ]}));
+    assert_eq!(output.status.code(), Some(1));
+    let value = json(&output);
+    assert_eq!(value["result"], "nonconformant");
+    assert_eq!(value["spec"], "ReplayTrace");
+    assert_eq!(value["failed_at_event"], 2);
+    assert_eq!(value["violation"]["kind"], "requires_failed");
+    assert_eq!(value["violation"]["action"], "select");
+    assert_eq!(
+        value["state_before"],
+        json!({
+            "count":{"0":1,"1":0},
+            "phase":"Done",
+            "selected":0
+        })
+    );
+}
+
+#[test]
 fn release_bundles_include_the_schema_spec_and_positive_and_negative_goldens() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
