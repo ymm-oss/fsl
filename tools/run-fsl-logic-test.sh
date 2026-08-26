@@ -26,5 +26,5 @@ if ! jq -e '.complete == true and .expected == .executed and (.cases | length) =
   echo "fsl-logic: incomplete report $report" >&2
   exit 1
 fi
-printf 'fsl-logic: tier=%s cases=%s report=%s\n' \
-  "$tier" "$(jq -r '.executed' "$report")" "$report"
+executed="$(jq -r '.executed' "$report")"
+printf 'fsl-logic: tier=%s cases=%s report=%s\n' "$tier" "$executed" "$report"

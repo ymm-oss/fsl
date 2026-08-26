@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+(( BASH_VERSINFO[0] >= 4 )) || { echo "aggregate_changelog.sh requires Bash 4 or newer" >&2; exit 1; }
 # SPDX-License-Identifier: Apache-2.0
 #
 # Aggregates checked-in changelog fragments under `changelog.d/` into
@@ -115,7 +116,10 @@ export LC_ALL=C
 # end-to-end control-1/control-4 fixtures `cd` into a throwaway git repo and
 # re-invoke this tool, and `$0` alone would break there if the script was
 # invoked with a relative path.
-SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+self_directory="$(dirname "$0")"
+self_directory="$(cd "$self_directory" && pwd)"
+self_basename="$(basename "$0")"
+SELF="$self_directory/$self_basename"
 
 # This repository's bullet-lead-word vocabulary. See the header comment.
 DECLARED_CATEGORY_ORDER=(
@@ -239,15 +243,18 @@ reject_unenumerable_fragments() {
   local dir="$1" f rel
   [ -d "$dir" ] || return 0
   # A newline-joined string, not an array: `"${arr[@]}"` on a zero-element
-  # array is an unbound-variable error under `set -u` on bash < 4.4 (macOS's
-  # default bash is 3.2), and this dir legitimately has zero enumerable
+  # array is an unbound-variable error under `set -u` on bash 4.0-4.3, and
+  # this dir legitimately has zero enumerable
   # fragments whenever every file under it is unenumerable (the exact case
   # this function exists to catch) or the dir holds only README.md (which
   # list_fragment_files itself always skips). `grep -qxF` below does exact
   # whole-line membership testing against this string instead of iterating
   # an array, so the empty case needs no special-casing at all.
-  local enumerated
+  local enumerated found_paths
   enumerated="$(list_fragment_files "$dir")"
+  found_paths="$(mktemp)" || fail "could not create fragment path inventory"
+  find "$dir" -type f -print0 >"$found_paths" 2>/dev/null \
+    || { rm -f "$found_paths"; fail "could not enumerate fragment paths under $dir"; }
   while IFS= read -r -d '' f; do
     # rel, not basename: a nested README.md ("sub/README.md") must not be
     # mistaken for the top-level exemption -- only $dir/README.md itself is
@@ -257,22 +264,26 @@ reject_unenumerable_fragments() {
     # the full relative path, not the last path component.
     rel="${f#"$dir"/}"
     [ "$rel" = "README.md" ] && continue
-    is_known_non_fragment_artifact "$(basename "$rel")" && continue
+    local basename_rel
+    basename_rel="$(basename "$rel")"
+    is_known_non_fragment_artifact "$basename_rel" && continue
     if ! printf '%s\n' "$enumerated" | grep -qxF "$rel"; then
       fail "changelog-fragment-path-invalid: $dir/$rel (not enumerable by list_fragment_files -- fragments must be direct, non-hidden children of $dir/ with a .md extension; only $dir/README.md is exempt)"
     fi
-  done < <(find "$dir" -type f -print0 2>/dev/null)
+  done <"$found_paths"
+  rm -f "$found_paths"
 }
 
 validate_fragment_names() {
   local dir="$1"
   reject_unenumerable_fragments "$dir"
   local -a files=()
-  local f
-  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$(list_fragment_files "$dir" | sort)"
+  local f listed
+  listed="$(list_fragment_files "$dir" | sort)" \
+    || fail "could not list and sort fragments under $dir"
+  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$listed"
   # `"${files[@]}"` on a zero-element array is an unbound-variable error
-  # under `set -u` on bash < 4.4 (macOS's default bash is 3.2, unlike
-  # ubuntu-latest's bash 5 that merge-readiness actually runs on), so guard
+  # under `set -u` on bash 4.0-4.3, so guard
   # the empty case -- an empty `changelog.d/` is trivially valid, not an
   # error, here.
   [ "${#files[@]}" -eq 0 ] && return 0
@@ -283,15 +294,15 @@ validate_fragment_names() {
 
 check_duplicates() {
   # Deliberately a plain indexed-array linear scan, not an associative
-  # array: this keeps the script running on bash 3.2 (macOS's default,
-  # unlike ubuntu-latest's bash 5, which is what merge-readiness actually
-  # runs on) so a contributor can execute it locally without a newer bash.
+  # array: the simpler data structure is sufficient for the bounded input.
   # Fragment counts are small (dozens at most between releases), so the
   # O(n^2) scan is not a performance concern.
   local dir="$1"
   local -a files=()
-  local f
-  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$(list_fragment_files "$dir" | sort)"
+  local f listed
+  listed="$(list_fragment_files "$dir" | sort)" \
+    || fail "could not list and sort fragments under $dir"
+  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$listed"
   [ "${#files[@]}" -eq 0 ] && return 0
   local -a seen_keys=() seen_files=()
   for f in "${files[@]}"; do
@@ -315,8 +326,9 @@ check_duplicates() {
 sort_fragments() {
   local dir="$1"
   local -a files=()
-  local f
-  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$(list_fragment_files "$dir")"
+  local f listed
+  listed="$(list_fragment_files "$dir")"
+  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$listed"
   [ "${#files[@]}" -eq 0 ] && return 0
   local keyed=""
   for f in "${files[@]}"; do
@@ -399,8 +411,9 @@ validate_fragment_hygiene() {
 validate_fragment_hygiene_all() {
   local dir="$1"
   local -a files=()
-  local f
-  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$(list_fragment_files "$dir")"
+  local f listed
+  listed="$(list_fragment_files "$dir")"
+  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$listed"
   [ "${#files[@]}" -eq 0 ] && return 0
   for f in "${files[@]}"; do
     validate_fragment_hygiene "$dir/$f"
@@ -422,8 +435,9 @@ render_fragment() {
 aggregate_section_body() {
   local dir="$1"
   local -a sorted=()
-  local f
-  while IFS= read -r f; do [ -n "$f" ] && sorted+=("$f"); done <<<"$(sort_fragments "$dir")"
+  local f listed
+  listed="$(sort_fragments "$dir")"
+  while IFS= read -r f; do [ -n "$f" ] && sorted+=("$f"); done <<<"$listed"
   [ "${#sorted[@]}" -eq 0 ] && return 0
   local out="" f_out
   for f in "${sorted[@]}"; do
@@ -463,11 +477,16 @@ split_bullets() {
 verify_conservation() {
   local dir="$1" produced="$2"
   local -a sorted=()
-  local f
-  while IFS= read -r f; do [ -n "$f" ] && sorted+=("$f"); done <<<"$(sort_fragments "$dir")"
+  local f listed
+  listed="$(sort_fragments "$dir")"
+  while IFS= read -r f; do [ -n "$f" ] && sorted+=("$f"); done <<<"$listed"
   local -a actual=()
-  local seg
-  while IFS= read -r -d '' seg; do actual+=("$seg"); done < <(split_bullets "$produced")
+  local seg bullet_file
+  bullet_file="$(mktemp)" || fail "could not create rendered-bullet inventory"
+  split_bullets "$produced" >"$bullet_file" \
+    || { rm -f "$bullet_file"; fail "could not split rendered bullets"; }
+  while IFS= read -r -d '' seg; do actual+=("$seg"); done <"$bullet_file"
+  rm -f "$bullet_file"
   if [ "${#actual[@]}" -ne "${#sorted[@]}" ]; then
     fail "fragment-dropped: bullet count mismatch (expected ${#sorted[@]} fragment(s), produced ${#actual[@]} top-level bullet(s))"
   fi
@@ -751,7 +770,7 @@ classify_product_diff() {
     fail "changelog-fragment-missing: ${non_exempt[*]}"
   fi
   # `"${arr[@]}"` on an empty array is an unbound-variable error under
-  # `set -u` on bash < 4.4 (macOS's default bash is 3.2), so guard the
+  # `set -u` on bash 4.0-4.3, so guard the
   # common empty case explicitly instead of relying on a modern bash.
   if [ "${#check_fragments[@]}" -gt 0 ]; then
     printf '%s\n' "${check_fragments[@]}"
@@ -868,9 +887,10 @@ check_direct_edit_files() {
 # own fail-closed behavior (a bad edit fails here, before control 1 ever
 # runs) and control 1's release exclusion -- one computation, consumed
 # twice, so the two controls cannot disagree (review finding S2-1, #737,
-# comment 2026-08-07, second round).
+# comment 2026-08-07, second round). $1 is the repository-relative changelog
+# path and must be supplied explicitly by the caller.
 compute_direct_edit_classification() {
-  local changelog="${1:-CHANGELOG.md}"
+  local changelog="$1"
   : "${BASE_SHA:?BASE_SHA is required}"
   : "${HEAD_SHA:?HEAD_SHA is required}"
   # Diff against the merge base, not BASE_SHA's tip: this repository's own
@@ -965,7 +985,7 @@ check_pr() {
   # cannot disagree about whether this diff is a genuine release move (S2-1).
   local classification status
   set +e
-  classification="$(compute_direct_edit_classification)"
+  classification="$(compute_direct_edit_classification "CHANGELOG.md")"
   status=$?
   set -e
   [ "$status" -eq 0 ] || exit 1
@@ -980,8 +1000,9 @@ check_stale() {
   # dotfile) must not be able to reach tag time invisibly either (S3-1).
   reject_unenumerable_fragments "$dir"
   local -a files=()
-  local f
-  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$(list_fragment_files "$dir")"
+  local f listed
+  listed="$(list_fragment_files "$dir")"
+  while IFS= read -r f; do [ -n "$f" ] && files+=("$f"); done <<<"$listed"
   if [ "${#files[@]}" -gt 0 ]; then
     fail "stale-fragments-present: ${files[*]}"
   fi
@@ -1008,8 +1029,9 @@ release() {
   validate_fragment_hygiene_all "$fragdir"
 
   local -a sorted=()
-  local f
-  while IFS= read -r f; do [ -n "$f" ] && sorted+=("$f"); done <<<"$(sort_fragments "$fragdir")"
+  local f listed
+  listed="$(sort_fragments "$fragdir")"
+  while IFS= read -r f; do [ -n "$f" ] && sorted+=("$f"); done <<<"$listed"
   # An empty `changelog.d/` is a legitimate release, not an error (review
   # finding S3-2, #737, comment 2026-08-07, second round): a version bump
   # with no product-facing content since the previous release is a real
@@ -1020,7 +1042,7 @@ release() {
   # made step 7 impossible to run for that release shape at all. Guarded
   # with `-gt 0` before the loop below (rather than only inside it) because
   # `"${sorted[@]}"` on a zero-element array is an unbound-variable error
-  # under `set -u` on bash < 4.4 (macOS's default bash is 3.2).
+  # under `set -u` on bash 4.0-4.3.
   if [ "${#sorted[@]}" -gt 0 ]; then
     for f in "${sorted[@]}"; do
       fragment_is_empty "$fragdir/$f" && fail "changelog-fragment-empty: $fragdir/$f"
@@ -1255,7 +1277,10 @@ selftest_control3() {
   fi
   local lexicographic_numeric
   lexicographic_numeric="$(list_fragment_files "$tmp" | LC_ALL=C sort)"
-  echo "selftest: rejecting fixture 'control3 rejecting: lexicographic sham vs numeric golden' produced: $(printf '%s' "$lexicographic_numeric" | tr '\n' ' ')"
+  local lexicographic_numeric_display
+  lexicographic_numeric_display="$(printf '%s' "$lexicographic_numeric" | tr '\n' ' ')" \
+    || fail "could not format numeric-order selftest output"
+  echo "selftest: rejecting fixture 'control3 rejecting: lexicographic sham vs numeric golden' produced: $lexicographic_numeric_display"
   if [ "$lexicographic_numeric" = "$golden_numeric" ]; then
     st_report "control3 rejecting: lexicographic sham vs numeric golden (aggregation-order-wrong)" fail 0
   else
@@ -1278,7 +1303,10 @@ selftest_control3() {
   fi
   local lexicographic_category
   lexicographic_category="$(list_fragment_files "$tmp" | LC_ALL=C sort)"
-  echo "selftest: rejecting fixture 'control3 rejecting: lexicographic-category sham vs category golden' produced: $(printf '%s' "$lexicographic_category" | tr '\n' ' ')"
+  local lexicographic_category_display
+  lexicographic_category_display="$(printf '%s' "$lexicographic_category" | tr '\n' ' ')" \
+    || fail "could not format category-order selftest output"
+  echo "selftest: rejecting fixture 'control3 rejecting: lexicographic-category sham vs category golden' produced: $lexicographic_category_display"
   if [ "$lexicographic_category" = "$golden_category" ]; then
     st_report "control3 rejecting: lexicographic-category sham vs category golden (aggregation-order-wrong)" fail 0
   else
@@ -1353,8 +1381,10 @@ selftest_control5() {
   st_expect_pass "control5 accepting: faithful aggregation of 3 fragments (one multi-line)" verify_conservation "$tmp" "$faithful"
 
   # Rejecting (a): a sham that drops one of three fragments.
-  local dropped
-  dropped="$(render_fragment "$tmp/1-a.added.md")"$'\n'"$(render_fragment "$tmp/3-c.added.md")"
+  local dropped first_render third_render
+  first_render="$(render_fragment "$tmp/1-a.added.md")"
+  third_render="$(render_fragment "$tmp/3-c.added.md")"
+  dropped="${first_render}"$'\n'"${third_render}"
   st_expect_fail "control5 rejecting: sham drops one of three fragments (fragment-dropped)" verify_conservation "$tmp" "$dropped"
 
   # Rejecting (b): a sham that copies only each fragment's first line,
@@ -1376,8 +1406,9 @@ selftest_control5() {
   # must reject it.
   st_setup_frag "$tmp" "1-a.added.md" "Fixed (#1): a."
   st_setup_frag "$tmp" "2-b.added.md" "Fixed (#1): a." "more detail."
-  local duplicated
-  duplicated="$(render_fragment "$tmp/2-b.added.md")"$'\n'"$(render_fragment "$tmp/2-b.added.md")"
+  local duplicated duplicated_render
+  duplicated_render="$(render_fragment "$tmp/2-b.added.md")"
+  duplicated="${duplicated_render}"$'\n'"${duplicated_render}"
   st_expect_fail "control5 rejecting: sham drops fragment A and emits fragment B (whose block starts with A's) twice" \
     verify_conservation "$tmp" "$duplicated"
 

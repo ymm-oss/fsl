@@ -1,0 +1,1 @@
+Required (#898): Merge readiness now runs ShellCheck with masked-return analysis and fail-closed tracked-script enumeration, plus a calibrated direct-syntax Bash-version guard lint that scans expansions in unquoted heredocs, ignores literal heredoc data, and documents its dynamic-execution boundary.
