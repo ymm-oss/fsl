@@ -343,6 +343,82 @@ fn legacy_action_only_arrays_keep_the_pre_v1_result_shape() {
 }
 
 #[test]
+fn legacy_object_wrapper_keeps_the_pre_v1_public_projection() {
+    let output = replay_value(&json!({"events":[
+        {"action":"select","params":{"i":0}},
+        {"action":"finish","params":{}}
+    ]}));
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        json(&output),
+        json!({
+            "fsl":"1.0",
+            "result":"conformant",
+            "spec":"ReplayTrace",
+            "steps_checked":2,
+            "final_state":{
+                "count":{"0":1,"1":0},
+                "phase":"Done",
+                "selected":0
+            },
+            "note":"leadsTo properties are not checked by replay (finite logs only)"
+        })
+    );
+}
+
+#[test]
+fn legacy_object_wrapper_rejects_a_forbidden_call_with_public_diagnostics() {
+    let output = replay_value(&json!({"events":[
+        {"action":"select","params":{"i":0}},
+        {"action":"finish","params":{}},
+        {"action":"select","params":{"i":1}}
+    ]}));
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        json(&output),
+        json!({
+            "fsl":"1.0",
+            "result":"nonconformant",
+            "spec":"ReplayTrace",
+            "failed_at_event":2,
+            "violation":{
+                "kind":"requires_failed",
+                "check":"safety",
+                "name":"_requires_failed_select",
+                "action":"select",
+                "params":{"i":1}
+            },
+            "state_before":{
+                "count":{"0":1,"1":0},
+                "phase":"Done",
+                "selected":0
+            },
+            "hint":"the implementation performed an action the spec forbids at this state (or reached a state violating an invariant)",
+            "note":"leadsTo properties are not checked by replay (finite logs only)"
+        })
+    );
+}
+
+#[test]
+fn legacy_object_wrapper_rejects_wrong_key_type_and_extra_keys_exactly() {
+    let expected = json!({
+        "fsl":"1.0",
+        "result":"error",
+        "kind":"io",
+        "message":"trace JSON must be a public replay trace, an array, or {\"events\": [...]}"
+    });
+    for (shape, input) in [
+        ("key", json!({"eventz":[]})),
+        ("type", json!({"events":{}})),
+        ("extra", json!({"events":[],"extra":true})),
+    ] {
+        let output = replay_value(&input);
+        assert_eq!(output.status.code(), Some(2), "{shape}");
+        assert_eq!(json(&output), expected, "{shape}");
+    }
+}
+
+#[test]
 fn release_bundles_include_the_schema_spec_and_positive_and_negative_goldens() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
