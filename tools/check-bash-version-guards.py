@@ -4,7 +4,9 @@
 
 This lint detects direct shell syntax. Dynamic execution through ``eval`` or a
 variable-expanded command word is outside its static-detection boundary and is
-not part of its detection claim.
+not part of its detection claim. Literal heredoc command text is ignored;
+parameter, command, backtick, and arithmetic expansions are scanned only when
+the heredoc delimiter is unquoted.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from typing import NamedTuple
 GUARD = re.compile(
     r'^\(\( BASH_VERSINFO\[0\] >= 4 \)\) \|\| \{ echo "[^"]+" >&2; exit 1; \}$'
 )
-ARRAY_EXPANSION = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\}")
+ARRAY_EXPANSION = re.compile(r"\$\{[^}\n]*\[@\][^}\n]*\}")
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 COMMAND_BOUNDARIES = {"\n", ";", ";;", ";&", ";;&", "&", "&&", "|", "||", "(", ")", "{", "}"}
 COMMAND_KEYWORDS = {
@@ -47,6 +49,12 @@ COMMAND_KEYWORDS = {
 class Token(NamedTuple):
     kind: str
     text: str
+
+
+class Heredoc(NamedTuple):
+    delimiter: str
+    strip_tabs: bool
+    quoted: bool
 
 
 class LexedShell:
@@ -117,13 +125,15 @@ def consume_backticks(source: str, start: int) -> tuple[str, int]:
     return source[start + 1 :], len(source)
 
 
-def consume_heredoc_delimiter(source: str, start: int) -> tuple[str, int]:
-    """Apply shell quote removal to one heredoc delimiter word."""
+def consume_heredoc_delimiter(source: str, start: int) -> tuple[str, int, bool]:
+    """Apply quote removal and report whether a heredoc delimiter was quoted."""
     delimiter: list[str] = []
+    quoted = False
     index = start
     while index < len(source) and source[index] not in " \t\r\n;&|(){}<>":
         char = source[index]
         if char == "\\":
+            quoted = True
             if index + 1 < len(source):
                 delimiter.append(source[index + 1])
                 index += 2
@@ -131,14 +141,16 @@ def consume_heredoc_delimiter(source: str, start: int) -> tuple[str, int]:
                 index += 1
             continue
         if char == "'":
+            quoted = True
             end = source.find("'", index + 1)
             if end < 0:
                 delimiter.append(source[index + 1 :])
-                return "".join(delimiter), len(source)
+                return "".join(delimiter), len(source), quoted
             delimiter.append(source[index + 1 : end])
             index = end + 1
             continue
         if char == '"':
+            quoted = True
             index += 1
             while index < len(source) and source[index] != '"':
                 if source[index] == "\\" and index + 1 < len(source):
@@ -155,24 +167,56 @@ def consume_heredoc_delimiter(source: str, start: int) -> tuple[str, int]:
             continue
         delimiter.append(char)
         index += 1
-    return "".join(delimiter), index
+    return "".join(delimiter), index, quoted
 
 
 def consume_heredoc_bodies(
-    source: str, start: int, delimiters: list[tuple[str, bool]]
-) -> int:
-    """Return the offset after parser-validated heredoc bodies and terminators."""
+    source: str, start: int, heredocs: list[Heredoc]
+) -> tuple[int, list[str]]:
+    """Return the end offset and expansion-capable unquoted heredoc bodies."""
     index = start
-    for delimiter, strip_tabs in delimiters:
+    expandable_bodies: list[str] = []
+    for heredoc in heredocs:
+        body_start = index
         while index < len(source):
+            line_start = index
             newline = source.find("\n", index)
             line_end = len(source) if newline < 0 else newline
             line = source[index:line_end]
-            comparison = line.lstrip("\t") if strip_tabs else line
+            comparison = line.lstrip("\t") if heredoc.strip_tabs else line
             index = len(source) if newline < 0 else newline + 1
-            if comparison == delimiter:
+            if comparison == heredoc.delimiter:
+                if not heredoc.quoted:
+                    expandable_bodies.append(source[body_start:line_start])
                 break
-    return index
+    return index, expandable_bodies
+
+
+def record_heredoc_expansions(source: str, result: LexedShell) -> None:
+    """Record only expansions Bash executes in an unquoted heredoc body."""
+    index = 0
+    while index < len(source):
+        if source[index] == "\\":
+            index += 2
+            continue
+        if source.startswith("$((", index):
+            arithmetic, index = consume_parenthesized(source, index)
+            record_heredoc_expansions(arithmetic, result)
+            continue
+        if source.startswith("$(", index):
+            nested, index = consume_parenthesized(source, index)
+            result.nested_commands.append(nested)
+            continue
+        if source.startswith("${", index):
+            expansion, index = consume_braced(source, index)
+            if ARRAY_EXPANSION.search(expansion):
+                result.has_array_expansion = True
+            continue
+        if source[index] == "`":
+            nested, index = consume_backticks(source, index)
+            result.nested_commands.append(nested)
+            continue
+        index += 1
 
 
 def lex_shell(source: str) -> LexedShell:
@@ -180,7 +224,7 @@ def lex_shell(source: str) -> LexedShell:
     result = LexedShell()
     word: list[str] = []
     word_active = False
-    heredoc_delimiters: list[tuple[str, bool]] = []
+    heredocs: list[Heredoc] = []
     expect_heredoc_delimiter: bool | None = None
     index = 0
 
@@ -204,8 +248,8 @@ def lex_shell(source: str) -> LexedShell:
             if char in " \t\r":
                 index += 1
                 continue
-            delimiter, index = consume_heredoc_delimiter(source, index)
-            heredoc_delimiters.append((delimiter, expect_heredoc_delimiter))
+            delimiter, index, quoted = consume_heredoc_delimiter(source, index)
+            heredocs.append(Heredoc(delimiter, expect_heredoc_delimiter, quoted))
             expect_heredoc_delimiter = None
             continue
         if char in " \t\r":
@@ -216,9 +260,13 @@ def lex_shell(source: str) -> LexedShell:
             flush_word()
             result.tokens.append(Token("operator", "\n"))
             index += 1
-            if heredoc_delimiters:
-                index = consume_heredoc_bodies(source, index, heredoc_delimiters)
-                heredoc_delimiters.clear()
+            if heredocs:
+                index, expandable_bodies = consume_heredoc_bodies(
+                    source, index, heredocs
+                )
+                for body in expandable_bodies:
+                    record_heredoc_expansions(body, result)
+                heredocs.clear()
             continue
         if char == "#" and not word_active:
             newline = source.find("\n", index)
@@ -518,6 +566,41 @@ FEATURE_CASES = (
         "cat <<EOF\nmapfile data only\nEOF\nmapfile -t values </dev/null\n",
         ["mapfile/readarray"],
     ),
+    (
+        "unquoted heredoc command text",
+        "cat <<EOF\nmapfile -t values </dev/null\nEOF\n",
+        [],
+    ),
+    (
+        "quoted heredoc parameter and command text",
+        "set -u\nvalues=()\ncat <<'EOF'\n${values[@]}\n$(mapfile -t nested)\nEOF\n",
+        [],
+    ),
+    (
+        "unquoted heredoc array expansion",
+        "set -u\nvalues=()\ncat <<EOF\n${values[@]}\nEOF\n",
+        ["array expansion under set -u"],
+    ),
+    (
+        "unquoted heredoc command substitution",
+        "cat <<EOF\n$(mapfile -t values </dev/null)\nEOF\n",
+        ["mapfile/readarray"],
+    ),
+    (
+        "tab-stripped unquoted heredoc expansions",
+        "set -u\nvalues=()\ncat <<-EOF\n\t${values[@]}\n\t$(readarray -t nested)\n\tEOF\n",
+        ["mapfile/readarray", "array expansion under set -u"],
+    ),
+    (
+        "unquoted heredoc backtick substitution",
+        "cat <<EOF\n`mapfile -t values </dev/null`\nEOF\n",
+        ["mapfile/readarray"],
+    ),
+    (
+        "unquoted heredoc arithmetic expansion",
+        "set -u\nvalues=()\ncat <<EOF\n$(( ${values[@]} ))\nEOF\n",
+        ["array expansion under set -u"],
+    ),
     ("literal eval is outside boundary", "eval 'mapfile -t values </dev/null'\n", []),
     (
         "variable command is outside boundary",
@@ -571,6 +654,17 @@ def selftest(root: Path) -> int:
         "double-quoted-decoy": [],
         "heredoc-data": [],
         "heredoc-followed-by-code": ["mapfile/readarray"],
+        "heredoc-quoted-command-accepting": [],
+        "heredoc-quoted-command-rejecting": ["mapfile/readarray"],
+        "heredoc-unquoted-command-accepting": [],
+        "heredoc-unquoted-command-rejecting": ["associative array"],
+        "heredoc-quoted-expansion-accepting": [],
+        "heredoc-quoted-expansion-rejecting": ["array expansion under set -u"],
+        "heredoc-unquoted-expansion-accepting": [],
+        "heredoc-unquoted-expansion-rejecting": [
+            "mapfile/readarray",
+            "array expansion under set -u",
+        ],
         "indented-declare": ["associative array"],
         "local-associative": ["associative array"],
     }
@@ -613,7 +707,7 @@ def selftest(root: Path) -> int:
     if ok:
         print(
             f"selftest: PASS: feature_cases={len(FEATURE_CASES)} "
-            "guard_accepting=4 guard_rejecting=5"
+            "guard_accepting=8 guard_rejecting=9"
         )
         return 0
     return 1

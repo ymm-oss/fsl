@@ -116,11 +116,20 @@ independent lanes succeed:
    | nounset array expansion | executable `set -u`, combined `-euo`, or `set -o nounset` plus executable `${name[@]}` | detected; `${name[@]}` inside double quotes still expands | plain `"set -u"` and single-quoted `${name[@]}` are ignored | ignored |
    | nested execution | command substitutions and backticks are recursively tokenized, even inside double quotes | detected | outer literal text remains ignored | ignored |
 
-   Thirty-nine parser-accepted table cases plus accepting, missing-guard, late-guard,
+   Forty-six parser-accepted table cases plus accepting, missing-guard, late-guard,
    indented-declare, local-associative, heredoc, and single/double-quoted-decoy fixtures calibrate
-   both bypass and false-positive directions. Heredoc data bodies are excluded from token
-   classification; executable code after a heredoc remains in scope and has both accepting and
-   rejecting fixture coverage.
+   both bypass and false-positive directions. Heredoc classification is deliberately quantified by
+   delimiter and body-pattern class:
+
+   | Delimiter class | Literal command-position text | Expansion syntax |
+   | --- | --- | --- |
+   | quoted (`<<'EOF'`, `<<-"EOF"`, or any partially quoted word) | ignored | ignored because Bash does not expand the body |
+   | unquoted (`<<EOF` or `<<-EOF`) | ignored as data | parameter, command, backtick, and arithmetic expansions are scanned |
+
+   Each of these four cells has separate accepting and rejecting fixtures (eight fixtures total).
+   The rejecting controls also establish that executable code immediately after a terminator remains
+   visible. Thus heredoc exclusion applies to literal data, not to expansions Bash executes in an
+   unquoted body.
 
    This lint's detection claim is deliberately limited to direct syntactic feature use. Dynamic
    execution through `eval` or a variable-expanded command word is outside the static-detection
