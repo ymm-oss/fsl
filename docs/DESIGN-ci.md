@@ -98,6 +98,46 @@ independent lanes succeed:
    source location, and fails closed on unreadable input, a missing document, or a citation target
    outside the same Git-tracked input set. An untracked worktree document therefore cannot satisfy a
    tracked citation.
+   The lane also runs ShellCheck over every `tools/*.sh` and `.github/scripts/*.sh`, explicitly
+   enabling `check-extra-masked-returns` (SC2312), and rejects suppressions without an inline reason.
+   Discovery must contain every Git-tracked direct `*.sh` child of both directories and must be
+   non-empty; untracked matching additions are also checked. A separate fixture contains
+   `check-*.sh`, `run-*.sh`, and `.github/scripts/report-*.sh` canaries, so narrowing either glob or
+   dropping either directory fails the inventory selftest before ShellCheck runs.
+   A standard-library Python lint first asks Bash to parse each script, then requires scripts using
+   `mapfile`/`readarray`, associative arrays, or array expansion under `set -u` to put a fail-closed
+   Bash-4+ guard immediately after the shebang. Its token classifier follows this executable-context
+   table; indentation never changes a result:
+
+   | Feature class | Executable token form | Quoted command word | Argument literal | Comment |
+   | --- | --- | --- | --- | --- |
+   | map input | exact simple-command word `mapfile` or `readarray`, including through `builtin` | detected | single- or double-quoted text is ignored | ignored |
+   | associative array | simple-command word `declare`, `typeset`, or `local` plus an option token containing `A`, including combined flags | detected | single- or double-quoted text is ignored | ignored |
+   | nounset array expansion | executable `set -u`, combined `-euo`, or `set -o nounset` plus executable `${name[@]}` | detected; `${name[@]}` inside double quotes still expands | plain `"set -u"` and single-quoted `${name[@]}` are ignored | ignored |
+   | nested execution | command substitutions and backticks are recursively tokenized, even inside double quotes | detected | outer literal text remains ignored | ignored |
+
+   Forty-six parser-accepted table cases plus accepting, missing-guard, late-guard,
+   indented-declare, local-associative, heredoc, and single/double-quoted-decoy fixtures calibrate
+   both bypass and false-positive directions. Heredoc classification is deliberately quantified by
+   delimiter and body-pattern class:
+
+   | Delimiter class | Literal command-position text | Expansion syntax |
+   | --- | --- | --- |
+   | quoted (`<<'EOF'`, `<<-"EOF"`, or any partially quoted word) | ignored | ignored because Bash does not expand the body |
+   | unquoted (`<<EOF` or `<<-EOF`) | ignored as data | parameter, command, backtick, and arithmetic expansions are scanned |
+
+   Each of these four cells has separate accepting and rejecting fixtures (eight fixtures total).
+   The rejecting controls also establish that executable code immediately after a terminator remains
+   visible. Thus heredoc exclusion applies to literal data, not to expansions Bash executes in an
+   unquoted body.
+
+   This lint's detection claim is deliberately limited to direct syntactic feature use. Dynamic
+   execution through `eval` or a variable-expanded command word is outside the static-detection
+   boundary and is not included in the detection claim. Selftests pin literal `eval` and variable
+   command examples as expected non-detections so this boundary cannot be mistaken for implicit
+   coverage. Local macOS development requires `brew install shellcheck`; a missing executable fails
+   the lane instead of skipping it. CI's ShellCheck version is authoritative; CI detects findings
+   that a different local version does not report, and the checker records the version it used.
    Repository-root `CHANGELOG.md` is deliberately outside that scope because it is an immutable
    historical record whose old section names must not make current automation fail.
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+(( BASH_VERSINFO[0] >= 4 )) || { echo "run-fault-operators.sh requires Bash 4 or newer" >&2; exit 1; }
 # SPDX-License-Identifier: Apache-2.0
 #
 # Implementation fault operators (#537 C5). See
@@ -90,13 +91,15 @@ export CARGO_TARGET_DIR="$work/target"
 lock="$work/lock"
 mkdir -p "$work"
 if ! mkdir "$lock" 2>/dev/null; then
+  # shellcheck disable=SC2312 # the explicit fallback turns an unreadable stale holder into the intended diagnostic
   echo "fault-operators: another invocation holds $lock ($(cat "$lock/holder" 2>/dev/null || echo unknown)).
   If that run crashed, verify no cargo/fslc process is alive and remove the
   directory by hand. Not proceeding: two runners in one scratch make every
   verdict in the matrix meaningless." >&2
   exit 1
 fi
-echo "pid $$ started $(date -u +%FT%TZ)" >"$lock/holder"
+started_at="$(date -u +%FT%TZ)"
+echo "pid $$ started $started_at" >"$lock/holder"
 trap 'rm -rf "$lock"' EXIT
 
 fail() {
@@ -127,10 +130,11 @@ read_table() {
   local name patch_file contract seam_path seam_anchor primary_target primary_test
   local blind_target blind_test expected_change calibrated_edge source_scope extra
   while IFS='^' read -r name patch_file contract seam_path seam_anchor primary_target primary_test blind_target blind_test expected_change calibrated_edge source_scope extra; do
-    name="$(trim "${name:-}")"
+    name="$(trim "${name:-}")" || fail "$table: could not trim an operator name"
     [ -n "$name" ] || continue
     case "$name" in \#*) continue ;; esac
-    [ -z "$(trim "${extra:-}")" ] || fail "$table: row '$name' has more than twelve columns"
+    extra="$(trim "${extra:-}")" || fail "$table: could not trim the extra-column field"
+    [ -z "$extra" ] || fail "$table: row '$name' has more than twelve columns"
     patch_file="$(trim "${patch_file:-}")"
     [ -n "$patch_file" ] || fail "$table: row '$name' names no patch file"
     [ -f "$operators_dir/$patch_file" ] || fail "$table: row '$name' names a missing patch file '$patch_file'"
@@ -221,7 +225,14 @@ sync_scratch() {
   # seam". It reproduced only where the scratch's own `.git` was absent or
   # unusable, which is why it appeared in CI and never locally, and why the same
   # revision returned different verdicts on different runs.
-  if [ "$(cd "$scratch" && git rev-parse --show-toplevel 2>/dev/null || true)" != "$(cd "$scratch" && pwd -P)" ]; then
+  local scratch_toplevel scratch_physical
+  if scratch_toplevel="$(cd "$scratch" && git rev-parse --show-toplevel 2>/dev/null)"; then
+    :
+  else
+    scratch_toplevel=""
+  fi
+  scratch_physical="$(cd "$scratch" && pwd -P)"
+  if [ "$scratch_toplevel" != "$scratch_physical" ]; then
     rm -rf "$scratch/.git"
     git -C "$scratch" init --quiet
   fi
@@ -335,16 +346,20 @@ run_detector() {
   local target="$1" name="$2" log="$3" status=0
   # `$target` is a cargo test-target selector ("--lib", "--test <name>") and
   # is deliberately word-split.
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2086 # deliberate word splitting applies the table's cargo arguments
   if ! (cd "$scratch" && cargo test --manifest-path rust/Cargo.toml -p fslc-rust $target --locked --no-run) >"$log.build" 2>&1; then
     tail -40 "$log.build" >&2
     fail "the patched checkout does not compile (target: $target). Full log: $log.build"
   fi
   local binary
   binary="$(executable_from_build_log "$log.build")"
-  [ -n "$binary" ] && [ -f "$binary" ] || fail "cargo reported no executable for
-  target '$target', so nothing here can prove which binary the detector ran.
-  Full log: $log.build"
+  if [ -n "$binary" ] && [ -f "$binary" ]; then
+    :
+  else
+    fail "cargo reported no executable for
+    target '$target', so nothing here can prove which binary the detector ran.
+    Full log: $log.build"
+  fi
   detector_binary_hash="$(hash_file "$binary")"
   # The `fslc` executable the detector may spawn instead of, or in addition to,
   # exercising the library in-process. `cargo test` builds the package's bins so
@@ -352,7 +367,7 @@ run_detector() {
   # this one is named directly rather than read back.
   detector_cli_hash=""
   [ -f "$CARGO_TARGET_DIR/debug/fslc" ] && detector_cli_hash="$(hash_file "$CARGO_TARGET_DIR/debug/fslc")"
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2086 # deliberate word splitting applies the table's cargo arguments
   (cd "$scratch" && cargo test --manifest-path rust/Cargo.toml -p fslc-rust $target --locked -- --exact "$name") >"$log" 2>&1 || status=$?
   if ! grep -q -- "^test ${name} \.\.\. " "$log"; then
     tail -20 "$log" >&2
@@ -451,7 +466,10 @@ no_op_cli_hashes=()
 # genuinely faulted binary equal the unfaulted one, so this only ever fires on
 # a real reuse, never on a flaky digest.
 assert_fault_reached_source() {
-  local file="$1" name="$2" patched seen=0
+  local file="$1" name="$2" patched seen=0 patched_paths
+  patched_paths="$(mktemp)" || fail "operator '$name': could not create patched-path inventory"
+  sed -n 's/^+++ b\///p' "$file" | sort -u >"$patched_paths" \
+    || { rm -f "$patched_paths"; fail "operator '$name': could not enumerate patched paths"; }
   while IFS= read -r patched; do
     [ -n "$patched" ] || continue
     seen=$((seen + 1))
@@ -463,7 +481,8 @@ assert_fault_reached_source() {
   the source the detector is about to be built from. Any verdict below would be
   a property of the harness, not of the fault."
     fi
-  done < <(sed -n 's/^+++ b\///p' "$file" | sort -u)
+  done <"$patched_paths"
+  rm -f "$patched_paths"
   [ "$seen" -gt 0 ] || fail "operator '$name': its patch names no files, so
   there is nothing to verify reached the scratch."
 }
@@ -531,12 +550,15 @@ executed_names=()
 for index in "${assigned_indices[@]}"; do
   executed_names+=("${names[$index]}")
 done
-table_operators_json="$(printf '%s\n' "${names[@]}" | jq -R . | jq -s .)"
-executed_operators_json="$(printf '%s\n' "${executed_names[@]}" | jq -R . | jq -s .)"
+table_operators_json="$(printf '%s\n' "${names[@]}" | jq -R . | jq -s .)" \
+  || fail "could not serialize the full operator inventory"
+executed_operators_json="$(printf '%s\n' "${executed_names[@]}" | jq -R . | jq -s .)" \
+  || fail "could not serialize the executed operator inventory"
+base_revision="$(git -C "$root" rev-parse HEAD)"
 jq -n \
   --arg schema "fslc.fault-operator-shard-manifest.v1" \
   --argjson schema_version 1 \
-  --arg base_revision "$(git -C "$root" rev-parse HEAD)" \
+  --arg base_revision "$base_revision" \
   --argjson shard_index "$shard_index" \
   --argjson shard_total "$shard_total" \
   --argjson table_operators "$table_operators_json" \

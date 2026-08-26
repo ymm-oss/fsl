@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+(( BASH_VERSINFO[0] >= 4 )) || { echo "check-shard-artifact-cohort.sh requires Bash 4 or newer" >&2; exit 1; }
 # SPDX-License-Identifier: Apache-2.0
 
 # Validate one downloaded cohort of stable-name sharded artifacts before the
@@ -145,11 +146,17 @@ check_cohort() {
     expect_equal run_id "$expected_run_id" "$run_id" "$artifact_name"
     expect_equal head_revision "$expected_revision" "$revision" "$artifact_name"
     expect_equal shard.total "$expected_total" "$total" "$artifact_name"
-    [[ "$index" =~ ^[1-9][0-9]*$ ]] && [ "$index" -le "$expected_total" ] \
-      || fail "$artifact_name: shard.index out of range: expected '1..$expected_total', actual '$index'"
+    if [[ "$index" =~ ^[1-9][0-9]*$ ]] && [ "$index" -le "$expected_total" ]; then
+      :
+    else
+      fail "$artifact_name: shard.index out of range: expected '1..$expected_total', actual '$index'"
+    fi
     expect_equal artifact_name "$expected_name" "$artifact_name" "$artifact_name"
-    [ "$attempt" -ge 1 ] && [ "$attempt" -le "$current_attempt" ] \
-      || fail "$artifact_name: run_attempt out of range: expected '1..$current_attempt', actual '$attempt'"
+    if [ "$attempt" -ge 1 ] && [ "$attempt" -le "$current_attempt" ]; then
+      :
+    else
+      fail "$artifact_name: run_attempt out of range: expected '1..$current_attempt', actual '$attempt'"
+    fi
     if [[ " ${seen[*]-} " = *" $index "* ]]; then
       fail "$artifact_name: duplicate shard.index: expected unique '1..$expected_total', actual '$index'"
     fi
@@ -291,9 +298,9 @@ write_provenance() {
 }
 
 make_rust_fixture() {
-  local directory="$1" attempts="$2"
+  local directory="$1" attempt_list="$2"
   local -a attempt_values
-  IFS=, read -r -a attempt_values <<<"$attempts"
+  IFS=, read -r -a attempt_values <<<"$attempt_list"
   local index
   for index in 1 2 3; do
     local artifact="$directory/rust-test-shard-$index-77"
@@ -309,9 +316,9 @@ make_rust_fixture() {
 }
 
 make_semantic_fixture() {
-  local directory="$1" attempts="$2"
+  local directory="$1" attempt_list="$2"
   local -a attempt_values
-  IFS=, read -r -a attempt_values <<<"$attempts"
+  IFS=, read -r -a attempt_values <<<"$attempt_list"
   local index
   for index in 1 2 3; do
     local artifact="$directory/semantic-mutation-operators-$index-77"
@@ -368,6 +375,7 @@ selftest() {
   real_sort="$(command -v sort)" || fail "selftest could not resolve sort"
   real_paste="$(command -v paste)" || fail "selftest could not resolve paste"
   mkdir -p "$tmp/failing-sort" "$tmp/failing-paste"
+  # shellcheck disable=SC2016 # generated wrapper expands these variables when it runs
   printf '%s\n' \
     '#!/usr/bin/env bash' \
     'for argument in "$@"; do' \
@@ -379,6 +387,7 @@ selftest() {
     'done' \
     'exec "$REAL_SORT" "$@"' >"$tmp/failing-sort/sort" \
     || fail "selftest comparison-sort wrapper creation failed"
+  # shellcheck disable=SC2016 # generated wrapper expands these variables when it runs
   printf '%s\n' \
     '#!/usr/bin/env bash' \
     'if [ "${FSL_COHORT_JOIN_CONTEXT:-}" = "attempts" ]; then' \
