@@ -272,6 +272,40 @@ fn explicit_accepts_forall_init_writing_the_same_value_every_iteration() {
 }
 
 #[test]
+fn unresolved_init_index_collisions_share_the_ownership_diagnostic() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let expected = "state variable 'm' assigned more than once in init forall";
+
+    for name in ["issue_826_root_concrete.fsl", "issue_826_root_root.fsl"] {
+        let path = fixtures.join(name);
+        let path = path.to_str().expect("UTF-8 fixture path");
+
+        let (checked, check_status) = run_cli(&["check".to_owned(), path.to_owned()]);
+        assert_eq!(check_status, 2, "check accepted {name}: {checked:#}");
+        assert_eq!(checked["result"], "error");
+        assert_eq!(checked["kind"], "semantics");
+        assert_eq!(checked["message"], expected);
+
+        for engine in ["bmc", "explicit"] {
+            let (verified, verify_status) = verify(path, engine, 1, &[]);
+            assert_eq!(verify_status, 2, "{engine} accepted {name}: {verified:#}");
+            assert_eq!(verified["result"], checked["result"]);
+            assert_eq!(verified["kind"], checked["kind"]);
+            assert_eq!(verified["message"], checked["message"]);
+        }
+    }
+
+    let lone = fixtures.join("issue_826_lone_root.fsl");
+    let lone = lone.to_str().expect("UTF-8 fixture path");
+    let (checked, check_status) = run_cli(&["check".to_owned(), lone.to_owned()]);
+    assert_eq!(check_status, 0, "check rejected a lone owner: {checked:#}");
+    assert_eq!(checked["result"], "ok");
+    let (verified, verify_status) = verify(lone, "bmc", 1, &[]);
+    assert_eq!(verify_status, 0, "BMC rejected a lone owner: {verified:#}");
+    assert_eq!(verified["result"], "verified");
+}
+
+#[test]
 fn explicit_closure_proves_true_noninductive_invariant() {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/explicit_noninductive.fsl");

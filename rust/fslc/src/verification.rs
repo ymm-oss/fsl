@@ -1042,6 +1042,10 @@ fn execute_bmc(
 fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc, CommandResult> {
     let model = load_selected_model(request.selection)
         .map_err(|error| (spec_load_error_output(&error), 2))?;
+    if request.initial_state.is_none() {
+        fsl_runtime::check_init_write_ownership(&model)
+            .map_err(|error| (semantic_error_output(&error.to_string()), 2))?;
+    }
     let checked_bounds = selected_implicit_bounds(
         &model,
         request.selection.property,
