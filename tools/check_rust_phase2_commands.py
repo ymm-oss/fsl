@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from check_rust_cli_snapshot import DEFAULT_RUST_BIN
-from check_rust_full_envelope import _diff
+from rust_parity_util import _diff
 
 
 ROOT = Path(__file__).resolve().parents[1]

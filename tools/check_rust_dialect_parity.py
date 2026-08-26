@@ -17,8 +17,8 @@ from typing import Any
 from fslc.cli import run_check, run_verify
 
 from check_rust_cli_snapshot import DEFAULT_RUST_BIN, _invoke
-from check_rust_full_envelope import _diff, _normalize as _normalize_bmc
 from check_rust_induction_parity import _normalize as _normalize_induction
+from rust_parity_util import _diff, _normalize as _normalize_bmc
 
 
 ROOT = Path(__file__).resolve().parents[1]
