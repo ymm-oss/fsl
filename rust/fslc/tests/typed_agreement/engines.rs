@@ -18,7 +18,10 @@ use std::future::Future;
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
-use fsl_core::{FsResolver, KernelModel, build_model, build_surface_model, parse_kernel_source};
+use fsl_core::{
+    FsResolver, FslValue as Value, KernelModel, build_model, build_surface_model,
+    parse_kernel_source,
+};
 use fsl_runtime::{Monitor, State, Violation};
 use fsl_syntax::{Expr, SpecItem};
 
@@ -129,6 +132,7 @@ impl fmt::Display for AgreementFailure {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgreementObservation {
     pub verdict: Verdict,
+    pub deadlock_step: Option<usize>,
     pub required_edges: Vec<&'static str>,
     pub property_location: Option<String>,
     pub completeness: AgreementCompleteness,
@@ -146,8 +150,40 @@ pub struct AgreementCompleteness {
 
 struct MonitorObservation {
     verdict: Verdict,
+    deadlock_step: Option<usize>,
     depth_reached: usize,
     closure: bool,
+}
+
+fn monitor_terminal_holds(id: &str, monitor: &Monitor) -> Result<bool, AgreementFailure> {
+    let Some(terminal) = &monitor.model.terminal else {
+        return Ok(false);
+    };
+    match fsl_runtime::eval(
+        terminal,
+        &monitor.state,
+        &mut BTreeMap::new(),
+        &monitor.model,
+        None,
+    )
+    .map_err(|error| {
+        disagreement(
+            id,
+            "earliest_deadlock",
+            "terminal",
+            "Boolean",
+            error.message,
+        )
+    })? {
+        Value::Bool(value) => Ok(value),
+        value => Err(disagreement(
+            id,
+            "earliest_deadlock",
+            "terminal",
+            "Boolean",
+            value,
+        )),
+    }
 }
 
 fn disagreement(
@@ -178,6 +214,36 @@ fn require_equal<T: Eq + fmt::Debug>(
     } else {
         Err(disagreement(id, edge, field, left, right))
     }
+}
+
+pub fn require_deadlock_agreement(
+    id: &str,
+    monitor: Option<usize>,
+    legacy_bfs: Option<usize>,
+    explicit: Option<usize>,
+    symbolic: Option<usize>,
+) -> Result<(), AgreementFailure> {
+    require_equal(
+        id,
+        "earliest_deadlock",
+        "monitor_bfs",
+        &monitor,
+        &legacy_bfs,
+    )?;
+    require_equal(
+        id,
+        "earliest_deadlock",
+        "bfs_explicit",
+        &legacy_bfs,
+        &explicit,
+    )?;
+    require_equal(
+        id,
+        "earliest_deadlock",
+        "explicit_bmc",
+        &explicit,
+        &symbolic,
+    )
 }
 
 fn property_location(
@@ -236,6 +302,7 @@ fn observe_monitor(
         .map_err(|error| disagreement(id, "monitor_bfs", "engine", "ok", error.message))?;
     let mut frontier = BTreeMap::from([(initial.state.clone(), initial)]);
     let mut seen: BTreeSet<_> = frontier.keys().cloned().collect();
+    let mut deadlock_step = None;
 
     for level in 0..=depth {
         for monitor in frontier.values() {
@@ -245,17 +312,11 @@ fn observe_monitor(
             if violation.is_some() {
                 return Ok(MonitorObservation {
                     verdict: Verdict::from(violation),
+                    deadlock_step,
                     depth_reached: level,
                     closure: false,
                 });
             }
-        }
-        if level == depth {
-            return Ok(MonitorObservation {
-                verdict: Verdict::Clean,
-                depth_reached: level,
-                closure: false,
-            });
         }
 
         let mut next = BTreeMap::new();
@@ -263,6 +324,15 @@ fn observe_monitor(
             let enabled = monitor
                 .enabled()
                 .map_err(|error| disagreement(id, "monitor_bfs", "enabled", "ok", error.message))?;
+            if enabled.is_empty()
+                && deadlock_step.is_none()
+                && !monitor_terminal_holds(id, monitor)?
+            {
+                deadlock_step = Some(level);
+            }
+            if level == depth {
+                continue;
+            }
             for action in enabled {
                 let mut child = monitor.clone();
                 let stepped = child.step(&action).map_err(|error| {
@@ -271,6 +341,7 @@ fn observe_monitor(
                 if stepped.violation.is_some() {
                     return Ok(MonitorObservation {
                         verdict: Verdict::from(stepped.violation),
+                        deadlock_step,
                         depth_reached: level + 1,
                         closure: false,
                     });
@@ -280,9 +351,18 @@ fn observe_monitor(
                 }
             }
         }
+        if level == depth {
+            return Ok(MonitorObservation {
+                verdict: Verdict::Clean,
+                deadlock_step,
+                depth_reached: level,
+                closure: false,
+            });
+        }
         if next.is_empty() {
             return Ok(MonitorObservation {
                 verdict: Verdict::Clean,
+                deadlock_step,
                 depth_reached: level,
                 closure: true,
             });
@@ -440,6 +520,13 @@ pub fn compare_agreement(
             // different points after a violation. Reachable steps and action
             // coverage therefore have a common contract only for clean runs.
             if matches!(bmc_verdict, Verdict::Clean) {
+                require_deadlock_agreement(
+                    id,
+                    monitor.deadlock_step,
+                    bfs_result.deadlock_step,
+                    explicit_result.deadlock_step,
+                    bmc_result.deadlock_step,
+                )?;
                 let bfs_reachables = bfs_result
                     .reachables
                     .iter()
@@ -532,6 +619,7 @@ pub fn compare_agreement(
 
     Ok(AgreementObservation {
         verdict: bmc_verdict,
+        deadlock_step: bmc_result.deadlock_step,
         required_edges: if has_leadsto {
             vec!["depth_completeness", "replay", "successor_admission"]
         } else {
@@ -545,6 +633,9 @@ pub fn compare_agreement(
             ];
             if trace_compared {
                 edges.push("trace_explicit_bmc");
+            }
+            if !has_violation {
+                edges.push("earliest_deadlock");
             }
             if has_violation {
                 edges.push("property_location");

@@ -13,7 +13,7 @@ use fsl_core::{
 use super::trace::{ParentLink, reconstruct_trace, state_changes};
 use super::{
     Bindings, Monitor, RuntimeError, State, Violation, eval, runtime_error, runtime_error_at,
-    with_total_division,
+    terminal_holds, with_total_division,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -268,24 +268,6 @@ pub fn verify_explicit_selected(
 
     result.states_explored = seen.len();
     Ok(result)
-}
-
-fn terminal_holds(monitor: &Monitor) -> Result<bool, RuntimeError> {
-    let Some(terminal) = &monitor.model.terminal else {
-        return Ok(false);
-    };
-    with_total_division(|| {
-        match eval(
-            terminal,
-            &monitor.state,
-            &mut Bindings::new(),
-            &monitor.model,
-            None,
-        )? {
-            Value::Bool(value) => Ok(value),
-            _ => Err(runtime_error("terminal expression must be Boolean")),
-        }
-    })
 }
 
 fn record_reachables(
