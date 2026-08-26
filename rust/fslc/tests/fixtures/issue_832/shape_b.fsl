@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+compose ShapeB {
+  use Core as core from "core.fsl"
+  state { x: Int }
+  init {
+    if nonexistent.flag {
+      x = 0
+    }
+  }
+}
