@@ -53,6 +53,7 @@
 | [`DESIGN-seq.md`](DESIGN-seq.md) | Seq<T,N> (partial_op, type whitelist) |
 | [`DESIGN-seq-partial-operations.md`](DESIGN-seq-partial-operations.md) | Accepted Seq partial-operation semantics: out-of-prefix reads report `partial_op` consistently across engines while guarded short-circuit reads remain defined |
 | [`DESIGN-option-struct.md`](DESIGN-option-struct.md) | Option fields in structs |
+| [`DESIGN-nested-option-support.md`](DESIGN-nested-option-support.md) | Accepted #841 implementation plan for full recursive nested `Option` support, fail-closed state-type boundaries, lossless JSON/replay, and cross-engine agreement |
 | [`DESIGN-divmod.md`](DESIGN-divmod.md) | Integer division `/` and remainder `%` (total definition of division by zero, partial_op, Euclidean) |
 | [`DESIGN-forbidden.md`](DESIGN-forbidden.md) | `forbidden` (negative acceptance criteria / must-forbid) — detecting under-constraint |
 | [`DESIGN-vacuity.md`](DESIGN-vacuity.md) | Vacuity checking (invariants whose antecedent is unreachable, leadsTo whose trigger is unreachable, always-true requires) |
