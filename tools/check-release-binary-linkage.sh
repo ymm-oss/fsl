@@ -21,7 +21,10 @@ check_glibc() {
     printf 'release ABI check failed: %s has no GLIBC requirement\n' "$binary" >&2
     return 1
   fi
-  if ! test "$(printf '%s\n' GLIBC_2.39 "$required" | sort -V | tail -1)" = GLIBC_2.39; then
+  local maximum
+  maximum="$(printf '%s\n' GLIBC_2.39 "$required" | sort -V | tail -1)" \
+    || return 1
+  if ! test "$maximum" = GLIBC_2.39; then
     printf 'release ABI check failed: %s requires %s; maximum supported GLIBC version is GLIBC_2.39\n' \
       "$binary" "$required" >&2
     return 1

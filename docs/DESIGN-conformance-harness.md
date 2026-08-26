@@ -247,30 +247,36 @@ A green corpus therefore said nothing about `fslc refine`. Before this manifest 
 `tools/check_rust_refinement_parity.py` comparison script that no workflow and no
 `tools/check-native-integration.sh` lane invoked. The other 22 were executed by
 nothing. `rust/fslc/tests/refine_corpus_parity.rs` is now the native owner; it derives
-the complete mapping roster and checks declared result, violation kind, and exit status. It does
-not yet own the Python harness's broader stable envelope projection (F6 in `RUST-PORTING.md`), so the script
-remains pending a complete observed-field comparison with reasoned, self-retiring exclusions.
+the complete mapping roster and checks the complete observed stable envelope projection plus exit
+status. Its only projection exclusion is the solver-selected `impl_trace` witness; the test states
+why that value cannot be compared while retaining all stable failure summaries, and fails if the
+excluded key disappears from both observed and expected envelopes. This closes F6 in
+`RUST-PORTING.md`; the Python compatibility script remains retained but is not a product or CI gate.
 
 `rust/fslc/tests/refine_corpus_parity.rs` owns the mapping corpus the way
-`tests/dialect_registry.py` owns the dialect corpus, on three rules:
+`tests/dialect_registry.py` owns the dialect corpus, on four rules:
 
 - **The roster is derived, never listed.** The test walks `specs/` + `examples/`
   for `refinement`-dialect files and requires each to hold a manifest row or an
   exclusion. Adding a mapping fails the test until it is registered, and a
   registered path that no longer exists fails as a stale entry. A hard-coded list
   is the shape #577 retired 28 stale instances of.
-- **Expectations are transcribed from declarations, not from output.** Each row
-  carries `declared_by`, the `path:line` of the README row, documented command
-  comment, or fixture header that states the expected verdict. Recording what the
-  binary prints would pin a defect as the contract the moment one exists — which
-  is exactly the state `examples/layers/return_impl_refines.fsl` is in
-  (issue #615). Where no declaration exists, the correct move is to write one, not
-  to transcribe a measurement. `depth` is deliberately *not* part of that contract:
-  it bounds the search rather than declaring the verdict, so it is taken from the
-  documented command line where one exists.
-- **Both channels, every row.** `result`, `kind`, and the process exit code are all
-  compared (#537 C4). An envelope that disagrees with its exit status is how #554
-  and #600 escaped.
+- **Verdict expectations are transcribed from declarations, not from output.** Each
+  row carries `declared_by`, the `path:line` of the README row, documented command
+  comment, or fixture header that states the expected `result`/`kind`. Recording an
+  observed verdict would pin a defect as the contract the moment one exists — which
+  is exactly the state `examples/layers/return_impl_refines.fsl` was in (issue #615).
+  Where no declaration exists, the correct move is to write one, not to transcribe a
+  measurement. The additional public envelope fields are necessarily an observed
+  contract and live in the reviewed projection golden; the test separately requires
+  its `result`/`kind` to agree with the declaration-backed row. `depth` is deliberately
+  *not* part of the declared verdict contract: it bounds the search rather than
+  declaring the verdict, so it is taken from the documented command line where one
+  exists.
+- **Both channels, every stable field.** The complete observed stable JSON envelope
+  and process exit code are compared (#537 C4). `impl_trace` alone is excluded for
+  the reason above, and the exclusion must match an emitted or expected key. An
+  envelope that disagrees with its exit status is how #554 and #600 escaped.
 - **The citation is checked, not trusted.** Where a mapping declares its own
   expectation in the gallery `expected-command`/`expected-result`/`expected-kind`
   header convention, the row must agree with it — including the `--depth` inside
@@ -279,7 +285,7 @@ remains pending a complete observed-field comparison with reasoned, self-retirin
   exists to prevent. It caught one on introduction: the `refinement_failed_map.fsl`
   row ran at depth 4 against a header declaring `--depth 3`.
 
-  22 of the 26 rows additionally carry a `declaration` anchor, and the harness
+  23 of the 27 rows additionally carry a `declaration` anchor, and the harness
   requires the cited file to still contain a line stating this row's verdict.
   That is what keeps each declaration single-owner. `governance_semantic_mapping`
   is declared by the broken *implementation* it maps
@@ -293,7 +299,7 @@ remains pending a complete observed-field comparison with reasoned, self-retirin
   than a verdict on one line; they are the manifest's residual trust.
 
 Depth is the one field the corpus is allowed to leave open, and where it is
-declared the declaration wins. 24 of the 26 rows run at the depth their README
+declared the declaration wins. 25 of the 27 rows run at the depth their README
 command line or fixture header states. The two that do not —
 `specs/bank_refines.fsl` and `specs/seat_refines.fsl` — had no documented command
 at all; each now carries one in its abstraction's header (`specs/bank.fsl:2-3`,
