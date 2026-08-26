@@ -141,6 +141,30 @@ def check(root: Path) -> int:
     if executable is None:
         print("check-shell-scripts: shellcheck not found", file=sys.stderr)
         return 1
+    version_result = subprocess.run(
+        [executable, "--version"],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    version = next(
+        (
+            line.partition(":")[2].strip()
+            for line in version_result.stdout.splitlines()
+            if line.startswith("version:")
+        ),
+        "",
+    )
+    if version_result.returncode != 0 or not version:
+        detail = (version_result.stderr or version_result.stdout).strip()
+        print(
+            "check-shell-scripts: cannot determine shellcheck version"
+            f" (exit {version_result.returncode}): {detail or '(no output)'}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"check-shell-scripts: shellcheck version {version}", flush=True)
     result = subprocess.run(
         [executable, "--enable=check-extra-masked-returns", *map(str, files)],
         cwd=root,

@@ -887,9 +887,10 @@ check_direct_edit_files() {
 # own fail-closed behavior (a bad edit fails here, before control 1 ever
 # runs) and control 1's release exclusion -- one computation, consumed
 # twice, so the two controls cannot disagree (review finding S2-1, #737,
-# comment 2026-08-07, second round).
+# comment 2026-08-07, second round). $1 is the repository-relative changelog
+# path and must be supplied explicitly by the caller.
 compute_direct_edit_classification() {
-  local changelog="${1:-CHANGELOG.md}"
+  local changelog="$1"
   : "${BASE_SHA:?BASE_SHA is required}"
   : "${HEAD_SHA:?HEAD_SHA is required}"
   # Diff against the merge base, not BASE_SHA's tip: this repository's own
@@ -984,7 +985,7 @@ check_pr() {
   # cannot disagree about whether this diff is a genuine release move (S2-1).
   local classification status
   set +e
-  classification="$(compute_direct_edit_classification)"
+  classification="$(compute_direct_edit_classification "CHANGELOG.md")"
   status=$?
   set -e
   [ "$status" -eq 0 ] || exit 1

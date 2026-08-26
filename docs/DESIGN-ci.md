@@ -136,7 +136,8 @@ independent lanes succeed:
    boundary and is not included in the detection claim. Selftests pin literal `eval` and variable
    command examples as expected non-detections so this boundary cannot be mistaken for implicit
    coverage. Local macOS development requires `brew install shellcheck`; a missing executable fails
-   the lane instead of skipping it.
+   the lane instead of skipping it. CI's ShellCheck version is authoritative; CI detects findings
+   that a different local version does not report, and the checker records the version it used.
    Repository-root `CHANGELOG.md` is deliberately outside that scope because it is an immutable
    historical record whose old section names must not make current automation fail.
 

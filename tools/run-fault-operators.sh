@@ -226,7 +226,11 @@ sync_scratch() {
   # unusable, which is why it appeared in CI and never locally, and why the same
   # revision returned different verdicts on different runs.
   local scratch_toplevel scratch_physical
-  scratch_toplevel="$(cd "$scratch" && git rev-parse --show-toplevel 2>/dev/null || true)"
+  if scratch_toplevel="$(cd "$scratch" && git rev-parse --show-toplevel 2>/dev/null)"; then
+    :
+  else
+    scratch_toplevel=""
+  fi
   scratch_physical="$(cd "$scratch" && pwd -P)"
   if [ "$scratch_toplevel" != "$scratch_physical" ]; then
     rm -rf "$scratch/.git"
@@ -349,9 +353,13 @@ run_detector() {
   fi
   local binary
   binary="$(executable_from_build_log "$log.build")"
-  [ -n "$binary" ] && [ -f "$binary" ] || fail "cargo reported no executable for
-  target '$target', so nothing here can prove which binary the detector ran.
-  Full log: $log.build"
+  if [ -n "$binary" ] && [ -f "$binary" ]; then
+    :
+  else
+    fail "cargo reported no executable for
+    target '$target', so nothing here can prove which binary the detector ran.
+    Full log: $log.build"
+  fi
   detector_binary_hash="$(hash_file "$binary")"
   # The `fslc` executable the detector may spawn instead of, or in addition to,
   # exercising the library in-process. `cargo test` builds the package's bins so
