@@ -101,12 +101,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 54,
-          "conflicts": 15,
-          "decisions": 11,
-          "memory_mb": "<memory-mb>",
-          "propagations": 40
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "engine": "induction",
@@ -217,12 +217,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 36,
-          "conflicts": 11,
-          "decisions": 4,
-          "memory_mb": "<memory-mb>",
-          "propagations": 42
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "engine": "induction",
@@ -352,12 +352,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 38,
-          "conflicts": 22,
-          "decisions": 21,
-          "memory_mb": "<memory-mb>",
-          "propagations": 286
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "engine": "induction",
@@ -525,12 +525,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 82,
-          "conflicts": 322,
-          "decisions": 682,
-          "memory_mb": "<memory-mb>",
-          "propagations": 13461
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "engine": "induction",
@@ -694,12 +694,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 106,
-          "conflicts": 1145,
-          "decisions": 3032,
-          "memory_mb": "<memory-mb>",
-          "propagations": 136921
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "engine": "induction",
@@ -821,12 +821,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 42,
-          "conflicts": 11,
-          "decisions": null,
-          "memory_mb": "<memory-mb>",
-          "propagations": 24
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<null>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "cti": {
@@ -936,12 +936,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 44,
-          "conflicts": 11,
-          "decisions": null,
-          "memory_mb": "<memory-mb>",
-          "propagations": 24
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<null>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "cti": {
@@ -1055,12 +1055,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 120,
-          "conflicts": 83,
-          "decisions": 4,
-          "memory_mb": "<memory-mb>",
-          "propagations": 124
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "engine": "induction",
@@ -1183,12 +1183,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 120,
-          "conflicts": 83,
-          "decisions": 4,
-          "memory_mb": "<memory-mb>",
-          "propagations": 124
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "cti": {
@@ -1316,12 +1316,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 119,
-          "conflicts": 83,
-          "decisions": 4,
-          "memory_mb": "<memory-mb>",
-          "propagations": 124
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "cti": {
@@ -1450,12 +1450,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 43,
-          "conflicts": 20,
-          "decisions": 20,
-          "memory_mb": "<memory-mb>",
-          "propagations": 303
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "engine": "induction",
@@ -1591,12 +1591,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 31,
-          "conflicts": 8,
-          "decisions": 24,
-          "memory_mb": "<memory-mb>",
-          "propagations": 123
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "cti": {
@@ -1729,12 +1729,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 28,
-          "conflicts": 5,
-          "decisions": 1,
-          "memory_mb": "<memory-mb>",
-          "propagations": 19
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "cti": {
@@ -1907,12 +1907,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 408,
-          "conflicts": 1173,
-          "decisions": 22019,
-          "memory_mb": "<memory-mb>",
-          "propagations": 54060
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "cti": {
@@ -2061,12 +2061,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 112,
-          "conflicts": 90,
-          "decisions": 165,
-          "memory_mb": "<memory-mb>",
-          "propagations": 1254
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "cti": {
@@ -2205,12 +2205,12 @@
           }
         ],
         "solver": {
-          "check_elapsed_s": "<elapsed>",
-          "checks": 33,
-          "conflicts": 187,
-          "decisions": 613,
-          "memory_mb": "<memory-mb>",
-          "propagations": 6223
+          "check_elapsed_s": "<number>",
+          "checks": "<number>",
+          "conflicts": "<number>",
+          "decisions": "<number>",
+          "memory_mb": "<number>",
+          "propagations": "<number>"
         }
       },
       "fsl": "1.0",

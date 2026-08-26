@@ -163,9 +163,9 @@ const EXCLUSIONS: &[Exclusion] = &[
         treatment: Treatment::ValueShape,
     },
     Exclusion {
-        path: "$.cost.solver.memory_mb",
-        reason: "solver memory usage varies with the allocator and host (observed 17.24 vs 17.27 MB for one case across environments); its presence remains compared via the mask",
-        treatment: Treatment::Mask("<memory-mb>"),
+        path: "$.cost.solver",
+        reason: "Z3 internal search statistics vary across hosts and runs (observed memory_mb 17.24 vs 17.27 and conflicts 1097 vs 1173 for the same case across environments); the key set and value types remain compared",
+        treatment: Treatment::ValueShape,
     },
 ];
 
@@ -223,7 +223,7 @@ fn exclusion_index(path: &str) -> Option<usize> {
         Some(5)
     } else if path.starts_with("$.blame.conjuncts.") && path.ends_with(".violating_bindings") {
         Some(6)
-    } else if path == "$.cost.solver.memory_mb" {
+    } else if path == "$.cost.solver" {
         Some(7)
     } else {
         None
