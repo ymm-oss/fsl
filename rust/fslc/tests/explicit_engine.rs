@@ -285,6 +285,7 @@ fn unresolved_init_index_collisions_share_the_ownership_diagnostic() {
         assert_eq!(checked["result"], "error");
         assert_eq!(checked["kind"], "semantics");
         assert_eq!(checked["message"], expected);
+        assert_eq!(checked["loc"], json!({"line": 8, "column": 21}));
 
         for engine in ["bmc", "explicit"] {
             let (verified, verify_status) = verify(path, engine, 1, &[]);
@@ -292,6 +293,7 @@ fn unresolved_init_index_collisions_share_the_ownership_diagnostic() {
             assert_eq!(verified["result"], checked["result"]);
             assert_eq!(verified["kind"], checked["kind"]);
             assert_eq!(verified["message"], checked["message"]);
+            assert_eq!(verified["loc"], checked["loc"]);
         }
     }
 

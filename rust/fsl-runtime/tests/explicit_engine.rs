@@ -461,6 +461,10 @@ fn unresolved_init_index_writes_collide_by_logical_root() {
         error.message,
         "state variable 'm' assigned more than once in init forall"
     );
+    assert!(
+        error.span.is_some(),
+        "collision must retain the second write span"
+    );
 
     let root_root = model(
         "spec RootRoot { type Idx = 0..2 state { m: Map<Idx, Bool> } \
@@ -472,6 +476,10 @@ fn unresolved_init_index_writes_collide_by_logical_root() {
     assert_eq!(
         error.message,
         "state variable 'm' assigned more than once in init forall"
+    );
+    assert!(
+        error.span.is_some(),
+        "collision must retain the second write span"
     );
 
     let lone_root = model(

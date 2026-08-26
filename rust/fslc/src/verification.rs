@@ -874,7 +874,12 @@ pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32
         checked_bounds.as_ref(),
     ) {
         Ok(result) => result,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        Err(error) => {
+            return (
+                fslc_rust::verification_output::render_runtime_error(envelope(), &error),
+                2,
+            );
+        }
     };
     let (vacuity, reachable_diagnostics) =
         match explicit_solver_findings(&model, &result.action_coverage) {
@@ -933,7 +938,12 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
         checked_bounds.as_ref(),
     ) {
         Ok(result) => result,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        Err(error) => {
+            return (
+                fslc_rust::verification_output::render_runtime_error(envelope(), &error),
+                2,
+            );
+        }
     };
     let (vacuity, reachable_diagnostics) =
         match explicit_solver_findings(&model, &result.action_coverage) {
@@ -1043,8 +1053,12 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
     let model = load_selected_model(request.selection)
         .map_err(|error| (spec_load_error_output(&error), 2))?;
     if request.initial_state.is_none() {
-        fsl_runtime::check_init_write_ownership(&model)
-            .map_err(|error| (semantic_error_output(&error.to_string()), 2))?;
+        fsl_runtime::check_init_write_ownership(&model).map_err(|error| {
+            (
+                fslc_rust::verification_output::render_runtime_error(envelope(), &error),
+                2,
+            )
+        })?;
     }
     let checked_bounds = selected_implicit_bounds(
         &model,

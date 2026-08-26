@@ -12,7 +12,8 @@ use fsl_core::{
 
 use super::trace::{ParentLink, reconstruct_trace, state_changes};
 use super::{
-    Bindings, Monitor, RuntimeError, State, Violation, eval, runtime_error, with_total_division,
+    Bindings, Monitor, RuntimeError, State, Violation, eval, runtime_error, runtime_error_at,
+    with_total_division,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -76,14 +77,18 @@ pub fn verify_explicit(
 /// the symbolic engine).
 #[must_use]
 pub fn explicit_unsupported_reason(model: &KernelModel) -> Option<String> {
+    explicit_unsupported_error(model).map(|error| error.message)
+}
+
+fn explicit_unsupported_error(model: &KernelModel) -> Option<RuntimeError> {
     if let Err(error) = check_deterministic_init(model) {
-        return Some(error.message);
+        return Some(error);
     }
     if !model.leadstos.is_empty() {
-        return Some(
+        return Some(runtime_error(
             "the explicit engine does not support leadsTo properties; use --engine bmc or exclude the leadsTo property"
                 .to_owned(),
-        );
+        ));
     }
     None
 }
@@ -115,8 +120,8 @@ pub fn verify_explicit_selected(
     if max_states == 0 {
         return Err(runtime_error("explicit state budget must be at least 1"));
     }
-    if let Some(reason) = explicit_unsupported_reason(&model) {
-        return Err(runtime_error(reason));
+    if let Some(error) = explicit_unsupported_error(&model) {
+        return Err(error);
     }
 
     // The frontier carries `State` only, not `Monitor` -- a full `Monitor`
@@ -694,7 +699,7 @@ fn walk_init_write_ownership(
 ) -> Result<BTreeSet<InitWriteKey>, RuntimeError> {
     for statement in statements {
         match statement {
-            Statement::Assign { target, .. } => {
+            Statement::Assign { target, span, .. } => {
                 let logical = logical_var(target)
                     .ok_or_else(|| runtime_error("invalid init assignment target"))?;
                 let contribution = assignment_coverage(target, bound_names, model);
@@ -705,9 +710,10 @@ fn walk_init_write_ownership(
                         .any(|previous| init_write_keys_overlap(previous, key))
                 }) {
                     let scope = if in_forall { "init forall" } else { "init" };
-                    return Err(runtime_error(format!(
-                        "state variable '{logical}' assigned more than once in {scope}"
-                    )));
+                    return Err(runtime_error_at(
+                        format!("state variable '{logical}' assigned more than once in {scope}"),
+                        *span,
+                    ));
                 }
                 possibly_assigned.extend(keys);
             }
@@ -762,7 +768,12 @@ fn walk_init(
 ) -> Result<(BTreeMap<String, Coverage>, BTreeSet<InitWriteKey>), RuntimeError> {
     for statement in statements {
         match statement {
-            Statement::Assign { target, value, .. } => {
+            Statement::Assign {
+                target,
+                value,
+                span,
+                ..
+            } => {
                 let logical = logical_var(target)
                     .ok_or_else(|| runtime_error("invalid init assignment target"))?;
                 let contribution = assignment_coverage(target, bound_names, model);
@@ -773,9 +784,10 @@ fn walk_init(
                         .any(|previous| init_write_keys_overlap(previous, key))
                 }) {
                     let scope = if in_forall { "init forall" } else { "init" };
-                    return Err(runtime_error(format!(
-                        "state variable '{logical}' assigned more than once in {scope}"
-                    )));
+                    return Err(runtime_error_at(
+                        format!("state variable '{logical}' assigned more than once in {scope}"),
+                        *span,
+                    ));
                 }
                 if let LValue::Index(_, key_expr) = target {
                     check_init_expr(key_expr, &definitely_assigned, model)?;

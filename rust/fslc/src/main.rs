@@ -5585,7 +5585,10 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
     match load_kernel_model(path) {
         Ok((_, kernel, model)) => {
             if let Err(error) = fsl_runtime::check_init_write_ownership(&model) {
-                return (semantic_error_output(&error.to_string()), 2);
+                return (
+                    fslc_rust::verification_output::render_runtime_error(envelope(), &error),
+                    2,
+                );
             }
             let has_trace_contract = match validate_requirement_traces(path, &model) {
                 Ok((Some(failure), _)) => return (failure, 2),

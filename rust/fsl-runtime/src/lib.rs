@@ -10,7 +10,7 @@ use fsl_core::{
     ActionCorrespondenceTarget, ActionDef, ActionGuard, FslValue as Value,
     KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
     KernelLValue as LValue, KernelModel, KernelStatement as Statement, ModelError, ParamDef,
-    Refinement, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef, display_name,
+    Refinement, Span, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef, display_name,
     insert_requirement_metadata, internal_origin_json, model_warnings, origin_display_name,
     state_summary, static_leadsto_bindings,
 };
@@ -61,6 +61,8 @@ fn with_total_division<T>(body: impl FnOnce() -> T) -> T {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeError {
     pub message: String,
+    /// Authored construct responsible for this runtime diagnostic, when one exists.
+    pub span: Option<Span>,
 }
 
 impl fmt::Display for RuntimeError {
@@ -75,6 +77,7 @@ impl From<ModelError> for RuntimeError {
     fn from(error: ModelError) -> Self {
         Self {
             message: error.message,
+            span: error.span,
         }
     }
 }
@@ -732,6 +735,14 @@ fn i64_len(value: usize) -> Result<i64, RuntimeError> {
 fn runtime_error(message: impl Into<String>) -> RuntimeError {
     RuntimeError {
         message: message.into(),
+        span: None,
+    }
+}
+
+fn runtime_error_at(message: impl Into<String>, span: Span) -> RuntimeError {
+    RuntimeError {
+        message: message.into(),
+        span: Some(span),
     }
 }
 
