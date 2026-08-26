@@ -42,7 +42,7 @@ const WORKER_REFINEMENT_CONTROL: Citation = Citation {
 };
 const REFINEMENT_OWNER: Citation = Citation {
     path: "rust/fslc/tests/refine_corpus_parity.rs",
-    anchor: "fn native_refine_matches_the_declared_result_and_exit_for_every_registered_mapping()",
+    anchor: "fn native_refine_matches_the_declared_projection_and_exit_for_every_registered_mapping()",
 };
 const EVIDENCE_OWNER: Citation = Citation {
     path: "rust/fslc/tests/evidence_corpus_manifest.rs",

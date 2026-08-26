@@ -3,9 +3,10 @@
 
 """Compare bounded native refinement envelopes with the Python reference.
 
-Deletion deferred (F6): the native manifest is broader in cases but
-not in output fields. Deletion requires a complete observed stable projection,
-reasoned exclusions, and dead-exclusion checks.
+Native owner (F6): ``rust/fslc/tests/refine_corpus_parity.rs`` compares the
+complete observed stable projection, documents its sole ``impl_trace``
+exclusion, and rejects dead exclusions. This compatibility harness is retained
+for now; it is not a product or CI gate.
 """
 from __future__ import annotations
 
