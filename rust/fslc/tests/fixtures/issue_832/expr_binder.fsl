@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+compose Broken {
+  use Core as core from "core.fsl"
+    invariant Bad { forall u: core.NoSuchType { true } }
+}

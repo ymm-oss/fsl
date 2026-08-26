@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+compose AcceptAliasCondition {
+  use Core as core from "core.fsl"
+  state { x: Int }
+  init {
+    if core.flag {
+      x = 0
+    }
+  }
+}
