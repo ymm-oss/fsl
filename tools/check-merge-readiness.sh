@@ -37,6 +37,7 @@ check_automation() {
   # ShellCheck's extra masked-return analysis covers the pipeline/process-
   # substitution regressions from #898. The companion stdlib lint requires
   # Bash-4+ scripts to fail closed before executing any other command.
+  python3 tools/check-shell-scripts.py selftest
   python3 tools/check-shell-scripts.py
   python3 tools/check-bash-version-guards.py selftest
   python3 tools/check-bash-version-guards.py check

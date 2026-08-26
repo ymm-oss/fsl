@@ -100,11 +100,26 @@ independent lanes succeed:
    tracked citation.
    The lane also runs ShellCheck over every `tools/*.sh` and `.github/scripts/*.sh`, explicitly
    enabling `check-extra-masked-returns` (SC2312), and rejects suppressions without an inline reason.
+   Discovery must contain every Git-tracked direct `*.sh` child of both directories and must be
+   non-empty; untracked matching additions are also checked. A separate fixture contains
+   `check-*.sh`, `run-*.sh`, and `.github/scripts/report-*.sh` canaries, so narrowing either glob or
+   dropping either directory fails the inventory selftest before ShellCheck runs.
    A standard-library Python lint first asks Bash to parse each script, then requires scripts using
    `mapfile`/`readarray`, associative arrays, or array expansion under `set -u` to put a fail-closed
-   Bash-4+ guard immediately after the shebang. The checker has accepting, missing-guard,
-   late-guard, and quoted-decoy fixtures. Local macOS development requires `brew install shellcheck`;
-   a missing executable fails the lane instead of skipping it.
+   Bash-4+ guard immediately after the shebang. Its token classifier follows this executable-context
+   table; indentation never changes a result:
+
+   | Feature class | Executable token form | Quoted command word | Argument literal | Comment |
+   | --- | --- | --- | --- | --- |
+   | map input | exact simple-command word `mapfile` or `readarray`, including through `builtin` | detected | single- or double-quoted text is ignored | ignored |
+   | associative array | simple-command word `declare`, `typeset`, or `local` plus an option token containing `A`, including combined flags | detected | single- or double-quoted text is ignored | ignored |
+   | nounset array expansion | executable `set -u`, combined `-euo`, or `set -o nounset` plus executable `${name[@]}` | detected; `${name[@]}` inside double quotes still expands | plain `"set -u"` and single-quoted `${name[@]}` are ignored | ignored |
+   | nested execution | command substitutions and backticks are recursively tokenized, even inside double quotes | detected | outer literal text remains ignored | ignored |
+
+   Thirty-four parser-accepted table cases plus accepting, missing-guard, late-guard, indented-declare,
+   local-associative, and single/double-quoted-decoy fixtures calibrate both bypass and false-positive
+   directions. Local macOS development requires `brew install shellcheck`; a missing executable
+   fails the lane instead of skipping it.
    Repository-root `CHANGELOG.md` is deliberately outside that scope because it is an immutable
    historical record whose old section names must not make current automation fail.
 
