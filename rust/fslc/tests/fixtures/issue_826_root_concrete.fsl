@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec RootConcreteCollision {
+  type Idx = 0..2
+  state { m: Map<Idx, Bool> }
+  init {
+    forall i: Idx { m[i - i] = true }
+    forall j: Idx { m[j] = true }
+  }
+  action noop() { }
+}
