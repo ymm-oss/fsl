@@ -12,8 +12,8 @@ use fsl_core::{
 
 use super::trace::{ParentLink, reconstruct_trace, state_changes};
 use super::{
-    Bindings, Monitor, RuntimeError, State, Violation, eval, runtime_error, terminal_holds,
-    with_total_division,
+    Bindings, Monitor, RuntimeError, State, Violation, eval, runtime_error, runtime_error_at,
+    terminal_holds, with_total_division,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -77,14 +77,18 @@ pub fn verify_explicit(
 /// the symbolic engine).
 #[must_use]
 pub fn explicit_unsupported_reason(model: &KernelModel) -> Option<String> {
+    explicit_unsupported_error(model).map(|error| error.message)
+}
+
+fn explicit_unsupported_error(model: &KernelModel) -> Option<RuntimeError> {
     if let Err(error) = check_deterministic_init(model) {
-        return Some(error.message);
+        return Some(error);
     }
     if !model.leadstos.is_empty() {
-        return Some(
+        return Some(runtime_error(
             "the explicit engine does not support leadsTo properties; use --engine bmc or exclude the leadsTo property"
                 .to_owned(),
-        );
+        ));
     }
     None
 }
@@ -116,8 +120,8 @@ pub fn verify_explicit_selected(
     if max_states == 0 {
         return Err(runtime_error("explicit state budget must be at least 1"));
     }
-    if let Some(reason) = explicit_unsupported_reason(&model) {
-        return Err(runtime_error(reason));
+    if let Some(error) = explicit_unsupported_error(&model) {
+        return Err(error);
     }
 
     // The frontier carries `State` only, not `Monitor` -- a full `Monitor`
@@ -656,6 +660,85 @@ fn assignment_coverage(
     }
 }
 
+/// Enforce init's assign-once ownership rule without requiring a concrete
+/// initial state. Symbolic verification may admit partially assigned init,
+/// but it must reject two writes that can own the same state location.
+///
+/// # Errors
+///
+/// Returns [`RuntimeError`] when two writes may overlap on one logical root.
+pub fn check_init_write_ownership(model: &KernelModel) -> Result<(), RuntimeError> {
+    walk_init_write_ownership(&model.init, BTreeSet::new(), false, &BTreeMap::new(), model)?;
+    Ok(())
+}
+
+fn walk_init_write_ownership(
+    statements: &[Statement],
+    mut possibly_assigned: BTreeSet<InitWriteKey>,
+    in_forall: bool,
+    bound_names: &BTreeMap<String, Option<Vec<Value>>>,
+    model: &KernelModel,
+) -> Result<BTreeSet<InitWriteKey>, RuntimeError> {
+    for statement in statements {
+        match statement {
+            Statement::Assign { target, span, .. } => {
+                let logical = logical_var(target)
+                    .ok_or_else(|| runtime_error("invalid init assignment target"))?;
+                let contribution = assignment_coverage(target, bound_names, model);
+                let keys = init_write_keys(target, contribution.as_ref());
+                if keys.iter().any(|key| {
+                    possibly_assigned
+                        .iter()
+                        .any(|previous| init_write_keys_overlap(previous, key))
+                }) {
+                    let scope = if in_forall { "init forall" } else { "init" };
+                    return Err(runtime_error_at(
+                        format!("state variable '{logical}' assigned more than once in {scope}"),
+                        *span,
+                    ));
+                }
+                possibly_assigned.extend(keys);
+            }
+            Statement::ForAll {
+                binder, statements, ..
+            } => {
+                let binder_values = compute_binder_values(binder, model)?;
+                let mut nested_bound = bound_names.clone();
+                nested_bound.insert(binder_name(binder).to_owned(), binder_values);
+                possibly_assigned = walk_init_write_ownership(
+                    statements,
+                    possibly_assigned,
+                    true,
+                    &nested_bound,
+                    model,
+                )?;
+            }
+            Statement::If {
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                let then_possible = walk_init_write_ownership(
+                    then_statements,
+                    possibly_assigned.clone(),
+                    in_forall,
+                    bound_names,
+                    model,
+                )?;
+                let else_possible = walk_init_write_ownership(
+                    else_statements,
+                    possibly_assigned,
+                    in_forall,
+                    bound_names,
+                    model,
+                )?;
+                possibly_assigned = then_possible.union(&else_possible).cloned().collect();
+            }
+        }
+    }
+    Ok(possibly_assigned)
+}
+
 #[allow(clippy::too_many_lines)]
 fn walk_init(
     statements: &[Statement],
@@ -667,16 +750,26 @@ fn walk_init(
 ) -> Result<(BTreeMap<String, Coverage>, BTreeSet<InitWriteKey>), RuntimeError> {
     for statement in statements {
         match statement {
-            Statement::Assign { target, value, .. } => {
+            Statement::Assign {
+                target,
+                value,
+                span,
+                ..
+            } => {
                 let logical = logical_var(target)
                     .ok_or_else(|| runtime_error("invalid init assignment target"))?;
                 let contribution = assignment_coverage(target, bound_names, model);
                 let keys = init_write_keys(target, contribution.as_ref());
-                if keys.iter().any(|key| possibly_assigned.contains(key)) {
+                if keys.iter().any(|key| {
+                    possibly_assigned
+                        .iter()
+                        .any(|previous| init_write_keys_overlap(previous, key))
+                }) {
                     let scope = if in_forall { "init forall" } else { "init" };
-                    return Err(runtime_error(format!(
-                        "state variable '{logical}' assigned more than once in {scope}"
-                    )));
+                    return Err(runtime_error_at(
+                        format!("state variable '{logical}' assigned more than once in {scope}"),
+                        *span,
+                    ));
                 }
                 if let LValue::Index(_, key_expr) = target {
                     check_init_expr(key_expr, &definitely_assigned, model)?;
@@ -939,18 +1032,9 @@ fn logical_var(target: &LValue) -> Option<&str> {
 /// Falls back to `InitWriteKey::Root` (whole-variable) whenever `coverage`
 /// is not `Coverage::Keys` for an `Index` target — including `Full`,
 /// `Fields`, and unresolved (`None`, e.g. a dynamic key or a nested lvalue).
-/// That fallback never *accepts* something the coarser, pre-#821
-/// `Root`-only classification would have rejected: every write this
-/// function buckets under `Root` was already bucketed there before. It is
-/// not, however, "as strict as touching the entire variable" in the
-/// collision sense: `Root(name)` never collides with
-/// `ConcreteIndex(name, _)`, so a `None`-coverage target is simply not
-/// collision-checked against any concrete key at all. A `forall`-bound
-/// index used through a non-`Var` key expression (e.g. `m[i - i]`) is one
-/// such target; two iterations of it aliasing each other, or it aliasing a
-/// separate `m[K] = ...`, can still go undetected here when the values
-/// agree. That gap is pre-existing (identical on `origin/main`) and is not
-/// fixed by this change.
+/// `init_write_keys_overlap` treats that root as touching every concrete key
+/// on the same logical variable, so unresolved indexed writes fail closed
+/// against both concrete writes and other unresolved writes (issue #826).
 fn init_write_keys(target: &LValue, coverage: Option<&Coverage>) -> BTreeSet<InitWriteKey> {
     if let (LValue::Index(name, _), Some(Coverage::Keys(keys))) = (target, coverage) {
         return keys
@@ -964,6 +1048,20 @@ fn init_write_keys(target: &LValue, coverage: Option<&Coverage>) -> BTreeSet<Ini
             .expect("kernel lvalue has a logical root")
             .to_owned(),
     )])
+}
+
+fn init_write_keys_overlap(left: &InitWriteKey, right: &InitWriteKey) -> bool {
+    match (left, right) {
+        (
+            InitWriteKey::Root(left),
+            InitWriteKey::Root(right) | InitWriteKey::ConcreteIndex(right, _),
+        )
+        | (InitWriteKey::ConcreteIndex(left, _), InitWriteKey::Root(right)) => left == right,
+        (
+            InitWriteKey::ConcreteIndex(left_root, left_key),
+            InitWriteKey::ConcreteIndex(right_root, right_key),
+        ) => left_root == right_root && left_key == right_key,
+    }
 }
 
 fn binder_name(binder: &Binder) -> &str {

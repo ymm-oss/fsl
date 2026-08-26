@@ -85,24 +85,23 @@ pub fn diagnostics_with_model(
 }
 
 fn core_diagnostic(source: &str, error: &fsl_core::CoreError) -> SourceDiagnostic {
-    let message = error.to_string();
+    let diagnostic = crate::spec_load::SemanticDiagnostic::from_core_error(error);
     SourceDiagnostic {
-        kind: crate::verification_output::diagnostic_kind(&message, error.name_resolution),
+        kind: crate::verification_output::diagnostic_kind(
+            &diagnostic.message,
+            diagnostic.name_resolution,
+        ),
         code: "FSL-SEMANTIC".to_owned(),
-        message,
+        message: diagnostic.message,
         span: error
             .origin
             .as_deref()
             .and_then(|origin| origin.primary.as_ref())
             .and_then(|site| site.span)
             .unwrap_or_else(|| point_span(source, error.line, error.column)),
-        // `CoreError` carries `line: 0` as its "unknown" sentinel.
-        located: error.line != 0
-            || error
-                .origin
-                .as_deref()
-                .and_then(|origin| origin.primary.as_ref())
-                .is_some_and(|site| site.span.is_some()),
+        // `line`/`column` also carry legacy placeholders such as `(1, 1)`.
+        // Only an authored origin proves that the public location is real.
+        located: diagnostic.loc.is_some(),
     }
 }
 

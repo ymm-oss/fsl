@@ -164,6 +164,20 @@ pub fn render_semantic_error(
     Value::Object(output)
 }
 
+/// Render a runtime diagnostic without discarding an authored statement span.
+#[must_use]
+pub fn render_runtime_error(
+    output: Map<String, Value>,
+    error: &fsl_runtime::RuntimeError,
+) -> Value {
+    render_semantic_error(
+        output,
+        &error.message,
+        error.span.map(fsl_syntax::Span::python_loc),
+        false,
+    )
+}
+
 /// A governance diagnostic with its source location preserved across delivery
 /// surfaces.
 #[derive(Clone, Debug, Eq, PartialEq)]

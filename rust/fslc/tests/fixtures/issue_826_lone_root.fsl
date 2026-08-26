@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec LoneRootWrite {
+  type Idx = 0..2
+  state { m: Map<Idx, Bool> }
+  init { forall i: Idx { m[i - i] = true } }
+  action noop() { }
+}
