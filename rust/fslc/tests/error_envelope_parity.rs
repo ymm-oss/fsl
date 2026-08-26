@@ -678,6 +678,165 @@ enum InputShape {
     RequirementsDocument,
 }
 
+/// One semantic input-shape catalog for this matrix. The native frontend
+/// registry is the authority for registered dialect keywords; this catalog
+/// assigns every such keyword to exactly one envelope input shape and records
+/// the three non-frontend shapes selected by production dispatch or command
+/// arguments. `tests/dialect_registry.py` is deliberately not imported here:
+/// it owns corpus/compatibility classification, whereas this catalog owns CLI
+/// error-envelope input shapes. Its exact comparison with
+/// `fsl_syntax::DIALECT_KEYWORDS` makes a new native dialect fail closed until
+/// its envelope shape is reviewed.
+#[derive(Clone, Copy)]
+struct InputShapeDefinition {
+    shape: InputShape,
+    native_frontends: &'static [&'static str],
+}
+
+const INPUT_SHAPE_CATALOG: &[InputShapeDefinition] = &[
+    InputShapeDefinition {
+        shape: InputShape::Source,
+        native_frontends: &[
+            "spec",
+            "refinement",
+            "compose",
+            "business",
+            "governance",
+            "requirements",
+            "domain",
+            "dbsystem",
+            "agent",
+        ],
+    },
+    InputShapeDefinition {
+        shape: InputShape::Component,
+        native_frontends: &["ai_component"],
+    },
+    // `is_ai_project` routes this legacy multi-declaration form before the
+    // registered `ai_component` frontend.
+    InputShapeDefinition {
+        shape: InputShape::Project,
+        native_frontends: &[],
+    },
+    // `is_causal_source` bypasses `fsl_syntax::DIALECT_KEYWORDS`.
+    InputShapeDefinition {
+        shape: InputShape::Causal,
+        native_frontends: &[],
+    },
+    // A compose dependency is parsed during semantic resolution, not as the
+    // parent document's top-level frontend.
+    InputShapeDefinition {
+        shape: InputShape::Compose,
+        native_frontends: &[],
+    },
+    // `approval create --kind requirements_document` selects this frontend.
+    InputShapeDefinition {
+        shape: InputShape::RequirementsDocument,
+        native_frontends: &[],
+    },
+];
+
+/// The independent owner of each command/failure-class input population.
+///
+/// Coverage entries classify concrete fixtures below; they never decide which
+/// shapes are required. A command without a more-specific row receives Source
+/// through the explicit `AllSpecPath` fallback. New CLI leaves consequently
+/// enter the matrix through the existing CLI-contract totality test, while new
+/// `ai` leaves receive the component/project population automatically.
+#[derive(Clone, Copy)]
+enum ShapeSelector {
+    AllSpecPath,
+    AiSpecPath,
+    Command(&'static str),
+}
+
+#[derive(Clone, Copy)]
+struct InputShapePopulation {
+    selector: ShapeSelector,
+    class: FailureClass,
+    shapes: &'static [InputShape],
+}
+
+const SOURCE_INPUT_SHAPES: &[InputShape] = &[InputShape::Source];
+const AI_FSL_INPUT_SHAPES: &[InputShape] = &[InputShape::Component, InputShape::Project];
+const AI_LITERATE_INPUT_SHAPES: &[InputShape] = &[
+    InputShape::Source,
+    InputShape::Component,
+    InputShape::Project,
+];
+const CHECK_PARSE_INPUT_SHAPES: &[InputShape] = &[
+    InputShape::Source,
+    InputShape::Project,
+    InputShape::Causal,
+    InputShape::Compose,
+];
+const MUTATE_PARSE_INPUT_SHAPES: &[InputShape] = &[InputShape::Source, InputShape::Causal];
+const APPROVAL_CREATE_PARSE_INPUT_SHAPES: &[InputShape] =
+    &[InputShape::Source, InputShape::RequirementsDocument];
+
+const INPUT_SHAPE_POPULATIONS: &[InputShapePopulation] = &[
+    InputShapePopulation {
+        selector: ShapeSelector::AllSpecPath,
+        class: FailureClass::Parse,
+        shapes: SOURCE_INPUT_SHAPES,
+    },
+    InputShapePopulation {
+        selector: ShapeSelector::AllSpecPath,
+        class: FailureClass::Guard,
+        shapes: SOURCE_INPUT_SHAPES,
+    },
+    InputShapePopulation {
+        selector: ShapeSelector::AllSpecPath,
+        class: FailureClass::Name,
+        shapes: SOURCE_INPUT_SHAPES,
+    },
+    InputShapePopulation {
+        selector: ShapeSelector::AllSpecPath,
+        class: FailureClass::Literate,
+        shapes: SOURCE_INPUT_SHAPES,
+    },
+    InputShapePopulation {
+        selector: ShapeSelector::AiSpecPath,
+        class: FailureClass::Parse,
+        shapes: AI_FSL_INPUT_SHAPES,
+    },
+    InputShapePopulation {
+        selector: ShapeSelector::AiSpecPath,
+        class: FailureClass::Guard,
+        shapes: AI_FSL_INPUT_SHAPES,
+    },
+    InputShapePopulation {
+        selector: ShapeSelector::AiSpecPath,
+        class: FailureClass::Name,
+        shapes: AI_FSL_INPUT_SHAPES,
+    },
+    InputShapePopulation {
+        selector: ShapeSelector::AiSpecPath,
+        class: FailureClass::Literate,
+        shapes: AI_LITERATE_INPUT_SHAPES,
+    },
+    InputShapePopulation {
+        selector: ShapeSelector::Command("check"),
+        class: FailureClass::Parse,
+        shapes: CHECK_PARSE_INPUT_SHAPES,
+    },
+    InputShapePopulation {
+        selector: ShapeSelector::Command("verify"),
+        class: FailureClass::Parse,
+        shapes: CHECK_PARSE_INPUT_SHAPES,
+    },
+    InputShapePopulation {
+        selector: ShapeSelector::Command("mutate"),
+        class: FailureClass::Parse,
+        shapes: MUTATE_PARSE_INPUT_SHAPES,
+    },
+    InputShapePopulation {
+        selector: ShapeSelector::Command("approval create"),
+        class: FailureClass::Parse,
+        shapes: APPROVAL_CREATE_PARSE_INPUT_SHAPES,
+    },
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Diagnostic {
     None,
@@ -1943,47 +2102,34 @@ fn required_input_shapes(
     entry: &CommandRegistration,
     class: FailureClass,
 ) -> &'static [InputShape] {
-    const SOURCE: &[InputShape] = &[InputShape::Source];
-    const AI_FSL: &[InputShape] = &[InputShape::Component, InputShape::Project];
-    const AI_LITERATE: &[InputShape] = &[
-        InputShape::Source,
-        InputShape::Component,
-        InputShape::Project,
-    ];
-    const CHECK_PARSE: &[InputShape] = &[
-        InputShape::Source,
-        InputShape::Project,
-        InputShape::Causal,
-        InputShape::Compose,
-    ];
-    const MUTATE_PARSE: &[InputShape] = &[InputShape::Source, InputShape::Causal];
-    const APPROVAL_CREATE_PARSE: &[InputShape] =
-        &[InputShape::Source, InputShape::RequirementsDocument];
-
-    if matches!(entry.key, "check" | "verify") && class == FailureClass::Parse {
-        CHECK_PARSE
-    } else if entry.key == "mutate" && class == FailureClass::Parse {
-        MUTATE_PARSE
-    } else if entry.key == "approval create" && class == FailureClass::Parse {
-        APPROVAL_CREATE_PARSE
-    } else if matches!(entry.scope, ParityScope::SpecPath { .. }) && entry.key.starts_with("ai ") {
-        match class {
-            FailureClass::Parse | FailureClass::Guard | FailureClass::Name => AI_FSL,
-            // Markdown has a generic source fixture plus component/project
-            // bodies: all three are required because AI subcommands can
-            // select a different frontend path after literate extraction.
-            FailureClass::Literate => AI_LITERATE,
+    let selector_matches = |selector| match selector {
+        ShapeSelector::AllSpecPath => matches!(entry.scope, ParityScope::SpecPath { .. }),
+        ShapeSelector::AiSpecPath => {
+            matches!(entry.scope, ParityScope::SpecPath { .. }) && entry.key.starts_with("ai ")
         }
-    } else {
-        SOURCE
-    }
+        ShapeSelector::Command(command) => entry.key == command,
+    };
+
+    INPUT_SHAPE_POPULATIONS
+        .iter()
+        .filter(|population| population.class == class && selector_matches(population.selector))
+        .max_by_key(|population| match population.selector {
+            ShapeSelector::AllSpecPath => 0,
+            ShapeSelector::AiSpecPath => 1,
+            ShapeSelector::Command(_) => 2,
+        })
+        .map_or(SOURCE_INPUT_SHAPES, |population| population.shapes)
 }
 
 fn literate_fixture(command: &str, shape: InputShape) -> &'static str {
     match (command.starts_with("ai "), shape) {
         (true, InputShape::Component) => LITERATE_AI_COMPONENT_FIXTURE,
         (true, InputShape::Project) => LITERATE_AI_PROJECT_FIXTURE,
-        _ => LITERATE_FIXTURE,
+        (true | false, InputShape::Source) => LITERATE_FIXTURE,
+        (true, shape) => panic!("ai literate input shape {shape:?} requires an explicit fixture"),
+        (false, shape) => {
+            panic!("non-AI literate input shape {shape:?} requires an explicit fixture")
+        }
     }
 }
 
@@ -2488,6 +2634,117 @@ fn parity_registry_exclusions_are_explicit_and_runnable_entries_have_a_spec_slot
             );
         }
     }
+}
+
+#[test]
+fn input_shape_catalog_is_total_over_native_dialect_registration() {
+    let catalog_shapes = INPUT_SHAPE_CATALOG
+        .iter()
+        .map(|definition| definition.shape)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        catalog_shapes.len(),
+        INPUT_SHAPE_CATALOG.len(),
+        "INPUT_SHAPE_CATALOG contains duplicate shape definitions"
+    );
+
+    let catalog_frontends = INPUT_SHAPE_CATALOG
+        .iter()
+        .flat_map(|definition| definition.native_frontends)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let native_frontends = fsl_syntax::DIALECT_KEYWORDS
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        catalog_frontends, native_frontends,
+        "INPUT_SHAPE_CATALOG must classify every registered native dialect exactly once; \
+         tests/dialect_registry.py is a separate corpus/compatibility projection, not this owner"
+    );
+}
+
+#[test]
+fn input_shape_population_is_independent_and_complete_for_dispatch() {
+    for entry in PARITY_REGISTRY {
+        let spec_path = matches!(entry.scope, ParityScope::SpecPath { .. });
+        for class in [
+            FailureClass::Parse,
+            FailureClass::Guard,
+            FailureClass::Name,
+            FailureClass::Literate,
+        ] {
+            let shapes = required_input_shapes(entry, class);
+            assert!(
+                !shapes.is_empty(),
+                "{} has no input-shape population for {class:?}",
+                entry.key
+            );
+            assert!(
+                shapes.iter().all(|shape| INPUT_SHAPE_CATALOG
+                    .iter()
+                    .any(|definition| definition.shape == *shape)),
+                "{} declares an input shape absent from INPUT_SHAPE_CATALOG",
+                entry.key
+            );
+            if !spec_path {
+                assert_eq!(
+                    shapes, SOURCE_INPUT_SHAPES,
+                    "excluded command {} must not inherit a semantic FSL input shape",
+                    entry.key
+                );
+            }
+        }
+    }
+
+    // These are native command-family dispatch facts, derived from the CLI
+    // registration rather than coverage fixtures. They are deliberately
+    // independent from INPUT_SHAPE_POPULATIONS so the issue #801 mutation
+    // (remove a cell/pin and narrow AI_FSL_INPUT_SHAPES) fails here.
+    for entry in PARITY_REGISTRY.iter().filter(|entry| {
+        matches!(entry.scope, ParityScope::SpecPath { .. }) && entry.key.starts_with("ai ")
+    }) {
+        for class in [FailureClass::Parse, FailureClass::Guard, FailureClass::Name] {
+            assert_eq!(
+                required_input_shapes(entry, class),
+                &[InputShape::Component, InputShape::Project],
+                "{} must cover both ai_component and fsl-ai project dispatch for {class:?}",
+                entry.key
+            );
+        }
+        assert_eq!(
+            required_input_shapes(entry, FailureClass::Literate),
+            &[
+                InputShape::Source,
+                InputShape::Component,
+                InputShape::Project,
+            ],
+            "{} must retain generic, component, and project literate shapes",
+            entry.key
+        );
+    }
+    for command in ["check", "verify"] {
+        assert_eq!(
+            required_input_shapes(registration(command), FailureClass::Parse),
+            &[
+                InputShape::Source,
+                InputShape::Project,
+                InputShape::Causal,
+                InputShape::Compose,
+            ],
+            "{command} must retain Source, Project, Causal, and Compose Parse shapes"
+        );
+    }
+    assert_eq!(
+        required_input_shapes(registration("mutate"), FailureClass::Parse),
+        &[InputShape::Source, InputShape::Causal],
+        "mutate must retain its Causal Parse path"
+    );
+    assert_eq!(
+        required_input_shapes(registration("approval create"), FailureClass::Parse),
+        &[InputShape::Source, InputShape::RequirementsDocument],
+        "approval create must retain requirements-document Parse selection"
+    );
 }
 
 #[test]
