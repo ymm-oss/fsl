@@ -1,1 +1,1 @@
-Required (#761): native Rust tests now bind every corpus `verify` result class to its exact public process exit code and pin the business, requirements, and governance induction CLI contracts before the Python parity harnesses are retired.
+Required (#761): native Rust tests now bind every corpus `verify` result class to its exact public process exit code; pin the business, requirements, and governance induction CLI contracts; and own all sixteen stable induction envelope/exit cases with live exclusions and negative controls before the Python parity harnesses are retired.

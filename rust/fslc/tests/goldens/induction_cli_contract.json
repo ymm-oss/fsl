@@ -1,0 +1,2347 @@
+[
+  {
+    "path": "examples/gallery/valid/tiny_turnstile.fsl",
+    "depth": 4,
+    "k": 1,
+    "exit": 0,
+    "output": {
+      "action_coverage": {
+        "coin": true,
+        "push": true
+      },
+      "base_depth": 4,
+      "checked_to_depth": 4,
+      "completeness": "unbounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "coin"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "push"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 12,
+            "elapsed_s": "<elapsed>",
+            "kind": "ensures",
+            "name": "push"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "LockedOrOpen"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "LockedOrOpen"
+          },
+          {
+            "checks": 3,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "OneEntry"
+          },
+          {
+            "checks": 4,
+            "elapsed_s": "<elapsed>",
+            "kind": "reachable",
+            "name": "OneEntry"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_entries"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_locked"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "coin"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "push"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 54,
+          "conflicts": 15,
+          "decisions": 11,
+          "memory_mb": 17.27,
+          "propagations": 40
+        }
+      },
+      "engine": "induction",
+      "invariants_checked": [
+        "_bounds_entries",
+        "LockedOrOpen"
+      ],
+      "k_used": {
+        "LockedOrOpen": 1,
+        "_bounds_entries": 1
+      },
+      "reachables": {
+        "OneEntry": {
+          "witness": "<replayed-base-witness>",
+          "witnessed_at_step": 2
+        }
+      },
+      "result": "proved",
+      "spec": "GalleryTinyTurnstile",
+      "transitions_checked": [],
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "warnings": []
+    }
+  },
+  {
+    "path": "examples/gallery/valid/tiny_traffic_light.fsl",
+    "depth": 5,
+    "k": 1,
+    "exit": 0,
+    "output": {
+      "action_coverage": {
+        "tick": true
+      },
+      "base_depth": 5,
+      "checked_to_depth": 5,
+      "completeness": "unbounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "tick"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "AlwaysAColor"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "AlwaysAColor"
+          },
+          {
+            "checks": 3,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "SeenYellow"
+          },
+          {
+            "checks": 4,
+            "elapsed_s": "<elapsed>",
+            "kind": "reachable",
+            "name": "SeenYellow"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_light"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 36,
+          "conflicts": 11,
+          "decisions": 4,
+          "memory_mb": 17.27,
+          "propagations": 42
+        }
+      },
+      "engine": "induction",
+      "invariants_checked": [
+        "_bounds_light",
+        "AlwaysAColor"
+      ],
+      "k_used": {
+        "AlwaysAColor": 1,
+        "_bounds_light": 1
+      },
+      "reachables": {
+        "SeenYellow": {
+          "witness": "<replayed-base-witness>",
+          "witnessed_at_step": 2
+        }
+      },
+      "result": "proved",
+      "spec": "GalleryTinyTrafficLight",
+      "transitions_checked": [],
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "warnings": []
+    }
+  },
+  {
+    "path": "examples/gallery/valid/tiny_bounded_counter.fsl",
+    "depth": 4,
+    "k": 1,
+    "exit": 0,
+    "output": {
+      "action_coverage": {
+        "dec": true,
+        "inc": true
+      },
+      "base_depth": 4,
+      "checked_to_depth": 4,
+      "completeness": "unbounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "dec"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "inc"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "NeverAboveCap"
+          },
+          {
+            "checks": 4,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "HitCap"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "NeverAboveCap"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "reachable",
+            "name": "HitCap"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_n"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "dec"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "inc"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 38,
+          "conflicts": 22,
+          "decisions": 21,
+          "memory_mb": 17.27,
+          "propagations": 286
+        }
+      },
+      "engine": "induction",
+      "invariants_checked": [
+        "_bounds_n",
+        "NeverAboveCap"
+      ],
+      "k_used": {
+        "NeverAboveCap": 1,
+        "_bounds_n": 1
+      },
+      "reachables": {
+        "HitCap": {
+          "witness": "<replayed-base-witness>",
+          "witnessed_at_step": 3
+        }
+      },
+      "result": "proved",
+      "spec": "GalleryTinyBoundedCounter",
+      "transitions_checked": [],
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "warnings": []
+    }
+  },
+  {
+    "path": "examples/gallery/valid/small_elevator.fsl",
+    "depth": 7,
+    "k": 1,
+    "exit": 0,
+    "output": {
+      "action_coverage": {
+        "call": true,
+        "move_down": true,
+        "move_up": true,
+        "open": true
+      },
+      "base_depth": 7,
+      "checked_to_depth": 7,
+      "completeness": "unbounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "call"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "move_down"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "move_up"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "open"
+          },
+          {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 9,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "OpenAtTarget"
+          },
+          {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "OpenAtTarget"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "OpenAtTop"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "reachable",
+            "name": "OpenAtTop"
+          },
+          {
+            "checks": 9,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_door"
+          },
+          {
+            "checks": 9,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_floor"
+          },
+          {
+            "checks": 9,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_target"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "call"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "move_down"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "move_up"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "open"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 82,
+          "conflicts": 322,
+          "decisions": 682,
+          "memory_mb": 17.84,
+          "propagations": 13461
+        }
+      },
+      "engine": "induction",
+      "invariants_checked": [
+        "_bounds_floor",
+        "_bounds_target",
+        "_bounds_door",
+        "OpenAtTarget"
+      ],
+      "k_used": {
+        "OpenAtTarget": 1,
+        "_bounds_door": 1,
+        "_bounds_floor": 1,
+        "_bounds_target": 1
+      },
+      "reachables": {
+        "OpenAtTop": {
+          "witness": "<replayed-base-witness>",
+          "witnessed_at_step": 4
+        }
+      },
+      "result": "proved",
+      "spec": "GallerySmallElevator",
+      "transitions_checked": [],
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "warnings": []
+    }
+  },
+  {
+    "path": "examples/gallery/adversarial/option_struct_set_seq_combo.fsl",
+    "depth": 5,
+    "k": 1,
+    "exit": 0,
+    "output": {
+      "action_coverage": {
+        "complete": true,
+        "enqueue": true
+      },
+      "base_depth": 5,
+      "checked_to_depth": 5,
+      "completeness": "unbounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "complete"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "enqueue"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "NoDuplicateQueue"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "QueueRowsQueued"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "QueuedInActive"
+          },
+          {
+            "checks": 12,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "NoDuplicateQueue"
+          },
+          {
+            "checks": 12,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "QueueRowsQueued"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "QueuedInActive"
+          },
+          {
+            "checks": 20,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "complete"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_active"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_jobs"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_q"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "complete"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "enqueue"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 106,
+          "conflicts": 1145,
+          "decisions": 3032,
+          "memory_mb": 19.13,
+          "propagations": 136921
+        }
+      },
+      "engine": "induction",
+      "invariants_checked": [
+        "_bounds_jobs",
+        "_bounds_active",
+        "_bounds_q",
+        "QueuedInActive",
+        "QueueRowsQueued",
+        "NoDuplicateQueue"
+      ],
+      "k_used": {
+        "NoDuplicateQueue": 1,
+        "QueueRowsQueued": 1,
+        "QueuedInActive": 1,
+        "_bounds_active": 1,
+        "_bounds_jobs": 1,
+        "_bounds_q": 1
+      },
+      "reachables": {},
+      "result": "proved",
+      "spec": "GalleryAdversarialOptionStructSetSeqCombo",
+      "transitions_checked": [],
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "warnings": []
+    }
+  },
+  {
+    "path": "tests/fixtures/rust_port/induction_unknown_cti.fsl",
+    "depth": 4,
+    "k": 1,
+    "exit": 1,
+    "output": {
+      "checked_to_depth": 4,
+      "completeness": "bounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "step"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "Sync"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "XNonNegative"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "Sync"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "XNonNegative"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_x"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_y"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "step"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 42,
+          "conflicts": 11,
+          "decisions": null,
+          "memory_mb": 17.27,
+          "propagations": 24
+        }
+      },
+      "cti": {
+        "states": "<nondeterministic-cti>",
+        "violated_at": 1
+      },
+      "hint": "this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run",
+      "invariant": "Sync",
+      "k": 1,
+      "result": "unknown_cti",
+      "spec": "InductionUnknownCti",
+      "trace_type": "induction_cti",
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      }
+    }
+  },
+  {
+    "path": "tests/fixtures/rust_port/induction_unknown_cti.fsl",
+    "depth": 4,
+    "k": 3,
+    "exit": 1,
+    "output": {
+      "checked_to_depth": 4,
+      "completeness": "bounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "step"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "Sync"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "XNonNegative"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "Sync"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "XNonNegative"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_x"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_y"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "step"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 44,
+          "conflicts": 11,
+          "decisions": null,
+          "memory_mb": 17.27,
+          "propagations": 24
+        }
+      },
+      "cti": {
+        "states": "<nondeterministic-cti>",
+        "violated_at": 3
+      },
+      "hint": "this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run",
+      "invariant": "Sync",
+      "k": 3,
+      "result": "unknown_cti",
+      "spec": "InductionUnknownCti",
+      "trace_type": "induction_cti",
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      }
+    }
+  },
+  {
+    "path": "tests/fixtures/rust_port/ranked_leadsto.fsl",
+    "depth": 5,
+    "k": 1,
+    "exit": 0,
+    "output": {
+      "action_coverage": {
+        "inc": true
+      },
+      "base_depth": 5,
+      "checked_to_depth": 5,
+      "completeness": "unbounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "inc"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "XRange"
+          },
+          {
+            "checks": 76,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo",
+            "name": "ReachFive"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo_rank",
+            "name": "ReachFive"
+          },
+          {
+            "checks": 12,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "ReachFive"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "XRange"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_x"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "inc"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 120,
+          "conflicts": 83,
+          "decisions": 4,
+          "memory_mb": 17.27,
+          "propagations": 124
+        }
+      },
+      "engine": "induction",
+      "invariants_checked": [
+        "XRange"
+      ],
+      "k_used": {
+        "XRange": 1
+      },
+      "leads_to": {
+        "ReachFive": {
+          "checked_to_depth": 5,
+          "completeness": "unbounded",
+          "decreases": "(5 - x)",
+          "proof": "ranking",
+          "proved": true
+        }
+      },
+      "note": "invariants and ranked leadsTo proved for all depths",
+      "reachables": {},
+      "result": "proved",
+      "spec": "RankedLeadsto",
+      "transitions_checked": [],
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "warnings": []
+    }
+  },
+  {
+    "path": "tests/fixtures/rust_port/ranked_leadsto_non_decreasing.fsl",
+    "depth": 5,
+    "k": 1,
+    "exit": 1,
+    "output": {
+      "bindings": {},
+      "checked_to_depth": 5,
+      "completeness": "bounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "inc"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "XRange"
+          },
+          {
+            "checks": 76,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo",
+            "name": "ReachFive"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo_rank",
+            "name": "ReachFive"
+          },
+          {
+            "checks": 12,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "ReachFive"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "XRange"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_x"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "inc"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 120,
+          "conflicts": 83,
+          "decisions": 4,
+          "memory_mb": 17.27,
+          "propagations": 124
+        }
+      },
+      "cti": {
+        "states": "<nondeterministic-cti>",
+        "violated_at": 1
+      },
+      "hint": "from every state where P holds and Q is false, each enabled action must either make Q true, or keep P true and strictly decrease the measure",
+      "invariant": "ReachFive",
+      "last_action": {
+        "loc": {
+          "column": 3,
+          "line": 7
+        },
+        "name": "inc",
+        "params": {}
+      },
+      "loc": {
+        "column": 3,
+        "line": 13
+      },
+      "measure": "x",
+      "measure_after": 1,
+      "measure_before": 0,
+      "message": "enabled action 'inc' can leave leadsTo 'ReachFive' pending without strictly decreasing the measure",
+      "rank_failure": "non_decreasing_action",
+      "result": "unknown_cti",
+      "spec": "RankedLeadsto",
+      "trace_type": "induction_cti",
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "violation_kind": "leadsTo_rank"
+    }
+  },
+  {
+    "path": "tests/fixtures/rust_port/ranked_leadsto_unbounded_below.fsl",
+    "depth": 5,
+    "k": 1,
+    "exit": 1,
+    "output": {
+      "bindings": {},
+      "checked_to_depth": 5,
+      "completeness": "bounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "inc"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "XRange"
+          },
+          {
+            "checks": 76,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo",
+            "name": "ReachFive"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo_rank",
+            "name": "ReachFive"
+          },
+          {
+            "checks": 12,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "ReachFive"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "XRange"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_x"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "inc"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 119,
+          "conflicts": 83,
+          "decisions": 4,
+          "memory_mb": 17.27,
+          "propagations": 124
+        }
+      },
+      "cti": {
+        "states": "<nondeterministic-cti>",
+        "violated_at": 0
+      },
+      "hint": "the decreases measure must be non-negative whenever the leadsTo trigger is pending (P holds and Q is false); add an invariant or use a bounded domain that proves the measure is >= 0",
+      "invariant": "ReachFive",
+      "loc": {
+        "column": 3,
+        "line": 13
+      },
+      "measure": "-x",
+      "measure_value": -1,
+      "message": "leadsTo 'ReachFive' decreases measure can be negative while P holds and Q is false",
+      "rank_failure": "unbounded_below",
+      "result": "unknown_cti",
+      "spec": "RankedLeadsto",
+      "trace_type": "induction_cti",
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "violation_kind": "leadsTo_rank"
+    }
+  },
+  {
+    "path": "tests/fixtures/rust_port/ranked_leadsto_helpful.fsl",
+    "depth": 1,
+    "k": 1,
+    "exit": 0,
+    "output": {
+      "action_coverage": {
+        "idle": true,
+        "step": true
+      },
+      "base_depth": 1,
+      "checked_to_depth": 1,
+      "completeness": "unbounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "idle"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "step"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 3,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "NonNeg"
+          },
+          {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo",
+            "name": "Responds"
+          },
+          {
+            "checks": 12,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo_rank",
+            "name": "Responds"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "NonNeg"
+          },
+          {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "Responds"
+          },
+          {
+            "checks": 3,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_level"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "step"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 43,
+          "conflicts": 20,
+          "decisions": 20,
+          "memory_mb": 17.17,
+          "propagations": 303
+        }
+      },
+      "engine": "induction",
+      "invariants_checked": [
+        "_bounds_level",
+        "NonNeg"
+      ],
+      "k_used": {
+        "NonNeg": 1,
+        "_bounds_level": 1
+      },
+      "leads_to": {
+        "Responds": {
+          "checked_to_depth": 1,
+          "completeness": "unbounded",
+          "decreases": "level[c]",
+          "helpful": [
+            "step(c)"
+          ],
+          "proof": "ranking",
+          "proved": true
+        }
+      },
+      "note": "invariants and ranked leadsTo proved for all depths",
+      "reachables": {},
+      "result": "proved",
+      "spec": "HelpfulPerEntity",
+      "transitions_checked": [],
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "warnings": []
+    }
+  },
+  {
+    "path": "tests/fixtures/rust_port/ranked_leadsto_helpful_nonfair.fsl",
+    "depth": 1,
+    "k": 1,
+    "exit": 1,
+    "output": {
+      "bindings": {
+        "c": 0
+      },
+      "checked_to_depth": 1,
+      "completeness": "bounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "idle"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "step"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "NonNeg"
+          },
+          {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo",
+            "name": "Responds"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo_rank",
+            "name": "Responds"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "NonNeg"
+          },
+          {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "Responds"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_level"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "step"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 31,
+          "conflicts": 8,
+          "decisions": 24,
+          "memory_mb": 17.17,
+          "propagations": 123
+        }
+      },
+      "cti": {
+        "states": "<nondeterministic-cti>",
+        "violated_at": 0
+      },
+      "helpful": [
+        "step(c)"
+      ],
+      "helpful_actions": [
+        {
+          "loc": null,
+          "name": "step",
+          "params": {
+            "c": 0
+          }
+        }
+      ],
+      "hint": "helpful only identifies the per-binding progress action. Add `fair` to the lower-layer action instance that must eventually run; helpful does not create a fairness assumption.",
+      "invariant": "Responds",
+      "loc": {
+        "column": 3,
+        "line": 20
+      },
+      "measure": "level[c]",
+      "measure_value": 1,
+      "message": "leadsTo 'Responds' uses helpful action metadata, but a matching progress action is not declared fair",
+      "rank_failure": "progress_action_not_fair",
+      "result": "unknown_cti",
+      "spec": "HelpfulNonfair",
+      "trace_type": "induction_cti",
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "violation_kind": "leadsTo_rank"
+    }
+  },
+  {
+    "path": "tests/fixtures/rust_port/ranked_leadsto_helpful_blocked.fsl",
+    "depth": 1,
+    "k": 1,
+    "exit": 1,
+    "output": {
+      "bindings": {
+        "c": 0
+      },
+      "checked_to_depth": 1,
+      "completeness": "bounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 4,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "step"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "NonNeg"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo",
+            "name": "Responds"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo_rank",
+            "name": "Responds"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "NonNeg"
+          },
+          {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "Responds"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_gate"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_level"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 28,
+          "conflicts": 5,
+          "decisions": 1,
+          "memory_mb": 17.17,
+          "propagations": 19
+        }
+      },
+      "cti": {
+        "states": "<nondeterministic-cti>",
+        "violated_at": 0
+      },
+      "helpful": [
+        "step(c)"
+      ],
+      "helpful_actions": [
+        {
+          "loc": null,
+          "name": "step",
+          "params": {
+            "c": 0
+          }
+        }
+      ],
+      "hint": "helpful marks which action instance is responsible for progress. The matching action must be declared `fair action`, must be enabled whenever the obligation is pending, and must strictly decrease the rank when it fires; other actions must keep the pending obligation true (unless they make Q true) and must not increase the measure -- an unbounded increase between helpful firings can outpace the guaranteed decrease and prevent Q from ever being reached",
+      "invariant": "Responds",
+      "loc": {
+        "column": 3,
+        "line": 25
+      },
+      "measure": "level[c]",
+      "measure_value": 1,
+      "message": "leadsTo 'Responds' can be pending while no matching helpful action instance is enabled",
+      "rank_failure": "helpful_action_not_enabled",
+      "result": "unknown_cti",
+      "spec": "BlockedHelpful",
+      "trace_type": "induction_cti",
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "violation_kind": "leadsTo_rank"
+    }
+  },
+  {
+    "path": "tests/fixtures/rust_port/ranked_leadsto_helpful_flickering.fsl",
+    "depth": 8,
+    "k": 1,
+    "exit": 1,
+    "output": {
+      "bindings": {},
+      "checked_to_depth": 8,
+      "completeness": "bounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "helpEven"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "helpOdd"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "rotate"
+          },
+          {
+            "checks": 3,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 249,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo",
+            "name": "Finishes"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo_rank",
+            "name": "Finishes"
+          },
+          {
+            "checks": 18,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "Finishes"
+          },
+          {
+            "checks": 32,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "helpEven"
+          },
+          {
+            "checks": 32,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "helpOdd"
+          },
+          {
+            "checks": 32,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "rotate"
+          },
+          {
+            "checks": 10,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_credit"
+          },
+          {
+            "checks": 9,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_done"
+          },
+          {
+            "checks": 10,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_phase"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "helpEven"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "helpOdd"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "rotate"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 408,
+          "conflicts": 1173,
+          "decisions": 22019,
+          "memory_mb": 18.13,
+          "propagations": 54060
+        }
+      },
+      "cti": {
+        "states": "<nondeterministic-cti>",
+        "violated_at": 1
+      },
+      "helpful": [
+        "helpEven()",
+        "helpOdd()"
+      ],
+      "helpful_actions": [
+        {
+          "loc": null,
+          "name": "helpEven",
+          "params": {}
+        }
+      ],
+      "hint": "with more than one `helpful` action, each instance's enabledness must not flicker: once a helpful instance becomes enabled while the obligation is pending, it must stay enabled until it fires (or Q holds) -- otherwise its weak fairness is never triggered. Guard the other actions so they cannot disable a pending helpful instance, or split into a leadsTo per helpful action so each owns a stable region",
+      "invariant": "Finishes",
+      "last_action": {
+        "loc": {
+          "column": 3,
+          "line": 23
+        },
+        "name": "rotate",
+        "params": {}
+      },
+      "loc": {
+        "column": 3,
+        "line": 28
+      },
+      "measure": "credit",
+      "message": "helpful action 'helpEven' can become disabled again while leadsTo 'Finishes' is still pending, without itself having fired",
+      "rank_failure": "helpful_action_enabledness_not_sticky",
+      "result": "unknown_cti",
+      "spec": "HelpfulFlickering",
+      "trace_type": "induction_cti",
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "violation_kind": "leadsTo_rank"
+    }
+  },
+  {
+    "path": "tests/fixtures/rust_port/ranked_leadsto_helpful_pumped.fsl",
+    "depth": 8,
+    "k": 1,
+    "exit": 1,
+    "output": {
+      "bindings": {},
+      "checked_to_depth": 8,
+      "completeness": "bounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "pump"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "work"
+          },
+          {
+            "checks": 7,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 9,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "NonNeg"
+          },
+          {
+            "checks": 50,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo",
+            "name": "Finishes"
+          },
+          {
+            "checks": 4,
+            "elapsed_s": "<elapsed>",
+            "kind": "leadsTo_rank",
+            "name": "Finishes"
+          },
+          {
+            "checks": 18,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "Finishes"
+          },
+          {
+            "checks": 9,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "NonNeg"
+          },
+          {
+            "checks": 9,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_x"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "pump"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "session"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "vacuity",
+            "name": "work"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 112,
+          "conflicts": 90,
+          "decisions": 165,
+          "memory_mb": 17.36,
+          "propagations": 1254
+        }
+      },
+      "cti": {
+        "states": "<nondeterministic-cti>",
+        "violated_at": 1
+      },
+      "helpful": [
+        "work()"
+      ],
+      "helpful_actions": [
+        {
+          "loc": null,
+          "name": "work",
+          "params": {}
+        }
+      ],
+      "hint": "helpful marks which action instance is responsible for progress. The matching action must be declared `fair action`, must be enabled whenever the obligation is pending, and must strictly decrease the rank when it fires; other actions must keep the pending obligation true (unless they make Q true) and must not increase the measure -- an unbounded increase between helpful firings can outpace the guaranteed decrease and prevent Q from ever being reached",
+      "invariant": "Finishes",
+      "last_action": {
+        "loc": {
+          "column": 3,
+          "line": 12
+        },
+        "name": "pump",
+        "params": {}
+      },
+      "loc": {
+        "column": 3,
+        "line": 19
+      },
+      "measure": "x",
+      "measure_after": 3,
+      "measure_before": 1,
+      "message": "non-helpful action 'pump' can increase the measure while leadsTo 'Finishes' is still pending, which could outpace the helpful action's guaranteed decrease",
+      "rank_failure": "non_helpful_action_increases_measure",
+      "result": "unknown_cti",
+      "spec": "HelpfulPumpedMeasure",
+      "trace_type": "induction_cti",
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "violation_kind": "leadsTo_rank"
+    }
+  },
+  {
+    "path": "specs/cart_buggy.fsl",
+    "depth": 5,
+    "k": 1,
+    "exit": 1,
+    "output": {
+      "blame": {
+        "conjuncts": [
+          {
+            "holds": false,
+            "index": 0,
+            "text": "forall i: ItemId { stock[i] >= 0 }",
+            "violating_bindings": [
+              {
+                "i": "<number>"
+              }
+            ]
+          }
+        ]
+      },
+      "checked_to_depth": 4,
+      "completeness": "bounded",
+      "cost": {
+        "elapsed_s": "<elapsed>",
+        "properties": [
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "add_to_cart"
+          },
+          {
+            "checks": 3,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "checkout"
+          },
+          {
+            "checks": 3,
+            "elapsed_s": "<elapsed>",
+            "kind": "action_coverage",
+            "name": "remove_from_cart"
+          },
+          {
+            "checks": 4,
+            "elapsed_s": "<elapsed>",
+            "kind": "deadlock",
+            "name": "deadlock"
+          },
+          {
+            "checks": 1,
+            "elapsed_s": "<elapsed>",
+            "kind": "init",
+            "name": "initial_state"
+          },
+          {
+            "checks": 6,
+            "elapsed_s": "<elapsed>",
+            "kind": "invariant",
+            "name": "NoNegativeStock"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "NoNegativeStock"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_cart"
+          },
+          {
+            "checks": 5,
+            "elapsed_s": "<elapsed>",
+            "kind": "type_bound",
+            "name": "_bounds_stock"
+          }
+        ],
+        "solver": {
+          "check_elapsed_s": "<elapsed>",
+          "checks": 33,
+          "conflicts": 187,
+          "decisions": 613,
+          "memory_mb": 17.66,
+          "propagations": 6223
+        }
+      },
+      "invariant": "NoNegativeStock",
+      "last_action": {
+        "loc": {
+          "column": 3,
+          "line": 30
+        },
+        "name": "checkout",
+        "params": {
+          "u": "<number>"
+        }
+      },
+      "loc": {
+        "column": 3,
+        "line": 37
+      },
+      "result": "violated",
+      "spec": "ShoppingCart",
+      "trace": [
+        {
+          "keys": [
+            "state",
+            "step"
+          ]
+        },
+        {
+          "keys": [
+            "action",
+            "blame",
+            "changes",
+            "state",
+            "step"
+          ],
+          "action_keys": [
+            "loc",
+            "name",
+            "params"
+          ],
+          "changes_shape": [
+            [
+              "from",
+              "to"
+            ]
+          ],
+          "blame_keys": [
+            "effects",
+            "guards"
+          ]
+        },
+        {
+          "keys": [
+            "action",
+            "blame",
+            "changes",
+            "state",
+            "step"
+          ],
+          "action_keys": [
+            "loc",
+            "name",
+            "params"
+          ],
+          "changes_shape": [
+            [
+              "from",
+              "to"
+            ]
+          ],
+          "blame_keys": [
+            "effects",
+            "guards"
+          ]
+        },
+        {
+          "keys": [
+            "action",
+            "blame",
+            "changes",
+            "state",
+            "step"
+          ],
+          "action_keys": [
+            "loc",
+            "name",
+            "params"
+          ],
+          "changes_shape": [
+            [
+              "from",
+              "to"
+            ]
+          ],
+          "blame_keys": [
+            "effects",
+            "guards"
+          ]
+        },
+        {
+          "keys": [
+            "action",
+            "blame",
+            "changes",
+            "state",
+            "step"
+          ],
+          "action_keys": [
+            "loc",
+            "name",
+            "params"
+          ],
+          "changes_shape": [
+            [
+              "from",
+              "to"
+            ]
+          ],
+          "blame_keys": [
+            "effects",
+            "guards"
+          ]
+        }
+      ],
+      "trace_type": "invariant",
+      "versions": {
+        "core": {
+          "name": "fsl-core",
+          "version": "4.4.0"
+        },
+        "solver": {
+          "backend": "native-z3",
+          "name": "z3",
+          "version": "Z3 4.16.0.0"
+        },
+        "verifier": {
+          "name": "fslc-rust",
+          "version": "4.4.0"
+        }
+      },
+      "violated_at_step": 4,
+      "violating_bindings": [
+        {
+          "i": "<number>"
+        }
+      ],
+      "violation_kind": "invariant"
+    }
+  }
+]
