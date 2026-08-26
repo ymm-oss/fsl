@@ -3,9 +3,10 @@
 
 """Compare bounded leadsTo decisions and cross-replay liveness witnesses.
 
-Deletion deferred (F4): calibrated invariant replay exists, but no native
-liveness-lasso replay matrix. Deletion requires isolated state/action/loop
-corruption controls for these witnesses.
+Deletion remains deferred (F4). Candidate native owner
+``rust/fslc/tests/liveness_witness_replay.rs`` covers the three legacy cases
+with an exact 3x3 state/action/loop corruption matrix; harness retirement still
+requires review of that evidence.
 """
 from __future__ import annotations
 

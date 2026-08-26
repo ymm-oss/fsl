@@ -144,10 +144,12 @@ JSON false mismatches.
 ## Compatibility and adjacent trace formats
 
 The pre-v1 bare array and `{ "events": [...] }` action-only shapes remain an
-explicit unversioned compatibility adapter. They retain current action/display
-name matching and do not claim snapshot evidence. Migration consists of adding
-the v1 root, recording complete init, numbering events, and recording every
-complete post-state. No heuristic conversion or fallback is performed.
+explicit unversioned compatibility adapter. The object form is closed: its root
+contains exactly the single `events` key, and that key's value is an array. They
+retain current action/display name matching and do not claim snapshot evidence.
+Migration consists of adding the v1 root, recording complete init, numbering
+events, and recording every complete post-state. No heuristic conversion or
+fallback is performed.
 
 `testgen-trace.v1` is a fixed-seed generated-test oracle with `steps[].expected`;
 verifier counterexample trace JSON carries source locations and changes. Neither
