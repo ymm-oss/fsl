@@ -1,1 +1,0 @@
-Documented (#761): recorded all 17 Python/Rust parity-harness dispositions and deletion preconditions without deleting a harness, including seven native-owner gaps, the full-envelope helper dependency, the parked Phase-3 comparison, three native-migration candidates, and five bounded manual controls.

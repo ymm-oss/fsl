@@ -92,9 +92,22 @@ It also rejects a dynamic dependency on `libz3`.
    snapshot is regenerated, never hand-edited; any other change in that diff is
    a contract change that does not belong in a release commit.
 
+   Regenerate the induction contract golden for the same reason — it records each
+   envelope's `versions` block:
+
+   ```bash
+   UPDATE_INDUCTION_CLI_CONTRACT=1 \
+     cargo test --manifest-path rust/Cargo.toml -p fslc-rust \
+     --test induction_cli_contract --locked
+   ```
+
+   Apply the same review rule: version strings only. Skipping this fails the complete
+   product gate, not merge-readiness — observed on the v4.4.1 candidate, where
+   `induction_cli_contract` compared 4.4.0 against 4.4.1.
+
    **Steps 4–6 above touch `rust/Cargo.toml`, `rust/Cargo.lock`, the domain characterization
-   baseline, `editors/vscode/package.json`, and `editors/vscode/package-lock.json`.** The first
-   three are product surfaces under `tools/aggregate_changelog.sh`'s `is_product_surface_path`,
+   baseline, the induction contract golden, `editors/vscode/package.json`, and
+   `editors/vscode/package-lock.json`.** The first four are product surfaces under `tools/aggregate_changelog.sh`'s `is_product_surface_path`,
    and are exactly what `is_release_bump_path` names — the fixed set the merge-readiness
    `check-pr` gate exempts from needing a fragment once this diff's `CHANGELOG.md` edit is a
    validated release move (H1/F3; review, #737, comments 2026-08-07 third round and 2026-08-08
