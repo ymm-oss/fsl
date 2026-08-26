@@ -82,7 +82,14 @@ impl SemanticDiagnostic {
     pub fn from_core_error(error: &fsl_core::CoreError) -> Self {
         Self {
             message: error.to_string(),
-            loc: crate::verification_output::origin_loc(error.origin.as_deref()),
+            loc: crate::verification_output::origin_loc(error.origin.as_deref()).or_else(|| {
+                (error.line != 0).then(|| {
+                    json!({
+                        "line": error.line,
+                        "column": error.column,
+                    })
+                })
+            }),
             name_resolution: error.name_resolution,
         }
     }

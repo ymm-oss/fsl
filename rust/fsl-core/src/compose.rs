@@ -995,7 +995,7 @@ fn resolve_alias_statement(
             statements,
             span,
         } => Statement::ForAll {
-            binder: resolve_alias_binder(binder, components)?,
+            binder: resolve_alias_binder(binder, components, Some(span))?,
             statements: statements
                 .into_iter()
                 .map(|statement| resolve_alias_statement(statement, components))
@@ -1014,7 +1014,7 @@ fn sync_action(
         .params
         .iter()
         .cloned()
-        .map(|param| resolve_alias_param(param, components))
+        .map(|param| resolve_alias_param(param, components, action.span))
         .collect::<Result<Vec<_>, _>>()?;
     let mut items = Vec::new();
     let mut fair_constituents = Vec::new();
@@ -1117,11 +1117,13 @@ fn sync_action(
 fn resolve_alias_param(
     param: Param,
     components: &BTreeMap<String, Component>,
+    span: fsl_syntax::Span,
 ) -> Result<Param, CoreError> {
     Ok(match param {
-        Param::Typed(name, qualified) => {
-            Param::Typed(name, resolve_alias_qualified_name(qualified, components)?)
-        }
+        Param::Typed(name, qualified) => Param::Typed(
+            name,
+            resolve_alias_qualified_name(qualified, components, Some(span))?,
+        ),
         Param::Range(name, lo, hi) => Param::Range(
             name,
             resolve_alias_expr(lo, components)?,
@@ -1133,16 +1135,33 @@ fn resolve_alias_param(
 fn resolve_alias_qualified_name(
     qualified: QualifiedName,
     components: &BTreeMap<String, Component>,
+    span: Option<fsl_syntax::Span>,
 ) -> Result<QualifiedName, CoreError> {
     if let Some(alias) = qualified.namespace {
-        if !components.contains_key(&alias) {
-            return Err(CoreError {
-                message: format!("unknown alias '{alias}'"),
-                line: 1,
-                column: 1,
-                origin: None,
-                name_resolution: false,
-            });
+        let component = components.get(&alias).ok_or_else(|| {
+            span.map_or_else(
+                || CoreError {
+                    message: format!("unknown alias '{alias}'"),
+                    line: 1,
+                    column: 1,
+                    origin: None,
+                    name_resolution: false,
+                },
+                |span| error_at(format!("unknown alias '{alias}'"), span),
+            )
+        })?;
+        if !component.names.types.contains(&qualified.name) {
+            let message = format!("unknown type '{alias}.{}'", qualified.name);
+            return Err(span.map_or_else(
+                || CoreError {
+                    message: message.clone(),
+                    line: 1,
+                    column: 1,
+                    origin: None,
+                    name_resolution: false,
+                },
+                |span| error_at(message.clone(), span),
+            ));
         }
         Ok(QualifiedName {
             namespace: None,
@@ -1156,6 +1175,7 @@ fn resolve_alias_qualified_name(
 fn resolve_alias_binder(
     binder: Binder,
     components: &BTreeMap<String, Component>,
+    span: Option<fsl_syntax::Span>,
 ) -> Result<Binder, CoreError> {
     Ok(match binder {
         Binder::Typed {
@@ -1164,7 +1184,7 @@ fn resolve_alias_binder(
             where_expr,
         } => Binder::Typed {
             name,
-            type_name: resolve_alias_qualified_name(type_name, components)?,
+            type_name: resolve_alias_qualified_name(type_name, components, span)?,
             where_expr: where_expr
                 .map(|expr| resolve_alias_expr(*expr, components).map(Box::new))
                 .transpose()?,
@@ -1285,7 +1305,7 @@ fn resolve_alias_expr(
             body,
         } => Expr::Quantified {
             quantifier,
-            binder: resolve_alias_binder(binder, components)?,
+            binder: resolve_alias_binder(binder, components, None)?,
             body: Box::new(resolve_alias_expr(*body, components)?),
         },
         Expr::Aggregate {
@@ -1294,7 +1314,7 @@ fn resolve_alias_expr(
             value,
         } => Expr::Aggregate {
             kind,
-            binder: resolve_alias_binder(binder, components)?,
+            binder: resolve_alias_binder(binder, components, None)?,
             value: value
                 .map(|expr| resolve_alias_expr(*expr, components).map(Box::new))
                 .transpose()?,
