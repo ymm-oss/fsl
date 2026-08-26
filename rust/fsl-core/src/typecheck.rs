@@ -1072,13 +1072,19 @@ fn validate_statement_assignments(
             validate_expression(value, env, model, *span, Some(&ty))
         }
         Statement::If {
+            condition,
             then_statements,
             else_statements,
-            ..
-        } => then_statements
-            .iter()
-            .chain(else_statements)
-            .try_for_each(|item| validate_statement_assignments(item, env, model, visible_consts)),
+            span,
+        } => {
+            validate_expression(condition, env, model, *span, Some(&TypeRef::Bool))?;
+            then_statements
+                .iter()
+                .chain(else_statements)
+                .try_for_each(|item| {
+                    validate_statement_assignments(item, env, model, visible_consts)
+                })
+        }
         Statement::ForAll {
             binder, statements, ..
         } => {

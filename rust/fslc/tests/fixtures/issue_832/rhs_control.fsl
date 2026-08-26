@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
+compose RhsControl {
+  use Core as core from "core.fsl"
+  state { x: Int }
+  init {
+    x = nonexistent.value
+  }
+}
