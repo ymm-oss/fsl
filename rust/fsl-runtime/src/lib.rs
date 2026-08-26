@@ -10,7 +10,7 @@ use fsl_core::{
     ActionCorrespondenceTarget, ActionDef, ActionGuard, FslValue as Value,
     KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
     KernelLValue as LValue, KernelModel, KernelStatement as Statement, ModelError, ParamDef,
-    Refinement, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef, display_name,
+    Refinement, Span, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef, display_name,
     insert_requirement_metadata, internal_origin_json, model_warnings, origin_display_name,
     state_summary, static_leadsto_bindings,
 };
@@ -20,8 +20,9 @@ mod explicit;
 mod trace;
 
 pub use explicit::{
-    ExplicitReachableWitness, ExplicitResult, ExplicitViolation, deterministic_initial_state,
-    explicit_unsupported_reason, verify_explicit, verify_explicit_selected,
+    ExplicitReachableWitness, ExplicitResult, ExplicitViolation, check_init_write_ownership,
+    deterministic_initial_state, explicit_unsupported_reason, verify_explicit,
+    verify_explicit_selected,
 };
 
 pub type State = BTreeMap<String, Value>;
@@ -60,6 +61,8 @@ fn with_total_division<T>(body: impl FnOnce() -> T) -> T {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeError {
     pub message: String,
+    /// Authored construct responsible for this runtime diagnostic, when one exists.
+    pub span: Option<Span>,
 }
 
 impl fmt::Display for RuntimeError {
@@ -74,6 +77,7 @@ impl From<ModelError> for RuntimeError {
     fn from(error: ModelError) -> Self {
         Self {
             message: error.message,
+            span: error.span,
         }
     }
 }
@@ -731,6 +735,14 @@ fn i64_len(value: usize) -> Result<i64, RuntimeError> {
 fn runtime_error(message: impl Into<String>) -> RuntimeError {
     RuntimeError {
         message: message.into(),
+        span: None,
+    }
+}
+
+fn runtime_error_at(message: impl Into<String>, span: Span) -> RuntimeError {
+    RuntimeError {
+        message: message.into(),
+        span: Some(span),
     }
 }
 
@@ -1313,6 +1325,24 @@ pub struct BfsResult {
     pub reachables: BTreeMap<String, Option<ReachableWitness>>,
     pub deadlock_step: Option<usize>,
     pub action_coverage: BTreeMap<String, bool>,
+}
+
+fn terminal_holds(monitor: &Monitor) -> Result<bool, RuntimeError> {
+    let Some(terminal) = &monitor.model.terminal else {
+        return Ok(false);
+    };
+    with_total_division(|| {
+        match eval(
+            terminal,
+            &monitor.state,
+            &mut Bindings::new(),
+            &monitor.model,
+            None,
+        )? {
+            Value::Bool(value) => Ok(value),
+            _ => Err(runtime_error("terminal expression must be Boolean")),
+        }
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2024,7 +2054,28 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
         scratch.step = step;
         let enabled = scratch.enabled()?;
         if enabled.is_empty() {
-            result.deadlock_step = Some(result.deadlock_step.map_or(step, |old| old.min(step)));
+            let terminal = match terminal_holds(&scratch) {
+                Ok(value) => value,
+                Err(error) if is_partial_operation_error(&error.message) => {
+                    let violation = Violation {
+                        kind: "partial_op".to_owned(),
+                        name: "_partial_property_terminal".to_owned(),
+                        step,
+                    };
+                    if result
+                        .violation
+                        .as_ref()
+                        .is_none_or(|old| violation.step < old.step)
+                    {
+                        result.violation = Some(violation);
+                    }
+                    return Ok(result);
+                }
+                Err(error) => return Err(error),
+            };
+            if !terminal {
+                result.deadlock_step = Some(result.deadlock_step.map_or(step, |old| old.min(step)));
+            }
         }
         for instance in &enabled {
             result.action_coverage.insert(instance.action.clone(), true);

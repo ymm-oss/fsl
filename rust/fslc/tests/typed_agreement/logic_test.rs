@@ -69,6 +69,52 @@ fn validate_report(report: &Value) {
         .expect("FSL Logic report matches schema");
 }
 
+#[test]
+fn terminal_siblings_agree_on_the_earliest_reportable_deadlock() {
+    for (id, source, expected) in [
+        (
+            "terminal_positive",
+            include_str!("../fixtures/assurance_terminal_once.fsl"),
+            None,
+        ),
+        (
+            "missing_terminal_sibling",
+            include_str!("../fixtures/assurance_terminal_once_missing.fsl"),
+            Some(1),
+        ),
+    ] {
+        let model = engines::build(id, source);
+        let observation = engines::compare_agreement(id, &model, 1)
+            .unwrap_or_else(|failure| panic!("{id}: {failure}"));
+        assert_eq!(
+            observation.deadlock_step, expected,
+            "{id}: produced {:?}, expected {expected:?}",
+            observation.deadlock_step
+        );
+        assert!(
+            observation.required_edges.contains(&"earliest_deadlock"),
+            "{id}: earliest_deadlock edge did not execute"
+        );
+    }
+}
+
+#[test]
+fn earliest_deadlock_edge_rejects_an_isolated_legacy_misclassification() {
+    let failure = engines::require_deadlock_agreement(
+        "terminal_deadlock_mutation",
+        None,
+        Some(1),
+        None,
+        None,
+    )
+    .expect_err("a legacy terminal-as-deadlock mutation must be detected");
+
+    assert_eq!(failure.edge, "earliest_deadlock");
+    assert_eq!(failure.field, "monitor_bfs");
+    assert_eq!(failure.left, "None", "expected monitor value");
+    assert_eq!(failure.right, "Some(1)", "produced mutated legacy value");
+}
+
 fn parse_replay_case(value: &str) -> (u64, usize, usize) {
     let coordinates = value
         .strip_prefix("fsl-logic-v1-s")

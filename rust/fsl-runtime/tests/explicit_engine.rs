@@ -444,6 +444,52 @@ fn init_forall_write_collides_with_later_concrete_write_to_the_same_key() {
     assert!(result.violation.is_none());
 }
 
+/// Issue #826: an indexed init write whose key coverage cannot be resolved
+/// may touch every key of its logical map root. It therefore overlaps both
+/// concrete-key writes and another unresolved indexed write, while a lone
+/// unresolved write has no competing owner and remains admissible to BMC.
+#[test]
+fn unresolved_init_index_writes_collide_by_logical_root() {
+    let root_concrete = model(
+        "spec RootConcrete { type Idx = 0..2 state { m: Map<Idx, Bool> } \
+         init { forall i: Idx { m[i - i] = true } forall j: Idx { m[j] = true } } \
+         action noop() { } }",
+    );
+    let error = fsl_runtime::check_init_write_ownership(&root_concrete)
+        .expect_err("unresolved write must overlap every concrete key on the same root");
+    assert_eq!(
+        error.message,
+        "state variable 'm' assigned more than once in init forall"
+    );
+    assert!(
+        error.span.is_some(),
+        "collision must retain the second write span"
+    );
+
+    let root_root = model(
+        "spec RootRoot { type Idx = 0..2 state { m: Map<Idx, Bool> } \
+         init { forall i: Idx { m[i - i] = true } \
+                forall j: Idx { m[j - j] = true } } action noop() { } }",
+    );
+    let error = fsl_runtime::check_init_write_ownership(&root_root)
+        .expect_err("two unresolved writes must overlap on the same logical root");
+    assert_eq!(
+        error.message,
+        "state variable 'm' assigned more than once in init forall"
+    );
+    assert!(
+        error.span.is_some(),
+        "collision must retain the second write span"
+    );
+
+    let lone_root = model(
+        "spec LoneRoot { type Idx = 0..2 state { m: Map<Idx, Bool> } \
+         init { forall i: Idx { m[i - i] = true } } action noop() { } }",
+    );
+    fsl_runtime::check_init_write_ownership(&lone_root)
+        .expect("a lone unresolved write has no duplicate owner");
+}
+
 #[test]
 fn explicit_violation_trace_replays_through_the_monitor() {
     let model = model(
