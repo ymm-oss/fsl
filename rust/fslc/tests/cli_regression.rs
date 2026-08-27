@@ -222,6 +222,94 @@ fn native_check_rejects_nested_bounded_map_values_with_a_located_state_type_cont
 }
 
 #[test]
+fn unsupported_nested_option_payloads_fail_check_with_locations() {
+    const STATE_HINT: &str = "state types allow scalars, nested Option around a scalar, structs with those fields, Map<bounded scalar, scalar-or-nested-Option-or-struct>, Set<bounded scalar>, Seq<scalar,N>, and bounded-scalar relations; Option cannot wrap a collection or struct";
+    const STRUCT_HINT: &str = "struct fields must be a scalar (domain type, enum, Bool, Int) or nested Option around a scalar; use a separate Map for Set, Map, Seq, relation, or struct fields";
+    let directory = std::env::temp_dir().join(format!(
+        "fslc-nested-option-payloads-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).expect("create nested Option fixture directory");
+
+    for (position, payload) in [
+        ("state", "Inner"),
+        ("state", "Set<Bit>"),
+        ("state", "Map<Key, Bit>"),
+        ("state", "Seq<Bit, 1>"),
+        ("state", "relation Key -> Key"),
+        ("struct", "Inner"),
+        ("struct", "Set<Bit>"),
+        ("struct", "Map<Key, Bit>"),
+        ("struct", "Seq<Bit, 1>"),
+        ("struct", "relation Key -> Key"),
+        ("map_value", "Inner"),
+        ("map_value", "Set<Bit>"),
+        ("map_value", "Map<Key, Bit>"),
+        ("map_value", "Seq<Bit, 1>"),
+        ("map_value", "relation Key -> Key"),
+    ] {
+        let (source, name, expected_location, hint, message) = match position {
+            "state" => (
+                format!(
+                    "spec Unsupported {{\n  type Bit = 0..1\n  type Key = 0..1\n  struct Inner {{ value: Bit }}\n  state {{\n    value: Option<{payload}>\n  }}\n}}\n"
+                ),
+                "value",
+                serde_json::json!({"line": 6, "column": 5}),
+                STATE_HINT,
+                "state variable",
+            ),
+            "struct" => (
+                format!(
+                    "spec Unsupported {{\n  type Bit = 0..1\n  type Key = 0..1\n  struct Inner {{ value: Bit }}\n  struct Outer {{\n    value: Option<{payload}>\n  }}\n  state {{ outer: Outer }}\n}}\n"
+                ),
+                "Outer.value",
+                serde_json::json!({"line": 5, "column": 3}),
+                STRUCT_HINT,
+                "struct field",
+            ),
+            "map_value" => (
+                format!(
+                    "spec Unsupported {{\n  type Bit = 0..1\n  type Key = 0..1\n  struct Inner {{ value: Bit }}\n  state {{\n    values: Map<Key, Option<{payload}>>\n  }}\n}}\n"
+                ),
+                "values",
+                serde_json::json!({"line": 6, "column": 5}),
+                STATE_HINT,
+                "state variable",
+            ),
+            _ => unreachable!("listed unsupported nested Option position"),
+        };
+        let path =
+            directory.join(format!("{position}-{payload}.fsl").replace(['<', '>', ',', ' '], "_"));
+        std::fs::write(&path, source).expect("write nested Option fixture");
+        let path = path.to_str().expect("UTF-8 fixture path");
+        let (value, status) = run_cli(&["check", path]);
+
+        assert_eq!(status, 2, "{position} Option<{payload}>: {value}");
+        assert_eq!(value["result"], "error", "{position} Option<{payload}>");
+        assert_eq!(value["kind"], "type", "{position} Option<{payload}>");
+        assert_eq!(
+            value["message"],
+            format!(
+                "{message} '{name}' has {}",
+                if position == "struct" {
+                    "non-scalar type"
+                } else {
+                    "unsupported state type"
+                }
+            ),
+            "{position} Option<{payload}>"
+        );
+        assert_eq!(value["hint"], hint, "{position} Option<{payload}>");
+        assert_eq!(
+            value["loc"], expected_location,
+            "{position} Option<{payload}>"
+        );
+    }
+
+    std::fs::remove_dir_all(directory).expect("remove nested Option fixture directory");
+}
+
+#[test]
 fn native_check_rejects_an_incomplete_governance_contract() {
     let (value, status) = run_cli(&[
         "check",

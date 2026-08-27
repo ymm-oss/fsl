@@ -1,0 +1,13 @@
+diff --git a/rust/fsl-verifier/src/transition.rs b/rust/fsl-verifier/src/transition.rs
+--- a/rust/fsl-verifier/src/transition.rs
++++ b/rust/fsl-verifier/src/transition.rs
+@@ -595,8 +595,7 @@ fn compute_statement<S: SmtSolver>(
+             let target_ty = model
+                 .state_lvalue_type(target)
+                 .map_err(|error| VerifyError::new(error.message))?;
+-            let value =
+-                eval_expected(solver, model, value, &target_ty, read_state, bindings, None)?;
++            let value = eval(solver, model, value, read_state, bindings, None)?;
+             assign(
+                 solver,
+                 model,

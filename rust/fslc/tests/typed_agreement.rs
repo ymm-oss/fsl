@@ -46,6 +46,8 @@ use fsl_syntax::{Binder, Expr};
 use generator::{PropertyKind, domain_sweep, expression_sweep, operation_sweep};
 use sweep_summary::SweepSummary;
 
+include!("typed_agreement/nested_options.rs");
+
 /// Generator floor, asserted per the brief and design's "assert model
 /// count is at least N" requirement: `domain_axis` has 15 `(kind, size)`
 /// pairs (S2's four scalar domain kinds), so anything below that means the
