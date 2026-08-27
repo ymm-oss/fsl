@@ -329,9 +329,10 @@ supported semantics」)。per-key init は `Map` 値型に対して選べる既�
 parse し、さらにその同じ String を `load_kernel_model_from_source` に渡して検査済み
 Kernel を構築します。atomic な path replacement が起きても、出力前に別の source
 version を検証することはありません。未解決識別子は部分的な分析や使用不能な Kernel
-text を出力せず、元の source location 付きで棄却されます。`domain generate` は同じ
-typed lowering を使いますが、この single-snapshot 契約はまだ持ちません。別個の
-TOCTOU follow-up は #808 が追跡します。Functional DDD スキャフォールドには
+text を出力せず、元の source location 付きで棄却されます。`domain generate`、
+`domain replay`、`domain testgen`、`domain check` は、検査済み Kernel の scaffold、
+Monitor replay、generic/adapter の test generation、edition の後処理をそれぞれ同じ
+capture 済み source から導きます (#808)。Functional DDD スキャフォールドには
 `fslc domain generate --target typescript|python|kotlin|swift|rust` を、
 アダプタ/コンフォーマンスのスキャフォールドには `fslc domain testgen` を、
 ランタイムの command / event / effect エビデンスには
