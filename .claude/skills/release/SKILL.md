@@ -162,6 +162,45 @@ After the promotion is approved and merged:
 11. If publication has begun and a defect is found, fix it upstream, promote it,
     and cut a new patch version. Never rewrite the published release.
 
+## Classify a failed gate before retrying
+
+This is the sole classification rule for the release procedure. Apply it before
+calling a job failure transient or rerunning it; `docs/RELEASE.md` retains the
+command and publication contract.
+
+1. Record the exact commit, the binary that ran, and the run ID/status before
+   interpreting a failure. A run still in progress is not evidence from the
+   completed run; do not mix their observations.
+2. For a mutation lane, read the outcome classes before its exit code.
+   `outcomes.json` supplies the `CaughtMutant`, `MissedMutant`, `Timeout`, and
+   `Unviable` counts and per-phase durations; read `missed.txt` and
+   `timeout.txt` separately. A surviving mutant is a coverage defect, whereas
+   a timeout is a budget/performance observation.
+3. Compare a local failure with the same commit's completed CI run for the same
+   lane, and record both observed values. Do not conclude that a local failure
+   is a code defect before making that comparison.
+4. Classify the evidence and act on the matching branch:
+   - A missing release-procedure or release-bump-path requirement is a real
+     procedure defect. The v4.4.1 candidate exposed this when #906's
+     `induction_cli_contract.json` golden recorded the version block; #914
+     added its regeneration step and `is_release_bump_path` entry.
+   - A local timeout that does not reproduce in that CI lane is an environment
+     difference. The v4.4.1 local mutation run had 14 `Timeout`, 0
+     `MissedMutant`, 775 s mutant builds against the 600 s build timeout, and a
+     322 s baseline build; CI on the same commit had 55 tested, 47 caught, 8
+     unviable, and 0 timeouts. Record both sets of numbers. Never widen a
+     timeout or threshold to make a local gate pass: record the environment
+     difference instead.
+   - A `cancelled` job is not a failing job. If the aggregate's only
+     non-success input is cancellation, treat it as transient and rerun only
+     failed jobs. On `d9e9710`, one `native Z3 4.16 (windows-latest)` job was
+     cancelled while the other 15 jobs succeeded; `gh run rerun --failed`
+     succeeded.
+   - A reproducing failure, a surviving non-equivalent mutant, or other failed
+     job is a defect until evidence establishes a different branch. Fix it
+     upstream and repeat the applicable release evidence; do not retag to
+     retry a different commit.
+
 ## Stabilize while main advances
 
 Create `release/vX.Y` from a recorded `main` SHA only when candidate validation
