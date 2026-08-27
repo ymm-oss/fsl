@@ -165,8 +165,8 @@ After the promotion is approved and merged:
 ## Classify a failed gate before retrying
 
 This is the sole classification rule for the release procedure. Apply it before
-calling a job failure transient or rerunning it; `../../../docs/RELEASE.md`
-retains the command and publication contract.
+calling a job failure transient or rerunning it; `docs/RELEASE.md` retains the
+command and publication contract.
 
 1. Record the exact commit, the binary that ran, and the run ID/status before
    interpreting a failure. A run still in progress is not evidence from the
@@ -182,9 +182,9 @@ retains the command and publication contract.
 4. Classify the evidence and act on the matching branch:
    - A missing release-procedure or release-bump-path requirement is a real
      procedure defect. The v4.4.1 candidate exposed this when #906's
-     `../../../rust/fslc/tests/goldens/induction_cli_contract.json` golden
-     recorded the version block; #914 added its regeneration step and the
-     `is_release_bump_path` entry in `../../../tools/aggregate_changelog.sh`.
+     `rust/fslc/tests/goldens/induction_cli_contract.json` golden recorded the
+     version block; #914 added its regeneration step and the
+     `is_release_bump_path` entry in `tools/aggregate_changelog.sh`.
    - A local timeout that does not reproduce in that CI lane is an environment
      difference. The v4.4.1 local mutation run had 14 `Timeout`, 0
      `MissedMutant`, 775 s mutant builds against the 600 s build timeout, and a
