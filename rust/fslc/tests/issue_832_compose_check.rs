@@ -93,6 +93,31 @@ fn check_rejects_unknown_member_in_invariant_binder_at_authored_location() {
     );
 }
 
+/// Rejecting detector for #831's remaining reachable fallback: an action
+/// expression binder has its own source span and must not fall back to `1:1`.
+/// The alias is deliberately on line 8, so a placeholder cannot pass.
+#[test]
+fn check_rejects_unknown_action_binder_alias_at_authored_location() {
+    assert_rejected_by_check_and_verify(
+        "action_expr_binder",
+        "semantics",
+        "unknown alias 'nonexistent' at 8:5",
+        &json!({"line": 8, "column": 5}),
+    );
+}
+
+/// The sync-action reference producer must carry the same real source span
+/// into the envelope, rather than retaining it only in the message.
+#[test]
+fn check_rejects_unknown_sync_action_alias_at_authored_location() {
+    assert_rejected_by_check_and_verify(
+        "sync_unknown_alias",
+        "semantics",
+        "unknown alias 'nonexistent' at 8:3",
+        &json!({"line": 8, "column": 3}),
+    );
+}
+
 /// Rejecting detector for the shared typed-binder gate: requirements process
 /// lowering must not let an unknown invariant binder pass `check` and fail only
 /// when `verify` tries to enumerate its finite domain. The binder is authored
@@ -122,7 +147,11 @@ fn check_rejects_undeclared_alias_shaped_init_condition() {
 /// Accepting controls for both corrected positions.
 #[test]
 fn check_accepts_real_alias_type_and_declared_alias_condition() {
-    for name in ["accept_real_type", "accept_alias_condition"] {
+    for name in [
+        "accept_real_type",
+        "accept_alias_condition",
+        "accept_action_expr_binder",
+    ] {
         let path = fixture(name);
         let (value, status) = run_cli(&["check", &path]);
         assert_eq!(status, 0, "{name}: {value}");

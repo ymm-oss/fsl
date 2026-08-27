@@ -38,13 +38,8 @@ impl FsResolver {
 
 impl FileResolver for FsResolver {
     fn read(&self, path: &str) -> Result<String, CoreError> {
-        std::fs::read_to_string(self.base.join(path)).map_err(|error| CoreError {
-            message: error.to_string(),
-            line: 1,
-            column: 1,
-            origin: None,
-            name_resolution: false,
-        })
+        std::fs::read_to_string(self.base.join(path))
+            .map_err(|error| CoreError::unlocated(error.to_string()))
     }
 }
 
@@ -68,13 +63,9 @@ pub fn parse_kernel_source(
         SurfaceDocument::Domain(domain) => crate::lower_domain(&domain),
         SurfaceDocument::AiComponent(component) => crate::lower_ai_component(component),
         SurfaceDocument::Compose(compose) => lower_compose(compose, resolver),
-        SurfaceDocument::Refinement(_) | SurfaceDocument::Agent(_) => Err(CoreError {
-            message: "top-level document has not reached the kernel lowering gate".to_owned(),
-            line: 1,
-            column: 1,
-            origin: None,
-            name_resolution: false,
-        }),
+        SurfaceDocument::Refinement(_) | SurfaceDocument::Agent(_) => Err(CoreError::unlocated(
+            "top-level document has not reached the kernel lowering gate",
+        )),
     }?;
     kernel
         .annotations
@@ -169,10 +160,14 @@ fn component_error(
     verb: &str,
 ) -> CoreError {
     CoreError {
-        message: format!(
-            "component \"{path}\" {verb} ({} at {path}:{}:{})",
-            error.message, error.line, error.column
-        ),
+        message: if error.is_located() {
+            format!(
+                "component \"{path}\" {verb} ({} at {path}:{}:{})",
+                error.message, error.line, error.column
+            )
+        } else {
+            format!("component \"{path}\" {verb} ({})", error.message)
+        },
         line: use_span.start.line,
         column: use_span.start.column,
         // Not propagated from `error`. What this value reports is a compose-level
@@ -929,7 +924,7 @@ fn rewrite_compose_item(
             annotations,
         } => SpecItem::Invariant {
             name,
-            expr: Box::new(resolve_alias_expr_with_span(*expr, components, Some(span))?),
+            expr: Box::new(resolve_alias_expr(*expr, components, span)?),
             span,
             meta,
             annotations,
@@ -942,7 +937,7 @@ fn rewrite_compose_item(
             annotations,
         } => SpecItem::Trans {
             name,
-            expr: Box::new(resolve_alias_expr_with_span(*expr, components, Some(span))?),
+            expr: Box::new(resolve_alias_expr(*expr, components, span)?),
             span,
             meta,
             annotations,
@@ -955,7 +950,7 @@ fn rewrite_compose_item(
             annotations,
         } => SpecItem::Reachable {
             name,
-            expr: Box::new(resolve_alias_expr_with_span(*expr, components, Some(span))?),
+            expr: Box::new(resolve_alias_expr(*expr, components, span)?),
             span,
             meta,
             annotations,
@@ -985,7 +980,7 @@ fn resolve_alias_statement(
             span,
         } => Statement::Assign {
             target,
-            value: resolve_alias_expr(value, components)?,
+            value: resolve_alias_expr(value, components, span)?,
             span,
         },
         Statement::If {
@@ -994,7 +989,7 @@ fn resolve_alias_statement(
             else_statements,
             span,
         } => Statement::If {
-            condition: resolve_alias_expr(condition, components)?,
+            condition: resolve_alias_expr(condition, components, span)?,
             then_statements: then_statements
                 .into_iter()
                 .map(|statement| resolve_alias_statement(statement, components))
@@ -1010,7 +1005,7 @@ fn resolve_alias_statement(
             statements,
             span,
         } => Statement::ForAll {
-            binder: resolve_alias_binder(binder, components, Some(span))?,
+            binder: resolve_alias_binder(binder, components, span)?,
             statements: statements
                 .into_iter()
                 .map(|statement| resolve_alias_statement(statement, components))
@@ -1034,25 +1029,20 @@ fn sync_action(
     let mut items = Vec::new();
     let mut fair_constituents = Vec::new();
     for reference in &action.refs {
-        let component = components.get(&reference.alias).ok_or_else(|| CoreError {
-            message: format!("unknown alias '{}'", reference.alias),
-            line: action.span.start.line,
-            column: action.span.start.column,
-            origin: None,
-            name_resolution: false,
-        })?;
+        let component = components
+            .get(&reference.alias)
+            .ok_or_else(|| error_at(format!("unknown alias '{}'", reference.alias), action.span))?;
         let source = component
             .spec
             .items
             .iter()
             .find(|item| matches!(item, SpecItem::Action { name, .. } if name == &reference.action))
             .cloned()
-            .ok_or_else(|| CoreError {
-                message: format!("unknown action '{}.{}'", reference.alias, reference.action),
-                line: action.span.start.line,
-                column: action.span.start.column,
-                origin: None,
-                name_resolution: false,
+            .ok_or_else(|| {
+                error_at(
+                    format!("unknown action '{}.{}'", reference.alias, reference.action),
+                    action.span,
+                )
             })?;
         // Fairness is not inherited through synchronization (docs/LANGUAGE.md
         // "Compose"): capture the constituent's own `fair` marker here, before
@@ -1089,7 +1079,10 @@ fn sync_action(
                 let name = match param {
                     Param::Typed(name, _) | Param::Range(name, _, _) => name.clone(),
                 };
-                Ok((name, resolve_alias_expr(arg.clone(), components)?))
+                Ok((
+                    name,
+                    resolve_alias_expr(arg.clone(), components, action.span)?,
+                ))
             })
             .collect::<Result<HashMap<_, _>, CoreError>>()?;
         items.extend(
@@ -1137,12 +1130,12 @@ fn resolve_alias_param(
     Ok(match param {
         Param::Typed(name, qualified) => Param::Typed(
             name,
-            resolve_alias_qualified_name(qualified, components, Some(span))?,
+            resolve_alias_qualified_name(qualified, components, span)?,
         ),
         Param::Range(name, lo, hi) => Param::Range(
             name,
-            resolve_alias_expr(lo, components)?,
-            resolve_alias_expr(hi, components)?,
+            resolve_alias_expr(lo, components, span)?,
+            resolve_alias_expr(hi, components, span)?,
         ),
     })
 }
@@ -1150,33 +1143,15 @@ fn resolve_alias_param(
 fn resolve_alias_qualified_name(
     qualified: QualifiedName,
     components: &BTreeMap<String, Component>,
-    span: Option<fsl_syntax::Span>,
+    span: fsl_syntax::Span,
 ) -> Result<QualifiedName, CoreError> {
     if let Some(alias) = qualified.namespace {
-        let component = components.get(&alias).ok_or_else(|| {
-            span.map_or_else(
-                || CoreError {
-                    message: format!("unknown alias '{alias}'"),
-                    line: 1,
-                    column: 1,
-                    origin: None,
-                    name_resolution: false,
-                },
-                |span| error_at(format!("unknown alias '{alias}'"), span),
-            )
-        })?;
+        let component = components
+            .get(&alias)
+            .ok_or_else(|| error_at(format!("unknown alias '{alias}'"), span))?;
         if !component.names.types.contains(&qualified.name) {
             let message = format!("unknown type '{alias}.{}'", qualified.name);
-            return Err(span.map_or_else(
-                || CoreError {
-                    message: message.clone(),
-                    line: 1,
-                    column: 1,
-                    origin: None,
-                    name_resolution: false,
-                },
-                |span| error_at(message.clone(), span),
-            ));
+            return Err(error_at(message, span));
         }
         Ok(QualifiedName {
             namespace: None,
@@ -1190,7 +1165,7 @@ fn resolve_alias_qualified_name(
 fn resolve_alias_binder(
     binder: Binder,
     components: &BTreeMap<String, Component>,
-    span: Option<fsl_syntax::Span>,
+    span: fsl_syntax::Span,
 ) -> Result<Binder, CoreError> {
     Ok(match binder {
         Binder::Typed {
@@ -1201,7 +1176,7 @@ fn resolve_alias_binder(
             name,
             type_name: resolve_alias_qualified_name(type_name, components, span)?,
             where_expr: where_expr
-                .map(|expr| resolve_alias_expr(*expr, components).map(Box::new))
+                .map(|expr| resolve_alias_expr(*expr, components, span).map(Box::new))
                 .transpose()?,
         },
         Binder::Range {
@@ -1211,10 +1186,10 @@ fn resolve_alias_binder(
             where_expr,
         } => Binder::Range {
             name,
-            lo: Box::new(resolve_alias_expr(*lo, components)?),
-            hi: Box::new(resolve_alias_expr(*hi, components)?),
+            lo: Box::new(resolve_alias_expr(*lo, components, span)?),
+            hi: Box::new(resolve_alias_expr(*hi, components, span)?),
             where_expr: where_expr
-                .map(|expr| resolve_alias_expr(*expr, components).map(Box::new))
+                .map(|expr| resolve_alias_expr(*expr, components, span).map(Box::new))
                 .transpose()?,
         },
         Binder::Collection {
@@ -1223,9 +1198,9 @@ fn resolve_alias_binder(
             where_expr,
         } => Binder::Collection {
             name,
-            collection: Box::new(resolve_alias_expr(*collection, components)?),
+            collection: Box::new(resolve_alias_expr(*collection, components, span)?),
             where_expr: where_expr
-                .map(|expr| resolve_alias_expr(*expr, components).map(Box::new))
+                .map(|expr| resolve_alias_expr(*expr, components, span).map(Box::new))
                 .transpose()?,
         },
     })
@@ -1235,15 +1210,7 @@ fn resolve_alias_binder(
 fn resolve_alias_expr(
     expr: Expr,
     components: &BTreeMap<String, Component>,
-) -> Result<Expr, CoreError> {
-    resolve_alias_expr_with_span(expr, components, None)
-}
-
-#[allow(clippy::too_many_lines)]
-fn resolve_alias_expr_with_span(
-    expr: Expr,
-    components: &BTreeMap<String, Component>,
-    diagnostic_span: Option<fsl_syntax::Span>,
+    diagnostic_span: fsl_syntax::Span,
 ) -> Result<Expr, CoreError> {
     Ok(match expr {
         Expr::Field(base, name) => {
@@ -1252,26 +1219,18 @@ fn resolve_alias_expr_with_span(
                     Expr::Var(prefix(alias, &name))
                 } else {
                     Expr::Field(
-                        Box::new(resolve_alias_expr_with_span(
-                            *base,
-                            components,
-                            diagnostic_span,
-                        )?),
+                        Box::new(resolve_alias_expr(*base, components, diagnostic_span)?),
                         name,
                     )
                 }
             } else {
                 Expr::Field(
-                    Box::new(resolve_alias_expr_with_span(
-                        *base,
-                        components,
-                        diagnostic_span,
-                    )?),
+                    Box::new(resolve_alias_expr(*base, components, diagnostic_span)?),
                     name,
                 )
             }
         }
-        Expr::Some(expr) => Expr::Some(Box::new(resolve_alias_expr_with_span(
+        Expr::Some(expr) => Expr::Some(Box::new(resolve_alias_expr(
             *expr,
             components,
             diagnostic_span,
@@ -1279,13 +1238,13 @@ fn resolve_alias_expr_with_span(
         Expr::Set(items) => Expr::Set(
             items
                 .into_iter()
-                .map(|item| resolve_alias_expr_with_span(item, components, diagnostic_span))
+                .map(|item| resolve_alias_expr(item, components, diagnostic_span))
                 .collect::<Result<_, _>>()?,
         ),
         Expr::Seq(items) => Expr::Seq(
             items
                 .into_iter()
-                .map(|item| resolve_alias_expr_with_span(item, components, diagnostic_span))
+                .map(|item| resolve_alias_expr(item, components, diagnostic_span))
                 .collect::<Result<_, _>>()?,
         ),
         Expr::Struct { name, fields } => Expr::Struct {
@@ -1293,10 +1252,7 @@ fn resolve_alias_expr_with_span(
             fields: fields
                 .into_iter()
                 .map(|(name, expr)| {
-                    Ok((
-                        name,
-                        resolve_alias_expr_with_span(expr, components, diagnostic_span)?,
-                    ))
+                    Ok((name, resolve_alias_expr(expr, components, diagnostic_span)?))
                 })
                 .collect::<Result<_, CoreError>>()?,
         },
@@ -1304,57 +1260,37 @@ fn resolve_alias_expr_with_span(
             name,
             args: args
                 .into_iter()
-                .map(|arg| resolve_alias_expr_with_span(arg, components, diagnostic_span))
+                .map(|arg| resolve_alias_expr(arg, components, diagnostic_span))
                 .collect::<Result<_, _>>()?,
             span,
         },
         Expr::Index(base, index) => Expr::Index(
-            Box::new(resolve_alias_expr_with_span(
-                *base,
-                components,
-                diagnostic_span,
-            )?),
-            Box::new(resolve_alias_expr_with_span(
-                *index,
-                components,
-                diagnostic_span,
-            )?),
+            Box::new(resolve_alias_expr(*base, components, diagnostic_span)?),
+            Box::new(resolve_alias_expr(*index, components, diagnostic_span)?),
         ),
         Expr::Method {
             receiver,
             name,
             args,
         } => Expr::Method {
-            receiver: Box::new(resolve_alias_expr_with_span(
-                *receiver,
-                components,
-                diagnostic_span,
-            )?),
+            receiver: Box::new(resolve_alias_expr(*receiver, components, diagnostic_span)?),
             name,
             args: args
                 .into_iter()
-                .map(|arg| resolve_alias_expr_with_span(arg, components, diagnostic_span))
+                .map(|arg| resolve_alias_expr(arg, components, diagnostic_span))
                 .collect::<Result<_, _>>()?,
         },
         Expr::Binary { op, left, right } => Expr::Binary {
             op,
-            left: Box::new(resolve_alias_expr_with_span(
-                *left,
-                components,
-                diagnostic_span,
-            )?),
-            right: Box::new(resolve_alias_expr_with_span(
-                *right,
-                components,
-                diagnostic_span,
-            )?),
+            left: Box::new(resolve_alias_expr(*left, components, diagnostic_span)?),
+            right: Box::new(resolve_alias_expr(*right, components, diagnostic_span)?),
         },
-        Expr::Neg(expr) => Expr::Neg(Box::new(resolve_alias_expr_with_span(
+        Expr::Neg(expr) => Expr::Neg(Box::new(resolve_alias_expr(
             *expr,
             components,
             diagnostic_span,
         )?)),
-        Expr::Not(expr) => Expr::Not(Box::new(resolve_alias_expr_with_span(
+        Expr::Not(expr) => Expr::Not(Box::new(resolve_alias_expr(
             *expr,
             components,
             diagnostic_span,
@@ -1366,28 +1302,12 @@ fn resolve_alias_expr_with_span(
             spans,
         } => Expr::Conditional {
             spans,
-            condition: Box::new(resolve_alias_expr_with_span(
-                *condition,
-                components,
-                diagnostic_span,
-            )?),
-            then_expr: Box::new(resolve_alias_expr_with_span(
-                *then_expr,
-                components,
-                diagnostic_span,
-            )?),
-            else_expr: Box::new(resolve_alias_expr_with_span(
-                *else_expr,
-                components,
-                diagnostic_span,
-            )?),
+            condition: Box::new(resolve_alias_expr(*condition, components, diagnostic_span)?),
+            then_expr: Box::new(resolve_alias_expr(*then_expr, components, diagnostic_span)?),
+            else_expr: Box::new(resolve_alias_expr(*else_expr, components, diagnostic_span)?),
         },
         Expr::Is { expr, pattern } => Expr::Is {
-            expr: Box::new(resolve_alias_expr_with_span(
-                *expr,
-                components,
-                diagnostic_span,
-            )?),
+            expr: Box::new(resolve_alias_expr(*expr, components, diagnostic_span)?),
             pattern,
         },
         Expr::Quantified {
@@ -1397,11 +1317,7 @@ fn resolve_alias_expr_with_span(
         } => Expr::Quantified {
             quantifier,
             binder: resolve_alias_binder(binder, components, diagnostic_span)?,
-            body: Box::new(resolve_alias_expr_with_span(
-                *body,
-                components,
-                diagnostic_span,
-            )?),
+            body: Box::new(resolve_alias_expr(*body, components, diagnostic_span)?),
         },
         Expr::Aggregate {
             kind,
@@ -1411,32 +1327,18 @@ fn resolve_alias_expr_with_span(
             kind,
             binder: resolve_alias_binder(binder, components, diagnostic_span)?,
             value: value
-                .map(|expr| {
-                    resolve_alias_expr_with_span(*expr, components, diagnostic_span).map(Box::new)
-                })
+                .map(|expr| resolve_alias_expr(*expr, components, diagnostic_span).map(Box::new))
                 .transpose()?,
         },
         Expr::UnaryNamed { name, expr, span } => Expr::UnaryNamed {
             name,
-            expr: Box::new(resolve_alias_expr_with_span(
-                *expr,
-                components,
-                diagnostic_span,
-            )?),
+            expr: Box::new(resolve_alias_expr(*expr, components, diagnostic_span)?),
             span,
         },
         Expr::BinaryNamed { name, left, right } => Expr::BinaryNamed {
             name,
-            left: Box::new(resolve_alias_expr_with_span(
-                *left,
-                components,
-                diagnostic_span,
-            )?),
-            right: Box::new(resolve_alias_expr_with_span(
-                *right,
-                components,
-                diagnostic_span,
-            )?),
+            left: Box::new(resolve_alias_expr(*left, components, diagnostic_span)?),
+            right: Box::new(resolve_alias_expr(*right, components, diagnostic_span)?),
         },
         Expr::TernaryNamed {
             name,
@@ -1445,21 +1347,9 @@ fn resolve_alias_expr_with_span(
             third,
         } => Expr::TernaryNamed {
             name,
-            first: Box::new(resolve_alias_expr_with_span(
-                *first,
-                components,
-                diagnostic_span,
-            )?),
-            second: Box::new(resolve_alias_expr_with_span(
-                *second,
-                components,
-                diagnostic_span,
-            )?),
-            third: Box::new(resolve_alias_expr_with_span(
-                *third,
-                components,
-                diagnostic_span,
-            )?),
+            first: Box::new(resolve_alias_expr(*first, components, diagnostic_span)?),
+            second: Box::new(resolve_alias_expr(*second, components, diagnostic_span)?),
+            third: Box::new(resolve_alias_expr(*third, components, diagnostic_span)?),
         },
         other => other,
     })
@@ -1471,13 +1361,13 @@ fn resolve_alias_action_item(
 ) -> Result<ActionItem, CoreError> {
     Ok(match item {
         ActionItem::Requires(expr, span) => {
-            ActionItem::Requires(resolve_alias_expr(expr, components)?, span)
+            ActionItem::Requires(resolve_alias_expr(expr, components, span)?, span)
         }
         ActionItem::Ensures(expr, span) => {
-            ActionItem::Ensures(resolve_alias_expr(expr, components)?, span)
+            ActionItem::Ensures(resolve_alias_expr(expr, components, span)?, span)
         }
         ActionItem::Let(name, expr, span) => {
-            ActionItem::Let(name, resolve_alias_expr(expr, components)?, span)
+            ActionItem::Let(name, resolve_alias_expr(expr, components, span)?, span)
         }
         ActionItem::Statement(statement) => {
             ActionItem::Statement(resolve_alias_statement(statement, components)?)

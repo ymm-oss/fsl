@@ -135,3 +135,22 @@ fn declared_alias_in_forall_binder_still_lowers() {
     parse_kernel_source(source, &resolver())
         .expect("a declared alias in a forall binder must lower successfully");
 }
+
+/// Unlocated lowering failures must not pretend that the first token is the
+/// construct that failed. The CLI turns this into a semantic envelope without
+/// `loc`; this direct public-API check covers callers that render `CoreError`.
+#[test]
+fn top_level_lowering_gate_has_no_fabricated_location() {
+    let error = parse_kernel_source(
+        "refinement Mapping { impl Detailed abs Abstract }",
+        &resolver(),
+    )
+    .expect_err("a refinement is not a kernel-lowering input");
+
+    assert_eq!(error.line, 0);
+    assert_eq!(error.column, 0);
+    assert_eq!(
+        error.to_string(),
+        "top-level document has not reached the kernel lowering gate"
+    );
+}
