@@ -9,10 +9,17 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use wasm_bindgen::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = performance, js_name = now)]
     fn performance_now() -> f64;
+}
+
+/// Native unit tests exercise pre-solver error paths without a browser clock.
+#[cfg(not(target_arch = "wasm32"))]
+const fn performance_now() -> f64 {
+    0.0
 }
 
 #[derive(Debug, Deserialize)]
@@ -619,6 +626,14 @@ mod tests {
             assert_eq!(status, 2, "test fixture must be a failing AI project");
             return output;
         }
+        if let Err(failure) =
+            fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&request.source))
+        {
+            return fslc_rust::frontend_output::render_surface_parse_error(
+                envelope(solver_version),
+                &failure,
+            );
+        }
         let resolver = MemoryResolver {
             files: request.files.clone(),
         };
@@ -644,6 +659,21 @@ mod tests {
         assert_eq!(
             worker, native,
             "Worker/native error envelope diverged for {fixture}"
+        );
+    }
+
+    fn native_verify_surface_parse_error(request: &Request, solver_version: &str) -> Value {
+        let failure = fsl_syntax::parse_surface_document(&request.source)
+            .expect_err("fixture must fail native verify surface parsing");
+        fslc_rust::frontend_output::render_surface_parse_error(envelope(solver_version), &failure)
+    }
+
+    fn assert_worker_verify_surface_parse_error_matches_native(request: &Request, fixture: &str) {
+        let worker = block_on(verify(request, TEST_SOLVER_VERSION));
+        let native = native_verify_surface_parse_error(request, TEST_SOLVER_VERSION);
+        assert_eq!(
+            worker, native,
+            "Worker/native verify surface-parse envelope diverged for {fixture}"
         );
     }
 
@@ -735,6 +765,11 @@ mod tests {
                 "broken_ai_project.fsl",
             ),
             (
+                "surface parse",
+                include_str!("../../../examples/gallery/errors/parse_missing_expression.fsl"),
+                "parse_missing_expression.fsl",
+            ),
+            (
                 "domain guard",
                 include_str!("../../fslc/tests/fixtures/domain_await_routing_rejected.fsl"),
                 "await_routing_rejected.fsl",
@@ -756,6 +791,19 @@ mod tests {
             };
             assert_worker_check_error_matches_native(&request, fixture);
         }
+    }
+
+    #[test]
+    fn verify_surface_parse_error_envelope_matches_native() {
+        let request = Request {
+            cmd: "verify".to_owned(),
+            source: include_str!("../../../examples/gallery/errors/parse_missing_expression.fsl")
+                .to_owned(),
+            source_file: "parse_missing_expression.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        };
+        assert_worker_verify_surface_parse_error_matches_native(&request, "surface parse");
     }
 
     #[test]
