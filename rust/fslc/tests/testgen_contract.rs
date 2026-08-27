@@ -99,7 +99,7 @@ fn all_six_public_kernel_targets_match_the_pre_migration_goldens() {
 
 #[test]
 fn nested_option_expected_state_is_lossless() {
-    let source = r#"
+    let source = r"
 spec NestedOptionTestgen {
   type Bit = 0..1
   state { x: Option<Option<Bit>> }
@@ -108,7 +108,7 @@ spec NestedOptionTestgen {
   action fill() { requires x == some(none)  x = some(some(1)) }
   action clear() { requires x == some(some(1))  x = none }
 }
-"#;
+";
     let kernel = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
         .expect("parse nested Option testgen model");
     let model = fsl_core::build_model(kernel).expect("build nested Option testgen model");
