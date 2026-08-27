@@ -8,11 +8,13 @@ fn build(source: &str) -> Result<fsl_core::KernelModel, fsl_core::ModelError> {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn nested_option_state_shape() {
     let accepted = build(
         "spec Accepted {
   type Bit = 0..1
   type Id = 0..1
+  enum Flag { Off, On }
   struct Record { nested: Option<Option<Bit>> }
   state {
     root: Option<Option<Bit>>,
@@ -21,6 +23,9 @@ fn nested_option_state_shape() {
     optional_values: Map<Id, Option<Option<Bit>>>,
     records: Map<Id, Record>,
     members: Set<Id>,
+    bool_members: Set<Bool>,
+    range_values: Map<0..1, Bit>,
+    enum_members: Set<Flag>,
     queue: Seq<Bit, 1>,
     links: relation Id -> Id
   }
@@ -29,10 +34,11 @@ fn nested_option_state_shape() {
     .expect("nested Option state shapes are accepted");
     assert!(accepted.state_type("depth_three").is_some());
 
-    // This table names every rejected `TypeRef` family at the state root,
-    // including each bounded-scalar-only collection position. Keep it aligned
-    // with DESIGN-nested-option-support.md §3.2: `Int` is scalar but is never
-    // a bounded key, element, or relation endpoint.
+    // This table gives each `bounded_scalar` false branch a concrete
+    // bounded-only position. Keep it aligned with
+    // DESIGN-nested-option-support.md §3.2: `Int` is scalar but is never a
+    // bounded key, element, or relation endpoint; nor are resolved structs or
+    // any collection/Option shape.
     for ty in [
         "Option<Record>",
         "Option<Set<Bit>>",
@@ -42,10 +48,16 @@ fn nested_option_state_shape() {
         "Map<Id, Option<Set<Bit>>>",
         "Map<Id, Set<Bit>>",
         "Map<Id, Option<Record>>",
+        "Map<Record, Bit>",
         "Map<Int, Bit>",
         "Map<Option<Id>, Bit>",
         "Set<Int>",
+        "Set<Record>",
         "Set<Option<Id>>",
+        "Set<Map<Id, Bit>>",
+        "Set<relation Id -> Id>",
+        "Set<Set<Id>>",
+        "Set<Seq<Bit, 1>>",
         "Seq<Option<Bit>, 1>",
         "relation Int -> Id",
         "relation Id -> Option<Id>",
