@@ -14907,10 +14907,7 @@ fn implements_result_from_source(
 fn implements_error_output(
     error: &fslc_rust::verification_output::RequirementsImplementsError,
 ) -> Value {
-    error.span.map_or_else(
-        || error_output("type", &error.message),
-        |span| located_error_output("type", &error.message, span),
-    )
+    fslc_rust::verification_output::render_requirements_implements_error(envelope(), error)
 }
 
 fn mismatch_paths(
