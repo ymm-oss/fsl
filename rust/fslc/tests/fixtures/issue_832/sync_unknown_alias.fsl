@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
+compose BrokenSyncAlias {
+  use Core as core from "core.fsl"
+  state { x: Int }
+  init { x = 0 }
+  // The bad alias is deliberately not on line 1.
+  action set() = nonexistent.noop() || core.noop() {}
+}
