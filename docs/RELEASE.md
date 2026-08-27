@@ -219,7 +219,8 @@ It also rejects a dynamic dependency on `libz3`.
 ## Failure handling
 
 - Classify the evidence first under the internal release skill's
-  ["Classify a failed gate before retrying"](.claude/skills/release/SKILL.md#classify-a-failed-gate-before-retrying).
+  `../.claude/skills/release/SKILL.md` `Classify a failed gate before retrying`
+  section.
   For a failure classified there as transient, use `gh run rerun RUN_ID --failed`.
   Do not retag merely to retry the same commit.
 - Use `workflow_dispatch` for build diagnosis. It is the only dry-run path and
