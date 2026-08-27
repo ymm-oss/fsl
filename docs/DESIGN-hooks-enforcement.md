@@ -9,7 +9,7 @@ Status: Accepted (2026-08-27, #922)
 Repository policy has one primary enforcement owner for each mechanically
 testable rule. Required CI owns rules that must hold for every merge; local
 Codex hooks are guardrails for pre-side-effect resource coordination and early
-feedback, not a replacement for required CI or orchestration approval.
+feedback, not a replacement for required CI or human approval.
 
 Codex `PreToolUse` rewrites a Bash command mentioning `cargo` to the repository
 Cargo wrapper. The wrapper holds an exclusive advisory `fcntl.flock` on
@@ -53,7 +53,7 @@ and the established copyright line for new Python source.
 
 ## Claude hook migration
 
-`session_context.py` remains a Claude-specific orchestration aid. The snapshot
+`session_context.py` remains a Claude-specific session aid. The snapshot
 and SPDX hooks remain temporarily, but now act only as adapters to shared
 detectors. The per-edit Cargo `fslc_check.py` hook is removed: it skipped Bash
 writes and aggravated the lock contention that the Codex wrapper resolves.
@@ -65,11 +65,11 @@ than the canonical changelog checker now called as Codex advisory feedback.
 
 Task-local history policy and evidence sufficiency stay in `AGENTS.md` and the
 worktree-local task packet, not in a generic hook heuristic. A task that
-declares append-only history requires a new commit unless an orchestrator
-records an exception. A partial or single successful command is never enough
-to complete a task: the task packet records each required command, expected and
-produced results, and the current commit/binary identity; the orchestrator
-decides whether the evidence is sufficient.
+declares append-only history requires a new commit unless an exception is
+explicitly recorded in the task packet. A partial or single successful command is
+never enough to complete a task: the task packet records each required command, expected and
+produced results, and the current commit/binary identity; whoever delegated the
+task decides whether the evidence is sufficient.
 
 ## Controls and limits
 
