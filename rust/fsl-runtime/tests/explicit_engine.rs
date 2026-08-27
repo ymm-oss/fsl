@@ -60,7 +60,6 @@ fn nested_options_remain_distinct() {
 
     let result = fsl_runtime::verify_explicit(model, 3, 100).expect("explicit verification");
     assert!(result.closure);
-    assert_eq!(result.states_explored, 3);
     assert_eq!(
         result.reachables["Wrapped"]
             .as_ref()

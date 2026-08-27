@@ -23,7 +23,7 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
             "spec Broken { type K = 0..1 struct Bag { members: Set<K> } state { bag: Bag } init { bag.members = Set {} } }",
             None,
             Some(
-                "struct fields must be scalar (domain type, enum, Bool, Int) or Option<scalar>; use a separate Map for Set/Map/Seq/struct fields",
+                "struct fields must be a scalar (domain type, enum, Bool, Int) or nested Option around a scalar; use a separate Map for Set, Map, Seq, relation, or struct fields",
             ),
         ),
         (
