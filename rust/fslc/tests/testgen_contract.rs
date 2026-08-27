@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use serde_json::json;
 use sha2::{Digest, Sha256};
 
 static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
@@ -94,6 +95,39 @@ fn all_six_public_kernel_targets_match_the_pre_migration_goldens() {
             "{target} output changed"
         );
     }
+}
+
+#[test]
+fn nested_option_expected_state_is_lossless() {
+    let source = r#"
+spec NestedOptionTestgen {
+  type Bit = 0..1
+  state { x: Option<Option<Bit>> }
+  init { x = none }
+  action wrap() { requires x == none  x = some(none) }
+  action fill() { requires x == some(none)  x = some(some(1)) }
+  action clear() { requires x == some(some(1))  x = none }
+}
+"#;
+    let kernel = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+        .expect("parse nested Option testgen model");
+    let model = fsl_core::build_model(kernel).expect("build nested Option testgen model");
+    let fslc_rust::TestgenWalk::Clean(trace) =
+        fslc_rust::testgen_trace_vectors(&model).expect("generate nested Option testgen trace")
+    else {
+        panic!("nested Option cycle must not violate");
+    };
+
+    assert_eq!(trace["initial"], json!({"x": null}));
+    assert_eq!(
+        trace["steps"][0]["expected"],
+        json!({"x": {"kind":"some","value":null}})
+    );
+    assert_eq!(
+        trace["steps"][1]["expected"],
+        json!({"x": {"kind":"some","value":1}})
+    );
+    assert_eq!(trace["steps"][2]["expected"], json!({"x": null}));
 }
 
 #[test]

@@ -561,7 +561,7 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use super::*;
-    use fsl_core::{FslValue, TraceAction, TraceStep, trace_json};
+    use fsl_core::{FslValue, TraceAction, TraceStep, state_summary, trace_json};
     use fsl_verifier::{BmcResult, BmcViolation, LeadsToViolation};
 
     const TEST_SOLVER_VERSION: &str = "Z3 4.16.0.0";
@@ -973,5 +973,111 @@ mod tests {
             !changes.contains_key("job"),
             "whole-struct key must not appear, got {changes:?}"
         );
+    }
+
+    #[test]
+    fn nested_option_trace_matches_native_encoding() {
+        let model = model_from(
+            "spec NestedOption {
+               type Bit = 0..1
+               state { x: Option<Option<Bit>> }
+               init { x = none }
+               action wrap() { x = some(none) }
+               action fill() { x = some(some(1)) }
+             }",
+        );
+        let trace = vec![
+            TraceStep {
+                step: 0,
+                state: BTreeMap::from([("x".to_owned(), FslValue::None)]),
+                action: None,
+                changes: BTreeMap::new(),
+            },
+            TraceStep {
+                step: 1,
+                state: BTreeMap::from([("x".to_owned(), FslValue::Some(Box::new(FslValue::None)))]),
+                action: Some(TraceAction {
+                    name: "wrap".to_owned(),
+                    params: BTreeMap::new(),
+                }),
+                changes: BTreeMap::new(),
+            },
+            TraceStep {
+                step: 2,
+                state: BTreeMap::from([(
+                    "x".to_owned(),
+                    FslValue::Some(Box::new(FslValue::Some(Box::new(FslValue::Int(1))))),
+                )]),
+                action: Some(TraceAction {
+                    name: "fill".to_owned(),
+                    params: BTreeMap::new(),
+                }),
+                changes: BTreeMap::new(),
+            },
+        ];
+
+        let worker = trace_json(&model, &trace);
+        let native = fslc_rust::trace_json(&model, &trace);
+        assert_eq!(worker, native);
+        assert_eq!(worker[1]["state"]["x"], json!({"kind":"some","value":null}));
+        assert_eq!(worker[2]["state"]["x"], json!({"kind":"some","value":1}));
+        assert_eq!(
+            worker[1]["changes"],
+            json!({"x":{"from":null,"to":{"kind":"some","value":null}}})
+        );
+        assert_eq!(
+            worker[2]["changes"],
+            json!({"x":{"from":{"kind":"some","value":null},"to":{"kind":"some","value":1}}})
+        );
+        assert_eq!(state_summary(&model, &trace[1].state), "x=some(none)");
+        assert_eq!(state_summary(&model, &trace[2].state), "x=some(some(1))");
+
+        let struct_model = model_from(
+            "spec StructFields {
+               struct Packet { kind: Int, value: Int }
+               state { packet: Packet }
+               init { packet = Packet { kind: 0, value: 0 } }
+             }",
+        );
+        let struct_trace = vec![
+            TraceStep {
+                step: 0,
+                state: BTreeMap::from([(
+                    "packet".to_owned(),
+                    FslValue::Struct {
+                        type_name: "Packet".to_owned(),
+                        fields: BTreeMap::from([
+                            ("kind".to_owned(), FslValue::Int(0)),
+                            ("value".to_owned(), FslValue::Int(0)),
+                        ]),
+                    },
+                )]),
+                action: None,
+                changes: BTreeMap::new(),
+            },
+            TraceStep {
+                step: 1,
+                state: BTreeMap::from([(
+                    "packet".to_owned(),
+                    FslValue::Struct {
+                        type_name: "Packet".to_owned(),
+                        fields: BTreeMap::from([
+                            ("kind".to_owned(), FslValue::Int(1)),
+                            ("value".to_owned(), FslValue::Int(1)),
+                        ]),
+                    },
+                )]),
+                action: Some(TraceAction {
+                    name: "write".to_owned(),
+                    params: BTreeMap::new(),
+                }),
+                changes: BTreeMap::new(),
+            },
+        ];
+        let rendered = trace_json(&struct_model, &struct_trace);
+        assert_eq!(rendered[1]["state"]["packet"], json!({"kind":1,"value":1}));
+        assert!(rendered[1]["changes"].get("packet[kind]").is_some());
+        assert!(rendered[1]["changes"].get("packet[value]").is_some());
+        assert!(rendered[1]["changes"].get("packet").is_none());
     }
 }

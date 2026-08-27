@@ -232,6 +232,18 @@ spec NestedOption {
             .any(|state| state["state"]["x"]["kind"] == "some")
     );
     assert!(
+        states
+            .iter()
+            .any(|state| { state["state"]["x"] == json!({"kind":"some","value":{"kind":"none"}}) }),
+        "conformance must preserve some(none): {states:#?}"
+    );
+    assert!(
+        states.iter().any(|state| {
+            state["state"]["x"] == json!({"kind":"some","value":{"kind":"some","value":1}})
+        }),
+        "conformance must preserve some(some(1)): {states:#?}"
+    );
+    assert!(
         output["vectors"]
             .as_array()
             .expect("vectors")

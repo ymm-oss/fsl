@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec NestedOptionReplay {
+  type Bit = 0..1
+  state { x: Option<Option<Bit>> }
+  init { x = none }
+  action wrap() {
+    requires x == none
+    x = some(none)
+  }
+  action fill() {
+    requires x == some(none)
+    x = some(some(1))
+  }
+  action clear() {
+    requires x == some(some(1))
+    x = none
+  }
+}
