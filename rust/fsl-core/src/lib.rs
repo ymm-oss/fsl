@@ -102,6 +102,28 @@ pub struct CoreError {
 }
 
 impl CoreError {
+    /// Construct a diagnostic that has no source location.
+    ///
+    /// `CoreError` predates optional locations, so its numeric fields use zero
+    /// internally for absence. Public renderers must keep that sentinel out
+    /// of their envelopes and messages.
+    #[must_use]
+    pub fn unlocated(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            line: 0,
+            column: 0,
+            origin: None,
+            name_resolution: false,
+        }
+    }
+
+    /// Whether this diagnostic records a real source location.
+    #[must_use]
+    pub const fn is_located(&self) -> bool {
+        self.line != 0 && self.column != 0
+    }
+
     /// Classify this diagnostic as a name-resolution failure.
     #[must_use]
     pub fn into_name_resolution(mut self) -> Self {
@@ -120,6 +142,9 @@ impl CoreError {
 
 impl fmt::Display for CoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.is_located() {
+            return formatter.write_str(&self.message);
+        }
         if let Some(source_file) = self
             .origin
             .as_ref()

@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+compose BrokenActionBinder {
+  use Core as core from "core.fsl"
+  state { x: Int }
+  init { x = 0 }
+  action set() = core.noop() {
+    requires forall u: nonexistent.UserId { true }
+    x = 1
+  }
+}
