@@ -99,14 +99,10 @@ fn implements_error(
     solver_version: &str,
     failure: &fslc_rust::verification_output::RequirementsImplementsError,
 ) -> Value {
-    let mut output = error(solver_version, "type", &failure.message);
-    if let Some(span) = failure.span
-        && let Some(object) = output.as_object_mut()
-    {
-        object.insert("loc".to_owned(), span.python_loc());
-        object.insert("span".to_owned(), json!(span));
-    }
-    output
+    fslc_rust::verification_output::render_requirements_implements_error(
+        envelope(solver_version),
+        failure,
+    )
 }
 
 /// Render a solver or verifier failure, which names no construct in the source:
@@ -610,6 +606,107 @@ mod tests {
         .0
     }
 
+    /// Render the native check path's error payload with the Worker-owned
+    /// delivery metadata. The metadata is deliberately shared here so the
+    /// comparison has no excluded output fields; it is not a native identity
+    /// assertion (`versions.verifier` necessarily names `fsl-wasm`).
+    fn native_check_error(request: &Request, solver_version: &str) -> Value {
+        if let Some((output, status)) = fslc_rust::frontend_output::ai_project_check_output(
+            &request.source,
+            &request.source_file,
+            envelope(solver_version),
+        ) {
+            assert_eq!(status, 2, "test fixture must be a failing AI project");
+            return output;
+        }
+        let resolver = MemoryResolver {
+            files: request.files.clone(),
+        };
+        let diagnostic = fslc_rust::source_diagnostic::diagnostics(
+            &request.source,
+            &request.source_file,
+            &resolver,
+        )
+        .into_iter()
+        .find(|diagnostic| diagnostic.kind != "migration")
+        .expect("test fixture must fail native source diagnostics");
+        fslc_rust::verification_output::render_semantic_error(
+            envelope(solver_version),
+            &diagnostic.message,
+            diagnostic.located.then(|| diagnostic.span.python_loc()),
+            diagnostic.kind == "name",
+        )
+    }
+
+    fn assert_worker_check_error_matches_native(request: &Request, fixture: &str) {
+        let worker = block_on(check(request, TEST_SOLVER_VERSION));
+        let native = native_check_error(request, TEST_SOLVER_VERSION);
+        assert_eq!(
+            worker, native,
+            "Worker/native error envelope diverged for {fixture}"
+        );
+    }
+
+    fn native_governance_error(request: &Request, solver_version: &str) -> Value {
+        let resolver = MemoryResolver {
+            files: request.files.clone(),
+        };
+        let failure = fslc_rust::verification_output::governance_output(
+            &request.source,
+            &resolver,
+            |preservation| {
+                let error = resolver
+                    .read(&preservation.after_path)
+                    .expect_err("fixture must leave governance dependency absent");
+                Err(governance_error(error.to_string(), preservation.span))
+            },
+        )
+        .expect_err("fixture must fail native governance output");
+        fslc_rust::verification_output::render_governance_error(envelope(solver_version), &failure)
+    }
+
+    fn assert_worker_governance_error_matches_native(request: &Request, fixture: &str) {
+        let worker = block_on(check(request, TEST_SOLVER_VERSION));
+        let native = native_governance_error(request, TEST_SOLVER_VERSION);
+        assert_eq!(
+            worker, native,
+            "Worker/native governance error diverged for {fixture}"
+        );
+    }
+
+    fn native_implements_error(request: &Request, solver_version: &str) -> Value {
+        let resolver = MemoryResolver {
+            files: request.files.clone(),
+        };
+        let kernel = fsl_core::parse_kernel_source_with_file(
+            &request.source,
+            &resolver,
+            &request.source_file,
+        )
+        .expect("fixture must lower before its implements failure");
+        let model = fsl_core::build_model(kernel).expect("fixture must build before implements");
+        let failure = fslc_rust::verification_output::requirements_implements_output(
+            &request.source,
+            &resolver,
+            &model,
+            8,
+        )
+        .expect_err("fixture must fail native implements output");
+        fslc_rust::verification_output::render_requirements_implements_error(
+            envelope(solver_version),
+            &failure,
+        )
+    }
+
+    fn assert_worker_implements_error_matches_native(request: &Request, fixture: &str) {
+        let worker = block_on(check(request, TEST_SOLVER_VERSION));
+        let native = native_implements_error(request, TEST_SOLVER_VERSION);
+        assert_eq!(
+            worker, native,
+            "Worker/native implements error diverged for {fixture}"
+        );
+    }
+
     #[test]
     fn build_rejects_duplicate_action_writes() {
         let request = Request {
@@ -620,34 +717,45 @@ mod tests {
             options: Options::default(),
         };
 
-        let error = build(&request, TEST_SOLVER_VERSION)
+        let worker = build(&request, TEST_SOLVER_VERSION)
             .expect_err("duplicate write must fail in Worker build");
-
-        assert_eq!(error["kind"], json!("semantics"));
-        assert!(
-            error["message"]
-                .as_str()
-                .is_some_and(|message| message.contains("same state location"))
+        let native = native_check_error(&request, TEST_SOLVER_VERSION);
+        assert_eq!(
+            worker, native,
+            "Worker/native duplicate-write envelope diverged"
         );
     }
 
     #[test]
-    fn check_preserves_ai_project_parser_location_and_code() {
-        let request = Request {
-            cmd: "check".to_owned(),
-            source: include_str!("../../fslc/tests/fixtures/error_envelope_broken_ai_project.fsl")
-                .to_owned(),
-            source_file: "broken_ai_project.fsl".to_owned(),
-            files: BTreeMap::new(),
-            options: Options::default(),
-        };
-
-        let error = block_on(check(&request, TEST_SOLVER_VERSION));
-
-        assert_eq!(error["result"], json!("error"));
-        assert_eq!(error["kind"], json!("parse"));
-        assert_eq!(error["diagnostic_code"], json!("FSL-PARSE"));
-        assert_eq!(error["loc"], json!({"line": 9, "column": 3}));
+    fn check_error_envelopes_match_native_across_parse_guard_and_name() {
+        for (fixture, source, source_file) in [
+            (
+                "AI project parse",
+                include_str!("../../fslc/tests/fixtures/error_envelope_broken_ai_project.fsl"),
+                "broken_ai_project.fsl",
+            ),
+            (
+                "domain guard",
+                include_str!("../../fslc/tests/fixtures/domain_await_routing_rejected.fsl"),
+                "await_routing_rejected.fsl",
+            ),
+            (
+                "domain name",
+                include_str!(
+                    "../../fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl"
+                ),
+                "invalid_unknown_name.fsl",
+            ),
+        ] {
+            let request = Request {
+                cmd: "check".to_owned(),
+                source: source.to_owned(),
+                source_file: source_file.to_owned(),
+                files: BTreeMap::new(),
+                options: Options::default(),
+            };
+            assert_worker_check_error_matches_native(&request, fixture);
+        }
     }
 
     #[test]
@@ -661,16 +769,7 @@ mod tests {
             options: Options::default(),
         };
 
-        let error = block_on(check(&request, TEST_SOLVER_VERSION));
-
-        assert_eq!(error["result"], json!("error"));
-        assert_eq!(error["kind"], json!("type"));
-        assert_eq!(error["loc"], json!({"line": 4, "column": 3}));
-        assert!(
-            error["message"]
-                .as_str()
-                .is_some_and(|message| message.contains("governance preservation missing before"))
-        );
+        assert_worker_governance_error_matches_native(&request, "missing governance before");
     }
 
     #[test]
@@ -684,16 +783,7 @@ mod tests {
             options: Options::default(),
         };
 
-        let error = block_on(check(&request, TEST_SOLVER_VERSION));
-
-        assert_eq!(error["result"], json!("error"));
-        assert_eq!(error["kind"], json!("type"));
-        assert_eq!(error["loc"], json!({"line": 6, "column": 5}));
-        assert!(
-            error["message"]
-                .as_str()
-                .is_some_and(|message| message.contains("missing-before.fsl"))
-        );
+        assert_worker_governance_error_matches_native(&request, "missing governance dependency");
     }
 
     #[test]
@@ -721,17 +811,7 @@ mod tests {
             options: Options::default(),
         };
 
-        let failure = block_on(check(&request, TEST_SOLVER_VERSION));
-
-        assert_eq!(failure["result"], "error");
-        assert_eq!(failure["kind"], "type");
-        assert_eq!(failure["loc"], json!({"line": 3, "column": 5}));
-        assert!(failure["span"].is_object());
-        assert!(
-            failure["message"]
-                .as_str()
-                .is_some_and(|message| message.contains("missing source: [B]"))
-        );
+        assert_worker_implements_error_matches_native(&request, "inline enum conversion");
     }
 
     #[test]
@@ -777,14 +857,8 @@ mod tests {
             "{wrong}"
         );
 
-        let incomplete = block_on(check(
-            &request(source.replace(" C -> Y", "")),
-            TEST_SOLVER_VERSION,
-        ));
-        assert_eq!(incomplete["result"], "error", "{incomplete}");
-        assert_eq!(incomplete["kind"], "type", "{incomplete}");
-        assert_eq!(incomplete["loc"], json!({"line": 3, "column": 5}));
-        assert!(incomplete["span"].is_object(), "{incomplete}");
+        let incomplete = request(source.replace(" C -> Y", ""));
+        assert_worker_implements_error_matches_native(&incomplete, "incomplete enum abstraction");
     }
 
     #[test]

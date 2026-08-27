@@ -38,6 +38,25 @@ impl fmt::Display for RequirementsImplementsError {
 
 impl std::error::Error for RequirementsImplementsError {}
 
+/// Render a requirements `implements` diagnostic using the public JSON contract.
+///
+/// The caller supplies its delivery-surface metadata in `output`; the failure
+/// fields themselves are identical for native and browser entry points.
+#[must_use]
+pub fn render_requirements_implements_error(
+    mut output: Map<String, Value>,
+    error: &RequirementsImplementsError,
+) -> Value {
+    output.insert("result".to_owned(), json!("error"));
+    output.insert("kind".to_owned(), json!("type"));
+    output.insert("message".to_owned(), json!(error.message));
+    if let Some(span) = error.span {
+        output.insert("loc".to_owned(), span.python_loc());
+        output.insert("span".to_owned(), json!(span));
+    }
+    Value::Object(output)
+}
+
 /// Why a requirements step could not be replayed across semantic-diff models.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RequirementStepRelationError {
