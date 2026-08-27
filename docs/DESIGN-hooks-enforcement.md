@@ -28,6 +28,55 @@ directories, deliberately serializing every Cargo invocation in this
 repository common directory. This is more conservative than a target-keyed
 scheme and is the chosen response to the existing shared-resource collision.
 
+## Activation and entry-level trust
+
+Adding an entry to `.codex/hooks.json` declares it but does not make it run.
+Codex requires a machine-local, entry-level `trusted_hash` in the developer's
+`~/.codex/config.toml` under `[hooks.state]`. Its key has the form
+`<hooks.json path>:<event>:<group index>:<hook index>`, so every newly added
+entry starts untrusted even when another entry in the same file is trusted.
+
+The checked-in `.codex/config.toml` setting `[features] hooks = true` enables
+the feature but is not a substitute for that persisted trust decision. Codex
+also exposes `--dangerously-bypass-hook-trust` for an invocation that runs
+enabled hooks without persisted trust; whether to use it routinely is an
+operational decision and is deliberately not made by this design.
+
+[Issue #929](https://github.com/ymm-oss/fsl/issues/929)'s five-minute sample
+captured six independent Cargo processes in two launch forms (directly under
+Codex and through `/bin/zsh -c`). None had `cargo_lock.py` as a parent, and
+no wrapper process appeared at any sample point. At that observation, only a
+`session_start` hook entry was trusted; the Cargo `PreToolUse` entry and the
+remaining checked-in entries were not. Consequently, descriptions of hook
+behavior in this document state the behavior only after the developer has
+accepted each entry's trust prompt.
+
+The hook-source path in a state key is absolute, and state lookup is exact;
+trust does not transfer to a linked worktree. The read-only comparison behind
+#929 found persisted `session_start` hashes for Codex's global hook source and
+for the primary checkout's `.codex/hooks.json`, while the linked worktree's
+`.codex/hooks.json` supplied a third, different source path. Its
+`session_start` key and all four `PreToolUse`/`PostToolUse` keys were therefore
+untrusted. The local diagnostic warning listed all five as
+`session_start:0:0, pre_tool_use:0:0, pre_tool_use:1:0, post_tool_use:0:0,
+post_tool_use:0:1`. This distinction is intentionally described without
+recording a developer-specific absolute path in repository history.
+
+[AGENTS.md](../AGENTS.md) requires a dedicated branch/worktree for non-trivial
+changes. A newly created linked worktree consequently starts with no inherited
+hook trust as the ordinary case, not as an exception. Hook behavior must never
+be designed as a mechanism that becomes reliably available after a developer
+has approved it once: that approval applies only to the particular hook source
+path where it was granted.
+
+Trust is local to a developer machine and therefore unavailable to CI. Hook
+configuration contract tests may verify a checked-in entry's existence,
+matcher, and command, but cannot establish that it is trusted on the machine
+that will run it. Hooks must not be counted as merge-time enforcement;
+required CI remains the merge-time owner. The linked-worktree non-inheritance
+is an additional reason: hooks are local convenience and early feedback, never
+the repository rules' enforcement owner.
+
 ## CI-owned checks and shared detectors
 
 The DESIGN-index rule remains owned by the bidirectional map test in
