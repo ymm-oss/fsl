@@ -1,7 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare bounded native refinement envelopes with the Python reference."""
+"""Compare bounded native refinement envelopes with the Python reference.
+
+Native owner (F6): ``rust/fslc/tests/refine_corpus_parity.rs`` compares the
+complete observed stable projection, documents its sole ``impl_trace``
+exclusion, and rejects dead exclusions. This compatibility harness is retained
+for now; it is not a product or CI gate.
+"""
 from __future__ import annotations
 
 import argparse

@@ -84,8 +84,8 @@ pub fn parse_replay_trace(data: Value) -> Result<ReplayTraceInput, String> {
     let events = match data {
         Value::Array(events) => events,
         Value::Object(mut object) => {
-            match object.remove("events") {
-                Some(Value::Array(events)) => events,
+            match (object.len(), object.remove("events")) {
+                (1, Some(Value::Array(events))) => events,
                 _ => {
                     return Err("trace JSON must be a public replay trace, an array, or {\"events\": [...]}".to_owned());
                 }
@@ -283,6 +283,16 @@ mod tests {
                 .expect_err("reserved marker must select v1")
                 .contains("invalid replay trace v1")
         );
+        for input in [
+            json!({"eventz":[]}),
+            json!({"events":{}}),
+            json!({"events":[],"extra":true}),
+        ] {
+            assert_eq!(
+                parse_replay_trace(input).expect_err("legacy wrapper shape must be exact"),
+                "trace JSON must be a public replay trace, an array, or {\"events\": [...]}"
+            );
+        }
     }
 
     #[test]

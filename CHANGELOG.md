@@ -5,6 +5,67 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.4.1] - 2026-08-26
+
+- Fixed (#761): the legacy replay trace object wrapper is now exactly `{"events": [...]}` —
+  a misspelled key (for example `eventz`), a non-array `events` value, or extra keys are
+  rejected with the wrapper diagnostic instead of being silently tolerated. Focused native
+  accepting and rejecting contracts pin the wrapper and its full public projection, and a
+  new liveness-witness replay matrix rejects isolated state, action, and loop corruptions
+  of every `leadsTo` lasso case the retired Python comparison covered.
+- Fixed (#786): the frozen Python compatibility reference now lets an explicit
+  inline `implements` action correspondence override the same requirements-process
+  auto map, so the manual dialect-conformance corpus no longer rejects a valid
+  arity-changing refinement mapping.
+- Fixed (#826): unresolved indexed `init` writes now conservatively collide with every concrete key on the same logical map root instead of silently accepting aliasing writes with equal values.
+- Fixed (#832): native `fslc check` now fails closed for compose alias and typed
+  binder resolution gaps that `verify` already rejected. A declared alias no
+  longer authorizes a nonexistent qualified type such as `core.NoSuchType`, and
+  an undeclared alias-shaped expression in an `init if` condition receives the
+  same type check as an assignment right-hand side. Unknown typed binder names
+  are also rejected uniformly in properties, action postconditions, and init.
+  Errors retain the author's spelling and source location; valid imported types,
+  binder types, and state conditions remain accepted.
+- Fixed (#904): legacy solver-free BFS now excludes intended `terminal` states from deadlock reporting while preserving true deadlocks, matching explicit BFS and symbolic BMC.
+- Required (#742): merge readiness now rejects Git-tracked citations to missing
+  `docs/DESIGN-*.md` sections, including colon and explicit-section forms, without
+  letting untracked documents satisfy them; calibrated folded, list-tail, historical,
+  and accepting controls preserve the boundary.
+- Required (#746): the five frozen-Python and DESIGN-index coupled-change metatests now run in the required pre-merge automation lane while remaining outside the Rust-native product gate.
+- Required (#761): native Rust tests now bind every corpus `verify` result class to
+  its exact public process exit code; pin the business, requirements, and governance
+  induction CLI contracts; exercise all nine leadsTo case-by-corruption replay cells
+  with exact diagnostics; compare the complete legacy object-wrapper envelopes
+  while rejecting wrong keys, value types, and extra root keys; compare the
+  complete stable `refine` envelope projection with a live, reasoned exclusion for
+  solver-selected implementation traces; and own all sixteen stable induction
+  envelope/exit cases with live exclusions and negative controls before the Python
+  parity harnesses are retired.
+- Required (#898): Merge readiness now runs ShellCheck with masked-return analysis and fail-closed tracked-script enumeration, plus a calibrated direct-syntax Bash-version guard lint that scans expansions in unquoted heredocs, ignores literal heredoc data, and documents its dynamic-execution boundary.
+- Required (#761): the sixteen induction CLI cases the retired Python parity harness compared
+  are now owned by a native golden contract (`induction_cli_contract.rs`) — full stable
+  envelopes with reason-coded, live-hit-checked exclusions, a calibrated cache-mode control,
+  and an idempotent golden regeneration path.
+- Required (#761): refinement corpus parity now compares the full stable projection of every
+  corpus envelope against a checked-in golden with reason-coded exclusions and a
+  dead-exclusion check, replacing the result/kind/exit-only assertion the retired Python
+  harness was stronger than.
+- Documented (#757): recorded the first natural production partial re-run — a GitHub-side
+  artifact-service transient failed one test shard on a docs-only PR, `gh run rerun --failed`
+  re-ran only that shard, and the aggregator accepted the mixed-attempt cohort
+  (`attempts=1,1,2`), recovering in one shard's time instead of a full three-shard re-run.
+- Documented (#761): recorded all 17 Python/Rust parity-harness dispositions and deletion preconditions without deleting a harness, including seven native-owner gaps, the full-envelope helper dependency, the parked Phase-3 comparison, three native-migration candidates, and five bounded manual controls.
+- Documented (#904): accepted the #761 native BFS/BMC migration plan, including the
+  checked 20-model decision matrix, bidirectional witness validation, terminal-aware
+  deadlock repair, rejecting controls, and safe Python-harness and helper-binary
+  retirement order.
+- Required (#906): the induction contract golden is now part of the release-commit
+  regeneration set. It records each envelope's `versions` block, so a version bump made the
+  complete product gate fail comparing the previous version against the new one; `docs/RELEASE.md`
+  step 6 now names its `UPDATE_INDUCTION_CLI_CONTRACT` regeneration and
+  `is_release_bump_path` names the golden, keeping the release commit exempt from a
+  fragment for that path.
+
 ## [4.4.0] - 2026-08-25
 
 - Changed (#760): native CLI tests now cover deterministic DOT and Mermaid
@@ -5641,7 +5702,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.4.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.4.1...HEAD
+[4.4.1]: https://github.com/ymm-oss/fsl/compare/v4.4.0...v4.4.1
 [4.4.0]: https://github.com/ymm-oss/fsl/compare/v4.3.0...v4.4.0
 [4.3.0]: https://github.com/ymm-oss/fsl/compare/v4.2.0...v4.3.0
 [4.2.0]: https://github.com/ymm-oss/fsl/compare/v4.1.0...v4.2.0

@@ -1,7 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare the public native and Python replay command contracts."""
+"""Compare the public native and Python replay command contracts.
+
+Deletion remains deferred (F7). Candidate native owner
+``legacy_object_wrapper_*`` in ``rust/fslc/tests/replay_trace_contract.rs``
+compares complete success/rejection envelopes and rejects wrong keys, value
+types, and extra root keys; harness retirement still requires review of that
+evidence.
+"""
 from __future__ import annotations
 
 import argparse

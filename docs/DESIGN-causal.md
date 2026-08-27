@@ -635,9 +635,10 @@ never contradict, the sections above.
   checker via the pre-dispatch `is_causal_source` sniff (the same mechanism as
   legacy AI project files); `causal` is deliberately not in the dialect
   registry, so the frozen Python `DIALECT_KEYWORDS` parity check
-  (`tests/test_coupled_change_meta.py` — manual compatibility evidence, not a
-  CI gate; see `docs/DESIGN-coupled-change-metatest.md`) does not move. LSP
-  diagnostics and the document index apply the same sniff.
+  (`tests/test_coupled_change_meta.py` — required pre-merge repository evidence
+  through the automation lane, not product-gate evidence; see
+  `docs/DESIGN-coupled-change-metatest.md`) does not move. LSP diagnostics and
+  the document index apply the same sniff.
 - **Worker waiver**: the browser Worker exposes only `check`/`verify` by
   standing policy; causal commands are CLI-only and fall through to the
   Worker's deny-by-default error. This is an explicit waiver, not an omission.

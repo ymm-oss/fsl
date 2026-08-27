@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+requirements ProcessBinderLocation {
+  process Claim {
+    stages Draft, Done
+    initial Draft
+    transition finish Draft -> Done by System
+  }
+  invariant Good { forall c: Claim { true } }
+}
+verify { instances Claim = 1 }

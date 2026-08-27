@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+(( BASH_VERSINFO[0] >= 4 )) || { echo "run-semantic-mutation-gate.sh requires Bash 4 or newer" >&2; exit 1; }
 # SPDX-License-Identifier: Apache-2.0
 
 set -euo pipefail
@@ -101,8 +102,9 @@ run_operators_lane() {
 }
 
 if [ "$lane" != "operators" ]; then
-  if [ "$(cargo mutants --version)" != "$runner_version" ]; then
-    echo "semantic-mutation: requires exactly $runner_version; observed $(cargo mutants --version 2>&1)" >&2
+  observed_runner_version="$(cargo mutants --version 2>&1)"
+  if [ "$observed_runner_version" != "$runner_version" ]; then
+    echo "semantic-mutation: requires exactly $runner_version; observed $observed_runner_version" >&2
     exit 1
   fi
 fi
@@ -176,18 +178,23 @@ if [ "$mode" = changed ]; then
     cargo mutants "${args[@]}" "${diff_args[@]}" --list
   ) >"$filtered"
   if [ ! -s "$filtered" ]; then
-    changed_scope_paths="$(comm -12 \
-      <(sed -n 's|^+++ b/||p' "$diff_file" | sort -u) \
-      <(jq -r '.decisions[].path | sub("^rust/"; "")' "$scope" | sort -u))"
+    changed_diff_paths="$output/changed-diff-paths.txt"
+    changed_scope_inventory="$output/changed-scope-paths.txt"
+    sed -n 's|^+++ b/||p' "$diff_file" | sort -u >"$changed_diff_paths"
+    jq -r '.decisions[].path | sub("^rust/"; "")' "$scope" \
+      | sort -u >"$changed_scope_inventory"
+    changed_scope_paths="$(comm -12 "$changed_diff_paths" "$changed_scope_inventory")"
     if [ -z "$changed_scope_paths" ]; then
       (
         cd "$scratch/rust"
         cargo test --locked -p fsl-verifier -p fslc-rust \
           --test solver_fail_closed --test triangulated_assurance
       )
-      paths_json="$(sed -n 's|^+++ b/||p' "$diff_file" | sort -u | jq -Rsc 'split("\n") | map(select(length > 0) | "rust/" + .)')"
+      paths_json="$(sed -n 's|^+++ b/||p' "$diff_file" | sort -u | jq -Rsc 'split("\n") | map(select(length > 0) | "rust/" + .)')" \
+        || { echo "semantic-mutation: could not serialize changed paths" >&2; exit 1; }
+      report_revision="$(git -C "$root" rev-parse HEAD)"
       jq -n \
-        --arg revision "$(git -C "$root" rev-parse HEAD)" \
+        --arg revision "$report_revision" \
         --arg diff_base "${FSL_MUTATION_BASE:-unknown}" \
         --argjson paths "$paths_json" \
         '{
@@ -293,6 +300,8 @@ fi
 # source lines are derived from exact maintained anchors at run time, so line
 # movement cannot silently turn a decision ID into a bare function name.
 decision_anchors='[]'
+decision_rows="$output/decision-rows.jsonl"
+jq -c '.decisions[]' "$scope" >"$decision_rows"
 while IFS= read -r decision; do
   decision_id="$(jq -r '.id' <<<"$decision")"
   decision_path="$(jq -r '.path' <<<"$decision")"
@@ -313,7 +322,7 @@ while IFS= read -r decision; do
     --argjson line "$decision_line" \
     '. + [{id: $id, path: $path, function: $function, line: $line}]' \
     <<<"$decision_anchors")"
-done < <(jq -c '.decisions[]' "$scope")
+done <"$decision_rows"
 
 jq \
   --arg revision "$base_revision" \
@@ -388,6 +397,14 @@ jq \
 # failing tests in each mutant's log. A caught classification without the
 # detector that actually failed is not reviewable mutation evidence, so enrich
 # every killed row and fail closed if the runner log cannot supply one.
+caught_mutant_rows="$output/caught-mutant-rows.tsv"
+jq -r '
+  [.outcomes[] | select(.scenario != "Baseline")]
+  | to_entries[]
+  | select(.value.summary == "CaughtMutant")
+  | [.key, .value.log_path]
+  | @tsv
+' "$raw/outcomes.json" >"$caught_mutant_rows"
 while IFS=$'\t' read -r mutant_index log_path; do
   case "$log_path" in
     log/*) ;;
@@ -415,15 +432,7 @@ while IFS=$'\t' read -r mutant_index log_path; do
     '.mutants[$mutant_index].primary_failing_test = $primary_failing_test' \
     "$output/implementation-mutation-report.v1.json" >"$report_tmp"
   mv "$report_tmp" "$output/implementation-mutation-report.v1.json"
-done < <(
-  jq -r '
-    [.outcomes[] | select(.scenario != "Baseline")]
-    | to_entries[]
-    | select(.value.summary == "CaughtMutant")
-    | [.key, .value.log_path]
-    | @tsv
-  ' "$raw/outcomes.json"
-)
+done <"$caught_mutant_rows"
 
 FSL_IMPLEMENTATION_MUTATION_REPORT="$output/implementation-mutation-report.v1.json" \
   cargo test --manifest-path "$root/rust/Cargo.toml" -p fslc-rust \

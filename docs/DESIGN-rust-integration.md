@@ -34,8 +34,26 @@ part of the Rust product gate.
 The removed `tests/test_rust_cli_contract.py` compared the evolving Rust CLI with a frozen Python
 parser plus a large exception file. That made the frozen implementation a second authority. The
 native tests instead compare every live help path with the checked-in embedded contract and directly
-validate the published result/schema contracts. Existing Python parity utilities remain historical
-or explicitly invoked compatibility evidence only.
+validate the published result/schema contracts. No parity utility is deleted under #761's
+documentation phase. `check_rust_full_envelope.py` is eligible for deletion because calibrated
+native/Worker parity owns its named drift, but it remains until its `_diff`/`_normalize` helpers move
+without breaking three retained consumers. Seven other utilities remain deletion-deferred because
+their exact native contract gaps (F1–F7) are recorded in `RUST-PORTING.md`.
+`check_rust_phase3_commands.py` remains parked,
+outside every gate, until its
+unowned `ai compare` metric/delta projection receives a focused native contract test; AI work is
+currently parked. The five bounded manual utilities below are explicitly invoked compatibility
+evidence only; the seven F1–F7-deferred parity harnesses retain their existing detector role
+until the named native controls exist.
+
+That bounded manual suite is exactly `check_rust_ast_parity.py`,
+`check_rust_grammar_fuzz.py`, `check_rust_surface_parity.py`,
+`check_rust_kernel_parity.py`, and `check_rust_cli_snapshot.py`. Their scopes are respectively the
+registered expression fixture, deterministic seed-195 grammar sample, registered surface/error-
+location subset, Python-shaped compatible kernel projection, and provenance-recorded 190-entry CLI
+snapshot. They must not be generalized into product correctness claims or regenerated/allowlisted
+merely to accept native evolution. A nonzero result is an unresolved compatibility decision, not a
+native product failure and not permission to broaden exclusions.
 
 The checked-in `rust/fslc/cli-contract.json` is therefore native-authored authority, not a snapshot
 to regenerate from the frozen Python parser. It enumerates all 50 live native leaves, including the

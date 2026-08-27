@@ -18,6 +18,18 @@ A post-merge failure can therefore still expose a temporarily broken `main`, but
 platform-specific defect. The failed check and its deduplicated issue are blocking evidence for
 production/release promotion and must be repaired or reverted; they are not informational warnings.
 
+`tools/check_rust_*.py` is not a discovery convention: no workflow or native gate runs files merely
+because they match that name. The five bounded frozen-Python compatibility checks documented in
+`RUST-PORTING.md` are developer-run only, triggered by an intentional change to their shared
+projection. They are outside merge readiness, the product gate, scheduled promotion, and release,
+and a manual pass cannot replace or waive native evidence. Native/Worker full-envelope comparison
+is owned by `rust/fsl-wasm/test-browser.mjs`; native semantic agreement is owned by the Rust
+agreement and replay suites. The Phase-3 Python comparison is separately parked until `ai compare`
+has a focused native contract test. #761's documentation phase deletes no harness:
+`check_rust_full_envelope.py` is deletion-ready only after its shared helpers move safely; seven
+parity harnesses remain because related native coverage does not yet detect their exact drift
+(F1–F7 in `RUST-PORTING.md`); and the BFS/BMC/scenarios trio remains pending native semantic migration.
+
 ### Why the split falls here
 
 Measured on the batch that motivated this revision:
@@ -77,7 +89,57 @@ independent lanes succeed:
    recurrence updates, recovery closure, and workflow-level failure handling. It also runs the
    checked-in Codex/Claude task-harness contracts with the system Python: a discovered soundness
    finding must remain in the worktree ledger until fixed, linked to an issue, or explicitly marked
-   as awaiting issue-creation authorization.
+   as awaiting issue-creation authorization. The same lane runs the standard-library-only DESIGN
+   section-citation selftest and live audit. The audit examines Git-tracked UTF-8 text under
+   `.github/`, `tools/`, `rust/`, `docs/`, and `skills/`; a quoted section paired with a
+   `docs/DESIGN-*.md` path must exactly match an H2-H6 ATX heading after symmetric normalization of
+   presentation-only numbering, inline-code backticks, whitespace, and issue/slice suffixes. It
+   recognizes comma, colon, parenthesis, possessive, and explicit `section` separators, reports every
+   source location, and fails closed on unreadable input, a missing document, or a citation target
+   outside the same Git-tracked input set. An untracked worktree document therefore cannot satisfy a
+   tracked citation.
+   The lane also runs ShellCheck over every `tools/*.sh` and `.github/scripts/*.sh`, explicitly
+   enabling `check-extra-masked-returns` (SC2312), and rejects suppressions without an inline reason.
+   Discovery must contain every Git-tracked direct `*.sh` child of both directories and must be
+   non-empty; untracked matching additions are also checked. A separate fixture contains
+   `check-*.sh`, `run-*.sh`, and `.github/scripts/report-*.sh` canaries, so narrowing either glob or
+   dropping either directory fails the inventory selftest before ShellCheck runs.
+   A standard-library Python lint first asks Bash to parse each script, then requires scripts using
+   `mapfile`/`readarray`, associative arrays, or array expansion under `set -u` to put a fail-closed
+   Bash-4+ guard immediately after the shebang. Its token classifier follows this executable-context
+   table; indentation never changes a result:
+
+   | Feature class | Executable token form | Quoted command word | Argument literal | Comment |
+   | --- | --- | --- | --- | --- |
+   | map input | exact simple-command word `mapfile` or `readarray`, including through `builtin` | detected | single- or double-quoted text is ignored | ignored |
+   | associative array | simple-command word `declare`, `typeset`, or `local` plus an option token containing `A`, including combined flags | detected | single- or double-quoted text is ignored | ignored |
+   | nounset array expansion | executable `set -u`, combined `-euo`, or `set -o nounset` plus executable `${name[@]}` | detected; `${name[@]}` inside double quotes still expands | plain `"set -u"` and single-quoted `${name[@]}` are ignored | ignored |
+   | nested execution | command substitutions and backticks are recursively tokenized, even inside double quotes | detected | outer literal text remains ignored | ignored |
+
+   Forty-six parser-accepted table cases plus accepting, missing-guard, late-guard,
+   indented-declare, local-associative, heredoc, and single/double-quoted-decoy fixtures calibrate
+   both bypass and false-positive directions. Heredoc classification is deliberately quantified by
+   delimiter and body-pattern class:
+
+   | Delimiter class | Literal command-position text | Expansion syntax |
+   | --- | --- | --- |
+   | quoted (`<<'EOF'`, `<<-"EOF"`, or any partially quoted word) | ignored | ignored because Bash does not expand the body |
+   | unquoted (`<<EOF` or `<<-EOF`) | ignored as data | parameter, command, backtick, and arithmetic expansions are scanned |
+
+   Each of these four cells has separate accepting and rejecting fixtures (eight fixtures total).
+   The rejecting controls also establish that executable code immediately after a terminator remains
+   visible. Thus heredoc exclusion applies to literal data, not to expansions Bash executes in an
+   unquoted body.
+
+   This lint's detection claim is deliberately limited to direct syntactic feature use. Dynamic
+   execution through `eval` or a variable-expanded command word is outside the static-detection
+   boundary and is not included in the detection claim. Selftests pin literal `eval` and variable
+   command examples as expected non-detections so this boundary cannot be mistaken for implicit
+   coverage. Local macOS development requires `brew install shellcheck`; a missing executable fails
+   the lane instead of skipping it. CI's ShellCheck version is authoritative; CI detects findings
+   that a different local version does not report, and the checker records the version it used.
+   Repository-root `CHANGELOG.md` is deliberately outside that scope because it is an immutable
+   historical record whose old section names must not make current automation fail.
 
 The lanes run in parallel through `tools/check-merge-readiness.sh`. Native-CLI/default-feature
 compilation, all-target compilation, Clippy, native Z3 verification, the complete LSP/corpus suites,
@@ -380,6 +442,15 @@ expected diagnostics: `check-shard-artifact-cohort: PASS -- lane=rust-tests run_
 attempts=1,2,1 shards=1,2,3` and `check-shard-artifact-cohort: PASS --
 lane=semantic-mutation-operators run_id=32798975136 attempts=1,2,1 shards=1,2,3`. This satisfies the
 probe precondition above; the probe commit itself was then removed from the branch.
+
+**First natural production observation (recorded 2026-08-26, run `32931874941` on PR #908).**
+A docs-only PR's `rust tests (3/3)` shard failed on a GitHub-side transient — five
+`ArtifactService/ListArtifacts` and `CreateArtifact` request timeouts with the tests themselves
+green — exactly the transient class this design targets. `gh run rerun --failed` re-ran only that
+shard; attempt 2 completed `success` overall and the aggregator accepted the mixed cohort:
+`check-shard-artifact-cohort: PASS -- lane=rust-tests run_id=32931874941 attempts=1,1,2
+shards=1,2,3`. Before this design, that recovery would have required a full ~60-minute re-run of
+every shard.
 
 **Agent-configuration-exempt pull requests still work.** Every shard job runs
 `check-product-gate-scope.sh` itself and early-exits its own later steps when `run=false`, so the
@@ -1090,6 +1161,13 @@ workflow is not exempt: its commit-pinned action must receive the MSRV declared
 by `rust/Cargo.toml` through a direct `with: toolchain:` input. Local reusable
 workflows are audited as workflow files; external reusable workflows are outside
 this repository's source authority.
+
+The same automation lane runs the five tests in
+`tests/test_coupled_change_meta.py`. They keep the frozen Python dialect, AI
+project-block, grammar, and CLI registries coupled to their native or
+DESIGN-document counterparts, and keep the DESIGN-document index bidirectional.
+This is required pre-merge repository/compatibility evidence, not product
+evidence, and it does not add Python to `./tools/check-native-integration.sh`.
 
 The privileged post-merge reporter receives `issues: write`, so its workflow
 also has a deliberately narrow parser-backed shape contract. It requires the

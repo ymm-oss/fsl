@@ -36,6 +36,7 @@
 | [`DESIGN-induction.md`](DESIGN-induction.md) | The k-induction engine (proved / unknown_cti / CTI) |
 | [`DESIGN-induction-lemmas.md`](DESIGN-induction-lemmas.md) | `verify --engine induction --lemma`: independent candidate proof, CTI exclusion/retry, JSON and cache contract |
 | [`DESIGN-explicit-engine.md`](DESIGN-explicit-engine.md) | `verify --engine explicit` (Rust-native): Z3-free concrete-state BFS, closure ⇒ `proved`, `unknown_budget` truncation, deterministic-init and binder-domain fail-closed gates; plus the `--engine auto` composite (explicit first, transparent BMC fallback, `engine`/`engine_fallback` tracking) |
+| [`DESIGN-bfs-bmc-native-migration.md`](DESIGN-bfs-bmc-native-migration.md) | Accepted #761 migration plan for replacing frozen-Python BFS/BMC parity with a checked native Monitor/legacy-BFS/explicit-BFS/BMC decision and bidirectional witness matrix |
 | [`DESIGN-literate.md`](DESIGN-literate.md) | Literate Markdown FSL: in-place blanking extraction of ` ```fsl ` fenced blocks, materialization, position-preserving diagnostics, scope boundaries (WASM waiver, LSP deferral) |
 | [`DESIGN-from-state.md`](DESIGN-from-state.md) | Predictive BMC from a complete Monitor/replay logical-state snapshot (`verify --from-state`), including type validation, faithfulness metadata, cache/symmetry boundaries, and induction exclusion |
 | [`DESIGN-trans.md`](DESIGN-trans.md) | `trans` (transition invariant / two-state safety) |
@@ -52,6 +53,7 @@
 | [`DESIGN-seq.md`](DESIGN-seq.md) | Seq<T,N> (partial_op, type whitelist) |
 | [`DESIGN-seq-partial-operations.md`](DESIGN-seq-partial-operations.md) | Accepted Seq partial-operation semantics: out-of-prefix reads report `partial_op` consistently across engines while guarded short-circuit reads remain defined |
 | [`DESIGN-option-struct.md`](DESIGN-option-struct.md) | Option fields in structs |
+| [`DESIGN-nested-option-support.md`](DESIGN-nested-option-support.md) | Accepted #841 implementation plan for full recursive nested `Option` support, fail-closed state-type boundaries, lossless JSON/replay, and cross-engine agreement |
 | [`DESIGN-divmod.md`](DESIGN-divmod.md) | Integer division `/` and remainder `%` (total definition of division by zero, partial_op, Euclidean) |
 | [`DESIGN-forbidden.md`](DESIGN-forbidden.md) | `forbidden` (negative acceptance criteria / must-forbid) — detecting under-constraint |
 | [`DESIGN-vacuity.md`](DESIGN-vacuity.md) | Vacuity checking (invariants whose antecedent is unreachable, leadsTo whose trigger is unreachable, always-true requires) |

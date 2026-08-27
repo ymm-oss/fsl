@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Inline `implements { }` action correspondence (#73).
+"""Inline `implements { }` action correspondence (#73, #786).
 
 Confirms `refinement_action` can appear inside the requirements-dialect
 inline `implements { }` block (grammar.py `?implements_item`), including
@@ -11,7 +11,10 @@ refinement file + `fslc refine`. The inline desugar (dialects.py
 same `("refinement", ..., mapping_items)` AST that the separate-file path
 parses, so `refine.py` needs no changes.
 """
+from pathlib import Path
+
 from fslc.cli import run_check, run_refine, run_verify
+from fslc.dialects import _parse_file
 
 
 def _write(tmp_path, files):
@@ -178,6 +181,81 @@ def test_inline_action_map_conflicts_with_requirement_maps_clause_is_an_error(tm
     assert checked["result"] == "error"
     assert checked["kind"] == "type"
     assert "duplicate action map for 'pay'" in checked["message"]
+
+
+def test_inline_action_map_overrides_process_auto_map_only():
+    root = Path(__file__).resolve().parents[1]
+    requirements = root / "examples/e2e/2_requirements.fsl"
+
+    checked = run_check(str(requirements))
+    assert checked["result"] == "ok", checked
+    assert checked["implements"] == {"abs": "ExpenseToBe", "result": "refines"}
+
+    ast, _display_names = _parse_file(requirements)
+    implements = next(item[1] for item in ast[2] if item[0] == "__implements")
+    action_maps = [
+        item for item in implements["mapping_ast"][2] if item[0] == "action_map"
+    ]
+
+    assert [(item[1], item[2], item[3]) for item in action_maps] == [
+        (
+            "submit",
+            [("refinement_param", "c", None), ("refinement_param", "a", None)],
+            ("action", "submit", [("var", "c")]),
+        ),
+        ("auto_approve", ["c"], ("action", "auto_approve", [("var", "c")])),
+        ("mgr_approve", ["c"], ("action", "mgr_approve", [("var", "c")])),
+        ("reject", ["c"], ("action", "reject", [("var", "c")])),
+        ("pay", ["c"], ("action", "pay", [("var", "c")])),
+    ]
+
+
+BUSINESS_PROCESS_ACTOR_OVERRIDE = '''business ActorOverrideBiz {
+  actor Employee, Manager
+  entity Claim
+
+  process Claim {
+    stages Draft, Submitted
+    initial Draft
+    transition submit Draft -> Submitted by Employee
+    transition review Draft -> Submitted by Manager
+  }
+}
+verify {
+  instances Claim = 1
+}
+'''
+
+REQUIREMENTS_PROCESS_ACTOR_OVERRIDE = '''requirements ActorOverrideReq {
+  implements ActorOverrideBiz from "biz.fsl" {
+    action submit(c) -> review(c)
+  }
+
+  process Claim {
+    stages Draft, Submitted
+    initial Draft
+    transition submit Draft -> Submitted by Manager
+  }
+}
+verify {
+  instances Claim = 1
+}
+'''
+
+
+def test_inline_action_map_override_skips_auto_map_actor_validation(tmp_path):
+    _write(tmp_path, {
+        "biz.fsl": BUSINESS_PROCESS_ACTOR_OVERRIDE,
+        "req.fsl": REQUIREMENTS_PROCESS_ACTOR_OVERRIDE,
+    })
+
+    checked = run_check(str(tmp_path / "req.fsl"))
+
+    assert checked["result"] == "ok", checked
+    assert checked["implements"] == {
+        "abs": "ActorOverrideBiz",
+        "result": "refines",
+    }
 
 
 ABS_BRANCH = '''spec AbsBranch73 {

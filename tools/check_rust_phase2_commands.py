@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare Phase-2 sweep and chain command contracts with Python."""
+"""Compare Phase-2 sweep and chain command contracts with Python.
+
+Deletion deferred (F5): ``--keep-going`` failure continuation and
+the human-readable ``Layer`` stderr table unowned. Deletion requires native
+assertions for both observations.
+"""
 from __future__ import annotations
 
 import argparse
@@ -13,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from check_rust_cli_snapshot import DEFAULT_RUST_BIN
-from check_rust_full_envelope import _diff
+from rust_parity_util import _diff
 
 
 ROOT = Path(__file__).resolve().parents[1]

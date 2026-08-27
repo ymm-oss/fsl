@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+compose ShapeA {
+  use Core as core from "core.fsl"
+  state { x: Int }
+  init {
+    forall u: core.NoSuchType {
+      x = 0
+    }
+  }
+}

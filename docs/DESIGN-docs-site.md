@@ -226,15 +226,14 @@ readable in Japanese, accepting the resulting maintenance cost.
     and does not execute Python," and this check needs the third-party `markdown` package plus
     pytest. This check is not product evidence in `docs/DESIGN-ci.md`'s sense either — it protects
     a documentation artifact, not Rust/solver/Monitor behavior.
-  - Not `merge-readiness.yml`'s `automation-contracts` lane (or a new sibling lane inside that
-    workflow): that lane deliberately stays stdlib-only with no pytest and no third-party
-    dependency (`tools/check-merge-readiness.sh`'s `check_automation` comment). This is a
-    dependency-contract objection, not a latency one — measured, `automation-contracts` runs in
-    ~5s against `core-contracts`'s ~45s critical path (the three `merge-readiness.yml` lanes run
-    in parallel, so the workflow's wall-clock is set by the slowest lane), so adding a ~10s
-    pip-install-plus-pytest step there would cost the workflow zero wall-clock. What it would
-    cost is the lane's stdlib-only contract, which `tools/check-merge-readiness.sh` states is
-    deliberate independent of speed.
+  - At the time of this decision, not `merge-readiness.yml`'s `automation-contracts` lane (or a
+    new sibling lane inside that workflow): that lane was stdlib-only with no pytest or
+    third-party dependency. Later accepted CI decisions superseded that dependency assumption:
+    `merge readiness / automation contracts` now installs Python 3.12 and `.[dev]` and runs
+    parser-backed pytest calibration suites (`docs/DESIGN-ci.md`, "Automation contracts use
+    parser-backed workflow inspection"). The site snapshot remains in its standalone required
+    workflow because that workflow owns generated-reference freshness, not because the current
+    automation lane forbids Python or pytest.
 
   The new workflow covers all **4** generated pages (`language.{ja,en}.html` and
   `cli.{ja,en}.html`), not just the 2 `language.*` pages, because `test_site_reference_snapshot.py`
@@ -247,13 +246,13 @@ readable in Japanese, accepting the resulting maintenance cost.
   that; `#688` stays open and is the place that asymmetry gets decided, not this check.
 
   **This workflow is now enforced, and that costs nothing the placement above was protecting.**
-  The original objection conflated two different moves: joining this check to *another*
-  workflow's job graph, and requiring *this* workflow's own context on the ruleset. The first
-  would have broken a real contract — `ci.yml` is Rust-native by `AGENTS.md`'s "one Rust-native
-  entrypoint, no Python" clause, and `merge-readiness.yml`'s `automation-contracts` lane is
-  stdlib-only by `tools/check-merge-readiness.sh`'s own comment — and that objection still holds;
-  neither workflow gained a Python dependency. The second move breaks nothing: `site reference
-  freshness` runs as its own standalone workflow on every pull request with no path filter
+  The original placement distinguished joining this check to *another* workflow's job graph from
+  requiring *this* workflow's own context on the ruleset. The Rust-native `ci.yml` product gate
+  still cannot gain Python under AGENTS.md's "one Rust-native entrypoint, no Python" clause. The
+  later parser-backed automation-contract decision did add Python to merge readiness and therefore
+  superseded this section's separate stdlib-only premise; it did not change the site workflow's
+  ownership of generated-reference freshness. Requiring the standalone context breaks nothing:
+  `site reference freshness` runs as its own standalone workflow on every pull request with no path filter
   (`pull_request`/`merge_group`, unconditioned), so it cannot deadlock a pull request the way a
   deferred, `FSL_OPTIMISTIC_CI`-gated context would (`docs/DESIGN-ci.md`, "Ruleset drift audit").
   `.github/ruleset-contract.json` now lists it as the sixth required context alongside `merge

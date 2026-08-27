@@ -59,12 +59,66 @@ fn undeclared_alias_in_forall_binder_returns_core_error_not_panic() {
         .expect_err("an undeclared alias must fail, not panic");
 
     assert_eq!(error.message, "unknown alias 'nonexistent'");
-    // This location is a placeholder, not a real source position: the
-    // qualified-name resolver (`resolve_alias_qualified_name`) has no span
-    // to draw from, so it always reports (1, 1) regardless of where the
-    // binder actually appears.
+    // The statement span now gives the qualified-name resolver the real
+    // source position instead of the former (1, 1) placeholder.
     assert_eq!(error.line, 1);
-    assert_eq!(error.column, 1);
+    assert_eq!(error.column, 42);
+}
+
+/// Rejecting detector for issue #832 shape A: a declared alias does not make
+/// an absent member a valid binder type. The diagnostic keeps author spelling
+/// and the `forall` statement's real location.
+#[test]
+fn declared_alias_with_unknown_forall_type_returns_located_core_error() {
+    let source = r#"compose Broken {
+  use Core as core from "core.fsl"
+  state { x: Int }
+  init {
+    forall u: core.NoSuchType {
+      x = 0
+    }
+  }
+}"#;
+
+    let error = parse_kernel_source(source, &resolver())
+        .expect_err("an unknown member of a declared alias must fail during lowering");
+
+    assert_eq!(error.message, "unknown type 'core.NoSuchType'");
+    assert_eq!(error.line, 5);
+    assert_eq!(error.column, 5);
+    assert!(
+        error
+            .origin
+            .as_deref()
+            .is_some_and(|origin| origin.id.0.starts_with("compose:error:"))
+    );
+}
+
+/// Rejecting detector for the expression-binder path: a qualified type in an
+/// invariant must retain the authored property's location while resolving the
+/// alias member.
+#[test]
+fn declared_alias_with_unknown_invariant_binder_returns_located_core_error() {
+    let source = r#"compose Broken {
+  use Core as core from "core.fsl"
+  state { x: Int }
+    invariant Bad { forall u: core.NoSuchType { true } }
+}"#;
+
+    let error = parse_kernel_source(source, &resolver())
+        .expect_err("an unknown invariant binder member must fail during lowering");
+
+    assert_eq!(error.message, "unknown type 'core.NoSuchType'");
+    assert_eq!(error.line, 4);
+    assert_eq!(error.column, 5);
+    let origin = error.origin.expect("authored compose error origin");
+    assert_eq!(
+        origin
+            .primary
+            .and_then(|site| site.span)
+            .map(|span| (span.start.line, span.start.column)),
+        Some((4, 5))
+    );
 }
 
 /// Accepting control: a correctly declared alias used the same way (in a

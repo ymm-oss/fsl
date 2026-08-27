@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+compose AcceptRealType {
+  use Core as core from "core.fsl"
+  state { x: Int }
+  init {
+    forall u: core.RealType {
+      x = 0
+    }
+  }
+}

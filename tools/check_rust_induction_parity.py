@@ -1,7 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Compare native and Python k-induction envelopes over focused corpus slices."""
+"""Compare native and Python k-induction envelopes over focused corpus slices.
+
+Deletion disposition (F3): ``rust/fslc/tests/induction_cli_contract.rs`` owns
+all 16 native CLI stable-envelope/exit cases with live exclusions and negative
+controls. Retain this harness only while its Python compatibility comparison is
+still required by the broader parity-harness retirement.
+"""
 from __future__ import annotations
 
 import argparse
@@ -13,7 +19,7 @@ from typing import Any
 from fslc.cli import run_verify
 
 from check_rust_cli_snapshot import DEFAULT_RUST_BIN
-from check_rust_full_envelope import _normalize as _normalize_bmc
+from rust_parity_util import _normalize as _normalize_bmc
 
 
 ROOT = Path(__file__).resolve().parents[1]
