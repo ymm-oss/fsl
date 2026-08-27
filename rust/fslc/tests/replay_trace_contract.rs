@@ -213,6 +213,70 @@ fn public_v1_replays_complete_tick_ordered_observations() {
 }
 
 #[test]
+fn nested_option_state_round_trips_without_flattening() {
+    let trace = json!({
+        "$schema": fsl_core::REPLAY_TRACE_V1_SCHEMA_ID,
+        "schema_version": fsl_core::REPLAY_TRACE_V1_SCHEMA_VERSION,
+        "kernel_schema_version": fsl_core::KERNEL_SCHEMA_VERSION,
+        "spec": "NestedOptionReplay",
+        "initial": {"x": null},
+        "events": [
+            {"tick": 1, "action": "wrap", "params": {},
+             "state": {"x": {"kind": "some", "value": null}}},
+            {"tick": 2, "action": "fill", "params": {},
+             "state": {"x": {"kind": "some", "value": 1}}},
+            {"tick": 3, "action": "clear", "params": {}, "state": {"x": null}}
+        ]
+    });
+    let path = write_trace(&trace);
+    let output = replay_spec_path(&fixture("nested_option_replay.fsl"), &path);
+    std::fs::remove_file(&path).expect("remove trace");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(json(&output)["final_state"], json!({"x": null}));
+
+    let mut rejected = trace.clone();
+    rejected["events"]
+        .as_array_mut()
+        .expect("events")
+        .truncate(1);
+    rejected["events"]
+        .as_array_mut()
+        .expect("events")
+        .push(json!({
+            "tick": 2,
+            "action": "wrap",
+            "params": {},
+            "state": {"x": {"kind": "some", "value": null}}
+        }));
+    let path = write_trace(&rejected);
+    let output = replay_spec_path(&fixture("nested_option_replay.fsl"), &path);
+    std::fs::remove_file(path).expect("remove trace");
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        json(&output)["state_before"],
+        json!({"x": {"kind":"some","value":null}})
+    );
+
+    for (label, nested_value) in [
+        ("untagged", json!(1)),
+        ("missing", json!({"kind":"some"})),
+        ("extra", json!({"kind":"some","value":1,"extra":true})),
+    ] {
+        let mut malformed = trace.clone();
+        malformed["events"][1]["state"]["x"] = nested_value;
+        let path = write_trace(&malformed);
+        let output = replay_spec_path(&fixture("nested_option_replay.fsl"), &path);
+        std::fs::remove_file(path).expect("remove trace");
+        assert_eq!(output.status.code(), Some(2), "{label}");
+        assert_eq!(json(&output)["kind"], "io", "{label}");
+    }
+}
+
+#[test]
 fn well_typed_observed_state_divergence_is_nonconformant_with_leaf_evidence() {
     let output = replay("replay_trace.state-mismatch.v1.json");
     assert_eq!(output.status.code(), Some(1));

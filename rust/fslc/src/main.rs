@@ -16113,6 +16113,26 @@ fn snapshot_value(
         TypeRef::Option(inner) => {
             if value.is_null() {
                 Ok(FslValue::None)
+            } else if matches!(inner.as_ref(), TypeRef::Option(_)) {
+                let object = value.as_object().ok_or_else(|| {
+                    format!(
+                        "{path} nested Option must be null or {{\"kind\":\"some\",\"value\":...}}"
+                    )
+                })?;
+                if object.len() != 2
+                    || object.get("kind") != Some(&Value::String("some".to_owned()))
+                    || !object.contains_key("value")
+                {
+                    return Err(format!(
+                        "{path} nested Option must be null or {{\"kind\":\"some\",\"value\":...}}"
+                    ));
+                }
+                Ok(FslValue::Some(Box::new(snapshot_value(
+                    model,
+                    inner,
+                    object.get("value").expect("checked value key"),
+                    path,
+                )?)))
             } else {
                 Ok(FslValue::Some(Box::new(snapshot_value(
                     model, inner, value, path,
