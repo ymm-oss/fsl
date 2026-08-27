@@ -1,0 +1,169 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 FSL Authors
+"""Contract tests for the shared Cargo lock and migrated hook detectors."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import shlex
+import subprocess
+import sys
+import time
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CODEX_HOOKS = ROOT / ".codex" / "hooks"
+
+
+def run_hook(name: str, payload: dict) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(CODEX_HOOKS / name)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        check=False,
+    )
+
+
+def event_command(events: Path, label: str, release: Path | None = None) -> str:
+    program = (
+        "import pathlib,sys,time;"
+        "f=pathlib.Path(sys.argv[1]).open('a');"
+        "f.write(f'{sys.argv[2]}:start\\n');f.flush();"
+        "release=pathlib.Path(sys.argv[3]);"
+        "(time.sleep(0.3) if sys.argv[3]=='-' else exec('while not release.exists():\\n time.sleep(0.01)'));"
+        "f.write(f'{sys.argv[2]}:end\\n');f.close()"
+    )
+    release_arg = "-" if release is None else str(release)
+    return " ".join(
+        [
+            shlex.quote(sys.executable),
+            "-c",
+            shlex.quote(program),
+            shlex.quote(str(events)),
+            label,
+            shlex.quote(release_arg),
+        ]
+    )
+
+
+def wait_for_start(events: Path, label: str) -> None:
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        if events.exists() and f"{label}:start" in events.read_text(encoding="utf-8"):
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"{label} did not start before deadline")
+
+
+def event_order(events: Path) -> list[str]:
+    return events.read_text(encoding="utf-8").splitlines()
+
+
+def test_codex_hooks_register_cargo_rewrite_and_shared_detectors() -> None:
+    hooks = json.loads((ROOT / ".codex" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+    pre_tool = hooks["PreToolUse"]
+    assert [group["matcher"] for group in pre_tool] == ["Bash", "apply_patch|Edit|Write"]
+    assert "cargo_pre_tool_use.py" in pre_tool[0]["hooks"][0]["command"]
+    assert "snapshot_guard.py" in pre_tool[1]["hooks"][0]["command"]
+    post_tool = hooks["PostToolUse"]
+    assert post_tool[0]["matcher"] == "apply_patch|Edit|Write"
+    assert "spdx_guard.py" in post_tool[0]["hooks"][0]["command"]
+    assert "changelog_advisory.py" in post_tool[0]["hooks"][1]["command"]
+
+
+def test_cargo_pre_tool_use_rewrites_only_commands_that_mention_cargo() -> None:
+    skipped = run_hook("cargo_pre_tool_use.py", {"cwd": str(ROOT), "tool_input": {"command": "git status"}})
+    assert skipped.returncode == 0
+    assert skipped.stdout == ""
+
+    original = "CARGO_TARGET_DIR=/tmp/fsl-target cargo test --locked"
+    rewritten = run_hook(
+        "cargo_pre_tool_use.py", {"cwd": str(ROOT), "tool_input": {"command": original}}
+    )
+    assert rewritten.returncode == 0, rewritten.stderr
+    output = json.loads(rewritten.stdout)["hookSpecificOutput"]
+    assert output["permissionDecision"] == "allow"
+    command = output["updatedInput"]["command"]
+    assert "cargo_lock.py" in command
+    assert shlex.split(command)[-1] == original
+
+
+def test_snapshot_pre_tool_use_denies_direct_snapshot_patch() -> None:
+    proc = run_hook(
+        "snapshot_guard.py",
+        {"tool_input": {"command": "*** Update File: tests/snapshots/corpus_snapshot.json"}},
+    )
+    assert proc.returncode == 0, proc.stderr
+    output = json.loads(proc.stdout)["hookSpecificOutput"]
+    assert output["permissionDecision"] == "deny"
+    assert "compatibility-contract" in output["permissionDecisionReason"]
+
+
+def test_unwrapped_commands_overlap_but_cargo_lock_serializes(tmp_path: Path) -> None:
+    unwrapped_events = tmp_path / "unwrapped.txt"
+    release = tmp_path / "release"
+    first = subprocess.Popen(event_command(unwrapped_events, "first", release), shell=True)
+    wait_for_start(unwrapped_events, "first")
+    second = subprocess.Popen(event_command(unwrapped_events, "second", release), shell=True)
+    wait_for_start(unwrapped_events, "second")
+    release.touch()
+    assert first.wait(timeout=5) == 0
+    assert second.wait(timeout=5) == 0
+    unwrapped = event_order(unwrapped_events)
+    assert unwrapped.index("second:start") < unwrapped.index("first:end")
+
+    wrapped_events = tmp_path / "wrapped.txt"
+    wrapper = CODEX_HOOKS / "cargo_lock.py"
+    lock_file = ROOT
+    try:
+        lock_file = Path(
+            subprocess.run(
+                ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        ) / "fsl-cargo.lock"
+        existed = lock_file.exists()
+        first = subprocess.Popen(
+            [sys.executable, str(wrapper), "--cwd", str(ROOT), "--timeout", "5", "--", event_command(wrapped_events, "first")]
+        )
+        wait_for_start(wrapped_events, "first")
+        second = subprocess.Popen(
+            [sys.executable, str(wrapper), "--cwd", str(ROOT), "--timeout", "5", "--", event_command(wrapped_events, "second")]
+        )
+        assert first.wait(timeout=5) == 0
+        assert second.wait(timeout=5) == 0
+        wrapped = event_order(wrapped_events)
+        assert wrapped == ["first:start", "first:end", "second:start", "second:end"]
+    finally:
+        if isinstance(lock_file, Path) and not existed and lock_file.exists():
+            lock_file.unlink()
+
+
+def test_shared_detectors_reject_missing_headers_and_snapshot_paths(tmp_path: Path) -> None:
+    source = tmp_path / "missing.py"
+    source.write_text("print('missing header')\n", encoding="utf-8")
+    spdx = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "check_spdx_headers.py"), "paths", str(source)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert spdx.returncode == 1
+    assert "missing SPDX header" in spdx.stderr
+
+    snapshot = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "check_generated_snapshot.py"), "tests/snapshots/corpus_snapshot.json"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert snapshot.returncode == 2
+    assert "compatibility-contract" in snapshot.stderr
