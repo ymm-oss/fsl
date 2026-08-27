@@ -192,11 +192,27 @@ command and publication contract.
      unviable, and 0 timeouts. Record both sets of numbers. Never widen a
      timeout or threshold to make a local gate pass: record the environment
      difference instead.
-   - A `cancelled` job is not a failing job. If the aggregate's only
-     non-success input is cancellation, treat it as transient and rerun only
-     failed jobs. On `d9e9710`, one `native Z3 4.16 (windows-latest)` job was
-     cancelled while the other 15 jobs succeeded; `gh run rerun --failed`
-     succeeded.
+   - A `cancelled` job is not a failing job, but decide *why* it was cancelled
+     before rerunning: GitHub reports a job killed by its own
+     `timeout-minutes` as `cancelled`, not as a timeout. Compute the job's
+     elapsed time from its `startedAt` and `completedAt` and compare it with
+     that job's configured `timeout-minutes`.
+     - Elapsed well under the budget, and the aggregate's only non-success
+       input is the cancellation: transient. Rerun only failed jobs. On
+       `d9e9710`, one `native Z3 4.16 (windows-latest)` job was cancelled
+       while the other 15 jobs succeeded; `gh run rerun --failed` succeeded.
+     - Elapsed at the budget: this is a timeout wearing a cancellation label.
+       Rerunning without establishing why the job exceeded its budget repeats
+       it; `.github/workflows/ci.yml`'s `rust-native-z3` comment records six
+       consecutive scheduled `windows-latest` timeouts from 2026-08-07 through
+       2026-08-11, with cache absence as an observed material correlate. Establish the cause first, then rerun
+       at most once when the cause is known to have changed. On `ca2d5e7d`,
+       that job ran 06:45:55Z to 07:46:59Z — 61 minutes against
+       `.github/workflows/ci.yml`'s `timeout-minutes: 60` — with a cache key
+       (`v0-rust-rust-native-z3-Windows_NT-x64-368f6b88-...`) that had not
+       existed before the run, so it built cold. It saved that cache as it
+       exited, which is what made a single warm rerun worth attempting.
+       Never widen the budget to make the lane pass.
    - A reproducing failure, a surviving non-equivalent mutant, or other failed
      job is a defect until evidence establishes a different branch. Fix it
      upstream and repeat the applicable release evidence; do not retag to
