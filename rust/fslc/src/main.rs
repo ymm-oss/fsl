@@ -6902,16 +6902,15 @@ fn domain_scaffold_inputs_from_source(
     path: &Path,
     source: &str,
     domain: &fsl_syntax::DomainSpec,
-) -> Result<(Value, Value), String> {
-    let (kernel, model) =
-        load_kernel_model_from_source(path, source).map_err(|error| error.to_string())?;
+) -> Result<(Value, Value), SpecLoadError> {
+    let (kernel, model) = load_kernel_model_from_source(path, source)?;
     let contract = fsl_core::public_kernel_contract(
         &kernel,
         &model,
         &path.to_string_lossy(),
         source_dialect(source),
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))?;
     Ok((contract, fsl_tools::domain_scaffold_metadata(domain)))
 }
 
@@ -7062,7 +7061,7 @@ fn run_domain_generate(
     }
     let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, &source, &domain) {
         Ok(input) => input,
-        Err(error) => return (semantic_error_output(&error), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
     let mut result = match fsl_tools::domain_scaffold(&kernel, &metadata, target) {
         Ok(result) => result,
@@ -7572,7 +7571,7 @@ fn run_domain_testgen(
         let mut prefix = "// Auto-generated fsl-domain conformance scaffold.\n// Wire makeAdapter() to the generated aggregate adapter or your implementation adapter.\n\n".to_owned();
         let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, &source, &domain) {
             Ok(input) => input,
-            Err(error) => return (semantic_error_output(&error), 2),
+            Err(error) => return (spec_load_error_output(&error), 2),
         };
         let adapter_files = match fsl_tools::domain_adapter_files(&kernel, &metadata) {
             Ok(files) => files,
