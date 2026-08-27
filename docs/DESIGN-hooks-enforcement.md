@@ -51,12 +51,31 @@ remaining checked-in entries were not. Consequently, descriptions of hook
 behavior in this document state the behavior only after the developer has
 accepted each entry's trust prompt.
 
+The hook-source path in a state key is absolute, and state lookup is exact;
+trust does not transfer to a linked worktree. The read-only comparison behind
+#929 found persisted `session_start` hashes for Codex's global hook source and
+for the primary checkout's `.codex/hooks.json`, while the linked worktree's
+`.codex/hooks.json` supplied a third, different source path. Its
+`session_start` key and all four `PreToolUse`/`PostToolUse` keys were therefore
+untrusted. The local diagnostic warning listed all five as
+`session_start:0:0, pre_tool_use:0:0, pre_tool_use:1:0, post_tool_use:0:0,
+post_tool_use:0:1`. This distinction is intentionally described without
+recording a developer-specific absolute path in repository history.
+
+[AGENTS.md](../AGENTS.md) requires a dedicated branch/worktree for non-trivial
+changes. A newly created linked worktree consequently starts with no inherited
+hook trust as the ordinary case, not as an exception. Hook behavior must never
+be designed as a mechanism that becomes reliably available after a developer
+has approved it once: that approval applies only to the particular hook source
+path where it was granted.
+
 Trust is local to a developer machine and therefore unavailable to CI. Hook
 configuration contract tests may verify a checked-in entry's existence,
 matcher, and command, but cannot establish that it is trusted on the machine
 that will run it. Hooks must not be counted as merge-time enforcement;
-required CI remains the merge-time owner regardless of hook configuration or
-local trust state.
+required CI remains the merge-time owner. The linked-worktree non-inheritance
+is an additional reason: hooks are local convenience and early feedback, never
+the repository rules' enforcement owner.
 
 ## CI-owned checks and shared detectors
 

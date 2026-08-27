@@ -179,7 +179,9 @@ New source files must carry the repository's Apache-2.0 SPDX header.
 
 - In Codex sessions, `tasks/active.md` is the worktree-local current task packet. It is ignored by Git
   and must be reconciled with the branch, working tree, implementation, and observed command results.
-- When Codex prompts for hook trust, approve the entry; until then, the Cargo serialization hook does not run.
+- When Codex prompts for hook trust, approve the entry for local feedback if appropriate; trust is bound
+  to the hook source's absolute path, does not transfer to linked worktrees, and must not be relied on
+  as repository enforcement.
 - When a task packet declares append-only history or a no-amend rule, create a new commit rather than
   using `git commit --amend`; an exception requires explicit approval recorded in the task packet.
 - A single successful or partial verification command is not completion evidence. The task packet must
