@@ -27,6 +27,10 @@ fn nested_option_state_shape() {
     range_values: Map<0..1, Bit>,
     enum_members: Set<Flag>,
     queue: Seq<Bit, 1>,
+    int_queue: Seq<Int, 1>,
+    bool_queue: Seq<Bool, 1>,
+    range_queue: Seq<0..1, 1>,
+    enum_queue: Seq<Flag, 1>,
     links: relation Id -> Id
   }
 }",
@@ -34,11 +38,10 @@ fn nested_option_state_shape() {
     .expect("nested Option state shapes are accepted");
     assert!(accepted.state_type("depth_three").is_some());
 
-    // This table gives each `bounded_scalar` false branch a concrete
-    // bounded-only position. Keep it aligned with
-    // DESIGN-nested-option-support.md §3.2: `Int` is scalar but is never a
-    // bounded key, element, or relation endpoint; nor are resolved structs or
-    // any collection/Option shape.
+    // These placements make every reachable false arm of all three shape
+    // predicates observable: Map keys reach `bounded_scalar`, Map values
+    // reach `struct_value` after `optional_scalar` rejects them, and Seq
+    // elements reach `scalar`. `Int` remains scalar but is not bounded.
     for ty in [
         "Option<Record>",
         "Option<Set<Bit>>",
@@ -47,10 +50,17 @@ fn nested_option_state_shape() {
         "Option<relation Id -> Id>",
         "Map<Id, Option<Set<Bit>>>",
         "Map<Id, Set<Bit>>",
+        "Map<Id, Map<Id, Bool>>",
+        "Map<Id, Seq<Bit, 1>>",
+        "Map<Id, relation Id -> Id>",
         "Map<Id, Option<Record>>",
         "Map<Record, Bit>",
         "Map<Int, Bit>",
         "Map<Option<Id>, Bit>",
+        "Map<Map<Id, Bit>, Bit>",
+        "Map<relation Id -> Id, Bit>",
+        "Map<Set<Id>, Bit>",
+        "Map<Seq<Bit, 1>, Bit>",
         "Set<Int>",
         "Set<Record>",
         "Set<Option<Id>>",
@@ -59,6 +69,11 @@ fn nested_option_state_shape() {
         "Set<Set<Id>>",
         "Set<Seq<Bit, 1>>",
         "Seq<Option<Bit>, 1>",
+        "Seq<Record, 1>",
+        "Seq<Map<Id, Bit>, 1>",
+        "Seq<relation Id -> Id, 1>",
+        "Seq<Set<Id>, 1>",
+        "Seq<Seq<Bit, 1>, 1>",
         "relation Int -> Id",
         "relation Id -> Option<Id>",
     ] {
@@ -109,14 +124,7 @@ fn nested_option_state_shape() {
             error.message, "struct field 'Record.nested' has non-scalar type",
             "{ty}"
         );
-        assert_eq!(
-            error
-                .span
-                .expect("struct field rejection is located")
-                .start
-                .line,
-            5,
-            "{ty}"
-        );
+        let span = error.span.expect("struct field rejection is located");
+        assert_eq!((span.start.line, span.start.column), (5, 3), "{ty}");
     }
 }
