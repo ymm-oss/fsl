@@ -201,15 +201,24 @@ fn native_check_accepts_a_bounded_map_key() {
 }
 
 #[test]
-fn native_check_accepts_nested_bounded_map_keys() {
+fn native_check_rejects_nested_bounded_map_values_with_a_located_state_type_contract() {
     let (value, status) = run_cli(&[
         "check",
-        "rust/fslc/tests/fixtures/map_nested_bounded_key_accepted.fsl",
+        "rust/fslc/tests/fixtures/map_nested_bounded_value_rejected.fsl",
     ]);
 
-    assert_eq!(status, 0, "{value}");
-    assert_eq!(value["result"], "ok");
-    assert!(value["warnings"].as_array().is_some_and(Vec::is_empty));
+    assert_eq!(status, 2, "{value}");
+    assert_eq!(value["result"], "error");
+    assert_eq!(value["kind"], "type");
+    assert_eq!(
+        value["message"],
+        "state variable 'm' has unsupported state type"
+    );
+    assert_eq!(value["loc"], serde_json::json!({"line": 7, "column": 5}));
+    assert_eq!(
+        value["hint"],
+        "state types allow scalars, nested Option around a scalar, structs with those fields, Map<bounded scalar, scalar-or-nested-Option-or-struct>, Set<bounded scalar>, Seq<scalar,N>, and bounded-scalar relations; Option cannot wrap a collection or struct"
+    );
 }
 
 #[test]

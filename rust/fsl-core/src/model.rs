@@ -254,6 +254,50 @@ impl KernelModel {
             .find_map(|(state_name, ty)| (state_name == name).then_some(ty))
     }
 
+    /// Return the resolved type of a state update target.
+    ///
+    /// The target's index expression is checked separately. This helper owns
+    /// only the state-root/Map-or-relation/struct-field lookup shared by the
+    /// typechecker and symbolic transition evaluator.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ModelError`] when the target does not name a state location
+    /// with a resolvable Map, relation, or struct-field type.
+    pub fn state_lvalue_type(&self, target: &LValue) -> Result<TypeRef, ModelError> {
+        match target {
+            LValue::Var(name) => self
+                .state_type(name)
+                .cloned()
+                .ok_or_else(|| model_error(format!("unknown update target '{name}'"))),
+            LValue::Index(name, _) => match self.state_type(name) {
+                Some(TypeRef::Map(_, value) | TypeRef::Relation(_, value)) => {
+                    Ok(value.as_ref().clone())
+                }
+                Some(_) => Err(model_error(
+                    "indexed update target requires Map or Relation",
+                )),
+                None => Err(model_error(format!("unknown update target '{name}'"))),
+            },
+            LValue::Field(base, field) => {
+                let TypeRef::Named(name) = self.state_lvalue_type(base)? else {
+                    return Err(model_error("field update target requires named struct"));
+                };
+                match self.types.get(&name) {
+                    Some(TypeDef::Struct { fields }) => fields
+                        .iter()
+                        .find_map(|(candidate, ty)| (candidate == field).then(|| ty.clone()))
+                        .ok_or_else(|| {
+                            model_error(format!("unknown struct field '{name}.{field}'"))
+                        }),
+                    Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) | None => {
+                        Err(model_error("field update target requires struct"))
+                    }
+                }
+            }
+        }
+    }
+
     #[must_use]
     pub fn struct_fields(&self, name: &str) -> Option<&[(String, TypeRef)]> {
         match self.types.get(name) {
@@ -618,6 +662,18 @@ impl ModelBuilder {
                             .into_name_resolution());
                         }
                         reject_map_int_key(&field.name, &field.ty, field.span)?;
+                        let origin = self.origins.diagnostic_origin(&state_target(&field.name));
+                        let resolved = self
+                            .resolve_type(&field.ty)
+                            .map_err(|error| error.with_origin(origin.clone()).at(field.span))?;
+                        if !self.legal_state_type(&resolved) {
+                            return Err(model_error(format!(
+                                "state variable '{}' has unsupported state type",
+                                field.name
+                            ))
+                            .with_origin(origin)
+                            .at(field.span));
+                        }
                         if let Some(initializer) = &field.initializer {
                             if let Some(form) = unsupported_inline_form(initializer) {
                                 return Err(model_error(format!(
@@ -664,18 +720,7 @@ impl ModelBuilder {
                                 span: initializer_span,
                             });
                         }
-                        let origin = self.origins.diagnostic_origin(&state_target(&field.name));
-                        state.push((
-                            field.name.clone(),
-                            self.resolve_type(&field.ty)
-                                .map_err(|error| error.with_origin(origin))
-                                // A kernel `spec` registers no lowering origins,
-                                // so an unresolvable state type would otherwise
-                                // reach the CLI with no location at all. The
-                                // declaration's own span is the construct the
-                                // reader has to edit (issue 555).
-                                .map_err(|error| error.at(field.span))?,
-                        ));
+                        state.push((field.name.clone(), resolved));
                     }
                 }
                 // Dialect lowering can append generated init fragments (for
@@ -1029,7 +1074,7 @@ impl ModelBuilder {
                     .collect::<Result<Vec<_>, ModelError>>()
                     .map_err(|error| error.with_origin(origin.clone()).at(*span))?;
                 for (field, ty) in &resolved {
-                    if !self.is_scalar_struct_field(ty) {
+                    if !self.optional_scalar(ty) {
                         return Err(model_error(format!(
                             "struct field '{name}.{field}' has non-scalar type"
                         ))
@@ -1044,17 +1089,83 @@ impl ModelBuilder {
         Ok(())
     }
 
-    fn is_scalar_struct_field(&self, ty: &TypeRef) -> bool {
+    fn scalar(&self, ty: &TypeRef) -> bool {
         match ty {
             TypeRef::Int | TypeRef::Bool | TypeRef::Range(_, _) => true,
-            TypeRef::Named(name) => matches!(
-                self.types.get(name),
-                Some(TypeDef::Domain { .. } | TypeDef::Enum { .. })
-            ),
-            TypeRef::Option(inner) => self.is_scalar_struct_field(inner),
+            TypeRef::Named(name) => match self.types.get(name) {
+                Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) => true,
+                Some(TypeDef::Struct { .. }) | None => false,
+            },
+            TypeRef::Map(_, _)
+            | TypeRef::Relation(_, _)
+            | TypeRef::Set(_)
+            | TypeRef::Seq(_, _)
+            | TypeRef::Option(_) => false,
+        }
+    }
+
+    fn bounded_scalar(&self, ty: &TypeRef) -> bool {
+        match ty {
+            TypeRef::Bool | TypeRef::Range(_, _) => true,
+            TypeRef::Named(name) => match self.types.get(name) {
+                Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) => true,
+                Some(TypeDef::Struct { .. }) | None => false,
+            },
+            TypeRef::Int
+            | TypeRef::Map(_, _)
+            | TypeRef::Relation(_, _)
+            | TypeRef::Set(_)
+            | TypeRef::Seq(_, _)
+            | TypeRef::Option(_) => false,
+        }
+    }
+
+    fn optional_scalar(&self, ty: &TypeRef) -> bool {
+        match ty {
+            TypeRef::Int | TypeRef::Bool | TypeRef::Range(_, _) | TypeRef::Named(_) => {
+                self.scalar(ty)
+            }
+            TypeRef::Option(inner) => self.optional_scalar(inner),
             TypeRef::Map(_, _) | TypeRef::Relation(_, _) | TypeRef::Set(_) | TypeRef::Seq(_, _) => {
                 false
             }
+        }
+    }
+
+    fn struct_value(&self, ty: &TypeRef) -> bool {
+        match ty {
+            TypeRef::Named(name) => match self.types.get(name) {
+                Some(TypeDef::Struct { fields }) => fields
+                    .iter()
+                    .all(|(_, field_ty)| self.optional_scalar(field_ty)),
+                Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) | None => false,
+            },
+            TypeRef::Int
+            | TypeRef::Bool
+            | TypeRef::Range(_, _)
+            | TypeRef::Map(_, _)
+            | TypeRef::Relation(_, _)
+            | TypeRef::Set(_)
+            | TypeRef::Seq(_, _)
+            | TypeRef::Option(_) => false,
+        }
+    }
+
+    fn legal_state_type(&self, ty: &TypeRef) -> bool {
+        match ty {
+            TypeRef::Int | TypeRef::Bool | TypeRef::Range(_, _) | TypeRef::Named(_) => {
+                self.optional_scalar(ty) || self.struct_value(ty)
+            }
+            TypeRef::Option(_) => self.optional_scalar(ty),
+            TypeRef::Map(key, value) => {
+                self.bounded_scalar(key)
+                    && (self.optional_scalar(value) || self.struct_value(value))
+            }
+            TypeRef::Relation(source, target) => {
+                self.bounded_scalar(source) && self.bounded_scalar(target)
+            }
+            TypeRef::Set(element) => self.bounded_scalar(element),
+            TypeRef::Seq(element, _) => self.scalar(element),
         }
     }
 

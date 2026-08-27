@@ -15,7 +15,7 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
         (
             "type",
             "spec Broken { state { value: Missing } init { value = 0 } }",
-            Some((1, 30)),
+            Some((1, 23)),
             None,
         ),
         (
@@ -23,7 +23,15 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
             "spec Broken { type K = 0..1 struct Bag { members: Set<K> } state { bag: Bag } init { bag.members = Set {} } }",
             None,
             Some(
-                "struct fields must be scalar (domain type, enum, Bool, Int) or Option<scalar>; use a separate Map for Set/Map/Seq/struct fields",
+                "struct fields must be a scalar (domain type, enum, Bool, Int) or nested Option around a scalar; use a separate Map for Set, Map, Seq, relation, or struct fields",
+            ),
+        ),
+        (
+            "state-type-hint",
+            "spec Broken {\n  type Key = 0..1\n  state {\n    nested: Map<Key, Map<Key, Bool>>\n  }\n}",
+            Some((4, 5)),
+            Some(
+                "state types allow scalars, nested Option around a scalar, structs with those fields, Map<bounded scalar, scalar-or-nested-Option-or-struct>, Set<bounded scalar>, Seq<scalar,N>, and bounded-scalar relations; Option cannot wrap a collection or struct",
             ),
         ),
         (
@@ -58,10 +66,12 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
         assert_eq!(cli["hint"].as_str(), expected_hint, "{name}");
         if !cli["loc"].is_null() {
             assert_eq!(cli["loc"], shared.span.python_loc(), "{name}");
-        } else if let Some(expected) = expected_location {
-            assert_eq!((shared.span.start.line, shared.span.start.column), expected);
         }
-        assert_eq!(shared.span.start.line, 1, "{name}");
+        if let Some(expected) = expected_location {
+            assert_eq!((shared.span.start.line, shared.span.start.column), expected);
+        } else {
+            assert_eq!(shared.span.start.line, 1, "{name}");
+        }
         assert!(shared.span.start.offset <= source.len(), "{name}");
     }
 

@@ -150,7 +150,13 @@ pub fn render_semantic_error(
     if message.starts_with("struct field '") && message.ends_with(" has non-scalar type") {
         output.insert(
             "hint".to_owned(),
-            json!("struct fields must be scalar (domain type, enum, Bool, Int) or Option<scalar>; use a separate Map for Set/Map/Seq/struct fields"),
+            json!("struct fields must be a scalar (domain type, enum, Bool, Int) or nested Option around a scalar; use a separate Map for Set, Map, Seq, relation, or struct fields"),
+        );
+    }
+    if message.starts_with("state variable '") && message.ends_with(" has unsupported state type") {
+        output.insert(
+            "hint".to_owned(),
+            json!("state types allow scalars, nested Option around a scalar, structs with those fields, Map<bounded scalar, scalar-or-nested-Option-or-struct>, Set<bounded scalar>, Seq<scalar,N>, and bounded-scalar relations; Option cannot wrap a collection or struct"),
         );
     }
     if message.starts_with("unknown ai hard-contract rule '") {
@@ -247,6 +253,8 @@ pub fn semantic_error_kind(message: &str) -> &'static str {
         || message.starts_with("cannot coerce symbolic value")
         || message.starts_with("Map<Int, ...> on '") && message.contains("' is rejected;")
         || message.starts_with("struct field '") && message.ends_with(" has non-scalar type")
+        || message.starts_with("state variable '")
+            && message.ends_with(" has unsupported state type")
     {
         "type"
     } else {
@@ -2189,6 +2197,40 @@ mod tests {
 
     fn test_envelope() -> Map<String, Value> {
         Map::from_iter([("fsl".to_owned(), json!("1.0"))])
+    }
+
+    #[test]
+    fn state_shape_errors_are_located_type_diagnostics() {
+        let output = render_semantic_error(
+            Map::new(),
+            "state variable 'x' has unsupported state type",
+            Some(json!({"line": 3, "column": 3})),
+            false,
+        );
+        assert_eq!(output["result"], "error");
+        assert_eq!(output["kind"], "type");
+        assert_eq!(output["loc"], json!({"line": 3, "column": 3}));
+        assert_eq!(
+            output["hint"],
+            "state types allow scalars, nested Option around a scalar, structs with those fields, Map<bounded scalar, scalar-or-nested-Option-or-struct>, Set<bounded scalar>, Seq<scalar,N>, and bounded-scalar relations; Option cannot wrap a collection or struct"
+        );
+    }
+
+    #[test]
+    fn struct_field_shape_errors_describe_the_recursive_option_boundary() {
+        let output = render_semantic_error(
+            Map::new(),
+            "struct field 'Record.nested' has non-scalar type",
+            Some(json!({"line": 3, "column": 3})),
+            false,
+        );
+        assert_eq!(output["result"], "error");
+        assert_eq!(output["kind"], "type");
+        assert_eq!(output["loc"], json!({"line": 3, "column": 3}));
+        assert_eq!(
+            output["hint"],
+            "struct fields must be a scalar (domain type, enum, Bool, Int) or nested Option around a scalar; use a separate Map for Set, Map, Seq, relation, or struct fields"
+        );
     }
 
     #[test]
