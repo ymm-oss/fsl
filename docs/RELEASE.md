@@ -218,8 +218,11 @@ It also rejects a dynamic dependency on `libz3`.
 
 ## Failure handling
 
-- For a transient job failure, inspect it and use
-  `gh run rerun RUN_ID --failed`. Do not retag merely to retry the same commit.
+- Classify the evidence first under the internal
+  `.claude/skills/release/SKILL.md` skill's `Classify a failed gate before
+  retrying` section.
+  For a failure classified there as transient, use `gh run rerun RUN_ID --failed`.
+  Do not retag merely to retry the same commit.
 - Use `workflow_dispatch` for build diagnosis. It is the only dry-run path and
   never attaches Release assets.
 - Never force-move, delete, or reuse a pushed release tag. If the tagged commit
