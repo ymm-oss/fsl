@@ -1702,13 +1702,6 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
     ),
     pin!(
         FailureClass::Guard,
-        "domain generate",
-        GUARD_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#773"
-    ),
-    pin!(
-        FailureClass::Guard,
         "domain analyze",
         GUARD_FIXTURE,
         SEMANTIC_WITHOUT_INPUT_PATH,
@@ -1762,13 +1755,6 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         GUARD_FIXTURE,
         SEMANTIC_WITHOUT_INPUT_PATH,
         "#780"
-    ),
-    pin!(
-        FailureClass::Name,
-        "domain generate",
-        NAME_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#773"
     ),
     pin!(
         FailureClass::Name,
@@ -3074,6 +3060,26 @@ fn lowering_guard_errors_are_uniform_or_pinned_across_frontend_siblings() {
     }
 }
 
+/// #773: the generation path reaches the same checked-Kernel lowering failure
+/// as `domain check`. This is a full envelope comparison: no field is excluded.
+/// The population test above independently keeps guard cells for all frontend
+/// siblings, including commands with their own deliberately pinned envelopes.
+#[test]
+fn domain_generate_guard_envelope_matches_domain_check_exactly() {
+    let checked = run("domain check", GUARD_FIXTURE);
+    let generated = run("domain generate", GUARD_FIXTURE);
+    assert_eq!(
+        generated.exit, checked.exit,
+        "generated exit={} stdout={} checked exit={} stdout={}",
+        generated.exit, generated.stdout, checked.exit, checked.stdout,
+    );
+    assert_eq!(
+        generated.json, checked.json,
+        "domain generate must preserve the full checked-Kernel guard envelope; generated stdout={} checked stdout={}",
+        generated.stdout, checked.stdout,
+    );
+}
+
 #[test]
 fn unresolved_identifier_errors_are_uniform_or_pinned_across_frontend_siblings() {
     for cell in cells(FailureClass::Name) {
@@ -3247,7 +3253,7 @@ fn approval_diff_zero_digest_negative_control_stops_before_the_diff() {
 }
 
 #[test]
-fn name_matrix_keeps_eight_uniform_countercontrols_and_one_pin() {
+fn name_matrix_keeps_nine_uniform_countercontrols() {
     let bounded_commands = [
         "check",
         "verify",
@@ -3262,27 +3268,25 @@ fn name_matrix_keeps_eight_uniform_countercontrols_and_one_pin() {
         .into_iter()
         .filter(|cell| bounded_commands.contains(&cell.command))
         .collect::<Vec<_>>();
-    let pinned = name_cells
-        .iter()
-        .filter(|cell| {
-            KNOWN_ASYMMETRIES.iter().any(|pin| {
-                pin.class == FailureClass::Name
-                    && pin.command == cell.command
-                    && pin.shape == cell.shape
-                    && pin.fixture == cell.fixture
-            })
-        })
-        .count();
     assert_eq!(
         name_cells.len(),
         9,
         "Name matrix must keep nine countercontrols"
     );
-    assert_eq!(pinned, 1, "Name matrix must keep one self-retiring pin");
     assert_eq!(
-        name_cells.len() - pinned,
-        8,
-        "Name matrix must keep eight uniform countercontrols"
+        name_cells
+            .iter()
+            .filter(|cell| {
+                KNOWN_ASYMMETRIES.iter().any(|pin| {
+                    pin.class == FailureClass::Name
+                        && pin.command == cell.command
+                        && pin.shape == cell.shape
+                        && pin.fixture == cell.fixture
+                })
+            })
+            .count(),
+        0,
+        "Name matrix must keep all nine countercontrols uniform"
     );
 }
 
