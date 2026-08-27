@@ -339,8 +339,9 @@ one authored-source `String`, parse their `DomainSpec` with
 replacement cannot make either command validate a different source version
 before returning output. They reject unresolved identifiers with the original
 source location instead of emitting a partial analysis or unusable Kernel text.
-`domain generate` uses the same typed lowering but does not yet have this
-single-snapshot contract; #808 tracks that separate TOCTOU follow-up.
+`domain generate`, `domain replay`, `domain testgen`, and `domain check` use the
+same captured source for checked-kernel scaffolding, Monitor replay,
+generic/adapter test generation, and edition post-processing respectively (#808).
 `fslc domain generate --target typescript|python|kotlin|swift|rust` for
 Functional DDD scaffolds, `fslc domain testgen` for adapter/conformance
 scaffolds, and `fslc domain replay --logs events.jsonl` for runtime command /

@@ -323,9 +323,10 @@ authored-source `String`, parse their `DomainSpec` with
 replacement therefore cannot make either command validate a different source
 version before returning output. They reject unresolved identifiers with the
 original source location; neither command is a best-effort/raw-AST inspection
-path for semantically invalid domain input. `domain generate` uses the same
-typed lowering but does not yet have this single-snapshot contract; #808 tracks
-that separate TOCTOU follow-up.
+path for semantically invalid domain input. `domain generate`, `domain replay`,
+`domain testgen`, and `domain check` extend the same single-snapshot contract
+through checked-kernel scaffolding, Monitor replay, generic and adapter test
+generation, and edition postprocessing.
 The accepted #662 design keeps `event_*` flags one-hot/current-step and will add
 a dedicated `Map<Correlation,SagaPhase>` in a follow-up; do not make global
 event flags sticky or treat one effect's status map as a general saga history.

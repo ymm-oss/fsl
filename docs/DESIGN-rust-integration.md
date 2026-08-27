@@ -94,9 +94,10 @@ snapshot guarantee.
 The generic `testgen` and `scenarios` command entries join the same contract: `run_scenarios` and
 `run_testgen` capture their root specification once and derive `load_model`, requirement-trace
 validation, the BMC fallback on a genuine violation, and every acceptance/forbidden requirement-trace
-scenario from that same source string (#808). `domain testgen` and the AI dialects still re-read
-their root path inside the generic `testgen` path they delegate to; that gap is intentionally out of
-scope for #808 (no user-facing consumer of the DDD notation exists yet) and remains open.
+scenario from that same source string (#808). The `domain generate`, `domain replay`, `domain testgen`,
+and `domain check` entries likewise capture one root domain source, derive their `DomainSpec`, checked
+Kernel/model, generated adapter scaffold, and edition post-processing from it, and never delegate to a
+path-reading generic helper. The AI dialects remain outside this #808 contract.
 
 The #442 local-optimum audit found that retaining the old Python exporter as an apparent complete
 source was locally convenient when the Rust CLI still matched it, but became a `mixed`

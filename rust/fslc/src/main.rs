@@ -6857,18 +6857,9 @@ fn ai_compat_profile_block(profile: &Value) -> String {
     format!("artifact {artifact} {{\n{requires_line}{provides_line}}}\n")
 }
 
-fn parse_domain_document(path: &Path) -> Result<fsl_syntax::DomainSpec, SpecLoadError> {
-    match load_surface_document(path)? {
-        fsl_syntax::SurfaceDocument::Domain(domain) => Ok(domain),
-        _ => Err(SpecLoadError::unlocated_semantic(
-            "expected a domain document",
-        )),
-    }
-}
-
-/// Same as [`parse_domain_document`], but from an already-captured source
-/// string so a caller that must validate and project the identical snapshot
-/// (#796) does not re-read `path`.
+/// Parse a domain document from an already-captured source string so a caller
+/// that must validate and project the identical snapshot (#796) does not
+/// re-read `path`.
 fn parse_domain_document_from_source(
     path: &Path,
     source: &str,
@@ -6889,27 +6880,37 @@ fn parse_domain_document_from_source(
 fn read_domain_command_input(
     path: &Path,
 ) -> Result<(String, fsl_syntax::DomainSpec), SpecLoadError> {
-    // This command's caller contract predates the typed `io` envelope, same as
-    // `load_surface_document` above. Keep a read failure classified as
-    // `semantics` without widening #780 beyond its declared parse-only scope.
-    let source = std::fs::read_to_string(path)
-        .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))?;
+    let source = read_domain_command_source(path)?;
     let domain = parse_domain_document_from_source(path, &source)?;
     Ok((source, domain))
 }
 
-fn domain_scaffold_inputs(
+/// Capture a domain command's one root-source snapshot.
+///
+/// All command-specific projections (the domain AST, checked Kernel/model,
+/// generated scaffold, replay Monitor, and edition metadata) must derive from
+/// this value. Dependencies resolved by `FsResolver` are intentionally outside
+/// this root-input contract.
+fn read_domain_command_source(path: &Path) -> Result<String, SpecLoadError> {
+    // This command's caller contract predates the typed `io` envelope, same as
+    // `load_surface_document` above. Keep a read failure classified as
+    // `semantics` without widening #780 beyond its declared parse-only scope.
+    std::fs::read_to_string(path)
+        .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))
+}
+
+fn domain_scaffold_inputs_from_source(
     path: &Path,
+    source: &str,
     domain: &fsl_syntax::DomainSpec,
 ) -> Result<(Value, Value), String> {
-    // Reached only once the caller has parsed `path` into a `DomainSpec`, so
-    // the load cannot fail with a surface-parse error here.
-    let (source, kernel, model) = load_kernel_model(path).map_err(|error| error.to_string())?;
+    let (kernel, model) =
+        load_kernel_model_from_source(path, source).map_err(|error| error.to_string())?;
     let contract = fsl_core::public_kernel_contract(
         &kernel,
         &model,
         &path.to_string_lossy(),
-        source_dialect(&source),
+        source_dialect(source),
     )
     .map_err(|error| error.to_string())?;
     Ok((contract, fsl_tools::domain_scaffold_metadata(domain)))
@@ -6953,24 +6954,44 @@ fn run_domain_check(
     engine: &str,
     edition: &str,
 ) -> (Value, i32) {
-    let domain = match parse_domain_document(path) {
+    let source = match read_domain_command_source(path) {
+        Ok(source) => source,
+        // `apply_domain_edition` cannot enrich an unreadable root document;
+        // returning the established load error directly also keeps this
+        // command to its single attempted root-path read.
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let domain = match parse_domain_document_from_source(path, &source) {
         Ok(domain) => domain,
         Err(error) => {
-            return apply_domain_edition((spec_load_error_output(&error), 2), path, path, edition);
+            return apply_domain_edition_from_source(
+                (spec_load_error_output(&error), 2),
+                &source,
+                path,
+                edition,
+            );
         }
     };
-    let (kernel, status) = run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
+    let (kernel, status) = run_verify_from_source(
+        path,
+        &source,
+        depth,
+        deadlock,
+        engine,
+        DEFAULT_EXPLICIT_BUDGET,
+        1,
+    );
     // Issue #515. The rule and its rationale live with the rest of the outcome
     // vocabulary; `run_db_check` calls the same predicate.
     if !fslc_rust::outcome::is_definitive_kernel_verdict(status) {
-        return apply_domain_edition((kernel, status), path, path, edition);
+        return apply_domain_edition_from_source((kernel, status), &source, path, edition);
     }
     let result = match fsl_tools::check_domain(&domain, &fslc_rust::outcome::project_kernel(kernel))
     {
         Ok(result) => wrap_specialized(result),
         Err(error) => (core_error_output(&error), 2),
     };
-    apply_domain_edition(result, path, path, edition)
+    apply_domain_edition_from_source(result, &source, path, edition)
 }
 
 fn run_domain_analyze(path: &Path) -> (Value, i32) {
@@ -7023,7 +7044,11 @@ fn run_domain_generate(
     target: &str,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let domain = match parse_domain_document(path) {
+    let source = match read_domain_command_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let domain = match parse_domain_document_from_source(path, &source) {
         Ok(domain) => domain,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -7036,7 +7061,7 @@ fn run_domain_generate(
             2,
         );
     }
-    let (kernel, metadata) = match domain_scaffold_inputs(path, &domain) {
+    let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, &source, &domain) {
         Ok(input) => input,
         Err(error) => return (semantic_error_output(&error), 2),
     };
@@ -7191,7 +7216,11 @@ fn domain_replay_step(
 
 #[allow(clippy::too_many_lines)]
 fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
-    let domain = match parse_domain_document(path) {
+    let source = match read_domain_command_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let domain = match parse_domain_document_from_source(path, &source) {
         Ok(domain) => domain,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -7199,7 +7228,7 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
         Ok(events) => events,
         Err(error) => return (error_output("parse", &error), 2),
     };
-    let model = match load_model(path) {
+    let model = match load_model_from_source(path, &source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -7470,11 +7499,16 @@ fn run_domain_testgen(
     strict: bool,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let domain = match parse_domain_document(path) {
+    let source = match read_domain_command_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let domain = match parse_domain_document_from_source(path, &source) {
         Ok(domain) => domain,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let (generic, generic_status) = run_testgen(path, depth, target, deadlock_mode, strict, None);
+    let (generic, generic_status) =
+        run_testgen_from_source(path, &source, depth, target, deadlock_mode, strict, None);
     if generic_status != 0 {
         // Same reasoning as run_testgen above: `domain testgen` must not
         // re-wrap a genuine violated/reachable_failed/internal result from
@@ -7537,7 +7571,7 @@ fn run_domain_testgen(
     }
     if target == "vitest" {
         let mut prefix = "// Auto-generated fsl-domain conformance scaffold.\n// Wire makeAdapter() to the generated aggregate adapter or your implementation adapter.\n\n".to_owned();
-        let (kernel, metadata) = match domain_scaffold_inputs(path, &domain) {
+        let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, &source, &domain) {
             Ok(input) => input,
             Err(error) => return (semantic_error_output(&error), 2),
         };
@@ -10906,12 +10940,37 @@ fn run_testgen(
     strict: bool,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let (source, kernel, model) = match load_kernel_model(path) {
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    run_testgen_from_source(
+        path,
+        &source,
+        depth,
+        target,
+        deadlock_mode,
+        strict,
+        output_path,
+    )
+}
+
+/// Generate a test scaffold from one caller-owned root-source snapshot.
+fn run_testgen_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    target: &str,
+    deadlock_mode: &str,
+    strict: bool,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let (kernel, model) = match load_kernel_model_from_source(path, source) {
         Ok(parts) => parts,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
     let (scenarios, status) =
-        run_scenarios_mode_from_source(path, &source, depth, deadlock_mode, !strict);
+        run_scenarios_mode_from_source(path, source, depth, deadlock_mode, !strict);
     if status != 0 {
         // A genuine `violated`/`reachable_failed` counterexample (status 1)
         // is not a spec error: propagate it verbatim (verdict, exit code,
@@ -10935,7 +10994,7 @@ fn run_testgen(
         Ok(context) => context,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let input = if source_dialect(&source) == "compose" {
+    let input = if source_dialect(source) == "compose" {
         fsl_tools::compose_testgen_input(
             &model.name,
             &path_context,
@@ -10962,7 +11021,7 @@ fn run_testgen(
             &kernel,
             &model,
             &path.to_string_lossy(),
-            source_dialect(&source),
+            source_dialect(source),
         )
         .map_err(|error| error.to_string())
         .and_then(|contract| {

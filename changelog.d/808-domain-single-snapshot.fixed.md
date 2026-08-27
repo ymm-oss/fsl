@@ -1,0 +1,1 @@
+Fixed (#808): native `fslc domain generate`, `domain replay`, `domain testgen`, and `domain check` now derive their AST, checked Kernel/model, generated scaffolds, replay monitor, and edition metadata from one captured root-source snapshot, preventing concurrent atomic replacements from mixing document revisions in one result.

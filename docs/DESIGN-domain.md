@@ -519,8 +519,9 @@ projection from it with `parse_domain_document_from_source`, and pass that same
 string to `load_kernel_model_from_source` to construct the checked Kernel. An
 atomic replacement of the path therefore cannot make either command validate a
 different source version before returning success (#796).
-`domain generate` uses the same typed lowering but does not yet provide this
-single-snapshot contract; #808 tracks that separate TOCTOU follow-up.
+`domain generate`, `domain replay`, `domain testgen`, and `domain check` extend
+the same single-snapshot contract to checked-kernel scaffolding, Monitor replay,
+generic/adapter test generation, and edition post-processing respectively (#808).
 `rust/fsl-core/tests/domain_render_agreement.rs` projects both through
 `public_kernel_contract` for the full domain corpus and requires them to match
 except on source spans (#664). Building that gate found the two
