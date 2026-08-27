@@ -1,19 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
-"""PreToolUse hook: block hand-edits to the frozen Python corpus snapshot.
-
-``tests/snapshots/corpus_snapshot.json`` is a generated golden file and the repo's
-core behavior-preservation safety net. It must only change via
-``FSLC_SNAPSHOT_UPDATE=1 pytest tests/test_corpus_snapshot.py`` — a direct Edit/Write is
-almost always a mistake (hollowing the net to dodge a diff). This hook blocks such a
-write (exit 2) and points at the regeneration command. The legitimate regeneration path
-goes through pytest, not an editing tool, so it is unaffected.
-"""
+"""Adapt the shared generated-snapshot detector to Claude PreToolUse."""
 import json
 import os
+from pathlib import Path
+import subprocess
 import sys
-
-TARGET = os.path.join("tests", "snapshots", "corpus_snapshot.json")
 
 
 def main() -> int:
@@ -24,14 +16,17 @@ def main() -> int:
     path = (data.get("tool_input") or {}).get("file_path") or ""
     if not path:
         return 0
-    if os.path.normpath(path).endswith(TARGET):
-        sys.stderr.write(
-            "Refusing to hand-edit the corpus snapshot ({}).\n".format(TARGET)
-            + "Regenerate it only for an intended compatibility-contract change (review the diff first):\n"
-            + "  FSLC_SNAPSHOT_UPDATE=1 .venv/bin/python -m pytest tests/test_corpus_snapshot.py -q\n"
-        )
-        return 2
-    return 0
+    root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).resolve()
+    result = subprocess.run(
+        [sys.executable, str(root / "tools" / "check_generated_snapshot.py"), path],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    return result.returncode
 
 
 if __name__ == "__main__":

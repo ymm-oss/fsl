@@ -39,6 +39,10 @@ check_automation() {
   # Bash-4+ scripts to fail closed before executing any other command.
   python3 tools/check-shell-scripts.py selftest
   python3 tools/check-shell-scripts.py
+  # SPDX headers are a source-wide rule.  One common detector serves this
+  # required lane and the Codex/Claude early-feedback adapters.
+  python3 tools/check_spdx_headers.py selftest
+  python3 tools/check_spdx_headers.py check
   python3 tools/check-bash-version-guards.py selftest
   python3 tools/check-bash-version-guards.py check
   node --test .github/scripts/report-post-merge-ci.test.mjs

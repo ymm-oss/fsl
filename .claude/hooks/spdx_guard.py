@@ -1,14 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
-"""PostToolUse hook: require repository SPDX headers on newly written source."""
+"""Adapt the shared SPDX detector to Claude PostToolUse."""
 
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
-
-
-SOURCE_SUFFIXES = {".py", ".rs", ".js", ".mjs", ".ts", ".sh"}
-
 
 def main() -> int:
     try:
@@ -16,24 +14,19 @@ def main() -> int:
     except Exception:
         return 0
     raw_path = (data.get("tool_input") or {}).get("file_path") or ""
-    path = Path(raw_path)
-    if path.suffix not in SOURCE_SUFFIXES:
+    if not raw_path:
         return 0
-    try:
-        head = path.read_text(encoding="utf-8", errors="ignore")[:1200]
-    except OSError:
-        return 0
-    if "SPDX-License-Identifier: Apache-2.0" not in head:
-        prefix = "#" if path.suffix in {".py", ".sh"} else "//"
-        sys.stderr.write(
-            f"{path}: missing SPDX header. Add near the top:\n"
-            f"{prefix} SPDX-License-Identifier: Apache-2.0\n"
-        )
-        return 2
-    if path.suffix == ".py" and "Copyright" not in head:
-        sys.stderr.write(f"{path}: new Python source also needs a copyright line.\n")
-        return 2
-    return 0
+    root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()).resolve()
+    result = subprocess.run(
+        [sys.executable, str(root / "tools" / "check_spdx_headers.py"), "paths", raw_path],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    return 2 if result.returncode else 0
 
 
 if __name__ == "__main__":
