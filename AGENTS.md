@@ -179,6 +179,11 @@ New source files must carry the repository's Apache-2.0 SPDX header.
 
 - In Codex sessions, `tasks/active.md` is the worktree-local current task packet. It is ignored by Git
   and must be reconciled with the branch, working tree, implementation, and observed command results.
+- When a task packet declares append-only history or a no-amend rule, create a new commit rather than
+  using `git commit --amend`; only the orchestrator may approve a recorded exception.
+- A single successful or partial verification command is not completion evidence. The task packet must
+  name every required command, its expected and produced result, and the current commit/binary identity;
+  the orchestrator determines whether that evidence is sufficient to complete the task.
 - Use `$task-start` before substantial Codex work and `$checkpoint` before compaction, clearing,
   handoff, independent review, or ending the task.
 - Keep durable decisions in accepted `docs/DESIGN-*.md`; task packets, conversations, plans, and Codex
