@@ -595,7 +595,7 @@ fn lvalue_json(
     path: &str,
     span: Span,
 ) -> Result<Value, PublicKernelError> {
-    let ty = lvalue_type(target, env, model)?;
+    let ty = lvalue_type(target, env, model, span)?;
     Ok(match target {
         LValue::Var(name) => json!({
             "kind":"var","type":type_json(&ty),"span":span_json(path,span),"name":name
@@ -633,7 +633,7 @@ fn statement_json(
             value,
             span,
         } => {
-            let ty = lvalue_type(target, env, model)?;
+            let ty = lvalue_type(target, env, model, *span)?;
             ensure_assignable(value, &ty, env, model, *span)?;
             Ok(json!({
                 "kind":"assign","type":{"kind":"statement"},"span":span_json(path,*span),

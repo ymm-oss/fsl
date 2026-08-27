@@ -519,35 +519,13 @@ pub(crate) fn extend_pattern_binding(
 
 pub(crate) fn lvalue_type(
     target: &LValue,
-    env: &TypeEnv,
+    _env: &TypeEnv,
     model: &KernelModel,
+    span: Span,
 ) -> Result<TypeRef, TypecheckError> {
-    match target {
-        LValue::Var(name) => env
-            .get(name)
-            .cloned()
-            .ok_or_else(|| error(format!("unknown update target '{name}'"))),
-        LValue::Index(name, _) => match resolve(
-            model,
-            env.get(name)
-                .ok_or_else(|| error(format!("unknown update target '{name}'")))?,
-        )? {
-            TypeRef::Map(_, value) | TypeRef::Relation(_, value) => Ok(*value),
-            _ => Err(error("indexed update target requires Map or Relation")),
-        },
-        LValue::Field(base, field) => {
-            let TypeRef::Named(name) = lvalue_type(base, env, model)? else {
-                return Err(error("field update target requires named struct"));
-            };
-            match model.types.get(&name) {
-                Some(TypeDef::Struct { fields }) => fields
-                    .iter()
-                    .find_map(|(candidate, ty)| (candidate == field).then(|| ty.clone()))
-                    .ok_or_else(|| error(format!("unknown struct field '{name}.{field}'"))),
-                _ => Err(error("field update target requires struct")),
-            }
-        }
-    }
+    model
+        .state_lvalue_type(target)
+        .map_err(|model_error| error(model_error.message).with_span(span))
 }
 
 pub(crate) fn normalize_aggregate(
@@ -960,7 +938,7 @@ fn validate_statement(
             value,
             span,
         } => {
-            let ty = lvalue_type(target, env, model)?;
+            let ty = lvalue_type(target, env, model, *span)?;
             ensure_assignable(value, &ty, env, model, *span)?;
             validate_lvalue(target, env, model, *span)?;
             validate_expression(value, env, model, *span, Some(&ty))
@@ -1073,7 +1051,7 @@ fn validate_statement_assignments(
             value,
             span,
         } => {
-            let ty = lvalue_type(target, env, model)?;
+            let ty = lvalue_type(target, env, model, *span)?;
             ensure_assignable(value, &ty, env, model, *span)?;
             validate_map_key_const_shadowing(target, env, model, visible_consts, *span)?;
             validate_lvalue(target, env, model, *span)?;

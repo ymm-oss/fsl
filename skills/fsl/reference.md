@@ -733,8 +733,8 @@ implementation Map (for example `Column -> DesignColumn`).
 | number kind (dialects) | `number Amount` | Finite numeric sort for business/requirements; bound by `verify { values Amount = lo..hi }` |
 | enum | `enum St { A, B }` | members are referenced and displayed by bare name |
 | symmetric enum | `symmetric enum Worker { A, B }` | Same as enum, plus liveness symmetry reduction |
-| struct | `struct S { f: Qty, o: Option<K> }` | field = scalar or Option<scalar> only |
-| Option<T> | `c: Option<ItemId>` | T is a scalar. `none` / `some(e)` |
+| struct | `struct S { f: Qty, o: Option<Option<K>> }` | field = scalar or nested Option<scalar> only |
+| Option<T> | `c: Option<Option<ItemId>>` | T is a scalar or nested Option around a scalar. `none` / `some(e)` |
 | Map<K, V> | `m: Map<ItemId, Qty>` | K must be a bounded scalar; `Map<Int, V>` is rejected by `check` |
 | Set<T> | `s: Set<OrderId>` | T is a bounded scalar |
 | Seq<T, N> | `q: Seq<JobId, CAP>` | T is a scalar, N is a positive constant. FIFO |
@@ -743,11 +743,16 @@ implementation Map (for example `Column -> DesignColumn`).
 Scalar = Int / Bool / domain type / enum. In a `state` declaration,
 `x: lo..hi` is an anonymous domain type and is equivalent to declaring
 `type X = lo..hi` and writing `x: X`.
-**State-variable whitelist**: scalar | Option<scalar> | struct |
-Map<bounded scalar, scalar|Option|struct> | Set<bounded scalar> | Seq<scalar, N> |
+**State-variable whitelist**: scalar | nested Option<scalar> | struct |
+Map<bounded scalar, scalar|nested Option|struct> | Set<bounded scalar> | Seq<scalar, N> |
 relation bounded-scalar -> bounded-scalar.
 Anything else (nested structs, Set/Map/Seq as a Map value, etc.) is rejected by
 check as a type error.
+
+`Map<Id, Map<K, Bool>>` is rejected: the former check-only acceptance had no
+end-to-end explicit-state initialization path. Map values remain scalars, nested
+Options around scalars, or structs with those fields; Map/Set/Seq/relation values
+are not state types.
 
 Kernel `state` fields may carry deterministic inline initializers. They normalize
 to ordinary root assignments before checking and therefore share Monitor/BMC/

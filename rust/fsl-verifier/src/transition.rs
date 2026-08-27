@@ -11,7 +11,7 @@ use fsl_solver::SmtSolver;
 use crate::VerifyError;
 use crate::eval::{
     EvaluationStatus, binder_has_partial_operation_candidate, binder_values, binder_where, eval,
-    evaluation_status, expression_has_partial_operation_candidate, index_accessible,
+    eval_expected, evaluation_status, expression_has_partial_operation_candidate, index_accessible,
     partial_operation_index_accessible, sequence_statuses,
 };
 use crate::value::{
@@ -264,7 +264,10 @@ fn statement_evaluation_status<S: SmtSolver>(
     match statement {
         Statement::Assign { target, value, .. } => {
             let value_status = evaluation_status(solver, model, value, read_state, bindings, None)?;
-            let _ = eval(solver, model, value, read_state, bindings, None)?;
+            let target_ty = model
+                .state_lvalue_type(target)
+                .map_err(|error| VerifyError::new(error.message))?;
+            let _ = eval_expected(solver, model, value, &target_ty, read_state, bindings, None)?;
             let target_status =
                 lvalue_evaluation_status(solver, model, target, read_state, bindings)?;
             sequence_statuses(solver, [value_status, target_status])
@@ -450,7 +453,10 @@ fn collect_init_statement<S: SmtSolver>(
 ) -> Result<(), VerifyError> {
     match statement {
         Statement::Assign { target, value, .. } => {
-            let value = eval(solver, model, value, state, bindings, None)?;
+            let target_ty = model
+                .state_lvalue_type(target)
+                .map_err(|error| VerifyError::new(error.message))?;
+            let value = eval_expected(solver, model, value, &target_ty, state, bindings, None)?;
             let mut assigned = state.clone();
             assign(solver, model, target, value, state, &mut assigned, bindings)?;
             constraints.extend(state_equalities(solver, model, state, &assigned)?);
@@ -586,7 +592,11 @@ fn compute_statement<S: SmtSolver>(
 ) -> Result<SymbolicState<S::Term>, VerifyError> {
     match statement {
         Statement::Assign { target, value, .. } => {
-            let value = eval(solver, model, value, read_state, bindings, None)?;
+            let target_ty = model
+                .state_lvalue_type(target)
+                .map_err(|error| VerifyError::new(error.message))?;
+            let value =
+                eval_expected(solver, model, value, &target_ty, read_state, bindings, None)?;
             assign(
                 solver,
                 model,

@@ -27,7 +27,7 @@ spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata bad
   symmetric type <Name> = <lo>..<hi>   // domain whose values are interchangeable identities
   enum  <Name> { <Member>, ... }
   symmetric enum <Name> { <Member>, ... }
-  struct <Name> { <field>: <scalar type | Option<scalar type>>, ... }
+  struct <Name> { <field>: <scalar type | nested Option<scalar type>>, ... }
 
   def <name>(<p>: <type name>, ...) = <expr> // non-recursive named predicate; frontend-inlined
 
@@ -534,8 +534,8 @@ by itself prove the per-entity decrease required by the `helpful` form.)
 | Entity kind | `entity Claim` / `process Claim ...` | Finite identity sort. Allowed in any layer incl. kernel `spec`; size set by `verify { instances Claim = N }`; desugars to `type Claim = 0..N-1` |
 | Number kind | `number Amount` | Finite numeric sort. Allowed in any layer incl. kernel `spec`; range set by `verify { values Amount = lo..hi }`; desugars to `type` |
 | enum | `enum St { Open, Closed }` | Members are referenced by their bare name in expressions |
-| struct | `struct Order { st: St, item: Option<ItemId>, qty: Qty }` | Fields are scalars or `Option<scalar>` |
-| `Option<T>` | `cart: Option<ItemId>` | `none` / `some(e)`. Used instead of a sentinel value |
+| struct | `struct Order { st: St, item: Option<Option<ItemId>>, qty: Qty }` | Fields are scalars or nested `Option<scalar>` |
+| `Option<T>` | `cart: Option<Option<ItemId>>` | `none` / `some(e)`. Used instead of a sentinel value; nesting is supported around a scalar payload |
 | `Map<K, V>` | `stock: Map<ItemId, Qty>` | K must be a bounded scalar (domain type / enum / Bool) |
 | `Set<T>` | `shipped: Set<OrderId>` | T is a bounded scalar |
 | `Seq<T, N>` | `queue: Seq<JobId, 3>` | A sequence (FIFO) of capacity N. T is a scalar, N is a constant |
@@ -557,14 +557,22 @@ error that reports both source locations. See
 [`DESIGN-initialization.md`](DESIGN-initialization.md).
 
 **Types legal as state variables** (anything else is rejected by `check` as a type error):
-scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
-| `Map<bounded scalar, scalar | Option<scalar> | struct>`
+scalar | nested `Option<scalar>` | struct (scalar / nested `Option<scalar>` fields)
+| `Map<bounded scalar, scalar | nested Option<scalar> | struct>`
 | `Set<bounded scalar>` | `Seq<scalar, N>` | `relation bounded-scalar -> bounded-scalar`
 
 - Nesting structs, Set/Map/Seq inside a struct field,
-  `Option<Option<...>>`, and `Option<Set/Map/Seq/struct>` are not allowed
+  and `Option<Set/Map/Seq/struct>` are not allowed
   (rejected at check time with a hint). Optional scalar fields can be written
   directly inside a struct as of v2.1.
+- A Map value may be a scalar, nested `Option<scalar>`, or a struct with those
+  fields; nested Map/Set/Seq/relation values are rejected. In particular,
+  `Map<Id, Map<K, Bool>>` is rejected because explicit-state execution cannot
+  construct its required initial Map value. This is a breaking removal of a
+  shape that earlier `check` accepted without an end-to-end execution path.
+- The shared CLI/LSP state and struct-field type hints name this recursive
+  `Option<scalar>` boundary, including the rejected relation and collection
+  forms; this replaces the earlier one-level `Option<scalar>` wording.
 - `Map<Int, V>` is rejected by `check`. Declare a bounded key type, for example
   `type ItemId = 0..<max>`, and use `Map<ItemId, V>`.
 - `symmetric type` and `symmetric enum` mark values as interchangeable entity
