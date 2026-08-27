@@ -800,6 +800,7 @@ const CHECK_PARSE_INPUT_SHAPES: &[InputShape] = &[
     InputShape::Causal,
     InputShape::Compose,
 ];
+const CHECK_NAME_INPUT_SHAPES: &[InputShape] = &[InputShape::Source, InputShape::Component];
 const MUTATE_PARSE_INPUT_SHAPES: &[InputShape] = &[InputShape::Source, InputShape::Causal];
 const APPROVAL_CREATE_PARSE_INPUT_SHAPES: &[InputShape] =
     &[InputShape::Source, InputShape::RequirementsDocument];
@@ -817,6 +818,11 @@ const AI_INPUT_SHAPE_PROFILE: InputShapeProfile = InputShapeProfile {
     literate: AI_LITERATE_INPUT_SHAPES,
 };
 const CHECK_INPUT_SHAPE_PROFILE: InputShapeProfile = InputShapeProfile {
+    parse: CHECK_PARSE_INPUT_SHAPES,
+    name: CHECK_NAME_INPUT_SHAPES,
+    ..SOURCE_INPUT_SHAPE_PROFILE
+};
+const VERIFY_INPUT_SHAPE_PROFILE: InputShapeProfile = InputShapeProfile {
     parse: CHECK_PARSE_INPUT_SHAPES,
     ..SOURCE_INPUT_SHAPE_PROFILE
 };
@@ -904,7 +910,7 @@ const INPUT_SHAPE_POPULATIONS: &[CommandInputShapePopulation] = &[
     input_shape_population!("sweep", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("testgen", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("typestate", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("verify", CHECK_INPUT_SHAPE_PROFILE),
+    input_shape_population!("verify", VERIFY_INPUT_SHAPE_PROFILE),
     input_shape_population!("version", SOURCE_INPUT_SHAPE_PROFILE),
 ];
 
@@ -931,6 +937,7 @@ enum ExpectedField {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum MessageExpectation {
     Absent,
+    Exact(&'static str),
     MentionsInput,
     OmitsInput,
 }
@@ -995,6 +1002,11 @@ const SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION: Expectation =
         message: MessageExpectation::OmitsInput,
         ..SEMANTIC_JSON
     });
+const AI_UNKNOWN_TOOL_SEMANTIC: Expectation = Expectation::Json(JsonExpectation {
+    location: LocationShape::Absent,
+    message: MessageExpectation::Exact("unknown tool 'MissingTool' in authority block"),
+    ..SEMANTIC_JSON
+});
 
 const PARSE_WITH_DIAGNOSTIC_ALIAS: Expectation = Expectation::Json(JsonExpectation {
     diagnostic: Diagnostic::Alias("parse"),
@@ -1348,8 +1360,19 @@ const CHECK_COVERAGE: &[FailureCoverage] = &[
         fixture: NAME_FIXTURE,
         uniform: SEMANTIC_UNIFORM,
     },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_NAME_FIXTURE,
+        uniform: AI_UNKNOWN_TOOL_SEMANTIC,
+    },
 ];
-const VERIFY_COVERAGE: &[FailureCoverage] = CHECK_COVERAGE;
+const VERIFY_COVERAGE: &[FailureCoverage] = &[
+    CHECK_COVERAGE[0],
+    CHECK_COVERAGE[1],
+    CHECK_COVERAGE[2],
+    CHECK_COVERAGE[3],
+    CHECK_COVERAGE[4],
+];
 const DB_CHECK_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
         class: FailureClass::Parse,
@@ -2148,6 +2171,7 @@ fn coverage_input_shape(command: &str, fixture: &str) -> InputShape {
         return match fixture {
             PARSE_AI_PROJECT_FIXTURE | PARSE_AI_PROJECT_DUPLICATE_FIXTURE => InputShape::Project,
             PARSE_CAUSAL_FIXTURE => InputShape::Causal,
+            AI_NAME_FIXTURE if command == "check" => InputShape::Component,
             _ => InputShape::Source,
         };
     }
@@ -2503,6 +2527,9 @@ fn matches_expectation(actual: &Actual, expected: Expectation, fixture: &str) ->
             }
             match expected.message {
                 MessageExpectation::Absent => output.get("message").is_none(),
+                MessageExpectation::Exact(message) => {
+                    output.get("message").and_then(Value::as_str) == Some(message)
+                }
                 MessageExpectation::MentionsInput => output["message"]
                     .as_str()
                     .is_some_and(|message| message.contains(fixture)),
@@ -3055,6 +3082,42 @@ fn unresolved_identifier_errors_are_uniform_or_pinned_across_frontend_siblings()
 }
 
 #[test]
+fn generic_check_matches_ai_check_for_an_unknown_authority_tool() {
+    let generic = run("check", AI_NAME_FIXTURE);
+    let specialized = run("ai check", AI_NAME_FIXTURE);
+
+    assert_eq!(
+        generic.exit, specialized.exit,
+        "generic stdout={} specialized stdout={}",
+        generic.stdout, specialized.stdout
+    );
+    let generic = generic.json.expect("generic JSON envelope");
+    let specialized = specialized.json.expect("specialized JSON envelope");
+    for field in ["result", "kind", "message", "loc"] {
+        assert_eq!(
+            generic.get(field),
+            specialized.get(field),
+            "{field} differs: generic={generic} specialized={specialized}"
+        );
+    }
+    assert!(
+        generic.get("loc").is_none(),
+        "the shared unknown-tool diagnostic must remain unlocated: {generic}"
+    );
+    // `check` receives `versions` from command()'s common
+    // `with_version_metadata` wrapper; `ai check` returns its specialized
+    // envelope directly. This observed, command-wide metadata difference is
+    // outside the shared failure contract. Keep its asymmetric presence
+    // explicit so deleting both keys cannot make this comparison look fuller
+    // than it is.
+    assert!(generic.get("versions").is_some(), "generic={generic}");
+    assert!(
+        specialized.get("versions").is_none(),
+        "specialized={specialized}"
+    );
+}
+
+#[test]
 fn requirements_document_approval_invocation_uses_the_selected_kind() {
     let arguments = invoke(
         "approval create",
@@ -3184,7 +3247,7 @@ fn approval_diff_zero_digest_negative_control_stops_before_the_diff() {
 }
 
 #[test]
-fn name_matrix_keeps_seven_uniform_countercontrols_and_one_pin() {
+fn name_matrix_keeps_eight_uniform_countercontrols_and_one_pin() {
     let bounded_commands = [
         "check",
         "verify",
@@ -3212,14 +3275,14 @@ fn name_matrix_keeps_seven_uniform_countercontrols_and_one_pin() {
         .count();
     assert_eq!(
         name_cells.len(),
-        8,
-        "Name matrix must keep eight countercontrols"
+        9,
+        "Name matrix must keep nine countercontrols"
     );
     assert_eq!(pinned, 1, "Name matrix must keep one self-retiring pin");
     assert_eq!(
         name_cells.len() - pinned,
-        7,
-        "Name matrix must keep seven uniform countercontrols"
+        8,
+        "Name matrix must keep eight uniform countercontrols"
     );
 }
 

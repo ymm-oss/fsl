@@ -299,6 +299,286 @@ spec Agreement {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
+fn nested_option_assignments_are_context_typed() {
+    let source = r"
+spec NestedOptionAssignment {
+  type Bit = 0..1
+  type Id = 0..1
+  struct Record { value: Option<Option<Bit>> }
+  state {
+    x: Option<Option<Bit>>,
+    inline: Option<Option<Bit>> = some(none),
+    depth_three: Option<Option<Option<Bit>>>,
+    indexed: Map<Id, Option<Option<Bit>>>,
+    field: Record,
+    constructed: Record,
+    records: Map<Id, Record>,
+    flag: Bool
+  }
+  init {
+    x = none
+    depth_three = none
+    forall id: Id {
+      indexed[id] = none
+      records[id] = Record { value: none }
+    }
+    field = Record { value: none }
+    constructed = Record { value: none }
+    flag = true
+  }
+  action wrap() {
+    requires x == none
+    x = some(none)
+  }
+  action fill() {
+    requires x == some(none)
+    x = some(some(1))
+  }
+  action index(id: Id) { indexed[id] = some(none) }
+  action update_field() { field.value = some(none) }
+  action construct() { constructed = Record { value: some(none) } }
+  action update_map_value_field(id: Id) { records[id].value = some(none) }
+  action conditional() {
+    x = if flag then some(none) else some(some(1))
+  }
+  action nest_three() { depth_three = some(some(none)) }
+  reachable Wrapped { x == some(none) }
+  reachable Filled { x == some(some(1)) }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse model");
+    let model = build_model(kernel).expect("build model");
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create combined-placement solver");
+    let bmc = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 2))
+        .expect("all assignment placements evaluate with their target type");
+    assert!(bmc.violation.is_none(), "{bmc:?}");
+    assert!(bmc.leadsto_violation.is_none(), "{bmc:?}");
+    assert_eq!(
+        bmc.reachables["Wrapped"]
+            .as_ref()
+            .map(|witness| witness.step),
+        Some(1)
+    );
+    assert_eq!(
+        bmc.reachables["Filled"]
+            .as_ref()
+            .map(|witness| witness.step),
+        Some(2)
+    );
+    for action in [
+        "wrap",
+        "index",
+        "update_field",
+        "construct",
+        "update_map_value_field",
+        "conditional",
+        "nest_three",
+    ] {
+        assert!(bmc.action_coverage[action], "{action} was not covered");
+    }
+
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let nested_none = FslValue::Some(Box::new(FslValue::None));
+    assert_eq!(
+        monitor.state["inline"], nested_none,
+        "inline initializer retains its nested Option wrapper"
+    );
+
+    for (action, expected) in [
+        ("wrap", nested_none.clone()),
+        (
+            "fill",
+            FslValue::Some(Box::new(FslValue::Some(Box::new(FslValue::Int(1))))),
+        ),
+    ] {
+        let current = monitor.state.clone();
+        let enabled = monitor
+            .enabled()
+            .expect("enumerate actions")
+            .into_iter()
+            .find(|candidate| candidate.action == action)
+            .expect("expected action is enabled");
+        let result = monitor.step(&enabled).expect("step monitor");
+        assert_eq!(result.violation, None);
+        assert_eq!(result.state["x"], expected, "{action} concrete successor");
+
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+        assert!(
+            block_on(fsl_verifier::transition_matches_step(
+                &model,
+                &mut solver,
+                &current,
+                &enabled.action,
+                &enabled.params,
+                &result.state,
+            ))
+            .expect("symbolic transition accepts Monitor successor"),
+            "{action} symbolic transition disagreed"
+        );
+    }
+
+    let mut current = monitor.state.clone();
+    current.insert("x".to_owned(), FslValue::Some(Box::new(FslValue::None)));
+    let mut wrong = current.clone();
+    wrong.insert("x".to_owned(), FslValue::None);
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create rejection solver");
+    assert!(
+        !block_on(fsl_verifier::transition_matches_step(
+            &model,
+            &mut solver,
+            &current,
+            "fill",
+            &BTreeMap::new(),
+            &wrong,
+        ))
+        .expect("symbolic transition rejects a flattened successor")
+    );
+
+    // Coverage only establishes that these placements can fire.  Each row also
+    // pins its post-state value and proves symbolic rejection of the same value
+    // with its outer `Some` flattened to `none`.
+    for action in [
+        "index",
+        "update_field",
+        "construct",
+        "update_map_value_field",
+        "conditional",
+        "nest_three",
+    ] {
+        let mut placement_monitor =
+            fsl_runtime::Monitor::new(model.clone()).expect("create placement monitor");
+        let current = placement_monitor.state.clone();
+        let enabled = placement_monitor
+            .enabled()
+            .expect("enumerate placement actions")
+            .into_iter()
+            .find(|candidate| candidate.action == action)
+            .expect("placement action is enabled");
+        let id = enabled.params.get("id").cloned();
+        let result = placement_monitor
+            .step(&enabled)
+            .expect("step placement action");
+        assert_eq!(result.violation, None, "{action}");
+
+        let actual = match action {
+            "index" => {
+                let FslValue::Map(entries) = &result.state["indexed"] else {
+                    panic!("indexed must be a map");
+                };
+                entries[&id.clone().expect("index id")].clone()
+            }
+            "update_field" => {
+                let FslValue::Struct { fields, .. } = &result.state["field"] else {
+                    panic!("field must be a struct");
+                };
+                fields["value"].clone()
+            }
+            "construct" => {
+                let FslValue::Struct { fields, .. } = &result.state["constructed"] else {
+                    panic!("constructed must be a struct");
+                };
+                fields["value"].clone()
+            }
+            "update_map_value_field" => {
+                let FslValue::Map(entries) = &result.state["records"] else {
+                    panic!("records must be a map");
+                };
+                let FslValue::Struct { fields, .. } =
+                    &entries[&id.clone().expect("map-value-field id")]
+                else {
+                    panic!("map value must be a struct");
+                };
+                fields["value"].clone()
+            }
+            "conditional" => result.state["x"].clone(),
+            "nest_three" => result.state["depth_three"].clone(),
+            _ => unreachable!("listed placement action"),
+        };
+        let expected = if action == "nest_three" {
+            FslValue::Some(Box::new(nested_none.clone()))
+        } else {
+            nested_none.clone()
+        };
+        assert_eq!(actual, expected, "{action} retains its nested Option value");
+
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create placement solver");
+        assert!(
+            block_on(fsl_verifier::transition_matches_step(
+                &model,
+                &mut solver,
+                &current,
+                &enabled.action,
+                &enabled.params,
+                &result.state,
+            ))
+            .expect("symbolic transition accepts exact placement successor"),
+            "{action} symbolic transition disagreed"
+        );
+
+        let mut wrong = result.state.clone();
+        match action {
+            "index" => {
+                let FslValue::Map(entries) = wrong.get_mut("indexed").expect("indexed state")
+                else {
+                    panic!("indexed must be a map");
+                };
+                entries.insert(id.expect("index id"), FslValue::None);
+            }
+            "update_field" => {
+                let FslValue::Struct { fields, .. } = wrong.get_mut("field").expect("field state")
+                else {
+                    panic!("field must be a struct");
+                };
+                fields.insert("value".to_owned(), FslValue::None);
+            }
+            "construct" => {
+                let FslValue::Struct { fields, .. } =
+                    wrong.get_mut("constructed").expect("constructed state")
+                else {
+                    panic!("constructed must be a struct");
+                };
+                fields.insert("value".to_owned(), FslValue::None);
+            }
+            "update_map_value_field" => {
+                let FslValue::Map(entries) = wrong.get_mut("records").expect("records state")
+                else {
+                    panic!("records must be a map");
+                };
+                let FslValue::Struct { fields, .. } = entries
+                    .get_mut(&id.expect("map-value-field id"))
+                    .expect("map record")
+                else {
+                    panic!("map value must be a struct");
+                };
+                fields.insert("value".to_owned(), FslValue::None);
+            }
+            "conditional" => {
+                wrong.insert("x".to_owned(), FslValue::None);
+            }
+            "nest_three" => {
+                wrong.insert("depth_three".to_owned(), FslValue::None);
+            }
+            _ => unreachable!("listed placement action"),
+        }
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create rejection solver");
+        assert!(
+            !block_on(fsl_verifier::transition_matches_step(
+                &model,
+                &mut solver,
+                &current,
+                &enabled.action,
+                &enabled.params,
+                &wrong,
+            ))
+            .expect("symbolic transition rejects flattened placement successor"),
+            "{action} must reject a flattened successor"
+        );
+    }
+}
+
+#[test]
 fn explicit_effect_success_disables_retry_across_monitor_and_symbolic_semantics() {
     let source = r"
 domain ExplicitEffectSuccess {

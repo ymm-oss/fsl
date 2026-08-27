@@ -939,13 +939,12 @@ fn ordered_evaluation_status_refs<S: SmtSolver>(
     old_state: Option<&SymbolicState<S::Term>>,
     policy: EvaluationPolicy,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
-    let mut local = bindings.clone();
+    let local = bindings.clone();
     let mut statuses = Vec::new();
     for expression in expressions {
         statuses.push(evaluation_status_with_policy(
             solver, model, expression, state, &local, old_state, policy,
         )?);
-        let _ = eval(solver, model, expression, state, &mut local, old_state)?;
     }
     sequence_statuses(solver, statuses)
 }
@@ -1237,8 +1236,8 @@ fn eval_struct_literal<S: SmtSolver>(
                 let expr = expressions
                     .get(field)
                     .ok_or_else(|| VerifyError::new(format!("missing struct field '{field}'")))?;
-                let value = eval(solver, model, expr, state, bindings, old_state)?;
-                Ok((field.clone(), coerce(solver, model, value, ty)?))
+                let value = eval_expected(solver, model, expr, ty, state, bindings, old_state)?;
+                Ok((field.clone(), value))
             })
             .collect::<Result<_, VerifyError>>()?,
     })
@@ -1577,7 +1576,7 @@ fn requires_expected_type(expr: &Expr) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn eval_expected<S: SmtSolver>(
+pub(crate) fn eval_expected<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     expr: &Expr,
@@ -1586,6 +1585,28 @@ fn eval_expected<S: SmtSolver>(
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    if let Expr::Conditional {
+        condition,
+        then_expr,
+        else_expr,
+        ..
+    } = expr
+    {
+        let condition = eval(solver, model, condition, state, bindings, old_state)?;
+        let then_value = eval_expected(
+            solver, model, then_expr, expected, state, bindings, old_state,
+        )?;
+        let else_value = eval_expected(
+            solver, model, else_expr, expected, state, bindings, old_state,
+        )?;
+        return ite_value(
+            solver,
+            model,
+            bool_term(&condition)?,
+            &then_value,
+            &else_value,
+        );
+    }
     if let (Expr::Some(inner), TypeRef::Option(inner_ty)) = (expr, expected) {
         return Ok(SymbolicValue::Option {
             ty: expected.clone(),

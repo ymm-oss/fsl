@@ -25,7 +25,7 @@ spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata bad
   symmetric type <Name> = <lo>..<hi>   // domain whose values are interchangeable identities
   enum  <Name> { <Member>, ... }
   symmetric enum <Name> { <Member>, ... }
-  struct <Name> { <field>: <scalar type | Option<scalar type>>, ... }
+  struct <Name> { <field>: <scalar type | nested Option<scalar type>>, ... }
 
   def <name>(<p>: <type name>, ...) = <expr> // non-recursive named predicate; frontend-inlined
 
@@ -518,8 +518,8 @@ instances 数から独立です — `Case` のサイズが `verify { instances C
 | エンティティ種 | `entity Claim` / `process Claim ...` | 有限の同一性ソート。カーネル `spec` を含む任意のレイヤーで使用可。サイズは `verify { instances Claim = N }` で設定。`type Claim = 0..N-1` に脱糖 |
 | 数値種 | `number Amount` | 有限の数値ソート。カーネル `spec` を含む任意のレイヤーで使用可。範囲は `verify { values Amount = lo..hi }` で設定。`type` に脱糖 |
 | enum | `enum St { Open, Closed }` | メンバーは式の中で裸の名前で参照する |
-| struct | `struct Order { st: St, item: Option<ItemId>, qty: Qty }` | フィールドはスカラーまたは `Option<スカラー>` |
-| `Option<T>` | `cart: Option<ItemId>` | `none` / `some(e)`。番兵値の代わりに使う |
+| struct | `struct Order { st: St, item: Option<Option<ItemId>>, qty: Qty }` | フィールドはスカラーまたは入れ子の `Option<スカラー>` |
+| `Option<T>` | `cart: Option<Option<ItemId>>` | `none` / `some(e)`。番兵値の代わりに使う。スカラー payload の周りの入れ子をサポートする |
 | `Map<K, V>` | `stock: Map<ItemId, Qty>` | K は有界スカラー(ドメイン型 / enum / Bool)でなければならない |
 | `Set<T>` | `shipped: Set<OrderId>` | T は有界スカラー |
 | `Seq<T, N>` | `queue: Seq<JobId, 3>` | 容量 N の列(FIFO)。T はスカラー、N は定数 |
@@ -539,14 +539,22 @@ induction、Public Kernel v1 は、等価な `init` ブロックと同じ意味�
 します。[`DESIGN-initialization.md`](DESIGN-initialization.md) を参照。
 
 **状態変数として合法な型**(それ以外は `check` が型エラーとして拒否します):
-スカラー | `Option<scalar>` | struct(スカラー / `Option<scalar>` フィールド)
-| `Map<bounded scalar, scalar | Option<scalar> | struct>`
+スカラー | 入れ子の `Option<scalar>` | struct(スカラー / 入れ子の `Option<scalar>` フィールド)
+| `Map<bounded scalar, scalar | nested Option<scalar> | struct>`
 | `Set<bounded scalar>` | `Seq<scalar, N>` | `relation bounded-scalar -> bounded-scalar`
 
 - struct のネスト、struct フィールドの中の Set/Map/Seq、
-  `Option<Option<...>>`、`Option<Set/Map/Seq/struct>` は許されません
+  `Option<Set/Map/Seq/struct>` は許されません
   (check 時にヒント付きで拒否されます)。省略可能なスカラーのフィールドは、
   v2.1 以降 struct の中に直接書けます。
+- Map の値はスカラー、入れ子の `Option<scalar>`、またはそれらのフィールドだけを持つ
+  struct でなければなりません。入れ子の Map/Set/Seq/relation は拒否されます。特に
+  `Map<Id, Map<K, Bool>>` は explicit-state 実行で必要な初期 Map 値を構築できないため
+  拒否されます。これは、過去の `check` が end-to-end の実行経路なしに受理していた形を
+  削除する破壊的変更です。
+- 共有された CLI/LSP の state/struct-field 型ヒントは、拒否される relation と collection
+  の形も含めて、この再帰的な `Option<scalar>` 境界を示します。これは従来の 1 段だけの
+  `Option<scalar>` という文言を置き換えます。
 - `Map<Int, V>` は `check` で拒否されます。`type ItemId = 0..<max>` のような
   有界キー型を宣言し、`Map<ItemId, V>` を使ってください。
 - `symmetric type` と `symmetric enum` は、liveness の対称性簡約のために、値を

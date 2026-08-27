@@ -5556,6 +5556,13 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
         Ok(_) => {}
         Err(error) => return (surface_parse_error_output(&error), 2),
     }
+    // The source-diagnostic preflight lowers every regular dialect document.
+    // Validate specialized documents first, so an invalid AI authority name
+    // cannot reach `lower_ai_component`'s generated-member lookup. Surface
+    // parsing stays ahead of this validation to retain parse-error envelopes.
+    if let Err(error) = validate_specialized_document_from_source(path, &source) {
+        return (semantic_error_output(&error), 2);
+    }
     let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
     if let Some(diagnostic) = fslc_rust::source_diagnostic::diagnostics(
         &source,
@@ -5578,9 +5585,6 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
             ),
             2,
         );
-    }
-    if let Err(error) = validate_specialized_document(path) {
-        return (semantic_error_output(&error), 2);
     }
     match load_kernel_model(path) {
         Ok((_, kernel, model)) => {
@@ -6068,11 +6072,6 @@ fn validate_specialized_document_from_source(path: &Path, source: &str) -> Resul
         }
         _ => Ok(()),
     }
-}
-
-fn validate_specialized_document(path: &Path) -> Result<(), String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    validate_specialized_document_from_source(path, &source)
 }
 
 fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {

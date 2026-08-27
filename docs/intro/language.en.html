@@ -77,7 +77,7 @@
   symmetric type &lt;Name&gt; = &lt;lo&gt;..&lt;hi&gt;   // domain whose values are interchangeable identities
   enum  &lt;Name&gt; { &lt;Member&gt;, ... }
   symmetric enum &lt;Name&gt; { &lt;Member&gt;, ... }
-  struct &lt;Name&gt; { &lt;field&gt;: &lt;scalar type | Option&lt;scalar type&gt;&gt;, ... }
+  struct &lt;Name&gt; { &lt;field&gt;: &lt;scalar type | nested Option&lt;scalar type&gt;&gt;, ... }
 
   def &lt;name&gt;(&lt;p&gt;: &lt;type name&gt;, ...) = &lt;expr&gt; // non-recursive named predicate; frontend-inlined
 
@@ -577,13 +577,13 @@ by itself prove the per-entity decrease required by the <code>helpful</code> for
 </tr>
 <tr>
 <td>struct</td>
-<td><code>struct Order { st: St, item: Option&lt;ItemId&gt;, qty: Qty }</code></td>
-<td>Fields are scalars or <code>Option&lt;scalar&gt;</code></td>
+<td><code>struct Order { st: St, item: Option&lt;Option&lt;ItemId&gt;&gt;, qty: Qty }</code></td>
+<td>Fields are scalars or nested <code>Option&lt;scalar&gt;</code></td>
 </tr>
 <tr>
 <td><code>Option&lt;T&gt;</code></td>
-<td><code>cart: Option&lt;ItemId&gt;</code></td>
-<td><code>none</code> / <code>some(e)</code>. Used instead of a sentinel value</td>
+<td><code>cart: Option&lt;Option&lt;ItemId&gt;&gt;</code></td>
+<td><code>none</code> / <code>some(e)</code>. Used instead of a sentinel value; nesting is supported around a scalar payload</td>
 </tr>
 <tr>
 <td><code>Map&lt;K, V&gt;</code></td>
@@ -621,14 +621,22 @@ remain in <code>init</code>. Assigning the same root both inline and in <code>in
 error that reports both source locations. See
 <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-initialization.md"><code>DESIGN-initialization.md</code></a>.</p>
 <p><strong>Types legal as state variables</strong> (anything else is rejected by <code>check</code> as a type error):
-scalar | <code>Option&lt;scalar&gt;</code> | struct (scalar / <code>Option&lt;scalar&gt;</code> fields)
-| <code>Map&lt;bounded scalar, scalar | Option&lt;scalar&gt; | struct&gt;</code>
+scalar | nested <code>Option&lt;scalar&gt;</code> | struct (scalar / nested <code>Option&lt;scalar&gt;</code> fields)
+| <code>Map&lt;bounded scalar, scalar | nested Option&lt;scalar&gt; | struct&gt;</code>
 | <code>Set&lt;bounded scalar&gt;</code> | <code>Seq&lt;scalar, N&gt;</code> | <code>relation bounded-scalar -&gt; bounded-scalar</code></p>
 <ul>
 <li>Nesting structs, Set/Map/Seq inside a struct field,
-  <code>Option&lt;Option&lt;...&gt;&gt;</code>, and <code>Option&lt;Set/Map/Seq/struct&gt;</code> are not allowed
+  and <code>Option&lt;Set/Map/Seq/struct&gt;</code> are not allowed
   (rejected at check time with a hint). Optional scalar fields can be written
   directly inside a struct as of v2.1.</li>
+<li>A Map value may be a scalar, nested <code>Option&lt;scalar&gt;</code>, or a struct with those
+  fields; nested Map/Set/Seq/relation values are rejected. In particular,
+  <code>Map&lt;Id, Map&lt;K, Bool&gt;&gt;</code> is rejected because explicit-state execution cannot
+  construct its required initial Map value. This is a breaking removal of a
+  shape that earlier <code>check</code> accepted without an end-to-end execution path.</li>
+<li>The shared CLI/LSP state and struct-field type hints name this recursive
+  <code>Option&lt;scalar&gt;</code> boundary, including the rejected relation and collection
+  forms; this replaces the earlier one-level <code>Option&lt;scalar&gt;</code> wording.</li>
 <li><code>Map&lt;Int, V&gt;</code> is rejected by <code>check</code>. Declare a bounded key type, for example
   <code>type ItemId = 0..&lt;max&gt;</code>, and use <code>Map&lt;ItemId, V&gt;</code>.</li>
 <li><code>symmetric type</code> and <code>symmetric enum</code> mark values as interchangeable entity
