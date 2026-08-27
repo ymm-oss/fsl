@@ -16749,6 +16749,125 @@ spec InitTraceability {
         }
     }
 
+    /// Platform-neutral #808 control for `domain generate`. The scaffold's
+    /// checked Kernel and domain metadata must both derive from source A after
+    /// the root path has been normally overwritten with malformed source B.
+    #[test]
+    fn domain_generate_helpers_use_the_captured_root_snapshot() {
+        let source_a = include_str!("../tests/fixtures/issue_641_domain_clean.fsl");
+        let fixture = SnapshotFixture::new("domain-generate", source_a);
+        let captured = read_domain_command_source(&fixture.path).expect("capture source A");
+        std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
+
+        let domain =
+            parse_domain_document_from_source(&fixture.path, &captured).expect("parse source A");
+        let (kernel, metadata) =
+            domain_scaffold_inputs_from_source(&fixture.path, &captured, &domain)
+                .expect("derive source A scaffold inputs");
+        let scaffold = fsl_tools::domain_scaffold(&kernel, &metadata, "typescript")
+            .expect("scaffold source A");
+
+        assert_eq!(scaffold["domain"], "CleanDiagnosticDomain", "{scaffold:#}");
+        assert!(
+            scaffold["files"]
+                .as_array()
+                .expect("scaffold files")
+                .iter()
+                .filter_map(|file| file["content"].as_str())
+                .any(|content| content.contains("CloseDoc")),
+            "the generated scaffold must retain source A's CloseDoc command: {scaffold:#}"
+        );
+    }
+
+    /// Platform-neutral #808 control for `domain replay`. Its Monitor model
+    /// must be lowered from captured source A rather than a fresh read of the
+    /// malformed replacement at the root path.
+    #[test]
+    fn domain_replay_model_uses_the_captured_root_snapshot() {
+        let source_a = include_str!("../tests/fixtures/issue_641_domain_clean.fsl");
+        let fixture = SnapshotFixture::new("domain-replay", source_a);
+        let captured = read_domain_command_source(&fixture.path).expect("capture source A");
+        std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
+
+        let model = load_model_from_source(&fixture.path, &captured).expect("lower source A");
+        assert_eq!(display(&model.name), "CleanDiagnosticDomain");
+        assert!(
+            model
+                .actions
+                .iter()
+                .any(|action| display(&action.name) == "doc_close_doc"),
+            "replay model must retain source A's lowered CloseDoc action"
+        );
+    }
+
+    /// Platform-neutral #808 control for `domain testgen`. Both the generic
+    /// test scaffold and the Vitest adapter-scaffold inputs must remain bound
+    /// to captured source A after the root path is overwritten.
+    #[test]
+    fn domain_testgen_helpers_use_the_captured_root_snapshot() {
+        let source_a = include_str!("../tests/fixtures/issue_641_domain_clean.fsl");
+        let fixture = SnapshotFixture::new("domain-testgen", source_a);
+        let captured = read_domain_command_source(&fixture.path).expect("capture source A");
+        std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
+
+        let (generic, status) =
+            run_testgen_from_source(&fixture.path, &captured, 4, "vitest", "warn", false, None);
+        assert_eq!(status, 0, "{generic:#}");
+        assert_eq!(generic["spec"], "CleanDiagnosticDomain", "{generic:#}");
+        assert!(
+            generic["content"]
+                .as_str()
+                .expect("generic testgen content")
+                .contains("doc_close_doc"),
+            "generic testgen must retain source A's lowered CloseDoc action: {generic:#}"
+        );
+
+        let domain =
+            parse_domain_document_from_source(&fixture.path, &captured).expect("parse source A");
+        let (kernel, metadata) =
+            domain_scaffold_inputs_from_source(&fixture.path, &captured, &domain)
+                .expect("derive source A Vitest adapter inputs");
+        let adapter_files = fsl_tools::domain_adapter_files(&kernel, &metadata)
+            .expect("scaffold source A adapters");
+        assert!(
+            adapter_files
+                .iter()
+                .any(|(_, content)| content.contains("CloseDoc")),
+            "the Vitest adapter scaffold must retain source A's CloseDoc command"
+        );
+    }
+
+    /// Platform-neutral #808 control for `domain check`. Verification and
+    /// edition post-processing must derive from the same captured source A,
+    /// even after a normal overwrite makes the root path malformed.
+    #[test]
+    fn domain_check_helpers_use_the_captured_root_snapshot() {
+        // This fixture predates the `next` edition and uses its rejected
+        // `||` spelling. Keep the fixture's semantics while exercising the
+        // post-processing success path rather than that unrelated migration
+        // diagnostic.
+        let source_a =
+            include_str!("../tests/fixtures/issue_641_domain_clean.fsl").replace(" || ", " or ");
+        let fixture = SnapshotFixture::new("domain-check", &source_a);
+        let captured = read_domain_command_source(&fixture.path).expect("capture source A");
+        std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
+
+        let verified = run_verify_from_source(
+            &fixture.path,
+            &captured,
+            4,
+            "warn",
+            "bmc",
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        );
+        let (output, status) =
+            apply_domain_edition_from_source(verified, &captured, &fixture.path, "next");
+        assert_eq!(status, 0, "{output:#}");
+        assert_eq!(output["spec"], "CleanDiagnosticDomain", "{output:#}");
+        assert_eq!(output["edition"], "next", "{output:#}");
+    }
+
     /// The requirements `implements` path invokes the native refinement
     /// engine. Its root document must use the captured requirements source
     /// even after that path is replaced; its referenced business document is
