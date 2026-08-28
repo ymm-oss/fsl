@@ -461,7 +461,7 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
     if let Err(failure) = add_reachable_diagnostics(&model, &mut result, &mut statistics).await {
         return verifier_error(solver_version, &failure);
     }
-    let (mut output, _) = fslc_rust::verification_output::render_bmc_output(
+    let (output, _) = fslc_rust::verification_output::render_bmc_output(
         envelope(solver_version),
         &model,
         &result,
@@ -476,11 +476,35 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             skip_vacuity_probe: false,
         },
     );
+    finalize_verify_output(
+        request,
+        solver_version,
+        &model,
+        has_trace_contract,
+        output,
+        compose_warnings,
+    )
+}
+
+/// Apply the common post-verification metadata after a BMC result is rendered.
+///
+/// This stays separate from solver execution so the native-host unit tests can
+/// exercise the `verify` caller's `implements` error return without a browser
+/// Z3 bridge.  The Worker and the native CLI both delegate the final
+/// `implements` rendering to [`fslc_rust::verification_output`].
+fn finalize_verify_output(
+    request: &Request,
+    solver_version: &str,
+    model: &KernelModel,
+    has_trace_contract: bool,
+    mut output: Value,
+    compose_warnings: Vec<Value>,
+) -> Value {
     prepend_compose_warnings(&mut output, compose_warnings);
     add_frontend_metadata(
         request,
         solver_version,
-        &model,
+        model,
         has_trace_contract,
         request.options.depth,
         output,
@@ -560,6 +584,7 @@ pub fn internal_error(message: String) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::future::Future;
     use std::task::{Context, Poll, Waker};
 
@@ -568,6 +593,237 @@ mod tests {
     use fsl_verifier::{BmcResult, BmcViolation, LeadsToViolation};
 
     const TEST_SOLVER_VERSION: &str = "Z3 4.16.0.0";
+
+    /// Every Worker `check`/`verify` error-return route has exactly one row.
+    ///
+    /// This is a test-local inventory, not a reflection of `check`/`verify`.
+    /// Adding an implementation return without adding an `ErrorRoute` variant
+    /// remains a population risk: the registry cannot prove that route is
+    /// compared.  The exhaustive inventory guard below prevents omissions only
+    /// after a route has been deliberately added to this enum.
+    ///
+    /// `Compared` rows name a full-envelope `assert_eq!(worker, native)` cell.
+    /// `NotComparable` rows are deliberately retained with the concrete
+    /// boundary that prevents a native/Worker pair; they are not a tolerated
+    /// envelope difference.  The native CLI's `run_verify*` composition remains
+    /// binary-private, and the native-host unit test has no initialized browser
+    /// Z3 bridge, so a solver-dependent Worker return cannot be driven alongside
+    /// the native composite route without widening that public API.
+    #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+    enum ErrorRoute {
+        CheckAiProject,
+        CheckSurfaceParse,
+        CheckBuild,
+        CheckRequirementTrace,
+        CheckGovernance,
+        CheckImplements,
+        VerifySurfaceParse,
+        VerifyBuild,
+        VerifyRequirementTrace,
+        VerifyDeadlockOption,
+        VerifyBoundary,
+        VerifyVerifier,
+        VerifyReplay,
+        VerifyReachableDiagnostics,
+        VerifyImplements,
+    }
+
+    impl ErrorRoute {
+        const COUNT: usize = 15;
+
+        const ALL: [Self; Self::COUNT] = [
+            Self::CheckAiProject,
+            Self::CheckSurfaceParse,
+            Self::CheckBuild,
+            Self::CheckRequirementTrace,
+            Self::CheckGovernance,
+            Self::CheckImplements,
+            Self::VerifySurfaceParse,
+            Self::VerifyBuild,
+            Self::VerifyRequirementTrace,
+            Self::VerifyDeadlockOption,
+            Self::VerifyBoundary,
+            Self::VerifyVerifier,
+            Self::VerifyReplay,
+            Self::VerifyReachableDiagnostics,
+            Self::VerifyImplements,
+        ];
+
+        /// Adding a variant to `ErrorRoute` breaks this match, which is the only
+        /// compile-time forcing point.  Having added an arm here, also raise
+        /// `COUNT`, append the variant to `ALL`, and add its
+        /// `ERROR_ROUTE_REGISTRY` row: each of those three is enforced, but by a
+        /// different mechanism, and the diagnostics do not name each other.
+        ///
+        /// Measured on 2026-08-28, one isolated mutation each, reverted to
+        /// SHA-256 `7b769a4e…` between them:
+        ///
+        /// - variant only -> `E0004 non-exhaustive patterns` (`exit=101`)
+        /// - `COUNT` raised, `ALL` left alone -> `E0308 expected an array with a
+        ///   size of 16, found one with a size of 15` (`exit=101`)
+        /// - `ALL` appended, registry row omitted ->
+        ///   `error_route_registry_is_total_and_exclusions_are_specific` fails
+        ///   with `left: {0..=14}` vs `right: {0..=15}` (`exit=101`)
+        /// - variant plus this arm only, `COUNT` left at its old value ->
+        ///   `cargo test` **passes** (`exit=0`); only
+        ///   `clippy -D warnings` rejects it, as `variant is never constructed`
+        ///   (`exit=101`).  That last catcher is incidental rather than designed,
+        ///   and its message does not mention `COUNT`, `ALL`, or the registry --
+        ///   which is why this comment exists.
+        const fn discriminant(self) -> usize {
+            match self {
+                Self::CheckAiProject => 0,
+                Self::CheckSurfaceParse => 1,
+                Self::CheckBuild => 2,
+                Self::CheckRequirementTrace => 3,
+                Self::CheckGovernance => 4,
+                Self::CheckImplements => 5,
+                Self::VerifySurfaceParse => 6,
+                Self::VerifyBuild => 7,
+                Self::VerifyRequirementTrace => 8,
+                Self::VerifyDeadlockOption => 9,
+                Self::VerifyBoundary => 10,
+                Self::VerifyVerifier => 11,
+                Self::VerifyReplay => 12,
+                Self::VerifyReachableDiagnostics => 13,
+                Self::VerifyImplements => 14,
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum RouteCoverage {
+        Compared { cell: &'static str },
+        NotComparable(NonComparableReason),
+    }
+
+    /// An explicit native/Worker boundary for a route that cannot form a
+    /// full-envelope comparison pair in this native-host test.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum NonComparableReason {
+        DeadlockWorkerRequestOption,
+        VerifierRequiresBrowserSolverAndPrivateNativeComposite,
+        ReplayRequiresBrowserSolverAndPrivateNativeComposite,
+        ReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite,
+    }
+
+    impl NonComparableReason {
+        const fn detail(self) -> &'static str {
+            match self {
+                Self::DeadlockWorkerRequestOption => {
+                    "`options.deadlock` is a Worker request field; native CLI argument parsing is a distinct public input path, so no native request pair exists."
+                }
+                Self::VerifierRequiresBrowserSolverAndPrivateNativeComposite => {
+                    "a native/Worker composite verify pair requires the binary-private native `run_verify*` API and an initialized browser Z3 bridge; neither is available to this native-host test."
+                }
+                Self::ReplayRequiresBrowserSolverAndPrivateNativeComposite => {
+                    "replay is reached only after a browser-solver BMC result; the equivalent native composite verifier is binary-private and cannot be invoked here without public API expansion."
+                }
+                Self::ReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite => {
+                    "reachable diagnosis is reached only after browser-solver BMC; a native composite pair is unavailable without exposing `run_verify*`."
+                }
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct RouteRegistration {
+        route: ErrorRoute,
+        coverage: RouteCoverage,
+    }
+
+    const ERROR_ROUTE_REGISTRY: &[RouteRegistration] = &[
+        RouteRegistration {
+            route: ErrorRoute::CheckAiProject,
+            coverage: RouteCoverage::Compared {
+                cell: "check_error_envelopes_match_native_across_parse_guard_and_name",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::CheckSurfaceParse,
+            coverage: RouteCoverage::Compared {
+                cell: "check_error_envelopes_match_native_across_parse_guard_and_name",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::CheckBuild,
+            coverage: RouteCoverage::Compared {
+                cell: "build_rejects_duplicate_action_writes",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::CheckRequirementTrace,
+            coverage: RouteCoverage::Compared {
+                cell: "check_requirement_trace_error_envelope_matches_native",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::CheckGovernance,
+            coverage: RouteCoverage::Compared {
+                cell: "check_rejects_an_incomplete_governance_contract",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::CheckImplements,
+            coverage: RouteCoverage::Compared {
+                cell: "check_keeps_inline_enum_conversion_error_location",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::VerifySurfaceParse,
+            coverage: RouteCoverage::Compared {
+                cell: "verify_surface_parse_error_envelope_matches_native",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::VerifyBuild,
+            coverage: RouteCoverage::Compared {
+                cell: "verify_build_error_envelope_matches_native",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::VerifyRequirementTrace,
+            coverage: RouteCoverage::Compared {
+                cell: "verify_requirement_trace_error_envelope_matches_native",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::VerifyDeadlockOption,
+            coverage: RouteCoverage::NotComparable(
+                NonComparableReason::DeadlockWorkerRequestOption,
+            ),
+        },
+        RouteRegistration {
+            route: ErrorRoute::VerifyBoundary,
+            coverage: RouteCoverage::Compared {
+                cell: "verify_boundary_error_envelope_matches_native",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::VerifyVerifier,
+            coverage: RouteCoverage::NotComparable(
+                NonComparableReason::VerifierRequiresBrowserSolverAndPrivateNativeComposite,
+            ),
+        },
+        RouteRegistration {
+            route: ErrorRoute::VerifyReplay,
+            coverage: RouteCoverage::NotComparable(
+                NonComparableReason::ReplayRequiresBrowserSolverAndPrivateNativeComposite,
+            ),
+        },
+        RouteRegistration {
+            route: ErrorRoute::VerifyReachableDiagnostics,
+            coverage: RouteCoverage::NotComparable(
+                NonComparableReason::ReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite,
+            ),
+        },
+        RouteRegistration {
+            route: ErrorRoute::VerifyImplements,
+            coverage: RouteCoverage::Compared {
+                cell: "verify_implements_error_envelope_matches_native",
+            },
+        },
+    ];
 
     fn block_on<F: Future>(future: F) -> F::Output {
         let mut context = Context::from_waker(Waker::noop());
@@ -662,6 +918,44 @@ mod tests {
         );
     }
 
+    fn native_requirement_trace_error(request: &Request, solver_version: &str) -> Value {
+        let resolver = MemoryResolver {
+            files: request.files.clone(),
+        };
+        let kernel = fsl_core::parse_kernel_source_with_file(
+            &request.source,
+            &resolver,
+            &request.source_file,
+        )
+        .expect("fixture must lower before its requirement trace failure");
+        let model = fsl_core::build_model(kernel).expect("fixture must build before trace failure");
+        fslc_rust::verification_output::validate_requirement_trace_source(
+            &envelope(solver_version),
+            &request.source,
+            &model,
+        )
+        .expect("fixture trace validation must run")
+        .0
+        .expect("fixture must fail native requirement trace validation")
+    }
+
+    fn assert_worker_requirement_trace_error_matches_native(
+        request: &Request,
+        fixture: &str,
+        command: &str,
+    ) {
+        let worker = match command {
+            "check" => block_on(check(request, TEST_SOLVER_VERSION)),
+            "verify" => block_on(verify(request, TEST_SOLVER_VERSION)),
+            _ => panic!("unsupported Worker command {command}"),
+        };
+        let native = native_requirement_trace_error(request, TEST_SOLVER_VERSION);
+        assert_eq!(
+            worker, native,
+            "Worker/native {command} requirement-trace envelope diverged for {fixture}"
+        );
+    }
+
     fn native_verify_surface_parse_error(request: &Request, solver_version: &str) -> Value {
         let failure = fsl_syntax::parse_surface_document(&request.source)
             .expect_err("fixture must fail native verify surface parsing");
@@ -674,6 +968,59 @@ mod tests {
         assert_eq!(
             worker, native,
             "Worker/native verify surface-parse envelope diverged for {fixture}"
+        );
+    }
+
+    fn native_verify_boundary_error(request: &Request, solver_version: &str) -> Value {
+        let resolver = MemoryResolver {
+            files: request.files.clone(),
+        };
+        let kernel = fsl_core::parse_kernel_source_with_file(
+            &request.source,
+            &resolver,
+            &request.source_file,
+        )
+        .expect("fixture must lower before its boundary violation");
+        let model =
+            fsl_core::build_model(kernel).expect("fixture must build before boundary violation");
+        let (violation, trace) = fsl_runtime::find_boundary_violation(
+            &model,
+            request.options.depth,
+            fsl_runtime::CONCRETE_PROBE_BUDGET,
+        )
+        .expect("boundary probe must run")
+        .finding
+        .expect("fixture must find a boundary violation");
+        assert_ne!(
+            violation.kind, "partial_op",
+            "fixture must use the boundary return"
+        );
+        fslc_rust::verification_output::render_boundary_output(
+            envelope(solver_version),
+            &model,
+            &violation,
+            &trace,
+            &fslc_rust::verification_output::BmcOutputOptions {
+                depth: request.options.depth,
+                deadlock: fslc_rust::verification_output::DeadlockMode::parse(
+                    &request.options.deadlock,
+                )
+                .expect("fixture has a valid deadlock mode"),
+                checked_bounds: None,
+                elapsed_s: 0.0,
+                statistics: &fsl_solver::VerificationStatistics::default(),
+                skip_vacuity_probe: false,
+            },
+        )
+        .0
+    }
+
+    fn assert_worker_verify_boundary_error_matches_native(request: &Request, fixture: &str) {
+        let worker = block_on(verify(request, TEST_SOLVER_VERSION));
+        let native = native_verify_boundary_error(request, TEST_SOLVER_VERSION);
+        assert_eq!(
+            worker, native,
+            "Worker/native verify boundary envelope diverged for {fixture}"
         );
     }
 
@@ -735,6 +1082,98 @@ mod tests {
             worker, native,
             "Worker/native implements error diverged for {fixture}"
         );
+    }
+
+    fn assert_verify_finalization_implements_error_matches_native(
+        request: &Request,
+        fixture: &str,
+    ) {
+        let resolver = MemoryResolver {
+            files: request.files.clone(),
+        };
+        let kernel = fsl_core::parse_kernel_source_with_file(
+            &request.source,
+            &resolver,
+            &request.source_file,
+        )
+        .expect("fixture must lower before its implements failure");
+        let model = fsl_core::build_model(kernel).expect("fixture must build before implements");
+        // The error branch intentionally replaces the rendered BMC payload
+        // with the native implements envelope, so this value is inert while
+        // still exercising `verify`'s extracted finalization caller.
+        let worker = finalize_verify_output(
+            request,
+            TEST_SOLVER_VERSION,
+            &model,
+            false,
+            json!({"result": "verified"}),
+            Vec::new(),
+        );
+        let native = native_implements_error(request, TEST_SOLVER_VERSION);
+        assert_eq!(
+            worker, native,
+            "Worker/native verify implements envelope diverged for {fixture}"
+        );
+    }
+
+    #[test]
+    fn error_route_registry_is_total_and_exclusions_are_specific() {
+        let expected_discriminants = (0..ErrorRoute::COUNT).collect::<BTreeSet<_>>();
+        let all_discriminants = ErrorRoute::ALL
+            .into_iter()
+            .map(ErrorRoute::discriminant)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            all_discriminants, expected_discriminants,
+            "ErrorRoute::ALL must contain every discriminant exactly once"
+        );
+        let registered_discriminants = ERROR_ROUTE_REGISTRY
+            .iter()
+            .map(|entry| entry.route.discriminant())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            registered_discriminants, expected_discriminants,
+            "every Worker error route needs one registry row"
+        );
+        assert_eq!(
+            registered_discriminants.len(),
+            ERROR_ROUTE_REGISTRY.len(),
+            "Worker error-route registry contains duplicates"
+        );
+        for entry in ERROR_ROUTE_REGISTRY {
+            match entry.coverage {
+                RouteCoverage::Compared { cell } => assert!(
+                    !cell.trim().is_empty(),
+                    "{:?} is compared without a detector cell",
+                    entry.route
+                ),
+                RouteCoverage::NotComparable(reason) => {
+                    let expected_reason = match entry.route {
+                        ErrorRoute::VerifyDeadlockOption => {
+                            NonComparableReason::DeadlockWorkerRequestOption
+                        }
+                        ErrorRoute::VerifyVerifier => {
+                            NonComparableReason::VerifierRequiresBrowserSolverAndPrivateNativeComposite
+                        }
+                        ErrorRoute::VerifyReplay => {
+                            NonComparableReason::ReplayRequiresBrowserSolverAndPrivateNativeComposite
+                        }
+                        ErrorRoute::VerifyReachableDiagnostics => {
+                            NonComparableReason::ReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite
+                        }
+                        route => panic!("{route:?} is non-comparable without a route-specific reason"),
+                    };
+                    assert_eq!(
+                        reason,
+                        expected_reason,
+                        "{:?} has the wrong comparison boundary: {}",
+                        entry.route,
+                        reason.detail()
+                    );
+                    assert!(!reason.detail().trim().is_empty());
+                }
+            }
+        }
     }
 
     #[test]
@@ -804,6 +1243,109 @@ mod tests {
             options: Options::default(),
         };
         assert_worker_verify_surface_parse_error_matches_native(&request, "surface parse");
+    }
+
+    #[test]
+    fn check_requirement_trace_error_envelope_matches_native() {
+        let request = Request {
+            cmd: "check".to_owned(),
+            source: include_str!(
+                "../../fslc/tests/fixtures/requirements_acceptance_walk_violation.fsl"
+            )
+            .to_owned(),
+            source_file: "requirements_acceptance_walk_violation.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        };
+        assert_worker_requirement_trace_error_matches_native(
+            &request,
+            "requirements acceptance walk",
+            "check",
+        );
+    }
+
+    #[test]
+    fn verify_build_error_envelope_matches_native() {
+        let request = Request {
+            cmd: "verify".to_owned(),
+            source: "spec Duplicate { state { x: Bool } init { x = false } action write_twice() { x = true x = false } }".to_owned(),
+            source_file: "duplicate.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        };
+        let worker = block_on(verify(&request, TEST_SOLVER_VERSION));
+        let native = native_check_error(&request, TEST_SOLVER_VERSION);
+        assert_eq!(
+            worker, native,
+            "Worker/native verify build envelope diverged"
+        );
+    }
+
+    #[test]
+    fn verify_requirement_trace_error_envelope_matches_native() {
+        let request = Request {
+            cmd: "verify".to_owned(),
+            source: include_str!(
+                "../../fslc/tests/fixtures/requirements_acceptance_walk_violation.fsl"
+            )
+            .to_owned(),
+            source_file: "requirements_acceptance_walk_violation.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        };
+        assert_worker_requirement_trace_error_matches_native(
+            &request,
+            "requirements acceptance walk",
+            "verify",
+        );
+    }
+
+    #[test]
+    fn verify_boundary_error_envelope_matches_native() {
+        let request = Request {
+            cmd: "verify".to_owned(),
+            source: include_str!(
+                "../../../examples/gallery/errors/violated_type_bound_missing_guard.fsl"
+            )
+            .to_owned(),
+            source_file: "violated_type_bound_missing_guard.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options {
+                depth: 2,
+                deadlock: "warn".to_owned(),
+            },
+        };
+        assert_worker_verify_boundary_error_matches_native(&request, "type bound");
+    }
+
+    #[test]
+    fn verify_implements_error_envelope_matches_native() {
+        let request = Request {
+            cmd: "verify".to_owned(),
+            source: r#"requirements Impl {
+  implements Abs from "abs.fsl" {
+    enum conversion stage ImplStage -> AbsStage { A -> A }
+    map status = convert(stage, stage)
+    action step() -> step()
+  }
+  enum ImplStage { A, B }
+  state { stage: ImplStage }
+  init { stage = A }
+  action step() { stage = B }
+}
+"#
+            .to_owned(),
+            source_file: "impl.fsl".to_owned(),
+            files: BTreeMap::from([(
+                "abs.fsl".to_owned(),
+                "spec Abs { enum AbsStage { A, B } state { status: AbsStage } init { status = A } action step() { status = B } }".to_owned(),
+            )]),
+            options: Options::default(),
+        };
+        assert_verify_finalization_implements_error_matches_native(
+            &request,
+            "inline enum conversion",
+        );
     }
 
     #[test]
