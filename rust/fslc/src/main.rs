@@ -1050,11 +1050,13 @@ fn command() -> Result<(Value, i32), String> {
             let path = literate_guard
                 .as_ref()
                 .map_or(&display_path, |state| &state.path);
+            let source = match read_spec_source(path) {
+                Ok(source) => source,
+                Err(error) => return Ok((spec_load_error_output(&error), 2)),
+            };
             // Standalone causal models are never kernel specs; route them to
             // the causal checker instead of failing dialect dispatch.
-            if std::fs::read_to_string(path)
-                .is_ok_and(|source| fsl_syntax::is_causal_source(&source))
-            {
+            if fsl_syntax::is_causal_source(&source) {
                 if args.next().is_some() {
                     return Err(
                         "fslc check on a causal model accepts no options; use fslc causal check"
@@ -1079,9 +1081,10 @@ fn command() -> Result<(Value, i32), String> {
                     _ => return Err(format!("unknown check option '{option}'")),
                 }
             }
-            Ok(with_version_metadata(run_check_with_tags(
+            Ok(with_version_metadata(run_check_with_tags_from_source(
                 path,
                 &display_path,
+                &source,
                 strict_tags,
                 requirements.as_deref(),
                 &edition,
@@ -5538,17 +5541,25 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
+    run_check_from_source(path, display_path, &source)
+}
+
+/// Check one caller-owned root-source snapshot.
+///
+/// The displayed path intentionally remains independent of the path used to
+/// resolve imports, including for materialized literate sources.
+fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Value, i32) {
     // The fsl-ai project gate carries its own exit code: an unexecutable
     // `require` clause is a spec error (issue #542), so this may not be
     // flattened back to a fixed exit 0.
     if let Some(result) = fslc_rust::frontend_output::ai_project_check_output(
-        &source,
+        source,
         &display_path.to_string_lossy(),
         envelope(),
     ) {
         return result;
     }
-    match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source)) {
+    match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)) {
         Ok(fsl_syntax::ParsedDocument {
             surface: fsl_syntax::SurfaceDocument::Agent(agent),
             ..
@@ -5560,12 +5571,12 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
     // Validate specialized documents first, so an invalid AI authority name
     // cannot reach `lower_ai_component`'s generated-member lookup. Surface
     // parsing stays ahead of this validation to retain parse-error envelopes.
-    if let Err(error) = validate_specialized_document_from_source(path, &source) {
+    if let Err(error) = validate_specialized_document_from_source(path, source) {
         return (semantic_error_output(&error), 2);
     }
     let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
     if let Some(diagnostic) = fslc_rust::source_diagnostic::diagnostics(
-        &source,
+        source,
         &display_path.to_string_lossy(),
         &resolver,
     )
@@ -5586,23 +5597,24 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
             2,
         );
     }
-    match load_kernel_model(path) {
-        Ok((_, kernel, model)) => {
+    match load_kernel_model_from_source(path, source) {
+        Ok((kernel, model)) => {
             if let Err(error) = fsl_runtime::check_init_write_ownership(&model) {
                 return (
                     fslc_rust::verification_output::render_runtime_error(envelope(), &error),
                     2,
                 );
             }
-            let has_trace_contract = match validate_requirement_traces(path, &model) {
-                Ok((Some(failure), _)) => return (failure, 2),
-                Ok((None, has_contract)) => has_contract,
-                Err(error) => return (semantic_error_output(&error), 2),
-            };
+            let has_trace_contract =
+                match validate_requirement_traces_from_source(path, source, &model) {
+                    Ok((Some(failure), _)) => return (failure, 2),
+                    Ok((None, has_contract)) => has_contract,
+                    Err(error) => return (semantic_error_output(&error), 2),
+                };
             let mut output = envelope();
             output.insert("result".to_owned(), json!("ok"));
             output.insert("spec".to_owned(), json!(model.name));
-            let implements = match implements_result(path, &model, 8) {
+            let implements = match implements_result_from_source(path, source, &model, 8) {
                 Ok(implements) => implements,
                 Err(error) => return (implements_error_output(&error), 2),
             };
@@ -5627,7 +5639,7 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
             if let Some(implements) = implements {
                 output.insert("implements".to_owned(), implements);
             }
-            match governance_result(path, 8) {
+            match governance_result_from_source(path, source, 8) {
                 Ok(Some(governance)) => {
                     output.insert("governance".to_owned(), governance);
                 }
@@ -5751,6 +5763,15 @@ fn strict_tag_warnings(
     source_path: &Path,
     requirements: Option<&Path>,
 ) -> Result<Vec<Value>, String> {
+    let source = std::fs::read_to_string(source_path).map_err(|error| error.to_string())?;
+    strict_tag_warnings_from_source(model, &source, requirements)
+}
+
+fn strict_tag_warnings_from_source(
+    model: &KernelModel,
+    source: &str,
+    requirements: Option<&Path>,
+) -> Result<Vec<Value>, String> {
     let mut warnings = Vec::new();
     // The hint names the canonical link form from `docs/DESIGN-id-policy.md`.
     // It used to propose the `"REQ-1: original requirement"` string slot, which
@@ -5820,9 +5841,7 @@ fn strict_tag_warnings(
                 .map(|requirement| requirement.id),
         );
     }
-    if let Ok(source) = std::fs::read_to_string(source_path)
-        && let Ok(Some(contract)) = fsl_core::requirements_trace_contract(&source)
-    {
+    if let Ok(Some(contract)) = fsl_core::requirements_trace_contract(source) {
         referenced.extend(contract.acceptance.into_iter().map(|case| case.id));
         referenced.extend(contract.forbidden.into_iter().map(|case| case.id));
     }
@@ -5881,46 +5900,57 @@ fn add_strict_tag_warnings(
     Ok(())
 }
 
-/// `path` is read for source content (the materialized `.literate.fsl` sibling
-/// for a literate `.md` input); `display_path` is stamped into user-visible
-/// labels. See `run_check` for the same split.
-fn run_check_with_tags(
+fn add_strict_tag_warnings_from_source(
+    output: &mut Value,
+    model: &KernelModel,
+    source: &str,
+    strict_tags: bool,
+    requirements: Option<&Path>,
+) -> Result<(), String> {
+    if !strict_tags
+        || !matches!(
+            output.get("result").and_then(Value::as_str),
+            Some("ok" | "verified" | "proved")
+        )
+    {
+        return Ok(());
+    }
+    let additions = strict_tag_warnings_from_source(model, source, requirements)?;
+    let Some(envelope) = output.as_object_mut() else {
+        return Ok(());
+    };
+    envelope
+        .entry("warnings")
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .expect("warnings is an array")
+        .extend(additions);
+    Ok(())
+}
+
+/// Extend one caller-owned root-source check snapshot with tag and edition
+/// post-processing. `display_path` remains the user-visible source label.
+fn run_check_with_tags_from_source(
     path: &Path,
     display_path: &Path,
+    source: &str,
     strict_tags: bool,
     requirements: Option<&Path>,
     edition: &str,
 ) -> (Value, i32) {
-    let (mut output, status) = run_check(path, display_path);
+    let (mut output, status) = run_check_from_source(path, display_path, source);
     if status == 0 && strict_tags {
-        let model = match load_model(path) {
+        let model = match load_model_from_source(path, source) {
             Ok(model) => model,
             Err(error) => return (spec_load_error_output(&error), 2),
         };
-        if let Err(error) = add_strict_tag_warnings(&mut output, &model, path, true, requirements) {
+        if let Err(error) =
+            add_strict_tag_warnings_from_source(&mut output, &model, source, true, requirements)
+        {
             return (error_output("io", &error), 2);
         }
     }
-    apply_domain_edition((output, status), path, display_path, edition)
-}
-
-/// `path` is read for source content (the materialized `.literate.fsl`
-/// sibling for a literate `.md` input, so parsing sees the correctly blanked,
-/// position-preserving text); `display_path` is stamped into every
-/// user-visible label (migration/edition finding `file` fields, implicit-
-/// initial-value warning `file` fields) so machine-readable output always
-/// names the document the caller passed on the command line, never the
-/// transient materialization.
-fn apply_domain_edition(
-    (output, status): (Value, i32),
-    path: &Path,
-    display_path: &Path,
-    edition: &str,
-) -> (Value, i32) {
-    let Ok(source) = std::fs::read_to_string(path) else {
-        return (output, status);
-    };
-    apply_domain_edition_from_source((output, status), &source, display_path, edition)
+    apply_domain_edition_from_source((output, status), source, display_path, edition)
 }
 
 fn apply_domain_edition_from_source(
@@ -6075,7 +6105,22 @@ fn validate_specialized_document_from_source(path: &Path, source: &str) -> Resul
 }
 
 fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
-    let system = match load_surface_document(path) {
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    run_db_check_from_source(path, &source, depth, deadlock, engine)
+}
+
+/// Check one caller-owned database root-source snapshot.
+fn run_db_check_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock: &str,
+    engine: &str,
+) -> (Value, i32) {
+    let system = match load_surface_document_from_source(path, source) {
         Ok(fsl_syntax::SurfaceDocument::Db(system)) => system,
         Ok(_) => return (semantic_error_output("expected a dbsystem document"), 2),
         Err(error) => return (spec_load_error_output(&error), 2),
@@ -6088,8 +6133,15 @@ fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
     let status = if result.get("result").and_then(Value::as_str) == Some("violated") {
         1
     } else {
-        let (kernel, kernel_status) =
-            run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
+        let (kernel, kernel_status) = run_verify_from_source(
+            path,
+            source,
+            depth,
+            deadlock,
+            engine,
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        );
         // Issue #600. The rule and its rationale live with the rest of the
         // outcome vocabulary; `run_domain_check` calls the same predicate.
         if !fslc_rust::outcome::is_definitive_kernel_verdict(kernel_status) {
@@ -14817,14 +14869,6 @@ fn run_diff_git(
     )
 }
 
-fn validate_requirement_traces(
-    path: &Path,
-    model: &KernelModel,
-) -> Result<(Option<Value>, bool), String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    validate_requirement_traces_from_source(path, &source, model)
-}
-
 fn validate_requirement_traces_from_source(
     _path: &Path,
     source: &str,
@@ -14847,16 +14891,15 @@ fn validate_requirement_trace_source(
     fslc_rust::verification_output::validate_requirement_trace_source(&envelope(), source, model)
 }
 
-fn governance_result(
+/// Derive governance output from one caller-owned root-source snapshot.
+fn governance_result_from_source(
     path: &Path,
+    source: &str,
     depth: usize,
 ) -> Result<Option<Value>, fslc_rust::verification_output::GovernanceOutputError> {
-    let source = std::fs::read_to_string(path).map_err(|error| {
-        fslc_rust::verification_output::GovernanceOutputError::new(error.to_string(), 1, 1)
-    })?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    fslc_rust::verification_output::governance_output(&source, &resolver, |preservation| {
+    fslc_rust::verification_output::governance_output(source, &resolver, |preservation| {
         let (result, status) = run_refine(
             &base.join(&preservation.after_path),
             &base.join(&preservation.before_path),
@@ -16762,6 +16805,39 @@ spec InitTraceability {
                 );
             }
         }
+    }
+
+    /// Platform-neutral #932 control for `check`. Every result component must
+    /// use source A after the root path is overwritten with malformed source
+    /// B; reverting any of the source-taking calls in `run_check_from_source`
+    /// to its path-taking counterpart makes this detector return an error.
+    #[test]
+    fn check_helpers_use_the_captured_root_snapshot() {
+        let source_a = include_str!("../tests/fixtures/vacuous_leadsto.fsl");
+        let fixture = SnapshotFixture::new("check", source_a);
+        let captured = read_spec_source(&fixture.path).expect("capture source A");
+        std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
+
+        let (output, status) = run_check_from_source(&fixture.path, &fixture.path, &captured);
+        assert_eq!(status, 0, "{output:#}");
+        assert_eq!(output["result"], "ok", "{output:#}");
+        assert_eq!(output["spec"], "VacuousLeadstoFixture", "{output:#}");
+    }
+
+    /// Platform-neutral #932 control for `db check`. Its db projection and
+    /// Kernel verification must both use source A after the root path is
+    /// overwritten with malformed source B.
+    #[test]
+    fn db_check_helpers_use_the_captured_root_snapshot() {
+        let source_a = include_str!("../../../examples/db/safe_add_nullable_column.fsl");
+        let fixture = SnapshotFixture::new("db-check", source_a);
+        let captured = read_spec_source(&fixture.path).expect("capture source A");
+        std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
+
+        let (output, status) = run_db_check_from_source(&fixture.path, &captured, 4, "warn", "bmc");
+        assert_eq!(status, 0, "{output:#}");
+        assert_eq!(output["result"], "verified_under_assumptions", "{output:#}");
+        assert_eq!(output["dbsystem"], "SafeAddNullableColumn", "{output:#}");
     }
 
     /// Platform-neutral #808 control for `domain generate`. The scaffold's
