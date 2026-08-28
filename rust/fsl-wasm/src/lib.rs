@@ -596,6 +596,12 @@ mod tests {
 
     /// Every Worker `check`/`verify` error-return route has exactly one row.
     ///
+    /// This is a test-local inventory, not a reflection of `check`/`verify`.
+    /// Adding an implementation return without adding an `ErrorRoute` variant
+    /// remains a population risk: the registry cannot prove that route is
+    /// compared.  The exhaustive inventory guard below prevents omissions only
+    /// after a route has been deliberately added to this enum.
+    ///
     /// `Compared` rows name a full-envelope `assert_eq!(worker, native)` cell.
     /// `NotComparable` rows are deliberately retained with the concrete
     /// boundary that prevents a native/Worker pair; they are not a tolerated
@@ -643,6 +649,27 @@ mod tests {
             Self::VerifyImplements,
         ];
 
+        /// Adding a variant to `ErrorRoute` breaks this match, which is the only
+        /// compile-time forcing point.  Having added an arm here, also raise
+        /// `COUNT`, append the variant to `ALL`, and add its
+        /// `ERROR_ROUTE_REGISTRY` row: each of those three is enforced, but by a
+        /// different mechanism, and the diagnostics do not name each other.
+        ///
+        /// Measured on 2026-08-28, one isolated mutation each, reverted to
+        /// SHA-256 `7b769a4e…` between them:
+        ///
+        /// - variant only -> `E0004 non-exhaustive patterns` (`exit=101`)
+        /// - `COUNT` raised, `ALL` left alone -> `E0308 expected an array with a
+        ///   size of 16, found one with a size of 15` (`exit=101`)
+        /// - `ALL` appended, registry row omitted ->
+        ///   `error_route_registry_is_total_and_exclusions_are_specific` fails
+        ///   with `left: {0..=14}` vs `right: {0..=15}` (`exit=101`)
+        /// - variant plus this arm only, `COUNT` left at its old value ->
+        ///   `cargo test` **passes** (`exit=0`); only
+        ///   `clippy -D warnings` rejects it, as `variant is never constructed`
+        ///   (`exit=101`).  That last catcher is incidental rather than designed,
+        ///   and its message does not mention `COUNT`, `ALL`, or the registry --
+        ///   which is why this comment exists.
         const fn discriminant(self) -> usize {
             match self {
                 Self::CheckAiProject => 0,
@@ -674,25 +701,25 @@ mod tests {
     /// full-envelope comparison pair in this native-host test.
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum NonComparableReason {
-        VerifyDeadlockWorkerRequestOption,
-        VerifyVerifierRequiresBrowserSolverAndPrivateNativeComposite,
-        VerifyReplayRequiresBrowserSolverAndPrivateNativeComposite,
-        VerifyReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite,
+        DeadlockWorkerRequestOption,
+        VerifierRequiresBrowserSolverAndPrivateNativeComposite,
+        ReplayRequiresBrowserSolverAndPrivateNativeComposite,
+        ReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite,
     }
 
     impl NonComparableReason {
         const fn detail(self) -> &'static str {
             match self {
-                Self::VerifyDeadlockWorkerRequestOption => {
+                Self::DeadlockWorkerRequestOption => {
                     "`options.deadlock` is a Worker request field; native CLI argument parsing is a distinct public input path, so no native request pair exists."
                 }
-                Self::VerifyVerifierRequiresBrowserSolverAndPrivateNativeComposite => {
+                Self::VerifierRequiresBrowserSolverAndPrivateNativeComposite => {
                     "a native/Worker composite verify pair requires the binary-private native `run_verify*` API and an initialized browser Z3 bridge; neither is available to this native-host test."
                 }
-                Self::VerifyReplayRequiresBrowserSolverAndPrivateNativeComposite => {
+                Self::ReplayRequiresBrowserSolverAndPrivateNativeComposite => {
                     "replay is reached only after a browser-solver BMC result; the equivalent native composite verifier is binary-private and cannot be invoked here without public API expansion."
                 }
-                Self::VerifyReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite => {
+                Self::ReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite => {
                     "reachable diagnosis is reached only after browser-solver BMC; a native composite pair is unavailable without exposing `run_verify*`."
                 }
             }
@@ -763,7 +790,7 @@ mod tests {
         RouteRegistration {
             route: ErrorRoute::VerifyDeadlockOption,
             coverage: RouteCoverage::NotComparable(
-                NonComparableReason::VerifyDeadlockWorkerRequestOption,
+                NonComparableReason::DeadlockWorkerRequestOption,
             ),
         },
         RouteRegistration {
@@ -775,19 +802,19 @@ mod tests {
         RouteRegistration {
             route: ErrorRoute::VerifyVerifier,
             coverage: RouteCoverage::NotComparable(
-                NonComparableReason::VerifyVerifierRequiresBrowserSolverAndPrivateNativeComposite,
+                NonComparableReason::VerifierRequiresBrowserSolverAndPrivateNativeComposite,
             ),
         },
         RouteRegistration {
             route: ErrorRoute::VerifyReplay,
             coverage: RouteCoverage::NotComparable(
-                NonComparableReason::VerifyReplayRequiresBrowserSolverAndPrivateNativeComposite,
+                NonComparableReason::ReplayRequiresBrowserSolverAndPrivateNativeComposite,
             ),
         },
         RouteRegistration {
             route: ErrorRoute::VerifyReachableDiagnostics,
             coverage: RouteCoverage::NotComparable(
-                NonComparableReason::VerifyReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite,
+                NonComparableReason::ReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite,
             ),
         },
         RouteRegistration {
@@ -1123,16 +1150,16 @@ mod tests {
                 RouteCoverage::NotComparable(reason) => {
                     let expected_reason = match entry.route {
                         ErrorRoute::VerifyDeadlockOption => {
-                            NonComparableReason::VerifyDeadlockWorkerRequestOption
+                            NonComparableReason::DeadlockWorkerRequestOption
                         }
                         ErrorRoute::VerifyVerifier => {
-                            NonComparableReason::VerifyVerifierRequiresBrowserSolverAndPrivateNativeComposite
+                            NonComparableReason::VerifierRequiresBrowserSolverAndPrivateNativeComposite
                         }
                         ErrorRoute::VerifyReplay => {
-                            NonComparableReason::VerifyReplayRequiresBrowserSolverAndPrivateNativeComposite
+                            NonComparableReason::ReplayRequiresBrowserSolverAndPrivateNativeComposite
                         }
                         ErrorRoute::VerifyReachableDiagnostics => {
-                            NonComparableReason::VerifyReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite
+                            NonComparableReason::ReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite
                         }
                         route => panic!("{route:?} is non-comparable without a route-specific reason"),
                     };
