@@ -559,7 +559,7 @@ strip_link_ref_tail() {
 
 is_product_surface_path() {
   case "$1" in
-    rust/*|src/fslc/*|specs/*|examples/*|docs/LANGUAGE*|skills/fsl/reference.md) return 0 ;;
+    rust/*|src/fslc/*|specs/*|examples/*|docs/LANGUAGE*|skills/fsl/references/*) return 0 ;;
     *) return 1 ;;
   esac
 }

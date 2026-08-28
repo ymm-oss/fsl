@@ -77,7 +77,7 @@ inventory, and promotion changes run the `scheduled` tier.
 - Native CLI and Worker output must preserve the JSON envelope, exit codes, locations, and replayable
   evidence contract. Do not allowlist verdict, location, assurance, or exit-code differences.
 - A language feature moves with its grammar/lowering, typed model, symbolic and concrete semantics,
-  regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/reference.md`, a design
+  regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/references/`, a design
   note, and a `changelog.d/` fragment (see `changelog.d/README.md`; `CHANGELOG.md`'s `[Unreleased]`
   body itself is aggregated from fragments at release time and must not be hand-edited). A new
   declaration, binder, or reference form additionally moves with

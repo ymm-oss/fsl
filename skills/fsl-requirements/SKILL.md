@@ -10,8 +10,8 @@ FSL file. The deliverable is a requirements contract that development can consum
 requirement IDs, source text, operations, guards, acceptance criteria, forbidden
 flows, and optional conformance to an upper business layer.
 
-Before writing syntax, read `../fsl/SKILL.md` and `../fsl/reference.md` for the
-shared FSL verifier workflow and language rules. When working inside this
+Before writing syntax, read `../fsl/SKILL.md`, then use its reference index to
+load only the needed language and verifier detail. When working inside this
 repository, read `examples/pm/`, `examples/layers/return_system.fsl`, and
 `examples/e2e/2_requirements.fsl` for the requirements dialect. Read
 `examples/nfr/` only when SLA/deadline behavior is in scope.

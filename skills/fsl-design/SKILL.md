@@ -12,8 +12,8 @@ optional refinement mapping back to the requirements layer. That mapping is the
 requirements contract, and `fslc refine` verifies the seam. When a seam breaks,
 repair the design or the mapping — not the upper contract, unless a human revises it.
 
-Before writing syntax, read `../fsl/SKILL.md` and `../fsl/reference.md` for the
-shared FSL verifier workflow and language rules. When working inside this
+Before writing syntax, read `../fsl/SKILL.md`, then use its reference index to
+load only the needed language and verifier detail. When working inside this
 repository, read `examples/e2e/3_design.fsl` and `examples/e2e/3_refines_2.fsl`
 for the main pattern, `examples/layers/` for a compact chain, and `examples/bank/`
 or `examples/refinement_liveness/` when the task is mostly refinement. Use
@@ -87,4 +87,4 @@ for a contract decision.
   (sizes in the `verify` block, not in `type X = 0..N`), tag every action/invariant
   with `"ID: intent"` (prefix verification-only invariants `MODEL-`/`ASSUME-`), and
   prefer `forall x in coll { … }` over index quantifiers in invariant bodies. See
-  `skills/fsl/reference.md` → "Authoring specs as readable documentation".
+  `skills/fsl/references/layers.md` → "Authoring specs as readable documentation".
