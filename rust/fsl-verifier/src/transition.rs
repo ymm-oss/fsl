@@ -595,13 +595,13 @@ fn compute_statement<S: SmtSolver>(
             let target_ty = model
                 .state_lvalue_type(target)
                 .map_err(|error| VerifyError::new(error.message))?;
-            let value =
+            let assigned_value =
                 eval_expected(solver, model, value, &target_ty, read_state, bindings, None)?;
             assign(
                 solver,
                 model,
                 target,
-                value,
+                assigned_value,
                 read_state,
                 &mut pending,
                 bindings,
