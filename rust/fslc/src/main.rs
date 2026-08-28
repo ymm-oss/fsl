@@ -38,7 +38,7 @@ const DEFAULT_EXPLICIT_BUDGET: usize = 1_000_000;
 /// `mutate`'s built-in mutant cap when `--max-mutants` is omitted. Must equal
 /// the `max_mutants` default the published CLI contract advertises
 /// (`rust/fslc/cli-contract.json`), which `docs/DESIGN-mutate.md`,
-/// `skills/fsl/reference.md`, and the frozen `src/fslc/mutate.py`
+/// `skills/fsl/references/commands.md`, and the frozen `src/fslc/mutate.py`
 /// (`DEFAULT_MAX_MUTANTS`) all fix at 200: a smaller runtime default silently
 /// evaluates a different mutant set and reports a different kill rate
 /// (issue #524).
@@ -6534,7 +6534,7 @@ fn run_ai_project_check(source: &str, path: &Path) -> (Value, i32) {
     // Field set and order mirror the frozen reference's `analyze_ai_project`
     // (`src/fslc/ai_project.py`). Native previously omitted `dialect`,
     // `ai_project`, `datasets`, `evaluators`, `failure_modes`, and
-    // `assumptions`; `skills/fsl/reference.md` documents `failure_modes` as
+    // `assumptions`; `skills/fsl/references/syntax.md` documents `failure_modes` as
     // output, so agents were told to expect a field native never produced
     // (issue #563).
     wrap_specialized(

@@ -25,11 +25,13 @@ existing label's topic or is a same-named but distinct finding from the second r
 ## Decision
 
 Adopt **checked-in changelog fragments for `CHANGELOG.md`'s `[Unreleased]` entries only**
-(option C1 below), aggregated deterministically at release time. Fragmenting the contract
-documents — `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/reference.md` — is
-**rejected** (option C2): the replay measurement below shows it would resolve zero additional
-conflicting branch pairs, which is the no-go condition #737 itself set, and it would put a
-generated layer upstream of the required `site reference freshness` status check.
+(option C1 below), aggregated deterministically at release time. Fragmenting the site-source
+contract documents — `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md` — is **rejected** (option C2):
+the replay measurement below shows it would resolve zero additional conflicting branch pairs,
+which is the no-go condition #737 itself set, and it would put a generated layer upstream of the
+required `site reference freshness` status check. The FSL skill reference is instead currently
+routed across `skills/fsl/references/*` for agent token cost (#942), outside C2's
+merge-conflict-reduction purpose and the site generator's input surface.
 
 This document records the decision, its evidence, the fail-closed controls the implementation
 must carry, the migration sites, and the rollback/reversal rule. It changes no behavior by
@@ -139,17 +141,20 @@ concurrency.
   distinct files under `changelog.d/` instead of competing for the same lines. The residual
   10 conflicting pairs are implementation conflicts (`src/fslc/*.py` era); no documentation
   option removes those, and none should try.
-- **C2 — fragment the contract documents too. Rejected on measurement, not taste.** In the
-  replay, fragmenting `docs/LANGUAGE.md` / `docs/LANGUAGE.ja.md` / `skills/fsl/reference.md`
-  resolves **zero additional pairs**: every contract-document conflict is confined to the
-  early-Python cluster and co-occurs with an implementation conflict that fragments cannot
-  fix, while all current-era contract-document edits auto-merged. #737's own acceptance
-  criteria close the spike as no-go when the measurement does not show an advantage — this is
-  that case. Independently, C2 would insert a generated aggregation layer upstream of
-  `site reference freshness`, a **required** status check on the `main safety and CI` ruleset
-  that regenerates `docs/intro/*.html` from `docs/LANGUAGE.md` / `docs/LANGUAGE.ja.md` on
-  every pull request; the canonical sources feeding a blocking gate would themselves become
-  build outputs.
+- **C2 — fragment the site-source contract documents too. Rejected on measurement, not taste.**
+  At the time of the replay, its three-document experiment included
+  `docs/LANGUAGE.md` / `docs/LANGUAGE.ja.md` / `skills/fsl/reference.md` and resolved **zero
+  additional pairs**: every contract-document conflict is confined to the early-Python cluster
+  and co-occurs with an implementation conflict that fragments cannot fix, while all current-era
+  contract-document edits auto-merged. #737's own acceptance criteria close the spike as no-go
+  when the measurement does not show an advantage — this is that case. The historical skill
+  component does not extend C2's continuing rejection: it is now routed across
+  `skills/fsl/references/*` for agent token cost (#942), a different purpose. Independently,
+  fragmenting the two site-source documents would insert a generated aggregation layer upstream
+  of `site reference freshness`, a **required** status check on the `main safety and CI` ruleset
+  that regenerates `docs/intro/*.html` from `docs/LANGUAGE.md` / `docs/LANGUAGE.ja.md` on every
+  pull request; the canonical sources feeding a blocking gate would themselves become build
+  outputs.
 
 ## The C1 contract the implementation must satisfy
 
@@ -241,7 +246,7 @@ detects the failure it exists for, alongside its accepting fixture.
 1. **Missing or empty fragment.** A pull-request diff touching a product surface with no new
    file under `changelog.d/` must fail. The surface list is the coupled-change contract's
    list, not a subset of it: `rust/`, `src/fslc/`, `specs/`, `examples/`, `docs/LANGUAGE*`,
-   and `skills/fsl/reference.md` (`AGENTS.md`, "A language feature moves with …";
+   and `skills/fsl/references/*` (`AGENTS.md`, "A language feature moves with …";
    `CONTRIBUTING.md`, "Language or semantics"). Rejecting fixture: exactly such a synthetic
    diff → exit 1, `changelog-fragment-missing: <changed paths>`. A fragment must also carry
    content: a whitespace-only fragment body → exit 1, `changelog-fragment-empty: <file>`, and

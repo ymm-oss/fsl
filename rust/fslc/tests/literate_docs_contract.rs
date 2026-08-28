@@ -10,7 +10,7 @@
 //! registry and with each other.
 //!
 //! Before this test the enumeration in `docs/LANGUAGE.md`,
-//! `docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md` was accurate but
+//! `docs/LANGUAGE.ja.md`, and `skills/fsl/references/commands.md` was accurate but
 //! *ungated*: registering a 20th `Unsupported` command in
 //! `rust/fslc/src/literate_access.rs` would leave all three documents
 //! silently stale, with nothing to fail. This is the gate.
@@ -45,7 +45,7 @@ fn read(path: impl AsRef<Path>) -> String {
 
 /// Normalize a checkout's line endings to `\n` before anchor matching. On a
 /// Windows checkout under `core.autocrlf`, `docs/LANGUAGE.md`,
-/// `docs/LANGUAGE.ja.md`, and `skills/fsl/reference.md` are read back with
+/// `docs/LANGUAGE.ja.md`, and `skills/fsl/references/commands.md` are read back with
 /// `\r\n`, so a multi-line anchor such as `"is not supported.\n\n"` never
 /// matches and `between()` panics with a missing-anchor error instead of
 /// comparing documented commands against the registry.
@@ -119,7 +119,7 @@ fn parenthesized_after<'a>(text: &'a str, anchor: &str) -> &'a str {
 /// and a compound-command chain written as `` `document generate`/`claims`/`check` ``,
 /// where only the first token spells the group's prefix and the rest are
 /// joined by a literal `/` with no surrounding space. A token is also
-/// stripped of a leading `"fslc "` (`skills/fsl/reference.md` spells the
+/// stripped of a leading `"fslc "` (`skills/fsl/references/commands.md` spells the
 /// supported three as `` `fslc check` `` etc.) before either rule applies.
 fn command_names(list_text: &str) -> Vec<String> {
     let mut spans = Vec::new();

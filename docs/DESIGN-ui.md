@@ -133,7 +133,7 @@ spec ReturnUI "ui: return-request screen flow (behavioral slice only)" { … }
   only`) so heightened recognition does not outrun what FSL actually models.
 - **Files it moved**: `grammar.py` (optional `meta_tag?` on `spec_def`), `model.py`
   (`spec["kind"]`), `explain.py` (`skeleton.spec_kind` + readable line), `html_report.py`
-  (title badge), `docs/LANGUAGE.md`, `skills/fsl/reference.md`, this note, and a
+  (title badge), `docs/LANGUAGE.md`, `skills/fsl/references/commands.md`, this note, and a
   regression test. The surfaced field remains `spec_kind` to distinguish spec metadata
   from the established diagnostic `kind`; faithfulness routing is provenance-scoped and
   does not interpret arbitrary nested payload keys as diagnostics.
