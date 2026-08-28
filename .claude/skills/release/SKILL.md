@@ -99,8 +99,12 @@ a feature-flag system solely to accommodate this flow.
 ## Promote main to production
 
 1. Verify `production` is an ancestor of, or can be merged cleanly with, `main`.
-2. Freeze the candidate by recording the exact `main` SHA in the promotion pull
-   request. If unrelated changes land, rerun the gate or replace the candidate.
+2. Freeze the candidate by recording the exact `main` SHA. Follow the canonical
+   pinned-head and pre-/post-merge tree-identity procedure in
+   `docs/RELEASE.md` §2, steps 3–4: create the candidate branch at that SHA,
+   use it as the promotion pull request head, and perform both identity checks.
+   Do not open a moving `main -> production` pull request. If unrelated changes
+   land, rerun the gate or replace the candidate.
 3. Confirm the release commit preparation is already on `main`:
    - bump `rust/Cargo.toml`'s workspace version and regenerate `rust/Cargo.lock`
      with Cargo; do not bump the frozen `pyproject.toml` package for a native
@@ -119,15 +123,18 @@ a feature-flag system solely to accommodate this flow.
    `workflow_dispatch` is non-publishing and must never attach Release assets, even for a tag ref. Add
    focused formal, mutation, platform, or compatibility evidence when the
    changed contract requires it.
-5. Open `main -> production`. State the candidate SHA, version, included changes,
-   known residual risk, exact gates, and artifact evidence.
-6. Merge without squashing away the promoted history. Verify the resulting
-   `production` tree matches the approved `main` tree. Record the new production
-   merge SHA; it is distinct from the gated candidate SHA unless promotion was a
-   true fast-forward.
+5. Open the promotion pull request from the pinned candidate branch to
+   `production`. State the candidate SHA, version, included changes, known
+   residual risk, exact gates, and artifact evidence.
+6. Complete the canonical checks in `docs/RELEASE.md` §2, step 4 before and
+   after merge. Record the new production merge SHA; it is distinct from the
+   gated candidate SHA unless promotion was a true fast-forward.
 
 Do not merge newer `main` work into an open promotion implicitly. Close or update
-the promotion and rerun its evidence against the new SHA.
+the promotion and rerun its evidence against the new SHA. Before the next
+promotion, also follow `docs/RELEASE.md` §2's required v4.4.1 carry-forward:
+explicitly reapply `docs/DESIGN-nested-option-support.md` and verify that it
+exists on `production` after merge.
 
 ## Cut the release
 
