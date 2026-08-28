@@ -77,3 +77,95 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
 
     std::fs::remove_dir_all(directory).expect("remove diagnostic fixture directory");
 }
+
+#[test]
+fn nested_option_payload_diagnostics_have_cli_lsp_identity() {
+    const STATE_HINT: &str = "state types allow scalars, nested Option around a scalar, structs with those fields, Map<bounded scalar, scalar-or-nested-Option-or-struct>, Set<bounded scalar>, Seq<scalar,N>, and bounded-scalar relations; Option cannot wrap a collection or struct";
+    const STRUCT_HINT: &str = "struct fields must be a scalar (domain type, enum, Bool, Int) or nested Option around a scalar; use a separate Map for Set, Map, Seq, relation, or struct fields";
+    let directory = std::env::temp_dir().join(format!(
+        "fsl-lsp-nested-option-payloads-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).expect("create nested Option fixture directory");
+
+    for (position, payload) in [
+        ("state", "Inner"),
+        ("state", "Set<Bit>"),
+        ("state", "Map<Key, Bit>"),
+        ("state", "Seq<Bit, 1>"),
+        ("state", "relation Key -> Key"),
+        ("struct", "Inner"),
+        ("struct", "Set<Bit>"),
+        ("struct", "Map<Key, Bit>"),
+        ("struct", "Seq<Bit, 1>"),
+        ("struct", "relation Key -> Key"),
+        ("map_value", "Inner"),
+        ("map_value", "Set<Bit>"),
+        ("map_value", "Map<Key, Bit>"),
+        ("map_value", "Seq<Bit, 1>"),
+        ("map_value", "relation Key -> Key"),
+    ] {
+        let (source, hint, expected_location) = match position {
+            "state" => (
+                format!(
+                    "spec Unsupported {{\n  type Bit = 0..1\n  type Key = 0..1\n  struct Inner {{ value: Bit }}\n  state {{\n    value: Option<{payload}>\n  }}\n}}\n"
+                ),
+                STATE_HINT,
+                (6, 5),
+            ),
+            "struct" => (
+                format!(
+                    "spec Unsupported {{\n  type Bit = 0..1\n  type Key = 0..1\n  struct Inner {{ value: Bit }}\n  struct Outer {{\n    value: Option<{payload}>\n  }}\n  state {{ outer: Outer }}\n}}\n"
+                ),
+                STRUCT_HINT,
+                (5, 3),
+            ),
+            "map_value" => (
+                format!(
+                    "spec Unsupported {{\n  type Bit = 0..1\n  type Key = 0..1\n  struct Inner {{ value: Bit }}\n  state {{\n    values: Map<Key, Option<{payload}>>\n  }}\n}}\n"
+                ),
+                STATE_HINT,
+                (6, 5),
+            ),
+            _ => unreachable!("listed unsupported nested Option position"),
+        };
+        let path =
+            directory.join(format!("{position}-{payload}.fsl").replace(['<', '>', ',', ' '], "_"));
+        std::fs::write(&path, &source).expect("write nested Option fixture");
+        let path = path.to_str().expect("UTF-8 fixture path");
+        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args(["check", path])
+            .output()
+            .expect("run native check");
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{position} Option<{payload}>"
+        );
+        let cli: Value = serde_json::from_slice(&output.stdout).expect("parse CLI envelope");
+        let resolver = fsl_core::FsResolver::new(Path::new(&directory));
+        let shared = fslc_rust::source_diagnostic::diagnostics(&source, path, &resolver)
+            .into_iter()
+            .find(|diagnostic| diagnostic.kind != "migration")
+            .expect("shared source diagnostic");
+
+        assert_eq!(cli["kind"], shared.kind, "{position} Option<{payload}>");
+        assert_eq!(
+            cli["message"], shared.message,
+            "{position} Option<{payload}>"
+        );
+        assert_eq!(cli["hint"], hint, "{position} Option<{payload}>");
+        assert_eq!(
+            cli["loc"],
+            shared.span.python_loc(),
+            "{position} Option<{payload}>"
+        );
+        assert_eq!(
+            (shared.span.start.line, shared.span.start.column),
+            expected_location,
+            "{position} Option<{payload}>"
+        );
+    }
+
+    std::fs::remove_dir_all(directory).expect("remove nested Option fixture directory");
+}

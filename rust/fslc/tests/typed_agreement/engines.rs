@@ -202,7 +202,7 @@ fn disagreement(
     }
 }
 
-fn require_equal<T: Eq + fmt::Debug>(
+fn require_equal<T: Eq + fmt::Debug + ?Sized>(
     id: &str,
     edge: &str,
     field: &str,
@@ -654,9 +654,9 @@ pub fn compare_agreement(
     })
 }
 
-/// Deliberately corrupt one already-normalized symbolic observation. This is
-/// test-only calibration evidence that the named edge rejects disagreement;
-/// it never changes an engine or shipped product path.
+/// Deliberately corrupt a normalized verdict. This is a test-only calibration
+/// of the verdict edge only; nested values and reachable witnesses are covered
+/// separately by [`nested_option_comparator_negative_controls`].
 pub fn comparator_negative_control(
     id: &str,
     observation: &AgreementObservation,
@@ -677,6 +677,45 @@ pub fn comparator_negative_control(
         &corrupted,
     )
     .expect_err("deliberate comparator corruption must be rejected")
+}
+
+/// Deliberately corrupt observed BMC nested-Option evidence after observation
+/// and before comparison. Unlike [`comparator_negative_control`], this owns
+/// the nested-value and reachable-step comparator detector required by the
+/// nested-Option contract; it never changes an engine or shipped product path.
+pub fn nested_option_comparator_negative_controls(
+    id: &str,
+    explicit_reachables: &BTreeMap<String, Option<usize>>,
+    bmc_reachables: &BTreeMap<String, Option<usize>>,
+    explicit_trace: &[fsl_core::TraceStep],
+    bmc_trace: &[fsl_core::TraceStep],
+) -> (AgreementFailure, AgreementFailure) {
+    let mut corrupted_reachables = bmc_reachables.clone();
+    corrupted_reachables.insert("Filled".to_owned(), Some(3));
+    let reachable_failure = require_equal(
+        id,
+        "explicit_bmc",
+        "reachables",
+        explicit_reachables,
+        &corrupted_reachables,
+    )
+    .expect_err("a corrupted normalized BMC reachable step must be rejected");
+
+    let mut corrupted_trace = bmc_trace.to_vec();
+    let final_state = corrupted_trace
+        .last_mut()
+        .expect("nested-option violation trace has a final state");
+    final_state.state.insert("x".to_owned(), Value::None);
+    let state_failure = require_equal(
+        id,
+        "trace_explicit_bmc",
+        "trace",
+        explicit_trace,
+        &corrupted_trace,
+    )
+    .expect_err("a corrupted normalized BMC nested state must be rejected");
+
+    (reachable_failure, state_failure)
 }
 
 /// Walk `model` concretely for up to `depth` steps taking the first enabled

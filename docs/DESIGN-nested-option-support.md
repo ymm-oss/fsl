@@ -432,7 +432,7 @@ PR's recorded pre-mutation commit).
 | Concrete wrapper detector | Mutate concrete `Expr::Some(e)` to return `eval(e)` without `Value::Some` | Produced state after `wrap` is `None`; expected `Some(None)`. Exact Monitor state and successor-admission tests fail. |
 | Explicit wiring detector | Insert/requeue the parent state instead of the Monitor successor in explicit exploration | Produced closure lacks `Wrapped@1`/`Filled@2`; expected both witnesses. Monitor and symbolic direct controls remain green, showing the detector owns explicit wiring. |
 | State-shape gate detector | Remove the `Option` payload rejection for one collection branch | Produced `check` exit 0 for `Option<Set<Bit>>`; expected exit 2/type/located error. The corresponding table row fails. |
-| Diagnostic-location detector | Drop `.at(field.span)` from the new state-shape error | Produced correct type message with absent `loc`; expected exact `loc`. CLI/LSP identity test fails for the right field. |
+| Diagnostic-location detector | Drop `.at(field.span)` from the new state-shape error | Expected exact `loc` at the state-field declaration (`line:6`, `column:5`). Produced `loc` is not absent: the origin fallback remains and moves it to a different location. The focused CLI detector rejects that move. |
 | Ordinary JSON detector | Restore unconditional `Some(v) => fsl_value_json(v)` flattening | Produced `none == null` and `some(none) == null`; expected `null` versus `{"kind":"some","value":null}`. Exact JSON, changes-path, testgen, and replay round-trip controls fail. |
 | Comparator detector | Corrupt one normalized BMC reachable step or nested state after observation, before comparison | Produced `Filled` step/state differs; expected exact equality. The comparator's existing negative-control pattern rejects the corruption. |
 
@@ -440,6 +440,12 @@ Each registered operator names a primary failing target and an unrelated blind
 target, as required by `operators.txt`. A patch that stops applying is a loud
 failure. A preservation control that remains green is reported only as a blind
 control, never as the detector.
+
+The earlier wording that this mutation produced an absent `loc` was incorrect.
+Dropping `.at(field.span)` leaves the intentional origin fallback intact (the
+#831 / PR #935 removal of fabricated 1:1 locations), so the calibration must
+detect movement away from the exact state-field declaration rather than the
+absence of a location.
 
 ## 8. Four-PR implementation sequence
 
