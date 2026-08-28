@@ -35,7 +35,7 @@ fn run_against_two_snapshot_fifo(
     options: &[&str],
     source_a: &str,
     source_b: &str,
-) -> (Value, i32) {
+) -> (String, i32) {
     let mut fixture = TwoSnapshotFifo::new("check", source_a, source_b);
     let path = fixture.fifo.to_string_lossy().into_owned();
     let mut child = ReapedChild::new(
@@ -65,9 +65,7 @@ fn run_against_two_snapshot_fifo(
             String::from_utf8_lossy(&output.stderr)
         )
     });
-    let json = serde_json::from_str(&stdout)
-        .unwrap_or_else(|error| panic!("invalid JSON: {error}; stdout={stdout}"));
-    (json, output.status.code().expect("exit status"))
+    (stdout, output.status.code().expect("exit status"))
 }
 
 /// Reverting `run_check_from_source` to any path-reading helper opens source
@@ -76,8 +74,10 @@ fn run_against_two_snapshot_fifo(
 #[cfg(unix)]
 #[test]
 fn check_reads_one_fifo_snapshot() {
-    let (output, status) =
+    let (stdout, status) =
         run_against_two_snapshot_fifo(&["check"], &[], CHECK_SOURCE_A, CHECK_SOURCE_B);
+    let output: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("invalid JSON: {error}; stdout={stdout}"));
 
     assert_eq!(status, 0, "{output:#}");
     assert_eq!(output["result"], "ok", "{output:#}");
@@ -90,16 +90,50 @@ fn check_reads_one_fifo_snapshot() {
 #[cfg(unix)]
 #[test]
 fn db_check_reads_one_fifo_snapshot() {
-    let (output, status) = run_against_two_snapshot_fifo(
+    let (stdout, status) = run_against_two_snapshot_fifo(
         &["db", "check"],
         &["--depth", "4"],
         DB_CHECK_SOURCE_A,
         DB_CHECK_SOURCE_B,
     );
+    let output: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("invalid JSON: {error}; stdout={stdout}"));
 
     assert_eq!(status, 0, "{output:#}");
     assert_eq!(output["result"], "verified_under_assumptions", "{output:#}");
     assert_eq!(output["dbsystem"], "SafeAddNullableColumn", "{output:#}");
+}
+
+/// Reverting any source-taking call in `run_explain_from_source` to a
+/// path-taking form opens source B and fails before cleanup. The complete
+/// envelope is still pinned to source A rather than a generic success.
+#[cfg(unix)]
+#[test]
+fn explain_reads_one_fifo_snapshot() {
+    let (stdout, status) =
+        run_against_two_snapshot_fifo(&["explain"], &[], CHECK_SOURCE_A, CHECK_SOURCE_B);
+    let output: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("invalid JSON: {error}; stdout={stdout}"));
+
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(output["result"], "explained", "{output:#}");
+    assert_eq!(output["spec"], "VacuousLeadstoFixture", "{output:#}");
+}
+
+/// Reverting any source-taking call in `run_html_report_from_source` opens
+/// source B and fails before cleanup. With no output path, HTML is delivered
+/// as raw stdout, so the rendered source-A spec name is the content oracle.
+#[cfg(unix)]
+#[test]
+fn html_reads_one_fifo_snapshot() {
+    let (html, status) =
+        run_against_two_snapshot_fifo(&["html"], &[], CHECK_SOURCE_A, CHECK_SOURCE_B);
+
+    assert_eq!(status, 0, "{html}");
+    assert!(
+        html.contains("VacuousLeadstoFixture"),
+        "HTML must be rendered from source A: {html}"
+    );
 }
 
 /// Windows does not implement the FIFO read-count oracle above. This marker
