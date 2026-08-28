@@ -247,7 +247,7 @@ event.
 Growing the exempt list is a contract change to this decision, not a script tweak, and each
 candidate needs the same evidence sweep: name every path that reads it and show that path keeps
 unfiltered pre-merge or fail-loud coverage. `skills/**` and `docs/**` must never join it:
-`skills/fsl/reference.md` moves with language features under the coupled-change contract,
+`skills/fsl/references/` moves with language features under the coupled-change contract,
 `docs/LANGUAGE*.md` feeds the site-reference freshness gate, and product-gate literate
 doc-contract tests read documentation files directly.
 

@@ -38,11 +38,11 @@ Before authoring a layer, read and follow the corresponding skill:
 - Cross-cutting dialect concerns — DB migration compatibility (`dbsystem`,
   `fslc db`), Functional DDD / async effects (`domain`, `fslc domain`), AI
   tool-boundary and agent contracts plus statistical evidence (`ai_component`/
-  `agent`, `fslc ai`): `../fsl/SKILL.md` → "Advanced features". These sit
+  `agent`, `fslc ai`): `../fsl/references/advanced.md`. These sit
   outside the business→requirements→design progression and are not stage-gated
   by this skill.
-- Syntax, verifier commands, JSON repair protocol: `../fsl/SKILL.md` and
-  `../fsl/reference.md`
+- Syntax, verifier commands, JSON repair protocol: `../fsl/SKILL.md`, then its
+  topic-specific references as needed
 
 Load only the skills needed for the current stage. Do not duplicate their syntax
 rules in this skill.
