@@ -344,14 +344,7 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fslc/src/main.rs",
-        14760,
-        "validate_requirement_traces",
-        ResultTupleOption
-    ),
-    entry!(
-        Verdict,
-        "rust/fslc/src/main.rs",
-        14769,
+        14872,
         "validate_requirement_traces_from_source",
         ResultTupleOption
     ),
@@ -435,8 +428,8 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fslc/src/main.rs",
-        14790,
-        "governance_result",
+        14895,
+        "governance_result_from_source",
         ResultOption
     ),
     entry!(
