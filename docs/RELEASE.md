@@ -170,12 +170,60 @@ It also rejects a dynamic dependency on `libz3`.
    all four native targets, the Agent Skill bundle, VS Code extension, and both
    Kernel bundles pass. Do not reuse evidence from a moving branch after its SHA
    changes.
-3. Open the release-promotion pull request from `main` to `production`, stating
-   the candidate SHA, version, changes, residual risk, gate results, and dry-run
-   URL.
-4. Merge without squashing away promoted history. Verify the resulting
-   `production` tree matches the approved `main` tree and record the new
-   `production` HEAD. Never tag `main`.
+3. Create a branch fixed at the recorded candidate SHA, then open the
+   release-promotion pull request from that branch to `production` — never from
+   moving `main`:
+
+   ```bash
+   git branch release/vX.Y.Z-candidate CANDIDATE_SHA
+   git push origin release/vX.Y.Z-candidate
+   ```
+
+   State the candidate SHA, version, changes, residual risk, gate results, and
+   dry-run URL in the pull request. This branch is required even when `main` is
+   currently at `CANDIDATE_SHA`: while promotion CI and review run, `main` can
+   advance, making its green result evidence for a tree nobody approved. The
+   pinned branch keeps the pull request head and its CI evidence bound to the
+   approved candidate.
+4. Before merging, verify that the promotion pull request's source branch still
+   resolves to the recorded candidate and that their trees are identical:
+
+   ```bash
+   git fetch origin "refs/heads/release/vX.Y.Z-candidate:refs/remotes/origin/release/vX.Y.Z-candidate"
+   test "$(git rev-parse origin/release/vX.Y.Z-candidate)" = "CANDIDATE_SHA"
+   test "$(git rev-parse origin/release/vX.Y.Z-candidate^{tree})" = "$(git rev-parse CANDIDATE_SHA^{tree})"
+   ```
+
+   Merge without squashing away promoted history. Then verify the resulting
+   `production` tree matches the approved candidate tree and record the new
+   `production` HEAD:
+
+   ```bash
+   git fetch origin "refs/heads/production:refs/remotes/origin/production"
+   test "$(git rev-parse origin/production^{tree})" = "$(git rev-parse CANDIDATE_SHA^{tree})"
+   git rev-parse origin/production
+   ```
+
+   Never tag `main`.
+
+The preceding promotion rule is canonical here; the release skill's `Promote
+main to production` procedure refers to these steps so there is one source of
+truth for the pinned-head and tree-identity requirements.
+
+### Required carry-forward after the v4.4.1 revert
+
+The revert on `production` does not make the reverted content reappear in a
+later promotion merge: Git will silently retain that omission unless it is
+explicitly reapplied. For the next promotion, explicitly reapply
+`docs/DESIGN-nested-option-support.md` from the approved candidate, then verify
+on `production` after the merge that the file exists:
+
+```bash
+git cat-file -e origin/production:docs/DESIGN-nested-option-support.md
+```
+
+Treat that verification as part of the post-merge tree-identity check; do not
+infer reapplication merely from the candidate branch containing the file.
 
 ## 3. Revalidate and tag production
 
