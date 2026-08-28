@@ -623,7 +623,9 @@ mod tests {
     }
 
     impl ErrorRoute {
-        const ALL: [Self; 15] = [
+        const COUNT: usize = 15;
+
+        const ALL: [Self; Self::COUNT] = [
             Self::CheckAiProject,
             Self::CheckSurfaceParse,
             Self::CheckBuild,
@@ -640,12 +642,61 @@ mod tests {
             Self::VerifyReachableDiagnostics,
             Self::VerifyImplements,
         ];
+
+        const fn discriminant(self) -> usize {
+            match self {
+                Self::CheckAiProject => 0,
+                Self::CheckSurfaceParse => 1,
+                Self::CheckBuild => 2,
+                Self::CheckRequirementTrace => 3,
+                Self::CheckGovernance => 4,
+                Self::CheckImplements => 5,
+                Self::VerifySurfaceParse => 6,
+                Self::VerifyBuild => 7,
+                Self::VerifyRequirementTrace => 8,
+                Self::VerifyDeadlockOption => 9,
+                Self::VerifyBoundary => 10,
+                Self::VerifyVerifier => 11,
+                Self::VerifyReplay => 12,
+                Self::VerifyReachableDiagnostics => 13,
+                Self::VerifyImplements => 14,
+            }
+        }
     }
 
     #[derive(Clone, Copy, Debug)]
     enum RouteCoverage {
         Compared { cell: &'static str },
-        NotComparable { reason: &'static str },
+        NotComparable(NonComparableReason),
+    }
+
+    /// An explicit native/Worker boundary for a route that cannot form a
+    /// full-envelope comparison pair in this native-host test.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum NonComparableReason {
+        VerifyDeadlockWorkerRequestOption,
+        VerifyVerifierRequiresBrowserSolverAndPrivateNativeComposite,
+        VerifyReplayRequiresBrowserSolverAndPrivateNativeComposite,
+        VerifyReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite,
+    }
+
+    impl NonComparableReason {
+        const fn detail(self) -> &'static str {
+            match self {
+                Self::VerifyDeadlockWorkerRequestOption => {
+                    "`options.deadlock` is a Worker request field; native CLI argument parsing is a distinct public input path, so no native request pair exists."
+                }
+                Self::VerifyVerifierRequiresBrowserSolverAndPrivateNativeComposite => {
+                    "a native/Worker composite verify pair requires the binary-private native `run_verify*` API and an initialized browser Z3 bridge; neither is available to this native-host test."
+                }
+                Self::VerifyReplayRequiresBrowserSolverAndPrivateNativeComposite => {
+                    "replay is reached only after a browser-solver BMC result; the equivalent native composite verifier is binary-private and cannot be invoked here without public API expansion."
+                }
+                Self::VerifyReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite => {
+                    "reachable diagnosis is reached only after browser-solver BMC; a native composite pair is unavailable without exposing `run_verify*`."
+                }
+            }
+        }
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -711,9 +762,9 @@ mod tests {
         },
         RouteRegistration {
             route: ErrorRoute::VerifyDeadlockOption,
-            coverage: RouteCoverage::NotComparable {
-                reason: "`options.deadlock` is a Worker request field; native CLI argument parsing is a distinct public input path, so no native request pair exists.",
-            },
+            coverage: RouteCoverage::NotComparable(
+                NonComparableReason::VerifyDeadlockWorkerRequestOption,
+            ),
         },
         RouteRegistration {
             route: ErrorRoute::VerifyBoundary,
@@ -723,21 +774,21 @@ mod tests {
         },
         RouteRegistration {
             route: ErrorRoute::VerifyVerifier,
-            coverage: RouteCoverage::NotComparable {
-                reason: "a native/Worker composite verify pair requires the binary-private native `run_verify*` API and an initialized browser Z3 bridge; neither is available to this native-host test.",
-            },
+            coverage: RouteCoverage::NotComparable(
+                NonComparableReason::VerifyVerifierRequiresBrowserSolverAndPrivateNativeComposite,
+            ),
         },
         RouteRegistration {
             route: ErrorRoute::VerifyReplay,
-            coverage: RouteCoverage::NotComparable {
-                reason: "replay is reached only after a browser-solver BMC result; the equivalent native composite verifier is binary-private and cannot be invoked here without public API expansion.",
-            },
+            coverage: RouteCoverage::NotComparable(
+                NonComparableReason::VerifyReplayRequiresBrowserSolverAndPrivateNativeComposite,
+            ),
         },
         RouteRegistration {
             route: ErrorRoute::VerifyReachableDiagnostics,
-            coverage: RouteCoverage::NotComparable {
-                reason: "reachable diagnosis is reached only after browser-solver BMC; a native composite pair is unavailable without exposing `run_verify*`.",
-            },
+            coverage: RouteCoverage::NotComparable(
+                NonComparableReason::VerifyReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite,
+            ),
         },
         RouteRegistration {
             route: ErrorRoute::VerifyImplements,
@@ -1040,17 +1091,25 @@ mod tests {
 
     #[test]
     fn error_route_registry_is_total_and_exclusions_are_specific() {
-        let expected = ErrorRoute::ALL.into_iter().collect::<BTreeSet<_>>();
-        let registered = ERROR_ROUTE_REGISTRY
-            .iter()
-            .map(|entry| entry.route)
+        let expected_discriminants = (0..ErrorRoute::COUNT).collect::<BTreeSet<_>>();
+        let all_discriminants = ErrorRoute::ALL
+            .into_iter()
+            .map(ErrorRoute::discriminant)
             .collect::<BTreeSet<_>>();
         assert_eq!(
-            registered, expected,
+            all_discriminants, expected_discriminants,
+            "ErrorRoute::ALL must contain every discriminant exactly once"
+        );
+        let registered_discriminants = ERROR_ROUTE_REGISTRY
+            .iter()
+            .map(|entry| entry.route.discriminant())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            registered_discriminants, expected_discriminants,
             "every Worker error route needs one registry row"
         );
         assert_eq!(
-            registered.len(),
+            registered_discriminants.len(),
             ERROR_ROUTE_REGISTRY.len(),
             "Worker error-route registry contains duplicates"
         );
@@ -1061,11 +1120,31 @@ mod tests {
                     "{:?} is compared without a detector cell",
                     entry.route
                 ),
-                RouteCoverage::NotComparable { reason } => assert!(
-                    reason.contains("native") || reason.contains("Worker"),
-                    "{:?} lacks a concrete comparison boundary: {reason}",
-                    entry.route
-                ),
+                RouteCoverage::NotComparable(reason) => {
+                    let expected_reason = match entry.route {
+                        ErrorRoute::VerifyDeadlockOption => {
+                            NonComparableReason::VerifyDeadlockWorkerRequestOption
+                        }
+                        ErrorRoute::VerifyVerifier => {
+                            NonComparableReason::VerifyVerifierRequiresBrowserSolverAndPrivateNativeComposite
+                        }
+                        ErrorRoute::VerifyReplay => {
+                            NonComparableReason::VerifyReplayRequiresBrowserSolverAndPrivateNativeComposite
+                        }
+                        ErrorRoute::VerifyReachableDiagnostics => {
+                            NonComparableReason::VerifyReachableDiagnosticsRequiresBrowserSolverAndPrivateNativeComposite
+                        }
+                        route => panic!("{route:?} is non-comparable without a route-specific reason"),
+                    };
+                    assert_eq!(
+                        reason,
+                        expected_reason,
+                        "{:?} has the wrong comparison boundary: {}",
+                        entry.route,
+                        reason.detail()
+                    );
+                    assert!(!reason.detail().trim().is_empty());
+                }
             }
         }
     }
