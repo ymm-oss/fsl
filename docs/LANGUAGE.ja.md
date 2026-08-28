@@ -1102,6 +1102,27 @@ leadsTo が宣言されていて結果が `verified` / `proved` のとき、
 特定されます。requirements の `branches` については、偽のカバレッジ診断は内部の
 分割 action の `name` を保持し、`display_name` を追加します。
 
+### explicit action 実行プロファイル
+
+`--engine explicit` が結果を判定した場合、エンベロープには `cost` および
+`action_coverage` と並んで `action_profile` が追加されます:
+
+```json
+"action_profile": {
+  "checkout": {"enabled": 5, "fired": 4, "no_op": 1}
+}
+```
+
+各 action について、`enabled` は少なくとも1つの action 実体が enabled だった
+探索済みユニーク状態数、`fired` は実際に探索された成功したユニークな
+`(state, action 実体)` 辺の数、`no_op` は後続状態が元状態と等しい fired 辺の部分集合
+です。これは verdict や solver metric ではなく、診断用のカバレッジエビデンスです。
+有界実行は最終深さの enabled 状態を含みますが、その出辺は発火できないため、
+`enabled` と `fired` は一致するとは限りません。explicit BFS が正準状態と action 実体を
+それぞれ一度だけ訪れるためプロファイルは決定的です。`--engine auto` では
+`engine:"explicit"` が結果を判定した場合にだけ含まれます。symbolic BMC と induction の
+結果には `action_profile` は含まれません。
+
 `reachable_failed` については、各 `unreached` エントリは以下を運びます:
 
 ```json

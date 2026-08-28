@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// At depth 1: advance has 2 enabled states but only 1 fired edge, making all
+// three metrics distinct. `set_one` converges with `advance` at state 1.
+spec ExplicitActionProfile {
+  type Count = 0..2
+  type Bit = 0..1
+  state { count: Count }
+  init { count = 0 }
+
+  action advance() {
+    requires count < 2
+    count = count + 1
+  }
+
+  action set_one() {
+    requires count == 0
+    count = 1
+  }
+
+  action stutter(bit: Bit) {
+    requires count < 2
+    count = count // Two parameter instances prove fired/no_op count edges, not action names.
+  }
+
+  action limited_reset() {
+    requires count == 1
+    count = 0
+  }
+
+  invariant InRange { count >= 0 }
+}

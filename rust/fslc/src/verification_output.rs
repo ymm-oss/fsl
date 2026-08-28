@@ -1352,6 +1352,25 @@ fn add_explicit_metadata(output: &mut Value, result: &fsl_runtime::ExplicitResul
         json!(result.max_frontier_width),
     );
     output.insert("depth_reached".to_owned(), json!(result.depth_reached));
+    output.insert(
+        "action_profile".to_owned(),
+        Value::Object(
+            result
+                .action_profile
+                .iter()
+                .map(|(name, stats)| {
+                    (
+                        display_name(name),
+                        json!({
+                            "enabled": stats.enabled,
+                            "fired": stats.fired,
+                            "no_op": stats.no_op,
+                        }),
+                    )
+                })
+                .collect(),
+        ),
+    );
 }
 
 fn mark_reachables_definitively_unreachable(output: &mut Value) {
@@ -2330,6 +2349,11 @@ mod tests {
             false,
         )
         .expect("explicit evidence replays");
+        assert_eq!(
+            explicit_output["action_profile"],
+            json!({"toggle": {"enabled": 1, "fired": 0, "no_op": 0}})
+        );
+        assert!(bmc.get("action_profile").is_none());
         let explicit_envelope = explicit_output.as_object_mut().expect("explicit envelope");
         for key in [
             "engine",
@@ -2337,6 +2361,7 @@ mod tests {
             "states_explored",
             "max_frontier_width",
             "depth_reached",
+            "action_profile",
         ] {
             explicit_envelope.remove(key);
         }

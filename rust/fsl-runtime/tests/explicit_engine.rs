@@ -2,6 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 use fsl_core::{FsResolver, FslValue, TypeDef, TypeRef, build_model, parse_kernel_source};
+use fsl_runtime::ActionStats;
 
 fn model(source: &str) -> fsl_core::KernelModel {
     build_model(parse_kernel_source(source, &FsResolver::new(".")).expect("parse kernel"))
@@ -110,6 +111,59 @@ fn explicit_bfs_fails_closed_at_the_state_budget() {
     assert!(result.violation.is_none());
     assert_eq!(result.states_explored, 1);
     assert_eq!(result.depth_reached, 0);
+}
+
+#[test]
+fn explicit_action_profile_counts_states_edges_and_no_op_edges_separately() {
+    let model = model(
+        "spec ExplicitActionProfile { type Count = 0..2 type Bit = 0..1 state { count: Count } \
+         init { count = 0 } \
+         action advance() { requires count < 2 count = count + 1 } \
+         action set_one() { requires count == 0 count = 1 } \
+         action stutter(bit: Bit) { requires count < 2 count = count } \
+         action limited_reset() { requires count == 1 count = 0 } \
+         invariant InRange { count >= 0 } }",
+    );
+    let result = fsl_runtime::verify_explicit(model, 1, 100).expect("explicit verification");
+
+    assert_eq!(
+        result.action_profile,
+        std::collections::BTreeMap::from([
+            (
+                "advance".to_owned(),
+                ActionStats {
+                    enabled: 2,
+                    fired: 1,
+                    no_op: 0,
+                },
+            ),
+            (
+                "limited_reset".to_owned(),
+                ActionStats {
+                    enabled: 1,
+                    fired: 0,
+                    no_op: 0,
+                },
+            ),
+            (
+                "set_one".to_owned(),
+                ActionStats {
+                    enabled: 1,
+                    fired: 1,
+                    no_op: 0,
+                },
+            ),
+            (
+                "stutter".to_owned(),
+                ActionStats {
+                    enabled: 2,
+                    fired: 2,
+                    no_op: 2,
+                },
+            ),
+        ]),
+    );
+    assert!(result.action_coverage.values().all(|covered| *covered));
 }
 
 #[test]

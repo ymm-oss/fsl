@@ -72,6 +72,24 @@ fn auto_uses_explicit_and_reports_closure_when_explicit_can_decide() {
 }
 
 #[test]
+fn auto_preserves_the_explicit_action_profile() {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/explicit_action_profile.fsl");
+    let (output, status) = verify_auto(fixture.to_str().expect("UTF-8 fixture path"), 1, &[]);
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(output["engine"], "explicit");
+    assert_eq!(
+        output["action_profile"],
+        json!({
+            "advance": {"enabled": 2, "fired": 1, "no_op": 0},
+            "limited_reset": {"enabled": 1, "fired": 0, "no_op": 0},
+            "set_one": {"enabled": 1, "fired": 1, "no_op": 0},
+            "stutter": {"enabled": 2, "fired": 2, "no_op": 2},
+        })
+    );
+}
+
+#[test]
 fn auto_falls_back_to_bmc_for_leadsto_and_records_the_reason() {
     let (output, status) = verify_auto("specs/mutex_queue.fsl", 8, &[]);
     assert_eq!(status, 0);
