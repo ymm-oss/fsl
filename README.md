@@ -287,7 +287,7 @@ role-specific workflow, and repair protocol into context. For easy distribution 
 discovery, the canonical copies live under [`skills/`](skills/) at the repository root:
 
 - [`skills/fsl/SKILL.md`](skills/fsl/SKILL.md) — shared verifier workflow / repair protocol / minimal syntax
-- [`skills/fsl/reference.md`](skills/fsl/reference.md) — condensed, complete language-reference card
+- `skills/fsl/references/` — topical FSL language and verifier references, indexed from the core skill
 - [`skills/fsl-business/SKILL.md`](skills/fsl-business/SKILL.md) — business process, controls, KPIs, and goals
 - [`skills/fsl-requirements/SKILL.md`](skills/fsl-requirements/SKILL.md) — PM requirements, acceptance criteria, forbidden flows, and NFRs
 - [`skills/fsl-design/SKILL.md`](skills/fsl-design/SKILL.md) — engineering design specs and refinement to requirements

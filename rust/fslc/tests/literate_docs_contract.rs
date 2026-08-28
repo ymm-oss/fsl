@@ -181,7 +181,7 @@ const DOCS: &[DocAnchors] = &[
         unsupported_anchor: "仕様パスを読み取る他のすべてのコマンド",
     },
     DocAnchors {
-        relative: "skills/fsl/reference.md",
+        relative: "skills/fsl/references/commands.md",
         supported_start: "**Literate Markdown FSL.** ",
         supported_end: "\naccept `.md` files containing",
         unsupported_anchor: "Every other spec-reading command ",

@@ -12,7 +12,7 @@ together. Inspect staged and unstaged changes; do not modify them.
 ## Coupling map
 
 1. Syntax or surface grammar in `rust/fsl-syntax` requires the corresponding lowering/model work,
-   regression cases, `docs/LANGUAGE.md`, `skills/fsl/reference.md`, an accepted `docs/DESIGN-*.md`, and
+   regression cases, `docs/LANGUAGE.md`, `skills/fsl/references/`, an accepted `docs/DESIGN-*.md`, and
    a new `changelog.d/<id>-<slug>.<category>.md` fragment (see `changelog.d/README.md`) -- not a direct
    `CHANGELOG.md` edit, which is aggregated from fragments only at release time.
 2. Typed semantics in `rust/fsl-core` or symbolic behavior in `rust/fsl-verifier` requires matching

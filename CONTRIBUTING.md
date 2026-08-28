@@ -58,7 +58,7 @@ inventory and explicitly optional Python surfaces.
 ## Guidelines for changes
 
 - **Language or semantics:** update Rust syntax/lowering, typed model, symbolic and concrete evaluation,
-  regression cases, `docs/LANGUAGE.md`, `skills/fsl/reference.md`, an accepted design note, and a new
+  regression cases, `docs/LANGUAGE.md`, `skills/fsl/references/`, an accepted design note, and a new
   `changelog.d/` fragment (see `changelog.d/README.md`) together. A new dialect's top-level construct,
   and any new `examples/`/`specs/`
   directory it lands in, must also be registered in `tests/dialect_registry.py` (`DIALECTS`,

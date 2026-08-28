@@ -7,7 +7,7 @@ paths:
 
 # FSL specification rules
 
-- Read `skills/fsl/reference.md` before authoring syntax; do not rely on model memory for FSL grammar.
+- Read `skills/fsl/SKILL.md` and only its relevant topical reference before authoring syntax; do not rely on model memory for FSL grammar.
 - Use the working-tree native CLI through
   `cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --`.
 - Validate in order: `check`, bounded `verify`, induction where applicable, then mutation and vacuity.
