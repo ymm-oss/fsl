@@ -1,0 +1,1 @@
+Required (#932): `explain` and `html` each carry a FIFO control that fails when the CLI opens a second root source, plus a platform-neutral control without `#[cfg(unix)]` so Windows holds the same guarantee; the HTML parity comparison's two wall-clock exclusions are themselves asserted present in both rendered reports, so the exclusion cannot go dead unnoticed.

@@ -8531,9 +8531,8 @@ fn weakening_candidates(spec: &fsl_syntax::SurfaceSpec) -> Vec<WeakeningCandidat
     candidates
 }
 
-fn reachable_counterfactuals(path: &Path, depth: usize) -> Value {
-    let source = std::fs::read_to_string(path).unwrap_or_default();
-    let Ok(parsed) = parse_surface_document(path) else {
+fn reachable_counterfactuals_from_source(path: &Path, source: &str, depth: usize) -> Value {
+    let Ok(parsed) = parse_surface_document_from_source(path, source) else {
         return json!([]);
     };
     let document = match parsed {
@@ -8543,7 +8542,7 @@ fn reachable_counterfactuals(path: &Path, depth: usize) -> Value {
         | fsl_syntax::SurfaceDocument::Compose(_) => {
             let resolver =
                 fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-            let Ok(kernel) = fsl_core::parse_kernel_source(&source, &resolver) else {
+            let Ok(kernel) = fsl_core::parse_kernel_source(source, &resolver) else {
                 return json!([]);
             };
             kernel.into_syntax()
@@ -9021,9 +9020,8 @@ fn invariant_violation_explanation(
 }
 
 #[allow(clippy::too_many_lines)]
-fn invariant_counterfactuals(path: &Path, depth: usize) -> Value {
-    let source = std::fs::read_to_string(path).unwrap_or_default();
-    let Ok(parsed) = parse_surface_document(path) else {
+fn invariant_counterfactuals_from_source(path: &Path, source: &str, depth: usize) -> Value {
+    let Ok(parsed) = parse_surface_document_from_source(path, source) else {
         return json!([]);
     };
     let document = match parsed {
@@ -9033,7 +9031,7 @@ fn invariant_counterfactuals(path: &Path, depth: usize) -> Value {
         | fsl_syntax::SurfaceDocument::Compose(_) => {
             let resolver =
                 fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-            let Ok(kernel) = fsl_core::parse_kernel_source(&source, &resolver) else {
+            let Ok(kernel) = fsl_core::parse_kernel_source(source, &resolver) else {
                 return json!([]);
             };
             kernel.into_syntax()
@@ -9187,8 +9185,15 @@ fn invariant_counterfactuals(path: &Path, depth: usize) -> Value {
 /// no `implements`, or when computing it fails: that failure already
 /// surfaces through `verify`/`check`, and a presentation view must not
 /// itself become a second point of failure for it.
-fn readable_implements_text(path: &Path, model: &KernelModel, depth: usize) -> Option<String> {
-    let implements = implements_result(path, model, depth).ok().flatten()?;
+fn readable_implements_text_from_source(
+    path: &Path,
+    source: &str,
+    model: &KernelModel,
+    depth: usize,
+) -> Option<String> {
+    let implements = implements_result_from_source(path, source, model, depth)
+        .ok()
+        .flatten()?;
     let abs = implements.get("abs").and_then(Value::as_str).unwrap_or("?");
     let result = implements
         .get("result")
@@ -9199,13 +9204,32 @@ fn readable_implements_text(path: &Path, model: &KernelModel, depth: usize) -> O
 
 #[allow(clippy::too_many_lines)]
 fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
-    let (source, _kernel, model) = match load_kernel_model(path) {
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    run_explain_from_source(path, &source, depth, readable)
+}
+
+/// Explain one caller-owned root-source snapshot.
+///
+/// Model lowering, scenarios, counterfactuals, and the readable implements
+/// summary all derive from `source`. Dependency files loaded by `FsResolver`
+/// deliberately retain their independent read semantics.
+#[allow(clippy::too_many_lines)]
+fn run_explain_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    readable: bool,
+) -> (Value, i32) {
+    let (_kernel, model) = match load_kernel_model_from_source(path, source) {
         Ok(loaded) => loaded,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let spec_kind = source_dialect(&source);
+    let spec_kind = source_dialect(source);
     let skeleton = model_skeleton(&model, spec_kind);
-    let (scenarios, _) = run_scenarios(path, depth, "warn");
+    let (scenarios, _) = run_scenarios_mode_from_source(path, source, depth, "warn", false);
     let mut output = envelope();
     output.insert("result".to_owned(), json!("explained"));
     output.insert("spec".to_owned(), json!(model.name));
@@ -9225,9 +9249,9 @@ fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
     );
     output.insert(
         "counterfactuals".to_owned(),
-        invariant_counterfactuals(path, depth),
+        invariant_counterfactuals_from_source(path, source, depth),
     );
-    let mut reachable_counterfactuals = reachable_counterfactuals(path, depth);
+    let mut reachable_counterfactuals = reachable_counterfactuals_from_source(path, source, depth);
     if let Value::Array(items) = &mut reachable_counterfactuals {
         for item in items {
             if let Value::Object(item) = item {
@@ -9270,7 +9294,8 @@ fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
         for (name, ty) in state {
             let _ = writeln!(text, "  - {}: {}", display(name), type_ref_text(ty));
         }
-        if let Some(implements) = readable_implements_text(path, &model, depth) {
+        if let Some(implements) = readable_implements_text_from_source(path, source, &model, depth)
+        {
             text.push_str("\nImplements:\n");
             text.push_str(&implements);
         }
@@ -11144,23 +11169,40 @@ fn run_html_report(
     engine: &str,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let model = match load_model(path) {
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    run_html_report_from_source(path, &source, depth, deadlock_mode, engine, output_path)
+}
+
+/// Render one HTML report from one caller-owned root-source snapshot.
+///
+/// Model lowering, verification, explanation, and rendered source all derive
+/// from `source`. Dependency files loaded by `FsResolver` deliberately retain
+/// their independent read semantics.
+fn run_html_report_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
-    let (verification, _) = run_verify(
+    let (verification, _) = run_verify_from_source(
         path,
+        source,
         depth,
         deadlock_mode,
         engine,
         DEFAULT_EXPLICIT_BUDGET,
         1,
     );
-    let (mut explained, explain_status) = run_explain(path, depth, false);
+    let (mut explained, explain_status) = run_explain_from_source(path, source, depth, false);
     if explain_status != 0 {
         return (explained, explain_status);
     }
@@ -11177,7 +11219,7 @@ fn run_html_report(
     }
     let html = fsl_tools::render_html_report(
         &path.display().to_string(),
-        &source,
+        source,
         &explained,
         &verification,
         &fsl_tools::undecided_declarations(&model),
@@ -14923,20 +14965,6 @@ fn governance_result_from_source(
     })
 }
 
-fn implements_result(
-    path: &Path,
-    model: &KernelModel,
-    depth: usize,
-) -> Result<Option<Value>, fslc_rust::verification_output::RequirementsImplementsError> {
-    let source = std::fs::read_to_string(path).map_err(|error| {
-        fslc_rust::verification_output::RequirementsImplementsError {
-            message: error.to_string(),
-            span: None,
-        }
-    })?;
-    implements_result_from_source(path, &source, model, depth)
-}
-
 fn implements_result_from_source(
     path: &Path,
     source: &str,
@@ -16838,6 +16866,75 @@ spec InitTraceability {
         assert_eq!(status, 0, "{output:#}");
         assert_eq!(output["result"], "verified_under_assumptions", "{output:#}");
         assert_eq!(output["dbsystem"], "SafeAddNullableColumn", "{output:#}");
+    }
+
+    /// Platform-neutral #932 control for `explain`. Every explain component
+    /// must use source A after the root path is overwritten with malformed
+    /// source B; reverting a source-taking call reintroduces that path read.
+    #[test]
+    fn explain_helpers_use_the_captured_root_snapshot() {
+        let source_a = include_str!("../tests/fixtures/vacuous_leadsto.fsl");
+        let fixture = SnapshotFixture::new("explain", source_a);
+        let captured = read_spec_source(&fixture.path).expect("capture source A");
+        std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
+
+        let (output, status) = run_explain_from_source(&fixture.path, &captured, 4, true);
+        assert_eq!(status, 0, "{output:#}");
+        assert_eq!(output["result"], "explained", "{output:#}");
+        assert_eq!(output["spec"], "VacuousLeadstoFixture", "{output:#}");
+        assert!(
+            output["readable"]
+                .as_str()
+                .is_some_and(|text| text.contains("VacuousLeadstoFixture")),
+            "readable explain output must retain source A: {output:#}"
+        );
+    }
+
+    /// Platform-neutral #932 control for `html`. Its model, verification,
+    /// explanation, and rendered source must all use source A after the root
+    /// path is overwritten with malformed source B.
+    #[test]
+    fn html_helpers_use_the_captured_root_snapshot() {
+        let source_a = include_str!("../tests/fixtures/vacuous_leadsto.fsl");
+        let fixture = SnapshotFixture::new("html", source_a);
+        let captured = read_spec_source(&fixture.path).expect("capture source A");
+        std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
+
+        let (output, status) =
+            run_html_report_from_source(&fixture.path, &captured, 4, "warn", "bmc", None);
+        assert_eq!(status, 0, "{output:#}");
+        assert_eq!(output["result"], "generated", "{output:#}");
+        assert_eq!(output["spec"], "VacuousLeadstoFixture", "{output:#}");
+        assert!(
+            output["content"]
+                .as_str()
+                .is_some_and(|html| html.contains("VacuousLeadstoFixture")),
+            "HTML content must retain source A: {output:#}"
+        );
+    }
+
+    /// The only non-comparable HTML parity fields are wall-clock measurements.
+    /// Keep that exclusion live: both independently rendered reports must
+    /// actually contain the two observed timing keys.
+    #[test]
+    fn html_parity_timing_exclusions_are_present_in_both_reports() {
+        let source = include_str!("../tests/fixtures/vacuous_leadsto.fsl");
+        let fixture = SnapshotFixture::new("html-parity", source);
+        let captured = read_spec_source(&fixture.path).expect("capture source");
+        for report in [
+            run_html_report_from_source(&fixture.path, &captured, 4, "warn", "bmc", None).0,
+            run_html_report_from_source(&fixture.path, &captured, 4, "warn", "bmc", None).0,
+        ] {
+            let html = report["content"].as_str().expect("HTML content");
+            assert!(
+                html.contains("&quot;elapsed_s&quot;"),
+                "missing elapsed_s: {html}"
+            );
+            assert!(
+                html.contains("&quot;check_elapsed_s&quot;"),
+                "missing solver.check_elapsed_s: {html}"
+            );
+        }
     }
 
     /// Platform-neutral #808 control for `domain generate`. The scaffold's

@@ -428,21 +428,14 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fslc/src/main.rs",
-        14895,
+        14937,
         "governance_result_from_source",
         ResultOption
     ),
     entry!(
         Verdict,
         "rust/fslc/src/main.rs",
-        14824,
-        "implements_result",
-        ResultOption
-    ),
-    entry!(
-        Verdict,
-        "rust/fslc/src/main.rs",
-        14839,
+        14968,
         "implements_result_from_source",
         ResultOption
     ),
