@@ -1,1 +1,1 @@
-Fixed (#932): native `fslc check` and `fslc db check` now derive their validation, checked Kernel/model, verification, and post-processing from one captured root-source snapshot, preventing concurrent atomic replacements from mixing document revisions in one result.
+Fixed (#932): native `fslc check`, `fslc db check`, `fslc explain`, and `fslc html` now derive their validation, checked Kernel/model, verification, rendering, and post-processing from one captured root-source snapshot, preventing concurrent atomic replacements from mixing document revisions in one result.
