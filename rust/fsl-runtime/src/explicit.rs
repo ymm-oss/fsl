@@ -124,6 +124,14 @@ pub fn deterministic_initial_state(model: &KernelModel) -> Result<State, Runtime
 /// # Errors
 ///
 /// Returns the same errors as [`verify_explicit`].
+///
+/// # Panics
+///
+/// Panics if an action the Monitor reported as enabled, or one it just stepped,
+/// is absent from `model.actions`. Both names come from the same model this
+/// function was handed, so either would mean the Monitor and the model had
+/// disagreed about which actions exist — a state the profile counters cannot be
+/// attributed under, and one no input can reach through the public API.
 #[allow(clippy::too_many_lines)]
 pub fn verify_explicit_selected(
     model: KernelModel,
