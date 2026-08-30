@@ -132,7 +132,7 @@ Rules:
   duplicating prose.
 - An acceptance/forbidden case's own ID is itself a requirement relation: native
   lowering folds requirement blocks, process `covers`, and acceptance/forbidden IDs
-  into the same typed-annotation carrier (`skills/fsl/reference.md` sec. 10), so
+  into the same typed-annotation carrier (`skills/fsl/references/layers.md`), so
   `case.annotations.requirements()` already includes `{id: case.id, text:
   Some(case.text)}` even without an explicit `@requirement(...)`.
 

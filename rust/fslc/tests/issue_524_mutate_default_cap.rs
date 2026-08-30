@@ -3,7 +3,7 @@
 //! Regression coverage for issue #524: native `fslc mutate` defaulted to 100
 //! built-in mutants while its own published CLI contract
 //! (`rust/fslc/cli-contract.json`), `docs/DESIGN-mutate.md`,
-//! `skills/fsl/reference.md`, and the frozen `src/fslc/mutate.py`
+//! `skills/fsl/references/commands.md`, and the frozen `src/fslc/mutate.py`
 //! (`DEFAULT_MAX_MUTANTS`) all specify 200. For a model with more than 100
 //! candidates that silently evaluated a different mutant set and reported a
 //! different kill count, making native reports incomparable with the

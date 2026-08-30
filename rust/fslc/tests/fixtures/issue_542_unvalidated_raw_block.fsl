@@ -2,7 +2,7 @@
 //
 // Positive control for issue #542: `ai_action`/`authority`/`retriever`/
 // `trust_boundary`/`ai_contract` are recognized only as block *boundaries*
-// (`skills/fsl/reference.md`), so garbage inside one is contractually
+// (`skills/fsl/references/syntax.md`), so garbage inside one is contractually
 // accepted. Only the descended `require` clauses are checked.
 
 ai_action Draft { arbitrary & opaque ? text }

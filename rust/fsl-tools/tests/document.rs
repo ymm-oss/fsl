@@ -373,7 +373,7 @@ fn keeps_full_many_to_many_requirement_relation() {
 
 #[test]
 fn acceptance_case_own_id_is_a_requirement_relation() {
-    // `skills/fsl/reference.md` sec. 10: native lowering folds requirement
+    // `skills/fsl/references/layers.md`: native lowering folds requirement
     // blocks, process `covers`, and acceptance/forbidden IDs into the same
     // typed annotation carrier, so an acceptance/forbidden case's own ID is a
     // requirement relation even without an explicit `@requirement(...)`.
