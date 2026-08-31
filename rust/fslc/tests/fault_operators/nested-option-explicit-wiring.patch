@@ -1,12 +1,12 @@
 diff --git a/rust/fsl-runtime/src/explicit.rs b/rust/fsl-runtime/src/explicit.rs
 --- a/rust/fsl-runtime/src/explicit.rs
 +++ b/rust/fsl-runtime/src/explicit.rs
-@@ -235,6 +235,6 @@ fn verify_explicit_selected(
+@@ -285,7 +285,7 @@ fn verify_explicit_selected(
                      result.violation = Some(ExplicitViolation { violation, trace });
                      return Ok(result);
                  }
 -                let child_state = scratch.state.clone();
 +                let child_state = state.clone();
-                 if seen.contains(&child_state) {
-                     continue;
-                 }
+                 // A frontier state is unique and `Monitor::enabled` enumerates
+                 // each action instance once, so this is exactly one unique
+                 // `(state, action instance)` edge. Record it before child

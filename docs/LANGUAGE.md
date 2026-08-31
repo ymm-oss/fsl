@@ -1137,6 +1137,28 @@ The blocking requires clause is identified by a minimized unsat core when that i
 cheap. For requirements `branches`, a false coverage diagnostic keeps the
 internal split-action `name` and adds `display_name`.
 
+### Explicit action execution profile
+
+When `--engine explicit` decides a run, its envelope additionally carries an
+`action_profile` alongside `cost` and `action_coverage`:
+
+```json
+"action_profile": {
+  "checkout": {"enabled": 5, "fired": 4, "no_op": 1}
+}
+```
+
+For each declared action, `enabled` is the number of unique explored states
+where at least one action instance was enabled; `fired` is the number of unique
+successful `(state, action instance)` edges actually explored; and `no_op` is
+the subset of fired edges whose successor equals the source state. This is
+diagnostic coverage evidence, not a verdict or a solver metric. A bounded run
+includes enabled states at its final depth but cannot fire their outgoing edges,
+so `enabled` and `fired` need not be equal. The profile is deterministic because
+explicit BFS visits canonical states and action instances once; it remains
+present for `--engine auto` only when `engine:"explicit"` decided the result.
+Symbolic BMC and induction results do not carry `action_profile`.
+
 For `reachable_failed`, each `unreached` entry carries:
 
 ```json

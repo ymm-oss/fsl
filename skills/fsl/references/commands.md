@@ -240,6 +240,14 @@ non-indexed location across binder values, e.g. `forall k: K { x = k }` with
 never `proved`. `--from-state`, `--lemma`, and `--k` do not apply to this
 engine.
 
+An explicit-decided envelope also carries `action_profile` separately from
+`cost`: each action has non-negative `enabled`, `fired`, and `no_op` counts.
+`enabled` counts unique explored states in which the action has an enabled
+instance; `fired` counts successful unique `(state, action instance)` edges;
+and `no_op` is the fired self-loop subset. The profile is deterministic under
+the canonical BFS traversal and is not emitted for BMC or induction. An
+`--engine auto` result includes it only when `engine` is `"explicit"`.
+
 `--engine auto` tries explicit first and falls back to bmc transparently
 when explicit can't decide the spec (a fail-closed rejection above, or
 `unknown_budget`); everywhere else explicit's own verdict is final. Every

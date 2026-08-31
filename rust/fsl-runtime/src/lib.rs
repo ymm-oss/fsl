@@ -20,9 +20,9 @@ mod explicit;
 mod trace;
 
 pub use explicit::{
-    ExplicitReachableWitness, ExplicitResult, ExplicitViolation, check_init_write_ownership,
-    deterministic_initial_state, explicit_unsupported_reason, verify_explicit,
-    verify_explicit_selected,
+    ActionStats, ExplicitReachableWitness, ExplicitResult, ExplicitViolation,
+    check_init_write_ownership, deterministic_initial_state, explicit_unsupported_reason,
+    verify_explicit, verify_explicit_selected,
 };
 
 pub type State = BTreeMap<String, Value>;

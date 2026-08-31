@@ -441,6 +441,11 @@ pub fn classify_kernel_key(key: &str) -> Option<KernelKeyFate> {
         | "states_explored"
         | "max_frontier_width"
         | "depth_reached"
+        // Per-action counts from the concrete explicit-state exploration.
+        // Unlike `action_coverage` (kept), this is engine-specific run
+        // diagnostics rather than a confidence qualification or replayable
+        // evidence for the verdict, so it stays outside the Public Kernel.
+        | "action_profile"
         // Coverage bookkeeping (which named properties this run checked),
         // not evidence of a specific finding. Distinct from `action_coverage`
         // (kept, #641), which qualifies the verdict's own confidence rather

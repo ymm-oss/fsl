@@ -1190,6 +1190,22 @@ witness のコントラクトを使わなければなりません。</p>
 <p>ブロックしている requires 節は、それが安価な場合、最小化された unsat core によって
 特定されます。requirements の <code>branches</code> については、偽のカバレッジ診断は内部の
 分割 action の <code>name</code> を保持し、<code>display_name</code> を追加します。</p>
+<h3 id="explicit-action">explicit action 実行プロファイル</h3>
+<p><code>--engine explicit</code> が結果を判定した場合、エンベロープには <code>cost</code> および
+<code>action_coverage</code> と並んで <code>action_profile</code> が追加されます:</p>
+<pre><code class="language-json">&quot;action_profile&quot;: {
+  &quot;checkout&quot;: {&quot;enabled&quot;: 5, &quot;fired&quot;: 4, &quot;no_op&quot;: 1}
+}
+</code></pre>
+<p>各 action について、<code>enabled</code> は少なくとも1つの action 実体が enabled だった
+探索済みユニーク状態数、<code>fired</code> は実際に探索された成功したユニークな
+<code>(state, action 実体)</code> 辺の数、<code>no_op</code> は後続状態が元状態と等しい fired 辺の部分集合
+です。これは verdict や solver metric ではなく、診断用のカバレッジエビデンスです。
+有界実行は最終深さの enabled 状態を含みますが、その出辺は発火できないため、
+<code>enabled</code> と <code>fired</code> は一致するとは限りません。explicit BFS が正準状態と action 実体を
+それぞれ一度だけ訪れるためプロファイルは決定的です。<code>--engine auto</code> では
+<code>engine:"explicit"</code> が結果を判定した場合にだけ含まれます。symbolic BMC と induction の
+結果には <code>action_profile</code> は含まれません。</p>
 <p><code>reachable_failed</code> については、各 <code>unreached</code> エントリは以下を運びます:</p>
 <pre><code class="language-json">{
   &quot;name&quot;: &quot;SoldOut&quot;,
