@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
+from unittest.mock import patch
 
 import pytest
 
@@ -72,6 +74,13 @@ def bash32_path_env() -> dict[str, str]:
     return env
 
 
+def bash32_only_candidates_env() -> dict[str, str]:
+    """Restrict advisory bash discovery to the platform bash 3.2 lane."""
+    env = bash32_path_env()
+    env["CODEX_CHANGELOG_BASH_CANDIDATES"] = "/bin/bash"
+    return env
+
+
 def bash4_path_env() -> dict[str, str]:
     """PATH that resolves bash 4+ for the fragment-violation control."""
     for prefix in ("/opt/homebrew/bin", "/usr/local/bin"):
@@ -82,11 +91,25 @@ def bash4_path_env() -> dict[str, str]:
         env["PATH"] = f"{prefix}:{env.get('PATH', '')}"
         major = bash_major_version(env)
         if major is not None and major >= 4:
+            env["CODEX_CHANGELOG_BASH_CANDIDATES"] = str(bash)
             return env
     major = bash_major_version(os.environ.copy())
     if major is not None and major >= 4:
-        return os.environ.copy()
+        bash = shutil.which("bash")
+        if bash is None:
+            pytest.skip("bash 4+ not found for changelog violation control")
+        env = os.environ.copy()
+        env["CODEX_CHANGELOG_BASH_CANDIDATES"] = bash
+        return env
     pytest.skip("bash 4+ not found for changelog violation control")
+
+
+def load_changelog_hook_module(hook: Path):
+    spec = importlib.util.spec_from_file_location("changelog_advisory", hook)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_changelog_hook(
@@ -179,21 +202,37 @@ def test_snapshot_pre_tool_use_denies_direct_snapshot_patch() -> None:
 
 def test_changelog_advisory_allows_an_unavailable_checker(tmp_path: Path) -> None:
     hook = copied_changelog_hook(tmp_path)
-    checker = hook.parents[2] / "tools" / "aggregate_changelog.sh"
-    checker.write_text(
-        "#!/bin/sh\n"
-        "echo 'aggregate_changelog.sh requires Bash 4 or newer' >&2\n"
-        "exit 3\n",
-        encoding="utf-8",
-    )
-    checker.chmod(0o755)
 
-    proc = run_changelog_hook(hook, hook.parents[2])
+    proc = run_changelog_hook(hook, hook.parents[2], env=bash32_only_candidates_env())
 
     assert proc.returncode == 0
     assert "changelog-advisory-unavailable" in proc.stderr
     assert "edit not blocked" in proc.stderr
-    assert "requires Bash 4 or newer" in proc.stderr
+    assert "Bash 4+ not found" in proc.stderr
+    assert "changelog-fragment-violation" not in proc.stderr
+
+
+def test_changelog_advisory_fail_open_on_checker_oserror(tmp_path: Path) -> None:
+    hook = copied_changelog_hook(tmp_path)
+    module = load_changelog_hook_module(hook)
+    bash4 = Path(bash4_path_env()["CODEX_CHANGELOG_BASH_CANDIDATES"])
+    stderr_chunks: list[str] = []
+
+    with patch.object(module, "_find_bash4", return_value=bash4):
+        with patch.object(
+            module.subprocess,
+            "run",
+            side_effect=OSError("checker launch failed"),
+        ):
+            with patch.object(module.sys.stderr, "write", stderr_chunks.append):
+                code = module.main()
+
+    stderr = "".join(stderr_chunks)
+    assert code == 0
+    assert "changelog-advisory-unavailable" in stderr
+    assert "checker launch failed" in stderr
+    assert "edit not blocked" in stderr
+    assert "changelog-fragment-violation" not in stderr
 
 
 def test_changelog_advisory_fail_open_on_unexpected_checker_exit(tmp_path: Path) -> None:
@@ -207,7 +246,7 @@ def test_changelog_advisory_fail_open_on_unexpected_checker_exit(tmp_path: Path)
     )
     checker.chmod(0o755)
 
-    proc = run_changelog_hook(hook, hook.parents[2])
+    proc = run_changelog_hook(hook, hook.parents[2], env=bash4_path_env())
 
     assert proc.returncode == 0
     assert "checker failed unexpectedly" in proc.stderr
@@ -240,12 +279,12 @@ def test_changelog_advisory_fail_open_on_bash32_even_with_fragment_violation(
         "Fixed (#947): invalid name fixture.\n", encoding="utf-8"
     )
 
-    proc = run_changelog_hook(hook, repo_root, env=bash32_path_env())
+    proc = run_changelog_hook(hook, repo_root, env=bash32_only_candidates_env())
 
     assert proc.returncode == 0
     assert "changelog-advisory-unavailable" in proc.stderr
     assert "edit not blocked" in proc.stderr
-    assert "requires Bash 4 or newer" in proc.stderr
+    assert "Bash 4+ not found" in proc.stderr
     assert "changelog-fragment-violation" not in proc.stderr
 
 
