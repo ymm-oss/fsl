@@ -73,6 +73,40 @@
   </div>
 </section>
 
+<section id="correctness-chain" aria-labelledby="correctness-chain-title">
+  <div class="wrap">
+    <p class="kicker reveal">境界を明示した正しさの連鎖</p>
+    <h2 class="reveal" id="correctness-chain-title">方針から実装観測まで</h2>
+    <p class="reveal">経費精算の例では、各引き渡し先を辿れます。各リンクは万能な証明ではなく、何を示す証拠かを示します。</p>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3><a href="business-layer.ja.html">方針と業務フロー</a></h3>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/1_business.fsl">1_business.fsl</a>はコンサルタントのTo-Be統制と目標を表します。</p>
+      </div>
+      <div class="syntax-card">
+        <h3><a href="requirements-layer.ja.html">プロダクト要件</a></h3>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/2_requirements.fsl">2_requirements.fsl</a>は受入れ条件と承認境界の要件を担います。</p>
+      </div>
+      <div class="syntax-card">
+        <h3><a href="design-layer.ja.html">設計と詳細化</a></h3>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/3_design.fsl">3_design.fsl</a>は実装に近い支払ステップをモデル化します。</p>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/3_refines_2.fsl">3_refines_2.fsl</a>は設計を要件へ対応付けます。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>実装の観測</h3>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/impl/expense.py">expense.py</a>はFSLから独立した素の実装です。</p>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/impl/test_conformance.py">test_conformance.py</a>はAdapterを通して実装を動かします。</p>
+      </div>
+      <div class="syntax-card">
+        <h3>検証への橋</h3>
+        <p><a href="language.ja.html#12-the-bridge-to-implementation">testgen</a>は実装適合ハーネスを生成します。</p>
+        <p><a href="language.ja.html#12-the-bridge-to-implementation">replay</a>は対応付けた完全な観測状態を比較します。</p>
+      </div>
+    </div>
+    <p class="reveal" style="margin-top:14px">対応付けとハーネスは指定された乖離を検出できます。replayは観測済みトレースの証拠であり、将来の全挙動の証明ではありません。</p>
+  </div>
+</section>
+
 <section>
   <div class="wrap">
     <p class="kicker reveal">層・ダイアレクト別</p>

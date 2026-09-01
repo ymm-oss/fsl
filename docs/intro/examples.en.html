@@ -73,6 +73,40 @@
   </div>
 </section>
 
+<section id="correctness-chain" aria-labelledby="correctness-chain-title">
+  <div class="wrap">
+    <p class="kicker reveal">One bounded correctness chain</p>
+    <h2 class="reveal" id="correctness-chain-title">From policy to implementation observations</h2>
+    <p class="reveal">The expense example makes each hand-off navigable; each link names the evidence it provides, not a universal claim.</p>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3><a href="business-layer.en.html">Policy and business flow</a></h3>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/1_business.fsl">1_business.fsl</a> states the consultant's To-Be controls and goals.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><a href="requirements-layer.en.html">Product requirements</a></h3>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/2_requirements.fsl">2_requirements.fsl</a> carries acceptance and approval-boundary requirements.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><a href="design-layer.en.html">Design and refinement</a></h3>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/3_design.fsl">3_design.fsl</a> models the implementation-facing payment steps.</p>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/3_refines_2.fsl">3_refines_2.fsl</a> maps that design back to the requirements.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Implementation observation</h3>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/impl/expense.py">expense.py</a> is a plain implementation, independent of FSL.</p>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/impl/test_conformance.py">test_conformance.py</a> drives it through an Adapter.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Verification bridges</h3>
+        <p><a href="language.en.html#12-the-bridge-to-implementation">testgen</a> generates an implementation-conformance harness.</p>
+        <p><a href="language.en.html#12-the-bridge-to-implementation">replay</a> compares mapped complete observed state.</p>
+      </div>
+    </div>
+    <p class="reveal" style="margin-top:14px">The mapping and harness can detect stated drift. Replay is observed-trace evidence, not a proof of all future behavior.</p>
+  </div>
+</section>
+
 <section>
   <div class="wrap">
     <p class="kicker reveal">By layer / dialect</p>
