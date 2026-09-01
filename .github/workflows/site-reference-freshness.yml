@@ -28,7 +28,8 @@ name: site reference freshness
 #     ordinary pull request, so requiring it cannot deadlock one. docs/DESIGN-ci.md's "Ruleset
 #     drift audit" audits this requirement against the live ruleset so it cannot silently regress.
 #
-# See docs/DESIGN-docs-site.md's D7 addendum for the full rationale and #630/#688.
+# See docs/DESIGN-ci.md's “Site reference context scope” for the combined-context contract.
+# docs/DESIGN-docs-site.md D7 remains the generated-reference rationale for #630/#688.
 
 on:
   pull_request:
@@ -51,6 +52,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:

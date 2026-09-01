@@ -1207,12 +1207,12 @@ generated-reference freshness snapshots for `language.{ja,en}.html` and
 
 The workflow invokes `tests/test_site_reference_snapshot.py` and
 `tests/test_site_manual_integrity.py` explicitly. The snapshot module remains
-generated-reference-only; the manual test parses static route, fragment,
-label, and commit-pinned-provenance markup without fetching URLs. Neither
-check establishes Rust/solver behavior, native CLI parity, browser rendering,
-or assistive-technology behavior. This expands the context's bounded
-documentation-artifact scope without changing its name, ruleset membership,
-job, triggers, dependencies, permissions, timeout, or concurrency.
+generated-reference-only; the manual test checks ordered static routes, unique labels,
+local fragments, and pinned blob objects in checked-out Git history without fetching URLs.
+Neither check establishes Rust/solver behavior, native CLI parity, browser rendering,
+or assistive-technology behavior. This expands the context's bounded documentation-artifact scope
+without changing its name, ruleset membership, job, triggers, Python package dependencies,
+permissions, timeout, or concurrency; `fetch-depth: 0` supplies local Git history for pinned blobs.
 
 This closes the gap issue #707 opened: the Safe rollout section below has always required the
 Linux evidence to be *required*, not merely running, and until this change only `merge readiness`

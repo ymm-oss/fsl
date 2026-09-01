@@ -865,13 +865,16 @@ unchanged. In particular, the **section-alignment enforcement between `docs/LANG
 - `tools/build_site_reference.py` (`render_language_tree`) raises `SystemExit` when a
   `docs/LANGUAGE.md` `## ` heading has no `SECTION_BLURBS` entry, and again when the two
   language files' `## ` section counts differ (`docs/DESIGN-docs-site.md` D7).
-- `tests/test_site_reference_snapshot.py` re-runs the generator in memory and byte-compares
-  the committed `docs/intro/{language,cli}.{ja,en}.html`.
-- `.github/workflows/site-reference-freshness.yml` runs that test on every pull request with
-  no path filter, and its context `site reference freshness` **is a required status check**
-  on the `main safety and CI` ruleset (`.github/ruleset-contract.json`; `docs/DESIGN-ci.md`,
-  "Required pre-merge contexts, and why the merge queue was rejected"), so a stale or
-  misaligned page blocks the merge.
+- `tests/test_site_reference_snapshot.py` re-runs the generator and byte-compares
+  the four committed `docs/intro/{language,cli}.{ja,en}.html` pages.
+
+`tests/test_site_manual_integrity.py` is not a section-alignment enforcement point; it separately checks ordered bilingual route links, unique labels, local fragments, and pinned blob objects.
+
+- `.github/workflows/site-reference-freshness.yml` runs both exact test files on every
+  pull request with no path filter; its `site reference freshness` context is required
+  on the `main safety and CI` ruleset (`.github/ruleset-contract.json`;
+  `docs/DESIGN-ci.md`, "Required pre-merge contexts, and why the merge queue was rejected").
+  A stale generated page, a `docs/LANGUAGE.ja.md` misalignment that makes the generator refuse to produce one, or a broken bounded manual-chain contract therefore blocks merge.
 
 None of these read `CHANGELOG.md` or the future `changelog.d/`, and C1 writes to nothing they
 read — that is *why* the enforcement is untouched, not merely an assertion that it is.
