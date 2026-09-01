@@ -1712,6 +1712,17 @@ implementation (see <code>DESIGN-bridge.md</code>).</p>
 <p>Recommended workflow: <strong><code>verify</code> / <code>prove</code> the spec → generate the scaffold with
 <code>testgen</code> → wire the implementation into the <code>Adapter</code> → run the tests</strong>. <code>Monitor</code>
 is used as an oracle in random-walk testing.</p>
+<p><strong>Layer selection:</strong> generate conformance tests from the spec at the <strong>same layer
+granularity as the implementation</strong> you are checking. From an <strong>upper</strong> layer you
+may reuse <strong><code>forbidden</code> (negative) scenarios only</strong> — forbidden traces remain
+sound under refinement, but upper-layer <strong>positive</strong> scenarios (<code>acceptance</code>,
+<code>cover</code>, random-walk witnesses) can falsely fail a legitimately refined
+implementation because refinement is forward simulation, not backward replay of
+every abstract positive trace. <strong>Example:</strong> <code>examples/refinement_chain/top.fsl</code>
+lets <code>finish</code> from initial <code>TOpen</code>; <code>mid.fsl</code> requires <code>MOpen → MReview</code> first —
+a <code>ChainTop</code> positive <code>finish</code> trace must not be used as a <code>ChainMid</code>
+implementation test. See <code>docs/DESIGN-layers.md</code> (refinement chain → design-layer
+testgen/replay; requirements <code>acceptance</code> → that layer's scenarios/testgen).</p>
 <p><code>testgen</code> separates a language-independent scenario-collection core (<code>scenarios</code>)
 from per-target emitters, so the same scenarios render to multiple harnesses. In
 the native implementation all six emitters consume one validated adapter built
