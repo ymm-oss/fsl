@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shlex
 import shutil
@@ -12,9 +13,13 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CODEX_HOOKS = ROOT / ".codex" / "hooks"
+# macOS system bash 3.2 is typically resolved from this PATH prefix.
+BASH32_CALIB_PATH = "/bin:/usr/bin:/sbin:/usr/sbin"
 
 
 def run_hook(name: str, payload: dict) -> subprocess.CompletedProcess[str]:
@@ -39,6 +44,62 @@ def copied_changelog_hook(tmp_path: Path) -> Path:
     shutil.copy2(CODEX_HOOKS / "changelog_advisory.py", hooks)
     shutil.copy2(ROOT / "tools" / "aggregate_changelog.sh", tools)
     return hooks / "changelog_advisory.py"
+
+
+def bash_major_version(env: dict[str, str]) -> int | None:
+    result = subprocess.run(
+        ["bash", "-c", "echo ${BASH_VERSINFO[0]}"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+def bash32_path_env() -> dict[str, str]:
+    """PATH that resolves the platform bash 3.2 calibration lane when present."""
+    env = os.environ.copy()
+    env["PATH"] = BASH32_CALIB_PATH
+    major = bash_major_version(env)
+    if major is None or major >= 4:
+        pytest.skip("bash 3.2 calibration PATH not available on this host")
+    return env
+
+
+def bash4_path_env() -> dict[str, str]:
+    """PATH that resolves bash 4+ for the fragment-violation control."""
+    for prefix in ("/opt/homebrew/bin", "/usr/local/bin"):
+        bash = Path(prefix) / "bash"
+        if not bash.is_file():
+            continue
+        env = os.environ.copy()
+        env["PATH"] = f"{prefix}:{env.get('PATH', '')}"
+        major = bash_major_version(env)
+        if major is not None and major >= 4:
+            return env
+    major = bash_major_version(os.environ.copy())
+    if major is not None and major >= 4:
+        return os.environ.copy()
+    pytest.skip("bash 4+ not found for changelog violation control")
+
+
+def run_changelog_hook(
+    hook: Path, repo_root: Path, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(hook)],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def event_command(events: Path, label: str, release: Path | None = None) -> str:
@@ -127,13 +188,7 @@ def test_changelog_advisory_allows_an_unavailable_checker(tmp_path: Path) -> Non
     )
     checker.chmod(0o755)
 
-    proc = subprocess.run(
-        [sys.executable, str(hook)],
-        cwd=hook.parents[2],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = run_changelog_hook(hook, hook.parents[2])
 
     assert proc.returncode == 0
     assert "changelog-advisory-unavailable" in proc.stderr
@@ -143,22 +198,35 @@ def test_changelog_advisory_allows_an_unavailable_checker(tmp_path: Path) -> Non
 
 def test_changelog_advisory_blocks_a_fragment_violation(tmp_path: Path) -> None:
     hook = copied_changelog_hook(tmp_path)
-    (hook.parents[2] / "changelog.d" / "not-a-fragment.md").write_text(
+    repo_root = hook.parents[2]
+    (repo_root / "changelog.d" / "not-a-fragment.md").write_text(
         "Fixed (#947): invalid name fixture.\n", encoding="utf-8"
     )
 
-    proc = subprocess.run(
-        [sys.executable, str(hook)],
-        cwd=hook.parents[2],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = run_changelog_hook(hook, repo_root, env=bash4_path_env())
 
     assert proc.returncode == 2
     assert "changelog-fragment-violation" in proc.stderr
     assert "fix changelog.d/ fragments" in proc.stderr
     assert "changelog-fragment-name-invalid" in proc.stderr
+
+
+def test_changelog_advisory_fail_open_on_bash32_even_with_fragment_violation(
+    tmp_path: Path,
+) -> None:
+    hook = copied_changelog_hook(tmp_path)
+    repo_root = hook.parents[2]
+    (repo_root / "changelog.d" / "not-a-fragment.md").write_text(
+        "Fixed (#947): invalid name fixture.\n", encoding="utf-8"
+    )
+
+    proc = run_changelog_hook(hook, repo_root, env=bash32_path_env())
+
+    assert proc.returncode == 0
+    assert "changelog-advisory-unavailable" in proc.stderr
+    assert "edit not blocked" in proc.stderr
+    assert "requires Bash 4 or newer" in proc.stderr
+    assert "changelog-fragment-violation" not in proc.stderr
 
 
 def test_unwrapped_commands_overlap_but_cargo_lock_serializes(tmp_path: Path) -> None:
