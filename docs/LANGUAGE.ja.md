@@ -1638,6 +1638,19 @@ fslc scenarios specs/order_system.fsl
 を生成する → 実装を `Adapter` に結線する → テストを実行する**。`Monitor` は
 ランダムウォークテストのオラクルとして使われます。
 
+**層の選び方:** コンフォーマンステストは、検査対象の実装と**同じ粒度の層**の spec
+から生成する。上位層から流用してよいのは **`forbidden`(負例)シナリオだけ**である。
+負例トレースは精緻化(refinement)のあとも健全だが、上位層の**正例**
+(`acceptance`、`cover`、ランダムウォークの witness)を下位実装のテストにそのまま使うと、
+正当に精緻化された実装を誤って落としうる。refinement は抽象モデルを下位が再現できるか
+を見る**前向きシミュレーション**であり、抽象側の正例トレースをすべて下位で再生できる
+ことを要求する**逆向き再生**ではないからである。**例:**
+`examples/refinement_chain/top.fsl` では初期 `TOpen` からすぐ `finish` できるが、
+`mid.fsl` では `MOpen → MReview` のあとでなければ `finish` できない。`ChainTop` の
+正例 `finish` トレースを `ChainMid` 実装のテストに使ってはならない。詳細は
+`docs/DESIGN-layers.md` を参照(refinement 連鎖の末端は design 層への testgen/replay;
+requirements の `acceptance` は**その層**の scenarios/testgen へ流れる)。
+
 `testgen` は、言語非依存のシナリオ収集コア(`scenarios`)をターゲットごとの
 エミッタから分離しているので、同じシナリオが複数のハーネスへレンダリングされます。
 ネイティブ実装では、6 つのエミッタすべてが、Public Kernel v1、シナリオ JSON、

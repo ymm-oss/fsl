@@ -1662,6 +1662,18 @@ fslc scenarios specs/order_system.fsl
 <p>推奨ワークフロー: <strong>spec を <code>verify</code> / <code>prove</code> する → <code>testgen</code> でスキャフォールド
 を生成する → 実装を <code>Adapter</code> に結線する → テストを実行する</strong>。<code>Monitor</code> は
 ランダムウォークテストのオラクルとして使われます。</p>
+<p><strong>層の選び方:</strong> コンフォーマンステストは、検査対象の実装と<strong>同じ粒度の層</strong>の spec
+から生成する。上位層から流用してよいのは <strong><code>forbidden</code>(負例)シナリオだけ</strong>である。
+負例トレースは精緻化(refinement)のあとも健全だが、上位層の<strong>正例</strong>
+(<code>acceptance</code>、<code>cover</code>、ランダムウォークの witness)を下位実装のテストにそのまま使うと、
+正当に精緻化された実装を誤って落としうる。refinement は抽象モデルを下位が再現できるか
+を見る<strong>前向きシミュレーション</strong>であり、抽象側の正例トレースをすべて下位で再生できる
+ことを要求する<strong>逆向き再生</strong>ではないからである。<strong>例:</strong>
+<code>examples/refinement_chain/top.fsl</code> では初期 <code>TOpen</code> からすぐ <code>finish</code> できるが、
+<code>mid.fsl</code> では <code>MOpen → MReview</code> のあとでなければ <code>finish</code> できない。<code>ChainTop</code> の
+正例 <code>finish</code> トレースを <code>ChainMid</code> 実装のテストに使ってはならない。詳細は
+<code>docs/DESIGN-layers.md</code> を参照(refinement 連鎖の末端は design 層への testgen/replay;
+requirements の <code>acceptance</code> は<strong>その層</strong>の scenarios/testgen へ流れる)。</p>
 <p><code>testgen</code> は、言語非依存のシナリオ収集コア(<code>scenarios</code>)をターゲットごとの
 エミッタから分離しているので、同じシナリオが複数のハーネスへレンダリングされます。
 ネイティブ実装では、6 つのエミッタすべてが、Public Kernel v1、シナリオ JSON、
