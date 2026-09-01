@@ -8,7 +8,8 @@ existence check. This productizes mutation as a repeatable non-triviality check.
 
 ## 1. CLI
 
-`fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
+`fslc mutate <f> [--depth K=8] [--by-requirement] [--oracle-attribution]
+[--max-mutants N=200]
 [--from mutants.jsonl]`. Output
 `result:"mutated"`, **exit 0 always** (a generator in the same family as scenarios/testgen;
 survivors are review data, not failures. `--fail-on-survivors` is future work).
@@ -149,9 +150,24 @@ can only demonstrate its work by **catching a behavior mutation**. Hence the cor
 mechanization is reversed: the kill oracle records each mutant's killer → aggregate by the
 `killed_by` requirement tag. **A requirement that killed no behavior mutation = an empty
 formalization**, warned as `empty_formalization`. v1 records the first-killer and explicitly
-labels this "lower observation bound" (sole-killer redundancy analysis is future work).
-Acceptance and forbidden kills are attributed through explicit requirement annotations on the
+labels this "lower observation bound". Acceptance and forbidden kills are attributed through explicit requirement annotations on the
 failed trace declaration; their AC/FB case IDs remain unique scenario identities, not requirements.
+
+## 4b. `--oracle-attribution` (opt-in full killer projection)
+
+Default `mutate` output is unchanged: `killed_by` remains the first-killer lower
+observation bound and `kill_rate` remains mutant union coverage. With
+`--oracle-attribution`, each killed mutant additionally carries a `killers` array
+listing every oracle display name that rejected it (invariant, reachable, ensures
+action name, `_bounds_*`, acceptance, forbidden, refinement, …), evaluated
+independently so the set is order-independent. The envelope also adds
+`by_obligation` keyed by those same oracle display names with `kills_any`,
+`sole_kills`, and `shared_kills` counts, plus `attribution:{mode:"all_killers",
+order_independent:true}`. These fields are **observed lower bounds** within the
+chosen mutant set and depth — not obligation completeness, not spec correctness,
+and not an assurance-class upgrade. The flag is explicit because full attribution
+is more expensive than first-killer recording; when the flag is off, nothing is
+fabricated (no empty `killers` arrays on the default path).
 
 ## 5. Output / ripple
 
@@ -162,6 +178,14 @@ failed trace declaration; their AC/FB case IDs remain unique scenario identities
  "mutants":[{"op","loc","target","status","killed_by","requirement","source"}],
  "by_requirement":{"REQ-7":{"kills":0,"warning":"empty_formalization"}},
  "notes":["mutant cap 200 reached: 37 dropped"]}
+```
+
+With `--oracle-attribution` only:
+
+```json
+{"mutants":[{"status":"killed","killed_by":"Funded","killers":["Funded","deposit"],…}],
+ "by_obligation":{"deposit":{"kills_any":1,"sole_kills":0,"shared_kills":1}},
+ "attribution":{"mode":"all_killers","order_independent":true}}
 ```
 
 New `src/fslc/mutate.py`. Deterministic enumeration + `--max-mutants` truncation is made

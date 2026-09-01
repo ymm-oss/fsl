@@ -98,7 +98,7 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
 fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
-fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
+fslc mutate <f> [--depth K=8] [--by-requirement] [--oracle-attribution] [--max-mutants N=200]
               [--from mutants.jsonl]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
@@ -467,7 +467,10 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   and warns on zero kills as `empty_formalization` (a lower bound observed for
   this mutant set and depth). Trace attribution uses explicit requirement
   annotations; AC/FB case IDs are not implicit requirements and are unique
-  within each declaration kind.
+  within each declaration kind. `--oracle-attribution` (opt-in) adds per-mutant
+  `killers` arrays and `by_obligation` sole/shared counts keyed by oracle display
+  names; default output is unchanged and these counts are observed lower bounds,
+  not completeness or correctness measures.
   `--from` appends external JSONL mutants. Each line supplies either full
   `mutated_spec` source (`spec` alias accepted) or an exact
   `replace:{target,replacement,occurrence?}` instruction. Valid records use the
