@@ -1689,6 +1689,18 @@ Recommended workflow: **`verify` / `prove` the spec → generate the scaffold wi
 `testgen` → wire the implementation into the `Adapter` → run the tests**. `Monitor`
 is used as an oracle in random-walk testing.
 
+**Layer selection:** generate conformance tests from the spec at the **same layer
+granularity as the implementation** you are checking. From an **upper** layer you
+may reuse **`forbidden` (negative) scenarios only** — forbidden traces remain
+sound under refinement, but upper-layer **positive** scenarios (`acceptance`,
+`cover`, random-walk witnesses) can falsely fail a legitimately refined
+implementation because refinement is forward simulation, not backward replay of
+every abstract positive trace. **Example:** `examples/refinement_chain/top.fsl`
+lets `finish` from initial `TOpen`; `mid.fsl` requires `MOpen → MReview` first —
+a `ChainTop` positive `finish` trace must not be used as a `ChainMid`
+implementation test. See `docs/DESIGN-layers.md` (refinement chain → design-layer
+testgen/replay; requirements `acceptance` → that layer's scenarios/testgen).
+
 `testgen` separates a language-independent scenario-collection core (`scenarios`)
 from per-target emitters, so the same scenarios render to multiple harnesses. In
 the native implementation all six emitters consume one validated adapter built
