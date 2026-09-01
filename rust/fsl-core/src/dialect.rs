@@ -3135,6 +3135,22 @@ pub fn requirements_trace_contract(
     }))
 }
 
+/// Whether a requirements-layer source declares an `implements` block.
+///
+/// # Errors
+///
+/// Returns [`CoreError`] when the source cannot be parsed.
+pub fn requirements_has_implements(source: &str) -> Result<bool, CoreError> {
+    let document = fsl_syntax::parse_surface_document(source)?;
+    let SurfaceDocument::Requirements(requirements) = document else {
+        return Ok(false);
+    };
+    Ok(requirements
+        .items
+        .iter()
+        .any(|item| matches!(item, RequirementsItem::Implements { .. })))
+}
+
 fn trace_case_annotations(
     id: &str,
     text: &str,

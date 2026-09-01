@@ -4,7 +4,10 @@
 
 use std::collections::BTreeMap;
 
-use fsl_core::{CoreError, FileResolver, KernelModel, model_warnings};
+use fsl_core::{
+    CoreError, FileResolver, KernelModel, ModelWarningContext, finalize_envelope_model_warnings,
+    finalize_model_warnings, model_warnings,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use wasm_bindgen::prelude::*;
@@ -178,31 +181,32 @@ async fn check(request: &Request, solver_version: &str) -> Value {
         Ok(built) => built,
         Err(error) => return error,
     };
-    let has_trace_contract = match fslc_rust::verification_output::validate_requirement_trace_source(
+    match fslc_rust::verification_output::validate_requirement_trace_source(
         &envelope(solver_version),
         &request.source,
         &model,
     ) {
         Ok((Some(failure), _)) => return failure,
-        Ok((None, has_contract)) => has_contract,
+        Ok((None, _)) => {}
         Err(failure) => return error(solver_version, "semantics", failure),
+    }
+    let warning_ctx = match ModelWarningContext::from_source(&model, &request.source) {
+        Ok(ctx) => ctx,
+        Err(core_error) => return error(solver_version, "semantics", core_error.to_string()),
     };
     let mut output = envelope(solver_version);
     output.insert("result".to_owned(), json!("ok"));
     output.insert("spec".to_owned(), json!(model.name));
-    let warnings = compose_warnings
-        .into_iter()
-        .chain(model_warnings(&model))
-        .collect::<Vec<_>>();
-    output.insert("warnings".to_owned(), Value::Array(warnings));
-    let mut output = add_frontend_metadata(
-        request,
-        solver_version,
-        &model,
-        has_trace_contract,
-        8,
-        Value::Object(output),
+    let warnings = finalize_model_warnings(
+        compose_warnings
+            .into_iter()
+            .chain(model_warnings(&model))
+            .collect(),
+        &warning_ctx,
     );
+    output.insert("warnings".to_owned(), Value::Array(warnings));
+    let mut output =
+        add_frontend_metadata(request, solver_version, &model, 8, Value::Object(output));
     match governance_output(request).await {
         Ok(Some(governance)) => {
             output
@@ -310,26 +314,13 @@ fn governance_error(
     )
 }
 
-fn remove_generic_invariant_warning(output: &mut Value) {
-    if let Some(warnings) = output.get_mut("warnings").and_then(Value::as_array_mut) {
-        warnings.retain(|warning| {
-            warning.get("message").and_then(Value::as_str)
-                != Some("spec declares no user invariants (only implicit type bounds are checked)")
-        });
-    }
-}
-
 fn add_frontend_metadata(
     request: &Request,
     solver_version: &str,
     model: &KernelModel,
-    has_trace_contract: bool,
     depth: usize,
     mut output: Value,
 ) -> Value {
-    if has_trace_contract {
-        remove_generic_invariant_warning(&mut output);
-    }
     let resolver = MemoryResolver {
         files: request.files.clone(),
     };
@@ -344,10 +335,12 @@ fn add_frontend_metadata(
                 .as_object_mut()
                 .expect("verify envelope")
                 .insert("implements".to_owned(), implements);
-            remove_generic_invariant_warning(&mut output);
         }
         Ok(None) => {}
         Err(failure) => return implements_error(solver_version, &failure),
+    }
+    if let Ok(ctx) = ModelWarningContext::from_source(model, &request.source) {
+        finalize_envelope_model_warnings(&mut output, &ctx);
     }
     let additions = fslc_rust::frontend_output::implicit_initial_value_warnings(
         &request.source,
@@ -382,15 +375,15 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
         Ok(built) => built,
         Err(error) => return error,
     };
-    let has_trace_contract = match fslc_rust::verification_output::validate_requirement_trace_source(
+    match fslc_rust::verification_output::validate_requirement_trace_source(
         &envelope(solver_version),
         &request.source,
         &model,
     ) {
         Ok((Some(failure), _)) => return failure,
-        Ok((None, has_contract)) => has_contract,
+        Ok((None, _)) => {}
         Err(failure) => return error(solver_version, "semantics", failure),
-    };
+    }
     let deadlock =
         match fslc_rust::verification_output::DeadlockMode::parse(&request.options.deadlock) {
             Ok(deadlock) => deadlock,
@@ -476,14 +469,7 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             skip_vacuity_probe: false,
         },
     );
-    finalize_verify_output(
-        request,
-        solver_version,
-        &model,
-        has_trace_contract,
-        output,
-        compose_warnings,
-    )
+    finalize_verify_output(request, solver_version, &model, output, compose_warnings)
 }
 
 /// Apply the common post-verification metadata after a BMC result is rendered.
@@ -496,7 +482,6 @@ fn finalize_verify_output(
     request: &Request,
     solver_version: &str,
     model: &KernelModel,
-    has_trace_contract: bool,
     mut output: Value,
     compose_warnings: Vec<Value>,
 ) -> Value {
@@ -505,7 +490,6 @@ fn finalize_verify_output(
         request,
         solver_version,
         model,
-        has_trace_contract,
         request.options.depth,
         output,
     )
@@ -1105,7 +1089,6 @@ mod tests {
             request,
             TEST_SOLVER_VERSION,
             &model,
-            false,
             json!({"result": "verified"}),
             Vec::new(),
         );

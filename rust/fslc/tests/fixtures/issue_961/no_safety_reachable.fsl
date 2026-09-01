@@ -1,0 +1,9 @@
+spec NoSafetyWithReachable {
+  state { x: Int }
+  init { x = 0 }
+  action bump() {
+    requires x < 3
+    x = x + 1
+  }
+  reachable Grew { x >= 1 }
+}
