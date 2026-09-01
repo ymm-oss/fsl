@@ -30,7 +30,9 @@ When sources disagree, stop and resolve the contract conflict instead of silentl
 - `src/fslc`: frozen Python compatibility reference.
 - `tests`: Python-driven Rust contract, parity, and compatibility tests.
 - `specs` and `examples`: FSL corpus and reproducing cases.
-- `skills`: canonical agent skills; `.claude/skills/fsl*` and `.agents/skills/fsl*` symlink here.
+- `skills`: distributable canonical agent skills. Put repository-internal workflow skills in
+  `.claude/skills` or `.codex/skills`; `.claude/skills/fsl*` and `.agents/skills/fsl*` remain
+  symlinks to the distributable FSL skills.
 
 ## Build and verification commands
 
@@ -134,11 +136,13 @@ inventory, and promotion changes run the `scheduled` tier.
   control at least twice in one session before reporting it green — the first fix for this class
   commonly inverts the flake rather than removing it, and a single run cannot tell those apart.
 - Confirm what a state *is* before reporting an observation about it. Name the commit, the built
-  binary, and any mutation currently applied. A working tree under a calibration mutation is not the
-  committed implementation; a worktree behind `origin/main` is not `main`; a binary built before the
-  change does not exercise the change; a run's creation timestamp is not a job's elapsed time. Each of
-  these has produced a confidently reported defect that did not exist, or a passing verdict that the
-  change had not earned.
+  binary, and any mutation currently applied. Before scoping an issue or making a current-state claim,
+  fetch `origin` and inspect recently merged pull requests that touch the same contract surface; a
+  locally cached remote-tracking ref is not freshness evidence. A working tree under a calibration
+  mutation is not the committed implementation; a worktree behind `origin/main` is not `main`; a
+  binary built before the change does not exercise the change; a run's creation timestamp is not a
+  job's elapsed time. Each of these has produced a confidently reported defect that did not exist, or
+  a passing verdict that the change had not earned.
 - A soundness-critical claim marked triangulated must follow
   `docs/DESIGN-triangulated-assurance.md`: preserve the pre-classification raw observation, declare
   two reviewably independent semantic lineages, execute all three agreement edges, and calibrate
