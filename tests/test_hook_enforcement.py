@@ -196,6 +196,26 @@ def test_changelog_advisory_allows_an_unavailable_checker(tmp_path: Path) -> Non
     assert "requires Bash 4 or newer" in proc.stderr
 
 
+def test_changelog_advisory_fail_open_on_unexpected_checker_exit(tmp_path: Path) -> None:
+    hook = copied_changelog_hook(tmp_path)
+    checker = hook.parents[2] / "tools" / "aggregate_changelog.sh"
+    checker.write_text(
+        "#!/bin/sh\n"
+        "echo 'checker internal fault' >&2\n"
+        "exit 4\n",
+        encoding="utf-8",
+    )
+    checker.chmod(0o755)
+
+    proc = run_changelog_hook(hook, hook.parents[2])
+
+    assert proc.returncode == 0
+    assert "checker failed unexpectedly" in proc.stderr
+    assert "edit not blocked" in proc.stderr
+    assert "checker internal fault" in proc.stderr
+    assert "changelog-fragment-violation" not in proc.stderr
+
+
 def test_changelog_advisory_blocks_a_fragment_violation(tmp_path: Path) -> None:
     hook = copied_changelog_hook(tmp_path)
     repo_root = hook.parents[2]
