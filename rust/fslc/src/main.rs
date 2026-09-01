@@ -4111,7 +4111,17 @@ fn format_chain_table(result: &Value) -> String {
 
 #[allow(clippy::too_many_lines)]
 fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
-    let model = match load_model(path) {
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    run_replay_from_source(path, &source, trace_path)
+}
+
+/// Replay one trace against one caller-owned root-source snapshot.
+#[allow(clippy::too_many_lines)]
+fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Value, i32) {
+    let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -11795,7 +11805,25 @@ fn run_ledger_report(
     approval_paths: &[PathBuf],
     trust_keys: &[PathBuf],
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report(request) {
+    let source = match read_spec_source(request.path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    run_ledger_report_from_source(request, &source, approval_paths, trust_keys)
+}
+
+/// Generate one ledger report from one caller-owned root-source snapshot.
+///
+/// The checked model, verification, and optional replay all derive from
+/// `source`. Dependency files and separately supplied evidence retain their
+/// independent read semantics.
+fn run_ledger_report_from_source(
+    request: &LedgerReportRequest<'_>,
+    source: &str,
+    approval_paths: &[PathBuf],
+    trust_keys: &[PathBuf],
+) -> (Value, i32) {
+    let prepared = match prepare_ledger_report_from_source(request, source) {
         Ok(prepared) => prepared,
         Err(error) => return (error, 2),
     };
@@ -11827,20 +11855,36 @@ fn run_ledger_report(
 }
 
 fn generate_unapproved_ledger_report(request: &LedgerReportRequest<'_>) -> (Value, i32) {
-    let prepared = match prepare_ledger_report(request) {
+    let source = match read_spec_source(request.path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    generate_unapproved_ledger_report_from_source(request, &source)
+}
+
+/// Generate the approval-rendering form from one caller-owned root snapshot.
+fn generate_unapproved_ledger_report_from_source(
+    request: &LedgerReportRequest<'_>,
+    source: &str,
+) -> (Value, i32) {
+    let prepared = match prepare_ledger_report_from_source(request, source) {
         Ok(prepared) => prepared,
         Err(error) => return (error, 2),
     };
     render_ledger_report(request, &prepared, None)
 }
 
-fn prepare_ledger_report(request: &LedgerReportRequest<'_>) -> Result<PreparedLedgerReport, Value> {
-    let model = match load_model(request.path) {
+fn prepare_ledger_report_from_source(
+    request: &LedgerReportRequest<'_>,
+    source: &str,
+) -> Result<PreparedLedgerReport, Value> {
+    let model = match load_model_from_source(request.path, source) {
         Ok(model) => model,
         Err(error) => return Err(spec_load_error_output(&error)),
     };
-    let (verification, verification_status) = run_verify(
+    let (verification, verification_status) = run_verify_from_source(
         request.path,
+        source,
         request.depth,
         request.deadlock_mode,
         request.engine,
@@ -11849,7 +11893,7 @@ fn prepare_ledger_report(request: &LedgerReportRequest<'_>) -> Result<PreparedLe
     );
     let replay = match request.impl_log {
         Some(trace) => {
-            let (detail, status) = run_replay(request.path, trace);
+            let (detail, status) = run_replay_from_source(request.path, source, trace);
             // Only `conformant` (0) and `nonconformant` (1) are replay
             // evidence; io/parse/internal errors (>=2) must fail the ledger
             // command instead of silently omitting the implementation-log row.
@@ -11877,7 +11921,13 @@ fn prepare_ledger_report(request: &LedgerReportRequest<'_>) -> Result<PreparedLe
             Ok((evidence_path.clone(), value))
         })
         .collect::<Result<Vec<_>, Value>>()?;
-    let (scenarios, _) = run_scenarios(request.path, request.depth, request.deadlock_mode);
+    let (scenarios, _) = run_scenarios_mode_from_source(
+        request.path,
+        source,
+        request.depth,
+        request.deadlock_mode,
+        false,
+    );
     let evidence = evidence
         .into_iter()
         .map(|(source, value)| (source.display().to_string(), value))
@@ -12753,9 +12803,9 @@ fn acknowledge_undecided_findings(model: &KernelModel, findings: &mut [Value]) {
 fn ai_review_output(
     model: &KernelModel,
     acceptance: &[(String, KernelExpr)],
-    path: &Path,
+    source: &str,
 ) -> Value {
-    let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(model), model, path);
+    let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(model), model, source);
     let mut findings = fsl_tools::structural_review_findings(&tsg);
     let unconstrained_states = findings
         .iter()
@@ -12863,10 +12913,7 @@ fn ai_review_output(
 /// control. Every edge added here has both of its endpoints created here,
 /// which is why no deferred resolution or ordering change is needed on any
 /// path.
-fn enrich_tsg_from_source(mut tsg: Value, model: &KernelModel, path: &Path) -> Value {
-    let Ok(source) = std::fs::read_to_string(path) else {
-        return tsg;
-    };
+fn enrich_tsg_from_source(mut tsg: Value, model: &KernelModel, source: &str) -> Value {
     let mut known_ids = tsg["nodes"]
         .as_array()
         .into_iter()
@@ -12877,14 +12924,14 @@ fn enrich_tsg_from_source(mut tsg: Value, model: &KernelModel, path: &Path) -> V
     let mut edge_additions = Vec::new();
     let spec_id = format!("spec:{}", model.name);
     add_scenario_items(
-        &source,
+        source,
         &spec_id,
         &mut known_ids,
         &mut node_additions,
         &mut edge_additions,
     );
     add_control_items(
-        &source,
+        source,
         &spec_id,
         &mut known_ids,
         &mut node_additions,
@@ -13113,14 +13160,15 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
             continue;
         };
         let layer_path = base.join(file);
-        let model = load_model(&layer_path)?;
+        let layer_source = read_spec_source(&layer_path)?;
+        let model = load_model_from_source(&layer_path, &layer_source)?;
         // `build_tsg` projects `requirement`/`kpi` nodes and `covers` edges
         // (#495) from `model.requirement_targets()`/`model.projections`, but it
         // only ever sees the lowered `KernelModel`. The source-only kinds run
         // through the same enrichment the standalone path uses, per layer and
         // on the unprefixed graph, so both input forms yield the same
         // vocabulary and the layer prefix below still applies uniformly (#558).
-        let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(&model), &model, &layer_path);
+        let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(&model), &model, &layer_source);
         let display = analysis_display_path(&layer_path);
         let file_id = format!("file:{layer}:{display}");
         let mut file_node = project_analysis_node(&file_id, "file", &display);
@@ -13436,8 +13484,12 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
     Ok(analysis)
 }
 
-fn analysis_acceptance_predicates(path: &Path) -> Vec<(String, KernelExpr)> {
-    let Ok(fsl_syntax::SurfaceDocument::Requirements(requirements)) = parse_surface_document(path)
+fn analysis_acceptance_predicates_from_source(
+    path: &Path,
+    source: &str,
+) -> Vec<(String, KernelExpr)> {
+    let Ok(fsl_syntax::SurfaceDocument::Requirements(requirements)) =
+        parse_surface_document_from_source(path, source)
     else {
         return Vec::new();
     };
@@ -13458,6 +13510,38 @@ fn analysis_acceptance_predicates(path: &Path) -> Vec<(String, KernelExpr)> {
 #[allow(clippy::too_many_lines)]
 fn run_analyze(
     path: &Path,
+    projection: &str,
+    focus: Option<&str>,
+    output_format: &str,
+    profile: Option<&str>,
+    export_kind: Option<&str>,
+    code_path: Option<&Path>,
+) -> (Value, i32) {
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    run_analyze_from_source(
+        path,
+        &source,
+        projection,
+        focus,
+        output_format,
+        profile,
+        export_kind,
+        code_path,
+    )
+}
+
+/// Analyze one caller-owned root-source snapshot.
+///
+/// The tag-review model, refinement surface, ordinary model, and AI-review
+/// acceptance predicates all derive from `source`. Project-manifest analysis
+/// and its referenced layer files retain their own input contract.
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+fn run_analyze_from_source(
+    path: &Path,
+    source: &str,
     projection: &str,
     focus: Option<&str>,
     output_format: &str,
@@ -13583,13 +13667,15 @@ fn run_analyze(
                 2,
             );
         }
-        let model = match load_model(path) {
+        let model = match load_model_from_source(path, source) {
             Ok(model) => model,
             Err(error) => return (spec_load_error_output(&error), 2),
         };
         return (tag_review_output(&model), 0);
     }
-    if let Ok(fsl_syntax::SurfaceDocument::Refinement(refinement)) = parse_surface_document(path) {
+    if let Ok(fsl_syntax::SurfaceDocument::Refinement(refinement)) =
+        parse_surface_document_from_source(path, source)
+    {
         if let Some(profile) = profile {
             let mut output = envelope();
             output.insert("result".to_owned(), json!("analyzed"));
@@ -13617,7 +13703,7 @@ fn run_analyze(
             output_format,
         );
     }
-    let model = match load_model(path) {
+    let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -13645,10 +13731,10 @@ fn run_analyze(
                 2,
             );
         }
-        let acceptance = analysis_acceptance_predicates(path);
-        return (ai_review_output(&model, &acceptance, path), 0);
+        let acceptance = analysis_acceptance_predicates_from_source(path, source);
+        return (ai_review_output(&model, &acceptance, source), 0);
     }
-    let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(&model), &model, path);
+    let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(&model), &model, source);
     match fsl_tools::analyze_tsg(tsg, projection, focus) {
         Ok(analysis @ Value::Object(_)) => finish_analysis(
             analysis,
@@ -16911,6 +16997,62 @@ spec InitTraceability {
                 .is_some_and(|html| html.contains("VacuousLeadstoFixture")),
             "HTML content must retain source A: {output:#}"
         );
+    }
+
+    /// Platform-neutral #932 control for `ledger`. Its model, verification,
+    /// scenarios, and rendered report must all use source A after the root path
+    /// is overwritten with malformed source B.
+    #[test]
+    fn ledger_helpers_use_the_captured_root_snapshot() {
+        let source_a = include_str!("../tests/fixtures/vacuous_leadsto.fsl");
+        let fixture = SnapshotFixture::new("ledger", source_a);
+        let captured = read_spec_source(&fixture.path).expect("capture source A");
+        std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
+
+        let request = LedgerReportRequest {
+            path: &fixture.path,
+            depth: 4,
+            deadlock_mode: "warn",
+            engine: "bmc",
+            impl_log: None,
+            evidence_paths: &[],
+            output_path: None,
+        };
+        let (output, status) = run_ledger_report_from_source(&request, &captured, &[], &[]);
+        assert_eq!(status, 0, "{output:#}");
+        assert_eq!(output["result"], "generated", "{output:#}");
+        assert_eq!(output["spec"], "VacuousLeadstoFixture", "{output:#}");
+        assert!(
+            output["content"]
+                .as_str()
+                .is_some_and(|ledger| ledger.contains("VacuousLeadstoFixture")),
+            "ledger content must retain source A: {output:#}"
+        );
+    }
+
+    /// Platform-neutral #932 control for `analyze`. Its model, refinement
+    /// surface, acceptance predicates, and TSG enrichment must all use source A
+    /// after the root path is overwritten with malformed source B.
+    #[test]
+    fn analyze_helpers_use_the_captured_root_snapshot() {
+        let source_a = include_str!("../tests/fixtures/vacuous_leadsto.fsl");
+        let fixture = SnapshotFixture::new("analyze", source_a);
+        let captured = read_spec_source(&fixture.path).expect("capture source A");
+        std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
+
+        let (output, status) = run_analyze_from_source(
+            &fixture.path,
+            &captured,
+            "tsg",
+            None,
+            "json",
+            None,
+            None,
+            None,
+        );
+        assert_eq!(status, 0, "{output:#}");
+        assert_eq!(output["result"], "analyzed", "{output:#}");
+        assert_eq!(output["spec"], "VacuousLeadstoFixture", "{output:#}");
     }
 
     /// The only non-comparable HTML parity fields are wall-clock measurements.

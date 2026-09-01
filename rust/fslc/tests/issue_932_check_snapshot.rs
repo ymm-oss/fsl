@@ -28,6 +28,8 @@ const CHECK_SOURCE_B: &str = include_str!("fixtures/explicit_vacuous.fsl");
 const DB_CHECK_SOURCE_A: &str = include_str!("../../../examples/db/safe_add_nullable_column.fsl");
 #[cfg(unix)]
 const DB_CHECK_SOURCE_B: &str = include_str!("../../../examples/db/safe_rename_preservation.fsl");
+#[cfg(unix)]
+const ANALYZE_SOURCE_B: &str = "not valid FSL source";
 
 #[cfg(unix)]
 fn run_against_two_snapshot_fifo(
@@ -134,6 +136,38 @@ fn html_reads_one_fifo_snapshot() {
         html.contains("VacuousLeadstoFixture"),
         "HTML must be rendered from source A: {html}"
     );
+}
+
+/// Reverting the ledger model, verification, or scenarios path to a
+/// path-taking helper opens source B and fails before cleanup. With no output
+/// path, ledger is raw-delivered, so its source-A content is the oracle.
+#[cfg(unix)]
+#[test]
+fn ledger_reads_one_fifo_snapshot() {
+    let (ledger, status) =
+        run_against_two_snapshot_fifo(&["ledger"], &[], CHECK_SOURCE_A, ANALYZE_SOURCE_B);
+
+    assert_eq!(status, 0, "{ledger}");
+    assert!(
+        ledger.contains("VacuousLeadstoFixture"),
+        "ledger content must retain source A: {ledger}"
+    );
+}
+
+/// Reverting the tag-review model, refinement surface, normal model, or
+/// AI-review acceptance projection to a path-taking helper opens source B and
+/// fails before cleanup. The successful TSG is pinned to source A.
+#[cfg(unix)]
+#[test]
+fn analyze_reads_one_fifo_snapshot() {
+    let (stdout, status) =
+        run_against_two_snapshot_fifo(&["analyze"], &[], CHECK_SOURCE_A, ANALYZE_SOURCE_B);
+    let output: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|error| panic!("invalid JSON: {error}; stdout={stdout}"));
+
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(output["result"], "analyzed", "{output:#}");
+    assert_eq!(output["spec"], "VacuousLeadstoFixture", "{output:#}");
 }
 
 /// Windows does not implement the FIFO read-count oracle above. This marker
