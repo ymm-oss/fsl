@@ -1,0 +1,8 @@
+spec Tiny {
+  state { n: Int }
+  init { n = 0 }
+  action bump() {
+    requires n < 3
+    n = n + 1
+  }
+}

@@ -10,8 +10,8 @@ use std::time::Instant;
 
 use fsl_core::{
     Annotations, FslValue, KernelExpr, KernelLValue, KernelModel, KernelSpec, KernelStatement,
-    ParamDef, TraceStep, TypeDef, TypeRef, insert_requirement_metadata, model_warnings,
-    requirement_metadata,
+    ModelWarningContext, ParamDef, TraceStep, TypeDef, TypeRef, finalize_envelope_model_warnings,
+    finalize_model_warnings, insert_requirement_metadata, model_warnings, requirement_metadata,
 };
 use fslc_rust::literate_access::literate_access;
 use fslc_rust::outcome::{OutcomeClass, outcome_class};
@@ -5615,12 +5615,11 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
                     2,
                 );
             }
-            let has_trace_contract =
-                match validate_requirement_traces_from_source(path, source, &model) {
-                    Ok((Some(failure), _)) => return (failure, 2),
-                    Ok((None, has_contract)) => has_contract,
-                    Err(error) => return (semantic_error_output(&error), 2),
-                };
+            match validate_requirement_traces_from_source(path, source, &model) {
+                Ok((Some(failure), _)) => return (failure, 2),
+                Ok((None, _)) => {}
+                Err(error) => return (semantic_error_output(&error), 2),
+            }
             let mut output = envelope();
             output.insert("result".to_owned(), json!("ok"));
             output.insert("spec".to_owned(), json!(model.name));
@@ -5628,17 +5627,12 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
                 Ok(implements) => implements,
                 Err(error) => return (implements_error_output(&error), 2),
             };
-            let model_level_warnings = if implements.is_some() || has_trace_contract {
-                model_warnings(&model)
-                    .into_iter()
-                    .filter(|warning| {
-                        warning.get("message").and_then(Value::as_str)
-                            != Some("spec declares no user invariants (only implicit type bounds are checked)")
-                    })
-                    .collect()
-            } else {
-                model_warnings(&model)
+            let warning_ctx = match ModelWarningContext::from_source(&model, source) {
+                Ok(ctx) => ctx,
+                Err(error) => return (semantic_error_output(&error.to_string()), 2),
             };
+            let model_level_warnings =
+                finalize_model_warnings(model_warnings(&model), &warning_ctx);
             let warnings = kernel
                 .diagnostics()
                 .iter()
@@ -15698,25 +15692,20 @@ fn run_verify_from_source(
     // selection before its engine loaded the model. Keep the error deferred,
     // but never re-read `path` to obtain it.
     let loaded_model = load_kernel_model_from_source(path, source);
-    let (has_trace_contract, implements, compose_warnings) = match &loaded_model {
+    let (implements, compose_warnings) = match &loaded_model {
         Ok((kernel, model)) => {
-            let has_trace_contract =
-                match validate_requirement_traces_from_source(path, source, model) {
-                    Ok((Some(failure), _)) => return (failure, 2),
-                    Ok((None, has_contract)) => has_contract,
-                    Err(error) => return (semantic_error_output(&error), 2),
-                };
+            match validate_requirement_traces_from_source(path, source, model) {
+                Ok((Some(failure), _)) => return (failure, 2),
+                Ok((None, _)) => {}
+                Err(error) => return (semantic_error_output(&error), 2),
+            }
             let implements = match implements_result_from_source(path, source, model, depth) {
                 Ok(implements) => implements,
                 Err(error) => return (implements_error_output(&error), 2),
             };
-            (
-                has_trace_contract,
-                implements,
-                kernel.diagnostics().to_vec(),
-            )
+            (implements, kernel.diagnostics().to_vec())
         }
-        Err(_) => (false, None, Vec::new()),
+        Err(_) => (None, Vec::new()),
     };
     let deadlock = match DeadlockMode::parse(deadlock_mode) {
         Ok(mode) => mode,
@@ -15789,23 +15778,9 @@ fn run_verify_from_source(
         && let Some(implements) = implements
     {
         envelope.insert("implements".to_owned(), implements);
-        if let Some(Value::Array(warnings)) = envelope.get_mut("warnings") {
-            warnings.retain(|warning| {
-                warning.get("message").and_then(Value::as_str)
-                    != Some(
-                        "spec declares no user invariants (only implicit type bounds are checked)",
-                    )
-            });
-        }
     }
-    if has_trace_contract
-        && let Value::Object(envelope) = &mut output
-        && let Some(Value::Array(warnings)) = envelope.get_mut("warnings")
-    {
-        warnings.retain(|warning| {
-            warning.get("message").and_then(Value::as_str)
-                != Some("spec declares no user invariants (only implicit type bounds are checked)")
-        });
+    if let Ok(ctx) = ModelWarningContext::from_source(&model, source) {
+        finalize_envelope_model_warnings(&mut output, &ctx);
     }
     (output, status)
 }

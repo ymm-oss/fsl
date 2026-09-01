@@ -63,6 +63,7 @@ def workflow(
         env:
           GITHUB_TOKEN: {validator.GITHUB_TOKEN}
         run: {validator.WRITER_COMMAND}"""
+    indented_condition = "".join(f"      {line}\n" for line in condition_text.splitlines())
     return f"""name: {validator.WORKFLOW_NAME}
 on:
   workflow_run:
@@ -80,7 +81,7 @@ jobs:
   {reconcile_name}:
     name: {validator.RECONCILE_JOB_NAME}
     if: >-
-{''.join(f'      {line}\n' for line in condition_text.splitlines())}    runs-on: {validator.RECONCILE_RUNS_ON}
+{indented_condition}    runs-on: {validator.RECONCILE_RUNS_ON}
     timeout-minutes: {validator.RECONCILE_TIMEOUT_MINUTES}
     steps:
 {steps}
