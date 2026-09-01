@@ -12,6 +12,10 @@ short-latency fail-fast lane, plus `rust workspace` and `WASM`. Only the **cross
 `product gate` context; that matrix also runs on schedule, on manual dispatch, and before promotion
 to `production`.
 
+The regular cross-platform matrix deliberately uses one macOS architecture: the Apple Silicon
+`macos-15` runner. Add an Intel macOS lane only when an explicit platform-support requirement
+calls for it.
+
 This changes `main` from "every supported platform was green before merge" to "every change was
 fully tested on Linux before merge, and the remaining platforms are validated immediately after."
 A post-merge failure can therefore still expose a temporarily broken `main`, but only for a
