@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-(( BASH_VERSINFO[0] >= 4 )) || { echo "aggregate_changelog.sh requires Bash 4 or newer" >&2; exit 1; }
+# Exit 3 means the checker could not start its validation.  Consumers such as
+# the Codex advisory hook must not confuse it with exit 1, a fragment violation.
+(( BASH_VERSINFO[0] >= 4 )) || { echo "aggregate_changelog.sh requires Bash 4 or newer" >&2; exit 3; }
 # SPDX-License-Identifier: Apache-2.0
 #
 # Aggregates checked-in changelog fragments under `changelog.d/` into

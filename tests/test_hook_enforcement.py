@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -25,6 +26,19 @@ def run_hook(name: str, payload: dict) -> subprocess.CompletedProcess[str]:
         cwd=ROOT,
         check=False,
     )
+
+
+def copied_changelog_hook(tmp_path: Path) -> Path:
+    """Create the minimal root that lets the hook execute its real checker."""
+    root = tmp_path / "repository"
+    hooks = root / ".codex" / "hooks"
+    tools = root / "tools"
+    hooks.mkdir(parents=True)
+    tools.mkdir()
+    (root / "changelog.d").mkdir()
+    shutil.copy2(CODEX_HOOKS / "changelog_advisory.py", hooks)
+    shutil.copy2(ROOT / "tools" / "aggregate_changelog.sh", tools)
+    return hooks / "changelog_advisory.py"
 
 
 def event_command(events: Path, label: str, release: Path | None = None) -> str:
@@ -100,6 +114,51 @@ def test_snapshot_pre_tool_use_denies_direct_snapshot_patch() -> None:
     output = json.loads(proc.stdout)["hookSpecificOutput"]
     assert output["permissionDecision"] == "deny"
     assert "compatibility-contract" in output["permissionDecisionReason"]
+
+
+def test_changelog_advisory_allows_an_unavailable_checker(tmp_path: Path) -> None:
+    hook = copied_changelog_hook(tmp_path)
+    checker = hook.parents[2] / "tools" / "aggregate_changelog.sh"
+    checker.write_text(
+        "#!/bin/sh\n"
+        "echo 'aggregate_changelog.sh requires Bash 4 or newer' >&2\n"
+        "exit 3\n",
+        encoding="utf-8",
+    )
+    checker.chmod(0o755)
+
+    proc = subprocess.run(
+        [sys.executable, str(hook)],
+        cwd=hook.parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0
+    assert "changelog-advisory-unavailable" in proc.stderr
+    assert "edit not blocked" in proc.stderr
+    assert "requires Bash 4 or newer" in proc.stderr
+
+
+def test_changelog_advisory_blocks_a_fragment_violation(tmp_path: Path) -> None:
+    hook = copied_changelog_hook(tmp_path)
+    (hook.parents[2] / "changelog.d" / "not-a-fragment.md").write_text(
+        "Fixed (#947): invalid name fixture.\n", encoding="utf-8"
+    )
+
+    proc = subprocess.run(
+        [sys.executable, str(hook)],
+        cwd=hook.parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 2
+    assert "changelog-fragment-violation" in proc.stderr
+    assert "fix changelog.d/ fragments" in proc.stderr
+    assert "changelog-fragment-name-invalid" in proc.stderr
 
 
 def test_unwrapped_commands_overlap_but_cargo_lock_serializes(tmp_path: Path) -> None:
