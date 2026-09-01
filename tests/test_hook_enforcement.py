@@ -4,12 +4,18 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import time
+from unittest.mock import patch
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +29,89 @@ def run_hook(name: str, payload: dict) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         cwd=ROOT,
+        check=False,
+    )
+
+
+def copied_changelog_hook(tmp_path: Path) -> Path:
+    """Create the minimal root that lets the hook execute its real checker."""
+    root = tmp_path / "repository"
+    hooks = root / ".codex" / "hooks"
+    tools = root / "tools"
+    hooks.mkdir(parents=True)
+    tools.mkdir()
+    (root / "changelog.d").mkdir()
+    shutil.copy2(CODEX_HOOKS / "changelog_advisory.py", hooks)
+    shutil.copy2(ROOT / "tools" / "aggregate_changelog.sh", tools)
+    return hooks / "changelog_advisory.py"
+
+
+def bash_major_version(env: dict[str, str]) -> int | None:
+    result = subprocess.run(
+        ["bash", "-c", "echo ${BASH_VERSINFO[0]}"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+def no_bash4_candidates_env() -> dict[str, str]:
+    """Deterministically simulate bash 4+ discovery finding no candidate."""
+    env = os.environ.copy()
+    env["CODEX_CHANGELOG_BASH_CANDIDATES"] = ""
+    return env
+
+
+def bash4_path_env() -> dict[str, str]:
+    """Return env pinning bash 4+ discovery to a known candidate."""
+    # Skip only when this host truly has no bash 4+ for the blocking lane.
+    # The no-bash4 fail-open controls use CODEX_CHANGELOG_BASH_CANDIDATES=""
+    # instead and must not skip on Linux hosts whose /bin/bash is already 4+.
+    for prefix in ("/opt/homebrew/bin", "/usr/local/bin"):
+        bash = Path(prefix) / "bash"
+        if not bash.is_file():
+            continue
+        env = os.environ.copy()
+        env["PATH"] = f"{prefix}:{env.get('PATH', '')}"
+        major = bash_major_version(env)
+        if major is not None and major >= 4:
+            env["CODEX_CHANGELOG_BASH_CANDIDATES"] = str(bash)
+            return env
+    major = bash_major_version(os.environ.copy())
+    if major is not None and major >= 4:
+        bash = shutil.which("bash")
+        if bash is None:
+            pytest.skip("bash 4+ not found for changelog violation control")
+        env = os.environ.copy()
+        env["CODEX_CHANGELOG_BASH_CANDIDATES"] = bash
+        return env
+    pytest.skip("bash 4+ not found for changelog violation control")
+
+
+def load_changelog_hook_module(hook: Path):
+    spec = importlib.util.spec_from_file_location("changelog_advisory", hook)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def run_changelog_hook(
+    hook: Path, repo_root: Path, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(hook)],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
         check=False,
     )
 
@@ -100,6 +189,94 @@ def test_snapshot_pre_tool_use_denies_direct_snapshot_patch() -> None:
     output = json.loads(proc.stdout)["hookSpecificOutput"]
     assert output["permissionDecision"] == "deny"
     assert "compatibility-contract" in output["permissionDecisionReason"]
+
+
+def test_changelog_advisory_allows_an_unavailable_checker(tmp_path: Path) -> None:
+    hook = copied_changelog_hook(tmp_path)
+
+    proc = run_changelog_hook(hook, hook.parents[2], env=no_bash4_candidates_env())
+
+    assert proc.returncode == 0
+    assert "changelog-advisory-unavailable" in proc.stderr
+    assert "edit not blocked" in proc.stderr
+    assert "Bash 4+ not found" in proc.stderr
+    assert "changelog-fragment-violation" not in proc.stderr
+
+
+def test_changelog_advisory_fail_open_on_checker_oserror(tmp_path: Path) -> None:
+    hook = copied_changelog_hook(tmp_path)
+    module = load_changelog_hook_module(hook)
+    bash4 = Path(bash4_path_env()["CODEX_CHANGELOG_BASH_CANDIDATES"])
+    stderr_chunks: list[str] = []
+
+    with patch.object(module, "_find_bash4", return_value=bash4):
+        with patch.object(
+            module.subprocess,
+            "run",
+            side_effect=OSError("checker launch failed"),
+        ):
+            with patch.object(module.sys.stderr, "write", stderr_chunks.append):
+                code = module.main()
+
+    stderr = "".join(stderr_chunks)
+    assert code == 0
+    assert "changelog-advisory-unavailable" in stderr
+    assert "checker launch failed" in stderr
+    assert "edit not blocked" in stderr
+    assert "changelog-fragment-violation" not in stderr
+
+
+def test_changelog_advisory_fail_open_on_unexpected_checker_exit(tmp_path: Path) -> None:
+    hook = copied_changelog_hook(tmp_path)
+    checker = hook.parents[2] / "tools" / "aggregate_changelog.sh"
+    checker.write_text(
+        "#!/bin/sh\n"
+        "echo 'checker internal fault' >&2\n"
+        "exit 4\n",
+        encoding="utf-8",
+    )
+    checker.chmod(0o755)
+
+    proc = run_changelog_hook(hook, hook.parents[2], env=bash4_path_env())
+
+    assert proc.returncode == 0
+    assert "checker failed unexpectedly" in proc.stderr
+    assert "edit not blocked" in proc.stderr
+    assert "checker internal fault" in proc.stderr
+    assert "changelog-fragment-violation" not in proc.stderr
+
+
+def test_changelog_advisory_blocks_a_fragment_violation(tmp_path: Path) -> None:
+    hook = copied_changelog_hook(tmp_path)
+    repo_root = hook.parents[2]
+    (repo_root / "changelog.d" / "not-a-fragment.md").write_text(
+        "Fixed (#947): invalid name fixture.\n", encoding="utf-8"
+    )
+
+    proc = run_changelog_hook(hook, repo_root, env=bash4_path_env())
+
+    assert proc.returncode == 2
+    assert "changelog-fragment-violation" in proc.stderr
+    assert "fix changelog.d/ fragments" in proc.stderr
+    assert "changelog-fragment-name-invalid" in proc.stderr
+
+
+def test_changelog_advisory_fail_open_when_no_bash4_even_with_fragment_violation(
+    tmp_path: Path,
+) -> None:
+    hook = copied_changelog_hook(tmp_path)
+    repo_root = hook.parents[2]
+    (repo_root / "changelog.d" / "not-a-fragment.md").write_text(
+        "Fixed (#947): invalid name fixture.\n", encoding="utf-8"
+    )
+
+    proc = run_changelog_hook(hook, repo_root, env=no_bash4_candidates_env())
+
+    assert proc.returncode == 0
+    assert "changelog-advisory-unavailable" in proc.stderr
+    assert "edit not blocked" in proc.stderr
+    assert "Bash 4+ not found" in proc.stderr
+    assert "changelog-fragment-violation" not in proc.stderr
 
 
 def test_unwrapped_commands_overlap_but_cargo_lock_serializes(tmp_path: Path) -> None:
