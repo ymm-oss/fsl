@@ -20,8 +20,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 CODEX_HOOKS = ROOT / ".codex" / "hooks"
-# macOS system bash 3.2 is typically resolved from this PATH prefix.
-BASH32_CALIB_PATH = "/bin:/usr/bin:/sbin:/usr/sbin"
 
 
 def run_hook(name: str, payload: dict) -> subprocess.CompletedProcess[str]:
@@ -64,25 +62,18 @@ def bash_major_version(env: dict[str, str]) -> int | None:
         return None
 
 
-def bash32_path_env() -> dict[str, str]:
-    """PATH that resolves the platform bash 3.2 calibration lane when present."""
+def no_bash4_candidates_env() -> dict[str, str]:
+    """Deterministically simulate bash 4+ discovery finding no candidate."""
     env = os.environ.copy()
-    env["PATH"] = BASH32_CALIB_PATH
-    major = bash_major_version(env)
-    if major is None or major >= 4:
-        pytest.skip("bash 3.2 calibration PATH not available on this host")
-    return env
-
-
-def bash32_only_candidates_env() -> dict[str, str]:
-    """Restrict advisory bash discovery to the platform bash 3.2 lane."""
-    env = bash32_path_env()
-    env["CODEX_CHANGELOG_BASH_CANDIDATES"] = "/bin/bash"
+    env["CODEX_CHANGELOG_BASH_CANDIDATES"] = ""
     return env
 
 
 def bash4_path_env() -> dict[str, str]:
-    """PATH that resolves bash 4+ for the fragment-violation control."""
+    """Return env pinning bash 4+ discovery to a known candidate."""
+    # Skip only when this host truly has no bash 4+ for the blocking lane.
+    # The no-bash4 fail-open controls use CODEX_CHANGELOG_BASH_CANDIDATES=""
+    # instead and must not skip on Linux hosts whose /bin/bash is already 4+.
     for prefix in ("/opt/homebrew/bin", "/usr/local/bin"):
         bash = Path(prefix) / "bash"
         if not bash.is_file():
@@ -203,7 +194,7 @@ def test_snapshot_pre_tool_use_denies_direct_snapshot_patch() -> None:
 def test_changelog_advisory_allows_an_unavailable_checker(tmp_path: Path) -> None:
     hook = copied_changelog_hook(tmp_path)
 
-    proc = run_changelog_hook(hook, hook.parents[2], env=bash32_only_candidates_env())
+    proc = run_changelog_hook(hook, hook.parents[2], env=no_bash4_candidates_env())
 
     assert proc.returncode == 0
     assert "changelog-advisory-unavailable" in proc.stderr
@@ -270,7 +261,7 @@ def test_changelog_advisory_blocks_a_fragment_violation(tmp_path: Path) -> None:
     assert "changelog-fragment-name-invalid" in proc.stderr
 
 
-def test_changelog_advisory_fail_open_on_bash32_even_with_fragment_violation(
+def test_changelog_advisory_fail_open_when_no_bash4_even_with_fragment_violation(
     tmp_path: Path,
 ) -> None:
     hook = copied_changelog_hook(tmp_path)
@@ -279,7 +270,7 @@ def test_changelog_advisory_fail_open_on_bash32_even_with_fragment_violation(
         "Fixed (#947): invalid name fixture.\n", encoding="utf-8"
     )
 
-    proc = run_changelog_hook(hook, repo_root, env=bash32_only_candidates_env())
+    proc = run_changelog_hook(hook, repo_root, env=no_bash4_candidates_env())
 
     assert proc.returncode == 0
     assert "changelog-advisory-unavailable" in proc.stderr
