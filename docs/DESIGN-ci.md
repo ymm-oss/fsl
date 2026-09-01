@@ -1197,6 +1197,23 @@ deferred precisely because they never report on an ordinary pull request.
 `current_user_can_bypass` is `"never"` for every account — an administrator cannot merge past a
 failing or missing required context.
 
+### Site reference context scope
+
+`site reference freshness` remains one required, unfiltered, non-product
+documentation-artifact context. It has two deliberately separate checks: the
+generated-reference freshness snapshots for `language.{ja,en}.html` and
+`cli.{ja,en}.html`, and static manual-route integrity for
+`index.{ja,en}.html` and `examples.{ja,en}.html`.
+
+The workflow invokes `tests/test_site_reference_snapshot.py` and
+`tests/test_site_manual_integrity.py` explicitly. The snapshot module remains
+generated-reference-only; the manual test parses static route, fragment,
+label, and commit-pinned-provenance markup without fetching URLs. Neither
+check establishes Rust/solver behavior, native CLI parity, browser rendering,
+or assistive-technology behavior. This expands the context's bounded
+documentation-artifact scope without changing its name, ruleset membership,
+job, triggers, dependencies, permissions, timeout, or concurrency.
+
 This closes the gap issue #707 opened: the Safe rollout section below has always required the
 Linux evidence to be *required*, not merely running, and until this change only `merge readiness`
 was. Making the other four required was blocked before, because `ci.yml`'s `paths-ignore` exemption
