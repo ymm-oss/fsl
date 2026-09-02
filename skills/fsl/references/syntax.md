@@ -458,7 +458,11 @@ the full `schemas/fslc/ai/statistical-result.v0.schema.json` field set
 (`observed_supported` / `observed_mismatch`), and `fslc ai compat` emits DB
 artifact capability profiles for one `ai_component` or every `ai_component` a
 project declares -- rejecting non-AI input and a project with no
-`ai_component` at all (exit 2) rather than an empty profile. These results
+`ai_component` at all (exit 2) rather than an empty profile. `fslc ai check`,
+`fslc ai compat`, and `fslc ai replay` share the same `ai_component` semantic
+gate (undeclared authority tools and unknown `check hard` rule names, exit 2)
+before any success verdict; project-level `fslc ai replay` uses the checked
+project parser rather than a line scanner. These results
 are never formal proof.
 
 Recursive fsl-ai `agent` composition is checked structurally by

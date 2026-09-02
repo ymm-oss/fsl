@@ -142,6 +142,15 @@ successful recursive `agent` checks return `agent_analyzed` with
 `formal_result: "not_run"`; successful replay returns `replay_conformant` with
 `formal_result: "not_run"`.
 
+`fslc ai check`, `fslc ai compat`, and `fslc ai replay` must not emit those
+success results on an invalid `ai_component`, whether the component is supplied
+alone or embedded in an fsl-ai project. They share
+`fsl_core::validate_ai_component` (undeclared authority tools and unknown
+`check hard` rule names, exit 2). Project-level `fslc ai replay` parses with
+`parse_checked_ai_project` instead of a line scanner so parse failures cannot
+report `replay_conformant` (issue #800). `fslc ai drift` / `eval` / `regress`
+remain tracked separately.
+
 ## Recursive Agent Composition
 
 `agent` is the recursively composable fsl-ai structure. A nested agent is not a

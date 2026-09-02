@@ -6083,30 +6083,7 @@ fn validate_specialized_document_from_source(path: &Path, source: &str) -> Resul
             fsl_tools::validate_db(&system).map_err(|error| error.to_string())
         }
         fsl_syntax::SurfaceDocument::AiComponent(component) => {
-            let mut reasons = std::collections::BTreeSet::new();
-            for fallback in &component.fallback {
-                if !reasons.insert(&fallback.reason) {
-                    return Err(format!("duplicate fallback reason '{}'", fallback.reason));
-                }
-            }
-            let tools = component
-                .tools
-                .iter()
-                .map(|tool| tool.name.as_str())
-                .collect::<std::collections::BTreeSet<_>>();
-            for rule in component
-                .authority
-                .may_suggest
-                .iter()
-                .chain(&component.authority.may_execute)
-                .chain(&component.authority.requires_human_approval)
-                .chain(&component.authority.forbidden)
-            {
-                if !tools.contains(rule.name.as_str()) {
-                    return Err(format!("unknown tool '{}' in authority block", rule.name));
-                }
-            }
-            Ok(())
+            fsl_core::validate_ai_component(&component).map_err(|error| error.to_string())
         }
         _ => Ok(()),
     }
@@ -6317,6 +6294,30 @@ fn wrap_specialized(result: Value) -> (Value, i32) {
     (output, status)
 }
 
+fn reject_invalid_ai_components(components: &[fsl_syntax::AiComponent]) -> Option<(Value, i32)> {
+    for component in components {
+        if let Err(error) = fsl_core::validate_ai_component(component) {
+            return Some((core_error_output(&error), 2));
+        }
+    }
+    None
+}
+
+fn ai_project_parse_failure(
+    error: &fslc_rust::frontend_output::AiProjectParseError,
+) -> (Value, i32) {
+    let mut output = error_output("parse", &error.message);
+    if let Some(object) = output.as_object_mut() {
+        if let Some((line, column)) = error.position {
+            object.insert("loc".to_owned(), json!({"line": line, "column": column}));
+        }
+        if let Some(code) = error.diagnostic_code {
+            object.insert("diagnostic_code".to_owned(), json!(code));
+        }
+    }
+    (output, 2)
+}
+
 fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
@@ -6393,6 +6394,16 @@ fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> 
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
     if fslc_rust::frontend_output::is_ai_project(&source) {
+        let project = match fslc_rust::frontend_output::parse_checked_ai_project(
+            &source,
+            &ai_project_name(path),
+        ) {
+            Ok(project) => project,
+            Err(error) => return ai_project_parse_failure(&error),
+        };
+        if let Some(failure) = reject_invalid_ai_components(&project.components) {
+            return failure;
+        }
         let summary = ai_project_summary(&source);
         if selected_component.is_some_and(|selected| selected != summary.component) {
             return (
@@ -6437,6 +6448,9 @@ fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> 
         }
         Err(error) => return (spec_load_error_output(&error), 2),
     };
+    if let Some(failure) = reject_invalid_ai_components(std::slice::from_ref(&component)) {
+        return failure;
+    }
     if selected_component.is_some_and(|selected| selected != component.name) {
         return (
             semantic_error_output(&format!(
@@ -6526,19 +6540,11 @@ fn run_ai_project_check(source: &str, path: &Path) -> (Value, i32) {
         &ai_project_name(path),
     ) {
         Ok(project) => project,
-        Err(error) => {
-            let mut output = error_output("parse", &error.message);
-            if let Some(object) = output.as_object_mut() {
-                if let Some((line, column)) = error.position {
-                    object.insert("loc".to_owned(), json!({"line": line, "column": column}));
-                }
-                if let Some(code) = error.diagnostic_code {
-                    object.insert("diagnostic_code".to_owned(), json!(code));
-                }
-            }
-            return (output, 2);
-        }
+        Err(error) => return ai_project_parse_failure(&error),
     };
+    if let Some(failure) = reject_invalid_ai_components(&project.components) {
+        return failure;
+    }
     // Field set and order mirror the frozen reference's `analyze_ai_project`
     // (`src/fslc/ai_project.py`). Native previously omitted `dialect`,
     // `ai_project`, `datasets`, `evaluators`, `failure_modes`, and
@@ -6806,6 +6812,9 @@ fn run_ai_compat(path: &Path, environment: Option<&str>) -> (Value, i32) {
                 Err(error) => return (spec_load_error_output(&error), 2),
             }
         };
+    if let Some(failure) = reject_invalid_ai_components(&components) {
+        return failure;
+    }
     if components.is_empty() {
         return (
             semantic_error_output(

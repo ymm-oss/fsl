@@ -2611,7 +2611,14 @@ declared <code>observed</code>/<code>drift</code> requirements over runtime tele
 (<code>observed_supported</code> / <code>observed_mismatch</code>); and <code>fslc ai compat</code> emits a
 finite <code>dbsystem artifact</code> capability profile for one <code>ai_component</code> or every
 <code>ai_component</code> a project declares, rejecting non-AI input and an AI project
-with no <code>ai_component</code> at all (exit 2). All of these use
+with no <code>ai_component</code> at all (exit 2). Before <code>fslc ai check</code>, <code>fslc ai
+compat</code>, or <code>fslc ai replay</code> may emit a success verdict, every <code>ai_component</code>
+in the input -- standalone or embedded in a project -- is checked for the same
+semantic constraints as <code>fslc verify</code> on a lone component: undeclared tools
+referenced in <code>authority</code>, and unknown <code>check hard { rule ... }</code> names (exit
+2, <code>kind:"semantics"</code>). <code>fslc ai replay</code> on a project file uses the same
+checked project parser as <code>fslc ai check</code>, so malformed project syntax cannot
+report <code>replay_conformant</code>. All of these use
 <code>formal_result:"not_run"</code>. A <code>require</code> clause matching none of the known
 evidence-clause grammars (<code>min_samples</code>, <code>ci_lower</code>, <code>ci_upper</code>, a point
 estimate, <code>observed</code>, <code>drift</code>) is a spec error (exit 2) at <code>check</code> time, in

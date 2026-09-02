@@ -2562,7 +2562,13 @@ fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 そして `fslc ai compat` は、1 つの `ai_component`、またはプロジェクトが
 宣言するすべての `ai_component` について有限の `dbsystem artifact`
 ケイパビリティプロファイルを出力し、AI ではない入力や `ai_component` を
-1 つも宣言しない AI プロジェクトは拒否します（exit 2）。これらはすべて
+1 つも宣言しない AI プロジェクトは拒否します（exit 2）。`fslc ai check`、
+`fslc ai compat`、`fslc ai replay` が成功 verdict を返す前に、入力内のすべての
+`ai_component`（単体でもプロジェクト内でも）について、単体 `ai_component` に対する
+`fslc verify` と同じ意味制約（`authority` が参照する未宣言 tool、未知の
+`check hard { rule ... }` 名）を検査します（exit 2、`kind:"semantics"`）。
+`fslc ai replay` のプロジェクト入力は `fslc ai check` と同じ checked パーサを使うため、
+壊れたプロジェクト構文は `replay_conformant` になりません。これらはすべて
 `formal_result:"not_run"` を使います。既知のエビデンス節文法
 （`min_samples`、`ci_lower`、`ci_upper`、点推定、`observed`、`drift`）の
 いずれにも一致しない `require` 節は、`fslc ai check` と `fslc check` の

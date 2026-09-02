@@ -1051,26 +1051,8 @@ const CAUSAL_NAME_WITH_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectati
     message: MessageExpectation::OmitsInput,
     ..SEMANTIC_JSON
 });
-/// #800 tracks these product false negatives. They are pinned to detect drift,
-/// not to endorse accepting invalid component declarations.
-const AI_PROJECT_CHECK_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
-    result: ExpectedField::Exact("ai_project_analyzed"),
-    kind: ExpectedField::Absent,
-    location: LocationShape::Absent,
-    diagnostic: Diagnostic::None,
-    exit: 0,
-    dialect: ExpectedField::Exact("fsl-ai-project.v0"),
-    message: MessageExpectation::Absent,
-});
-const AI_COMPAT_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
-    result: ExpectedField::Exact("compat_profile_generated"),
-    kind: ExpectedField::Absent,
-    location: LocationShape::Absent,
-    diagnostic: Diagnostic::None,
-    exit: 0,
-    dialect: ExpectedField::Absent,
-    message: MessageExpectation::Absent,
-});
+/// #800 tracks these product false negatives for commands outside the
+/// `check`/`compat`/`replay` fix in this change.
 const AI_DRIFT_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
     result: ExpectedField::Exact("observed_supported"),
     kind: ExpectedField::Absent,
@@ -1090,15 +1072,6 @@ const AI_EVAL_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
     message: MessageExpectation::Absent,
 });
 const AI_REGRESS_FALSE_GREEN: Expectation = AI_EVAL_FALSE_GREEN;
-const AI_REPLAY_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
-    result: ExpectedField::Exact("replay_conformant"),
-    kind: ExpectedField::Absent,
-    location: LocationShape::Absent,
-    diagnostic: Diagnostic::None,
-    exit: 0,
-    dialect: ExpectedField::Exact("fsl-ai-hard.v0"),
-    message: MessageExpectation::Absent,
-});
 /// Unlike the similarly shaped #800 observations, these are valid project
 /// documents. #694 tracks the command-specific Markdown handling difference.
 const AI_DRIFT_LITERATE_PROJECT: Expectation = Expectation::Json(JsonExpectation {
@@ -1583,49 +1556,6 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
     ),
     pin!(
         shape: InputShape::Project;
-        FailureClass::Parse,
-        "ai replay",
-        PARSE_AI_PROJECT_FIXTURE,
-        AI_REPLAY_FALSE_GREEN,
-        "#800"
-    ),
-    // #800 tracks these product false negatives. They are not accepted
-    // behavior: the affected command/input-shape pairs report success
-    // without validating the malformed component declaration.
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Guard,
-        "ai compat",
-        AI_GUARD_FIXTURE,
-        AI_COMPAT_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Name,
-        "ai compat",
-        AI_NAME_FIXTURE,
-        AI_COMPAT_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Guard,
-        "ai compat",
-        AI_PROJECT_GUARD_FIXTURE,
-        AI_COMPAT_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Name,
-        "ai compat",
-        AI_PROJECT_NAME_FIXTURE,
-        AI_COMPAT_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
         FailureClass::Guard,
         "ai drift",
         AI_PROJECT_GUARD_FIXTURE,
@@ -1670,54 +1600,6 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "ai regress",
         AI_PROJECT_NAME_FIXTURE,
         AI_REGRESS_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Guard,
-        "ai replay",
-        AI_GUARD_FIXTURE,
-        AI_REPLAY_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Name,
-        "ai replay",
-        AI_NAME_FIXTURE,
-        AI_REPLAY_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Guard,
-        "ai replay",
-        AI_PROJECT_GUARD_FIXTURE,
-        AI_REPLAY_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Name,
-        "ai replay",
-        AI_PROJECT_NAME_FIXTURE,
-        AI_REPLAY_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Guard,
-        "ai check",
-        AI_PROJECT_GUARD_FIXTURE,
-        AI_PROJECT_CHECK_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Name,
-        "ai check",
-        AI_PROJECT_NAME_FIXTURE,
-        AI_PROJECT_CHECK_FALSE_GREEN,
         "#800"
     ),
     pin!(
