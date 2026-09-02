@@ -2638,6 +2638,49 @@ fn ai_span(loc: fsl_syntax::AiLoc) -> fsl_syntax::Span {
     }
 }
 
+/// Semantic validation shared by every `fslc ai` entry point that can emit a
+/// success verdict for an `ai_component` document, whether the component is
+/// supplied alone or as part of an fsl-ai project (issue #800).
+///
+/// # Errors
+///
+/// Returns [`CoreError`] when authority references an undeclared tool, a
+/// `check hard { rule ... }` clause names an unknown rule, or a fallback
+/// reason is duplicated.
+pub fn validate_ai_component(component: &fsl_syntax::AiComponent) -> Result<(), CoreError> {
+    let mut reasons = BTreeSet::new();
+    for fallback in &component.fallback {
+        if !reasons.insert(&fallback.reason) {
+            return Err(CoreError::unlocated(format!(
+                "duplicate fallback reason '{}'",
+                fallback.reason
+            )));
+        }
+    }
+    let tools = component
+        .tools
+        .iter()
+        .map(|tool| tool.name.as_str())
+        .collect::<BTreeSet<_>>();
+    for rule in component
+        .authority
+        .may_suggest
+        .iter()
+        .chain(&component.authority.may_execute)
+        .chain(&component.authority.requires_human_approval)
+        .chain(&component.authority.forbidden)
+    {
+        if !tools.contains(rule.name.as_str()) {
+            return Err(CoreError::unlocated(format!(
+                "unknown tool '{}' in authority block",
+                rule.name
+            )));
+        }
+    }
+    ai_rule_set(component)?;
+    Ok(())
+}
+
 /// Validate and resolve `check hard { rule ...; }`, defaulting to all five
 /// rules when the block is omitted (`docs/LANGUAGE.md` §13.6).
 ///

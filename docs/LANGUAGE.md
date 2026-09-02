@@ -2624,7 +2624,14 @@ declared `observed`/`drift` requirements over runtime telemetry
 (`observed_supported` / `observed_mismatch`); and `fslc ai compat` emits a
 finite `dbsystem artifact` capability profile for one `ai_component` or every
 `ai_component` a project declares, rejecting non-AI input and an AI project
-with no `ai_component` at all (exit 2). All of these use
+with no `ai_component` at all (exit 2). Before `fslc ai check`, `fslc ai
+compat`, or `fslc ai replay` may emit a success verdict, every `ai_component`
+in the input -- standalone or embedded in a project -- is checked for the same
+semantic constraints as `fslc verify` on a lone component: undeclared tools
+referenced in `authority`, and unknown `check hard { rule ... }` names (exit
+2, `kind:"semantics"`). `fslc ai replay` on a project file uses the same
+checked project parser as `fslc ai check`, so malformed project syntax cannot
+report `replay_conformant`. All of these use
 `formal_result:"not_run"`. A `require` clause matching none of the known
 evidence-clause grammars (`min_samples`, `ci_lower`, `ci_upper`, a point
 estimate, `observed`, `drift`) is a spec error (exit 2) at `check` time, in

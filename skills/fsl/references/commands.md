@@ -154,6 +154,7 @@ fslc db import <sql|schema.prisma> [--source auto|sql|prisma] [--name Name] [-o 
                                                         # SQL DDL / minimal Prisma -> dbsystem
 fslc ai check <f> [--depth K] [--engine bmc|induction]  # ai_component hard-contract findings
 fslc ai replay <f> --logs events.jsonl                  # AI runtime replay evidence, not proof
+                                                        # check/compat/replay fail closed on invalid ai_component (exit 2)
 fslc ai eval <f> [--records <path>] [--dataset <Name>] [--slice <Name>] [--property <Name>]
                                                         # Wilson-bound check over precomputed eval JSONL
 fslc ai regress <f> [--migration <Name>] --before-records <p> --after-records <p> [--dataset <Name>]
