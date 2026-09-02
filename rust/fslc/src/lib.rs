@@ -30,6 +30,7 @@ pub mod origin_coverage;
 #[cfg(feature = "native-cli")]
 pub mod outcome;
 pub mod replay_trace;
+pub mod reproducer;
 pub mod source_diagnostic;
 pub mod spec_load;
 pub mod verification_output;

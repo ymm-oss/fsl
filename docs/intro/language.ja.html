@@ -842,6 +842,8 @@ fslc fmt       &lt;path&gt;... --check                 # JSON format_check; exit
 fslc kernel    &lt;file.fsl&gt; [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance &lt;file.fsl&gt; [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, counterexample is shortest)
+fslc counterexample export &lt;file.fsl&gt; [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+                                               # slice 1: safety-invariant counterexample を reproducer.v1 へ export
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -1252,7 +1254,7 @@ literate な <code>.md</code> はこの方法で <code>.fsl</code> ファイル�
 <p>このフェンス抽出を行うのは <code>check</code>・<code>verify</code>・<code>scenarios</code> の 3 コマンドだけです。
 仕様パスを読み取る他のすべてのコマンド(<code>lint</code>・<code>migrate</code>・<code>fmt</code>・<code>kernel</code>・
 <code>conformance</code>・<code>explain</code>・<code>mutate</code>・<code>typestate</code>・<code>testgen</code>・<code>html</code>・<code>ledger</code>・
-<code>analyze</code>・<code>diff</code>・<code>refine</code>・<code>replay</code>・<code>sweep</code>、および
+<code>analyze</code>・<code>diff</code>・<code>refine</code>・<code>replay</code>・<code>sweep</code>・<code>counterexample export</code>、および
 <code>document generate</code>/<code>claims</code>/<code>check</code>)は、<code>.md</code> 入力を代わりに入力種別の誤りとして
 拒否します: <code>result: "error"</code>、<code>kind: "usage"</code>、
 <code>diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"</code>、対応コマンドを挙げたメッセージ、
@@ -1654,6 +1656,10 @@ fslc scenarios specs/order_system.fsl
 <td>実システムのイベントログ JSON を spec に対して検査する</td>
 </tr>
 <tr>
+<td><code>fslc counterexample export</code></td>
+<td>有界な安全性不変式の verifier 反例を閉じた <code>reproducer.v1</code> JSON アーティファクトとして export する(#885 slice 1; <code>replay-trace</code> / <code>testgen-trace</code> ではない)</td>
+</tr>
+<tr>
 <td><code>fslc testgen</code></td>
 <td>コンフォーマンステストのスキャフォールドを生成する — pytest(デフォルト)、Vitest(<code>--target vitest</code>)、Swift Testing(<code>--target swift</code>)、kotlin.test(<code>--target kotlin</code>)、Dart <code>package:test</code>(<code>--target dart</code>)、PHPUnit(<code>--target phpunit</code>)(実装を Adapter に結線する)</td>
 </tr>
@@ -1691,6 +1697,13 @@ enabled な action が無くなればそこで止まります。<code>--depth</c
 これは FSL のどの契約も述べていない期待値です。<code>testgen</code> は代わりに、<code>verify</code> が
 返すのと同じ <code>result:"violated"</code> エンベロープ、終了コード、プロパティ、ステップ、
 再生可能なトレースで違反を報告し、ハーネスを書きません。</p>
+<p><code>fslc counterexample export</code>(reproducer slice 1)は <code>verify</code> と同じ有界検証を実行し、
+結果が<strong>安全性不変式</strong>違反のときだけ閉じた <code>reproducer.v1</code> JSON ファイルを
+<code>-o</code> で書き出します(必須)。stdout は violated な <code>verify</code> エンベロープに
+<code>reproducer.exported_to</code> を足したものであり、replay-trace / testgen-trace の
+入力ではありません。v1 では <code>leadsTo</code>、refinement 文書、induction/CTI、
+非決定的 <code>init</code>、不変式以外の違反を exit 2 で明示拒否します。stage-2 の
+<code>testgen --reproducer</code>(slice 2)は未実装です。</p>
 <ul>
 <li><code>--target pytest</code>(デフォルト): <code>fslc.runtime.Monitor</code> をインポートし、オラクル
   としてランダムウォークをライブで駆動する Python テストを出力します。</li>

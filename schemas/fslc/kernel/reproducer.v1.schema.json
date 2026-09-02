@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/kernel/reproducer.v1.schema.json",
+  "title": "FSL verifier reproducer artifact v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "result",
+    "origin",
+    "verification",
+    "violation",
+    "trace",
+    "canonical_steps",
+    "provenance",
+    "do_not_assume",
+    "unsupported_v1"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "https://fsl.dev/schemas/fslc/kernel/reproducer.v1.schema.json"
+    },
+    "schema_version": { "const": "1.0.0" },
+    "result": { "const": "reproducer" },
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spec",
+        "source",
+        "spec_digest",
+        "spec_digest_algorithm"
+      ],
+      "properties": {
+        "spec": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "spec_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "spec_digest_algorithm": { "const": "fsl-kernel-ast-v1+sha256" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "engine",
+        "depth",
+        "completeness",
+        "checked_to_depth"
+      ],
+      "properties": {
+        "engine": { "enum": ["bmc", "explicit", "auto"] },
+        "depth": { "type": "integer", "minimum": 0 },
+        "completeness": { "enum": ["bounded", "unbounded"] },
+        "checked_to_depth": { "type": "integer", "minimum": 0 },
+        "engine_metadata": { "type": "object" }
+      }
+    },
+    "violation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace_type",
+        "violation_kind",
+        "property",
+        "violated_at_step"
+      ],
+      "properties": {
+        "trace_type": { "const": "invariant" },
+        "violation_kind": { "const": "invariant" },
+        "property": { "type": "string", "minLength": 1 },
+        "violated_at_step": { "type": "integer", "minimum": 0 },
+        "loc": { "type": "object" },
+        "generated_name": { "type": "string" },
+        "origin": { "type": "object" }
+      }
+    },
+    "trace": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/trace_step" }
+    },
+    "canonical_steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "params"],
+        "properties": {
+          "action": { "type": "string", "minLength": 1 },
+          "params": { "type": "object" }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scaling_notes"],
+      "properties": {
+        "scaling_notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "do_not_assume": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "unsupported_v1": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "enum": [
+          "leadsTo",
+          "refinement",
+          "cti",
+          "nondeterministic_init"
+        ]
+      },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "trace_step": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["step", "state"],
+      "properties": {
+        "step": { "type": "integer", "minimum": 0 },
+        "state": { "type": "object" },
+        "action": { "type": "object" },
+        "changes": { "type": "object" },
+        "blame": { "type": "object" }
+      }
+    }
+  }
+}

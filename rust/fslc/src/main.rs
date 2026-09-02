@@ -1171,6 +1171,7 @@ fn command() -> Result<(Value, i32), String> {
             }
             Ok(run_conformance(&path, depth, version))
         }
+        "counterexample" => counterexample_command(args),
         "approval" => approval_command(args),
         "document" => document_command(args),
         "db" => db_command(args),
@@ -11307,6 +11308,136 @@ fn testgen_walk_violation_output(
             skip_vacuity_probe: false,
         },
     )
+}
+
+fn counterexample_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
+    let subcommand = args
+        .next()
+        .ok_or_else(|| "usage: fslc counterexample export SPEC --depth K -o FILE".to_owned())?;
+    match subcommand.as_str() {
+        "export" => {
+            let path = PathBuf::from(args.next().ok_or_else(|| {
+                "usage: fslc counterexample export SPEC --depth K -o FILE".to_owned()
+            })?);
+            if let Err(early_return) = literate_access("counterexample export", &path) {
+                return Ok(early_return);
+            }
+            let mut depth = 8_usize;
+            let mut output = None;
+            let mut engine = "bmc".to_owned();
+            let mut deadlock = "warn".to_owned();
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--depth" => {
+                        depth = args
+                            .next()
+                            .ok_or_else(|| "--depth requires a value".to_owned())?
+                            .parse()
+                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+                    }
+                    "-o" | "--output" => {
+                        output = Some(PathBuf::from(
+                            args.next()
+                                .ok_or_else(|| "--output requires a path".to_owned())?,
+                        ));
+                    }
+                    "--engine" => {
+                        engine = args
+                            .next()
+                            .ok_or_else(|| "--engine requires a value".to_owned())?;
+                        if !matches!(engine.as_str(), "bmc" | "explicit" | "auto" | "induction") {
+                            return Err(
+                                "--engine must be bmc, explicit, auto, or induction".to_owned()
+                            );
+                        }
+                    }
+                    "--deadlock" => {
+                        deadlock = args
+                            .next()
+                            .ok_or_else(|| "--deadlock requires a value".to_owned())?;
+                        if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
+                            return Err("--deadlock must be warn, error, or ignore".to_owned());
+                        }
+                    }
+                    _ => return Err(format!("unknown counterexample export option '{option}'")),
+                }
+            }
+            let output = output.ok_or_else(|| {
+                "usage: fslc counterexample export SPEC --depth K -o FILE".to_owned()
+            })?;
+            Ok(run_counterexample_export(
+                &path, depth, &engine, &deadlock, &output,
+            ))
+        }
+        other => Err(format!("unknown counterexample subcommand '{other}'")),
+    }
+}
+
+fn run_counterexample_export(
+    path: &Path,
+    depth: usize,
+    engine: &str,
+    deadlock_mode: &str,
+    output_path: &Path,
+) -> (Value, i32) {
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    if let Some(message) = fslc_rust::reproducer::reproducer_source_preflight_error(&source, engine)
+    {
+        return (semantic_error_output(&message), 2);
+    }
+    let (_, model) = match load_kernel_model_from_source(path, &source) {
+        Ok(parts) => parts,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    if let Some(message) = fslc_rust::reproducer::reproducer_preflight_error(&model) {
+        return (semantic_error_output(&message), 2);
+    }
+    let spec_digest = match approval::spec_digest(path) {
+        Ok(digest) => digest,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let (mut verify_output, status) = run_verify(
+        path,
+        depth,
+        deadlock_mode,
+        engine,
+        DEFAULT_EXPLICIT_BUDGET,
+        1,
+    );
+    if status == 2 {
+        return (verify_output, status);
+    }
+    if let Some(message) = fslc_rust::reproducer::reproducer_verify_error(&verify_output) {
+        return (semantic_error_output(&message), 2);
+    }
+    let artifact = match fslc_rust::reproducer::build_reproducer_artifact(
+        path,
+        &spec_digest,
+        &verify_output,
+    ) {
+        Ok(artifact) => artifact,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    let serialized = match serde_json::to_string_pretty(&artifact) {
+        Ok(serialized) => serialized,
+        Err(error) => return (error_output("internal", &error.to_string()), 3),
+    };
+    if let Err(error) = std::fs::write(output_path, serialized) {
+        return (error_output("io", &error.to_string()), 2);
+    }
+    if let Value::Object(ref mut map) = verify_output {
+        map.insert(
+            "reproducer".to_owned(),
+            json!({
+                "schema": fsl_core::REPRODUCER_V1_SCHEMA_ID,
+                "exported_to": output_path,
+            }),
+        );
+    }
+    (verify_output, status)
 }
 
 fn run_testgen(

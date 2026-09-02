@@ -2425,6 +2425,72 @@
         "commands": []
       },
       {
+        "path": ["counterexample"],
+        "prog": "fslc counterexample",
+        "help": "usage: fslc counterexample [-h] {export}\n\npositional arguments:\n  {export}            export a bounded safety-invariant counterexample to reproducer.v1\n\noptions:\n  -h, --help            show this help message and exit\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": ["-h", "--help"],
+            "nargs": 0,
+            "action": "store"
+          }
+        ],
+        "commands": [
+          {
+            "path": ["counterexample", "export"],
+            "prog": "fslc counterexample export",
+            "help": "usage: fslc counterexample export [-h] [--depth DEPTH] [--engine {bmc,explicit,auto,induction}] [--deadlock {warn,error,ignore}] -o OUTPUT file\n\nExport a bounded safety-invariant counterexample as a closed reproducer.v1 JSON artifact.\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH         maximum transition depth (default: 8)\n  --engine {bmc,explicit,auto,induction}\n                        verification engine (default: bmc)\n  --deadlock {warn,error,ignore}\n                        deadlock reporting policy (default: warn)\n  -o OUTPUT, --output OUTPUT\n                        reproducer artifact output path (required)\n",
+            "actions": [
+              {
+                "dest": "help",
+                "required": false,
+                "flags": ["-h", "--help"],
+                "nargs": 0,
+                "action": "store"
+              },
+              {
+                "dest": "file",
+                "required": true,
+                "positional": true,
+                "action": "store"
+              },
+              {
+                "dest": "depth",
+                "required": false,
+                "flags": ["--depth"],
+                "default": 8,
+                "action": "store"
+              },
+              {
+                "dest": "engine",
+                "required": false,
+                "flags": ["--engine"],
+                "choices": ["bmc", "explicit", "auto", "induction"],
+                "default": "bmc",
+                "action": "store"
+              },
+              {
+                "dest": "deadlock",
+                "required": false,
+                "flags": ["--deadlock"],
+                "choices": ["warn", "error", "ignore"],
+                "default": "warn",
+                "action": "store"
+              },
+              {
+                "dest": "output",
+                "required": true,
+                "flags": ["-o", "--output"],
+                "action": "store"
+              }
+            ],
+            "commands": []
+          }
+        ]
+      },
+      {
         "path": ["kernel"],
         "prog": "fslc kernel",
         "help": "usage: fslc kernel [-h] [--kernel-version {1,2}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --kernel-version {1,2}\n                        public Kernel major (default: 1)\n",
