@@ -1173,6 +1173,15 @@ DESIGN-document counterparts, and keep the DESIGN-document index bidirectional.
 This is required pre-merge repository/compatibility evidence, not product
 evidence, and it does not add Python to `./tools/check-native-integration.sh`.
 
+The automation lane also runs `tools/check_ci_validator_inventory.py` and
+`tests/test_ci_validator_inventory.py`. The committed
+`.github/ci-validator-inventory.json` records every tracked `tests/test_*.py`
+module as `required` or explicitly `exempt`, and `check` fails closed when a
+new module appears without required-gate wiring or an `--exempt path:reason`
+classification. Wiring a module is the shortest path to `required`
+classification; inventory-only exempt rows cannot satisfy required-gate wiring.
+See `docs/DESIGN-ci-validator-inventory.md`.
+
 The privileged post-merge reporter receives `issues: write`, so its workflow
 also has a deliberately narrow parser-backed shape contract. It requires the
 fixed `jobs.reconcile` boundary, the exact trusted default-branch condition,
