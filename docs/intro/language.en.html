@@ -898,7 +898,7 @@ fslc diff      &lt;old&gt; &lt;new&gt; [--depth K] [--mapping map.fsl]
 fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
                                                  # revision-consistent tree materialization; omit spec for all changed .fsl
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
-fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--max-mutants N]
+fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--oracle-attribution] [--max-mutants N]
                [--from mutants.jsonl]             # built-in + external spec mutation (§15)
 fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
@@ -2749,7 +2749,10 @@ DESIGN-*.md).</p>
   lower bounds within the chosen mutant set and depth. Acceptance and forbidden
   kills use explicit requirement annotations on the failed trace declaration;
   AC/FB case IDs are not implicit requirements. Trace case IDs are unique
-  within each declaration kind.
+  within each declaration kind. <code>--oracle-attribution</code> (opt-in) adds per-mutant
+  <code>killers</code> arrays and <code>by_obligation</code> sole/shared counts keyed by oracle display
+  names; default output is unchanged and these counts are observed lower bounds,
+  not completeness or correctness measures.
   → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
 - <strong><code>fslc explain --readable</code></strong> — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,

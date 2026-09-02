@@ -1211,6 +1211,7 @@ fn command() -> Result<(Value, i32), String> {
             let mut readable = false;
             let mut max_mutants = DEFAULT_MAX_MUTANTS;
             let mut by_requirement = false;
+            let mut oracle_attribution = false;
             let mut typescript_only = false;
             let mut external_mutants = None;
             while let Some(option) = args.next() {
@@ -1231,6 +1232,7 @@ fn command() -> Result<(Value, i32), String> {
                             .map_err(|_| "--max-mutants must be an integer".to_owned())?;
                     }
                     "--by-requirement" => by_requirement = true,
+                    "--oracle-attribution" => oracle_attribution = true,
                     "--from" => {
                         external_mutants = Some(PathBuf::from(
                             args.next()
@@ -1248,6 +1250,7 @@ fn command() -> Result<(Value, i32), String> {
                     depth,
                     max_mutants,
                     by_requirement,
+                    oracle_attribution,
                     external_mutants.as_deref(),
                 ),
                 "typestate" => run_typestate(&path),
@@ -9820,6 +9823,248 @@ fn mutation_oracle_for_model(model: KernelModel, depth: usize) -> MutationOracle
     mutation_model_oracle(model, depth)
 }
 
+fn clear_action_ensures(model: &mut KernelModel) {
+    for action in &mut model.actions {
+        action.ensures.clear();
+        action.ensure_spans.clear();
+    }
+}
+
+fn isolate_model_for_invariant(model: &KernelModel, name: &str) -> KernelModel {
+    let mut isolated = model.clone();
+    isolated.invariants = isolated
+        .invariants
+        .iter()
+        .filter(|property| property.name == name)
+        .cloned()
+        .collect();
+    isolated.transitions.clear();
+    isolated.reachables.clear();
+    isolated.leadstos.clear();
+    clear_action_ensures(&mut isolated);
+    isolated
+}
+
+fn isolate_model_for_reachable(model: &KernelModel, name: &str) -> KernelModel {
+    let mut isolated = model.clone();
+    isolated.reachables = isolated
+        .reachables
+        .iter()
+        .filter(|property| property.name == name)
+        .cloned()
+        .collect();
+    isolated.invariants.clear();
+    isolated.transitions.clear();
+    isolated.leadstos.clear();
+    clear_action_ensures(&mut isolated);
+    isolated
+}
+
+fn isolate_model_for_transition(model: &KernelModel, name: &str) -> KernelModel {
+    let mut isolated = model.clone();
+    isolated.transitions = isolated
+        .transitions
+        .iter()
+        .filter(|property| property.name == name)
+        .cloned()
+        .collect();
+    isolated.invariants.clear();
+    isolated.reachables.clear();
+    isolated.leadstos.clear();
+    clear_action_ensures(&mut isolated);
+    isolated
+}
+
+fn isolate_model_for_leadsto(model: &KernelModel, name: &str) -> KernelModel {
+    let mut isolated = model.clone();
+    isolated.leadstos = isolated
+        .leadstos
+        .iter()
+        .filter(|property| property.name == name)
+        .cloned()
+        .collect();
+    isolated.invariants.clear();
+    isolated.transitions.clear();
+    isolated.reachables.clear();
+    clear_action_ensures(&mut isolated);
+    isolated
+}
+
+fn isolate_model_for_ensures(model: &KernelModel, action_name: &str) -> KernelModel {
+    let mut isolated = model.clone();
+    isolated.invariants.clear();
+    isolated.transitions.clear();
+    isolated.reachables.clear();
+    isolated.leadstos.clear();
+    for action in &mut isolated.actions {
+        if action.name != action_name {
+            action.ensures.clear();
+            action.ensure_spans.clear();
+        }
+    }
+    isolated
+}
+
+fn isolated_oracle_kills(model: KernelModel, depth: usize, expected: &str) -> bool {
+    let outcome = mutation_model_oracle(model, depth);
+    !outcome.clean && outcome.killed_by.as_deref() == Some(expected)
+}
+
+fn boundary_oracle_killers(model: &KernelModel, depth: usize) -> Vec<String> {
+    if let Ok(fsl_runtime::BoundaryProbe {
+        finding: Some((violation, _)),
+        ..
+    }) = fsl_runtime::find_boundary_violation(model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET)
+    {
+        return vec![violation.name.clone()];
+    }
+    let mut automatic = model.clone();
+    automatic.invariants.clear();
+    automatic.transitions.clear();
+    automatic.reachables.clear();
+    automatic.leadstos.clear();
+    let outcome = mutation_model_oracle(automatic, depth);
+    if outcome.clean {
+        Vec::new()
+    } else {
+        outcome.killed_by.into_iter().collect()
+    }
+}
+
+fn collect_oracle_killers(
+    model: &KernelModel,
+    depth: usize,
+    source: &str,
+    base: &Path,
+    bounds_override: Option<&str>,
+) -> Vec<String> {
+    let mut killers = std::collections::BTreeSet::new();
+    if let Some(name) = bounds_override {
+        killers.insert(name.to_owned());
+    }
+    for name in boundary_oracle_killers(model, depth) {
+        killers.insert(name);
+    }
+    for property in &model.invariants {
+        let label = display(&property.name);
+        if isolated_oracle_kills(
+            isolate_model_for_invariant(model, &property.name),
+            depth,
+            &label,
+        ) {
+            killers.insert(label);
+        }
+    }
+    for property in &model.reachables {
+        let label = display(&property.name);
+        if isolated_oracle_kills(
+            isolate_model_for_reachable(model, &property.name),
+            depth,
+            &label,
+        ) {
+            killers.insert(label);
+        }
+    }
+    for property in &model.transitions {
+        let label = display(&property.name);
+        if isolated_oracle_kills(
+            isolate_model_for_transition(model, &property.name),
+            depth,
+            &label,
+        ) {
+            killers.insert(label);
+        }
+    }
+    for property in &model.leadstos {
+        let label = display(&property.name);
+        if isolated_oracle_kills(
+            isolate_model_for_leadsto(model, &property.name),
+            depth,
+            &label,
+        ) {
+            killers.insert(label);
+        }
+    }
+    for action in &model.actions {
+        if action.ensures.is_empty() {
+            continue;
+        }
+        let label = display(&action.name);
+        if isolated_oracle_kills(
+            isolate_model_for_ensures(model, &action.name),
+            depth,
+            &label,
+        ) {
+            killers.insert(label);
+        }
+    }
+    if mutation_oracle_for_model(model.clone(), depth).clean {
+        let mut outcome = MutationOracle {
+            clean: true,
+            killed_by: None,
+            killer_requirements: Vec::new(),
+        };
+        if apply_requirement_mutation_oracle(source, model, &mut outcome).is_ok()
+            && !outcome.clean
+            && let Some(killer) = outcome.killed_by
+        {
+            killers.insert(killer);
+        } else {
+            outcome = MutationOracle {
+                clean: true,
+                killed_by: None,
+                killer_requirements: Vec::new(),
+            };
+            if apply_implements_mutation_oracle(source, base, model, depth, &mut outcome).is_ok()
+                && !outcome.clean
+                && let Some(killer) = outcome.killed_by
+            {
+                killers.insert(killer);
+            }
+        }
+    }
+    killers.into_iter().collect()
+}
+
+fn aggregate_by_obligation(mutants: &[Value]) -> Map<String, Value> {
+    let mut stats = std::collections::BTreeMap::<String, (u64, u64, u64)>::new();
+    for mutant in mutants {
+        if mutant.get("status").and_then(Value::as_str) != Some("killed") {
+            continue;
+        }
+        let Some(killers) = mutant.get("killers").and_then(Value::as_array) else {
+            continue;
+        };
+        let names = killers.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+        if names.is_empty() {
+            continue;
+        }
+        let shared = names.len() > 1;
+        for name in names {
+            let entry = stats.entry(name.to_owned()).or_insert((0, 0, 0));
+            entry.0 += 1;
+            if shared {
+                entry.2 += 1;
+            } else {
+                entry.1 += 1;
+            }
+        }
+    }
+    stats
+        .into_iter()
+        .map(|(name, (kills_any, sole_kills, shared_kills))| {
+            (
+                name,
+                json!({
+                    "kills_any": kills_any,
+                    "sole_kills": sole_kills,
+                    "shared_kills": shared_kills,
+                }),
+            )
+        })
+        .collect()
+}
+
 fn requirement_trace_failure_requirements(
     source: &str,
     failure: &Value,
@@ -10457,6 +10702,7 @@ fn run_mutate(
     depth: usize,
     max_mutants: usize,
     by_requirement: bool,
+    oracle_attribution: bool,
     external_mutants: Option<&Path>,
 ) -> (Value, i32) {
     // Capture one root-spec snapshot up front (#808): the baseline verify, the
@@ -10668,6 +10914,26 @@ fn run_mutate(
                 json!("action dead at baseline — survival expected"),
             );
         }
+        if oracle_attribution
+            && status == "killed"
+            && let Ok(kernel) = fsl_core::lower_direct_spec(mutated_spec.clone())
+            && let Ok(mutated_model) = fsl_core::build_model(kernel)
+        {
+            let bounds_override = if outcome
+                .killed_by
+                .as_deref()
+                .is_some_and(|killer| killer.starts_with("_bounds_"))
+            {
+                outcome.killed_by.as_deref()
+            } else {
+                None
+            };
+            let killers =
+                collect_oracle_killers(&mutated_model, depth, &source, base, bounds_override);
+            if let Value::Object(public) = &mut public {
+                public.insert("killers".to_owned(), json!(killers));
+            }
+        }
         for requirement in outcome.killer_requirements {
             if let Some(Value::Object(entry)) = by_req.get_mut(&requirement) {
                 let kills = entry
@@ -10763,12 +11029,28 @@ fn run_mutate(
                         entry.insert("kills".to_owned(), json!(kills + 1));
                     }
                 }
-                public_mutants.push(external_mutant_public(
+                let mut public = external_mutant_public(
                     &candidate,
                     "killed",
                     outcome.killed_by.as_deref(),
                     None,
-                ));
+                );
+                if oracle_attribution {
+                    let killers = collect_oracle_killers(
+                        &mutated_model,
+                        depth,
+                        mutated_source,
+                        base,
+                        outcome
+                            .killed_by
+                            .as_deref()
+                            .filter(|killer| killer.starts_with("_bounds_")),
+                    );
+                    if let Value::Object(public) = &mut public {
+                        public.insert("killers".to_owned(), json!(killers));
+                    }
+                }
+                public_mutants.push(public);
             }
         }
     }
@@ -10800,6 +11082,12 @@ fn run_mutate(
                 .to_owned(),
         );
     }
+    if oracle_attribution {
+        notes.push(
+            "oracle-attribution kills_any, sole_kills, and shared_kills are observed lower bounds within this mutant set and depth; they are not obligation completeness or spec correctness measures"
+                .to_owned(),
+        );
+    }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("mutated"));
     output.insert("spec".to_owned(), json!(model.name));
@@ -10808,6 +11096,16 @@ fn run_mutate(
     output.insert("mutants".to_owned(), Value::Array(public_mutants.clone()));
     output.insert("summary".to_owned(), mutation_summary(&public_mutants));
     output.insert("by_requirement".to_owned(), Value::Object(by_req));
+    if oracle_attribution {
+        output.insert(
+            "by_obligation".to_owned(),
+            Value::Object(aggregate_by_obligation(&public_mutants)),
+        );
+        output.insert(
+            "attribution".to_owned(),
+            json!({"mode":"all_killers","order_independent":true}),
+        );
+    }
     output.insert("notes".to_owned(), json!(notes));
     if let Some(kernel_source) = domain_kernel_source {
         output.insert("kernel_source".to_owned(), json!(kernel_source));

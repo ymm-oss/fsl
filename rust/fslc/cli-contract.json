@@ -1729,7 +1729,7 @@
           "mutate"
         ],
         "prog": "fslc mutate",
-        "help": "usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement] [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --by-requirement\n  --max-mutants MAX_MUTANTS\n  --from MUTANTS_FROM   adjudicate external JSONL mutants in addition to the\n                        built-in catalog\n",
+        "help": "usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement] [--oracle-attribution] [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --by-requirement\n  --oracle-attribution  emit full killer sets and per-oracle sole/shared counts\n                        keyed by oracle display names (opt-in; default output\n                        unchanged)\n  --max-mutants MAX_MUTANTS\n  --from MUTANTS_FROM   adjudicate external JSONL mutants in addition to the\n                        built-in catalog\n",
         "actions": [
           {
             "dest": "help",
@@ -1761,6 +1761,16 @@
             "required": false,
             "flags": [
               "--by-requirement"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
+          },
+          {
+            "dest": "oracle_attribution",
+            "required": false,
+            "flags": [
+              "--oracle-attribution"
             ],
             "nargs": 0,
             "default": false,

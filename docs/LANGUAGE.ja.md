@@ -791,7 +791,7 @@ fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
 fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
                                                  # revision-consistent tree materialization; omit spec for all changed .fsl
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
-fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]
+fslc mutate    <file.fsl> [--by-requirement] [--oracle-attribution] [--max-mutants N]
                [--from mutants.jsonl]             # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
@@ -2717,7 +2717,10 @@ DESIGN-*.md があります)。
   拡張)。要件ごとのキル数とこの警告は、選択されたミュータント集合と深さの中で
   観測された下界です。acceptance と forbidden の kill は、失敗した trace 宣言の
   明示的な requirement annotation を使います。AC/FB case ID は暗黙の requirement
-  ではなく、trace case ID は宣言種別ごとに一意です。→
+  ではなく、trace case ID は宣言種別ごとに一意です。`--oracle-attribution`
+  (opt-in) はミュータントごとの `killers` 配列と、oracle 表示名をキーにした
+  `by_obligation` の sole/shared 集計を追加します。既定出力は変わらず、これらの
+  カウントは観測された下界であり、完全性や正しさの尺度ではありません。→
   [`DESIGN-mutate.md`](DESIGN-mutate.md)
 - **`fslc explain --readable`** — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement
