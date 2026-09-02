@@ -515,10 +515,9 @@ tests, or external evidence.
 by `check_domain` to validate renderability; only its hard-finding envelope
 includes the generated `kernel_source`). At command entry, `domain analyze`
 and `domain expand` read one source `String`, parse their `DomainSpec`
-projection from it with `parse_domain_document_from_source`, and pass that same
-string to `load_kernel_model_from_source` to construct the checked Kernel. An
-atomic replacement of the path therefore cannot make either command validate a
-different source version before returning success (#796).
+projection from it with `parse_domain_document_from_source`, and render from
+that same in-memory snapshot. An atomic replacement of the path therefore
+cannot make either command project a different source version (#808).
 `domain generate`, `domain replay`, `domain testgen`, and `domain check` extend
 the same single-snapshot contract to checked-kernel scaffolding, Monitor replay,
 generic/adapter test generation, and edition post-processing respectively (#808).
@@ -526,12 +525,11 @@ generic/adapter test generation, and edition post-processing respectively (#808)
 `public_kernel_contract` for the full domain corpus and requires them to match
 except on source spans (#664). Building that gate found the two
 implementations already disagree: `Context::default` (`domain.rs`) still has
-legacy surface paths, while `Context::normalize` now composes scope-aware AST
-for kernel rendering (#798 slice 1 / design option B). #690 fixed the known
+legacy surface paths, while `Context::normalize` composes scope-aware AST
+for kernel rendering (#798 / design option B). #690 fixed the known
 `can(...)` precedence false green by parenthesizing each joined piece. #798
-slice 2 will retire the remaining legacy string path and #796 CLI suppression.
-#796 validates the CLI source before returning its renderer output; slice 1
-makes the renderer agree with `lower_domain` for the formerly pinned fixtures.
+slice 1 closed the pinned renderer divergences; slice 2 retired the #796 CLI
+post-validation that had masked remaining divergence at the command boundary.
 `domain_render_agreement.rs`'s `KNOWN_DIVERGENT_DOMAIN_FIXTURES` is empty after
 slice 1. #691 (a separate root cause --
 `Context::default` had a catch-all arm reachable for every container type,

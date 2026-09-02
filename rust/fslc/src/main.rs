@@ -6983,18 +6983,6 @@ fn domain_scaffold_inputs_from_source(
     Ok((contract, fsl_tools::domain_scaffold_metadata(domain)))
 }
 
-/// Validate a domain command's source through the checked Kernel path shared
-/// by `check`, `verify`, and `domain generate`.
-///
-/// `domain analyze` and `domain expand` still consume their specialized
-/// projections below, but must never return success for a document direct
-/// lowering rejects (#796).
-fn validate_domain_command_input(path: &Path, source: &str) -> Result<(), (Value, i32)> {
-    load_kernel_model_from_source(path, source)
-        .map(|_| ())
-        .map_err(|error| (spec_load_error_output(&error), 2))
-}
-
 fn snake_case(value: &str) -> String {
     let characters = value.chars().collect::<Vec<_>>();
     let mut output = String::new();
@@ -7063,15 +7051,12 @@ fn run_domain_check(
 
 fn run_domain_analyze(path: &Path) -> (Value, i32) {
     match read_domain_command_input(path) {
-        // Preserve #726's renderer-side fail-closed guard and its established
-        // diagnostics first. A successful raw-`DomainSpec` projection must
-        // then also clear the checked direct-lowering path before it can be
-        // returned (#796).
-        Ok((source, domain)) => match fsl_tools::analyze_domain(&domain) {
-            Ok(result) => match validate_domain_command_input(path, &source) {
-                Ok(()) => wrap_specialized(result),
-                Err(error) => error,
-            },
+        // #726's renderer-side fail-closed guard; #798 slice 1 made the
+        // specialized projection agree with direct lowering, so the former
+        // #796 post-validation against `load_kernel_model_from_source` is
+        // no longer required at this boundary.
+        Ok((_source, domain)) => match fsl_tools::analyze_domain(&domain) {
+            Ok(result) => wrap_specialized(result),
             Err(error) => (domain_projection_error_output(path, &error), 2),
         },
         Err(error) => (spec_load_error_output(&error), 2),
@@ -7079,7 +7064,7 @@ fn run_domain_analyze(path: &Path) -> (Value, i32) {
 }
 
 fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
-    let (input_source, domain) = match read_domain_command_input(path) {
+    let (_input_source, domain) = match read_domain_command_input(path) {
         Ok(input) => input,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -7087,9 +7072,6 @@ fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
         Ok(source) => source,
         Err(error) => return (domain_projection_error_output(path, &error), 2),
     };
-    if let Err(error) = validate_domain_command_input(path, &input_source) {
-        return error;
-    }
     if let Some(output_path) = output_path
         && let Err(error) = std::fs::write(output_path, &source)
     {
@@ -16955,9 +16937,9 @@ fn core_error_output(error: &fsl_core::CoreError) -> Value {
 
 /// Render a domain projection failure from the renderer path.
 ///
-/// #798 slice 1 rejects unknown symbols during rendering. Those diagnostics
-/// must match `check`'s file-qualified envelope (#796). Other renderer
-/// failures keep the historical `at line:column` message shape established by
+/// #798 rejects unknown symbols during rendering. Those diagnostics must match
+/// `check`'s file-qualified envelope. Other renderer failures keep the
+/// historical `at line:column` message shape established by
 /// `domain_origin_diagnostics`.
 fn domain_projection_error_output(path: &Path, error: &fsl_core::CoreError) -> Value {
     if error.message.starts_with("unknown domain symbol") {
@@ -17183,14 +17165,13 @@ spec InitTraceability {
         }
     }
 
-    /// Deterministic TOCTOU control for #796. The first read captures an
-    /// authored-invalid domain, then an atomic rename replaces the path with
-    /// a valid document. Validation must reject the captured snapshot even
-    /// though the path now contains a valid document. After #798 slice 1 the
-    /// specialized projections also fail closed on the same unknown symbols
-    /// as `check`, rather than rendering a false-green kernel.
+    /// Deterministic TOCTOU control for domain projection commands. The first
+    /// read captures an authored-invalid domain, then an atomic rename replaces
+    /// the path with a valid document. The specialized projections must reject
+    /// the captured in-memory `DomainSpec` even though the path now contains a
+    /// valid document.
     #[test]
-    fn domain_projection_validation_uses_the_original_source_snapshot() {
+    fn domain_projection_uses_the_original_source_snapshot() {
         let directory =
             std::env::temp_dir().join(format!("fslc-domain-snapshot-{}", std::process::id()));
         std::fs::create_dir_all(&directory).expect("create temporary fixture directory");
@@ -17218,10 +17199,7 @@ spec InitTraceability {
             fsl_tools::domain_kernel_source(&domain).is_err(),
             "the specialized expansion must reject the same unknown symbols as check"
         );
-        assert!(
-            validate_domain_command_input(&path, &source).is_err(),
-            "validation must use the initially-read invalid source, not its valid replacement"
-        );
+        let _ = source;
 
         std::fs::remove_dir_all(&directory).expect("remove temporary fixture directory");
     }
