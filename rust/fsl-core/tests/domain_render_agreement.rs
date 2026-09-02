@@ -228,7 +228,8 @@ struct KnownDivergence {
 /// **#798** <https://github.com/ymm-oss/fsl/issues/798> slice 1 closed the
 /// two pinned symptoms below by replacing `Context::normalize`'s
 /// `str::replace` pipeline with scope-aware AST composition (design option
-/// B). Slice 2 retires the legacy string path and #796 CLI suppression.
+/// B). Slice 2 retired the #796 CLI post-validation that had masked renderer
+/// divergence at the command boundary.
 ///
 /// Historical record of the resolved divergences (fixtures moved to
 /// [`VALID_DOMAIN_FIXTURES`] / [`SEMANTICALLY_INVALID_DOMAIN_FIXTURES`]):
