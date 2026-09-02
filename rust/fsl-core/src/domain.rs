@@ -3,9 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_syntax::{
-    DomainAggregate, DomainEffect, DomainEvolve, DomainField, DomainLoc, DomainSaga,
+    DomainAggregate, DomainDecide, DomainEffect, DomainEvolve, DomainField, DomainLoc, DomainSaga,
     DomainSagaStep, DomainSpec, DomainType, DomainTypeSourceForm, SourcePos, Span, SyntaxExpr,
-    SyntaxExprKind, SyntaxTypeExpr, SyntaxTypeExprKind,
+    SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxOperator, SyntaxTypeExpr, SyntaxTypeExprKind,
 };
 
 use crate::{
@@ -241,11 +241,112 @@ fn compact(expression: &str) -> String {
     expression.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+fn render_kernel_expression(expression: &SyntaxExpr) -> String {
+    match &expression.kind {
+        SyntaxExprKind::Binary { op, left, right } => format!(
+            "{} {} {}",
+            render_kernel_expression(left),
+            op.canonical,
+            render_kernel_expression(right)
+        ),
+        SyntaxExprKind::Not(value) => format!("not ({})", render_kernel_expression(value)),
+        SyntaxExprKind::Neg(value) => format!("-{}", render_kernel_expression(value)),
+        SyntaxExprKind::Group(value) => format!("({})", render_kernel_expression(value)),
+        SyntaxExprKind::Call { callee, args } => format!(
+            "{}({})",
+            callee.text,
+            args.iter()
+                .map(render_kernel_expression)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        SyntaxExprKind::Some(value) => format!("some({})", render_kernel_expression(value)),
+        SyntaxExprKind::Set(values) | SyntaxExprKind::Seq(values) => {
+            let name = if matches!(expression.kind, SyntaxExprKind::Set(_)) {
+                "Set"
+            } else {
+                "Seq"
+            };
+            format!(
+                "{name} {{ {} }}",
+                values
+                    .iter()
+                    .map(render_kernel_expression)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+        SyntaxExprKind::Struct { name, fields } => format!(
+            "{} {{ {} }}",
+            name.text,
+            fields
+                .iter()
+                .map(|(field, value)| format!(
+                    "{}: {}",
+                    field.text,
+                    render_kernel_expression(value)
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        SyntaxExprKind::Index { receiver, index } => format!(
+            "{}[{}]",
+            render_kernel_expression(receiver),
+            render_kernel_expression(index)
+        ),
+        SyntaxExprKind::Field { receiver, field } => {
+            format!("{}.{}", render_kernel_expression(receiver), field.text)
+        }
+        SyntaxExprKind::Method {
+            receiver,
+            method,
+            args,
+        } => format!(
+            "{}.{}({})",
+            render_kernel_expression(receiver),
+            method.text,
+            args.iter()
+                .map(render_kernel_expression)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        SyntaxExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => format!(
+            "if {} then {} else {}",
+            render_kernel_expression(condition),
+            render_kernel_expression(then_expr),
+            render_kernel_expression(else_expr)
+        ),
+        SyntaxExprKind::Membership { value, members } => format!(
+            "{} in [{}]",
+            render_kernel_expression(value),
+            members
+                .iter()
+                .map(render_kernel_expression)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        _ => expression.render_source(),
+    }
+}
+
+#[derive(Clone)]
+struct NormalizeSymbol {
+    kernel_name: String,
+    ty: String,
+}
+
+type NormalizeScope = BTreeMap<String, NormalizeSymbol>;
+
 #[derive(Clone)]
 struct Context<'a> {
     domain: &'a DomainSpec,
     types: Vec<DomainType>,
     enum_members: BTreeMap<(String, String), String>,
+    enum_candidates: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl<'a> Context<'a> {
@@ -291,22 +392,678 @@ impl<'a> Context<'a> {
                 });
             }
         }
-        let enum_members = types
-            .iter()
-            .filter(|ty| ty.kind == "enum")
-            .flat_map(|ty| {
-                ty.members.iter().map(|member| {
-                    (
-                        (ty.name.clone(), member.clone()),
-                        format!("{}_{}", ty.name, member),
-                    )
-                })
-            })
-            .collect();
+        let mut enum_members = BTreeMap::new();
+        let mut enum_candidates = BTreeMap::<String, BTreeSet<String>>::new();
+        for ty in types.iter().filter(|ty| ty.kind == "enum") {
+            for member in &ty.members {
+                enum_members.insert(
+                    (ty.name.clone(), member.clone()),
+                    format!("{}_{}", ty.name, member),
+                );
+                enum_candidates
+                    .entry(member.clone())
+                    .or_default()
+                    .insert(ty.name.clone());
+            }
+        }
         Self {
             domain,
             types,
             enum_members,
+            enum_candidates,
+        }
+    }
+
+    fn build_normalize_scope(
+        aggregate: Option<&DomainAggregate>,
+        local_fields: &[DomainField],
+    ) -> NormalizeScope {
+        let Some(aggregate) = aggregate else {
+            return NormalizeScope::new();
+        };
+        let mut scope = aggregate
+            .state
+            .iter()
+            .map(|field| {
+                (
+                    field.name.text.clone(),
+                    NormalizeSymbol {
+                        kernel_name: Self::state_name(aggregate, &field.name),
+                        ty: field.type_name.render_source(),
+                    },
+                )
+            })
+            .collect::<NormalizeScope>();
+        for field in local_fields {
+            scope.insert(
+                field.name.text.clone(),
+                NormalizeSymbol {
+                    kernel_name: field.name.text.clone(),
+                    ty: field.type_name.render_source(),
+                },
+            );
+        }
+        scope
+    }
+
+    fn resolve_render_name(
+        &self,
+        name: &str,
+        span: Span,
+        expected_type: Option<&str>,
+        scope: &NormalizeScope,
+        form: DefaultForm,
+    ) -> Result<String, CoreError> {
+        if let Some(symbol) = scope.get(name) {
+            return Ok(symbol.kernel_name.clone());
+        }
+        if let Some(expected) = expected_type
+            && let Some(definition) = self.ty(expected)
+            && definition.kind == "enum"
+            && definition.members.iter().any(|member| member == name)
+        {
+            return Ok(match form {
+                DefaultForm::Kernel => self.enum_value(expected, name),
+                DefaultForm::DomainSource => name.to_owned(),
+            });
+        }
+        let Some(candidates) = self.enum_candidates.get(name) else {
+            return Err(error_at(format!("unknown domain symbol '{name}'"), span));
+        };
+        if candidates.len() != 1 {
+            return Err(error_at(
+                format!(
+                    "ambiguous enum member '{name}'; expected one of {}",
+                    candidates.iter().cloned().collect::<Vec<_>>().join(", ")
+                ),
+                span,
+            ));
+        }
+        let ty = candidates.iter().next().expect("one enum candidate");
+        Ok(match form {
+            DefaultForm::Kernel => self.enum_value(ty, name),
+            DefaultForm::DomainSource => name.to_owned(),
+        })
+    }
+
+    fn fold_binary(op: &str, spelling: &str, mut parts: Vec<SyntaxExpr>, span: Span) -> SyntaxExpr {
+        let mut output = parts.pop().expect("non-empty fold");
+        while let Some(left) = parts.pop() {
+            output = SyntaxExpr {
+                kind: SyntaxExprKind::Binary {
+                    op: SyntaxOperator {
+                        canonical: op.to_owned(),
+                        spelling: spelling.to_owned(),
+                        span,
+                    },
+                    left: Box::new(left),
+                    right: Box::new(output),
+                },
+                span,
+            };
+        }
+        output
+    }
+
+    fn parenthesize(expression: SyntaxExpr) -> SyntaxExpr {
+        let span = expression.span;
+        SyntaxExpr {
+            kind: SyntaxExprKind::Group(Box::new(expression)),
+            span,
+        }
+    }
+
+    fn expand_can(
+        &self,
+        decide: &DomainDecide,
+        aggregate: &DomainAggregate,
+        scope: &NormalizeScope,
+        expanding_can: &mut Vec<String>,
+    ) -> Result<SyntaxExpr, CoreError> {
+        if expanding_can.contains(&decide.command) {
+            return Err(error_at(
+                format!("recursive can({}) expansion", decide.command),
+                decide.loc.span(),
+            ));
+        }
+        expanding_can.push(decide.command.clone());
+        let mut pieces = decide
+            .requires
+            .iter()
+            .map(|requirement| {
+                self.normalize_expr(
+                    requirement,
+                    Some(aggregate),
+                    scope,
+                    None,
+                    DefaultForm::Kernel,
+                    expanding_can,
+                )
+                .map(Self::parenthesize)
+            })
+            .collect::<Result<Vec<_>, CoreError>>()?;
+        pieces.extend(
+            decide
+                .rejects
+                .iter()
+                .map(|reject| {
+                    self.normalize_expr(
+                        &reject.condition,
+                        Some(aggregate),
+                        scope,
+                        None,
+                        DefaultForm::Kernel,
+                        expanding_can,
+                    )
+                    .map(|condition| {
+                        Self::parenthesize(SyntaxExpr {
+                            kind: SyntaxExprKind::Not(Box::new(condition)),
+                            span: reject.condition.span,
+                        })
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        expanding_can.pop();
+        Ok(if pieces.is_empty() {
+            SyntaxExpr {
+                kind: SyntaxExprKind::Bool(true),
+                span: decide.loc.span(),
+            }
+        } else {
+            Self::parenthesize(Self::fold_binary("and", "and", pieces, decide.loc.span()))
+        })
+    }
+
+    #[allow(clippy::only_used_in_recursion)]
+    fn collect_pattern_bindings(
+        expression: &SyntaxExpr,
+        source_scope: &NormalizeScope,
+        target_scope: &mut NormalizeScope,
+    ) -> Result<(), CoreError> {
+        match &expression.kind {
+            SyntaxExprKind::Group(value) => {
+                Self::collect_pattern_bindings(value, source_scope, target_scope)
+            }
+            SyntaxExprKind::Binary { op, left, right }
+                if matches!(op.canonical.as_str(), "and") =>
+            {
+                Self::collect_pattern_bindings(left, source_scope, target_scope)?;
+                let after_left = target_scope.clone();
+                Self::collect_pattern_bindings(right, &after_left, target_scope)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn expected_type_for_expr(expression: &SyntaxExpr, scope: &NormalizeScope) -> Option<String> {
+        match &expression.kind {
+            SyntaxExprKind::Name(name) => scope.get(&name.text).map(|symbol| symbol.ty.clone()),
+            SyntaxExprKind::Group(value) => Self::expected_type_for_expr(value, scope),
+            _ => None,
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn normalize_expr(
+        &self,
+        expression: &SyntaxExpr,
+        aggregate: Option<&DomainAggregate>,
+        scope: &NormalizeScope,
+        expected_type: Option<&str>,
+        form: DefaultForm,
+        expanding_can: &mut Vec<String>,
+    ) -> Result<SyntaxExpr, CoreError> {
+        let span = expression.span;
+        match &expression.kind {
+            SyntaxExprKind::Num(_) | SyntaxExprKind::Bool(_) | SyntaxExprKind::None => {
+                Ok(expression.clone())
+            }
+            SyntaxExprKind::Name(name) => {
+                let text =
+                    self.resolve_render_name(&name.text, name.span, expected_type, scope, form)?;
+                Ok(SyntaxExpr {
+                    kind: SyntaxExprKind::Name(SyntaxIdent {
+                        text,
+                        span: name.span,
+                    }),
+                    span,
+                })
+            }
+            SyntaxExprKind::Call { callee, args }
+                if callee.text == "can" && matches!(args.as_slice(), [SyntaxExpr { .. }]) =>
+            {
+                let [argument] = args.as_slice() else {
+                    unreachable!()
+                };
+                let SyntaxExprKind::Name(command) = &argument.kind else {
+                    return Err(error_at("can() expects a command name", argument.span));
+                };
+                let Some(aggregate) = aggregate else {
+                    return Err(error_at(
+                        "can() is only valid in an aggregate expression",
+                        span,
+                    ));
+                };
+                let Some(decide) = aggregate
+                    .decides
+                    .iter()
+                    .find(|decide| decide.command == command.text)
+                else {
+                    let elsewhere = self.domain.aggregates.iter().any(|candidate| {
+                        candidate.name != aggregate.name
+                            && candidate
+                                .commands
+                                .iter()
+                                .any(|item| item.name == command.text)
+                    });
+                    let detail = if elsewhere {
+                        " belongs to another aggregate"
+                    } else {
+                        " is unknown"
+                    };
+                    return Err(error_at(
+                        format!("command '{}'{}", command.text, detail),
+                        argument.span,
+                    ));
+                };
+                self.expand_can(decide, aggregate, scope, expanding_can)
+            }
+            SyntaxExprKind::Call { callee, .. } if callee.text == "can" => Err(error_at(
+                "can() expects exactly one command name",
+                expression.span,
+            )),
+            SyntaxExprKind::Call { callee, args } => {
+                let args = args
+                    .iter()
+                    .map(|arg| {
+                        self.normalize_expr(
+                            arg,
+                            aggregate,
+                            scope,
+                            None,
+                            DefaultForm::Kernel,
+                            expanding_can,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, CoreError>>()?;
+                Ok(SyntaxExpr {
+                    kind: SyntaxExprKind::Call {
+                        callee: callee.clone(),
+                        args,
+                    },
+                    span,
+                })
+            }
+            SyntaxExprKind::Membership { value, members } => {
+                let expected = Self::expected_type_for_expr(value, scope);
+                let value = self.normalize_expr(
+                    value,
+                    aggregate,
+                    scope,
+                    None,
+                    DefaultForm::Kernel,
+                    expanding_can,
+                )?;
+                let comparisons = members
+                    .iter()
+                    .map(|member| {
+                        let member_span = member.span;
+                        let member = self.normalize_expr(
+                            member,
+                            aggregate,
+                            scope,
+                            expected.as_deref(),
+                            DefaultForm::Kernel,
+                            expanding_can,
+                        )?;
+                        Ok(Self::parenthesize(SyntaxExpr {
+                            kind: SyntaxExprKind::Binary {
+                                op: SyntaxOperator {
+                                    canonical: "==".to_owned(),
+                                    spelling: "==".to_owned(),
+                                    span: member_span,
+                                },
+                                left: Box::new(value.clone()),
+                                right: Box::new(member),
+                            },
+                            span: member_span,
+                        }))
+                    })
+                    .collect::<Result<Vec<_>, CoreError>>()?;
+                Ok(Self::fold_binary("or", "or", comparisons, span))
+            }
+            SyntaxExprKind::Binary { op, left, right } => {
+                let right_expected = match op.canonical.as_str() {
+                    "==" | "!=" => Self::expected_type_for_expr(left, scope),
+                    _ => None,
+                };
+                let left_value =
+                    self.normalize_expr(left, aggregate, scope, expected_type, form, expanding_can);
+                let (left_norm, right_norm) = match left_value {
+                    Ok(left_norm) => {
+                        let mut right_scope = scope.clone();
+                        if matches!(op.canonical.as_str(), "and" | "=>") {
+                            Self::collect_pattern_bindings(left, scope, &mut right_scope)?;
+                        }
+                        let right_norm = self.normalize_expr(
+                            right,
+                            aggregate,
+                            &right_scope,
+                            right_expected.as_deref().or(expected_type),
+                            form,
+                            expanding_can,
+                        )?;
+                        (left_norm, right_norm)
+                    }
+                    Err(left_error) => {
+                        let Ok(right_norm) = self.normalize_expr(
+                            right,
+                            aggregate,
+                            scope,
+                            expected_type,
+                            form,
+                            expanding_can,
+                        ) else {
+                            return Err(left_error);
+                        };
+                        let left_norm = self
+                            .normalize_expr(
+                                left,
+                                aggregate,
+                                scope,
+                                Self::expected_type_for_expr(right, scope)
+                                    .as_deref()
+                                    .or(expected_type),
+                                form,
+                                expanding_can,
+                            )
+                            .map_err(|_| left_error)?;
+                        (left_norm, right_norm)
+                    }
+                };
+                Ok(SyntaxExpr {
+                    kind: SyntaxExprKind::Binary {
+                        op: op.clone(),
+                        left: Box::new(left_norm),
+                        right: Box::new(right_norm),
+                    },
+                    span,
+                })
+            }
+            SyntaxExprKind::Neg(value) => Ok(SyntaxExpr {
+                kind: SyntaxExprKind::Neg(Box::new(self.normalize_expr(
+                    value,
+                    aggregate,
+                    scope,
+                    None,
+                    DefaultForm::Kernel,
+                    expanding_can,
+                )?)),
+                span,
+            }),
+            SyntaxExprKind::Not(value) => Ok(SyntaxExpr {
+                kind: SyntaxExprKind::Not(Box::new(self.normalize_expr(
+                    value,
+                    aggregate,
+                    scope,
+                    None,
+                    DefaultForm::Kernel,
+                    expanding_can,
+                )?)),
+                span,
+            }),
+            SyntaxExprKind::Group(value) => Ok(SyntaxExpr {
+                kind: SyntaxExprKind::Group(Box::new(self.normalize_expr(
+                    value,
+                    aggregate,
+                    scope,
+                    expected_type,
+                    form,
+                    expanding_can,
+                )?)),
+                span,
+            }),
+            SyntaxExprKind::Some(value) => Ok(SyntaxExpr {
+                kind: SyntaxExprKind::Some(Box::new(self.normalize_expr(
+                    value,
+                    aggregate,
+                    scope,
+                    None,
+                    DefaultForm::Kernel,
+                    expanding_can,
+                )?)),
+                span,
+            }),
+            SyntaxExprKind::Set(values) | SyntaxExprKind::Seq(values) => {
+                let values = values
+                    .iter()
+                    .map(|value| {
+                        self.normalize_expr(
+                            value,
+                            aggregate,
+                            scope,
+                            None,
+                            DefaultForm::Kernel,
+                            expanding_can,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, CoreError>>()?;
+                Ok(SyntaxExpr {
+                    kind: if matches!(expression.kind, SyntaxExprKind::Set(_)) {
+                        SyntaxExprKind::Set(values)
+                    } else {
+                        SyntaxExprKind::Seq(values)
+                    },
+                    span,
+                })
+            }
+            SyntaxExprKind::Struct { name, fields } => {
+                let fields = fields
+                    .iter()
+                    .map(|(field, value)| {
+                        let field_type = self
+                            .ty(&name.text)
+                            .and_then(|definition| {
+                                definition
+                                    .fields
+                                    .iter()
+                                    .find(|candidate| candidate.name.text == field.text)
+                            })
+                            .map(|field_definition| field_definition.type_name.render_source());
+                        Ok((
+                            field.clone(),
+                            self.normalize_expr(
+                                value,
+                                aggregate,
+                                scope,
+                                field_type.as_deref(),
+                                form,
+                                expanding_can,
+                            )?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, CoreError>>()?;
+                Ok(SyntaxExpr {
+                    kind: SyntaxExprKind::Struct {
+                        name: name.clone(),
+                        fields,
+                    },
+                    span,
+                })
+            }
+            SyntaxExprKind::Index { receiver, index } => Ok(SyntaxExpr {
+                kind: SyntaxExprKind::Index {
+                    receiver: Box::new(self.normalize_expr(
+                        receiver,
+                        aggregate,
+                        scope,
+                        None,
+                        DefaultForm::Kernel,
+                        expanding_can,
+                    )?),
+                    index: Box::new(self.normalize_expr(
+                        index,
+                        aggregate,
+                        scope,
+                        None,
+                        DefaultForm::Kernel,
+                        expanding_can,
+                    )?),
+                },
+                span,
+            }),
+            SyntaxExprKind::Field { receiver, field } => Ok(SyntaxExpr {
+                kind: SyntaxExprKind::Field {
+                    receiver: Box::new(self.normalize_expr(
+                        receiver,
+                        aggregate,
+                        scope,
+                        None,
+                        DefaultForm::Kernel,
+                        expanding_can,
+                    )?),
+                    field: field.clone(),
+                },
+                span,
+            }),
+            SyntaxExprKind::Method {
+                receiver,
+                method,
+                args,
+            } => {
+                let args = args
+                    .iter()
+                    .map(|arg| {
+                        self.normalize_expr(
+                            arg,
+                            aggregate,
+                            scope,
+                            None,
+                            DefaultForm::Kernel,
+                            expanding_can,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, CoreError>>()?;
+                Ok(SyntaxExpr {
+                    kind: SyntaxExprKind::Method {
+                        receiver: Box::new(self.normalize_expr(
+                            receiver,
+                            aggregate,
+                            scope,
+                            None,
+                            DefaultForm::Kernel,
+                            expanding_can,
+                        )?),
+                        method: method.clone(),
+                        args,
+                    },
+                    span,
+                })
+            }
+            SyntaxExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => Ok(SyntaxExpr {
+                kind: SyntaxExprKind::Conditional {
+                    condition: Box::new(self.normalize_expr(
+                        condition,
+                        aggregate,
+                        scope,
+                        None,
+                        DefaultForm::Kernel,
+                        expanding_can,
+                    )?),
+                    then_expr: Box::new(self.normalize_expr(
+                        then_expr,
+                        aggregate,
+                        scope,
+                        None,
+                        DefaultForm::Kernel,
+                        expanding_can,
+                    )?),
+                    else_expr: Box::new(self.normalize_expr(
+                        else_expr,
+                        aggregate,
+                        scope,
+                        None,
+                        DefaultForm::Kernel,
+                        expanding_can,
+                    )?),
+                },
+                span,
+            }),
+            SyntaxExprKind::Is { .. }
+            | SyntaxExprKind::Quantified { .. }
+            | SyntaxExprKind::Aggregate { .. } => {
+                Err(error_at("unsupported domain expression construct", span))
+            }
+        }
+    }
+
+    fn normalize_lvalue(
+        &self,
+        target: &SyntaxLValue,
+        aggregate: &DomainAggregate,
+        scope: &NormalizeScope,
+        expanding_can: &mut Vec<String>,
+    ) -> Result<(String, String), CoreError> {
+        match target {
+            SyntaxLValue::Name(name) => {
+                let Some(field) = aggregate
+                    .state
+                    .iter()
+                    .find(|field| field.name.text == name.text)
+                else {
+                    return Err(error_at(
+                        format!("unknown domain lvalue '{}'", name.text),
+                        name.span,
+                    ));
+                };
+                Ok((
+                    Self::state_name(aggregate, &field.name),
+                    field.type_name.render_source(),
+                ))
+            }
+            SyntaxLValue::Index {
+                base,
+                index,
+                span: _,
+            } => {
+                let (base, base_type) =
+                    self.normalize_lvalue(base, aggregate, scope, expanding_can)?;
+                let index = self.normalize_expr(
+                    index,
+                    Some(aggregate),
+                    scope,
+                    None,
+                    DefaultForm::Kernel,
+                    expanding_can,
+                )?;
+                Ok((format!("{base}[{}]", index.render_source()), base_type))
+            }
+            SyntaxLValue::Field { base, field, span } => {
+                let (base, base_type) =
+                    self.normalize_lvalue(base, aggregate, scope, expanding_can)?;
+                let Some(type_name) = self.ty(&base_type) else {
+                    return Err(error_at("field lvalue requires a value object", *span));
+                };
+                let Some(field_definition) = type_name
+                    .fields
+                    .iter()
+                    .find(|candidate| candidate.name.text == field.text)
+                else {
+                    return Err(error_at(
+                        format!("unknown field '{}.{}'", type_name.name, field.text),
+                        field.span,
+                    ));
+                };
+                Ok((
+                    format!("{base}.{}", field.text),
+                    field_definition.type_name.render_source(),
+                ))
+            }
         }
     }
 
@@ -379,13 +1136,18 @@ impl<'a> Context<'a> {
     }
 
     fn correlation_type(&self, effect: &DomainEffect) -> Option<String> {
+        self.correlation_type_expr(effect)
+            .map(|type_name| type_name.render_source())
+    }
+
+    fn correlation_type_expr(&self, effect: &DomainEffect) -> Option<SyntaxTypeExpr> {
         let field = Self::correlation_field(effect)?;
         let (_, event) = self.event(Self::request_event(effect)?)?;
         event
             .fields
             .iter()
             .find(|candidate| candidate.name.as_str() == field)
-            .map(|candidate| candidate.type_name.render_source())
+            .map(|candidate| candidate.type_name.clone())
     }
 
     /// The field-level default: an explicit `= expr` wins; otherwise falls
@@ -400,14 +1162,8 @@ impl<'a> Context<'a> {
         form: DefaultForm,
     ) -> Result<String, CoreError> {
         if let Some(value) = &field.default {
-            return Ok(self.normalize(
-                &value.render_source(),
-                None,
-                type_env,
-                Some(&field.type_name),
-                true,
-                form,
-            ));
+            let type_name = field.type_name.render_source();
+            return self.normalize(value, None, &[], Some(type_name.as_str()), form);
         }
         self.default_for_type(&field.type_name, field.span, type_env, form)
     }
@@ -511,133 +1267,38 @@ impl<'a> Context<'a> {
         }
     }
 
-    /// `form` governs only the `target_type`-driven bare-enum-member
-    /// mangling below: every kernel-text call site (guards, invariants,
-    /// evolve assignments) always passes [`DefaultForm::Kernel`], since
-    /// those render directly into `domain_kernel_source`'s output; only
-    /// [`Self::default`]'s explicit-default branch threads its caller's
-    /// `form` through, so a `value_object` field's own explicit enum
-    /// default (e.g. `status: OrderStatus = Draft;`) renders bare when the
-    /// whole struct literal is being computed in domain-source form (issue
-    /// #731 review, M1 follow-up: this is the second of two enum-mangling
-    /// sites -- [`Self::default_for_type`]'s own enum arm is the first --
-    /// that must both honor `form` for a nested `value_object` field's
-    /// explicit default to stay unmangled).
-    #[allow(clippy::too_many_lines)]
+    /// Scope-aware AST normalization for domain expressions rendered into
+    /// kernel text. Replaces the former string-substitution pipeline
+    /// (#798 slice 1 / design option B).
     fn normalize(
         &self,
-        expression: &str,
+        expression: &SyntaxExpr,
         aggregate: Option<&DomainAggregate>,
-        type_env: &BTreeMap<String, String>,
+        local_fields: &[DomainField],
         target_type: Option<&str>,
-        replace_state: bool,
         form: DefaultForm,
-    ) -> String {
-        let mut output = compact(expression)
-            .replace("&&", " and ")
-            .replace("||", " or ")
-            .replace("->", "=>");
-        if let Some(aggregate) = aggregate {
-            for decide in &aggregate.decides {
-                let pattern = format!("can({})", decide.command);
-                if output.contains(&pattern) {
-                    let mut pieces = decide
-                        .requires
-                        .iter()
-                        .map(SyntaxExpr::render_source)
-                        .collect::<Vec<_>>();
-                    pieces.extend(
-                        decide
-                            .rejects
-                            .iter()
-                            .map(|reject| format!("not ({})", reject.condition)),
-                    );
-                    let replacement = if pieces.is_empty() {
-                        "true".to_owned()
-                    } else {
-                        format!(
-                            "({})",
-                            pieces
-                                .iter()
-                                .map(|piece| format!(
-                                    "({})",
-                                    self.normalize(
-                                        piece,
-                                        Some(aggregate),
-                                        type_env,
-                                        None,
-                                        false,
-                                        DefaultForm::Kernel,
-                                    )
-                                ))
-                                .collect::<Vec<_>>()
-                                .join(" and ")
-                        )
-                    };
-                    output = output.replace(&pattern, &replacement);
-                }
-            }
-        }
-        for (variable, ty) in type_env {
-            if self.ty(ty).is_some_and(|ty| ty.kind == "enum")
-                && let Some(definition) = self.ty(ty)
-            {
-                for member in &definition.members {
-                    let value = self.enum_value(ty, member);
-                    output = output.replace(
-                        &format!("{variable} == {member}"),
-                        &format!("{variable} == {value}"),
-                    );
-                    output = output.replace(
-                        &format!("{variable} != {member}"),
-                        &format!("{variable} != {value}"),
-                    );
-                }
-            }
-            let marker = format!("{variable} in [");
-            while let Some(start) = output.find(&marker) {
-                let values_start = start + marker.len();
-                let Some(relative_end) = output[values_start..].find(']') else {
-                    break;
-                };
-                let end = values_start + relative_end;
-                let values = output[values_start..end]
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(|value| {
-                        let value = if self.ty(ty).is_some_and(|ty| ty.kind == "enum") {
-                            self.enum_value(ty, value)
-                        } else {
-                            value.to_owned()
-                        };
-                        format!("{variable} == {value}")
-                    })
-                    .collect::<Vec<_>>();
-                output.replace_range(start..=end, &format!("({})", values.join(" or ")));
-            }
-        }
+    ) -> Result<String, CoreError> {
+        let scope = Self::build_normalize_scope(aggregate, local_fields);
+        let mut expanding_can = Vec::new();
+        let normalized = self.normalize_expr(
+            expression,
+            aggregate,
+            &scope,
+            target_type,
+            form,
+            &mut expanding_can,
+        )?;
         if form == DefaultForm::Kernel
             && let Some(target) = target_type
             && self.ty(target).is_some_and(|ty| ty.kind == "enum")
-            && output
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric() || character == '_')
+            && matches!(normalized.kind, SyntaxExprKind::Name(_))
         {
-            output = self.enum_value(target, &output);
+            let SyntaxExprKind::Name(name) = normalized.kind else {
+                unreachable!()
+            };
+            return Ok(self.enum_value(target, &name.text));
         }
-        if replace_state && let Some(aggregate) = aggregate {
-            let mut fields = aggregate.state.iter().collect::<Vec<_>>();
-            fields.sort_by_key(|field| std::cmp::Reverse(field.name.len()));
-            for field in fields {
-                output = replace_identifier(
-                    &output,
-                    &field.name,
-                    &Self::state_name(aggregate, &field.name),
-                );
-            }
-        }
-        compact(&output)
+        Ok(compact(&render_kernel_expression(&normalized)))
     }
 }
 
@@ -669,73 +1330,69 @@ fn evolve_assignments(
     context: &Context<'_>,
     aggregate: &DomainAggregate,
     evolve: Option<&DomainEvolve>,
-    type_env: &BTreeMap<String, String>,
-) -> Vec<String> {
+    local_fields: &[DomainField],
+) -> Result<Vec<String>, CoreError> {
     let Some(evolve) = evolve else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    let state = aggregate
-        .state
-        .iter()
-        .map(|field| (field.name.as_str(), field.type_name.as_str()))
-        .collect::<BTreeMap<_, _>>();
+    let scope = Context::build_normalize_scope(Some(aggregate), local_fields);
+    let mut expanding_can = Vec::new();
     let mut output = evolve
         .requires
         .iter()
         .map(|requirement| {
-            format!(
+            Ok(format!(
                 "requires {}",
-                context.normalize(
-                    &requirement.render_source(),
+                compact(&render_kernel_expression(&context.normalize_expr(
+                    requirement,
                     Some(aggregate),
-                    type_env,
+                    &scope,
                     None,
-                    true,
                     DefaultForm::Kernel,
-                )
-            )
+                    &mut expanding_can,
+                )?,))
+            ))
         })
-        .collect::<Vec<_>>();
-    output.extend(evolve.assignments.iter().map(|assignment| {
-        let rendered_target = assignment.target.render_source();
-        let root = rendered_target
-            .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
-            .next()
-            .unwrap_or_default();
-        let target = replace_identifier(
-            &rendered_target,
-            root,
-            &Context::state_name(aggregate, root),
-        );
-        let expression = context.normalize(
-            &assignment.value.render_source(),
-            Some(aggregate),
-            type_env,
-            state.get(root).copied(),
-            true,
-            DefaultForm::Kernel,
-        );
-        format!("{target} = {expression}")
-    }));
-    output
+        .collect::<Result<Vec<_>, CoreError>>()?;
+    output.extend(
+        evolve
+            .assignments
+            .iter()
+            .map(|assignment| {
+                let (target, expected_type) = context.normalize_lvalue(
+                    &assignment.target,
+                    aggregate,
+                    &scope,
+                    &mut expanding_can,
+                )?;
+                let expression = compact(&render_kernel_expression(&context.normalize_expr(
+                    &assignment.value,
+                    Some(aggregate),
+                    &scope,
+                    Some(expected_type.as_str()),
+                    DefaultForm::Kernel,
+                    &mut expanding_can,
+                )?));
+                Ok(format!("{target} = {expression}"))
+            })
+            .collect::<Result<Vec<_>, CoreError>>()?,
+    );
+    Ok(output)
 }
 
 /// Render the declared `evolve` for each event a saga step/timeout/compensation
 /// action emits, pairing with `event_assignments`: an action that raises
 /// `event_<E>` for an occurring event must apply E's declared evolve in the
 /// same action (docs/DESIGN-domain.md's saga step pairing invariant).
-fn saga_emit_evolve_lines(context: &Context<'_>, events: &[String]) -> Vec<String> {
+fn saga_emit_evolve_lines(
+    context: &Context<'_>,
+    events: &[String],
+) -> Result<Vec<String>, CoreError> {
     let mut lines = Vec::new();
     for event_name in events {
         let Some((aggregate, event)) = context.event(event_name) else {
             continue;
         };
-        let environment = aggregate
-            .state
-            .iter()
-            .chain(&event.fields)
-            .map(|field| (field.name.text.clone(), field.type_name.render_source()))
-            .collect();
         lines.extend(
             evolve_assignments(
                 context,
@@ -744,21 +1401,25 @@ fn saga_emit_evolve_lines(context: &Context<'_>, events: &[String]) -> Vec<Strin
                     .evolves
                     .iter()
                     .find(|item| item.event == *event_name),
-                &environment,
-            )
+                &event.fields,
+            )?
             .into_iter()
             .map(|line| format!("  {line}")),
         );
     }
-    lines
+    Ok(lines)
 }
 
-fn render_effect_actions(context: &Context<'_>, effect: &DomainEffect) -> Vec<String> {
+#[allow(clippy::too_many_lines)]
+fn render_effect_actions(
+    context: &Context<'_>,
+    effect: &DomainEffect,
+) -> Result<Vec<String>, CoreError> {
     let Some(correlation) = Context::correlation_field(effect) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let Some(correlation_type) = context.correlation_type(effect) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let mut lines = Vec::new();
     let status = Context::status_var(effect);
@@ -798,13 +1459,26 @@ fn render_effect_actions(context: &Context<'_>, effect: &DomainEffect) -> Vec<St
             "  {status}[{correlation}] = {}",
             Context::status_member(effect, effect_outcome_member(effect, event_name))
         ));
-        let mut environment = aggregate
-            .state
-            .iter()
-            .chain(&event.fields)
-            .map(|field| (field.name.text.clone(), field.type_name.render_source()))
-            .collect::<BTreeMap<_, _>>();
-        environment.insert(correlation.clone(), correlation_type.clone());
+        let mut local_fields = event.fields.clone();
+        if let Some(correlation_type) = context.correlation_type_expr(effect)
+            && !local_fields
+                .iter()
+                .any(|field| field.name.text == correlation)
+        {
+            local_fields.insert(
+                0,
+                DomainField {
+                    name: SyntaxIdent {
+                        text: correlation.clone(),
+                        span: event.loc.span(),
+                    },
+                    type_name: correlation_type,
+                    default: None,
+                    span: event.loc.span(),
+                    loc: event.loc,
+                },
+            );
+        }
         lines.extend(
             evolve_assignments(
                 context,
@@ -813,8 +1487,8 @@ fn render_effect_actions(context: &Context<'_>, effect: &DomainEffect) -> Vec<St
                     .evolves
                     .iter()
                     .find(|evolve| evolve.event == *event_name),
-                &environment,
-            )
+                &local_fields,
+            )?
             .into_iter()
             .map(|line| format!("  {line}")),
         );
@@ -845,7 +1519,7 @@ fn render_effect_actions(context: &Context<'_>, effect: &DomainEffect) -> Vec<St
         ));
         lines.push("}".to_owned());
     }
-    lines
+    Ok(lines)
 }
 
 fn saga_condition(context: &Context<'_>, expression: &SyntaxExpr) -> String {
@@ -899,7 +1573,7 @@ fn saga_guards(
 }
 
 #[allow(clippy::too_many_lines)]
-fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> {
+fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Result<Vec<String>, CoreError> {
     let mut lines = Vec::new();
     let mut observed = BTreeSet::new();
     for step in &saga.steps {
@@ -932,12 +1606,6 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
                 .into_iter()
                 .map(|line| format!("  {line}")),
         );
-        let environment = aggregate
-            .state
-            .iter()
-            .chain(&event.fields)
-            .map(|field| (field.name.text.clone(), field.type_name.render_source()))
-            .collect();
         lines.extend(
             evolve_assignments(
                 context,
@@ -946,8 +1614,8 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
                     .evolves
                     .iter()
                     .find(|item| item.event == event_name),
-                &environment,
-            )
+                &event.fields,
+            )?
             .into_iter()
             .map(|line| format!("  {line}")),
         );
@@ -963,7 +1631,7 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
                 .into_iter()
                 .map(|line| format!("  {line}")),
         );
-        lines.extend(saga_emit_evolve_lines(context, &step.emits));
+        lines.extend(saga_emit_evolve_lines(context, &step.emits)?);
         lines.push("}".to_owned());
         if let Some(timeout) = &step.timeout_event {
             lines.push(format!("action {action}_timeout() {{"));
@@ -976,7 +1644,7 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
             lines.extend(saga_emit_evolve_lines(
                 context,
                 std::slice::from_ref(timeout),
-            ));
+            )?);
             lines.push("}".to_owned());
         }
     }
@@ -1000,10 +1668,10 @@ fn render_saga_actions(context: &Context<'_>, saga: &DomainSaga) -> Vec<String> 
                 .into_iter()
                 .map(|line| format!("  {line}")),
         );
-        lines.extend(saga_emit_evolve_lines(context, &compensation.emits));
+        lines.extend(saga_emit_evolve_lines(context, &compensation.emits)?);
         lines.push("}".to_owned());
     }
-    lines
+    Ok(lines)
 }
 
 /// Render the full executable kernel source for a Functional-DDD document.
@@ -1201,42 +1869,40 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
                 lower_name(&aggregate.name),
                 lower_name(&command.name)
             ));
-            let environment = aggregate
-                .state
+            let command_locals = &command.inputs;
+            let command_scope: BTreeSet<_> = command
+                .inputs
                 .iter()
-                .chain(&command.inputs)
-                .map(|field| (field.name.text.clone(), field.type_name.render_source()))
-                .collect::<BTreeMap<_, _>>();
+                .map(|field| field.name.text.as_str())
+                .collect();
             for requirement in &decide.requires {
                 lines.push(format!(
                     "    requires {}",
                     context.normalize(
-                        &requirement.render_source(),
+                        requirement,
                         Some(aggregate),
-                        &environment,
+                        command_locals,
                         None,
-                        true,
                         DefaultForm::Kernel,
-                    )
+                    )?
                 ));
             }
             for reject in &decide.rejects {
                 lines.push(format!(
                     "    requires not ({})",
                     context.normalize(
-                        &reject.condition.render_source(),
+                        &reject.condition,
                         Some(aggregate),
-                        &environment,
+                        command_locals,
                         None,
-                        true,
                         DefaultForm::Kernel,
-                    )
+                    )?
                 ));
             }
             for event in &decide.emits {
                 for effect in effects_by_request.get(event.as_str()).into_iter().flatten() {
                     if let Some(correlation) = Context::correlation_field(effect)
-                        && environment.contains_key(&correlation)
+                        && command_scope.contains(correlation.as_str())
                     {
                         let status = Context::status_var(effect);
                         lines.push(format!(
@@ -1256,19 +1922,24 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
                     .map(|line| format!("    {line}")),
             );
             for event in &decide.emits {
+                let event_locals = aggregate
+                    .events
+                    .iter()
+                    .find(|candidate| candidate.name == *event)
+                    .map_or_else(Vec::new, |candidate| candidate.fields.clone());
                 lines.extend(
                     evolve_assignments(
                         &context,
                         aggregate,
                         aggregate.evolves.iter().find(|item| item.event == *event),
-                        &environment,
-                    )
+                        &event_locals,
+                    )?
                     .into_iter()
                     .map(|line| format!("    {line}")),
                 );
                 for effect in effects_by_request.get(event.as_str()).into_iter().flatten() {
                     if let Some(correlation) = Context::correlation_field(effect)
-                        && environment.contains_key(&correlation)
+                        && command_scope.contains(correlation.as_str())
                     {
                         lines.push(format!(
                             "    {}[{correlation}] = {}",
@@ -1287,24 +1958,19 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
     }
     for effect in &domain.effects {
         lines.extend(
-            render_effect_actions(&context, effect)
+            render_effect_actions(&context, effect)?
                 .into_iter()
                 .map(|line| format!("  {line}")),
         );
     }
     for saga in &domain.sagas {
         lines.extend(
-            render_saga_actions(&context, saga)
+            render_saga_actions(&context, saga)?
                 .into_iter()
                 .map(|line| format!("  {line}")),
         );
     }
     for aggregate in &domain.aggregates {
-        let environment = aggregate
-            .state
-            .iter()
-            .map(|field| (field.name.text.clone(), field.type_name.render_source()))
-            .collect();
         for invariant in &aggregate.invariants {
             lines.push(format!(
                 "  invariant {}_{} \"DOMAIN-INVARIANT: {}.{}\" {{ {} }}",
@@ -1313,13 +1979,12 @@ pub fn domain_kernel_source(domain: &DomainSpec) -> Result<String, CoreError> {
                 aggregate.name,
                 invariant.name,
                 context.normalize(
-                    &invariant.expr.render_source(),
+                    &invariant.expr,
                     Some(aggregate),
-                    &environment,
+                    &[],
                     None,
-                    true,
                     DefaultForm::Kernel,
-                )
+                )?
             ));
         }
     }

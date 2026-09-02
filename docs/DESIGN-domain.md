@@ -525,18 +525,15 @@ generic/adapter test generation, and edition post-processing respectively (#808)
 `rust/fsl-core/tests/domain_render_agreement.rs` projects both through
 `public_kernel_contract` for the full domain corpus and requires them to match
 except on source spans (#664). Building that gate found the two
-implementations already disagree: `Context::normalize`/`Context::default`
-(`domain.rs`) render text with `str::replace` and no syntax tree, so they
-cannot be scope-aware the way `lower_domain`'s typed AST composition is. #690
-fixed the known `can(...)` precedence false green by parenthesizing each joined
-piece. #798 tracks the remaining scope-aware substitution and generated-name
-renderer gaps. #796 validates the CLI source before returning its renderer
-output, so the #798 generated-name misuse is rejected at the command boundary
-rather than being emitted as a seemingly valid Kernel; it does not make the
-two lowerings agree.
-`domain_render_agreement.rs`'s `KNOWN_DIVERGENT_DOMAIN_FIXTURES` pins the
-currently known instances as regression fixtures; #798 owns the remaining
-`Context::normalize` scope and generated-name gaps. #691 (a separate root cause --
+implementations already disagree: `Context::default` (`domain.rs`) still has
+legacy surface paths, while `Context::normalize` now composes scope-aware AST
+for kernel rendering (#798 slice 1 / design option B). #690 fixed the known
+`can(...)` precedence false green by parenthesizing each joined piece. #798
+slice 2 will retire the remaining legacy string path and #796 CLI suppression.
+#796 validates the CLI source before returning its renderer output; slice 1
+makes the renderer agree with `lower_domain` for the formerly pinned fixtures.
+`domain_render_agreement.rs`'s `KNOWN_DIVERGENT_DOMAIN_FIXTURES` is empty after
+slice 1. #691 (a separate root cause --
 `Context::default` had a catch-all arm reachable for every container type,
 not `Context::normalize`'s substitution-order problem) is fixed:
 `Context::default`/`Context::default_for_type` are now total over the
