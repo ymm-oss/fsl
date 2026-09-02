@@ -588,10 +588,16 @@ fn published_schema_ids_match_the_rust_api_constants() {
             .expect("read replay trace schema"),
     )
     .expect("replay trace schema JSON");
+    let reproducer: Value = serde_json::from_str(
+        &std::fs::read_to_string(workspace.join("schemas/fslc/kernel/reproducer.v1.schema.json"))
+            .expect("read reproducer schema"),
+    )
+    .expect("reproducer schema JSON");
     assert_eq!(kernel["$id"], fsl_core::KERNEL_SCHEMA_ID);
     assert_eq!(conformance["$id"], fslc_rust::CONFORMANCE_SCHEMA_ID);
     assert_eq!(testgen_trace["$id"], fsl_core::TESTGEN_TRACE_V1_SCHEMA_ID);
     assert_eq!(replay_trace["$id"], fsl_core::REPLAY_TRACE_V1_SCHEMA_ID);
+    assert_eq!(reproducer["$id"], fsl_core::REPRODUCER_V1_SCHEMA_ID);
     assert_eq!(
         replay_trace["properties"]["schema_version"]["enum"],
         json!([

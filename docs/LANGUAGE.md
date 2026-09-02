@@ -788,6 +788,8 @@ fslc fmt       <path>... --check                 # JSON format_check; exit 0 cle
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexample is shortest)
+fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+                                               # slice 1: export a safety-invariant counterexample to reproducer.v1
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -1215,7 +1217,7 @@ a literate `.md` may `use`/compose `.fsl` files this way, but using another
 `check`, `verify`, and `scenarios` are the only commands that extract fences
 this way. Every other command that reads a spec path (`lint`, `migrate`,
 `fmt`, `kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`,
-`html`, `ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, and
+`html`, `ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, `counterexample export`, and
 `document generate`/`claims`/`check`) rejects a `.md` input as an input-kind
 error instead: `result: "error"`, `kind: "usage"`,
 `diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"`, a message naming the
@@ -1683,6 +1685,7 @@ implementation (see `DESIGN-bridge.md`).
 |---|---|
 | `fslc.runtime.Monitor` | A concrete interpreter of the spec (no Z3 needed). Embed it in the implementation for runtime checking |
 | `fslc replay` | Check a real system's event-log JSON against the spec |
+| `fslc counterexample export` | Export a bounded safety-invariant verifier counterexample to a closed `reproducer.v1` JSON artifact (slice 1 of #885; not `replay-trace` or `testgen-trace`) |
 | `fslc testgen` | Generate a conformance-test scaffold — pytest (default), Vitest (`--target vitest`), Swift Testing (`--target swift`), kotlin.test (`--target kotlin`), Dart `package:test` (`--target dart`), or PHPUnit (`--target phpunit`) (wire the implementation into the Adapter) |
 
 Recommended workflow: **`verify` / `prove` the spec → generate the scaffold with
@@ -1719,6 +1722,15 @@ recording that step would state that the action is a no-op -- an expectation no
 FSL contract makes. `testgen` instead reports the violation with the same
 `result:"violated"` envelope, exit code, property, step, and replayable trace
 `verify` reports, and writes no harness.
+
+`fslc counterexample export` (reproducer slice 1) runs the same bounded
+verification as `verify`, but when the result is a **safety invariant**
+violation it also writes a closed `reproducer.v1` JSON file (`-o` required).
+The stdout envelope remains the violated `verify` result plus
+`reproducer.exported_to`; it is not a replay-trace or testgen-trace input.
+v1 rejects `leadsTo`, refinement documents, induction/CTI, nondeterministic
+`init`, and non-invariant violations with exit 2. Stage-2
+`testgen --reproducer` (slice 2) is not implemented yet.
 
 - `--target pytest` (default): emits Python tests that import `fslc.runtime.Monitor`
   and drive the random walk live as the oracle.

@@ -868,6 +868,8 @@ fslc fmt       &lt;path&gt;... --check                 # JSON format_check; exit
 fslc kernel    &lt;file.fsl&gt; [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance &lt;file.fsl&gt; [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    &lt;file.fsl|file.md&gt; [--depth K]     # BMC (default K=8, counterexample is shortest)
+fslc counterexample export &lt;file.fsl&gt; [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+                                               # slice 1: export a safety-invariant counterexample to reproducer.v1
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -1288,7 +1290,7 @@ a literate <code>.md</code> may <code>use</code>/compose <code>.fsl</code> files
 <p><code>check</code>, <code>verify</code>, and <code>scenarios</code> are the only commands that extract fences
 this way. Every other command that reads a spec path (<code>lint</code>, <code>migrate</code>,
 <code>fmt</code>, <code>kernel</code>, <code>conformance</code>, <code>explain</code>, <code>mutate</code>, <code>typestate</code>, <code>testgen</code>,
-<code>html</code>, <code>ledger</code>, <code>analyze</code>, <code>diff</code>, <code>refine</code>, <code>replay</code>, <code>sweep</code>, and
+<code>html</code>, <code>ledger</code>, <code>analyze</code>, <code>diff</code>, <code>refine</code>, <code>replay</code>, <code>sweep</code>, <code>counterexample export</code>, and
 <code>document generate</code>/<code>claims</code>/<code>check</code>) rejects a <code>.md</code> input as an input-kind
 error instead: <code>result: "error"</code>, <code>kind: "usage"</code>,
 <code>diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"</code>, a message naming the
@@ -1704,6 +1706,10 @@ implementation (see <code>DESIGN-bridge.md</code>).</p>
 <td>Check a real system's event-log JSON against the spec</td>
 </tr>
 <tr>
+<td><code>fslc counterexample export</code></td>
+<td>Export a bounded safety-invariant verifier counterexample to a closed <code>reproducer.v1</code> JSON artifact (slice 1 of #885; not <code>replay-trace</code> or <code>testgen-trace</code>)</td>
+</tr>
+<tr>
 <td><code>fslc testgen</code></td>
 <td>Generate a conformance-test scaffold — pytest (default), Vitest (<code>--target vitest</code>), Swift Testing (<code>--target swift</code>), kotlin.test (<code>--target kotlin</code>), Dart <code>package:test</code> (<code>--target dart</code>), or PHPUnit (<code>--target phpunit</code>) (wire the implementation into the Adapter)</td>
 </tr>
@@ -1740,6 +1746,14 @@ recording that step would state that the action is a no-op -- an expectation no
 FSL contract makes. <code>testgen</code> instead reports the violation with the same
 <code>result:"violated"</code> envelope, exit code, property, step, and replayable trace
 <code>verify</code> reports, and writes no harness.</p>
+<p><code>fslc counterexample export</code> (reproducer slice 1) runs the same bounded
+verification as <code>verify</code>, but when the result is a <strong>safety invariant</strong>
+violation it also writes a closed <code>reproducer.v1</code> JSON file (<code>-o</code> required).
+The stdout envelope remains the violated <code>verify</code> result plus
+<code>reproducer.exported_to</code>; it is not a replay-trace or testgen-trace input.
+v1 rejects <code>leadsTo</code>, refinement documents, induction/CTI, nondeterministic
+<code>init</code>, and non-invariant violations with exit 2. Stage-2
+<code>testgen --reproducer</code> (slice 2) is not implemented yet.</p>
 <ul>
 <li><code>--target pytest</code> (default): emits Python tests that import <code>fslc.runtime.Monitor</code>
   and drive the random walk live as the oracle.</li>

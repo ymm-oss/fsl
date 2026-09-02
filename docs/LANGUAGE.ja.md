@@ -761,6 +761,8 @@ fslc fmt       <path>... --check                 # JSON format_check; exit 0 cle
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
+fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+                                               # slice 1: safety-invariant counterexample を reproducer.v1 へ export
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -1178,7 +1180,7 @@ literate な `.md` はこの方法で `.fsl` ファイルを `use`/compose で�
 このフェンス抽出を行うのは `check`・`verify`・`scenarios` の 3 コマンドだけです。
 仕様パスを読み取る他のすべてのコマンド(`lint`・`migrate`・`fmt`・`kernel`・
 `conformance`・`explain`・`mutate`・`typestate`・`testgen`・`html`・`ledger`・
-`analyze`・`diff`・`refine`・`replay`・`sweep`、および
+`analyze`・`diff`・`refine`・`replay`・`sweep`・`counterexample export`、および
 `document generate`/`claims`/`check`)は、`.md` 入力を代わりに入力種別の誤りとして
 拒否します: `result: "error"`、`kind: "usage"`、
 `diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"`、対応コマンドを挙げたメッセージ、
@@ -1632,6 +1634,7 @@ fslc scenarios specs/order_system.fsl
 |---|---|
 | `fslc.runtime.Monitor` | spec の具象インタープリタ(Z3 不要)。実装に埋め込んでランタイム検査を行う |
 | `fslc replay` | 実システムのイベントログ JSON を spec に対して検査する |
+| `fslc counterexample export` | 有界な安全性不変式の verifier 反例を閉じた `reproducer.v1` JSON アーティファクトとして export する(#885 slice 1; `replay-trace` / `testgen-trace` ではない) |
 | `fslc testgen` | コンフォーマンステストのスキャフォールドを生成する — pytest(デフォルト)、Vitest(`--target vitest`)、Swift Testing(`--target swift`)、kotlin.test(`--target kotlin`)、Dart `package:test`(`--target dart`)、PHPUnit(`--target phpunit`)(実装を Adapter に結線する) |
 
 推奨ワークフロー: **spec を `verify` / `prove` する → `testgen` でスキャフォールド
@@ -1669,6 +1672,14 @@ enabled な action が無くなればそこで止まります。`--depth` には
 これは FSL のどの契約も述べていない期待値です。`testgen` は代わりに、`verify` が
 返すのと同じ `result:"violated"` エンベロープ、終了コード、プロパティ、ステップ、
 再生可能なトレースで違反を報告し、ハーネスを書きません。
+
+`fslc counterexample export`(reproducer slice 1)は `verify` と同じ有界検証を実行し、
+結果が**安全性不変式**違反のときだけ閉じた `reproducer.v1` JSON ファイルを
+`-o` で書き出します(必須)。stdout は violated な `verify` エンベロープに
+`reproducer.exported_to` を足したものであり、replay-trace / testgen-trace の
+入力ではありません。v1 では `leadsTo`、refinement 文書、induction/CTI、
+非決定的 `init`、不変式以外の違反を exit 2 で明示拒否します。stage-2 の
+`testgen --reproducer`(slice 2)は未実装です。
 
 - `--target pytest`(デフォルト): `fslc.runtime.Monitor` をインポートし、オラクル
   としてランダムウォークをライブで駆動する Python テストを出力します。

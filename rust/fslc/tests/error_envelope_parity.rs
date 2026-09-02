@@ -62,9 +62,11 @@ const LITERATE_AI_PROJECT_FIXTURE: &str =
 const DOMAIN_REPLAY_LOG: &str = "rust/fslc/tests/fixtures/issue_518_clean.jsonl";
 const EMPTY_RECORDS: &str = "rust/fslc/tests/fixtures/error_envelope_empty_records.json";
 const DOCUMENT_ARTIFACT: &str = "rust/fslc/tests/fixtures/error_envelope_document.md";
+const COUNTEREXAMPLE_OUTPUT: &str = "rust/target/counterexample-export-parity.json";
 const REPLAY_TRACE: &str = "rust/fslc/tests/fixtures/replay_trace.valid.v1.json";
 const APPROVAL_RECORD_PLACEHOLDER: &str = "{approval-record}";
 const DOCUMENT_ARTIFACT_PLACEHOLDER: &str = "{document-artifact}";
+const COUNTEREXAMPLE_OUTPUT_PLACEHOLDER: &str = "{counterexample-output}";
 
 static APPROVAL_RECORD_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 
@@ -358,6 +360,23 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         key: "conformance",
         scope: ParityScope::SpecPath {
             invoke: &["conformance", SPEC_PLACEHOLDER],
+        },
+        literate: LiterateCoverage::UniformUnsupported,
+        coverage: PARSE_KERNEL_COVERAGE,
+        not_applicable: &[],
+    },
+    CommandRegistration {
+        key: "counterexample export",
+        scope: ParityScope::SpecPath {
+            invoke: &[
+                "counterexample",
+                "export",
+                SPEC_PLACEHOLDER,
+                "--depth",
+                "4",
+                "-o",
+                COUNTEREXAMPLE_OUTPUT_PLACEHOLDER,
+            ],
         },
         literate: LiterateCoverage::UniformUnsupported,
         coverage: PARSE_KERNEL_COVERAGE,
@@ -883,6 +902,7 @@ const INPUT_SHAPE_POPULATIONS: &[CommandInputShapePopulation] = &[
     input_shape_population!("check", CHECK_INPUT_SHAPE_PROFILE),
     input_shape_population!("compat check", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("conformance", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("counterexample export", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("db check", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("db import", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("db observe", SOURCE_INPUT_SHAPE_PROFILE),
@@ -2409,6 +2429,8 @@ fn invoke(
                     .to_string()
             } else if *argument == DOCUMENT_ARTIFACT_PLACEHOLDER {
                 DOCUMENT_ARTIFACT.to_owned()
+            } else if *argument == COUNTEREXAMPLE_OUTPUT_PLACEHOLDER {
+                COUNTEREXAMPLE_OUTPUT.to_owned()
             } else {
                 (*argument).to_owned()
             }

@@ -37,6 +37,9 @@ pub const REPLAY_TRACE_V1_STUTTER_SCHEMA_VERSION: &str = "1.1.0";
 pub const REPLAY_TRACE_V1_SCHEMA_VERSION: &str = "1.2.0";
 pub const REPLAY_TRACE_V1_SCHEMA_ID: &str =
     "https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json";
+pub const REPRODUCER_V1_SCHEMA_VERSION: &str = "1.0.0";
+pub const REPRODUCER_V1_SCHEMA_ID: &str =
+    "https://fsl.dev/schemas/fslc/kernel/reproducer.v1.schema.json";
 
 /// Backwards-compatible aliases for the default Public Kernel v1 contract.
 pub const KERNEL_SCHEMA_VERSION: &str = KERNEL_V1_SCHEMA_VERSION;

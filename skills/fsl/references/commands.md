@@ -40,7 +40,9 @@ As needed: `fslc explain file.fsl --depth 8 --readable`
    regression in that delta is the signal; one absolute survivor count is not),
    `fslc scenarios` (integration-test skeleton JSON),
    `fslc testgen -o test_x.py`
-   (implementation-conformance pytest skeleton), `fslc replay --trace events.json`
+   (implementation-conformance pytest skeleton), `fslc counterexample export -o bug.reproducer.json`
+   (export a bounded safety-invariant counterexample to reproducer.v1; slice 1 of #885),
+   `fslc replay --trace events.json`
    (normalized spec-action log conformance), or `fslc replay --from-log
    events.jsonl --mapping log_mapping.fsl` (production action/state mapped through
    refinement syntax), `fslc refine impl.fsl abs.fsl mapping.fsl` (faithfulness check
@@ -102,6 +104,8 @@ fslc mutate <f> [--depth K=8] [--by-requirement] [--oracle-attribution] [--max-m
               [--from mutants.jsonl]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
+fslc counterexample export <f> [--depth K] [--engine bmc|explicit|auto] -o <reproducer.json>
+                                                # reproducer.v1 artifact from a safety-invariant violation
 fslc replay <f> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                 # production JSONL -> mapped action/state -> Monitor
 fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit)
@@ -270,7 +274,7 @@ sections). Files without fsl fences are rejected; non-fsl fences
 files relative to its own directory; using another `.md` as a compose target
 is not supported. Every other spec-reading command (`lint`, `migrate`, `fmt`,
 `kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`, `html`,
-`ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`,
+`ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, `counterexample export`,
 `document generate`/`claims`/`check`) rejects `.md` input as an input-kind
 error (`kind:"usage"`, `diagnostic_code:"FSL-INPUT-LITERATE-UNSUPPORTED"`,
 `loc` naming the input file, not a spec position) instead of handing it to
