@@ -521,6 +521,7 @@ macro_rules! unresolved_ordinary {
 // shape. They are explicitly ordinary rather than silently omitted: a return
 // whose alias becomes relevant to optional verdicts must be reconsidered here.
 const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
+    unresolved_ordinary!("rust/fsl-core/src/domain.rs", 417, "build_normalize_scope"),
     unresolved_ordinary!("rust/fsl-core/src/domain_lowering.rs", 2712, "saga_scope"),
     unresolved_ordinary!(
         "rust/fsl-core/src/lib.rs",
