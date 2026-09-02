@@ -7072,7 +7072,7 @@ fn run_domain_analyze(path: &Path) -> (Value, i32) {
                 Ok(()) => wrap_specialized(result),
                 Err(error) => error,
             },
-            Err(error) => (core_error_output(&error), 2),
+            Err(error) => (domain_projection_error_output(path, &error), 2),
         },
         Err(error) => (spec_load_error_output(&error), 2),
     }
@@ -7085,7 +7085,7 @@ fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
     };
     let source = match fsl_tools::domain_kernel_source(&domain) {
         Ok(source) => source,
-        Err(error) => return (core_error_output(&error), 2),
+        Err(error) => return (domain_projection_error_output(path, &error), 2),
     };
     if let Err(error) = validate_domain_command_input(path, &input_source) {
         return error;
@@ -16953,6 +16953,20 @@ fn core_error_output(error: &fsl_core::CoreError) -> Value {
     )
 }
 
+/// Render a domain projection failure from the renderer path.
+///
+/// #798 slice 1 rejects unknown symbols during rendering. Those diagnostics
+/// must match `check`'s file-qualified envelope (#796). Other renderer
+/// failures keep the historical `at line:column` message shape established by
+/// `domain_origin_diagnostics`.
+fn domain_projection_error_output(path: &Path, error: &fsl_core::CoreError) -> Value {
+    if error.message.starts_with("unknown domain symbol") {
+        core_error_output(&error.clone().with_source_file(path.display().to_string()))
+    } else {
+        core_error_output(error)
+    }
+}
+
 /// Render a typed-model failure with the location the model recorded for the
 /// construct that failed and the classification the frontend determined, so a
 /// name-resolution failure reports `kind:"name"` rather than collapsing into
@@ -17171,10 +17185,10 @@ spec InitTraceability {
 
     /// Deterministic TOCTOU control for #796. The first read captures an
     /// authored-invalid domain, then an atomic rename replaces the path with
-    /// a valid document. Both specialized projections can still complete from
-    /// the original AST, but their checked Kernel validation must reject the
-    /// original snapshot. Reverting validation to `load_kernel_model(path)`
-    /// makes this test fail because that second read accepts the replacement.
+    /// a valid document. Validation must reject the captured snapshot even
+    /// though the path now contains a valid document. After #798 slice 1 the
+    /// specialized projections also fail closed on the same unknown symbols
+    /// as `check`, rather than rendering a false-green kernel.
     #[test]
     fn domain_projection_validation_uses_the_original_source_snapshot() {
         let directory =
@@ -17197,12 +17211,12 @@ spec InitTraceability {
         std::fs::rename(&replacement, &path).expect("atomically replace input after first read");
 
         assert!(
-            fsl_tools::analyze_domain(&domain).is_ok(),
-            "the specialized analysis must reach the checked validation"
+            fsl_tools::analyze_domain(&domain).is_err(),
+            "the specialized analysis must reject the same unknown symbols as check"
         );
         assert!(
-            fsl_tools::domain_kernel_source(&domain).is_ok(),
-            "the specialized expansion must reach the checked validation"
+            fsl_tools::domain_kernel_source(&domain).is_err(),
+            "the specialized expansion must reject the same unknown symbols as check"
         );
         assert!(
             validate_domain_command_input(&path, &source).is_err(),

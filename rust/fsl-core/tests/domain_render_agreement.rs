@@ -125,6 +125,7 @@ const VALID_DOMAIN_FIXTURES: &[&str] = &[
     "rust/fslc/tests/fixtures/domain_characterization/can_expansion_precedence.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/container_defaults_surface.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/effect_saga_valid.fsl",
+    "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/lvalues_surface.fsl",
     "rust/fslc/tests/fixtures/domain_legacy_enum_union.fsl",
     "rust/fslc/tests/fixtures/domain_origin_violation.fsl",
@@ -148,6 +149,7 @@ const VALID_DOMAIN_FIXTURES: &[&str] = &[
 /// routing, and effect `retry` `backoff`).
 const SEMANTICALLY_INVALID_DOMAIN_FIXTURES: &[&str] = &[
     "rust/fslc/tests/fixtures/domain_await_routing_rejected.fsl",
+    "rust/fslc/tests/fixtures/domain_characterization/ai_internal_name_misuse.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_duplicate_enum.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_empty_enum_containers.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/invalid_type_mismatch.fsl",
@@ -174,6 +176,7 @@ const SYNTAX_INVALID_DOMAIN_FIXTURES: &[&str] = &[
 enum DivergenceShape {
     /// `lower_domain` (path A) rejects; the `domain_kernel_source` pipeline
     /// (path B) accepts and produces a checked model.
+    #[allow(dead_code)]
     PathARejects,
     /// The `domain_kernel_source` pipeline (path B) rejects; `lower_domain`
     /// (path A) accepts and produces a checked model.
@@ -188,6 +191,7 @@ enum DivergenceShape {
     PathBRejects,
     /// Both paths accept and produce a checked model, but the two
     /// `public_kernel_contract` projections are not structurally equal.
+    #[allow(dead_code)]
     ContractsDisagree,
 }
 
@@ -221,126 +225,19 @@ struct KnownDivergence {
 /// a review transcript (AGENTS.md: "do not let the finding survive only in
 /// chat, a review transcript, or agent memory").
 ///
-/// **#798** <https://github.com/ymm-oss/fsl/issues/798> tracks the two
-/// remaining symptoms: the generated-name leak (entry 1) and the
-/// scope-insensitive `quantity` shadowing (entry 2). They arise from
-/// `domain.rs`'s `Context::normalize`, a
-/// chain of `str::replace` calls over rendered text with no syntax tree, so it
-/// cannot distinguish legal domain-level references or respect lexical scope
-/// the way a typed AST composition can. Separately, #690 fixed the
-/// `can(...)` precedence symptom by parenthesizing each joined piece.
+/// **#798** <https://github.com/ymm-oss/fsl/issues/798> slice 1 closed the
+/// two pinned symptoms below by replacing `Context::normalize`'s
+/// `str::replace` pipeline with scope-aware AST composition (design option
+/// B). Slice 2 retires the legacy string path and #796 CLI suppression.
 ///
-/// **#691** <https://github.com/ymm-oss/fsl/issues/691> covered a third,
-/// now-resolved entry (`lvalues_surface.fsl`, a `Map<K, V>` domain state
-/// field with no explicit default): a missing match arm in
-/// `Context::default` rather than a substitution-order problem, fixed by
-/// making `Context::default`/`Context::default_for_type` total over
-/// `SyntaxTypeExprKind` with no catch-all arm. The two paths now agree on
-/// that fixture; it has moved to [`VALID_DOMAIN_FIXTURES`].
+/// Historical record of the resolved divergences (fixtures moved to
+/// [`VALID_DOMAIN_FIXTURES`] / [`SEMANTICALLY_INVALID_DOMAIN_FIXTURES`]):
 ///
-/// 1. `ai_internal_name_misuse.fsl` writes the invariant
-///    `status == Status_Draft`, directly naming the *generated*
-///    kernel-level enum member (`Status_Draft`) instead of the
-///    domain-level member (`Draft`). `lower_domain` (path A -- what
-///    `check`/`verify` run) rejects this as
-///    `unknown domain symbol 'Status_Draft'`, matching
-///    `rust/fslc/tests/fixtures/domain_characterization/baseline.v1.json`'s
-///    recorded `check`/`verify` outcome and the fixture's own documented
-///    purpose (`ai_native_cases.v1.json` case
-///    `generated-enum-name-check-gap`, `misuse.internal_generated_name: 1`):
-///    domain-level code must not reference compiler-generated names.
-///    `domain_kernel_source` (path B -- what `domain expand` /
-///    `check_domain` run) does not
-///    reject it: its textual substitution only rewrites *bare* enum member
-///    names it recognizes (`Draft` -> `Status_Draft`); the already-qualified
-///    name the fixture writes is left untouched, and happens to be
-///    byte-identical to the name path A's own generator would have
-///    produced, so the rendered text parses and type-checks as an ordinary
-///    valid kernel spec.
-///
-/// 2. `expressions_valid.fsl` both paths accept, but the projected
-///    contracts still disagree at one point (name-shadowing, the #798
-///    continuation of #690 symptom
-///    2). A second point that used to disagree here -- `can(...)`
-///    operator-precedence misgrouping, #690 symptom 1 -- was fixed and is
-///    described below, after this list, rather than removed from the
-///    historical record:
-///
-///    - `command Approve { quantity: Quantity }` shares a name with the
-///      aggregate's own `quantity` state field. Inside `evolve Approved`,
-///      `quantity = quantity` means "copy the incoming event field into
-///      state". `lower_domain`'s resolver (path A) is scope-aware and keeps
-///      the right-hand `quantity` as the event-field reference.
-///      `domain.rs`'s `Context::normalize` (path B,
-///      `replace_identifier`/`evolve_assignments`) renames *every* lexical
-///      occurrence of a state field name it finds, with no notion of a
-///      shadowing local/event-field binding, and rewrites the right-hand
-///      side too -- producing `order_quantity = order_quantity`, a no-op
-///      that silently drops the incoming event payload. The same
-///      mis-substitution reaches the `decide Approve` guard
-///      `quantity >= 0`, which refers to the *command input* `quantity`,
-///      not the state field. This needs a scope-aware substitution (design
-///      option B/C recorded for #690) and is out of scope for the `can(...)`
-///      fix.
-///
-///    Before #690's fix, this fixture's
-///    `invariant legacyImplication { status == Cancelled -> not can(Cancel) }`
-///    also disagreed at the projected `and`/`or` operator shape:
-///    `domain.rs`'s `can(...)` expansion (path B, `Context::normalize`) joined
-///    the requires/rejects pieces with literal
-///    `" and "` without individually parenthesizing each piece, so the
-///    rendered text read
-///    `status == Draft or status == Approved and not (status == Cancelled)`
-///    -- `and` binds tighter than `or` in FSL's grammar, so this re-parsed
-///    as `Draft or (Approved and not Cancelled)`, not the intended
-///    `(Draft or Approved) and not Cancelled` that `lower_domain`'s typed
-///    AST composition (path A) builds directly and therefore could not get
-///    wrong the same way. In *this* fixture, `decide Cancel`'s pieces are
-///    over a single-valued enum and mutually exclusive, so the misgrouping
-///    only changed the JSON AST shape here, not the truth value. It was
-///    worse in general: the same misgrouping could flip a verdict once the
-///    pieces are over independent `Bool` state -- see
-///    `can_expansion_precedence.fsl` in [`VALID_DOMAIN_FIXTURES`], which
-///    pins exactly that (`decide Open { requires a or b  requires c  emits
-///    Opened }` with `invariant aImpliesCanOpen { a => can(Open) }` used to
-///    render the tautology `gate_a => (gate_a or gate_b and gate_c)`
-///    instead of the intended, sometimes-false `gate_a => ((gate_a or
-///    gate_b) and gate_c)`, so `fslc verify` returned `violated` on the
-///    checked model and `verified` on the rendered/re-parsed one for the
-///    identical domain spec -- a false green, the class AGENTS.md ranks
-///    above a crash). #690's fix parenthesizes each piece individually
-///    before joining, which is why this fixture's `can(Cancel)` fingerprint
-///    is gone from [`KNOWN_DIVERGENT_DOMAIN_FIXTURES`] below while the
-///    `quantity`/`order_quantity` fingerprint remains.
-///
-/// `known_divergent_domain_fixture_pins_the_open_finding` asserts each
-/// fixture's exact shape so an incidental change that makes the two agree --
-/// in either direction -- fails this test and forces a deliberate move of
-/// the fixture into [`VALID_DOMAIN_FIXTURES`] or
-/// [`SEMANTICALLY_INVALID_DOMAIN_FIXTURES`] instead of a silent behavior
-/// change sliding past this gate.
-const KNOWN_DIVERGENT_DOMAIN_FIXTURES: &[KnownDivergence] = &[
-    KnownDivergence {
-        fixture: "rust/fslc/tests/fixtures/domain_characterization/ai_internal_name_misuse.fsl",
-        shape: DivergenceShape::PathARejects,
-        expected_contains: &["unknown domain symbol 'Status_Draft'"],
-        tracking_issue: "https://github.com/ymm-oss/fsl/issues/798",
-    },
-    KnownDivergence {
-        fixture: "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl",
-        shape: DivergenceShape::ContractsDisagree,
-        // #690 symptom 1 (the `can(...)` operator-precedence misgrouping,
-        // previously pinned here as `"operator: path A = \"and\", path B =
-        // \"or\""`) is fixed: `Context::normalize` now parenthesizes each
-        // `requires`/`rejects` piece individually before joining, so this
-        // fixture's `can(Cancel)` projection no longer disagrees with path
-        // A. #798 tracks the remaining #690 symptom 2: the name-shadowing
-        // rewrite still needs a scope-aware substitution (design option B/C,
-        // still open), so `quantity`/`order_quantity` still disagrees.
-        expected_contains: &["path A = \"quantity\", path B = \"order_quantity\""],
-        tracking_issue: "https://github.com/ymm-oss/fsl/issues/798",
-    },
-];
+/// 1. `ai_internal_name_misuse.fsl` — generated kernel enum names in domain
+///    source text are rejected by both paths.
+/// 2. `expressions_valid.fsl` — command-input `quantity` no longer loses to
+///    blind state-field substitution in path B.
+const KNOWN_DIVERGENT_DOMAIN_FIXTURES: &[KnownDivergence] = &[];
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1169,6 +1066,97 @@ fn assert_contracts_disagree_pinned(
             entry.tracking_issue
         );
     }
+}
+
+/// #798 slice 1 acceptance: the two fixtures formerly pinned in
+/// [`KNOWN_DIVERGENT_DOMAIN_FIXTURES`] now agree across both lowering paths.
+#[test]
+fn slice798_resolved_divergences_agree_across_lowering_paths() {
+    let root = repo_root();
+    let expressions_valid =
+        "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl";
+    let ai_internal_name_misuse =
+        "rust/fslc/tests/fixtures/domain_characterization/ai_internal_name_misuse.fsl";
+
+    let source = fs::read_to_string(root.join(expressions_valid))
+        .unwrap_or_else(|error| panic!("read {expressions_valid}: {error}"));
+    let domain = parse_domain_spec(&source).unwrap_or_else(|error| {
+        panic!("{expressions_valid}: expected a parseable domain document: {error}")
+    });
+    let (PipelineOutcome::Checked(kernel_a, model_a), PipelineOutcome::Checked(kernel_b, model_b)) =
+        (run_path_a(&domain), run_path_b(&domain))
+    else {
+        panic!("{expressions_valid}: both lowering paths must accept this fixture")
+    };
+    let contract_a =
+        public_kernel_contract(&kernel_a, &model_a, expressions_valid, "domain").unwrap();
+    let contract_b =
+        public_kernel_contract(&kernel_b, &model_b, expressions_valid, "domain").unwrap();
+    let mut mismatches = Vec::new();
+    let mut excluded_seen = BTreeSet::new();
+    diff_json(
+        "",
+        &contract_a,
+        &contract_b,
+        &mut excluded_seen,
+        &mut mismatches,
+    );
+    assert!(
+        mismatches.is_empty(),
+        "{expressions_valid}: expected path A and path B contracts to agree, got:\n{}",
+        mismatches.join("\n")
+    );
+
+    let source = fs::read_to_string(root.join(ai_internal_name_misuse))
+        .unwrap_or_else(|error| panic!("read {ai_internal_name_misuse}: {error}"));
+    let domain = parse_domain_spec(&source).unwrap_or_else(|error| {
+        panic!("{ai_internal_name_misuse}: expected a parseable domain document: {error}")
+    });
+    match (run_path_a(&domain), run_path_b(&domain)) {
+        (PipelineOutcome::Rejected(message_a), PipelineOutcome::Rejected(message_b)) => {
+            assert!(
+                message_a.contains("unknown domain symbol 'Status_Draft'"),
+                "path A rejection changed shape: {message_a}"
+            );
+            assert!(
+                message_b.contains("unknown domain symbol 'Status_Draft'"),
+                "path B rejection changed shape: {message_b}"
+            );
+        }
+        (PipelineOutcome::Checked(..), PipelineOutcome::Checked(..)) => {
+            panic!("{ai_internal_name_misuse}: both lowering paths accepted this fixture")
+        }
+        (PipelineOutcome::Rejected(_), PipelineOutcome::Checked(..)) => {
+            panic!("{ai_internal_name_misuse}: path B accepted while path A rejected")
+        }
+        (PipelineOutcome::Checked(..), PipelineOutcome::Rejected(_)) => {
+            panic!("{ai_internal_name_misuse}: path A accepted while path B rejected")
+        }
+    }
+}
+
+/// #798 negative control: blind state-field substitution would rewrite the
+/// `decide Approve` command input `quantity` to `order_quantity`. Reverting
+/// scope-aware AST normalization restores that divergence.
+#[test]
+fn slice798_scope_sensitive_substitution_negative_control() {
+    let root = repo_root();
+    let relative = "rust/fslc/tests/fixtures/domain_characterization/expressions_valid.fsl";
+    let source = fs::read_to_string(root.join(relative))
+        .unwrap_or_else(|error| panic!("read {relative}: {error}"));
+    let domain = parse_domain_spec(&source).unwrap_or_else(|error| {
+        panic!("{relative}: expected a parseable domain document: {error}")
+    });
+    let rendered = domain_kernel_source(&domain)
+        .unwrap_or_else(|error| panic!("{relative}: render path B: {error}"));
+    assert!(
+        rendered.contains("quantity >= 0"),
+        "{relative}: decide Approve guard must keep the command input name `quantity`"
+    );
+    assert!(
+        !rendered.contains("order_quantity >= 0"),
+        "{relative}: blind state-field substitution would rewrite the guard to `order_quantity`"
+    );
 }
 
 /// Pins the exact shape of each divergence documented on
