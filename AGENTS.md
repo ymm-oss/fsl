@@ -103,7 +103,9 @@ inventory, and promotion changes run the `scheduled` tier.
   `rust/fslc/tests/corpus_check_sweep.rs` inside the required `rust workspace` job
   (`.github/workflows/ci.yml`). That native sweep will not catch a missing `tests/dialect_registry.py`
   entry or a Monitor/native disagreement; register the construct because the rule says so, not
-  because something will always catch you if you don't.
+  because something will always catch you if you don't. A new `tests/test_*.py` module additionally
+  moves with `tools/check_ci_validator_inventory.py generate` and
+  `docs/DESIGN-ci-validator-inventory.md` so required-gate reachability is recorded before merge.
 - Top-level dialect counts and parser parity do not establish nested semantic coverage. When porting
   or auditing an AST/enum sum type, inventory every behavior-bearing variant and bind each accepted
   variant to executable native semantics with accepting/rejecting controls, or to an explicit

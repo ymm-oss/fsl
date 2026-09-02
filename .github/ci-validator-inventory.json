@@ -1,0 +1,562 @@
+{
+  "required_gate_entrypoints": [
+    "tools/check-merge-readiness.sh",
+    ".github/workflows/site-reference-freshness.yml"
+  ],
+  "schema_version": 1,
+  "validators": [
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_acceptance_enum_args.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_acceptance_override_skip.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_ai_hard_contract.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_ai_recursive_agent.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_ai_stochastic.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_analysis_batch.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_analysis_export.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_analysis_findings.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_analysis_graph.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_analysis_project.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_analysis_refinement.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_analysis_schema.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_analysis_tag_drift.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_analysis_tsg.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_analysis_underspecification.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_assurance.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_biz_dialect.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_bool_param.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_bounded_liveness_oracle.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_cache.py",
+      "tier": "exempt"
+    },
+    {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_cache_budget_audit_workflow.py",
+      "tier": "required"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_cart.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_chain.py",
+      "tier": "exempt"
+    },
+    {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_ci_validator_inventory.py",
+      "tier": "required"
+    },
+    {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_claude_environment.py",
+      "tier": "required"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_cli_bounds_override.py",
+      "tier": "exempt"
+    },
+    {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_codex_environment.py",
+      "tier": "required"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_compose.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_corpus_snapshot.py",
+      "tier": "exempt"
+    },
+    {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_coupled_change_meta.py",
+      "tier": "required"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_cti_suggestions.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_db_dialect.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_diagnostics.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_dialect_conformance.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_dialect_terminal.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_divmod.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_domain_dialect.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_e2e_example.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_evaluator_agreement.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_explain.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_external_mutants.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_forbidden.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_from_state.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_gallery.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_governance_business.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_helpful_leadsto.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "hook-local",
+      "path": "tests/test_hook_enforcement.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_html_report.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_implements_bounds_override.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_induction.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_induction_lemmas.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_init_if.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_injection_bench.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_inline_implements_action.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_inline_initializer_compat.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_inline_range.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_layers_chain.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_ledger.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_log_replay.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_logic_temporal_sugar.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_meta.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_metamorphic.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_mutate.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_named_predicates.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_nfr.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_option_struct.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_oracle_agreement.py",
+      "tier": "exempt"
+    },
+    {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_post_merge_reporter_workflow.py",
+      "tier": "required"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_precedence_policy.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_ranking_synthesis.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_referance_domain_manifest.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_refine.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_refine_oracle.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_refinement_chain_example.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_refinement_liveness_example.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_relation.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_repair_fields.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_req_dialect.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_req_process.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_req_process_carry_enum_bool.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_robustness.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_runtime.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_rust_cli_semantics.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_rust_port_ast.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_scenarios.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_self.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_self_conformance.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_self_examples.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_semantic_diff.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_seq.py",
+      "tier": "exempt"
+    },
+    {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_shard_artifact_workflow.py",
+      "tier": "required"
+    },
+    {
+      "entrypoints": [
+        ".github/workflows/site-reference-freshness.yml"
+      ],
+      "path": "tests/test_site_reference_snapshot.py",
+      "tier": "required"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_spec_domains.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_strict_tags.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_sum_decreases.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_sweep.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_temporal.py",
+      "tier": "exempt"
+    },
+    {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_toolchain_pin.py",
+      "tier": "required"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_trace_soundness.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_trans.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_typestate.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_ui_spike.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_v1.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_vacuity.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_verified_bugs.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_verify_cache.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tests/test_version.py",
+      "tier": "exempt"
+    }
+  ]
+}
