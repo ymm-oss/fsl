@@ -761,6 +761,8 @@ fslc fmt       <path>... --check                 # JSON format_check; exit 0 cle
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
+fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+                                               # slice 1: safety-invariant counterexample を reproducer.v1 へ export
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -784,6 +786,7 @@ fslc replay    <file.fsl> --trace <events.json>  # spec-action trace conformance
 fslc replay    <file.fsl> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                  # production log mapping + conformance (§12)
 fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
+fslc testplan  <file.fsl> [--depth K]             # 閉じた test-plan.v1 の vector 選択 (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
 fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
                [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
@@ -791,7 +794,7 @@ fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
 fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
                                                  # revision-consistent tree materialization; omit spec for all changed .fsl
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
-fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]
+fslc mutate    <file.fsl> [--by-requirement] [--oracle-attribution] [--max-mutants N]
                [--from mutants.jsonl]             # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
@@ -1177,8 +1180,8 @@ literate な `.md` はこの方法で `.fsl` ファイルを `use`/compose で�
 
 このフェンス抽出を行うのは `check`・`verify`・`scenarios` の 3 コマンドだけです。
 仕様パスを読み取る他のすべてのコマンド(`lint`・`migrate`・`fmt`・`kernel`・
-`conformance`・`explain`・`mutate`・`typestate`・`testgen`・`html`・`ledger`・
-`analyze`・`diff`・`refine`・`replay`・`sweep`、および
+`conformance`・`explain`・`mutate`・`typestate`・`testgen`・`testplan`・`html`・`ledger`・
+`analyze`・`diff`・`refine`・`replay`・`sweep`・`counterexample export`、および
 `document generate`/`claims`/`check`)は、`.md` 入力を代わりに入力種別の誤りとして
 拒否します: `result: "error"`、`kind: "usage"`、
 `diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"`、対応コマンドを挙げたメッセージ、
@@ -1632,11 +1635,26 @@ fslc scenarios specs/order_system.fsl
 |---|---|
 | `fslc.runtime.Monitor` | spec の具象インタープリタ(Z3 不要)。実装に埋め込んでランタイム検査を行う |
 | `fslc replay` | 実システムのイベントログ JSON を spec に対して検査する |
+| `fslc counterexample export` | 有界な安全性不変式の verifier 反例を閉じた `reproducer.v1` JSON アーティファクトとして export する(#885 slice 1; `replay-trace` / `testgen-trace` ではない) |
 | `fslc testgen` | コンフォーマンステストのスキャフォールドを生成する — pytest(デフォルト)、Vitest(`--target vitest`)、Swift Testing(`--target swift`)、kotlin.test(`--target kotlin`)、Dart `package:test`(`--target dart`)、PHPUnit(`--target phpunit`)(実装を Adapter に結線する) |
+| `fslc testplan` | bounded な `conformance` vector を、受理側だけでなく `testgen` が生成していなかった `requires_failed` 側も含めて、閉じた `test-plan.v1` JSON プランへ選択する。実装と同じ層の粒度の spec を渡すこと |
 
 推奨ワークフロー: **spec を `verify` / `prove` する → `testgen` でスキャフォールド
 を生成する → 実装を `Adapter` に結線する → テストを実行する**。`Monitor` は
 ランダムウォークテストのオラクルとして使われます。
+
+**層の選び方:** コンフォーマンステストは、検査対象の実装と**同じ粒度の層**の spec
+から生成する。上位層から流用してよいのは **`forbidden`(負例)シナリオだけ**である。
+負例トレースは精緻化(refinement)のあとも健全だが、上位層の**正例**
+(`acceptance`、`cover`、ランダムウォークの witness)を下位実装のテストにそのまま使うと、
+正当に精緻化された実装を誤って落としうる。refinement は抽象モデルを下位が再現できるか
+を見る**前向きシミュレーション**であり、抽象側の正例トレースをすべて下位で再生できる
+ことを要求する**逆向き再生**ではないからである。**例:**
+`examples/refinement_chain/top.fsl` では初期 `TOpen` からすぐ `finish` できるが、
+`mid.fsl` では `MOpen → MReview` のあとでなければ `finish` できない。`ChainTop` の
+正例 `finish` トレースを `ChainMid` 実装のテストに使ってはならない。詳細は
+`docs/DESIGN-layers.md` を参照(refinement 連鎖の末端は design 層への testgen/replay;
+requirements の `acceptance` は**その層**の scenarios/testgen へ流れる)。
 
 `testgen` は、言語非依存のシナリオ収集コア(`scenarios`)をターゲットごとの
 エミッタから分離しているので、同じシナリオが複数のハーネスへレンダリングされます。
@@ -1656,6 +1674,14 @@ enabled な action が無くなればそこで止まります。`--depth` には
 これは FSL のどの契約も述べていない期待値です。`testgen` は代わりに、`verify` が
 返すのと同じ `result:"violated"` エンベロープ、終了コード、プロパティ、ステップ、
 再生可能なトレースで違反を報告し、ハーネスを書きません。
+
+`fslc counterexample export`(reproducer slice 1)は `verify` と同じ有界検証を実行し、
+結果が**安全性不変式**違反のときだけ閉じた `reproducer.v1` JSON ファイルを
+`-o` で書き出します(必須)。stdout は violated な `verify` エンベロープに
+`reproducer.exported_to` を足したものであり、replay-trace / testgen-trace の
+入力ではありません。v1 では `leadsTo`、refinement 文書、induction/CTI、
+非決定的 `init`、不変式以外の違反を exit 2 で明示拒否します。stage-2 の
+`testgen --reproducer`(slice 2)は未実装です。
 
 - `--target pytest`(デフォルト): `fslc.runtime.Monitor` をインポートし、オラクル
   としてランダムウォークをライブで駆動する Python テストを出力します。
@@ -1713,7 +1739,20 @@ fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # s
 fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self-contained kotlin.test scaffold
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
+fslc testplan specs/cart_v1.fsl --depth 4                     # 閉じた test-plan.v1 JSON を stdout へ
 ```
+
+`fslc testplan` は閉じた `test-plan.v1` ドキュメント
+(`schemas/fslc/kernel/test-plan.v1.schema.json`)を出力します。Kernel JSON と
+`conformance` JSON と同一の検査済みモデルから作るため、別スナップショット同士の
+vector が混ざることはありません。プランは**選択であって判定ではありません**。
+常に `formal_result: "not_run"`、`assurance_effect: "none"`、および
+`do_not_assume` を持ち、そこには「実装の正しさの証明ではない」「宣言した深さと
+有限スコープを超えて網羅的ではない」「選択被覆は完全性ではない」「`verify`・
+帰納法・`replay`・refinement を置き換えない」ことが記録されます。
+`layer_selection.requirement` は CLI ヘルプと同じ規則を繰り返します——
+実装と同じ FSL 層の粒度の spec を渡すこと、上位層からは forbidden(negative)
+シナリオのみを再利用すること。
 
 外部のコンパイラは、ネイティブの replay コントラクトを、閉じたバージョン付き JSON
 オブジェクト(`schemas/fslc/kernel/replay-trace.v1.schema.json`)として出力します:
@@ -2538,7 +2577,13 @@ fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 そして `fslc ai compat` は、1 つの `ai_component`、またはプロジェクトが
 宣言するすべての `ai_component` について有限の `dbsystem artifact`
 ケイパビリティプロファイルを出力し、AI ではない入力や `ai_component` を
-1 つも宣言しない AI プロジェクトは拒否します（exit 2）。これらはすべて
+1 つも宣言しない AI プロジェクトは拒否します（exit 2）。`fslc ai check`、
+`fslc ai compat`、`fslc ai replay` が成功 verdict を返す前に、入力内のすべての
+`ai_component`（単体でもプロジェクト内でも）について、単体 `ai_component` に対する
+`fslc verify` と同じ意味制約（`authority` が参照する未宣言 tool、未知の
+`check hard { rule ... }` 名）を検査します（exit 2、`kind:"semantics"`）。
+`fslc ai replay` のプロジェクト入力は `fslc ai check` と同じ checked パーサを使うため、
+壊れたプロジェクト構文は `replay_conformant` になりません。これらはすべて
 `formal_result:"not_run"` を使います。既知のエビデンス節文法
 （`min_samples`、`ci_lower`、`ci_upper`、点推定、`observed`、`drift`）の
 いずれにも一致しない `require` 節は、`fslc ai check` と `fslc check` の
@@ -2704,7 +2749,10 @@ DESIGN-*.md があります)。
   拡張)。要件ごとのキル数とこの警告は、選択されたミュータント集合と深さの中で
   観測された下界です。acceptance と forbidden の kill は、失敗した trace 宣言の
   明示的な requirement annotation を使います。AC/FB case ID は暗黙の requirement
-  ではなく、trace case ID は宣言種別ごとに一意です。→
+  ではなく、trace case ID は宣言種別ごとに一意です。`--oracle-attribution`
+  (opt-in) はミュータントごとの `killers` 配列と、oracle 表示名をキーにした
+  `by_obligation` の sole/shared 集計を追加します。既定出力は変わらず、これらの
+  カウントは観測された下界であり、完全性や正しさの尺度ではありません。→
   [`DESIGN-mutate.md`](DESIGN-mutate.md)
 - **`fslc explain --readable`** — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement

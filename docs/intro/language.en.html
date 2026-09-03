@@ -868,6 +868,8 @@ fslc fmt       &lt;path&gt;... --check                 # JSON format_check; exit
 fslc kernel    &lt;file.fsl&gt; [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance &lt;file.fsl&gt; [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    &lt;file.fsl|file.md&gt; [--depth K]     # BMC (default K=8, counterexample is shortest)
+fslc counterexample export &lt;file.fsl&gt; [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+                                               # slice 1: export a safety-invariant counterexample to reproducer.v1
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -891,6 +893,7 @@ fslc replay    &lt;file.fsl&gt; --trace &lt;events.json&gt;  # spec-action trace
 fslc replay    &lt;file.fsl&gt; --from-log &lt;events.jsonl&gt; --mapping &lt;mapping.fsl&gt;
                                                  # production log mapping + conformance (§12)
 fslc testgen   &lt;file.fsl&gt; [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
+fslc testplan  &lt;file.fsl&gt; [--depth K]             # closed test-plan.v1 vector selection (§12)
 fslc refine    &lt;impl&gt; &lt;abs&gt; &lt;mapping&gt; [--depth K]# fidelity check of a detailed spec (§10)
 fslc diff      &lt;old&gt; &lt;new&gt; [--depth K] [--mapping map.fsl]
                [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
@@ -898,7 +901,7 @@ fslc diff      &lt;old&gt; &lt;new&gt; [--depth K] [--mapping map.fsl]
 fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
                                                  # revision-consistent tree materialization; omit spec for all changed .fsl
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
-fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--max-mutants N]
+fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--oracle-attribution] [--max-mutants N]
                [--from mutants.jsonl]             # built-in + external spec mutation (§15)
 fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
@@ -1288,7 +1291,7 @@ a literate <code>.md</code> may <code>use</code>/compose <code>.fsl</code> files
 <p><code>check</code>, <code>verify</code>, and <code>scenarios</code> are the only commands that extract fences
 this way. Every other command that reads a spec path (<code>lint</code>, <code>migrate</code>,
 <code>fmt</code>, <code>kernel</code>, <code>conformance</code>, <code>explain</code>, <code>mutate</code>, <code>typestate</code>, <code>testgen</code>,
-<code>html</code>, <code>ledger</code>, <code>analyze</code>, <code>diff</code>, <code>refine</code>, <code>replay</code>, <code>sweep</code>, and
+<code>testplan</code>, <code>html</code>, <code>ledger</code>, <code>analyze</code>, <code>diff</code>, <code>refine</code>, <code>replay</code>, <code>sweep</code>, <code>counterexample export</code>, and
 <code>document generate</code>/<code>claims</code>/<code>check</code>) rejects a <code>.md</code> input as an input-kind
 error instead: <code>result: "error"</code>, <code>kind: "usage"</code>,
 <code>diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"</code>, a message naming the
@@ -1704,14 +1707,33 @@ implementation (see <code>DESIGN-bridge.md</code>).</p>
 <td>Check a real system's event-log JSON against the spec</td>
 </tr>
 <tr>
+<td><code>fslc counterexample export</code></td>
+<td>Export a bounded safety-invariant verifier counterexample to a closed <code>reproducer.v1</code> JSON artifact (slice 1 of #885; not <code>replay-trace</code> or <code>testgen-trace</code>)</td>
+</tr>
+<tr>
 <td><code>fslc testgen</code></td>
 <td>Generate a conformance-test scaffold — pytest (default), Vitest (<code>--target vitest</code>), Swift Testing (<code>--target swift</code>), kotlin.test (<code>--target kotlin</code>), Dart <code>package:test</code> (<code>--target dart</code>), or PHPUnit (<code>--target phpunit</code>) (wire the implementation into the Adapter)</td>
+</tr>
+<tr>
+<td><code>fslc testplan</code></td>
+<td>Select the bounded <code>conformance</code> vectors — the accepting ones <strong>and</strong> the <code>requires_failed</code> ones <code>testgen</code> never emitted — into a closed <code>test-plan.v1</code> JSON plan. Pass a spec at the implementation's layer granularity</td>
 </tr>
 </tbody>
 </table>
 <p>Recommended workflow: <strong><code>verify</code> / <code>prove</code> the spec → generate the scaffold with
 <code>testgen</code> → wire the implementation into the <code>Adapter</code> → run the tests</strong>. <code>Monitor</code>
 is used as an oracle in random-walk testing.</p>
+<p><strong>Layer selection:</strong> generate conformance tests from the spec at the <strong>same layer
+granularity as the implementation</strong> you are checking. From an <strong>upper</strong> layer you
+may reuse <strong><code>forbidden</code> (negative) scenarios only</strong> — forbidden traces remain
+sound under refinement, but upper-layer <strong>positive</strong> scenarios (<code>acceptance</code>,
+<code>cover</code>, random-walk witnesses) can falsely fail a legitimately refined
+implementation because refinement is forward simulation, not backward replay of
+every abstract positive trace. <strong>Example:</strong> <code>examples/refinement_chain/top.fsl</code>
+lets <code>finish</code> from initial <code>TOpen</code>; <code>mid.fsl</code> requires <code>MOpen → MReview</code> first —
+a <code>ChainTop</code> positive <code>finish</code> trace must not be used as a <code>ChainMid</code>
+implementation test. See <code>docs/DESIGN-layers.md</code> (refinement chain → design-layer
+testgen/replay; requirements <code>acceptance</code> → that layer's scenarios/testgen).</p>
 <p><code>testgen</code> separates a language-independent scenario-collection core (<code>scenarios</code>)
 from per-target emitters, so the same scenarios render to multiple harnesses. In
 the native implementation all six emitters consume one validated adapter built
@@ -1729,6 +1751,14 @@ recording that step would state that the action is a no-op -- an expectation no
 FSL contract makes. <code>testgen</code> instead reports the violation with the same
 <code>result:"violated"</code> envelope, exit code, property, step, and replayable trace
 <code>verify</code> reports, and writes no harness.</p>
+<p><code>fslc counterexample export</code> (reproducer slice 1) runs the same bounded
+verification as <code>verify</code>, but when the result is a <strong>safety invariant</strong>
+violation it also writes a closed <code>reproducer.v1</code> JSON file (<code>-o</code> required).
+The stdout envelope remains the violated <code>verify</code> result plus
+<code>reproducer.exported_to</code>; it is not a replay-trace or testgen-trace input.
+v1 rejects <code>leadsTo</code>, refinement documents, induction/CTI, nondeterministic
+<code>init</code>, and non-invariant violations with exit 2. Stage-2
+<code>testgen --reproducer</code> (slice 2) is not implemented yet.</p>
 <ul>
 <li><code>--target pytest</code> (default): emits Python tests that import <code>fslc.runtime.Monitor</code>
   and drive the random walk live as the oracle.</li>
@@ -1782,7 +1812,20 @@ fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # s
 fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self-contained kotlin.test scaffold
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
+fslc testplan specs/cart_v1.fsl --depth 4                     # closed test-plan.v1 JSON to stdout
 </code></pre>
+<p><code>fslc testplan</code> emits a closed <code>test-plan.v1</code> document
+(<code>schemas/fslc/kernel/test-plan.v1.schema.json</code>) built from the same checked
+model as the Kernel and <code>conformance</code> JSON, so a plan cannot pair vectors from
+two different snapshots. A plan is a <em>selection</em>, never a verdict: it always
+carries <code>formal_result: "not_run"</code>, <code>assurance_effect: "none"</code>, and a
+<code>do_not_assume</code> list recording that it is not proof of implementation
+correctness, not exhaustive beyond the declared depth and finite scope, that
+selection coverage is not completeness, and that it does not replace <code>verify</code>,
+induction, <code>replay</code>, or refinement. <code>layer_selection.requirement</code> repeats what
+the CLI help states: pass the spec at the same FSL layer granularity as the
+implementation you are checking; from an upper layer reuse forbidden
+(negative) scenarios only.</p>
 <p>External compilers emit the native replay contract as a closed versioned JSON
 object (<code>schemas/fslc/kernel/replay-trace.v1.schema.json</code>):</p>
 <pre><code class="language-json">{&quot;$schema&quot;:&quot;https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json&quot;,&quot;schema_version&quot;:&quot;1.2.0&quot;,&quot;kernel_schema_version&quot;:&quot;1.0.0&quot;,&quot;spec&quot;:&quot;ShoppingCart&quot;,&quot;initial&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}},&quot;events&quot;:[{&quot;tick&quot;:1,&quot;action&quot;:null,&quot;params&quot;:{},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}}},{&quot;tick&quot;:2,&quot;action&quot;:&quot;add_to_cart&quot;,&quot;params&quot;:{&quot;u&quot;:0,&quot;i&quot;:0},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:0},&quot;cart&quot;:{&quot;0&quot;:1}}}]}
@@ -2586,7 +2629,14 @@ declared <code>observed</code>/<code>drift</code> requirements over runtime tele
 (<code>observed_supported</code> / <code>observed_mismatch</code>); and <code>fslc ai compat</code> emits a
 finite <code>dbsystem artifact</code> capability profile for one <code>ai_component</code> or every
 <code>ai_component</code> a project declares, rejecting non-AI input and an AI project
-with no <code>ai_component</code> at all (exit 2). All of these use
+with no <code>ai_component</code> at all (exit 2). Before <code>fslc ai check</code>, <code>fslc ai
+compat</code>, or <code>fslc ai replay</code> may emit a success verdict, every <code>ai_component</code>
+in the input -- standalone or embedded in a project -- is checked for the same
+semantic constraints as <code>fslc verify</code> on a lone component: undeclared tools
+referenced in <code>authority</code>, and unknown <code>check hard { rule ... }</code> names (exit
+2, <code>kind:"semantics"</code>). <code>fslc ai replay</code> on a project file uses the same
+checked project parser as <code>fslc ai check</code>, so malformed project syntax cannot
+report <code>replay_conformant</code>. All of these use
 <code>formal_result:"not_run"</code>. A <code>require</code> clause matching none of the known
 evidence-clause grammars (<code>min_samples</code>, <code>ci_lower</code>, <code>ci_upper</code>, a point
 estimate, <code>observed</code>, <code>drift</code>) is a spec error (exit 2) at <code>check</code> time, in
@@ -2738,7 +2788,10 @@ DESIGN-*.md).</p>
   lower bounds within the chosen mutant set and depth. Acceptance and forbidden
   kills use explicit requirement annotations on the failed trace declaration;
   AC/FB case IDs are not implicit requirements. Trace case IDs are unique
-  within each declaration kind.
+  within each declaration kind. <code>--oracle-attribution</code> (opt-in) adds per-mutant
+  <code>killers</code> arrays and <code>by_obligation</code> sole/shared counts keyed by oracle display
+  names; default output is unchanged and these counts are observed lower bounds,
+  not completeness or correctness measures.
   → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
 - <strong><code>fslc explain --readable</code></strong> — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,

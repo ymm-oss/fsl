@@ -40,7 +40,9 @@ As needed: `fslc explain file.fsl --depth 8 --readable`
    regression in that delta is the signal; one absolute survivor count is not),
    `fslc scenarios` (integration-test skeleton JSON),
    `fslc testgen -o test_x.py`
-   (implementation-conformance pytest skeleton), `fslc replay --trace events.json`
+   (implementation-conformance pytest skeleton), `fslc counterexample export -o bug.reproducer.json`
+   (export a bounded safety-invariant counterexample to reproducer.v1; slice 1 of #885),
+   `fslc replay --trace events.json`
    (normalized spec-action log conformance), or `fslc replay --from-log
    events.jsonl --mapping log_mapping.fsl` (production action/state mapped through
    refinement syntax), `fslc refine impl.fsl abs.fsl mapping.fsl` (faithfulness check
@@ -98,13 +100,19 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
 fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
-fslc mutate <f> [--depth K=8] [--by-requirement] [--max-mutants N=200]
+fslc mutate <f> [--depth K=8] [--by-requirement] [--oracle-attribution] [--max-mutants N=200]
               [--from mutants.jsonl]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
+fslc counterexample export <f> [--depth K] [--engine bmc|explicit|auto] -o <reproducer.json>
+                                                # reproducer.v1 artifact from a safety-invariant violation
 fslc replay <f> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                 # production JSONL -> mapped action/state -> Monitor
 fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit)
+fslc testplan <f> [--depth K=4]                 # closed test-plan.v1 selection of conformance vectors
+                                                # (accepting + requires_failed); formal_result:"not_run",
+                                                # assurance_effect:"none"; pass a spec at the
+                                                # implementation's layer granularity
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
           [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
@@ -150,6 +158,7 @@ fslc db import <sql|schema.prisma> [--source auto|sql|prisma] [--name Name] [-o 
                                                         # SQL DDL / minimal Prisma -> dbsystem
 fslc ai check <f> [--depth K] [--engine bmc|induction]  # ai_component hard-contract findings
 fslc ai replay <f> --logs events.jsonl                  # AI runtime replay evidence, not proof
+                                                        # check/compat/replay fail closed on invalid ai_component (exit 2)
 fslc ai eval <f> [--records <path>] [--dataset <Name>] [--slice <Name>] [--property <Name>]
                                                         # Wilson-bound check over precomputed eval JSONL
 fslc ai regress <f> [--migration <Name>] --before-records <p> --after-records <p> [--dataset <Name>]
@@ -269,8 +278,8 @@ sections). Files without fsl fences are rejected; non-fsl fences
 (` ```python ` etc.) are ignored. A literate `.md` may `use`/compose `.fsl`
 files relative to its own directory; using another `.md` as a compose target
 is not supported. Every other spec-reading command (`lint`, `migrate`, `fmt`,
-`kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`, `html`,
-`ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`,
+`kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`, `testplan`, `html`,
+`ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, `counterexample export`,
 `document generate`/`claims`/`check`) rejects `.md` input as an input-kind
 error (`kind:"usage"`, `diagnostic_code:"FSL-INPUT-LITERATE-UNSUPPORTED"`,
 `loc` naming the input file, not a spec position) instead of handing it to
@@ -467,7 +476,10 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   and warns on zero kills as `empty_formalization` (a lower bound observed for
   this mutant set and depth). Trace attribution uses explicit requirement
   annotations; AC/FB case IDs are not implicit requirements and are unique
-  within each declaration kind.
+  within each declaration kind. `--oracle-attribution` (opt-in) adds per-mutant
+  `killers` arrays and `by_obligation` sole/shared counts keyed by oracle display
+  names; default output is unchanged and these counts are observed lower bounds,
+  not completeness or correctness measures.
   `--from` appends external JSONL mutants. Each line supplies either full
   `mutated_spec` source (`spec` alias accepted) or an exact
   `replace:{target,replacement,occurrence?}` instruction. Valid records use the

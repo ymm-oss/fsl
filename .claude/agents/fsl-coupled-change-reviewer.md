@@ -12,9 +12,11 @@ together. Inspect staged and unstaged changes; do not modify them.
 ## Coupling map
 
 1. Syntax or surface grammar in `rust/fsl-syntax` requires the corresponding lowering/model work,
-   regression cases, `docs/LANGUAGE.md`, `skills/fsl/references/`, an accepted `docs/DESIGN-*.md`, and
-   a new `changelog.d/<id>-<slug>.<category>.md` fragment (see `changelog.d/README.md`) -- not a direct
-   `CHANGELOG.md` edit, which is aggregated from fragments only at release time.
+   regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/references/`, an accepted
+   `docs/DESIGN-*.md`, and a new `changelog.d/<id>-<slug>.<category>.md` fragment (see
+   `changelog.d/README.md`) -- not a direct `CHANGELOG.md` edit, which is aggregated from fragments only
+   at release time. A new declaration, binder, or reference form additionally requires
+   `rust/fsl-lsp/src/index.rs` and a targeted role/scope test.
 2. Typed semantics in `rust/fsl-core` or symbolic behavior in `rust/fsl-verifier` requires matching
    `rust/fsl-runtime` behavior when concretely evaluable, plus agreement/false-negative evidence.
 3. Solver changes require the relevant backend tests and preservation of runtime solver independence.

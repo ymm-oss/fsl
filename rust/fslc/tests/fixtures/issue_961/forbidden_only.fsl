@@ -1,0 +1,19 @@
+requirements ForbiddenOnly {
+  state { x: Int }
+  init { x = 0 }
+
+  requirement REQ-1 "counter" {
+    action bump() {
+      requires x < 3
+      x = x + 1
+    }
+  }
+
+  forbidden FB-1 "cannot bump past cap" {
+    bump()
+    bump()
+    bump()
+    bump()
+    expect rejected
+  }
+}

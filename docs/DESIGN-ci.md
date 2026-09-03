@@ -12,6 +12,10 @@ short-latency fail-fast lane, plus `rust workspace` and `WASM`. Only the **cross
 `product gate` context; that matrix also runs on schedule, on manual dispatch, and before promotion
 to `production`.
 
+The regular cross-platform matrix deliberately uses one macOS architecture: the Apple Silicon
+`macos-15` runner. Add an Intel macOS lane only when an explicit platform-support requirement
+calls for it.
+
 This changes `main` from "every supported platform was green before merge" to "every change was
 fully tested on Linux before merge, and the remaining platforms are validated immediately after."
 A post-merge failure can therefore still expose a temporarily broken `main`, but only for a
@@ -1168,6 +1172,15 @@ project-block, grammar, and CLI registries coupled to their native or
 DESIGN-document counterparts, and keep the DESIGN-document index bidirectional.
 This is required pre-merge repository/compatibility evidence, not product
 evidence, and it does not add Python to `./tools/check-native-integration.sh`.
+
+The automation lane also runs `tools/check_ci_validator_inventory.py` and
+`tests/test_ci_validator_inventory.py`. The committed
+`.github/ci-validator-inventory.json` records every tracked `tests/test_*.py`
+module as `required` or explicitly `exempt`, and `check` fails closed when a
+new module appears without required-gate wiring or an `--exempt path:reason`
+classification. Wiring a module is the shortest path to `required`
+classification; inventory-only exempt rows cannot satisfy required-gate wiring.
+See `docs/DESIGN-ci-validator-inventory.md`.
 
 The privileged post-merge reporter receives `issues: write`, so its workflow
 also has a deliberately narrow parser-backed shape contract. It requires the

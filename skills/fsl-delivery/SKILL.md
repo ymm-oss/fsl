@@ -78,6 +78,12 @@ rules in this skill.
    - design refines requirements with an explicit mapping (`fslc refine`)
    - implementation conforms through generated tests or event-log replay
    - gate the whole chain at once with `fslc chain` when a manifest exists
+   - **testgen layer selection:** run `fslc testgen` on the spec at the **same
+     layer granularity as the implementation** (design `spec` for design-aligned
+     code). From upper layers, reuse **`forbidden` negatives only** — they stay
+     sound under refinement; upper **positive** scenarios can falsely fail a
+     sound refinement (see `../fsl/references/impl.md` §9 and
+     `examples/refinement_chain/{top,mid}.fsl`).
 6. Report proof categories separately. Never collapse "model is verified",
    "design refines requirements", and "implementation conforms" into one claim.
 

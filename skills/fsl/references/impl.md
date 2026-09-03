@@ -1,5 +1,37 @@
 ## 9. Implementation connection (the testgen Adapter contract)
 
+### Layer selection for conformance tests
+
+Generate implementation-conformance tests from the spec at the **same layer
+granularity as the implementation** you are checking. `fslc testgen` against a
+design-layer `spec` checks the design model; against a `requirements` spec it
+checks the requirements model — pick the layer that matches what the Adapter
+projects.
+
+From an **upper** layer you may reuse **`forbidden` (negative) scenarios only**.
+Forbidden traces are sound under refinement: if the upper model must reject a
+sequence, a faithful lower layer must reject it too. Do **not** reuse upper-layer
+**positive** scenarios (`acceptance`, `cover`, random-walk witnesses) as
+implementation tests for a lower-layer implementation. Refinement is forward
+simulation (`fslc refine` asks whether the implementation model can simulate the
+abstract one), not backward simulation of every abstract positive trace. A
+legitimately refined lower layer may add intermediate states or guards that make
+an upper-layer positive trace unrealizable without violating the refinement
+contract.
+
+**Example:** In `examples/refinement_chain/top.fsl`, `ChainTop` starts in `TOpen`
+with `finish` enabled immediately (`fair action finish` requires only
+`st[c] == TOpen`). In `examples/refinement_chain/mid.fsl`, `ChainMid` requires
+`MOpen → MReview` before `finish` (`finish` requires `st[c] == MReview`). Running
+`ChainTop`'s positive `finish` trace against a `ChainMid` implementation falsely
+fails a sound refinement — the implementation correctly requires the review step
+the abstract top layer omitted.
+
+This matches `docs/DESIGN-layers.md`: the refinement chain ends with
+implementation conforming to the **design** layer via testgen/replay (§1); the
+requirements layer's `acceptance` flows into scenarios/testgen for **that layer's**
+conformance anchor (§5), not as a substitute for design-layer positive tests.
+
 Wire the generated file's `Adapter` to the implementation:
 - `reset()`: bring the implementation to the same initial state as init
 - `step(action, params)`: execute one action (in composition, `"alias.action"` names

@@ -44,15 +44,18 @@ pub use compose::{
     FileResolver, FsResolver, lower_compose, parse_kernel_source, parse_kernel_source_with_file,
 };
 pub use diagnostics::{
-    VACUITY_KINDS, insert_requirement_metadata, is_vacuity_kind, model_warnings,
-    requirement_metadata, version_metadata,
+    ModelWarningContext, NO_USER_INVARIANTS_KIND, VACUITY_KINDS, finalize_envelope_model_warnings,
+    finalize_model_warnings, insert_requirement_metadata, is_no_user_invariants_warning,
+    is_vacuity_kind, model_warnings, requirement_metadata, suppresses_no_user_invariants_warning,
+    version_metadata,
 };
 pub use dialect::{
     AiToolSets, GovernanceContract, GovernanceDelegate, GovernancePreservation,
     RequirementsTraceCase, RequirementsTraceContract, RequirementsTraceExpectation,
     RequirementsTraceStep, ai_approval_invariant_name, ai_forbidden_invariant_name, ai_tool_sets,
     governance_contract, lower_ai_component, lower_business, lower_db, lower_domain,
-    lower_governance, lower_requirements, requirements_trace_contract,
+    lower_governance, lower_requirements, requirements_has_implements, requirements_trace_contract,
+    validate_ai_component,
 };
 pub use domain::{DomainDefault, domain_kernel_source, domain_type_default};
 pub use domain_lowering::{domain_effect_owns_event, event_flag, state_name};
@@ -72,8 +75,9 @@ pub use public_kernel::{
     KERNEL_V2_SCHEMA_ID, KERNEL_V2_SCHEMA_VERSION, PublicKernelError, PublicKernelVersion,
     REPLAY_TRACE_V1_INITIAL_SCHEMA_VERSION, REPLAY_TRACE_V1_SCHEMA_ID,
     REPLAY_TRACE_V1_SCHEMA_VERSION, REPLAY_TRACE_V1_STUTTER_SCHEMA_VERSION,
-    TESTGEN_TRACE_V1_SCHEMA_ID, TESTGEN_TRACE_V1_SCHEMA_VERSION, public_kernel_contract,
-    public_kernel_contract_for_version, public_kernel_expression,
+    REPRODUCER_V1_SCHEMA_ID, REPRODUCER_V1_SCHEMA_VERSION, TEST_PLAN_V1_SCHEMA_ID,
+    TEST_PLAN_V1_SCHEMA_VERSION, TESTGEN_TRACE_V1_SCHEMA_ID, TESTGEN_TRACE_V1_SCHEMA_VERSION,
+    public_kernel_contract, public_kernel_contract_for_version, public_kernel_expression,
 };
 pub use refinement::{
     ActionCorrespondence, ActionCorrespondenceTarget, ActionRef, ImplementsContract, ProgressMap,

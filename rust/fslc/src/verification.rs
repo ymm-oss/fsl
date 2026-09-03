@@ -1816,7 +1816,6 @@ struct PreparedCliVerification {
     is_agent_document: bool,
     model: Result<KernelModel, SpecLoadError>,
     initial_state: Option<std::collections::BTreeMap<String, FslValue>>,
-    has_trace_contract: bool,
     /// Compose-lowering warnings (e.g. `fair_not_inherited`), computed while
     /// lowering the surface document, before `build_model` drops the per-
     /// component information (like constituent `fair` markers) that produced
@@ -1940,11 +1939,10 @@ fn prepare_cli_verification_from_source(
     } else {
         None
     };
-    let mut has_trace_contract = false;
     if !has_scope && let Ok(model) = &snapshot_model {
         match validate_requirement_traces_from_source(path, source, model) {
             Ok((Some(failure), _)) => return Err((failure, 2)),
-            Ok((None, has_contract)) => has_trace_contract = has_contract,
+            Ok((None, _)) => {}
             Err(error) => return Err((semantic_error_output(&error), 2)),
         }
     }
@@ -1971,7 +1969,6 @@ fn prepare_cli_verification_from_source(
         is_agent_document,
         model: snapshot_model,
         initial_state,
-        has_trace_contract,
         compose_warnings,
     })
 }
@@ -2296,8 +2293,9 @@ fn execute_cli_verification(
     if !filtered {
         decorate_default_cli_verification(
             &mut output,
+            source,
+            model,
             implements,
-            prepared.has_trace_contract,
             &prepared.compose_warnings,
         );
     }
@@ -2306,26 +2304,23 @@ fn execute_cli_verification(
 
 fn decorate_default_cli_verification(
     output: &mut Value,
+    source: &str,
+    model: &KernelModel,
     implements: Option<Value>,
-    has_trace_contract: bool,
     compose_warnings: &[Value],
 ) {
-    let Value::Object(envelope) = output else {
-        return;
-    };
-    if envelope.get("result").and_then(Value::as_str) != Some("error")
+    if let Value::Object(envelope) = output
+        && envelope.get("result").and_then(Value::as_str) != Some("error")
         && let Some(implements) = implements
     {
         envelope.insert("implements".to_owned(), implements);
     }
-    if (envelope.contains_key("implements") || has_trace_contract)
-        && let Some(Value::Array(warnings)) = envelope.get_mut("warnings")
-    {
-        warnings.retain(|warning| {
-            warning.get("message").and_then(Value::as_str)
-                != Some("spec declares no user invariants (only implicit type bounds are checked)")
-        });
+    if let Ok(ctx) = fsl_core::ModelWarningContext::from_source(model, source) {
+        fsl_core::finalize_envelope_model_warnings(output, &ctx);
     }
+    let Value::Object(envelope) = output else {
+        return;
+    };
     if !compose_warnings.is_empty()
         && envelope.get("result").and_then(Value::as_str) != Some("error")
         && let Some(Value::Array(warnings)) = envelope.get_mut("warnings")

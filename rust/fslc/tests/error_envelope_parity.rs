@@ -62,9 +62,11 @@ const LITERATE_AI_PROJECT_FIXTURE: &str =
 const DOMAIN_REPLAY_LOG: &str = "rust/fslc/tests/fixtures/issue_518_clean.jsonl";
 const EMPTY_RECORDS: &str = "rust/fslc/tests/fixtures/error_envelope_empty_records.json";
 const DOCUMENT_ARTIFACT: &str = "rust/fslc/tests/fixtures/error_envelope_document.md";
+const COUNTEREXAMPLE_OUTPUT: &str = "rust/target/counterexample-export-parity.json";
 const REPLAY_TRACE: &str = "rust/fslc/tests/fixtures/replay_trace.valid.v1.json";
 const APPROVAL_RECORD_PLACEHOLDER: &str = "{approval-record}";
 const DOCUMENT_ARTIFACT_PLACEHOLDER: &str = "{document-artifact}";
+const COUNTEREXAMPLE_OUTPUT_PLACEHOLDER: &str = "{counterexample-output}";
 
 static APPROVAL_RECORD_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 
@@ -364,6 +366,23 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         not_applicable: &[],
     },
     CommandRegistration {
+        key: "counterexample export",
+        scope: ParityScope::SpecPath {
+            invoke: &[
+                "counterexample",
+                "export",
+                SPEC_PLACEHOLDER,
+                "--depth",
+                "4",
+                "-o",
+                COUNTEREXAMPLE_OUTPUT_PLACEHOLDER,
+            ],
+        },
+        literate: LiterateCoverage::UniformUnsupported,
+        coverage: PARSE_KERNEL_COVERAGE,
+        not_applicable: &[],
+    },
+    CommandRegistration {
         key: "db check",
         scope: ParityScope::SpecPath {
             invoke: &["db", "check", SPEC_PLACEHOLDER],
@@ -612,6 +631,15 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         key: "testgen",
         scope: ParityScope::SpecPath {
             invoke: &["testgen", SPEC_PLACEHOLDER],
+        },
+        literate: LiterateCoverage::UniformUnsupported,
+        coverage: PARSE_KERNEL_COVERAGE,
+        not_applicable: &[],
+    },
+    CommandRegistration {
+        key: "testplan",
+        scope: ParityScope::SpecPath {
+            invoke: &["testplan", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
         coverage: PARSE_KERNEL_COVERAGE,
@@ -883,6 +911,7 @@ const INPUT_SHAPE_POPULATIONS: &[CommandInputShapePopulation] = &[
     input_shape_population!("check", CHECK_INPUT_SHAPE_PROFILE),
     input_shape_population!("compat check", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("conformance", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("counterexample export", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("db check", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("db import", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("db observe", SOURCE_INPUT_SHAPE_PROFILE),
@@ -909,6 +938,7 @@ const INPUT_SHAPE_POPULATIONS: &[CommandInputShapePopulation] = &[
     input_shape_population!("scenarios", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("sweep", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("testgen", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("testplan", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("typestate", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("verify", VERIFY_INPUT_SHAPE_PROFILE),
     input_shape_population!("version", SOURCE_INPUT_SHAPE_PROFILE),
@@ -1031,26 +1061,8 @@ const CAUSAL_NAME_WITH_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectati
     message: MessageExpectation::OmitsInput,
     ..SEMANTIC_JSON
 });
-/// #800 tracks these product false negatives. They are pinned to detect drift,
-/// not to endorse accepting invalid component declarations.
-const AI_PROJECT_CHECK_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
-    result: ExpectedField::Exact("ai_project_analyzed"),
-    kind: ExpectedField::Absent,
-    location: LocationShape::Absent,
-    diagnostic: Diagnostic::None,
-    exit: 0,
-    dialect: ExpectedField::Exact("fsl-ai-project.v0"),
-    message: MessageExpectation::Absent,
-});
-const AI_COMPAT_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
-    result: ExpectedField::Exact("compat_profile_generated"),
-    kind: ExpectedField::Absent,
-    location: LocationShape::Absent,
-    diagnostic: Diagnostic::None,
-    exit: 0,
-    dialect: ExpectedField::Absent,
-    message: MessageExpectation::Absent,
-});
+/// #800 tracks these product false negatives for commands outside the
+/// `check`/`compat`/`replay` fix in this change.
 const AI_DRIFT_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
     result: ExpectedField::Exact("observed_supported"),
     kind: ExpectedField::Absent,
@@ -1070,15 +1082,6 @@ const AI_EVAL_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
     message: MessageExpectation::Absent,
 });
 const AI_REGRESS_FALSE_GREEN: Expectation = AI_EVAL_FALSE_GREEN;
-const AI_REPLAY_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
-    result: ExpectedField::Exact("replay_conformant"),
-    kind: ExpectedField::Absent,
-    location: LocationShape::Absent,
-    diagnostic: Diagnostic::None,
-    exit: 0,
-    dialect: ExpectedField::Exact("fsl-ai-hard.v0"),
-    message: MessageExpectation::Absent,
-});
 /// Unlike the similarly shaped #800 observations, these are valid project
 /// documents. #694 tracks the command-specific Markdown handling difference.
 const AI_DRIFT_LITERATE_PROJECT: Expectation = Expectation::Json(JsonExpectation {
@@ -1563,49 +1566,6 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
     ),
     pin!(
         shape: InputShape::Project;
-        FailureClass::Parse,
-        "ai replay",
-        PARSE_AI_PROJECT_FIXTURE,
-        AI_REPLAY_FALSE_GREEN,
-        "#800"
-    ),
-    // #800 tracks these product false negatives. They are not accepted
-    // behavior: the affected command/input-shape pairs report success
-    // without validating the malformed component declaration.
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Guard,
-        "ai compat",
-        AI_GUARD_FIXTURE,
-        AI_COMPAT_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Name,
-        "ai compat",
-        AI_NAME_FIXTURE,
-        AI_COMPAT_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Guard,
-        "ai compat",
-        AI_PROJECT_GUARD_FIXTURE,
-        AI_COMPAT_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Name,
-        "ai compat",
-        AI_PROJECT_NAME_FIXTURE,
-        AI_COMPAT_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
         FailureClass::Guard,
         "ai drift",
         AI_PROJECT_GUARD_FIXTURE,
@@ -1650,54 +1610,6 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
         "ai regress",
         AI_PROJECT_NAME_FIXTURE,
         AI_REGRESS_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Guard,
-        "ai replay",
-        AI_GUARD_FIXTURE,
-        AI_REPLAY_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Name,
-        "ai replay",
-        AI_NAME_FIXTURE,
-        AI_REPLAY_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Guard,
-        "ai replay",
-        AI_PROJECT_GUARD_FIXTURE,
-        AI_REPLAY_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Name,
-        "ai replay",
-        AI_PROJECT_NAME_FIXTURE,
-        AI_REPLAY_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Guard,
-        "ai check",
-        AI_PROJECT_GUARD_FIXTURE,
-        AI_PROJECT_CHECK_FALSE_GREEN,
-        "#800"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Name,
-        "ai check",
-        AI_PROJECT_NAME_FIXTURE,
-        AI_PROJECT_CHECK_FALSE_GREEN,
         "#800"
     ),
     pin!(
@@ -2409,6 +2321,8 @@ fn invoke(
                     .to_string()
             } else if *argument == DOCUMENT_ARTIFACT_PLACEHOLDER {
                 DOCUMENT_ARTIFACT.to_owned()
+            } else if *argument == COUNTEREXAMPLE_OUTPUT_PLACEHOLDER {
+                COUNTEREXAMPLE_OUTPUT.to_owned()
             } else {
                 (*argument).to_owned()
             }

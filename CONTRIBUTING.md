@@ -58,8 +58,9 @@ inventory and explicitly optional Python surfaces.
 ## Guidelines for changes
 
 - **Language or semantics:** update Rust syntax/lowering, typed model, symbolic and concrete evaluation,
-  regression cases, `docs/LANGUAGE.md`, `skills/fsl/references/`, an accepted design note, and a new
-  `changelog.d/` fragment (see `changelog.d/README.md`) together. A new dialect's top-level construct,
+  regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/references/`, an accepted
+  design note, and a new `changelog.d/` fragment (see `changelog.d/README.md`) together. A new dialect's
+  top-level construct,
   and any new `examples/`/`specs/`
   directory it lands in, must also be registered in `tests/dialect_registry.py` (`DIALECTS`,
   `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS` with a reason) — the conformance harness
@@ -67,6 +68,8 @@ inventory and explicitly optional Python surfaces.
   to fail loudly on an unregistered construct instead of silently skipping it. That harness is a
   manual/reference check that no CI lane currently invokes (see the design doc's "Cost and CI
   wiring") — register the construct regardless of that gap.
+- **A new declaration, binder, or reference form:** also update `rust/fsl-lsp/src/index.rs` and a
+  targeted role/scope test.
 - **Public Kernel contract:** update schemas, Rust exporter/consumer paths, conformance vectors,
   agreement tests, `docs/DESIGN-kernel-contract.md`, language/reference docs, and a new
   `changelog.d/` fragment (see `changelog.d/README.md`) rather than editing `CHANGELOG.md` directly.
