@@ -111,6 +111,19 @@ inventory, and promotion changes run the `scheduled` tier.
   variant to executable native semantics with accepting/rejecting controls, or to an explicit
   fail-closed diagnostic. Prefer a total lowering expression whose arms all return the same semantic
   output type; an empty unit arm must not compile as a valid implementation.
+- A placement matrix or state-shape whitelist does not establish that existing accepted forms are
+  preserved. A change that rewrites a type-boundary gate must `check`, with binaries built from the
+  named base SHA and from head, every `.fsl` under `specs/`, `examples/`, and
+  `rust/fslc/tests/fixtures/` in the materialized tree of each SHA (so `use ... from` imports
+  resolve against that SHA's own siblings), plus the inline fixtures of every required test the
+  change rewrites, renames, removes, or stops from running. Record every `ok`→`error` transition as a
+  breaking removal in the design note, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`,
+  `skills/fsl/references/syntax.md`, and a `changed` fragment; an empty transition set is stated with
+  the command, both SHAs, and the form count, never assumed. Breaking this rule fails no gate:
+  `rust/fslc/tests/corpus_check_sweep.rs` reports only a `specs/` or `examples/` form that stops
+  checking, and a fixture-pinned acceptance surfaces only as the required test the change itself
+  rewrites (`docs/DESIGN-nested-option-support.md`, "Amendment (#925): matrix rows that change an
+  existing verdict").
 - Do not weaken or hollow out `.fsl` specs to make checks pass. Verify mutation/vacuity evidence.
 - Every formal-to-implementation conformance anchor must include a negative control that rejects a
   known contract-violating trace, transition, or mutation. A green positive path alone does not
