@@ -3,86 +3,43 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>FSL 日本語マニュアル — 概念・使い方・業務層・要件層・fsl-domain・fsl-db・fsl-ai・文法</title>
-<meta name="description" content="FSLの日本語マニュアル。形式手法の概念、使い方、検証の仕組み、業務層、要件層、fsl-domain、fsl-db、fsl-ai、文法・構文を目的別に読めます。" />
+<title>FSL — 機械で確かめる形式仕様言語</title>
+<meta name="description" content="FSLは形式仕様言語です。業務・要件・設計・実装の四段階が一つの証拠連鎖をなし、各段で検証し、有界な信頼を積み上げます。" />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
-<body class="manual-home" data-page="index">
+<body class="site-home" data-page="index">
 <div class="progress"></div>
-
 <header class="topbar" data-nav></header>
-
 <main>
-
-<section class="hero">
-  <div class="wrap narrow center">
-    <p class="kicker reveal">FSL Manual</p>
-    <h1 class="reveal">FSL 日本語マニュアル</h1>
-    <p class="lead reveal">仕様を機械で確かめるために、FSL の考え方、使い方、業務層、要件層、設計層、fsl-domain、fsl-db、fsl-ai、文法を順に読める入口です。</p>
-    <p class="reveal" style="margin-top:12px">FSL では<b>書いた仕様そのものがドキュメント</b>になります。人が読む説明と機械が検証する対象が同じ1つのテキストなので、両者がズレることはありません。</p>
-    <div class="pill-row reveal" style="justify-content:center;margin-top:24px">
-      <span class="pill">概念</span>
-      <span class="pill">使いどころ</span>
-      <span class="pill">検証の仕組み</span>
-      <span class="pill">業務層</span>
-      <span class="pill">要件層</span>
-      <span class="pill">設計層</span>
-      <span class="pill">文法</span>
-      <span class="pill">構造分析</span>
-      <span class="pill">fsl-domain</span>
-      <span class="pill">fsl-db</span>
-      <span class="pill">fsl-ai</span>
-    </div>
+<section class="landing-atf" aria-labelledby="landing-heading">
+  <div class="landing-atf-bg" aria-hidden="true"></div>
+  <div class="wrap landing-atf-inner">
+    <header class="landing-head">
+      <p class="landing-eyebrow reveal">Formal Specification Language</p>
+      <h1 id="landing-heading" class="reveal"><span class="landing-accent">FSL</span>で、仕様を証拠として積み上げる</h1>
+      <p class="landing-lead reveal">FSLは AI 時代の形式仕様言語です。<b>書いた仕様そのものがドキュメント</b>になり、人が読む説明とネイティブ Rust <code>fslc</code> が検証する対象が同じ1つのテキストです。</p>
+    </header>
+    <div id="home-backbone" class="home-backbone reveal"></div>
+    <footer class="landing-foot">
+      <div class="landing-actions reveal">
+        <a class="btn lp-primary" href="quickstart.ja.html">クイックスタート</a>
+        <a class="btn lp-secondary" href="examples.ja.html#correctness-chain">正しさの連鎖をたどる</a>
+      </div>
+      <p class="landing-meta reveal"><a href="language.ja.html">言語リファレンス</a> · <a href="cli.ja.html">CLI</a> · <a href="concept.ja.html">概念</a></p>
+      <p class="landing-limit reveal">各証拠には限界があります。FSL はその限界を明示し、次の観測や反例で信頼を更新し続けることを前提にしています。権威ある検証器はネイティブ Rust の <code>fslc</code>（<code>rust/fslc</code>）です。<code>src/fslc/</code> の凍結 Python パッケージは互換性参照のみです。</p>
+    </footer>
   </div>
 </section>
-
-<section>
+<section class="docs-compact" id="manual">
   <div class="wrap">
-    <p class="kicker reveal">4つの入り口</p>
-    <h2 class="reveal">カテゴリからブラウズする</h2>
-    <p class="lead narrow reveal">章は「はじめる」「ガイド」「リファレンス」「実例と背景」の4カテゴリに分かれています。各カテゴリのページ一覧は、以下のカードから開けます。</p>
-    <div id="index-categories" class="cards reveal" style="margin-top:24px"></div>
+    <p class="docs-compact-label reveal">ドキュメント</p>
+    <h2 class="reveal">マニュアルをブラウズする</h2>
+    <p class="docs-compact-lead reveal">はじめる・ガイド・リファレンス・実例の4カテゴリから、目的に合った章へ進めます。</p>
+    <div id="index-categories" class="cards reveal"></div>
   </div>
 </section>
-
-<section style="background:var(--surface-2)">
-  <div class="wrap">
-    <p class="kicker reveal">最初の一歩</p>
-    <h2 class="reveal">一つだけ選ぶなら</h2>
-    <div class="syntax-grid reveal">
-      <div class="syntax-card">
-        <h3>形式手法を知らない</h3>
-        <p>テストとの違い、反例、AI時代に仕様を機械で確かめる意味から読みます。</p>
-        <p><a class="btn" href="concept.ja.html">概念を読む</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>とにかく動かしてみたい</h3>
-        <p>インストールから、反例を読み、直し、証明するところまでを5分で一本道に進みます。</p>
-        <p><a class="btn" href="quickstart.ja.html">クイックスタートを読む</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>特定の構文・コマンドを引きたい</h3>
-        <p><code>LANGUAGE.md</code>・<code>cli.py</code>から生成される、検索用途の網羅リファレンス。</p>
-        <p><a class="btn" href="language.ja.html">言語リファレンス</a> <a class="btn" href="cli.ja.html">CLIリファレンス</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>大きな実例を見たい</h3>
-        <p>3層を貫く旗艦例から、ダイアレクト別の実例まで、<code>examples/</code>の案内図。</p>
-        <p><a class="btn" href="examples.ja.html">実例ギャラリーを読む</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>正しさの連鎖をたどる</h3>
-        <p>経費精算の方針からFSLの層、実装観測、そして各証拠の限界までを一本で追います。</p>
-        <p><a class="btn" href="examples.ja.html#correctness-chain">正しさの連鎖を見る</a></p>
-      </div>
-    </div>
-  </div>
-</section>
-
 </main>
-
 <footer data-nav></footer>
-
 <script src="assets/site.js"></script>
 </body>
 </html>

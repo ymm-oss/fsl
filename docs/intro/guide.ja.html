@@ -30,8 +30,23 @@
 
 <hr class="soft" />
 
+<section data-journey="guide-map">
+  <div class="wrap">
+    <p class="kicker reveal">検証ジャーニー</p>
+    <h2 class="reveal">4段階 — それぞれ確立することは異なる</h2>
+    <p class="lead narrow reveal">ネイティブ <code>fslc</code> は各段階で JSON と終了コードを返します。どれか一つが「永遠に完全正しい」ことを意味しません — <code>result</code>、<code>completeness</code>、コマンドをセットで読んでください。</p>
+    <table class="matrix reveal">
+      <tr><th>段階</th><th>典型コマンド</th><th>確立すること</th><th>確立しないこと</th></tr>
+      <tr data-journey="bounded-verify"><td>有界検証</td><td><code>fslc verify --depth K</code></td><td>深さ <em>K</em> まで反例なし（<code>verified</code>, <code>completeness:"bounded"</code>）</td><td>全深さの安全性や、別途書いていない応答性</td></tr>
+      <tr data-journey="proof-induction"><td>証明 / 帰納</td><td><code>fslc verify --engine induction</code></td><td>名前付き不変条件の無制限成立（<code>proved</code>）</td><td>書いていない性質；CTI は補助補題の手がかりであり必ずしも到達バグではない</td></tr>
+      <tr data-journey="refinement"><td>詳細化</td><td><code>fslc refine</code>, <code>fslc chain</code></td><td>下位層が上位意図を保つ（<code>refines</code>）</td><td>未検査マッピングや実装全体の正しさ</td></tr>
+      <tr data-journey="implementation-observe"><td>実装観測</td><td><code>fslc testgen</code>, <code>fslc replay</code>, <code>scenarios</code></td><td>観測トレースが仕様オラクルと一致（<code>conformant</code> 等）</td><td>将来の全ランタイム経路 — 実行された証拠のみ</td></tr>
+    </table>
+  </div>
+</section>
+
 <!-- 1. 2段構え -->
-<section>
+<section data-journey="bounded-verify proof-induction">
   <div class="wrap">
     <p class="kicker reveal">検証エンジン</p>
     <h2 class="reveal">検証は2段構え：まず「総当たり」、次に「証明」</h2>
@@ -55,6 +70,11 @@
       <pre><code>$ fslc verify order_fixed.fsl --depth 8
 <span class="s">{ "result": "verified", "spec": "OrderWorkflow" }</span>   <span class="c">// 深さ8まで反例なし</span></code></pre>
       <p class="reveal" style="margin:18px 0 0">深さ8まで反例なし。<b>でも「どんなに深くても安全」と言い切れる？</b> そこで帰納法の出番です。</p>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <h3>どこで動くか（ネイティブ Rust チェーン）</h3>
+      <p style="margin:0">表面構文は <code>fsl-syntax</code> が解析し、<code>fsl-core</code> が型付きカーネルへ下げ、ソルバー非依存の <code>fsl-runtime</code> Monitor/BFS と <code>fsl-verifier</code> による記号検証（<code>fsl-solver</code> 境界経由のネイティブ Z3 またはブラウザ Worker）が同じ意味論を検査します。ネイティブ CLI と <code>fsl-wasm</code> Worker は同じ JSON/終了コード/replay 契約を公開し、<code>fsl-lsp</code> がエディタ索引を提供します。有界の <code>verified</code> は無限証明ではありません——無制限の保証には帰納法または explicit 閉包が必要です。</p>
     </div>
   </div>
 </section>
@@ -97,7 +117,7 @@
 </section>
 
 <!-- 3. 方言と refinement -->
-<section>
+<section data-journey="refinement">
   <div class="wrap narrow">
     <p class="kicker reveal">縦のつながり</p>
     <h2 class="reveal">3つの書き方を詳細化チェックでつなぐ</h2>
@@ -117,7 +137,7 @@
 </section>
 
 <!-- 4. コマンド早見 -->
-<section style="background:var(--surface-2)">
+<section style="background:var(--surface-2)" data-journey="implementation-observe">
   <div class="wrap">
     <p class="kicker reveal">道具箱</p>
     <h2 class="reveal"><code>fslc</code> コマンド早見</h2>

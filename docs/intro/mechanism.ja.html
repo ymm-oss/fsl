@@ -33,6 +33,14 @@
   </div>
 </section>
 
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">実装スタック</p>
+    <h2 class="reveal">パーサから証明まで — ネイティブ Rust チェーン</h2>
+    <p class="lead narrow reveal">FSL 検証は単一のブラックボックスではありません。権威ある経路はネイティブ Rust ワークスペースです。<code>fsl-syntax</code> が表面構文を解析し、<code>fsl-core</code> が型付きカーネルを構築・下げ、<code>fsl-runtime</code> がソルバー非依存の Monitor と明示状態 BFS を実行し、<code>fsl-verifier</code> が <code>fsl-solver</code> 境界（ネイティブ Z3 またはブラウザ Worker）越しに記号 BMC/帰納法を駆動します。ネイティブ CLI と <code>fsl-wasm</code> Worker は同じ JSON/終了コード/replay エンベロープを公開し、<code>fsl-lsp</code> が仕様をエディタ索引します。有界の <code>verified</code> と <code>proved</code> は異なる保証クラスです——以下の節で各結果が何を確立し、何を確立しないかを説明します。</p>
+  </div>
+</section>
+
 <section>
   <div class="wrap">
     <p class="kicker reveal">学習マップ</p>

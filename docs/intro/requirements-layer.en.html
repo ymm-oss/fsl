@@ -211,9 +211,15 @@ requirement NFR-1 "respond within 3 ticks after acceptance" {
       </div>
       <div class="syntax-card">
         <h3>Verification</h3>
-        <pre><code>$ fslc verify requirements.fsl --depth 8</code></pre>
-        <p>The JSON includes both requirements verification and the business refinement result.</p>
+        <pre><code>$ fslc verify requirements.fsl --depth 8
+# assert JSON implements.result == "refines"
+# (a failed seam can still exit 0 — check the field)</code></pre>
+        <p>The JSON includes both requirements verification and the business refinement result under <code>implements</code>.</p>
       </div>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>Seam exit-code caveat:</b> unlike <code>violated</code> or <code>refinement_failed</code>, a broken <code>implements</code> link may still return exit code 0. Always assert <code>implements.result == "refines"</code> in CI — see the <a href="examples.en.html#correctness-chain">e2e chain</a> for a full walkthrough.</p>
     </div>
   </div>
 </section>

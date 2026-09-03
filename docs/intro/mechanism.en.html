@@ -33,6 +33,14 @@
   </div>
 </section>
 
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <p class="kicker reveal">Implementation stack</p>
+    <h2 class="reveal">From parser to proof — the native Rust chain</h2>
+    <p class="lead narrow reveal">FSL verification is not a single black box. The authoritative path is the native Rust workspace: <code>fsl-syntax</code> parses surface text, <code>fsl-core</code> builds and lowers the typed kernel, <code>fsl-runtime</code> runs the solver-free Monitor and explicit-state BFS, and <code>fsl-verifier</code> drives symbolic BMC/induction through the <code>fsl-solver</code> boundary (native Z3 or the browser Worker). The native CLI and <code>fsl-wasm</code> Worker publish the same JSON/exit/replay envelope; <code>fsl-lsp</code> indexes specs for editor navigation. Bounded <code>verified</code> and <code>proved</code> are different assurance classes — the sections below spell out what each result does and does not establish.</p>
+  </div>
+</section>
+
 <section>
   <div class="wrap">
     <p class="kicker reveal">Map</p>

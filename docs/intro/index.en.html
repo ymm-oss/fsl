@@ -3,86 +3,43 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>FSL Manual — Concepts, Workflow, Business Layer, Requirements Layer, fsl-domain, fsl-db, fsl-ai, Syntax</title>
-<meta name="description" content="The English FSL manual. Read the concept, when to use FSL, workflow, verification mechanisms, business layer, requirements layer, fsl-domain, fsl-db, fsl-ai, and syntax guide." />
+<title>FSL — Machine-checkable formal specifications</title>
+<meta name="description" content="FSL is a formal specification language. Business, requirements, design, and implementation form one evidence-backed backbone — verification at every stage, bounded confidence, no certainty claims." />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
-<body class="manual-home" data-page="index">
+<body class="site-home" data-page="index">
 <div class="progress"></div>
-
 <header class="topbar" data-nav></header>
-
 <main>
-
-<section class="hero">
-  <div class="wrap narrow center">
-    <p class="kicker reveal">FSL Manual</p>
-    <h1 class="reveal">FSL Manual</h1>
-    <p class="lead reveal">A practical manual for machine-checked specifications, from concepts and workflow to business, requirements, design, fsl-domain, fsl-db, fsl-ai, and syntax.</p>
-    <p class="reveal" style="margin-top:12px">In FSL, <b>the spec you write is the documentation</b> — the same text people read is the text the machine verifies, so the two can never drift apart.</p>
-    <div class="pill-row reveal" style="justify-content:center;margin-top:24px">
-      <span class="pill">Concept</span>
-      <span class="pill">When to use</span>
-      <span class="pill">Verification</span>
-      <span class="pill">Business Layer</span>
-      <span class="pill">Requirements Layer</span>
-      <span class="pill">Design Layer</span>
-      <span class="pill">Syntax</span>
-      <span class="pill">Analyze</span>
-      <span class="pill">fsl-domain</span>
-      <span class="pill">fsl-db</span>
-      <span class="pill">fsl-ai</span>
-    </div>
+<section class="landing-atf" aria-labelledby="landing-heading">
+  <div class="landing-atf-bg" aria-hidden="true"></div>
+  <div class="wrap landing-atf-inner">
+    <header class="landing-head">
+      <p class="landing-eyebrow reveal">Formal Specification Language</p>
+      <h1 id="landing-heading" class="reveal">Build <span class="landing-accent">confidence</span> in correctness</h1>
+      <p class="landing-lead reveal">FSL is a formal specification language for the AI era. <b>The spec you write is the documentation</b> — the same text people read is what the native Rust <code>fslc</code> verifies.</p>
+    </header>
+    <div id="home-backbone" class="home-backbone reveal"></div>
+    <footer class="landing-foot">
+      <div class="landing-actions reveal">
+        <a class="btn lp-primary" href="quickstart.en.html">Quickstart</a>
+        <a class="btn lp-secondary" href="examples.en.html#correctness-chain">Follow the correctness chain</a>
+      </div>
+      <p class="landing-meta reveal"><a href="language.en.html">Language reference</a> · <a href="cli.en.html">CLI</a> · <a href="concept.en.html">Concept</a></p>
+      <p class="landing-limit reveal">Each piece of evidence has limits. FSL makes those limits explicit so you can update confidence with the next observation or counterexample. The authoritative verifier is the native Rust <code>fslc</code> (<code>rust/fslc</code>); the frozen Python package under <code>src/fslc/</code> is compatibility-only.</p>
+    </footer>
   </div>
 </section>
-
-<section>
+<section class="docs-compact" id="manual">
   <div class="wrap">
-    <p class="kicker reveal">4 Entry Points</p>
-    <h2 class="reveal">Browse by category</h2>
-    <p class="lead narrow reveal">Chapters are grouped into 4 categories: Get Started, Guides, Reference, and Examples &amp; Background. Each card below opens that category's full chapter list.</p>
-    <div id="index-categories" class="cards reveal" style="margin-top:24px"></div>
+    <p class="docs-compact-label reveal">Documentation</p>
+    <h2 class="reveal">Browse the manual</h2>
+    <p class="docs-compact-lead reveal">Four categories — Get Started, Guides, Reference, and Examples.</p>
+    <div id="index-categories" class="cards reveal"></div>
   </div>
 </section>
-
-<section style="background:var(--surface-2)">
-  <div class="wrap">
-    <p class="kicker reveal">First Step</p>
-    <h2 class="reveal">If you only pick one</h2>
-    <div class="syntax-grid reveal">
-      <div class="syntax-card">
-        <h3>New to formal methods</h3>
-        <p>Start with why machine-checked specs matter and how counterexamples differ from ordinary tests.</p>
-        <p><a class="btn" href="concept.en.html">Read Concept</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>Just want to run something</h3>
-        <p>Install, then go straight to reading, fixing, and proving a counterexample in 5 minutes.</p>
-        <p><a class="btn" href="quickstart.en.html">Read Quickstart</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>Need to look up a command or construct</h3>
-        <p>The exhaustive, lookup-oriented references generated from <code>LANGUAGE.md</code> and <code>cli.py</code>.</p>
-        <p><a class="btn" href="language.en.html">Language Reference</a> <a class="btn" href="cli.en.html">CLI Reference</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>Want a bigger worked example</h3>
-        <p>From the flagship cross-layer example to per-dialect examples — a map of <code>examples/</code>.</p>
-        <p><a class="btn" href="examples.en.html">Read Example Gallery</a></p>
-      </div>
-      <div class="syntax-card">
-        <h3>Follow one correctness chain</h3>
-        <p>Trace an expense policy through FSL layers, implementation observations, and their evidence limits.</p>
-        <p><a class="btn" href="examples.en.html#correctness-chain">Follow the correctness chain</a></p>
-      </div>
-    </div>
-  </div>
-</section>
-
 </main>
-
 <footer data-nav></footer>
-
 <script src="assets/site.js"></script>
 </body>
 </html>

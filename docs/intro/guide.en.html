@@ -30,8 +30,23 @@
 
 <hr class="soft" />
 
+<section data-journey="guide-map">
+  <div class="wrap">
+    <p class="kicker reveal">Verification journey</p>
+    <h2 class="reveal">Four stages — each establishes something different</h2>
+    <p class="lead narrow reveal">Native <code>fslc</code> returns JSON and an exit code for every stage. None of these alone is “fully correct forever”; read <code>result</code>, <code>completeness</code>, and the command that produced the envelope together.</p>
+    <table class="matrix reveal">
+      <tr><th>Stage</th><th>Typical command</th><th>Establishes</th><th>Does not establish</th></tr>
+      <tr data-journey="bounded-verify"><td>Bounded verification</td><td><code>fslc verify --depth K</code></td><td>No counterexample to depth <em>K</em> (<code>verified</code>, <code>completeness:"bounded"</code>)</td><td>Safety at all depths or liveness unless separately checked</td></tr>
+      <tr data-journey="proof-induction"><td>Proof / induction</td><td><code>fslc verify --engine induction</code></td><td>Named invariants hold unboundedly (<code>proved</code>) when induction closes</td><td>Properties you did not write; CTI means lemma work, not necessarily a reachable bug</td></tr>
+      <tr data-journey="refinement"><td>Refinement</td><td><code>fslc refine</code>, <code>fslc chain</code></td><td>Lower layer behavior maps to upper intent (<code>refines</code>)</td><td>Full implementation correctness or unchecked mappings</td></tr>
+      <tr data-journey="implementation-observe"><td>Implementation observation</td><td><code>fslc testgen</code>, <code>fslc replay</code>, <code>scenarios</code></td><td>Observed traces match the spec oracle (<code>conformant</code>, generated harnesses)</td><td>All possible runtime paths — only the exercised adapter/log evidence</td></tr>
+    </table>
+  </div>
+</section>
+
 <!-- 1. Two stages -->
-<section>
+<section data-journey="bounded-verify proof-induction">
   <div class="wrap">
     <p class="kicker reveal">Verification engines</p>
     <h2 class="reveal">Two stages: brute force first, then proof</h2>
@@ -55,6 +70,11 @@
       <pre><code>$ fslc verify order_fixed.fsl --depth 8
 <span class="s">{ "result": "verified", "spec": "OrderWorkflow" }</span>   <span class="c">// no counterexample up to depth 8</span></code></pre>
       <p class="reveal" style="margin:18px 0 0">No counterexample to depth 8. <b>But can you claim it's safe at any depth?</b> That's where induction comes in.</p>
+    </div>
+
+    <div class="callout reveal" style="margin-top:24px">
+      <h3>Where this runs (native Rust chain)</h3>
+      <p style="margin:0">Surface syntax is parsed in <code>fsl-syntax</code>, lowered to the typed kernel in <code>fsl-core</code>, then checked concretely by the solver-free <code>fsl-runtime</code> Monitor/BFS and symbolically by <code>fsl-verifier</code> through the <code>fsl-solver</code> boundary (native Z3 or the browser Worker). The native CLI and <code>fsl-wasm</code> Worker expose the same JSON/exit/replay contract; <code>fsl-lsp</code> indexes documents for editor tooling. Bounded <code>verified</code> is not infinite proof — induction or explicit closure is required for unbounded assurance.</p>
     </div>
   </div>
 </section>
@@ -97,7 +117,7 @@
 </section>
 
 <!-- 3. Dialects & refinement -->
-<section>
+<section data-journey="refinement">
   <div class="wrap narrow">
     <p class="kicker reveal">The vertical thread</p>
     <h2 class="reveal">Three dialects, joined by refinement</h2>
@@ -117,7 +137,7 @@
 </section>
 
 <!-- 4. Cheat sheet -->
-<section style="background:var(--surface-2)">
+<section style="background:var(--surface-2)" data-journey="implementation-observe">
   <div class="wrap">
     <p class="kicker reveal">The toolbox</p>
     <h2 class="reveal"><code>fslc</code> command cheat sheet</h2>

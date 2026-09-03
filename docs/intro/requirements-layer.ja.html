@@ -239,9 +239,15 @@ verify {
       </div>
       <div class="syntax-card">
         <h3>検証時の見え方</h3>
-        <pre><code>$ fslc verify requirements.fsl --depth 8</code></pre>
-        <p>要件自身の検証に加えて、業務層への詳細化チェック結果がJSONに含まれます。</p>
+        <pre><code>$ fslc verify requirements.fsl --depth 8
+# JSON の implements.result == "refines" を確認
+# （seam 失敗でも exit 0 のことがある）</code></pre>
+        <p>要件自身の検証に加えて、業務層への詳細化結果が <code>implements</code> に含まれます。</p>
       </div>
+    </div>
+
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>seam の終了コード注意:</b> <code>violated</code> や <code>refinement_failed</code> と違い、壊れた <code>implements</code> リンクでも exit 0 になり得ます。CI では必ず <code>implements.result == "refines"</code> を確認してください — 全体の流れは <a href="examples.ja.html#correctness-chain">e2e 連鎖</a> を参照。</p>
     </div>
   </div>
 </section>

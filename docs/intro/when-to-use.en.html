@@ -81,17 +81,17 @@
     <div class="layers reveal" style="margin-top:24px">
       <div class="layer">
         <h3>① Is there a state machine?</h3>
-        <p>Can you draw boxes (states) and arrows (operations)?<br><b style="color:var(--danger)">No → static display, pure decoration, free-text content. Out of scope — there's nothing here to verify or to write a spec about.</b></p>
+        <p>Can you draw boxes (states) and arrows (operations)?<br><b style="color:var(--danger-text)">No → static display, pure decoration, free-text content. Out of scope — there's nothing here to verify or to write a spec about.</b></p>
       </div>
       <div class="arrow-down">↓ Yes</div>
       <div class="layer">
         <h3>② Can interaction reach a "bad" state?</h3>
-        <p>Do order, flags, permissions, async, or retry combine to slip into a state that must never happen?<br><b style="color:var(--warn)">No → verification payoff is low, but write it anyway as a thin spec if it's something you'd document — that's the default. Skip FSL only where you'd write no doc and run no check at all.</b></p>
+        <p>Do order, flags, permissions, async, or retry combine to slip into a state that must never happen?<br><b style="color:var(--warn-text)">No → verification payoff is low, but write it anyway as a thin spec if it's something you'd document — that's the default. Skip FSL only where you'd write no doc and run no check at all.</b></p>
       </div>
       <div class="arrow-down">↓ Yes</div>
       <div class="layer">
         <h3>③ Is it expressible as finite &amp; discrete?</h3>
-        <p>Are real-time values, probability, continuous quantities, or free text <em>not</em> the core?<br><b style="color:var(--danger)">No → the core of the model won't fit. Out of scope (table below).</b></p>
+        <p>Are real-time values, probability, continuous quantities, or free text <em>not</em> the core?<br><b style="color:var(--danger-text)">No → the core of the model won't fit. Out of scope (table below).</b></p>
       </div>
       <div class="arrow-down">↓ Yes</div>
       <div class="layer" style="border-left-color:var(--ok)">
@@ -116,7 +116,7 @@
     <p class="lead narrow reveal">The crucial split: <b>"thin verification payoff, but still your documentation"</b> versus <b>"not expressible at all (out of scope)."</b> Don't conflate them — thin is a reason to keep the spec small, never a reason to skip writing it if you'd document the thing anyway.</p>
     <div class="syntax-grid reveal">
       <div class="syntax-card">
-        <h3 style="color:var(--ok)">✅ High-yield</h3>
+        <h3 style="color:var(--ok-text)">✅ High-yield</h3>
         <ul>
           <li>Payments, refunds, billing</li>
           <li>Applications, approvals, send-backs</li>
@@ -129,7 +129,7 @@
         </ul>
       </div>
       <div class="syntax-card">
-        <h3 style="color:var(--warn)">△ Thin verification payoff — write it anyway</h3>
+        <h3 style="color:var(--warn-text)">△ Thin verification payoff — write it anyway</h3>
         <ul>
           <li>Static-display-only screens</li>
           <li>Simple CRUD</li>
@@ -139,7 +139,7 @@
         <p style="margin-top:10px">These rarely hide a loophole worth verifying — but if you'd write a design or requirements note for them anyway, write a thin FSL spec instead: same cost, and now it's checked. Reach for tests alone only where you'd neither document nor verify this at all.<br><span class="dim">And if it's part of <b>alignment with an upper layer</b> (payoff ②), it's worth writing even when thin on its own.</span></p>
       </div>
       <div class="syntax-card">
-        <h3 style="color:var(--danger)">⛔ Out of scope (not expressible)</h3>
+        <h3 style="color:var(--danger-text)">⛔ Out of scope (not expressible)</h3>
         <ul>
           <li>Real-time values, continuous amounts of money</li>
           <li>Probability, expected value, statistical properties</li>

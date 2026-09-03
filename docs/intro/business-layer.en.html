@@ -258,6 +258,15 @@ verify { values Amount = 0..3 }</code></pre>
     <div class="callout warn reveal" style="margin-top:24px">
       <p style="margin:0"><b>Do not weaken business intent to make refinement pass.</b> If the lower layer fails to implement the business layer, first inspect whether the requirement dropped or changed the business rule.</p>
     </div>
+
+    <div class="panel reveal" style="margin-top:24px">
+      <p class="dim" style="margin:0 0 6px;font-size:14px">Run the flagship e2e chain step by step (native Rust):</p>
+      <pre><code>$ fslc verify examples/e2e/1_business.fsl --engine induction --deadlock ignore
+$ fslc verify examples/e2e/2_requirements.fsl --engine induction --deadlock ignore
+# assert JSON implements.result == "refines"
+$ fslc refine examples/e2e/3_design.fsl examples/e2e/2_requirements.fsl examples/e2e/3_refines_2.fsl --depth 8</code></pre>
+      <p style="margin:14px 0 0;font-size:14px;color:var(--muted)">Each green step is bounded evidence for one seam — not proof that every runtime path is correct. See <a href="examples.en.html#correctness-chain">the e2e walkthrough</a> for implementation observation (<code>testgen</code>, replay).</p>
+    </div>
   </div>
 </section>
 

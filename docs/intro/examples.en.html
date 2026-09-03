@@ -27,6 +27,36 @@
 
 <hr class="soft" />
 
+<section data-journey="choose-goal">
+  <div class="wrap">
+    <p class="kicker reveal">Choose by verification goal</p>
+    <h2 class="reveal">Pick the example that matches what you want to establish</h2>
+    <p class="lead narrow reveal">Every gallery file names an <code>expected-command</code> and <code>expected-result</code>. Match your goal first, then open source — the native Rust <code>fslc</code> JSON tells you whether the claim held.</p>
+    <table class="matrix reveal">
+      <tr><th>Your goal</th><th>Start here</th><th>Native command</th><th><code>result</code> to inspect</th></tr>
+      <tr><td>Learn syntax and a first counterexample</td><td><code>gallery/valid/tiny_*</code></td><td><code>fslc verify --depth 8</code></td><td><code>verified</code> or <code>violated</code> + <code>trace</code></td></tr>
+      <tr><td>See cross-layer refinement</td><td><code>e2e/</code>, <code>layers/</code></td><td><code>fslc refine</code>, <code>fslc chain</code></td><td><code>refines</code> or <code>refinement_failed</code></td></tr>
+      <tr><td>Connect implementation observations</td><td><code>bank/</code>, <code>e2e/impl/</code></td><td><code>fslc testgen</code>, <code>fslc replay</code></td><td><code>conformant</code> / <code>nonconformant</code> + log line</td></tr>
+      <tr><td>Read diagnostic shapes</td><td><code>gallery/errors/</code></td><td><code>fslc check</code> / <code>verify</code></td><td><code>error</code> + <code>kind</code>, or <code>violated</code> + <code>violation_kind</code></td></tr>
+      <tr><td>Dialect-specific replay</td><td><code>domain/</code>, <code>db/</code>, <code>ai/</code></td><td><code>fslc domain replay</code>, <code>db observe</code>, <code>ai replay</code></td><td>dialect <code>result</code> + event index</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)" data-journey="inspect-evidence">
+  <div class="wrap">
+    <p class="kicker reveal">What evidence to inspect</p>
+    <h2 class="reveal">Read the fields that match the assurance class</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card"><h3>Bounded safety</h3><p><code>result</code>, <code>completeness:"bounded"</code>, <code>checked_to_depth</code>, counterexample <code>trace</code> when <code>violated</code>. Does <em>not</em> prove infinite depth.</p></div>
+      <div class="syntax-card"><h3>Unbounded proof</h3><p><code>result:"proved"</code>, <code>completeness:"unbounded"</code>, engine <code>induction</code> or explicit <code>closure:true</code>. Still scoped to the written properties.</p></div>
+      <div class="syntax-card"><h3>Refinement</h3><p><code>refines</code> vs <code>refinement_failed</code>, witness mapping, stutter notes. Establishes layer alignment for the checked mapping — not full system proof.</p></div>
+      <div class="syntax-card"><h3>Implementation observation</h3><p><code>replay</code>/<code>testgen</code> outputs: <code>conformant</code>, <code>failed_at_event</code>, adapter projection. Observed traces only — not all future behaviors.</p></div>
+    </div>
+    <p class="reveal dim" style="margin-top:14px;font-size:14px">Exit codes follow <code>docs/LANGUAGE.md</code> via native <code>rust/fslc/src/outcome.rs</code> — see <a href="errors.en.html">Errors &amp; Exit Codes</a>.</p>
+  </div>
+</section>
+
 <section>
   <div class="wrap">
     <p class="kicker reveal">Start here</p>
