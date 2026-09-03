@@ -189,6 +189,38 @@ fn symbolic_witness_agrees_with_concrete_replay_and_identity() {
 }
 
 #[test]
+fn corrupting_state_step_kind_or_location_cuts_a_p2_edge() {
+    let model = load_model();
+    let observed = symbolic_observation(&model);
+
+    let mut state = observed.clone();
+    state.trace[0]
+        .state
+        .insert("triangulated_corruption".to_owned(), FslValue::Bool(true));
+
+    let mut step = observed.clone();
+    step.trace[0].step += 1;
+
+    let mut kind = observed.clone();
+    kind.kind = "trans".to_owned();
+
+    let mut location = observed.clone();
+    location.failed_location.start.line += 1;
+
+    for (field, corrupt) in [
+        ("state", state),
+        ("step", step),
+        ("kind", kind),
+        ("location", location),
+    ] {
+        assert!(
+            concrete_oracle_check(&model, &corrupt).is_err(),
+            "corrupt {field} must cut the P2 symbolic/concrete witness edge"
+        );
+    }
+}
+
+#[test]
 fn corrupting_each_witness_identity_field_cuts_a_p2_edge() {
     let model = load_model();
     let observed = symbolic_observation(&model);

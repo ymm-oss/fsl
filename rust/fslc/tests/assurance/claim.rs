@@ -4,8 +4,10 @@
 //! Core `Claim`/`Citation`/`Axis` types for the C3 Semantic Assurance Matrix
 //! (issue #537 C3, `docs/DESIGN-assurance-matrix.md`).
 //!
-//! A `Citation` is a machine-rechecked pointer: `path` + `anchor`, where
-//! `anchor` must appear on some line of `path`. `recheck()` re-reads the
+//! A `Citation` is a machine-rechecked pointer: `path` + `anchor`. For
+//! zero-argument function anchors (`fn name()`), `recheck()` requires an
+//! actual item definition in `path`, not a registration string literal.
+//! Other anchors must appear on some line of `path`. `recheck()` re-reads the
 //! file from the working tree every time it runs -- nothing here is a cached
 //! table, mirroring `tests/refine_corpus_parity.rs`'s
 //! `declaration.recheck()` discipline (`#537 C4`, `#616`). A `Claim` names
@@ -41,19 +43,107 @@ pub struct Citation {
     pub anchor: &'static str,
 }
 
+/// True when `anchor` is a zero-argument function pointer (`fn name()`) that
+/// must resolve to an actual item definition rather than a registration
+/// literal containing the same text.
+fn anchor_requires_function_definition(anchor: &str) -> bool {
+    anchor.starts_with("fn ")
+        && anchor.ends_with("()")
+        && !anchor[3..anchor.len() - 2].contains('(')
+}
+
+fn function_name_from_anchor(anchor: &str) -> &str {
+    &anchor[3..anchor.len() - 2]
+}
+
+/// Remove Rust double-quoted string literals so `fn` tokens inside
+/// registration literals are not mistaken for item definitions.
+fn strip_double_quoted_strings(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            let mut escaped = false;
+            while let Some(&next) = chars.peek() {
+                chars.next();
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                if next == '\\' {
+                    escaped = true;
+                    continue;
+                }
+                if next == '"' {
+                    break;
+                }
+            }
+            out.push(' ');
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn line_declares_function(line: &str, fn_name: &str) -> bool {
+    let trimmed = strip_double_quoted_strings(line).trim().to_owned();
+    let needle = format!("fn {fn_name}(");
+    if !trimmed.contains(&needle) {
+        return false;
+    }
+    for prefix in [
+        "",
+        "pub ",
+        "async ",
+        "pub async ",
+        "const ",
+        "pub const ",
+        "unsafe ",
+        "pub unsafe ",
+    ] {
+        let pattern = format!("{prefix}fn {fn_name}(");
+        if trimmed.starts_with(&pattern) {
+            return true;
+        }
+    }
+    false
+}
+
+fn count_function_definitions(content: &str, fn_name: &str) -> usize {
+    content
+        .lines()
+        .filter(|line| line_declares_function(line, fn_name))
+        .count()
+}
+
 impl Citation {
-    /// Re-read `path` from the working tree and confirm some line contains
-    /// `anchor`. Never trusts a prior run's result.
+    /// Re-read `path` from the working tree and confirm `anchor` is present.
+    /// Zero-argument function anchors must resolve to exactly one item
+    /// definition; other anchors must appear on some line. Never trusts a
+    /// prior run's result.
     ///
     /// # Errors
     ///
-    /// Returns `Err` when `path` cannot be read, or when no line of it
-    /// contains `anchor`.
+    /// Returns `Err` when `path` cannot be read, when no line of it contains
+    /// `anchor`, or when a function anchor does not resolve to exactly one
+    /// definition.
     pub fn recheck(&self) -> Result<(), String> {
         let full = workspace_root().join(self.path);
         let content = std::fs::read_to_string(&full)
             .map_err(|error| format!("{}: cannot read citation target: {error}", self.path))?;
-        if content.lines().any(|line| line.contains(self.anchor)) {
+        if anchor_requires_function_definition(self.anchor) {
+            let fn_name = function_name_from_anchor(self.anchor);
+            let definitions = count_function_definitions(&content, fn_name);
+            if definitions == 1 {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{}: anchor `{}` must resolve to exactly one function definition, found {definitions}",
+                    self.path, self.anchor
+                ))
+            }
+        } else if content.lines().any(|line| line.contains(self.anchor)) {
             Ok(())
         } else {
             Err(format!(
