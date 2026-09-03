@@ -519,7 +519,7 @@ and re-renders the spec, and compares claim/slot marker structure and
 claim-block digests. Exit codes: 0 document_conformant, 1 document_drifted,
 2 parse/type/semantics/schema/I/O error, 3 internal error.
 </pre></div></details></div></div></details>
-<details><summary>fslc mutate</summary><div class="tree-body"><pre>usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement] [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM] file
+<details><summary>fslc mutate</summary><div class="tree-body"><pre>usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement] [--oracle-attribution] [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM] file
 
 positional arguments:
   file
@@ -528,6 +528,9 @@ options:
   -h, --help            show this help message and exit
   --depth DEPTH
   --by-requirement
+  --oracle-attribution  emit full killer sets and per-oracle sole/shared counts
+                        keyed by oracle display names (opt-in; default output
+                        unchanged)
   --max-mutants MAX_MUTANTS
   --from MUTANTS_FROM   adjudicate external JSONL mutants in addition to the
                         built-in catalog
@@ -661,6 +664,35 @@ options:
   --kernel-version {1,2}
                         public Kernel major (default: 1)
 </pre></div></details>
+<details><summary>fslc testplan</summary><div class="tree-body"><pre>usage: fslc testplan [-h] [--depth DEPTH] file
+
+Select bounded conformance vectors into a closed test-plan.v1 JSON plan.
+Pass the spec at the same FSL layer granularity as the implementation you are checking; from an upper layer reuse forbidden (negative) scenarios only.
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --depth DEPTH         maximum transition depth (default: 4)
+</pre></div></details>
+<details><summary>fslc counterexample <span class="tree-blurb">— 1 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc counterexample export</summary><div class="tree-body"><pre>usage: fslc counterexample export [-h] [--depth DEPTH] [--engine {bmc,explicit,auto,induction}] [--deadlock {warn,error,ignore}] -o OUTPUT file
+
+Export a bounded safety-invariant counterexample as a closed reproducer.v1 JSON artifact.
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --depth DEPTH         maximum transition depth (default: 8)
+  --engine {bmc,explicit,auto,induction}
+                        verification engine (default: bmc)
+  --deadlock {warn,error,ignore}
+                        deadlock reporting policy (default: warn)
+  -o OUTPUT, --output OUTPUT
+                        reproducer artifact output path (required)
+</pre></div></details></div></div></details>
 <details><summary>fslc kernel</summary><div class="tree-body"><pre>usage: fslc kernel [-h] [--kernel-version {1,2}] file
 
 positional arguments:
