@@ -171,6 +171,7 @@ pub const LITERATE_REGISTRY: &[(&str, LiterateSupport)] = &[
     ("mutate", LiterateSupport::Unsupported),
     ("typestate", LiterateSupport::Unsupported),
     ("testgen", LiterateSupport::Unsupported),
+    ("testplan", LiterateSupport::Unsupported),
     ("html", LiterateSupport::Unsupported),
     ("ledger", LiterateSupport::Unsupported),
     ("analyze", LiterateSupport::Unsupported),

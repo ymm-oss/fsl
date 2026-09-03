@@ -1171,6 +1171,29 @@ fn command() -> Result<(Value, i32), String> {
             }
             Ok(run_conformance(&path, depth, version))
         }
+        "testplan" => {
+            let mut path = None;
+            let mut depth = 4_usize;
+            while let Some(argument) = args.next() {
+                match argument.as_str() {
+                    "--depth" => {
+                        depth = required_option_value(&mut args, "--depth")?
+                            .parse()
+                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
+                    }
+                    option if option.starts_with('-') => {
+                        return Err(format!("unknown testplan option '{option}'"));
+                    }
+                    value if path.is_none() => path = Some(PathBuf::from(value)),
+                    value => return Err(format!("unexpected testplan argument '{value}'")),
+                }
+            }
+            let path = path.ok_or_else(|| "usage: fslc testplan SPEC [--depth N]".to_owned())?;
+            if let Err(early_return) = literate_access("testplan", &path) {
+                return Ok(early_return);
+            }
+            Ok(run_testplan(&path, depth))
+        }
         "counterexample" => counterexample_command(args),
         "approval" => approval_command(args),
         "document" => document_command(args),
@@ -5749,6 +5772,52 @@ fn run_conformance(
                 .expect("conformance object")
                 .insert("fsl".to_owned(), json!("1.0"));
             (vectors, 0)
+        }
+        Err(error) => (semantic_error_output(&error), 2),
+    }
+}
+
+fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    if source_dialect(&source) == "compose" {
+        return (
+            semantic_error_output(
+                "advanced test planning requires truthful Public Kernel export; compose unsupported",
+            ),
+            2,
+        );
+    }
+    let (kernel, model) = match load_kernel_model_from_source(path, &source) {
+        Ok(parts) => parts,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let source_path = path.to_string_lossy();
+    let kernel_json = match fsl_core::public_kernel_contract(
+        &kernel,
+        &model,
+        &source_path,
+        source_dialect(&source),
+    ) {
+        Ok(mut contract) => {
+            let object = contract.as_object_mut().expect("public Kernel object");
+            object.insert("result".to_owned(), json!("kernel"));
+            contract
+        }
+        Err(error) => return (semantic_error_output(&error.to_string()), 2),
+    };
+    let conformance = match fslc_rust::conformance_vectors(&model, depth) {
+        Ok(vectors) => vectors,
+        Err(error) => return (semantic_error_output(&error), 2),
+    };
+    match fsl_tools::build_test_plan_v1(&kernel_json, &conformance) {
+        Ok(mut plan) => {
+            plan.as_object_mut()
+                .expect("test-plan object")
+                .insert("fsl".to_owned(), json!("1.0"));
+            (plan, 0)
         }
         Err(error) => (semantic_error_output(&error), 2),
     }

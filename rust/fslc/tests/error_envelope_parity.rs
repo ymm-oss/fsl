@@ -637,6 +637,15 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         not_applicable: &[],
     },
     CommandRegistration {
+        key: "testplan",
+        scope: ParityScope::SpecPath {
+            invoke: &["testplan", SPEC_PLACEHOLDER],
+        },
+        literate: LiterateCoverage::UniformUnsupported,
+        coverage: PARSE_KERNEL_COVERAGE,
+        not_applicable: &[],
+    },
+    CommandRegistration {
         key: "typestate",
         scope: ParityScope::SpecPath {
             invoke: &["typestate", SPEC_PLACEHOLDER],
@@ -929,6 +938,7 @@ const INPUT_SHAPE_POPULATIONS: &[CommandInputShapePopulation] = &[
     input_shape_population!("scenarios", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("sweep", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("testgen", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("testplan", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("typestate", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("verify", VERIFY_INPUT_SHAPE_PROFILE),
     input_shape_population!("version", SOURCE_INPUT_SHAPE_PROFILE),

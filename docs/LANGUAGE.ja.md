@@ -786,6 +786,7 @@ fslc replay    <file.fsl> --trace <events.json>  # spec-action trace conformance
 fslc replay    <file.fsl> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                  # production log mapping + conformance (§12)
 fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
+fslc testplan  <file.fsl> [--depth K]             # 閉じた test-plan.v1 の vector 選択 (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
 fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
                [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
@@ -1179,7 +1180,7 @@ literate な `.md` はこの方法で `.fsl` ファイルを `use`/compose で�
 
 このフェンス抽出を行うのは `check`・`verify`・`scenarios` の 3 コマンドだけです。
 仕様パスを読み取る他のすべてのコマンド(`lint`・`migrate`・`fmt`・`kernel`・
-`conformance`・`explain`・`mutate`・`typestate`・`testgen`・`html`・`ledger`・
+`conformance`・`explain`・`mutate`・`typestate`・`testgen`・`testplan`・`html`・`ledger`・
 `analyze`・`diff`・`refine`・`replay`・`sweep`・`counterexample export`、および
 `document generate`/`claims`/`check`)は、`.md` 入力を代わりに入力種別の誤りとして
 拒否します: `result: "error"`、`kind: "usage"`、
@@ -1636,6 +1637,7 @@ fslc scenarios specs/order_system.fsl
 | `fslc replay` | 実システムのイベントログ JSON を spec に対して検査する |
 | `fslc counterexample export` | 有界な安全性不変式の verifier 反例を閉じた `reproducer.v1` JSON アーティファクトとして export する(#885 slice 1; `replay-trace` / `testgen-trace` ではない) |
 | `fslc testgen` | コンフォーマンステストのスキャフォールドを生成する — pytest(デフォルト)、Vitest(`--target vitest`)、Swift Testing(`--target swift`)、kotlin.test(`--target kotlin`)、Dart `package:test`(`--target dart`)、PHPUnit(`--target phpunit`)(実装を Adapter に結線する) |
+| `fslc testplan` | bounded な `conformance` vector を、受理側だけでなく `testgen` が生成していなかった `requires_failed` 側も含めて、閉じた `test-plan.v1` JSON プランへ選択する。実装と同じ層の粒度の spec を渡すこと |
 
 推奨ワークフロー: **spec を `verify` / `prove` する → `testgen` でスキャフォールド
 を生成する → 実装を `Adapter` に結線する → テストを実行する**。`Monitor` は
@@ -1737,7 +1739,20 @@ fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # s
 fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self-contained kotlin.test scaffold
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
+fslc testplan specs/cart_v1.fsl --depth 4                     # 閉じた test-plan.v1 JSON を stdout へ
 ```
+
+`fslc testplan` は閉じた `test-plan.v1` ドキュメント
+(`schemas/fslc/kernel/test-plan.v1.schema.json`)を出力します。Kernel JSON と
+`conformance` JSON と同一の検査済みモデルから作るため、別スナップショット同士の
+vector が混ざることはありません。プランは**選択であって判定ではありません**。
+常に `formal_result: "not_run"`、`assurance_effect: "none"`、および
+`do_not_assume` を持ち、そこには「実装の正しさの証明ではない」「宣言した深さと
+有限スコープを超えて網羅的ではない」「選択被覆は完全性ではない」「`verify`・
+帰納法・`replay`・refinement を置き換えない」ことが記録されます。
+`layer_selection.requirement` は CLI ヘルプと同じ規則を繰り返します——
+実装と同じ FSL 層の粒度の spec を渡すこと、上位層からは forbidden(negative)
+シナリオのみを再利用すること。
 
 外部のコンパイラは、ネイティブの replay コントラクトを、閉じたバージョン付き JSON
 オブジェクト(`schemas/fslc/kernel/replay-trace.v1.schema.json`)として出力します:

@@ -893,6 +893,7 @@ fslc replay    &lt;file.fsl&gt; --trace &lt;events.json&gt;  # spec-action trace
 fslc replay    &lt;file.fsl&gt; --from-log &lt;events.jsonl&gt; --mapping &lt;mapping.fsl&gt;
                                                  # production log mapping + conformance (§12)
 fslc testgen   &lt;file.fsl&gt; [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
+fslc testplan  &lt;file.fsl&gt; [--depth K]             # closed test-plan.v1 vector selection (§12)
 fslc refine    &lt;impl&gt; &lt;abs&gt; &lt;mapping&gt; [--depth K]# fidelity check of a detailed spec (§10)
 fslc diff      &lt;old&gt; &lt;new&gt; [--depth K] [--mapping map.fsl]
                [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
@@ -1290,7 +1291,7 @@ a literate <code>.md</code> may <code>use</code>/compose <code>.fsl</code> files
 <p><code>check</code>, <code>verify</code>, and <code>scenarios</code> are the only commands that extract fences
 this way. Every other command that reads a spec path (<code>lint</code>, <code>migrate</code>,
 <code>fmt</code>, <code>kernel</code>, <code>conformance</code>, <code>explain</code>, <code>mutate</code>, <code>typestate</code>, <code>testgen</code>,
-<code>html</code>, <code>ledger</code>, <code>analyze</code>, <code>diff</code>, <code>refine</code>, <code>replay</code>, <code>sweep</code>, <code>counterexample export</code>, and
+<code>testplan</code>, <code>html</code>, <code>ledger</code>, <code>analyze</code>, <code>diff</code>, <code>refine</code>, <code>replay</code>, <code>sweep</code>, <code>counterexample export</code>, and
 <code>document generate</code>/<code>claims</code>/<code>check</code>) rejects a <code>.md</code> input as an input-kind
 error instead: <code>result: "error"</code>, <code>kind: "usage"</code>,
 <code>diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"</code>, a message naming the
@@ -1713,6 +1714,10 @@ implementation (see <code>DESIGN-bridge.md</code>).</p>
 <td><code>fslc testgen</code></td>
 <td>Generate a conformance-test scaffold — pytest (default), Vitest (<code>--target vitest</code>), Swift Testing (<code>--target swift</code>), kotlin.test (<code>--target kotlin</code>), Dart <code>package:test</code> (<code>--target dart</code>), or PHPUnit (<code>--target phpunit</code>) (wire the implementation into the Adapter)</td>
 </tr>
+<tr>
+<td><code>fslc testplan</code></td>
+<td>Select the bounded <code>conformance</code> vectors — the accepting ones <strong>and</strong> the <code>requires_failed</code> ones <code>testgen</code> never emitted — into a closed <code>test-plan.v1</code> JSON plan. Pass a spec at the implementation's layer granularity</td>
+</tr>
 </tbody>
 </table>
 <p>Recommended workflow: <strong><code>verify</code> / <code>prove</code> the spec → generate the scaffold with
@@ -1807,7 +1812,20 @@ fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # s
 fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self-contained kotlin.test scaffold
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
+fslc testplan specs/cart_v1.fsl --depth 4                     # closed test-plan.v1 JSON to stdout
 </code></pre>
+<p><code>fslc testplan</code> emits a closed <code>test-plan.v1</code> document
+(<code>schemas/fslc/kernel/test-plan.v1.schema.json</code>) built from the same checked
+model as the Kernel and <code>conformance</code> JSON, so a plan cannot pair vectors from
+two different snapshots. A plan is a <em>selection</em>, never a verdict: it always
+carries <code>formal_result: "not_run"</code>, <code>assurance_effect: "none"</code>, and a
+<code>do_not_assume</code> list recording that it is not proof of implementation
+correctness, not exhaustive beyond the declared depth and finite scope, that
+selection coverage is not completeness, and that it does not replace <code>verify</code>,
+induction, <code>replay</code>, or refinement. <code>layer_selection.requirement</code> repeats what
+the CLI help states: pass the spec at the same FSL layer granularity as the
+implementation you are checking; from an upper layer reuse forbidden
+(negative) scenarios only.</p>
 <p>External compilers emit the native replay contract as a closed versioned JSON
 object (<code>schemas/fslc/kernel/replay-trace.v1.schema.json</code>):</p>
 <pre><code class="language-json">{&quot;$schema&quot;:&quot;https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json&quot;,&quot;schema_version&quot;:&quot;1.2.0&quot;,&quot;kernel_schema_version&quot;:&quot;1.0.0&quot;,&quot;spec&quot;:&quot;ShoppingCart&quot;,&quot;initial&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}},&quot;events&quot;:[{&quot;tick&quot;:1,&quot;action&quot;:null,&quot;params&quot;:{},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}}},{&quot;tick&quot;:2,&quot;action&quot;:&quot;add_to_cart&quot;,&quot;params&quot;:{&quot;u&quot;:0,&quot;i&quot;:0},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:0},&quot;cart&quot;:{&quot;0&quot;:1}}}]}

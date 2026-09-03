@@ -120,7 +120,7 @@ fn native_cli_help_matches_the_embedded_contract_at_every_command_path() {
             .iter()
             .filter(|node| node["commands"].as_array().is_some_and(Vec::is_empty))
             .count(),
-        51,
+        52,
         "the public contract must enumerate every live native leaf"
     );
     let mut paths = BTreeSet::new();
@@ -346,7 +346,7 @@ fn published_schema_inventory_is_complete_and_parseable() {
     let mut schemas = Vec::new();
     collect_schemas(&root().join("schemas/fslc"), &mut schemas);
     schemas.sort();
-    assert_eq!(schemas.len(), 45, "published schema inventory changed");
+    assert_eq!(schemas.len(), 46, "published schema inventory changed");
     let mut ids = BTreeSet::new();
     for path in schemas {
         let schema: Value =
