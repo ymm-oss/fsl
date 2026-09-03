@@ -1206,6 +1206,9 @@ fn command() -> Result<(Value, i32), String> {
                 args.next()
                     .ok_or_else(|| "compat check requires a dbsystem".to_owned())?,
             );
+            if let Err(early_return) = literate_access("compat check", &path) {
+                return Ok(early_return);
+            }
             let include_ai = match args.next() {
                 None => false,
                 Some(option) if option == "--include-ai" => true,
@@ -2991,6 +2994,12 @@ fn run_document_check(
     }
 }
 
+// `db_command` sat just under clippy's 100-line limit before #694 (98 non-blank,
+// non-comment lines); the two `literate_access` guards for `db check` and
+// `db observe` (6 lines) push it to 104. Extracting a helper would be a
+// dispatcher restructuring outside #694's scope (error-envelope classification
+// of `.md` input), so the lint is allowed for this function only.
+#[allow(clippy::too_many_lines)]
 fn db_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
     let subcommand = args
         .next()
@@ -3000,6 +3009,9 @@ fn db_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
             let path = PathBuf::from(args.next().ok_or_else(|| {
                 "usage: fslc db check SPEC [--depth N] [--engine ENGINE]".to_owned()
             })?);
+            if let Err(early_return) = literate_access("db check", &path) {
+                return Ok(early_return);
+            }
             let mut depth = 8_usize;
             let mut deadlock = "warn".to_owned();
             let mut engine = "bmc".to_owned();
@@ -3035,6 +3047,9 @@ fn db_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
                 args.next()
                     .ok_or_else(|| "usage: fslc db observe SPEC --trace EVENTS.json".to_owned())?,
             );
+            if let Err(early_return) = literate_access("db observe", &path) {
+                return Ok(early_return);
+            }
             if args.next().as_deref() != Some("--trace") {
                 return Err("db observe requires --trace EVENTS.json".to_owned());
             }
@@ -3132,10 +3147,16 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
     );
     match subcommand.as_str() {
         "check" => {
+            if let Err(early_return) = literate_access("ai check", &path) {
+                return Ok(early_return);
+            }
             let (depth, deadlock, engine, _) = parse_specialized_verify_options(&mut args, false)?;
             Ok(run_ai_check(&path, depth, &deadlock, &engine))
         }
         "replay" => {
+            if let Err(early_return) = literate_access("ai replay", &path) {
+                return Ok(early_return);
+            }
             let mut logs = None;
             let mut component = None;
             while let Some(option) = args.next() {
@@ -3234,6 +3255,9 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
             ))
         }
         "compat" => {
+            if let Err(early_return) = literate_access("ai compat", &path) {
+                return Ok(early_return);
+            }
             let environment = match args.next() {
                 None => None,
                 Some(option) if option == "--environment" => Some(
@@ -3273,15 +3297,24 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
     );
     match subcommand.as_str() {
         "check" => {
+            if let Err(early_return) = literate_access("domain check", &path) {
+                return Ok(early_return);
+            }
             let (depth, deadlock, engine, edition) =
                 parse_specialized_verify_options(&mut args, true)?;
             Ok(run_domain_check(&path, depth, &deadlock, &engine, &edition))
         }
         "analyze" => {
+            if let Err(early_return) = literate_access("domain analyze", &path) {
+                return Ok(early_return);
+            }
             reject_extra_domain_args(&mut args, "analyze")?;
             Ok(run_domain_analyze(&path))
         }
         "expand" => {
+            if let Err(early_return) = literate_access("domain expand", &path) {
+                return Ok(early_return);
+            }
             let output = parse_optional_output(&mut args)?;
             let result = run_domain_expand(&path, output.as_deref());
             if output.is_none()
@@ -3294,6 +3327,9 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
             Ok(result)
         }
         "generate" => {
+            if let Err(early_return) = literate_access("domain generate", &path) {
+                return Ok(early_return);
+            }
             let mut target = "typescript".to_owned();
             let mut profile = "functional-ddd".to_owned();
             let mut output = None;
@@ -3329,6 +3365,9 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
             ))
         }
         "replay" => {
+            if let Err(early_return) = literate_access("domain replay", &path) {
+                return Ok(early_return);
+            }
             if args.next().as_deref() != Some("--logs") {
                 return Err("domain replay requires --logs EVENTS.jsonl".to_owned());
             }
@@ -3340,6 +3379,9 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
             Ok(run_domain_replay(&path, &logs))
         }
         "testgen" => {
+            if let Err(early_return) = literate_access("domain testgen", &path) {
+                return Ok(early_return);
+            }
             let mut depth = 8_usize;
             let mut target = "vitest".to_owned();
             let mut deadlock = "warn".to_owned();

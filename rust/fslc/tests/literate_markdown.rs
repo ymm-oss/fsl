@@ -563,6 +563,203 @@ fn every_unsupported_registry_command_fails_closed_as_an_input_kind_error() {
     );
 }
 
+/// The registry-driven test passes one positional and the parity matrix passes
+/// `.md` twice, so neither reaches the second positional's guard; this test is
+/// what fails if the `after` guard is omitted.
+#[test]
+fn causal_diff_second_markdown_positional_fails_closed() {
+    let dir = std::env::temp_dir().join(format!("fslc-causal-diff-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let plain = dir.join("toggle.fsl");
+    std::fs::write(
+        &plain,
+        "\
+spec Toggle {
+  state { active: Bool }
+  init  { active = false }
+  action toggle() {
+    active = not active
+  }
+  invariant AlwaysBool {
+    active or not active
+  }
+}
+",
+    )
+    .expect("write plain fsl fixture");
+    let plain_str = plain.to_str().expect("UTF-8 path").to_owned();
+    let md = examples_literate_toggle();
+    let (output, status) = run_cli(&["causal", "diff", &plain_str, &md]);
+    assert_eq!(status, 2, "{output:#}");
+    assert_eq!(
+        output["diagnostic_code"], "FSL-INPUT-LITERATE-UNSUPPORTED",
+        "{output:#}"
+    );
+    assert_eq!(output["kind"], "usage", "{output:#}");
+    assert_eq!(output["loc"]["file"], md, "{output:#}");
+    assert!(
+        output["loc"].get("line").is_none() && output["loc"].get("column").is_none(),
+        "loc must not carry a spec line/column: {output:#}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+const EMPTY_RECORDS: &str = "rust/fslc/tests/fixtures/error_envelope_empty_records.json";
+
+/// Assert the exact error envelope `ai eval`/`ai drift`/`ai regress` emit on
+/// non-project literate Markdown at the `a3703211` baseline: exactly four keys
+/// (`fsl`, `result`, `kind`, `message`) with no `loc`, `diagnostic`,
+/// `diagnostic_code`, or `dialect`, and the measured semantic message. This is
+/// full exact-shape equality of the error case — no diagnostic code, no
+/// dialect, no location, and no Markdown-as-spec-syntax `1:2` lie.
+fn assert_no_markdown_as_spec_syntax_lie(
+    output: &Value,
+    command: &str,
+    fixture: &str,
+    expected_message: &str,
+) {
+    let object = output.as_object().unwrap_or_else(|| {
+        panic!("{command} {fixture}: expected JSON object: {output:#}");
+    });
+    assert_eq!(
+        object.len(),
+        4,
+        "{command} {fixture}: expected exactly four keys: {output:#}"
+    );
+    assert_eq!(output["fsl"], "1.0", "{command} {fixture}: {output:#}");
+    assert_eq!(output["result"], "error", "{command} {fixture}: {output:#}");
+    assert_eq!(
+        output["kind"], "semantics",
+        "{command} {fixture}: {output:#}"
+    );
+    assert_eq!(
+        output["message"], expected_message,
+        "{command} {fixture}: {output:#}"
+    );
+    assert!(
+        output.get("loc").is_none(),
+        "{command} {fixture}: must not carry loc: {output:#}"
+    );
+    assert!(
+        output.get("diagnostic").is_none(),
+        "{command} {fixture}: must not carry diagnostic: {output:#}"
+    );
+    assert!(
+        output.get("diagnostic_code").is_none(),
+        "{command} {fixture}: must not carry diagnostic_code: {output:#}"
+    );
+    assert!(
+        output.get("dialect").is_none(),
+        "{command} {fixture}: must not carry dialect: {output:#}"
+    );
+}
+
+fn assert_no_error_shaped_fields(output: &Value, command: &str) {
+    for field in [
+        "kind",
+        "loc",
+        "diagnostic",
+        "diagnostic_code",
+        "dialect",
+        "message",
+    ] {
+        assert!(
+            output.get(field).is_none(),
+            "{command}: success envelope must not carry '{field}': {output:#}"
+        );
+    }
+}
+
+/// Preservation control for `ai eval`'s `load_ai_project` literate `.md`
+/// frontend. Reclassifying the command as `LiterateCoverage::NotApplicable`
+/// in the parity matrix correctly stops generating Literate cells (this
+/// behavior is not a tracked defect), but these assertions restore the
+/// coverage the deleted pins held: a valid literate AI project succeeds, and
+/// other Markdown gets a clean semantic error with no `1:2` lie. `ai eval` is
+/// not part of #694's fix and must keep behaving exactly as on `a3703211`.
+#[test]
+fn ai_eval_load_ai_project_literate_markdown_contract_is_preserved() {
+    let project = fixture_path("error_envelope_literate_ai_project.md");
+    let component = fixture_path("error_envelope_literate_ai_component.md");
+    let toggle = examples_literate_toggle();
+
+    let (output, status) = run_cli(&["ai", "eval", &project, "--records", EMPTY_RECORDS]);
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(output["result"], "statistically_supported", "{output:#}");
+    assert_no_error_shaped_fields(&output, "ai eval");
+
+    for (fixture, expected_message) in [
+        (&toggle, "expected fsl-ai project declarations"),
+        (&component, "no statistical_property declaration found"),
+    ] {
+        let (output, status) = run_cli(&["ai", "eval", fixture, "--records", EMPTY_RECORDS]);
+        assert_eq!(status, 2, "{output:#}");
+        assert_no_markdown_as_spec_syntax_lie(&output, "ai eval", fixture, expected_message);
+    }
+}
+
+/// Preservation control for `ai drift`'s `load_ai_project` literate `.md`
+/// frontend (same rationale as [`ai_eval_load_ai_project_literate_markdown_contract_is_preserved`]).
+#[test]
+fn ai_drift_load_ai_project_literate_markdown_contract_is_preserved() {
+    let project = fixture_path("error_envelope_literate_ai_project.md");
+    let component = fixture_path("error_envelope_literate_ai_component.md");
+    let toggle = examples_literate_toggle();
+
+    let (output, status) = run_cli(&["ai", "drift", &project, "--logs", EMPTY_RECORDS]);
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(output["result"], "observed_supported", "{output:#}");
+    assert_no_error_shaped_fields(&output, "ai drift");
+
+    for (fixture, expected_message) in [
+        (&toggle, "expected fsl-ai project declarations"),
+        (&component, "no observed_property declaration found"),
+    ] {
+        let (output, status) = run_cli(&["ai", "drift", fixture, "--logs", EMPTY_RECORDS]);
+        assert_eq!(status, 2, "{output:#}");
+        assert_no_markdown_as_spec_syntax_lie(&output, "ai drift", fixture, expected_message);
+    }
+}
+
+/// Preservation control for `ai regress`'s `load_ai_project` literate `.md`
+/// frontend (same rationale as [`ai_eval_load_ai_project_literate_markdown_contract_is_preserved`]).
+#[test]
+fn ai_regress_load_ai_project_literate_markdown_contract_is_preserved() {
+    let project = fixture_path("error_envelope_literate_ai_project.md");
+    let component = fixture_path("error_envelope_literate_ai_component.md");
+    let toggle = examples_literate_toggle();
+
+    let (output, status) = run_cli(&[
+        "ai",
+        "regress",
+        &project,
+        "--before-records",
+        EMPTY_RECORDS,
+        "--after-records",
+        EMPTY_RECORDS,
+    ]);
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(output["result"], "statistically_supported", "{output:#}");
+    assert_no_error_shaped_fields(&output, "ai regress");
+
+    for (fixture, expected_message) in [
+        (&toggle, "expected fsl-ai project declarations"),
+        (&component, "no ai_migration declaration found"),
+    ] {
+        let (output, status) = run_cli(&[
+            "ai",
+            "regress",
+            fixture,
+            "--before-records",
+            EMPTY_RECORDS,
+            "--after-records",
+            EMPTY_RECORDS,
+        ]);
+        assert_eq!(status, 2, "{output:#}");
+        assert_no_markdown_as_spec_syntax_lie(&output, "ai regress", fixture, expected_message);
+    }
+}
+
 /// Over-firing control: an ordinary `.fsl` spec must be unaffected on every
 /// registered command, including the `Supported` ones -- the guard keys on
 /// the input's extension, not on which command is running.

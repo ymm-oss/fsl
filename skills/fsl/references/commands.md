@@ -277,13 +277,23 @@ Multiple fsl blocks form one compilation unit (split definitions across
 sections). Files without fsl fences are rejected; non-fsl fences
 (` ```python ` etc.) are ignored. A literate `.md` may `use`/compose `.fsl`
 files relative to its own directory; using another `.md` as a compose target
-is not supported. Every other spec-reading command (`lint`, `migrate`, `fmt`,
+is not supported. Most other spec-reading commands (`lint`, `migrate`, `fmt`,
 `kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`, `testplan`, `html`,
 `ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, `counterexample export`,
-`document generate`/`claims`/`check`) rejects `.md` input as an input-kind
+`db check`/`observe`, `compat check`, `domain check`/`analyze`/`expand`/`generate`/`replay`/`testgen`,
+`ai check`/`replay`/`compat`,
+`causal check`/`analyze`/`diff`/`ledger`/`observe-expectations`/`verify-expectations`,
+`document generate`/`claims`/`check`) reject `.md` input as an input-kind
 error (`kind:"usage"`, `diagnostic_code:"FSL-INPUT-LITERATE-UNSUPPORTED"`,
 `loc` naming the input file, not a spec position) instead of handing it to
-the parser (issue #665).
+the parser (issue #665). `chain` (project manifest, not a spec) and `db import`
+(SQL/Prisma schema artifact) are not spec-path commands in this sense.
+`approval create` cannot write a record whose `spec.path` is `.md`; when
+`approval check`/`diff` see a matching record they parse the positional as FSL
+and reproduce the `1:2` lie (measured with a forged record) -- excluded pending
+issue #980. `ai eval`/`regress`/`drift` already parse `.md` through `load_ai_project`
+(valid literate AI project succeeds; otherwise a clean semantic error) and are
+unaffected. See `rust/fslc/src/literate_access.rs`'s `LITERATE_EXCLUDED`.
 
 `diff` uses bidirectional bounded refinement for behavior changes, implication
 between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`

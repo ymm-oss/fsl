@@ -1179,15 +1179,30 @@ literate な `.md` はこの方法で `.fsl` ファイルを `use`/compose で�
 `.md` ファイルを compose のターゲットにすることはサポートされません。
 
 このフェンス抽出を行うのは `check`・`verify`・`scenarios` の 3 コマンドだけです。
-仕様パスを読み取る他のすべてのコマンド(`lint`・`migrate`・`fmt`・`kernel`・
+仕様パスを読み取る他のほとんどのコマンド(`lint`・`migrate`・`fmt`・`kernel`・
 `conformance`・`explain`・`mutate`・`typestate`・`testgen`・`testplan`・`html`・`ledger`・
-`analyze`・`diff`・`refine`・`replay`・`sweep`・`counterexample export`、および
+`analyze`・`diff`・`refine`・`replay`・`sweep`・`counterexample export`・
+`db check`/`observe`・`compat check`・`domain check`/`analyze`/`expand`/`generate`/`replay`/`testgen`・
+`ai check`/`replay`/`compat`・
+`causal check`/`analyze`/`diff`/`ledger`/`observe-expectations`/`verify-expectations`、および
 `document generate`/`claims`/`check`)は、`.md` 入力を代わりに入力種別の誤りとして
 拒否します: `result: "error"`、`kind: "usage"`、
 `diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"`、対応コマンドを挙げたメッセージ、
 そして仕様上の位置ではなく入力ファイル自体を指す `loc` です。これにより、非対応
 コマンドに渡された Markdown ドキュメントが、その Markdown 自身の最初の非 fsl 文字の
-位置にある仕様の構文エラーとして誤報されることを防ぎます。
+位置にある仕様の構文エラーとして誤報されることを防ぎます。`chain`(位置引数は
+プロジェクトマニフェストであり仕様ではない)と`db import`(位置引数は SQL/Prisma
+スキーマ成果物)は、この意味での仕様パスコマンドではありません。
+`approval create`は`spec.path`が`.md`のレコードを生成できません(実測:
+`approval create <.md> --kind requirements_document|ledger ...`はレコード
+書き込み前に`FSL-PARSE`で失敗)。`approval check`/`diff`はレコードの
+`spec.path`が位置引数と一致するとき位置引数を FSL 仕様としてパースし、同じ
+`1:2`の誤報を再現します(手作りレコードで実測); issue #980 まで除外。
+`ai eval`/`regress`/`drift`は独自の
+`load_ai_project` フロントエンドで `.md` を既にパースします(有効な literate AI
+project では成功し、それ以外は明確な意味エラー)ため、この変更の対象外です。各
+コマンドの除外理由の実測値は
+`rust/fslc/src/literate_access.rs` の `LITERATE_EXCLUDED` を参照してください。
 
 ## 8. 推奨ワークフロー: proved を標準にする
 
