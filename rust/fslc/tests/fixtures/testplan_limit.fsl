@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+// Acceptance fixture for issue #844 slice 1.
+spec Limit {
+  type Qty = 0..2
+  state { accepted: Bool }
+  init { accepted = false }
+  action submit(q: Qty) {
+    requires q <= 1
+    accepted = true
+  }
+}

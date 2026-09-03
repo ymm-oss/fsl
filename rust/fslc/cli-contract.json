@@ -2425,6 +2425,34 @@
         "commands": []
       },
       {
+        "path": ["testplan"],
+        "prog": "fslc testplan",
+        "help": "usage: fslc testplan [-h] [--depth DEPTH] file\n\nSelect bounded conformance vectors into a closed test-plan.v1 JSON plan.\nPass the spec at the same FSL layer granularity as the implementation you are checking; from an upper layer reuse forbidden (negative) scenarios only.\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH         maximum transition depth (default: 4)\n",
+        "actions": [
+          {
+            "dest": "help",
+            "required": false,
+            "flags": ["-h", "--help"],
+            "nargs": 0,
+            "action": "store"
+          },
+          {
+            "dest": "file",
+            "required": true,
+            "positional": true,
+            "action": "store"
+          },
+          {
+            "dest": "depth",
+            "required": false,
+            "flags": ["--depth"],
+            "default": 4,
+            "action": "store"
+          }
+        ],
+        "commands": []
+      },
+      {
         "path": ["counterexample"],
         "prog": "fslc counterexample",
         "help": "usage: fslc counterexample [-h] {export}\n\npositional arguments:\n  {export}            export a bounded safety-invariant counterexample to reproducer.v1\n\noptions:\n  -h, --help            show this help message and exit\n",

@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fsl.dev/schemas/fslc/kernel/test-plan.v1.schema.json",
+  "title": "FSL conformance test plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "kernel_schema_version",
+    "result",
+    "spec",
+    "depth",
+    "initial",
+    "formal_result",
+    "assurance_effect",
+    "oracle",
+    "selection_coverage",
+    "do_not_assume",
+    "layer_selection",
+    "cases"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "https://fsl.dev/schemas/fslc/kernel/test-plan.v1.schema.json"
+    },
+    "schema_version": { "const": "1.0.0" },
+    "kernel_schema_version": { "const": "1.0.0" },
+    "fsl": { "type": "string" },
+    "result": { "const": "testplan" },
+    "spec": { "type": "string", "minLength": 1 },
+    "depth": { "type": "integer", "minimum": 0 },
+    "initial": { "$ref": "#/$defs/state" },
+    "formal_result": { "const": "not_run" },
+    "assurance_effect": { "const": "none" },
+    "oracle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer", "evaluator_reimplemented"],
+      "properties": {
+        "producer": { "const": "fslc conformance" },
+        "evaluator_reimplemented": { "const": false }
+      }
+    },
+    "selection_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vectors_available", "vectors_selected", "uncovered"],
+      "properties": {
+        "vectors_available": { "type": "integer", "minimum": 0 },
+        "vectors_selected": { "type": "integer", "minimum": 0 },
+        "uncovered": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "do_not_assume": {
+      "type": "array",
+      "minItems": 4,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "layer_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirement"],
+      "properties": {
+        "requirement": { "type": "string", "minLength": 1 }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "state": { "type": "object" },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "setup",
+        "target",
+        "expected",
+        "source_vector"
+      ],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "setup": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/step" }
+        },
+        "target": { "$ref": "#/$defs/step" },
+        "expected": { "$ref": "#/$defs/expected" },
+        "source_vector": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "action"],
+          "properties": {
+            "state": { "type": "string", "pattern": "^s[0-9]+$" },
+            "action": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "params"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "params": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "params", "expected"],
+      "properties": {
+        "action": { "type": "string", "minLength": 1 },
+        "params": { "type": "object" },
+        "expected": { "$ref": "#/$defs/state" }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome_kind", "state"],
+      "properties": {
+        "outcome_kind": { "type": "string", "minLength": 1 },
+        "state": { "$ref": "#/$defs/state" },
+        "state_unchanged": { "type": "boolean" }
+      }
+    }
+  }
+}

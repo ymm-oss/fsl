@@ -813,6 +813,7 @@ fslc replay    <file.fsl> --trace <events.json>  # spec-action trace conformance
 fslc replay    <file.fsl> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                  # production log mapping + conformance (§12)
 fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
+fslc testplan  <file.fsl> [--depth K]             # closed test-plan.v1 vector selection (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
 fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
                [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
@@ -1217,7 +1218,7 @@ a literate `.md` may `use`/compose `.fsl` files this way, but using another
 `check`, `verify`, and `scenarios` are the only commands that extract fences
 this way. Every other command that reads a spec path (`lint`, `migrate`,
 `fmt`, `kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`,
-`html`, `ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, `counterexample export`, and
+`testplan`, `html`, `ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, `counterexample export`, and
 `document generate`/`claims`/`check`) rejects a `.md` input as an input-kind
 error instead: `result: "error"`, `kind: "usage"`,
 `diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"`, a message naming the
@@ -1687,6 +1688,7 @@ implementation (see `DESIGN-bridge.md`).
 | `fslc replay` | Check a real system's event-log JSON against the spec |
 | `fslc counterexample export` | Export a bounded safety-invariant verifier counterexample to a closed `reproducer.v1` JSON artifact (slice 1 of #885; not `replay-trace` or `testgen-trace`) |
 | `fslc testgen` | Generate a conformance-test scaffold — pytest (default), Vitest (`--target vitest`), Swift Testing (`--target swift`), kotlin.test (`--target kotlin`), Dart `package:test` (`--target dart`), or PHPUnit (`--target phpunit`) (wire the implementation into the Adapter) |
+| `fslc testplan` | Select the bounded `conformance` vectors — the accepting ones **and** the `requires_failed` ones `testgen` never emitted — into a closed `test-plan.v1` JSON plan. Pass a spec at the implementation's layer granularity |
 
 Recommended workflow: **`verify` / `prove` the spec → generate the scaffold with
 `testgen` → wire the implementation into the `Adapter` → run the tests**. `Monitor`
@@ -1787,7 +1789,21 @@ fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # s
 fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self-contained kotlin.test scaffold
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
+fslc testplan specs/cart_v1.fsl --depth 4                     # closed test-plan.v1 JSON to stdout
 ```
+
+`fslc testplan` emits a closed `test-plan.v1` document
+(`schemas/fslc/kernel/test-plan.v1.schema.json`) built from the same checked
+model as the Kernel and `conformance` JSON, so a plan cannot pair vectors from
+two different snapshots. A plan is a *selection*, never a verdict: it always
+carries `formal_result: "not_run"`, `assurance_effect: "none"`, and a
+`do_not_assume` list recording that it is not proof of implementation
+correctness, not exhaustive beyond the declared depth and finite scope, that
+selection coverage is not completeness, and that it does not replace `verify`,
+induction, `replay`, or refinement. `layer_selection.requirement` repeats what
+the CLI help states: pass the spec at the same FSL layer granularity as the
+implementation you are checking; from an upper layer reuse forbidden
+(negative) scenarios only.
 
 External compilers emit the native replay contract as a closed versioned JSON
 object (`schemas/fslc/kernel/replay-trace.v1.schema.json`):

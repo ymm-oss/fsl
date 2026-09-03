@@ -867,6 +867,7 @@ fslc replay    &lt;file.fsl&gt; --trace &lt;events.json&gt;  # spec-action trace
 fslc replay    &lt;file.fsl&gt; --from-log &lt;events.jsonl&gt; --mapping &lt;mapping.fsl&gt;
                                                  # production log mapping + conformance (§12)
 fslc testgen   &lt;file.fsl&gt; [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
+fslc testplan  &lt;file.fsl&gt; [--depth K]             # 閉じた test-plan.v1 の vector 選択 (§12)
 fslc refine    &lt;impl&gt; &lt;abs&gt; &lt;mapping&gt; [--depth K]# fidelity check of a detailed spec (§10)
 fslc diff      &lt;old&gt; &lt;new&gt; [--depth K] [--mapping map.fsl]
                [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
@@ -1253,7 +1254,7 @@ literate な <code>.md</code> はこの方法で <code>.fsl</code> ファイル�
 <code>.md</code> ファイルを compose のターゲットにすることはサポートされません。</p>
 <p>このフェンス抽出を行うのは <code>check</code>・<code>verify</code>・<code>scenarios</code> の 3 コマンドだけです。
 仕様パスを読み取る他のすべてのコマンド(<code>lint</code>・<code>migrate</code>・<code>fmt</code>・<code>kernel</code>・
-<code>conformance</code>・<code>explain</code>・<code>mutate</code>・<code>typestate</code>・<code>testgen</code>・<code>html</code>・<code>ledger</code>・
+<code>conformance</code>・<code>explain</code>・<code>mutate</code>・<code>typestate</code>・<code>testgen</code>・<code>testplan</code>・<code>html</code>・<code>ledger</code>・
 <code>analyze</code>・<code>diff</code>・<code>refine</code>・<code>replay</code>・<code>sweep</code>・<code>counterexample export</code>、および
 <code>document generate</code>/<code>claims</code>/<code>check</code>)は、<code>.md</code> 入力を代わりに入力種別の誤りとして
 拒否します: <code>result: "error"</code>、<code>kind: "usage"</code>、
@@ -1663,6 +1664,10 @@ fslc scenarios specs/order_system.fsl
 <td><code>fslc testgen</code></td>
 <td>コンフォーマンステストのスキャフォールドを生成する — pytest(デフォルト)、Vitest(<code>--target vitest</code>)、Swift Testing(<code>--target swift</code>)、kotlin.test(<code>--target kotlin</code>)、Dart <code>package:test</code>(<code>--target dart</code>)、PHPUnit(<code>--target phpunit</code>)(実装を Adapter に結線する)</td>
 </tr>
+<tr>
+<td><code>fslc testplan</code></td>
+<td>bounded な <code>conformance</code> vector を、受理側だけでなく <code>testgen</code> が生成していなかった <code>requires_failed</code> 側も含めて、閉じた <code>test-plan.v1</code> JSON プランへ選択する。実装と同じ層の粒度の spec を渡すこと</td>
+</tr>
 </tbody>
 </table>
 <p>推奨ワークフロー: <strong>spec を <code>verify</code> / <code>prove</code> する → <code>testgen</code> でスキャフォールド
@@ -1758,7 +1763,19 @@ fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # s
 fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self-contained kotlin.test scaffold
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
+fslc testplan specs/cart_v1.fsl --depth 4                     # 閉じた test-plan.v1 JSON を stdout へ
 </code></pre>
+<p><code>fslc testplan</code> は閉じた <code>test-plan.v1</code> ドキュメント
+(<code>schemas/fslc/kernel/test-plan.v1.schema.json</code>)を出力します。Kernel JSON と
+<code>conformance</code> JSON と同一の検査済みモデルから作るため、別スナップショット同士の
+vector が混ざることはありません。プランは<strong>選択であって判定ではありません</strong>。
+常に <code>formal_result: "not_run"</code>、<code>assurance_effect: "none"</code>、および
+<code>do_not_assume</code> を持ち、そこには「実装の正しさの証明ではない」「宣言した深さと
+有限スコープを超えて網羅的ではない」「選択被覆は完全性ではない」「<code>verify</code>・
+帰納法・<code>replay</code>・refinement を置き換えない」ことが記録されます。
+<code>layer_selection.requirement</code> は CLI ヘルプと同じ規則を繰り返します——
+実装と同じ FSL 層の粒度の spec を渡すこと、上位層からは forbidden(negative)
+シナリオのみを再利用すること。</p>
 <p>外部のコンパイラは、ネイティブの replay コントラクトを、閉じたバージョン付き JSON
 オブジェクト(<code>schemas/fslc/kernel/replay-trace.v1.schema.json</code>)として出力します:</p>
 <pre><code class="language-json">{&quot;$schema&quot;:&quot;https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json&quot;,&quot;schema_version&quot;:&quot;1.2.0&quot;,&quot;kernel_schema_version&quot;:&quot;1.0.0&quot;,&quot;spec&quot;:&quot;ShoppingCart&quot;,&quot;initial&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}},&quot;events&quot;:[{&quot;tick&quot;:1,&quot;action&quot;:null,&quot;params&quot;:{},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}}},{&quot;tick&quot;:2,&quot;action&quot;:&quot;add_to_cart&quot;,&quot;params&quot;:{&quot;u&quot;:0,&quot;i&quot;:0},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:0},&quot;cart&quot;:{&quot;0&quot;:1}}}]}

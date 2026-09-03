@@ -109,6 +109,10 @@ fslc counterexample export <f> [--depth K] [--engine bmc|explicit|auto] -o <repr
 fslc replay <f> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                 # production JSONL -> mapped action/state -> Monitor
 fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit)
+fslc testplan <f> [--depth K=4]                 # closed test-plan.v1 selection of conformance vectors
+                                                # (accepting + requires_failed); formal_result:"not_run",
+                                                # assurance_effect:"none"; pass a spec at the
+                                                # implementation's layer granularity
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
           [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
@@ -274,7 +278,7 @@ sections). Files without fsl fences are rejected; non-fsl fences
 (` ```python ` etc.) are ignored. A literate `.md` may `use`/compose `.fsl`
 files relative to its own directory; using another `.md` as a compose target
 is not supported. Every other spec-reading command (`lint`, `migrate`, `fmt`,
-`kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`, `html`,
+`kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`, `testplan`, `html`,
 `ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, `counterexample export`,
 `document generate`/`claims`/`check`) rejects `.md` input as an input-kind
 error (`kind:"usage"`, `diagnostic_code:"FSL-INPUT-LITERATE-UNSUPPORTED"`,

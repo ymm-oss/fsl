@@ -162,6 +162,7 @@ pub fn outcome_class(output: &Value) -> OutcomeClass {
         | "conformance"
         | "conformance_coverage"
         | "testgen_trace"
+        | "testplan"
         | "conformance_checked"
         | "document_conformant"
         | "observed_conformant"
