@@ -1213,16 +1213,23 @@ failing or missing required context.
 ### Site reference context scope
 
 `site reference freshness` remains one required, unfiltered, non-product
-documentation-artifact context. It has two deliberately separate checks: the
+documentation-artifact context. It has three deliberately separate checks: the
 generated-reference freshness snapshots for `language.{ja,en}.html` and
-`cli.{ja,en}.html`, and static manual-route integrity for
-`index.{ja,en}.html` and `examples.{ja,en}.html`.
+`cli.{ja,en}.html`, static manual-route integrity for
+`index.{ja,en}.html` and `examples.{ja,en}.html`, and the sitewide refresh
+contract for palette single-source wiring, docs-sidebar gutter survival, and
+CLI pages that no longer cite frozen Python as authority.
 
-The workflow invokes `tests/test_site_reference_snapshot.py` and
-`tests/test_site_manual_integrity.py` explicitly. The snapshot module remains
+The workflow invokes `tests/test_site_reference_snapshot.py`,
+`tests/test_site_manual_integrity.py`, and
+`tests/test_site_refresh_contract.py` explicitly. The snapshot module remains
 generated-reference-only; the manual test checks ordered static routes, unique labels,
-local fragments, and pinned blob objects in checked-out Git history without fetching URLs.
-Neither check establishes Rust/solver behavior, native CLI parity, browser rendering,
+local fragments, and pinned blob objects in checked-out Git history without fetching URLs;
+the refresh-contract test reads checked-out static files only, with no live server, no URL
+fetching, and no browser-automation or subprocess dependency, and carries rejecting mutant
+controls alongside its positive assertions so the module cannot go green merely by
+describing whatever the pages currently say. None of the three checks establishes
+Rust/solver behavior, native CLI parity, browser rendering,
 or assistive-technology behavior. This expands the context's bounded documentation-artifact scope
 without changing its name, ruleset membership, job, triggers, Python package dependencies,
 permissions, timeout, or concurrency; `fetch-depth: 0` supplies local Git history for pinned blobs.

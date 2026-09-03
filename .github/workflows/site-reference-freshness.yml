@@ -77,5 +77,5 @@ jobs:
       - name: Install the generator's test dependencies
         run: pip install ".[dev]"
 
-      - name: Check generated references and manual-chain integrity
-        run: python3 -m pytest tests/test_site_reference_snapshot.py tests/test_site_manual_integrity.py -v
+      - name: Check site reference, manual-route, and refresh contracts
+        run: python3 -m pytest tests/test_site_reference_snapshot.py tests/test_site_manual_integrity.py tests/test_site_refresh_contract.py -v

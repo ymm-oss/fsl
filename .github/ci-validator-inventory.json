@@ -478,7 +478,21 @@
       "entrypoints": [
         ".github/workflows/site-reference-freshness.yml"
       ],
+      "path": "tests/test_site_manual_integrity.py",
+      "tier": "required"
+    },
+    {
+      "entrypoints": [
+        ".github/workflows/site-reference-freshness.yml"
+      ],
       "path": "tests/test_site_reference_snapshot.py",
+      "tier": "required"
+    },
+    {
+      "entrypoints": [
+        ".github/workflows/site-reference-freshness.yml"
+      ],
+      "path": "tests/test_site_refresh_contract.py",
       "tier": "required"
     },
     {
