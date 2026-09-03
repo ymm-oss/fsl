@@ -137,7 +137,17 @@ def _playground_ok(text: str) -> bool:
 
 SKIP_LINK_EN = 'class="skip-link" href="#main">Skip to main content</a>'
 SKIP_LINK_JA = 'class="skip-link" href="#main">メインコンテンツへスキップ</a>'
-MAIN_LANDMARK = '<main id="main">'
+# Matched as a pattern, not an exact literal: the landmark carries tabindex="-1"
+# so the skip link can actually move focus into it, and an exact-literal check
+# would report the focusable landmark as a *missing* one.
+MAIN_LANDMARK_RE = re.compile(r'<main\b[^>]*\bid="main"[^>]*>')
+# A skip link that does not move focus is inert: the target must be programmatically
+# focusable. Measured on 5273c1b0 -- both playground pages activated the link,
+# set location.hash, and left document.activeElement on <body> (keyboard Tab/Enter
+# and click alike), because <main id="main"> carried no tabindex.
+MAIN_FOCUSABLE_RE = re.compile(
+    r'<main\b(?=[^>]*\bid="main")(?=[^>]*\btabindex="-1")[^>]*>'
+)
 
 
 def audit_playground_skip_contract(texts: dict[str, str]) -> list[str]:
@@ -152,8 +162,10 @@ def audit_playground_skip_contract(texts: dict[str, str]) -> list[str]:
     if SKIP_LINK_JA in en:
         missing.append("playground.en-has-japanese-skip-link")
     for lang, text in (("en", en), ("ja", ja)):
-        if MAIN_LANDMARK not in text:
+        if not MAIN_LANDMARK_RE.search(text):
             missing.append(f"playground.{lang}-missing-main-id-main")
+        elif not MAIN_FOCUSABLE_RE.search(text):
+            missing.append(f"playground.{lang}-main-not-focusable-tabindex")
         if text.count('class="skip-link"') != 1:
             missing.append(f"playground.{lang}-skip-link-count-not-1")
         body_open = text.find("<body")
@@ -416,6 +428,21 @@ def test_site_refresh_playground_skip_rejects_english_label_mutant():
     mutant = dict(texts)
     mutant["playground.en.html"] = texts["playground.en.html"].replace(SKIP_LINK_EN, SKIP_LINK_JA, 1)
     assert "playground.en-has-japanese-skip-link" in audit_playground_skip_contract(mutant)
+    assert audit_playground_skip_contract(texts) == []
+
+
+def test_site_refresh_playground_skip_rejects_unfocusable_main_mutant():
+    texts = {p.name: p.read_text(encoding="utf-8") for p in PLAYGROUND}
+    mutant = dict(texts)
+    mutant["playground.en.html"] = re.sub(
+        r'(<main\b[^>]*\bid="main"[^>]*?)\s+tabindex="-1"',
+        r"\1",
+        texts["playground.en.html"],
+        count=1,
+    )
+    assert mutant["playground.en.html"] != texts["playground.en.html"]
+    assert "playground.en-main-not-focusable-tabindex" in audit_playground_skip_contract(mutant)
+    assert "playground.en-missing-main-id-main" not in audit_playground_skip_contract(mutant)
     assert audit_playground_skip_contract(texts) == []
 
 
