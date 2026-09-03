@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import time
@@ -14,6 +16,7 @@ import time
 
 DEFAULT_TIMEOUT_SECONDS = 3_600.0
 LOCK_FILENAME = "fsl-cargo.lock"
+REENTRANCY_ENV = "FSL_CARGO_LOCK_HELD"
 
 
 def common_directory(cwd: Path) -> Path:
@@ -52,20 +55,77 @@ def acquire(lock_file: Path, timeout_seconds: float) -> object:
             time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
 
 
+def try_acquire(lock_file: Path):
+    """Take the lock without waiting.
+
+    Raises BlockingIOError when somebody else holds it and any other OSError when
+    locking fails for an unrelated reason (ENOLCK, EBADF, ...).
+    """
+    handle = lock_file.open("a+", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BaseException:
+        handle.close()
+        raise
+    return handle
+
+
+def release(handle) -> None:
+    """Give up an acquired lock."""
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+    handle.close()
+
+
+def marker_script(lock_file: Path) -> str:
+    """Mark the re-entrant call inside the shell text, after any login profile."""
+    return f"export {REENTRANCY_ENV}={shlex.quote(str(lock_file))}\n"
+
+
+def execute(command: str, cwd: Path, lock_file: Path) -> int:
+    """Run the command, handing the re-entrancy marker down to every descendant."""
+    env = os.environ.copy()
+    env[REENTRANCY_ENV] = str(lock_file)
+    script = marker_script(lock_file) + command
+    result = subprocess.run(["/bin/bash", "-lc", script], cwd=cwd, env=env, check=False)
+    if result.returncode < 0:
+        return 128 - result.returncode
+    return result.returncode
+
+
 def run(command: str, cwd: Path, timeout_seconds: float) -> int:
-    """Run a shell command while holding the repository-wide Cargo lock."""
+    """Run a shell command while holding the repository-wide Cargo lock.
+
+    A call that is already inside this very lock -- marker names lock_path(cwd)
+    and somebody really holds it -- runs the command without waiting, otherwise
+    the outer holder would be waited on forever by its own descendant.
+    """
     lock_file = lock_path(cwd)
+    if os.environ.get(REENTRANCY_ENV) == str(lock_file):
+        try:
+            handle = try_acquire(lock_file)
+        except BlockingIOError:
+            # Nested inside a live holder (ourselves' parent): pass straight through.
+            return execute(command, cwd, lock_file)
+        except OSError as error:
+            print(f"cargo-lock: {error}", file=sys.stderr)
+            return 2
+        # Nobody held it: the marker was stale, so take it and become the holder.
+        try:
+            return execute(command, cwd, lock_file)
+        finally:
+            release(handle)
     try:
         handle = acquire(lock_file, timeout_seconds)
     except (OSError, RuntimeError, TimeoutError) as error:
         print(f"cargo-lock: {error}", file=sys.stderr)
         return 2
     try:
-        result = subprocess.run(["/bin/bash", "-lc", command], cwd=cwd, check=False)
-        return result.returncode
+        return execute(command, cwd, lock_file)
     finally:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        handle.close()
+        release(handle)
 
 
 def main() -> int:
