@@ -269,8 +269,8 @@ verify { values Amount = 0..3 }</code></pre>
 
     <div class="panel reveal" style="margin-top:24px">
       <p class="dim" style="margin:0 0 6px;font-size:14px">旗艦 e2e 連鎖を段階的に実行（ネイティブ Rust）:</p>
-      <pre><code>$ fslc verify examples/e2e/1_business.fsl --engine induction --deadlock ignore
-$ fslc verify examples/e2e/2_requirements.fsl --engine induction --deadlock ignore
+      <pre><code>$ fslc verify examples/e2e/1_business.fsl --engine induction
+$ fslc verify examples/e2e/2_requirements.fsl --engine induction
 # JSON implements.result == "refines" を確認
 $ fslc refine examples/e2e/3_design.fsl examples/e2e/2_requirements.fsl examples/e2e/3_refines_2.fsl --depth 8</code></pre>
       <p style="margin:14px 0 0;font-size:14px;color:var(--muted)">各ステップの緑は1つの seam の有界証拠であり、全ランタイム経路の証明ではありません。実装観測（<code>testgen</code>、replay）は <a href="examples.ja.html#correctness-chain">e2e ウォークスルー</a> を参照。</p>
