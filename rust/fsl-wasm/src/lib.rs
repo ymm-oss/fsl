@@ -124,6 +124,8 @@ fn verifier_error(solver_version: &str, failure: &impl std::fmt::Display) -> Val
         &failure.to_string(),
         None,
         false,
+        None,
+        None,
     )
 }
 
@@ -152,12 +154,14 @@ fn build(request: &Request, solver_version: &str) -> Result<(KernelModel, Vec<Va
     let model = fsl_core::build_model(kernel).map_err(|failure| {
         // The same span and classification the native CLI reports, so the
         // Worker envelope does not diverge from `fslc` (issues 555, 565).
-        let loc = fslc_rust::verification_output::model_error_loc(&failure);
+        let diagnostic = fslc_rust::spec_load::SemanticDiagnostic::from_model_error(&failure);
         fslc_rust::verification_output::render_semantic_error(
             envelope(solver_version),
-            &failure.to_string(),
-            loc,
-            failure.name_resolution,
+            &diagnostic.message,
+            diagnostic.loc,
+            diagnostic.name_resolution,
+            diagnostic.diagnostic_code,
+            diagnostic.hint.as_deref(),
         )
     })?;
     Ok((model, diagnostics))
@@ -890,6 +894,10 @@ mod tests {
             &diagnostic.message,
             diagnostic.located.then(|| diagnostic.span.python_loc()),
             diagnostic.kind == "name",
+            Some(diagnostic.code.as_str()).filter(|code| {
+                *code != "FSL-SEMANTIC" && *code != "FSL-TYPE" && *code != "FSL-NAME"
+            }),
+            diagnostic.hint.as_deref(),
         )
     }
 
@@ -1175,6 +1183,28 @@ mod tests {
         assert_eq!(
             worker, native,
             "Worker/native duplicate-write envelope diverged"
+        );
+    }
+
+    #[test]
+    fn build_rejects_distinctness_unproved_writes_with_native_parity() {
+        let request = Request {
+            cmd: "check".to_owned(),
+            source: include_str!("../../fslc/tests/fixtures/issue_698_affine_index.fsl").to_owned(),
+            source_file: "issue_698_affine_index.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        };
+        let worker = build(&request, TEST_SOLVER_VERSION)
+            .expect_err("distinctness-unproved write must fail in Worker build");
+        let native = native_check_error(&request, TEST_SOLVER_VERSION);
+        assert_eq!(
+            worker, native,
+            "Worker/native distinctness-unproved envelope diverged"
+        );
+        assert_eq!(
+            worker["diagnostic_code"],
+            fsl_core::WRITE_DISTINCTNESS_UNPROVED_CODE
         );
     }
 

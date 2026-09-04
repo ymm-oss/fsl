@@ -93,6 +93,27 @@ fn rejects_a_constant_index_repeated_by_forall() {
     .expect_err("constant write repeats across forall iterations");
 
     assert!(error.message.contains("same state location"));
+    assert!(error.diagnostic_code.is_none());
+}
+
+#[test]
+fn classifies_affine_forall_index_as_distinctness_unproved() {
+    let error = build(
+        "spec Affine { type Cell = 0..7 type Off = 0..3 const BASE = 2 \
+         state { m: Map<Cell, Bool> } init { forall i: Cell { m[i] = false } } \
+         action shift() { forall c: Off { m[BASE + c] = true } } }",
+    )
+    .expect_err("affine index must stay rejected with distinctness classification");
+
+    assert_eq!(
+        error.message,
+        "cannot prove write-index distinctness across forall iterations"
+    );
+    assert_eq!(
+        error.diagnostic_code,
+        Some(fsl_core::WRITE_DISTINCTNESS_UNPROVED_CODE)
+    );
+    assert!(error.hint.is_some());
 }
 
 #[test]
