@@ -182,8 +182,12 @@ state {
   bounded.
 - `Map<Int, ·>` is rejected by `fslc check`. Declare a bounded domain key, for
   example `type K = 0..<max>`, and use `Map<K, ·>`. The guidance is part of
-  the located `message`: the semantic-error envelope has no general `hint`
-  field.
+  the located `message`. The semantic-error envelope carries no general
+  `hint`; a `hint` appears only alongside a `diagnostic_code` that names the
+  classification it repairs, and only when the repair is provably safe for
+  that spec (issue #698 added the first one,
+  `FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED`). Guidance that is not tied to a
+  coded classification stays in `message`, as this `Map<Int, ·>` case does.
 
 ### 3.8 Int / Bool
 

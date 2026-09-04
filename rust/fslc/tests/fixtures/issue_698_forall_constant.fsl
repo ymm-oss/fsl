@@ -1,0 +1,8 @@
+spec ForallConstant {
+  type Idx = 0..3
+  state { m: Map<Idx, Bool> }
+  init { forall i: Idx { m[i] = false } }
+  action dup() {
+    forall c: Idx { m[0] = true }
+  }
+}

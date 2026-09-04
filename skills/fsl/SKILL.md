@@ -272,7 +272,11 @@ domain truth. See [layers](references/layers.md), "Authoring specs as readable d
 - **Do not hand-write "non-negative"-style invariants** → `type Qty = 0..N` checks
   them automatically.
 - A **double assignment on the same execution path is an error**. Assigning to the
-  same variable after an if as inside a branch is also an error.
+  same variable after an if as inside a branch is also an error. **Proven duplicate
+  writes** keep the legacy duplicate-write message; **conservative rejections** for
+  unproved `forall` index distinctness report
+  `FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED` with `loc` and a safe `hint` when one
+  exists (acceptance is not widened).
 - Updates to Set/Seq are **re-assignments**: `s = s.add(x)`, `q = q.pop()`.
 - Seq `pop/head/at` and the divisor of `/` `%` **must always be guarded** (requires
   or if). Forgetting is detected as partial_op.

@@ -14,6 +14,8 @@ pub struct SourceDiagnostic {
     /// document as a last resort, but the CLI's `loc` must stay absent rather
     /// than claim a position the diagnostic does not have (issue 555).
     pub located: bool,
+    pub hint: Option<String>,
+    pub quick_fix: Option<fsl_core::DiagnosticEdit>,
 }
 
 /// Run the authoritative syntax and typed-model gates and return editor diagnostics.
@@ -48,6 +50,8 @@ pub fn diagnostics_with_model(
                     message: error.to_string(),
                     span: error.span,
                     located: true,
+                    hint: None,
+                    quick_fix: None,
                 }],
                 None,
             ),
@@ -63,6 +67,8 @@ pub fn diagnostics_with_model(
                     message: error.to_string(),
                     span: error.span,
                     located: true,
+                    hint: None,
+                    quick_fix: None,
                 }],
                 None,
             );
@@ -102,6 +108,8 @@ fn core_diagnostic(source: &str, error: &fsl_core::CoreError) -> SourceDiagnosti
         // `line`/`column` also carry legacy placeholders such as `(1, 1)`.
         // Only an authored origin proves that the public location is real.
         located: diagnostic.loc.is_some(),
+        hint: None,
+        quick_fix: None,
     }
 }
 
@@ -120,14 +128,19 @@ fn model_diagnostic(source: &str, error: &fsl_core::ModelError) -> SourceDiagnos
         .or_else(|| diagnostic_span_from_message(source, &message));
     SourceDiagnostic {
         kind,
-        code: match kind {
-            "type" => "FSL-TYPE".to_owned(),
-            "name" => "FSL-NAME".to_owned(),
-            _ => "FSL-SEMANTIC".to_owned(),
-        },
+        code: error.diagnostic_code.map_or_else(
+            || match kind {
+                "type" => "FSL-TYPE".to_owned(),
+                "name" => "FSL-NAME".to_owned(),
+                _ => "FSL-SEMANTIC".to_owned(),
+            },
+            str::to_owned,
+        ),
         message,
         span: located.unwrap_or_else(|| point_span(source, 1, 1)),
         located: located.is_some(),
+        hint: error.hint.as_deref().cloned(),
+        quick_fix: error.quick_fix.as_deref().cloned(),
     }
 }
 
@@ -166,6 +179,8 @@ fn migration_diagnostics(source: &str) -> Vec<SourceDiagnostic> {
                         message: message.to_owned(),
                         span: rewrite.span,
                         located: true,
+                        hint: None,
+                        quick_fix: None,
                     }
                 })
                 .collect()

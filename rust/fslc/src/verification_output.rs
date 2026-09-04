@@ -158,6 +158,8 @@ pub fn render_semantic_error(
     message: &str,
     loc: Option<Value>,
     name_resolution: bool,
+    diagnostic_code: Option<&str>,
+    hint: Option<&str>,
 ) -> Value {
     let kind = diagnostic_kind(message, name_resolution);
     output.insert("result".to_owned(), json!("error"));
@@ -166,7 +168,12 @@ pub fn render_semantic_error(
     if let Some(loc) = loc {
         output.insert("loc".to_owned(), loc);
     }
-    if message.starts_with("struct field '") && message.ends_with(" has non-scalar type") {
+    if let Some(code) = diagnostic_code {
+        output.insert("diagnostic_code".to_owned(), json!(code));
+    }
+    if let Some(hint) = hint {
+        output.insert("hint".to_owned(), json!(hint));
+    } else if message.starts_with("struct field '") && message.ends_with(" has non-scalar type") {
         output.insert(
             "hint".to_owned(),
             json!("struct fields must be a scalar (domain type, enum, Bool, Int) or nested Option around a scalar; use a separate Map for Set, Map, Seq, relation, or struct fields"),
@@ -200,6 +207,8 @@ pub fn render_runtime_error(
         &error.message,
         error.span.map(fsl_syntax::Span::python_loc),
         false,
+        None,
+        None,
     )
 }
 
@@ -2244,6 +2253,8 @@ mod tests {
             "state variable 'x' has unsupported state type",
             Some(json!({"line": 3, "column": 3})),
             false,
+            None,
+            None,
         );
         assert_eq!(output["result"], "error");
         assert_eq!(output["kind"], "type");
@@ -2261,6 +2272,8 @@ mod tests {
             "struct field 'Record.nested' has non-scalar type",
             Some(json!({"line": 3, "column": 3})),
             false,
+            None,
+            None,
         );
         assert_eq!(output["result"], "error");
         assert_eq!(output["kind"], "type");

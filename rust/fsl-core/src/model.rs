@@ -11,9 +11,20 @@ use fsl_syntax::{
 
 use crate::{
     INIT_TARGET, KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite,
-    ProjectionDef, SPEC_TARGET, TERMINAL_TARGET, TraceabilityRegistry, action_target,
+    ProjectionDef, SPEC_TARGET, TERMINAL_TARGET, TraceabilityRegistry, action_target, expr_text,
     property_target, state_target, type_target,
 };
+
+/// Stable semantic diagnostic code for a conservative write-alias rejection where
+/// index distinctness across `forall` iterations could not be proved (issue #698).
+pub const WRITE_DISTINCTNESS_UNPROVED_CODE: &str = "FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED";
+
+/// A machine-applicable source edit carried by a typed model diagnostic.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiagnosticEdit {
+    pub span: Span,
+    pub replacement: String,
+}
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Value {
@@ -462,6 +473,12 @@ pub struct ModelError {
     /// Whether this is a name-resolution failure. See
     /// [`crate::CoreError::name_resolution`] (issue 565).
     pub name_resolution: bool,
+    /// Stable machine-readable classification when the frontend knows it.
+    pub diagnostic_code: Option<&'static str>,
+    /// Actionable repair guidance for delivery surfaces that render hints.
+    pub hint: Option<Box<String>>,
+    /// A machine-applicable edit for LSP quick-fix surfaces.
+    pub quick_fix: Option<Box<DiagnosticEdit>>,
 }
 
 impl ModelError {
@@ -484,6 +501,24 @@ impl ModelError {
         if self.span.is_none() {
             self.span = Some(span);
         }
+        self
+    }
+
+    #[must_use]
+    fn with_diagnostic_code(mut self, code: &'static str) -> Self {
+        self.diagnostic_code = Some(code);
+        self
+    }
+
+    #[must_use]
+    fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(Box::new(hint.into()));
+        self
+    }
+
+    #[must_use]
+    fn with_quick_fix(mut self, edit: DiagnosticEdit) -> Self {
+        self.quick_fix = Some(Box::new(edit));
         self
     }
 }
@@ -594,6 +629,9 @@ impl ModelBuilder {
             origin: Some(Box::new(source_origin("annotation", error.span, None))),
             span: Some(error.span),
             name_resolution: false,
+            diagnostic_code: None,
+            hint: None,
+            quick_fix: None,
         })?;
         let state_names = self
             .spec
@@ -1232,13 +1270,23 @@ impl ModelBuilder {
         }
         let mut index_constants = self.consts.clone();
         index_constants.extend(self.enum_members.clone());
-        if let Some((_, duplicate_span)) = duplicate_statement_write(&statements, &index_constants)
-        {
-            return Err(model_error(
-                "an action may not assign the same state location more than once",
-            )
-            .with_origin(self.origins.diagnostic_origin(&action_target(name)))
-            .at(duplicate_span));
+        if let Some(conflict) = duplicate_statement_write(&statements, &index_constants) {
+            return Err(match conflict {
+                WriteAliasConflict::Duplicate((_, duplicate_span)) => {
+                    model_error("an action may not assign the same state location more than once")
+                        .with_origin(self.origins.diagnostic_origin(&action_target(name)))
+                        .at(duplicate_span)
+                }
+                WriteAliasConflict::DistinctnessUnproved(conflict) => self
+                    .write_distinctness_unproved_error(
+                        name,
+                        &conflict.target,
+                        &conflict.value,
+                        conflict.span,
+                        &conflict.binder,
+                        conflict.forall_span,
+                    ),
+            });
         }
         Ok(ActionDef {
             name: name.to_owned(),
@@ -1443,6 +1491,132 @@ impl ModelBuilder {
             _ => Err(model_error("constant expression must be an integer")),
         }
     }
+
+    fn write_distinctness_unproved_error(
+        &self,
+        action_name: &str,
+        target: &LValue,
+        value: &Expr,
+        span: Span,
+        binder: &Binder,
+        forall_span: Span,
+    ) -> ModelError {
+        let mut error =
+            model_error("cannot prove write-index distinctness across forall iterations")
+                .with_diagnostic_code(WRITE_DISTINCTNESS_UNPROVED_CODE)
+                .with_origin(self.origins.diagnostic_origin(&action_target(action_name)))
+                .at(span);
+        if let Some((hint, replacement)) =
+            self.try_distinctness_hint(target, value, binder, forall_span)
+        {
+            error = error.with_hint(hint).with_quick_fix(DiagnosticEdit {
+                span: forall_span,
+                replacement,
+            });
+        }
+        error
+    }
+
+    fn try_distinctness_hint(
+        &self,
+        target: &LValue,
+        value: &Expr,
+        binder: &Binder,
+        forall_span: Span,
+    ) -> Option<(String, String)> {
+        let LValue::Index(map_name, index) = target else {
+            return None;
+        };
+        let binder_name = match binder {
+            Binder::Typed { name, .. } | Binder::Range { name, .. } => name,
+            Binder::Collection { .. } => return None,
+        };
+        if expr_contains_var(value, binder_name) {
+            return None;
+        }
+        let key_type = self.map_key_type_name(map_name)?;
+        let offset = affine_binder_offset(index, binder_name)?;
+        // The binder's real bounds, not its width: `Off = 2..5` indexed as
+        // `BASE + c` covers `BASE+2..=BASE+5`, and a width-only rewrite writes
+        // `BASE..BASE+4`. `binder_domain_bounds` also refuses a filtered binder,
+        // whose subset this rewrite cannot reproduce.
+        let (lo, hi) = self.binder_domain_bounds(binder)?;
+        // The replacement introduces `k`. If the RHS or the offset already
+        // refers to a `k` from an enclosing scope, the new binder captures it
+        // and the rewrite changes meaning. Refuse instead of renaming: the
+        // classification, code and location still reach the reader.
+        if expr_contains_var(value, "k") || expr_contains_var(&offset, "k") || map_name == "k" {
+            return None;
+        }
+        // `hi + 1` is the exclusive upper bound; refuse rather than wrap if the
+        // domain reaches i64::MAX.
+        let exclusive_hi = hi.checked_add(1)?;
+        let offset_text = expr_text(&offset);
+        let rhs = expr_text(value);
+        // The written set is `offset + lo ..= offset + hi`, so the exclusive
+        // upper bound is `offset + hi + 1`. Emitting `offset + width` instead
+        // silently shifts the whole interval whenever `lo != 0`.
+        let low_text = if lo == 0 {
+            offset_text.clone()
+        } else {
+            format!("{offset_text} + {lo}")
+        };
+        let high_text = format!("{offset_text} + {exclusive_hi}");
+        let replacement = format!(
+            "forall k: {key_type} {{ if k >= {low_text} and k < {high_text} {{ {map_name}[k] = {rhs} }} }}"
+        );
+        let _ = forall_span;
+        let hint = replacement.clone();
+        Some((hint, replacement))
+    }
+
+    fn map_key_type_name(&self, map_name: &str) -> Option<String> {
+        self.spec.items.iter().find_map(|item| match item {
+            SpecItem::State(fields) => fields.iter().find_map(|field| {
+                if field.name != map_name {
+                    return None;
+                }
+                match &field.ty {
+                    TypeExpr::Map(key, _) => type_expr_display_name(key),
+                    _ => None,
+                }
+            }),
+            _ => None,
+        })
+    }
+
+    /// The binder's inclusive `(lo, hi)`, or `None` when it is not a bounded
+    /// integer domain. #698's quick-fix needs the lower bound, not just the
+    /// width: `Off = 2..5` indexed as `BASE + c` covers `BASE+2..=BASE+5`, and
+    /// a width-only rewrite writes `BASE..BASE+4` -- a different set.
+    fn binder_domain_bounds(&self, binder: &Binder) -> Option<(i64, i64)> {
+        match binder {
+            Binder::Typed {
+                type_name,
+                where_expr,
+                ..
+            } => {
+                // A filtered binder ranges over a subset this rewrite cannot
+                // reproduce, so refuse rather than widen it.
+                if where_expr.is_some() {
+                    return None;
+                }
+                match self.types.get(&type_name.name) {
+                    Some(TypeDef::Domain { lo, hi, .. }) => Some((*lo, *hi)),
+                    _ => None,
+                }
+            }
+            Binder::Range {
+                lo, hi, where_expr, ..
+            } => {
+                if where_expr.is_some() {
+                    return None;
+                }
+                Some((self.const_int(lo).ok()?, self.const_int(hi).ok()?))
+            }
+            Binder::Collection { .. } => None,
+        }
+    }
 }
 
 fn resolve_type(
@@ -1488,6 +1662,21 @@ fn const_int(expr: &Expr, consts: &BTreeMap<String, Value>) -> Result<i64, Model
 /// One write to a state location, with the span of the statement performing it.
 type StateWrite = (LValue, Span);
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DistinctnessUnprovedWrite {
+    target: LValue,
+    value: Expr,
+    span: Span,
+    binder: Binder,
+    forall_span: Span,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum WriteAliasConflict {
+    Duplicate(StateWrite),
+    DistinctnessUnproved(Box<DistinctnessUnprovedWrite>),
+}
+
 /// Find a state location an action writes twice, with the span of the write
 /// that repeats it.
 ///
@@ -1496,11 +1685,11 @@ type StateWrite = (LValue, Span);
 fn duplicate_statement_write(
     statements: &[Statement],
     constants: &BTreeMap<String, Value>,
-) -> Option<StateWrite> {
+) -> Option<WriteAliasConflict> {
     fn writes(
         statements: &[Statement],
         constants: &BTreeMap<String, Value>,
-    ) -> Result<Vec<StateWrite>, Box<StateWrite>> {
+    ) -> Result<Vec<StateWrite>, Box<WriteAliasConflict>> {
         let mut seen: Vec<(LValue, Span)> = Vec::new();
         for statement in statements {
             let candidates = match statement {
@@ -1515,14 +1704,39 @@ fn duplicate_statement_write(
                     branch
                 }
                 Statement::ForAll {
-                    binder, statements, ..
+                    binder,
+                    statements,
+                    span: forall_span,
+                    ..
                 } => {
                     let repeated = writes(statements, constants)?;
-                    if let Some(write) = repeated
+                    if let Some((target, write_span)) = repeated
                         .iter()
                         .find(|(target, _)| !write_is_injective_for_binder(target, binder))
                     {
-                        return Err(Box::new(write.clone()));
+                        let (_, index, _) = lvalue_path(target);
+                        if index.is_some_and(|idx| static_index_identity(idx, constants).is_some())
+                        {
+                            return Err(Box::new(WriteAliasConflict::Duplicate((
+                                target.clone(),
+                                *write_span,
+                            ))));
+                        }
+                        let Some((value, _)) = assignment_for_target(statements, target) else {
+                            return Err(Box::new(WriteAliasConflict::Duplicate((
+                                target.clone(),
+                                *write_span,
+                            ))));
+                        };
+                        return Err(Box::new(WriteAliasConflict::DistinctnessUnproved(
+                            Box::new(DistinctnessUnprovedWrite {
+                                target: target.clone(),
+                                value,
+                                span: *write_span,
+                                binder: binder.clone(),
+                                forall_span: *forall_span,
+                            }),
+                        )));
                     }
                     repeated
                 }
@@ -1531,13 +1745,74 @@ fn duplicate_statement_write(
                 seen.iter()
                     .any(|(previous, _)| lvalues_may_alias(previous, target, constants))
             }) {
-                return Err(Box::new(write.clone()));
+                return Err(Box::new(WriteAliasConflict::Duplicate(write.clone())));
             }
             seen.extend(candidates);
         }
         Ok(seen)
     }
     writes(statements, constants).err().map(|write| *write)
+}
+
+fn assignment_for_target(statements: &[Statement], target: &LValue) -> Option<(Expr, Span)> {
+    statements.iter().find_map(|statement| match statement {
+        Statement::Assign {
+            target: candidate,
+            value,
+            span,
+        } if candidate == target => Some((value.clone(), *span)),
+        _ => None,
+    })
+}
+
+fn type_expr_display_name(ty: &TypeExpr) -> Option<String> {
+    match ty {
+        TypeExpr::Name(name) => Some(name.clone()),
+        TypeExpr::Range(lo, hi) => Some(format!("{}..{}", expr_text(lo), expr_text(hi))),
+        _ => None,
+    }
+}
+
+fn affine_binder_offset(index: &Expr, binder_name: &str) -> Option<Expr> {
+    match index {
+        Expr::Binary { op, left, right } if op == "+" => {
+            if matches!(&**right, Expr::Var(name) if name == binder_name)
+                && !expr_contains_var(left, binder_name)
+            {
+                return Some(left.as_ref().clone());
+            }
+            if matches!(&**left, Expr::Var(name) if name == binder_name)
+                && !expr_contains_var(right, binder_name)
+            {
+                return Some(right.as_ref().clone());
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+fn expr_contains_var(expr: &Expr, name: &str) -> bool {
+    // Built on `expr_children`/`binder_exprs` rather than a second hand-written
+    // match: the hand-written one silently missed `Expr::Method`'s `args` and a
+    // quantifier's own range/filter, and #698's quick-fix guard reads this. A
+    // walk that drifts from the AST here does not merely miss a case, it emits
+    // an edit that moves an RHS out of the scope that bound it. Any new `Expr`
+    // variant is covered the moment `expr_children` covers it.
+    if let Expr::Var(candidate) = expr
+        && candidate == name
+    {
+        return true;
+    }
+    // A binder's own range and filter are evaluated in the outer scope, and its
+    // body may shadow `name`. Fail closed on the whole construct rather than
+    // modelling that: refusing a hint is safe, offering a captured one is not.
+    if matches!(expr, Expr::Quantified { .. } | Expr::Aggregate { .. }) {
+        return true;
+    }
+    expr_children(expr)
+        .into_iter()
+        .any(|child| expr_contains_var(child, name))
 }
 
 fn write_is_injective_for_binder(target: &LValue, binder: &Binder) -> bool {
@@ -2080,6 +2355,9 @@ fn model_error(message: impl Into<String>) -> ModelError {
         origin: None,
         span: None,
         name_resolution: false,
+        diagnostic_code: None,
+        hint: None,
+        quick_fix: None,
     }
 }
 

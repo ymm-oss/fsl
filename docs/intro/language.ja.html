@@ -737,6 +737,18 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
   代入するのは意味論エラーです。if の then/else は別々のパスなので、両方で代入して
   かまいません。if の<strong>後</strong>に同じ変数へ代入するのもエラーです(分岐の内側の書き込み
   が失われるのを防ぐため)。</li>
+<li><strong>保守的な write-alias 拒否</strong>: <code>forall</code> 本体が反復間で相異性を証明できない
+  インデックス付き location へ書き込む場合、ネイティブの <code>check</code>/<code>verify</code> と
+  ブラウザ Worker は検証器バックエンドより前に spec を拒否します。これは
+  <strong>確定した重複 write</strong>(例: <code>m[0]</code> を 2 回、<code>forall c { m[0] = ... }</code>)とは別で、
+  後者は従来の
+  <code>an action may not assign the same state location more than once</code> メッセージを
+  維持します。injectivity 未証明は
+  <code>cannot prove write-index distinctness across forall iterations</code> と
+  <code>diagnostic_code: FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED</code>、問題の代入 <code>loc</code>、
+  安全な修復が存在する場合は
+  <code>forall k: Cell { if k &gt;= BASE and k &lt; BASE + 4 { m[k] = ... } }</code> のような
+  <code>hint</code> で報告されます。</li>
 <li><code>Map&lt;K, Struct&gt;</code> の値については、フィールドの書き込みはフィールド単位で追跡され
   ます。1 つの action の中で同じ要素の異なる 2 つのフィールドを更新すること、例えば
   <code>m[k].f1 = 1</code> に続く <code>m[k].f2 = 2</code> は許されます。同じパスで同じフィールドを繰り返す

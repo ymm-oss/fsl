@@ -710,6 +710,17 @@ variable.
   of an if are separate paths, so you may assign in both. Assigning to the same
   variable **after** an if is also an error (to prevent the writes inside the
   branches from being lost).
+- **Conservative write-alias rejection**: when a `forall` body writes an indexed
+  location whose indices are not provably distinct across iterations, native
+  `check`/`verify` and the browser Worker reject the spec before any verifier
+  backend runs. This is distinct from a **proven duplicate write** (for example
+  `m[0]` twice, or `forall c { m[0] = ... }`), which keeps the legacy
+  `an action may not assign the same state location more than once` message.
+  Unproved injectivity is reported as
+  `cannot prove write-index distinctness across forall iterations` with
+  `diagnostic_code: FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED`, the offending
+  assignment `loc`, and—when a safe repair exists—a `hint` such as
+  `forall k: Cell { if k >= BASE and k < BASE + 4 { m[k] = ... } }`.
 - For `Map<K, Struct>` values, field writes are tracked per field. Updating two
   different fields of the same element in one action, such as `m[k].f1 = 1`
   followed by `m[k].f2 = 2`, is allowed. Repeating the same field on the same

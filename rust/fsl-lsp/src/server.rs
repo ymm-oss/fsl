@@ -761,29 +761,74 @@ const fn token_type(role: SymbolRole) -> u32 {
 
 fn code_actions(state: &ServerState, uri: &Url) -> Option<Vec<CodeActionOrCommand>> {
     let source = source_for_uri(state, uri)?;
-    let rewrites = fsl_syntax::canonical_rewrites(&source).ok()?;
-    Some(
-        rewrites
-            .into_iter()
-            .map(|rewrite| {
-                let edits = rewrite
-                    .edits
-                    .into_iter()
-                    .map(|edit| TextEdit::new(span_range(&source, edit.span), edit.replacement))
-                    .collect::<Vec<_>>();
+    let path = uri.to_file_path().ok();
+    let base = path
+        .as_deref()
+        .and_then(Path::parent)
+        .unwrap_or_else(|| Path::new("."));
+    let resolver = StoreResolver {
+        state,
+        base: base.to_path_buf(),
+    };
+    let source_file = path
+        .as_deref()
+        .and_then(Path::to_str)
+        .unwrap_or(uri.as_str());
+    let (diagnostics, _) =
+        fslc_rust::source_diagnostic::diagnostics_with_model(&source, source_file, &resolver);
+    let semantic_fixes = diagnostics
+        .into_iter()
+        .filter_map(|diagnostic| {
+            diagnostic.quick_fix.map(|edit| {
                 CodeActionOrCommand::CodeAction(CodeAction {
-                    title: format!("Use canonical FSL: {}", rewrite.canonical_replacement),
+                    title: "Apply write-index distinctness repair".to_owned(),
                     kind: Some(CodeActionKind::QUICKFIX),
                     diagnostics: None,
-                    edit: Some(WorkspaceEdit::new(HashMap::from([(uri.clone(), edits)]))),
+                    edit: Some(WorkspaceEdit::new(HashMap::from([(
+                        uri.clone(),
+                        vec![TextEdit::new(
+                            span_range(&source, edit.span),
+                            edit.replacement,
+                        )],
+                    )]))),
                     command: None,
                     is_preferred: Some(true),
                     disabled: None,
                     data: None,
                 })
             })
-            .collect(),
-    )
+        })
+        .collect::<Vec<_>>();
+    let rewrites = fsl_syntax::canonical_rewrites(&source).ok()?;
+    let canonical_fixes = rewrites
+        .into_iter()
+        .map(|rewrite| {
+            let edits = rewrite
+                .edits
+                .into_iter()
+                .map(|edit| TextEdit::new(span_range(&source, edit.span), edit.replacement))
+                .collect::<Vec<_>>();
+            CodeActionOrCommand::CodeAction(CodeAction {
+                title: format!("Use canonical FSL: {}", rewrite.canonical_replacement),
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: None,
+                edit: Some(WorkspaceEdit::new(HashMap::from([(uri.clone(), edits)]))),
+                command: None,
+                is_preferred: Some(true),
+                disabled: None,
+                data: None,
+            })
+        })
+        .collect::<Vec<_>>();
+    let actions = semantic_fixes
+        .into_iter()
+        .chain(canonical_fixes)
+        .collect::<Vec<_>>();
+    if actions.is_empty() {
+        None
+    } else {
+        Some(actions)
+    }
 }
 
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {

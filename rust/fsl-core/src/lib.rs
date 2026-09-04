@@ -61,8 +61,9 @@ pub use domain::{DomainDefault, domain_kernel_source, domain_type_default};
 pub use domain_lowering::{domain_effect_owns_event, event_flag, state_name};
 pub use expr_text::{binder_text, expr_text, source_binder_text, source_expr_text};
 pub use model::{
-    ActionDef, ActionGuard, KernelModel, LeadsToDef, ModelError, ParamDef, PropertyDef, TypeDef,
-    TypeRef, Value as FslValue, build_model, static_leadsto_bindings,
+    ActionDef, ActionGuard, DiagnosticEdit, KernelModel, LeadsToDef, ModelError, ParamDef,
+    PropertyDef, TypeDef, TypeRef, Value as FslValue, WRITE_DISTINCTNESS_UNPROVED_CODE,
+    build_model, static_leadsto_bindings,
 };
 pub use origin::{
     INIT_TARGET, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET,
