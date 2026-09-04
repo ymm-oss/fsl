@@ -44,10 +44,12 @@ import {
 const MAIN = "refs/heads/main";
 const BYTES_PER_GIB = 1_073_741_824;
 const PASS_REPORT =
-  "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches";
+  "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches\n" +
+  "  informational/generation-coexistence: 5 cache entries observed; 0 generations beyond the newest per {sharedKey, platform} pair on `refs/heads/main` (0.00 GiB) -- diagnostic visibility only, not subtracted from the budget judgment below.";
 const THRESHOLD_REPORT =
   "cache budget audit: FAIL -- 1 finding(s)\n" +
-  "  budget-exhausted: cache usage is 8.50 GiB of a 10.00 GiB limit (85%), at or above the 85% threshold. 8.50 GiB is 1.50 GiB remaining before the limit; a sufficiently large save can trigger least-recently-used eviction, including a default-branch cache that a main-targeting pull request depends on.";
+  "  budget-exhausted: cache usage is 8.50 GiB of a 10.00 GiB limit (85%), at or above the 85% threshold. 8.50 GiB is 1.50 GiB remaining before the limit; a sufficiently large save can trigger least-recently-used eviction, including a default-branch cache that a main-targeting pull request depends on.\n" +
+  "  informational/generation-coexistence: 5 cache entries observed; 0 generations beyond the newest per {sharedKey, platform} pair on `refs/heads/main` (0.00 GiB) -- diagnostic visibility only, not subtracted from the budget judgment below.";
 const PAGE_PATH = (page) =>
   `/actions/caches?per_page=100&sort=created_at&direction=asc&page=${page}`;
 const RUNNER_PATH = fileURLToPath(new URL("./run-cache-budget-audit.mjs", import.meta.url));
@@ -85,12 +87,18 @@ test("pageNumber reads the page query parameter without substring matches", () =
   }
 });
 
-function cache(key, ref, gib) {
-  return { key, ref, size_in_bytes: Math.round(gib * BYTES_PER_GIB) };
+// Arbitrary but fixed: no test that does not care about generation ordering
+// needs to think about `created_at` at all. A test that does (the
+// generation-coexistence de-duplication, issue #926) passes its own explicit
+// `createdAt` per entry instead.
+const DEFAULT_CREATED_AT = "2026-01-01T00:00:00Z";
+
+function cache(key, ref, gib, createdAt = DEFAULT_CREATED_AT) {
+  return { key, ref, size_in_bytes: Math.round(gib * BYTES_PER_GIB), created_at: createdAt };
 }
 
-function cacheBytes(key, ref, bytes) {
-  return { key, ref, size_in_bytes: bytes };
+function cacheBytes(key, ref, bytes, createdAt = DEFAULT_CREATED_AT) {
+  return { key, ref, size_in_bytes: bytes, created_at: createdAt };
 }
 
 function healthyListing() {
@@ -240,11 +248,214 @@ test("accepting: default-branch caches present, budget below threshold, no pull-
   const caches = healthyListing();
   const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
   assert.equal(result.ok, true, formatReport(result));
-  assert.equal(
-    formatReport(result),
-    "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches",
-  );
+  assert.equal(formatReport(result), PASS_REPORT);
   assert.deepEqual(result.findings, []);
+  assert.deepEqual(result.informational, [
+    {
+      code: "generation-coexistence",
+      message:
+        "5 cache entries observed; 0 generations beyond the newest per {sharedKey, platform} pair on `refs/heads/main` (0.00 GiB) -- diagnostic visibility only, not subtracted from the budget judgment below.",
+    },
+  ]);
+});
+
+// Issue #926, measured 2026-09-04. Exact bytes from `gh cache list`: a
+// healthy single-generation-per-key state (matching `healthyListing()`
+// above, current hash suffixes) plus `rust-native-z3` holding two
+// generations on each platform at once. The Darwin pair's root cause was
+// independently confirmed by comparing both runs' own `Swatinem/rust-cache`
+// restore logs (docs/DESIGN-ci.md, "Generation coexistence (issue #926,
+// measured 2026-09-04)"); the Windows_NT pair is real `gh cache list` data
+// showing the same two-generation shape, but its own CI logs were not
+// separately diffed, so this fixture does not claim the identical mechanism
+// was independently confirmed for that platform too.
+function generationCoexistenceListing() {
+  return [
+    cacheBytes("v0-rust-semantic-mutation-Linux-x64-0b9fd15e-9efe1eb7", MAIN, 2_918_976_572),
+    cacheBytes("v0-rust-rust-workspace-Linux-x64-0b9fd15e-9efe1eb7", MAIN, 1_606_856_511),
+    cacheBytes("v0-rust-wasm-Linux-x64-0b9fd15e-9efe1eb7", MAIN, 1_451_597_557),
+    // Older generation of each, created first.
+    cacheBytes(
+      "v0-rust-rust-native-z3-Darwin-arm64-cf75cde1-9efe1eb7",
+      MAIN,
+      1_240_460_598,
+      "2026-08-27T11:08:31Z",
+    ),
+    cacheBytes(
+      "v0-rust-rust-native-z3-Windows_NT-x64-e61e1838-9efe1eb7",
+      MAIN,
+      620_172_089,
+      "2026-08-21T00:00:00Z",
+    ),
+    // Newer generation of each, created later -- the one Swatinem/rust-cache
+    // would actually restore today.
+    cacheBytes(
+      "v0-rust-rust-native-z3-Darwin-arm64-2bc65c5a-9efe1eb7",
+      MAIN,
+      1_240_258_986,
+      "2026-09-02T21:39:44Z",
+    ),
+    cacheBytes(
+      "v0-rust-rust-native-z3-Windows_NT-x64-368f6b88-9efe1eb7",
+      MAIN,
+      620_209_508,
+      "2026-09-03T21:01:35Z",
+    ),
+    cacheBytes("node-cache-Linux-x64-npm-541c2caf2ed5378dd8986252a0959abcf8229ef6fd20cc2315b07fb766123eef", MAIN, 12_193_019),
+    cacheBytes("node-cache-Linux-x64-npm-e6d58c0aa2ebc53c41327e302ab36a33940d4fdecff9c231e58abfb54fc45d87", MAIN, 12_191_616),
+    cacheBytes("Linux-cargo-nextest-0.9.143", MAIN, 9_069_679),
+    cacheBytes("Linux-wasm-bindgen-cli-0.2.126", MAIN, 8_443_888),
+  ];
+}
+
+test("rejecting: physical generation coexistence still fails the budget, with a diagnostic companion", () => {
+  // Reverted design decision (review found two executed counterexamples in
+  // the earlier controllable-footprint version: a same-identity 5+5 GiB pair
+  // physically filling the 10 GiB budget judged as 5 GiB and passing; a
+  // higher independently-observed usage total reduced below threshold by
+  // subtracting listing-derived stale bytes not proven to be the same bytes
+  // the usage endpoint counts). GitHub's budget and eviction act on physical
+  // bytes: this fixture's raw total (9.07 GiB / 91%, the same shape the live
+  // 2026-09-04 audit reported) must still fail, exactly as it did before any
+  // #926 change, with the generation data now reported as an additional
+  // diagnostic rather than a judgment input.
+  const caches = generationCoexistenceListing();
+  assert.equal(usageOf(caches), 9_740_430_023);
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+
+  assert.equal(result.ok, false, formatReport(result));
+  const budgetFinding = result.findings.find((f) => f.code === "budget-exhausted");
+  assert.ok(budgetFinding, formatReport(result));
+  assert.match(budgetFinding.message, /^cache usage is 9\.07 GiB of a 10\.00 GiB limit \(91%\)/);
+  const diagnostic = result.findings.find(
+    (f) => f.code === "generation-coexistence-partial-explanation",
+  );
+  assert.ok(diagnostic, formatReport(result));
+  assert.match(diagnostic.message, /up to 1\.73 GiB/);
+  assert.match(diagnostic.message, /2 generations/);
+  assert.deepEqual(result.informational, [
+    {
+      code: "generation-coexistence",
+      message:
+        "11 cache entries observed; 2 generations beyond the newest per {sharedKey, platform} pair on `refs/heads/main` (1.73 GiB) -- diagnostic visibility only, not subtracted from the budget judgment below.",
+    },
+  ]);
+});
+
+test("accepting: deleting the superseded generation genuinely reduces physical usage and can restore PASS", () => {
+  // The corrected design's other half: unlike the reverted version, deleting
+  // a stale generation now *does* change the judged total, because it
+  // genuinely shrinks what physically sits in the account -- the same
+  // arithmetic GitHub's own eviction performs. This is not a reward for
+  // manual deletion (docs/DESIGN-ci.md still records why manual deletion is
+  // not the recommended response, per the issue's own main-cache-absent
+  // regression), only proof the audit no longer manufactures a discrepancy
+  // between what it judges and what physically exists.
+  const withStale = generationCoexistenceListing();
+  const withoutStale = withStale.filter((entry) => !/-(cf75cde1|e61e1838)-/.test(entry.key));
+  assert.equal(withoutStale.length, withStale.length - 2);
+
+  const resultWithStale = auditCacheBudget({ caches: withStale, usageBytes: usageOf(withStale) });
+  const resultWithoutStale = auditCacheBudget({
+    caches: withoutStale,
+    usageBytes: usageOf(withoutStale),
+  });
+
+  assert.equal(resultWithStale.ok, false, formatReport(resultWithStale));
+  assert.equal(resultWithoutStale.ok, true, formatReport(resultWithoutStale));
+  assert.deepEqual(resultWithoutStale.findings, []);
+});
+
+test("rejecting: genuine growth is not hidden by generation-coexistence reporting", () => {
+  // Grow the *kept* (newest) semantic-mutation generation alone -- a shape
+  // with no stale-generation explanation at all -- and confirm
+  // budget-exhausted fires on the raw total with no diagnostic companion
+  // (since staleGenerationBytes for this key's group is 0; the z3 pairs
+  // still contribute their own diagnostic).
+  const caches = generationCoexistenceListing().map((entry) =>
+    entry.key.includes("-semantic-mutation-")
+      ? { ...entry, size_in_bytes: entry.size_in_bytes + 2_500_000_000 }
+      : entry,
+  );
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+
+  assert.equal(result.ok, false, formatReport(result));
+  const finding = result.findings.find((f) => f.code === "budget-exhausted");
+  assert.ok(finding, formatReport(result));
+  assert.match(finding.message, /^cache usage is/);
+});
+
+test("rejecting: two same-identity generations physically filling the budget must not pass (review counterexample 1)", () => {
+  // Executed counterexample from independent review of the reverted
+  // controllable-footprint design: two generations sharing one
+  // {sharedKey, platform} pair, 5 GiB each, physically occupy the entire
+  // 10 GiB budget. The reverted design judged only the newest generation
+  // (5 GiB, 50%) and passed; GitHub's own budget and eviction act on both
+  // physical blobs regardless of which one this audit calls "current."
+  const caches = [
+    cacheBytes("v0-rust-rust-workspace-Linux-x64-aaaaaaaa-11111111", MAIN, 5 * BYTES_PER_GIB, "2026-01-01T00:00:00Z"),
+    cacheBytes("v0-rust-rust-workspace-Linux-x64-bbbbbbbb-11111111", MAIN, 5 * BYTES_PER_GIB, "2026-01-02T00:00:00Z"),
+  ];
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+
+  const finding = result.findings.find((f) => f.code === "budget-exhausted");
+  assert.ok(finding, formatReport(result));
+  assert.match(finding.message, /^cache usage is 10\.00 GiB of a 10\.00 GiB limit \(100%\)/);
+});
+
+test("rejecting: a listing sum lower than the independently-observed usage must not be reduced below it (review counterexample 2)", () => {
+  // Executed counterexample from independent review: the cache-usage
+  // endpoint and the cache listing are separate, non-atomic observations
+  // (the existing max(usageBytes, rawSummed) protects against the listing
+  // under-reporting a real higher usage). The reverted design subtracted
+  // listing-derived "stale" bytes from that already-higher usage total,
+  // assuming the two observations shared the same bytes -- an assumption
+  // this audit has no basis for. A usage total of 10 GiB must still fail
+  // even when the listing itself sums to far less and appears to explain
+  // some of the gap via a stale generation.
+  const caches = [
+    cacheBytes("v0-rust-rust-native-z3-Darwin-arm64-aaaa0000-11111111", MAIN, 2 * BYTES_PER_GIB, "2026-01-01T00:00:00Z"),
+    cacheBytes("v0-rust-rust-native-z3-Darwin-arm64-bbbb1111-11111111", MAIN, 2 * BYTES_PER_GIB, "2026-01-02T00:00:00Z"),
+  ];
+  const result = auditCacheBudget({ caches, usageBytes: 10 * BYTES_PER_GIB });
+
+  const finding = result.findings.find((f) => f.code === "budget-exhausted");
+  assert.ok(finding, formatReport(result));
+  assert.match(finding.message, /^cache usage is 10\.00 GiB of a 10\.00 GiB limit \(100%\)/);
+});
+
+test("rejecting: de-duplication is scoped to the default branch, not to identity alone", () => {
+  // A wrong implementation that groups by {sharedKey, platform} regardless of
+  // ref would let a genuine pull-request-scoped duplicate of a `ci.yml`
+  // shared key hide behind a main-branch generation of the same identity --
+  // whether by tripping rule 3 or, worse, by silently excluding its bytes
+  // from the raw total the way the reverted controllable-footprint design
+  // once excluded a stale main-branch generation. Both are asserted here:
+  // the finding still fires, and the reported total is the *full* sum
+  // including this entry's bytes, not a value with anything subtracted.
+  const base = generationCoexistenceListing();
+  const prScopedBytes = 1_606_856_511;
+  const caches = [
+    ...base,
+    cacheBytes("v0-rust-rust-workspace-Linux-x64-0b9fd15e-9efe1eb7", "refs/pull/9/merge", prScopedBytes),
+  ];
+  const expectedTotal = usageOf(base) + prScopedBytes;
+  assert.equal(usageOf(caches), expectedTotal);
+
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+
+  assert.equal(
+    result.findings.some((f) => f.code === "pull-request-cache-present"),
+    true,
+    formatReport(result),
+  );
+  // The full total (11.57 GiB) exceeds the 10 GiB limit outright, so this
+  // also exercises budget-exhausted with an over-100% listing: proof the
+  // PR-scoped entry's bytes were not silently excluded from judgment.
+  const budgetFinding = result.findings.find((f) => f.code === "budget-exhausted");
+  assert.ok(budgetFinding, formatReport(result));
+  const expectedGiB = (expectedTotal / BYTES_PER_GIB).toFixed(2);
+  assert.match(budgetFinding.message, new RegExp(`^cache usage is ${expectedGiB.replace(".", "\\.")} GiB `));
 });
 
 test("rejecting: a pull-request-scoped ci.yml cache requires provenance review", () => {
@@ -1149,7 +1360,14 @@ test("retrying runner sends exact transport metadata for usage, every listing pa
   });
 
   assert.equal(result.ok, true);
-  assert.deepEqual(reports, [PASS_REPORT]);
+  // 101 entries here, not `PASS_REPORT`'s 5: the informational entry count is
+  // part of the transport-metadata claim this test makes (every listing
+  // entry, real or filler, reaches the audit), so it is asserted against the
+  // actual listing length rather than the unrelated fixed constant.
+  assert.deepEqual(reports, [
+    "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches\n" +
+      `  informational/generation-coexistence: ${listing.length} cache entries observed; 0 generations beyond the newest per {sharedKey, platform} pair on \`refs/heads/main\` (0.00 GiB) -- diagnostic visibility only, not subtracted from the budget judgment below.`,
+  ]);
   assert.deepEqual(errors, []);
 
   assert.deepEqual(calls, [
@@ -1294,6 +1512,19 @@ test("rejecting: malformed required cache-entry fields are unreadable through th
     ["not-a-number size", (entry) => ({ ...entry, size_in_bytes: Number.NaN }), /no valid size_in_bytes/],
     ["infinite size", (entry) => ({ ...entry, size_in_bytes: Number.POSITIVE_INFINITY }), /no valid size_in_bytes/],
     ["unsafe size", (entry) => ({ ...entry, size_in_bytes: Number.MAX_SAFE_INTEGER + 1 }), /no valid size_in_bytes/],
+    ["missing created_at", (entry) => {
+      const { created_at, ...withoutCreatedAt } = entry;
+      return withoutCreatedAt;
+    }, /no valid created_at/],
+    ["empty created_at", (entry) => ({ ...entry, created_at: "" }), /no valid created_at/],
+    ["non-string created_at", (entry) => ({ ...entry, created_at: 0 }), /no valid created_at/],
+    ["numeric-string created_at", (entry) => ({ ...entry, created_at: "0" }), /no valid created_at/],
+    ["garbage created_at", (entry) => ({ ...entry, created_at: "not-a-date" }), /no valid created_at/],
+    // Date.parse alone would accept both of these: it rolls a nonexistent
+    // calendar date over to the next valid one instead of rejecting it, and
+    // it treats a bare year number as a valid instant.
+    ["nonexistent calendar date created_at", (entry) => ({ ...entry, created_at: "2026-02-30T00:00:00Z" }), /no valid created_at/],
+    ["missing timezone created_at", (entry) => ({ ...entry, created_at: "2026-01-01T00:00:00" }), /no valid created_at/],
   ];
 
   for (const [description, mutate, expectedError] of cases) {
@@ -1673,6 +1904,7 @@ test("formatReport fixes the complete default FAIL report count, order, and deli
       "  main-cache-absent: no `refs/heads/main` cache for shared key `rust-native-z3` on platform `Windows_NT`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are `refs/heads/main`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.",
       "  main-cache-absent: no `refs/heads/main` cache for shared key `rust-native-z3` on platform `Darwin`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are `refs/heads/main`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.",
       "  pull-request-cache-present: `refs/pull/9/merge` holds a cache for `ci.yml`'s shared key `rust-workspace` (1.00 GiB). This violates the current no-pull-request-save invariant. It may have been saved before the guard existed or may indicate a later guard regression; inspect created_at and workflow provenance.",
+      "  informational/generation-coexistence: 1 cache entry observed; 0 generations beyond the newest per {sharedKey, platform} pair on `refs/heads/main` (0.00 GiB) -- diagnostic visibility only, not subtracted from the budget judgment below.",
     ].join("\n"),
   );
 });

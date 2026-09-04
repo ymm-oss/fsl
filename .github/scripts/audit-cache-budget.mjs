@@ -111,14 +111,16 @@ function formatGiB(bytes) {
 }
 
 /**
- * @param {{caches: Array<{key: string, ref: string, size_in_bytes: number}>,
+ * @param {{caches: Array<{key: string, ref: string, size_in_bytes: number, created_at: string}>,
  *          usageBytes: number|null,
  *          limitBytes?: number,
  *          warnFraction?: number,
  *          requiredMainEntries?: {key: string, platform: string}[],
  *          ciSharedKeys?: string[],
  *          defaultBranchRef?: string}} input
- * @returns {{findings: Array<{code: string, message: string}>, ok: boolean}}
+ * @returns {{findings: Array<{code: string, message: string}>,
+ *            informational: Array<{code: string, message: string}>,
+ *            ok: boolean}}
  */
 export function auditCacheBudget({
   caches,
@@ -130,6 +132,7 @@ export function auditCacheBudget({
   defaultBranchRef = "refs/heads/main",
 }) {
   const findings = [];
+  const informational = [];
 
   if (!Array.isArray(caches)) {
     findings.push({
@@ -137,16 +140,71 @@ export function auditCacheBudget({
       message:
         "the cache listing is absent or not an array; an unreadable listing is never read as an empty (healthy) cache set",
     });
-    return { findings, ok: false };
+    return { findings, informational, ok: false };
   }
 
-  // 1. Budget headroom. The usage endpoint is observed before the listing, so
-  //    neither endpoint is an atomic snapshot. Use the larger observed value:
-  //    an older, lower usage value must not hide a later, over-threshold
-  //    listing sum, while a higher usage value still protects against a later
-  //    deletion or an incomplete listing.
-  const summed = caches.reduce((total, entry) => total + (entry.size_in_bytes ?? 0), 0);
-  const effective = typeof usageBytes === "number" ? Math.max(usageBytes, summed) : summed;
+  // 1. Budget headroom, judged over the *raw, physical* total -- unchanged
+  //    from before issue #926. GitHub's budget and its least-recently-used
+  //    eviction act on physical bytes sitting in the account, not on any
+  //    repository-side classification of which bytes are "controllable";
+  //    "self-healing" describes whether a lever this audit rewards can fix a
+  //    generation, not whether it is currently occupying budget. An earlier
+  //    version of this rule subtracted a de-duplicated {sharedKey, platform}
+  //    total from judgment and was reverted after review found two executed
+  //    counterexamples: (a) two same-identity 5 GiB generations physically
+  //    filling the entire 10 GiB budget were judged as 5 GiB and passed, and
+  //    (b) an independently-observed usage total already higher than the
+  //    listing sum was reduced below threshold by subtracting listing-derived
+  //    stale bytes that are not proven to be the same bytes the usage
+  //    endpoint is counting -- the two observations are non-atomic (see the
+  //    existing max(usageBytes, rawSummed) comment below), so a byte
+  //    identified as stale in one cannot be assumed present, or absent, in
+  //    the other. Both are real physical-budget risks; classifying them
+  //    "controllable" must not make them invisible to `ok`.
+  //
+  //    Generation coexistence (issue #926, measured 2026-09-04) is still
+  //    computed and reported below, but strictly as an *additional*
+  //    diagnostic alongside a real `budget-exhausted` finding, never as a
+  //    reduction applied before judgment. See docs/DESIGN-ci.md, "Generation
+  //    coexistence (issue #926, measured 2026-09-04)".
+  const rawSummed = caches.reduce((total, entry) => total + (entry.size_in_bytes ?? 0), 0);
+  const rawEffective = typeof usageBytes === "number" ? Math.max(usageBytes, rawSummed) : rawSummed;
+
+  // Diagnostic only, computed from the listing alone (the usage endpoint has
+  // no per-entry breakdown to de-duplicate): at most one generation per
+  // {sharedKey, platform} pair on the default branch is "current"; every
+  // older generation in the same group is one `Swatinem/rust-cache` would not
+  // restore today. Every non-main entry -- including any `refs/pull/*` cache
+  // -- is left out of this grouping entirely (not merely "kept whole"): rules
+  // 3 and 4 below already judge those in full, and de-duplication logic must
+  // not touch the shape that caught the original #747 incident.
+  const mainGenerationsByIdentity = new Map();
+  for (const entry of caches) {
+    if (entry.ref !== defaultBranchRef) continue;
+    const { sharedKey, platform } = entryIdentity(entry.key);
+    if (!sharedKey || !platform) continue;
+    const identity = `${sharedKey}::${platform}`;
+    const group = mainGenerationsByIdentity.get(identity) ?? [];
+    group.push(entry);
+    mainGenerationsByIdentity.set(identity, group);
+  }
+
+  let staleGenerationBytes = 0;
+  let staleGenerationCount = 0;
+  for (const group of mainGenerationsByIdentity.values()) {
+    if (group.length < 2) continue;
+    // Newest first: the generation Swatinem/rust-cache would actually restore
+    // today. Every older generation in the same group is the one no lever
+    // this audit rewards can fix -- it can only be waited out.
+    const bySize = [...group].sort(
+      (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
+    );
+    for (const stale of bySize.slice(1)) {
+      staleGenerationBytes += stale.size_in_bytes ?? 0;
+      staleGenerationCount += 1;
+    }
+  }
+
   if (typeof usageBytes !== "number") {
     findings.push({
       code: "usage-unobserved",
@@ -154,19 +212,52 @@ export function auditCacheBudget({
         "the repository cache-usage endpoint returned no total; falling back to the listing sum, which is not independent headroom evidence and can differ because of observation-time changes or an incomplete listing. Absence of the total is not evidence of headroom.",
     });
   }
-  if (effective >= limitBytes * warnFraction) {
+
+  // Always reported, purely descriptive, never a pass/fail input on its own:
+  // how many generations beyond the newest per {sharedKey, platform} exist on
+  // the default branch right now. This is visibility into ambient GitHub-side
+  // churn, not a claim that those bytes are excluded from anything judged.
+  informational.push({
+    code: "generation-coexistence",
+    message: `${caches.length} cache entr${
+      caches.length === 1 ? "y" : "ies"
+    } observed; ${staleGenerationCount} generation${
+      staleGenerationCount === 1 ? "" : "s"
+    } beyond the newest per {sharedKey, platform} pair on \`${defaultBranchRef}\` (${formatGiB(
+      staleGenerationBytes,
+    )}) -- diagnostic visibility only, not subtracted from the budget judgment below.`,
+  });
+
+  if (rawEffective >= limitBytes * warnFraction) {
     const limitDiagnostic =
-      effective > limitBytes
-        ? `${formatGiB(effective - limitBytes)} above the limit`
-        : `${formatGiB(limitBytes - effective)} remaining before the limit`;
+      rawEffective > limitBytes
+        ? `${formatGiB(rawEffective - limitBytes)} above the limit`
+        : `${formatGiB(limitBytes - rawEffective)} remaining before the limit`;
     findings.push({
       code: "budget-exhausted",
-      message: `cache usage is ${formatGiB(effective)} of a ${formatGiB(limitBytes)} limit (${Math.round(
-        (effective / limitBytes) * 100,
+      message: `cache usage is ${formatGiB(rawEffective)} of a ${formatGiB(
+        limitBytes,
+      )} limit (${Math.round(
+        (rawEffective / limitBytes) * 100,
       )}%), at or above the ${Math.round(warnFraction * 100)}% threshold. ${formatGiB(
-        effective,
+        rawEffective,
       )} is ${limitDiagnostic}; a sufficiently large save can trigger least-recently-used eviction, including a default-branch cache that a main-targeting pull request depends on.`,
     });
+    // Diagnostic companion, only ever alongside the real finding above: how
+    // much of this overage *might* be self-healing generation churn, phrased
+    // as "up to" because the listing and the independently-observed usage
+    // total are not atomic (see the rule-1 comment above) -- a byte this
+    // computation calls stale is not proven to be counted, or not counted, in
+    // `usageBytes`. This never changes `ok` on its own; it is only ever
+    // present when `budget-exhausted` already is.
+    if (staleGenerationBytes > 0) {
+      findings.push({
+        code: "generation-coexistence-partial-explanation",
+        message: `up to ${formatGiB(staleGenerationBytes)} of this overage may be ${
+          staleGenerationCount === 1 ? "a single generation" : `${staleGenerationCount} generations`
+        } beyond the newest per {sharedKey, platform} pair on \`${defaultBranchRef}\` -- self-healing via GitHub's own least-recently-used eviction, not something a save-if/shared-key/deletion change in this repository controls. This does not reduce the budget-exhausted finding above: the listing and the independently-observed usage total are separate, non-atomic observations, so these bytes are not proven to be what the usage total is counting. See docs/DESIGN-ci.md, "Generation coexistence (issue #926, measured 2026-09-04)".`,
+      });
+    }
   }
 
   // 2. The default branch must hold every {key, platform} pair on the
@@ -228,13 +319,21 @@ export function auditCacheBudget({
     });
   }
 
-  return { findings, ok: findings.length === 0 };
+  return { findings, informational, ok: findings.length === 0 };
 }
 
-export function formatReport({ findings, ok }) {
-  if (ok) return "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches";
+export function formatReport({ findings, informational = [], ok }) {
+  const header = ok
+    ? "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches"
+    : [
+        `cache budget audit: FAIL -- ${findings.length} finding(s)`,
+        ...findings.map((finding) => `  ${finding.code}: ${finding.message}`),
+      ].join("\n");
+  if (informational.length === 0) return header;
+  // Informational lines never change PASS/FAIL and are labeled distinctly so
+  // a reader (or a script) cannot mistake one for a judged finding.
   return [
-    `cache budget audit: FAIL -- ${findings.length} finding(s)`,
-    ...findings.map((finding) => `  ${finding.code}: ${finding.message}`),
+    header,
+    ...informational.map((entry) => `  informational/${entry.code}: ${entry.message}`),
   ].join("\n");
 }
