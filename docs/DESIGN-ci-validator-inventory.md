@@ -15,7 +15,7 @@ that is intentional, not a gap -- the property this check protects is "no
 validator module accumulates silently, unclassified" (the root problem
 #761's 17 unwired `tools/check_rust_*.py` harnesses demonstrated: nobody had
 recorded why any of them were unwired). Whether a recorded reason accurately
-describes a specific module -- the F1-F7 precondition analysis, native-owner
+describes a specific module -- the F1-F8 precondition analysis, native-owner
 cross-referencing, and retirement readiness for the parity harnesses -- is
 `docs/RUST-PORTING.md`'s job, a human-maintained document this tool does not
 read and cannot verify.
@@ -51,12 +51,12 @@ Declared `exempt_reason` values:
 
 - `frozen-python-compatibility` — frozen Python reference/product tests kept
   outside required gates (`docs/DESIGN-rust-integration.md`). Also covers the
-  7 `tools/check_rust_*.py` parity harnesses whose disposition in
-  `docs/RUST-PORTING.md` is F1, F2, F3, F4, F5, F6, or F7 (`corpus_cli_parity`,
+  8 `tools/check_rust_*.py` parity harnesses whose disposition in
+  `docs/RUST-PORTING.md` is F1, F2, F3, F4, F5, F6, F7, or F8 (`corpus_cli_parity`,
   `dialect_parity`, `induction_parity`, `leadsto_parity`, `phase2_commands`,
-  `refinement_parity`, `replay_parity`) — each still fundamentally compares
-  against the frozen Python reference; the precise stage each is at within
-  that F1-F7 pipeline (precondition unmet, native owner pending review, or
+  `refinement_parity`, `replay_parity`, `full_envelope`) — each still fundamentally
+  compares against the frozen Python reference; the precise stage each is at within
+  that F1-F8 pipeline (precondition unmet, native owner pending review, or
   explicitly retained) is recorded in `RUST-PORTING.md`'s own table, not
   re-encoded here (see "Guarantee boundary" above).
 - `hook-local` — agent hook contract tests with timing or local-environment
@@ -116,7 +116,7 @@ Calibration evidence:
 - Add a new unwired `tools/check_rust_*.py` module → `check` fails with
   `untracked validator module` (#761 stage 2, same execution path as the
   `tests/` case above). Measured directly against this repository, not only a
-  fixture: `check` on the unmodified tree exits 0 (123 validator modules);
+  fixture: `check` on the unmodified tree exits 0 (124 validator modules);
   adding an unclassified `tools/check_rust_probe_injected.py` and re-running
   the identical command exits 1, naming that exact path; removing it restores
   exit 0. Classify it via `generate --exempt

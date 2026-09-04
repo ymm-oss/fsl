@@ -16,7 +16,7 @@ once is the entire cost of satisfying `generate`'s guard, and that is
 intentional -- the property this check protects is "no validator module can
 accumulate silently, unclassified" (issue #761's own root problem: 17
 `tools/check_rust_*.py` harnesses existed with nobody having recorded why).
-Whether a recorded reason accurately describes the module -- the F1-F7
+Whether a recorded reason accurately describes the module -- the F1-F8
 precondition analysis, native-owner cross-referencing, and retirement
 readiness -- is `docs/RUST-PORTING.md`'s job, a human-maintained document
 this tool does not read and cannot verify.

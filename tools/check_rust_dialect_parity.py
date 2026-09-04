@@ -3,9 +3,12 @@
 
 """Compare native and Python business/requirements/governance envelopes.
 
-Deletion deferred (F2): dialect dispatch is covered, but there is no focused
-native induction output contract for all three paths. Deletion requires those
-native induction cases.
+Deletion deferred (docs/RUST-PORTING.md F2). ``rust/fslc/tests/
+dialect_induction_contract.rs``'s
+``business_requirements_and_governance_pin_native_induction_contracts`` (#900)
+now owns focused native induction output contracts for the business,
+requirements, and governance paths -- retiring this script is a separate
+follow-up decision, not made by that test landing alone.
 """
 from __future__ import annotations
 

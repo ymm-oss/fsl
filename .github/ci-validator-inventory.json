@@ -589,6 +589,11 @@
       "tier": "exempt"
     },
     {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tools/check_rust_full_envelope.py",
+      "tier": "exempt"
+    },
+    {
       "exempt_reason": "manual-developer-run",
       "path": "tools/check_rust_grammar_fuzz.py",
       "tier": "exempt"
