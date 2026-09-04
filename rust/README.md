@@ -27,10 +27,14 @@ Current covered slice:
   SQL/Prisma import, AI hard-contract/stochastic evidence, domain structural
   checks/replay/scaffolds, and the report-tool command surface. The historical
   Phase-3 differential is parked, not a gate, and awaits a focused native
-  `ai compare` metric/delta contract before deletion. Seven other Python parity
-  harnesses also remain deletion-deferred pending the exact native controls in
-  `RUST-PORTING.md` F1–F7. The redundant full-envelope comparison is deletion-ready but
-  remains until its helpers move without breaking retained consumers.
+  `ai compare` metric/delta contract before deletion. Eight other Python parity
+  harnesses also remain deletion-deferred, for varying reasons, in
+  `RUST-PORTING.md` F1–F8. The full-envelope comparison (F8) is not redundant:
+  it is the only harness comparing the frozen Python side against native for
+  the *full* envelope (F2 and F4 separately do the same kind of comparison,
+  narrowed to their own dialect/case sets), and `test-browser.mjs`'s
+  native/WASM parity does not observe the frozen Python side either; retiring
+  it needs a separate compatibility decision (#988).
   Native tests cover
   typestate, full built-in/external mutation adjudication, invariant and
   reachable counterfactuals with source-backed blame, all five alternate

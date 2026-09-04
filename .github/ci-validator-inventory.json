@@ -557,6 +557,91 @@
       "exempt_reason": "frozen-python-compatibility",
       "path": "tests/test_version.py",
       "tier": "exempt"
+    },
+    {
+      "exempt_reason": "manual-developer-run",
+      "path": "tools/check_rust_ast_parity.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "pending-native-migration",
+      "path": "tools/check_rust_bfs_parity.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "pending-native-migration",
+      "path": "tools/check_rust_bmc_parity.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "manual-developer-run",
+      "path": "tools/check_rust_cli_snapshot.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tools/check_rust_corpus_cli_parity.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tools/check_rust_dialect_parity.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tools/check_rust_full_envelope.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "manual-developer-run",
+      "path": "tools/check_rust_grammar_fuzz.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tools/check_rust_induction_parity.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "manual-developer-run",
+      "path": "tools/check_rust_kernel_parity.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tools/check_rust_leadsto_parity.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tools/check_rust_phase2_commands.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "parked-pending-unrelated-work",
+      "path": "tools/check_rust_phase3_commands.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tools/check_rust_refinement_parity.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "frozen-python-compatibility",
+      "path": "tools/check_rust_replay_parity.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "pending-native-migration",
+      "path": "tools/check_rust_scenarios_parity.py",
+      "tier": "exempt"
+    },
+    {
+      "exempt_reason": "manual-developer-run",
+      "path": "tools/check_rust_surface_parity.py",
+      "tier": "exempt"
     }
   ]
 }

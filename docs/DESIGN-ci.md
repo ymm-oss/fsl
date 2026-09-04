@@ -27,12 +27,17 @@ because they match that name. The five bounded frozen-Python compatibility check
 `RUST-PORTING.md` are developer-run only, triggered by an intentional change to their shared
 projection. They are outside merge readiness, the product gate, scheduled promotion, and release,
 and a manual pass cannot replace or waive native evidence. Native/Worker full-envelope comparison
-is owned by `rust/fsl-wasm/test-browser.mjs`; native semantic agreement is owned by the Rust
-agreement and replay suites. The Phase-3 Python comparison is separately parked until `ai compare`
-has a focused native contract test. #761's documentation phase deletes no harness:
-`check_rust_full_envelope.py` is deletion-ready only after its shared helpers move safely; seven
-parity harnesses remain because related native coverage does not yet detect their exact drift
-(F1–F7 in `RUST-PORTING.md`); and the BFS/BMC/scenarios trio remains pending native semantic migration.
+(native build vs. WASM build, not vs. the frozen Python side) is owned by
+`rust/fsl-wasm/test-browser.mjs`; native semantic agreement is owned by the Rust agreement and replay
+suites. The Phase-3 Python comparison is separately parked until `ai compare` has a focused native
+contract test. #761's documentation phase deletes no harness: eight parity harnesses remain deletion-
+deferred, for reasons recorded per-harness (F1–F8 in `RUST-PORTING.md`) rather than a blanket rule —
+some still lack matching native coverage, and two (F2, F4) have landed native coverage for part of
+what they check but retain a frozen-Python-vs-native comparison edge nothing native-only replaces.
+`check_rust_full_envelope.py` (F8) holds the only such edge for the *full* envelope, with no
+replacement edge identified yet, so retiring it needs a separate compatibility decision (#988); and
+the BFS/BMC/scenarios trio remains pending native semantic
+migration.
 
 ### Why the split falls here
 
