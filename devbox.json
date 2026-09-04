@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.12.0/.schema/devbox.schema.json",
+  "packages": [
+    "rustc",
+    "cargo",
+    "rust-analyzer",
+    "clippy",
+    "rustfmt",
+    "cmake",
+    "pkg-config",
+    "python3",
+    "act"
+  ],
+  "shell": {
+    "init_hook": [
+      "echo 'Welcome to the FSL devbox environment!'"
+    ],
+    "scripts": {
+      "build": "cargo build --manifest-path rust/Cargo.toml --workspace --locked",
+      "test": "cargo test --manifest-path rust/Cargo.toml --workspace --locked",
+      "check": "cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- check specs/cart_v1.fsl",
+      "verify": "cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- verify specs/cart_v1.fsl --depth 8",
+      "fmt": "cargo fmt --manifest-path rust/Cargo.toml --all",
+      "fmt-check": "cargo fmt --manifest-path rust/Cargo.toml --all -- --check",
+      "clippy": "cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings",
+      "run": "cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --"
+    }
+  }
+}
