@@ -172,19 +172,19 @@ const DOCS: &[DocAnchors] = &[
         relative: "docs/LANGUAGE.md",
         supported_start: "is not supported.\n\n",
         supported_end: "are the only commands that extract fences",
-        unsupported_anchor: "Every other command that reads a spec path ",
+        unsupported_anchor: "Most other commands that read a spec path ",
     },
     DocAnchors {
         relative: "docs/LANGUAGE.ja.md",
         supported_start: "サポートされません。\n\n",
         supported_end: "の 3 コマンドだけです",
-        unsupported_anchor: "仕様パスを読み取る他のすべてのコマンド",
+        unsupported_anchor: "仕様パスを読み取る他のほとんどのコマンド",
     },
     DocAnchors {
         relative: "skills/fsl/references/commands.md",
         supported_start: "**Literate Markdown FSL.** ",
         supported_end: "\naccept `.md` files containing",
-        unsupported_anchor: "Every other spec-reading command ",
+        unsupported_anchor: "Most other spec-reading commands ",
     },
 ];
 

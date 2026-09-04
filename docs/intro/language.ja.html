@@ -1253,15 +1253,30 @@ fsl 以外のフェンス付きブロック(<code>```python</code> など)は無
 literate な <code>.md</code> はこの方法で <code>.fsl</code> ファイルを <code>use</code>/compose できますが、別の
 <code>.md</code> ファイルを compose のターゲットにすることはサポートされません。</p>
 <p>このフェンス抽出を行うのは <code>check</code>・<code>verify</code>・<code>scenarios</code> の 3 コマンドだけです。
-仕様パスを読み取る他のすべてのコマンド(<code>lint</code>・<code>migrate</code>・<code>fmt</code>・<code>kernel</code>・
+仕様パスを読み取る他のほとんどのコマンド(<code>lint</code>・<code>migrate</code>・<code>fmt</code>・<code>kernel</code>・
 <code>conformance</code>・<code>explain</code>・<code>mutate</code>・<code>typestate</code>・<code>testgen</code>・<code>testplan</code>・<code>html</code>・<code>ledger</code>・
-<code>analyze</code>・<code>diff</code>・<code>refine</code>・<code>replay</code>・<code>sweep</code>・<code>counterexample export</code>、および
+<code>analyze</code>・<code>diff</code>・<code>refine</code>・<code>replay</code>・<code>sweep</code>・<code>counterexample export</code>・
+<code>db check</code>/<code>observe</code>・<code>compat check</code>・<code>domain check</code>/<code>analyze</code>/<code>expand</code>/<code>generate</code>/<code>replay</code>/<code>testgen</code>・
+<code>ai check</code>/<code>replay</code>/<code>compat</code>・
+<code>causal check</code>/<code>analyze</code>/<code>diff</code>/<code>ledger</code>/<code>observe-expectations</code>/<code>verify-expectations</code>、および
 <code>document generate</code>/<code>claims</code>/<code>check</code>)は、<code>.md</code> 入力を代わりに入力種別の誤りとして
 拒否します: <code>result: "error"</code>、<code>kind: "usage"</code>、
 <code>diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"</code>、対応コマンドを挙げたメッセージ、
 そして仕様上の位置ではなく入力ファイル自体を指す <code>loc</code> です。これにより、非対応
 コマンドに渡された Markdown ドキュメントが、その Markdown 自身の最初の非 fsl 文字の
-位置にある仕様の構文エラーとして誤報されることを防ぎます。</p></div></details>
+位置にある仕様の構文エラーとして誤報されることを防ぎます。<code>chain</code>(位置引数は
+プロジェクトマニフェストであり仕様ではない)と<code>db import</code>(位置引数は SQL/Prisma
+スキーマ成果物)は、この意味での仕様パスコマンドではありません。
+<code>approval create</code>は<code>spec.path</code>が<code>.md</code>のレコードを生成できません(実測:
+<code>approval create &lt;.md&gt; --kind requirements_document|ledger ...</code>はレコード
+書き込み前に<code>FSL-PARSE</code>で失敗)。<code>approval check</code>/<code>diff</code>はレコードの
+<code>spec.path</code>が位置引数と一致するとき位置引数を FSL 仕様としてパースし、同じ
+<code>1:2</code>の誤報を再現します(手作りレコードで実測); issue #980 まで除外。
+<code>ai eval</code>/<code>regress</code>/<code>drift</code>は独自の
+<code>load_ai_project</code> フロントエンドで <code>.md</code> を既にパースします(有効な literate AI
+project では成功し、それ以外は明確な意味エラー)ため、この変更の対象外です。各
+コマンドの除外理由の実測値は
+<code>rust/fslc/src/literate_access.rs</code> の <code>LITERATE_EXCLUDED</code> を参照してください。</p></div></details>
 <details id="8-recommended-workflow-make-proved-the-standard"><summary>8. 推奨ワークフロー: proved を標準にする<span class="tree-blurb"> — BMC から帰納法へ、proved を標準にする推奨ワークフロー。</span></summary><div class="tree-body"><ol>
 <li>spec を書く → <code>fslc check</code>(高速な構文/型のループ)</li>
 <li><code>fslc verify --depth 8</code> → violated ならトレースを使って直す。
