@@ -1191,18 +1191,42 @@ jobs share one cache; no other job builds this cache (confirmed: grepped every w
 consolidate. This was this session's first hypothesis and it was wrong; recorded here so it is not
 re-proposed without this evidence.
 
-**Total-size reduction, not only generation reduction, was checked.** `z3 = { version = "=0.20.2",
-features = ["vendored", "z3_4_16"] }` (`rust/Cargo.toml`) compiles the full Z3 C++ solver from source;
-the ~1.16-1.24 GiB per-platform `rust-native-z3` cache entry is that vendored build's external
-dependency output, not accumulated build-artifact debt. This mirrors the already-settled
-`semantic-mutation` case above (2.719 GiB, "an observed clean size, not accumulated dead weight --
-two successive size predictions to the contrary were both wrong"): the repository's two largest
-non-workspace cache entries have each, independently, been checked for reducibility and found to
-reflect what is actually built, not slack. A theoretically untested lever remains -- no `[profile]`
+**An initial fix subtracting de-duplicated bytes from judgment was reviewed and reverted.** The
+first version of `auditCacheBudget()`'s response to this issue computed a "controllable footprint" --
+one generation per `{sharedKey, platform}` on `refs/heads/main` -- and judged *that* value instead
+of the raw total. Independent review executed two counterexamples against it: (1) two generations
+sharing one identity, 5 GiB each, physically filling the entire 10 GiB budget, judged as 5 GiB and
+passed; (2) an independently-observed `usageBytes` total already higher than the listing sum, with
+listing-derived "stale" bytes subtracted from it on the unproven assumption that the two
+observations -- which the pre-existing `max(usageBytes, rawSummed)` comment already treats as
+non-atomic -- share the same bytes. GitHub's budget and its least-recently-used eviction act on
+physical bytes sitting in the account; a repository-side classification of which generation is
+"current" does not change what physically occupies budget, so it must not be subtracted from
+judgment. **The rule now judges the raw total exactly as it did before #926** (`Math.max(usageBytes,
+rawSummed)`, unchanged), and reports generation coexistence as a strictly additional
+`generation-coexistence-partial-explanation` finding -- present only alongside a real
+`budget-exhausted` finding, phrased as "up to N GiB *may* be" self-healing churn rather than as a
+subtraction, and never reducing `ok`. A `generation-coexistence` entry in the always-reported,
+non-gating `informational` array separately states the raw entry count and superseded-generation
+byte count regardless of whether the budget is exhausted. The practical consequence: this audit
+still reports `budget-exhausted` at 9.07 GiB / 91% for the exact 2026-09-04 measurement above, and
+that is correct -- the fix is making the red result actionable (which part is self-healing and which
+is not), not making it green.
+
+**Total-size reduction, not only generation reduction, was checked for its *composition* -- not for
+every lever.** `z3 = { version = "=0.20.2", features = ["vendored", "z3_4_16"] }` (`rust/Cargo.toml`)
+compiles the full Z3 C++ solver from source; the ~1.16-1.24 GiB per-platform `rust-native-z3` cache
+entry is that vendored build's external dependency output, not accumulated build-artifact debt. This
+mirrors the already-settled `semantic-mutation` case above (2.719 GiB, "an observed clean size, not
+accumulated dead weight -- two successive size predictions to the contrary were both wrong"): the
+repository's two largest non-workspace cache entries have each, independently, had their size traced
+to what is actually built, not to slack accumulating in a build-artifact tree. Neither check
+establishes that no smaller build is possible -- one concrete, untested lever remains: no `[profile]`
 section in `rust/Cargo.toml` or any crate's `Cargo.toml` currently trims debug info
 (`debug = "line-tables-only"` or similar), so the vendored Z3 object files plausibly carry full debug
-symbols uncompressed -- but validating that this would shrink the cache *without* changing cold-build
-time requires an actual `cargo`/CI build to measure both, which is outside this measurement's scope.
+symbols uncompressed. Validating that this would shrink the cache *without* changing cold-build time
+requires an actual `cargo`/CI build to measure both, which is outside this measurement's scope; filed
+separately as #984.
 
 **Self-healing, not permanent.** `cf75cde1` was last accessed 2026-09-03T05:10; absent further access
 it is eligible for GitHub's 7-day-no-access staleness eviction around 2026-09-10, or sooner under LRU

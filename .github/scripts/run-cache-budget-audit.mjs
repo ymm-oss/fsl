@@ -35,8 +35,18 @@ function validNonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
 }
 
+const ISO_TIMESTAMP_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+
 function validIsoTimestamp(value) {
-  return typeof value === "string" && value.length > 0 && Number.isFinite(Date.parse(value));
+  // `Date.parse` alone is not a validator: it is lenient enough to accept
+  // "0" (epoch year 0) and to roll a nonexistent calendar date like
+  // "2026-02-30" over to 2026-03-02 rather than reject it. Require the exact
+  // shape GitHub's API emits, then require the constructed date's own ISO day
+  // to match the input day -- a rolled-over date fails that round trip.
+  if (typeof value !== "string" || !ISO_TIMESTAMP_SHAPE.test(value)) return false;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return false;
+  return new Date(parsed).toISOString().slice(0, 10) === value.slice(0, 10);
 }
 
 function listingRequests(totalCount) {

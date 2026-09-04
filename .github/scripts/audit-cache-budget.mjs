@@ -143,44 +143,46 @@ export function auditCacheBudget({
     return { findings, informational, ok: false };
   }
 
-  // 1. Budget headroom, judged over the *controllable* footprint (issue
-  //    #926): at most one generation per {sharedKey, platform} pair on the
-  //    default branch, keeping only the most recently created generation.
-  //    `Swatinem/rust-cache` hashes the runner's entire installed-toolchain
-  //    list into its key, not only the one version a workflow pins, so a
-  //    `macos-15`/`windows-latest` runner-image update regenerates a key even
-  //    though nothing this repository controls changed (measured
-  //    2026-09-04: `rust/Cargo.lock` and `.github/workflows/ci.yml` were
-  //    byte-identical across a coexistence window, and both runs resolved the
-  //    pinned toolchain to the identical rustc commit). GitHub's own
-  //    least-recently-used eviction already reclaims a superseded generation
-  //    on its own schedule; judging the raw total would report a defect
-  //    nobody in this repository can fix by any means this audit is willing
-  //    to reward, and the shortest way to silence that false alarm --
-  //    deleting the older generation -- has already caused a *worse*,
-  //    previously observed failure (main-cache-absent) for this exact
-  //    reason. See docs/DESIGN-ci.md, "Generation coexistence (issue #926,
-  //    measured 2026-09-04)".
+  // 1. Budget headroom, judged over the *raw, physical* total -- unchanged
+  //    from before issue #926. GitHub's budget and its least-recently-used
+  //    eviction act on physical bytes sitting in the account, not on any
+  //    repository-side classification of which bytes are "controllable";
+  //    "self-healing" describes whether a lever this audit rewards can fix a
+  //    generation, not whether it is currently occupying budget. An earlier
+  //    version of this rule subtracted a de-duplicated {sharedKey, platform}
+  //    total from judgment and was reverted after review found two executed
+  //    counterexamples: (a) two same-identity 5 GiB generations physically
+  //    filling the entire 10 GiB budget were judged as 5 GiB and passed, and
+  //    (b) an independently-observed usage total already higher than the
+  //    listing sum was reduced below threshold by subtracting listing-derived
+  //    stale bytes that are not proven to be the same bytes the usage
+  //    endpoint is counting -- the two observations are non-atomic (see the
+  //    existing max(usageBytes, rawSummed) comment below), so a byte
+  //    identified as stale in one cannot be assumed present, or absent, in
+  //    the other. Both are real physical-budget risks; classifying them
+  //    "controllable" must not make them invisible to `ok`.
   //
-  //    Only default-branch entries attributable to a {sharedKey, platform}
-  //    pair are de-duplicated this way. Every other entry -- including any
-  //    `refs/pull/*` cache -- is counted individually and in full: the
-  //    original #747 incident was many *different* refs each holding their
-  //    own ref-scoped cache, not multiple generations of one key on one ref,
-  //    and de-duplication must not blunt detection of that shape (rules 3
-  //    and 4 below still see every such entry).
+  //    Generation coexistence (issue #926, measured 2026-09-04) is still
+  //    computed and reported below, but strictly as an *additional*
+  //    diagnostic alongside a real `budget-exhausted` finding, never as a
+  //    reduction applied before judgment. See docs/DESIGN-ci.md, "Generation
+  //    coexistence (issue #926, measured 2026-09-04)".
   const rawSummed = caches.reduce((total, entry) => total + (entry.size_in_bytes ?? 0), 0);
   const rawEffective = typeof usageBytes === "number" ? Math.max(usageBytes, rawSummed) : rawSummed;
 
+  // Diagnostic only, computed from the listing alone (the usage endpoint has
+  // no per-entry breakdown to de-duplicate): at most one generation per
+  // {sharedKey, platform} pair on the default branch is "current"; every
+  // older generation in the same group is one `Swatinem/rust-cache` would not
+  // restore today. Every non-main entry -- including any `refs/pull/*` cache
+  // -- is left out of this grouping entirely (not merely "kept whole"): rules
+  // 3 and 4 below already judge those in full, and de-duplication logic must
+  // not touch the shape that caught the original #747 incident.
   const mainGenerationsByIdentity = new Map();
-  let unattributedMainCount = 0;
   for (const entry of caches) {
     if (entry.ref !== defaultBranchRef) continue;
     const { sharedKey, platform } = entryIdentity(entry.key);
-    if (!sharedKey || !platform) {
-      unattributedMainCount += 1;
-      continue;
-    }
+    if (!sharedKey || !platform) continue;
     const identity = `${sharedKey}::${platform}`;
     const group = mainGenerationsByIdentity.get(identity) ?? [];
     group.push(entry);
@@ -211,37 +213,51 @@ export function auditCacheBudget({
     });
   }
 
-  // Informational only, never a pass/fail input: the raw, undeduplicated
-  // total and how many stale generations were excluded from judgment below.
-  // Deleting a stale generation changes this number; it changes nothing the
-  // audit judges (see rule 1 below), so there is no reward for doing so.
+  // Always reported, purely descriptive, never a pass/fail input on its own:
+  // how many generations beyond the newest per {sharedKey, platform} exist on
+  // the default branch right now. This is visibility into ambient GitHub-side
+  // churn, not a claim that those bytes are excluded from anything judged.
   informational.push({
-    code: "raw-cache-footprint",
-    message: `raw cache total (all refs, all generations) is ${formatGiB(rawEffective)} of a ${formatGiB(
-      limitBytes,
-    )} limit (${Math.round((rawEffective / limitBytes) * 100)}%) across ${caches.length} entr${
+    code: "generation-coexistence",
+    message: `${caches.length} cache entr${
       caches.length === 1 ? "y" : "ies"
-    }; ${staleGenerationCount} superseded generation${
+    } observed; ${staleGenerationCount} generation${
       staleGenerationCount === 1 ? "" : "s"
-    } on \`${defaultBranchRef}\` (${formatGiB(staleGenerationBytes)}) excluded from the controllable total below as self-healing, not judged.`,
+    } beyond the newest per {sharedKey, platform} pair on \`${defaultBranchRef}\` (${formatGiB(
+      staleGenerationBytes,
+    )}) -- diagnostic visibility only, not subtracted from the budget judgment below.`,
   });
 
-  const controllableEffective = Math.max(0, rawEffective - staleGenerationBytes);
-  if (controllableEffective >= limitBytes * warnFraction) {
+  if (rawEffective >= limitBytes * warnFraction) {
     const limitDiagnostic =
-      controllableEffective > limitBytes
-        ? `${formatGiB(controllableEffective - limitBytes)} above the limit`
-        : `${formatGiB(limitBytes - controllableEffective)} remaining before the limit`;
+      rawEffective > limitBytes
+        ? `${formatGiB(rawEffective - limitBytes)} above the limit`
+        : `${formatGiB(limitBytes - rawEffective)} remaining before the limit`;
     findings.push({
       code: "budget-exhausted",
-      message: `controllable cache usage is ${formatGiB(controllableEffective)} of a ${formatGiB(
+      message: `cache usage is ${formatGiB(rawEffective)} of a ${formatGiB(
         limitBytes,
       )} limit (${Math.round(
-        (controllableEffective / limitBytes) * 100,
+        (rawEffective / limitBytes) * 100,
       )}%), at or above the ${Math.round(warnFraction * 100)}% threshold. ${formatGiB(
-        controllableEffective,
+        rawEffective,
       )} is ${limitDiagnostic}; a sufficiently large save can trigger least-recently-used eviction, including a default-branch cache that a main-targeting pull request depends on.`,
     });
+    // Diagnostic companion, only ever alongside the real finding above: how
+    // much of this overage *might* be self-healing generation churn, phrased
+    // as "up to" because the listing and the independently-observed usage
+    // total are not atomic (see the rule-1 comment above) -- a byte this
+    // computation calls stale is not proven to be counted, or not counted, in
+    // `usageBytes`. This never changes `ok` on its own; it is only ever
+    // present when `budget-exhausted` already is.
+    if (staleGenerationBytes > 0) {
+      findings.push({
+        code: "generation-coexistence-partial-explanation",
+        message: `up to ${formatGiB(staleGenerationBytes)} of this overage may be ${
+          staleGenerationCount === 1 ? "a single generation" : `${staleGenerationCount} generations`
+        } beyond the newest per {sharedKey, platform} pair on \`${defaultBranchRef}\` -- self-healing via GitHub's own least-recently-used eviction, not something a save-if/shared-key/deletion change in this repository controls. This does not reduce the budget-exhausted finding above: the listing and the independently-observed usage total are separate, non-atomic observations, so these bytes are not proven to be what the usage total is counting. See docs/DESIGN-ci.md, "Generation coexistence (issue #926, measured 2026-09-04)".`,
+      });
+    }
   }
 
   // 2. The default branch must hold every {key, platform} pair on the
