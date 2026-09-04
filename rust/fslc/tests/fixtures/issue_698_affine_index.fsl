@@ -1,0 +1,10 @@
+spec AffineIndex {
+  type Cell = 0..7
+  type Off  = 0..3
+  const BASE = 2
+  state { m: Map<Cell, Bool> }
+  init { forall i: Cell { m[i] = false } }
+  action shift() {
+    forall c: Off { m[BASE + c] = true }
+  }
+}

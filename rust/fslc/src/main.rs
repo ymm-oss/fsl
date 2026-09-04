@@ -5630,6 +5630,10 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
                 &diagnostic.message,
                 diagnostic.located.then(|| diagnostic.span.python_loc()),
                 diagnostic.kind == "name",
+                Some(diagnostic.code.as_str()).filter(|code| {
+                    *code != "FSL-SEMANTIC" && *code != "FSL-TYPE" && *code != "FSL-NAME"
+                }),
+                diagnostic.hint.as_deref(),
             ),
             2,
         );
@@ -16646,8 +16650,9 @@ fn load_kernel_model_from_source(
             Ok(kernel) => kernel,
             Err(error) => return Err(kernel_load_error(source, &error)),
         };
-    let model = fsl_core::build_model(kernel.clone())
-        .map_err(|error| SpecLoadError::Semantic(SemanticDiagnostic::from_model_error(&error)))?;
+    let model = fsl_core::build_model(kernel.clone()).map_err(|error| {
+        SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_model_error(&error)))
+    })?;
     Ok((kernel, model))
 }
 
@@ -16920,14 +16925,15 @@ fn load_model_scoped_from_source(
             // A rejected `--instances`/`--values` bound is a CLI argument
             // defect, not a construct in the spec, so it owns no location.
             Err(error) if error.message.starts_with("--instances/--values") => {
-                return Err(SpecLoadError::Semantic(SemanticDiagnostic::unlocated(
-                    error.message,
+                return Err(SpecLoadError::Semantic(Box::new(
+                    SemanticDiagnostic::unlocated(error.message),
                 )));
             }
             Err(error) => return Err(kernel_load_error(source, &error)),
         };
-    fsl_core::build_model(kernel)
-        .map_err(|error| SpecLoadError::Semantic(SemanticDiagnostic::from_model_error(&error)))
+    fsl_core::build_model(kernel).map_err(|error| {
+        SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_model_error(&error)))
+    })
 }
 
 fn envelope() -> Map<String, Value> {
@@ -16989,7 +16995,14 @@ fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
 }
 
 fn semantic_error_output(message: &str) -> Value {
-    fslc_rust::verification_output::render_semantic_error(envelope(), message, None, false)
+    fslc_rust::verification_output::render_semantic_error(
+        envelope(),
+        message,
+        None,
+        false,
+        None,
+        None,
+    )
 }
 
 /// Render a core frontend/lowering diagnostic without discarding its typed
@@ -17001,6 +17014,8 @@ fn core_error_output(error: &fsl_core::CoreError) -> Value {
         &diagnostic.message,
         diagnostic.loc,
         diagnostic.name_resolution,
+        diagnostic.diagnostic_code,
+        diagnostic.hint.as_deref(),
     )
 }
 
@@ -17031,6 +17046,8 @@ fn model_error_output(error: &fsl_core::ModelError) -> Value {
         &error.to_string(),
         fslc_rust::verification_output::model_error_loc(error),
         error.name_resolution,
+        error.diagnostic_code,
+        error.hint.as_deref().map(String::as_str),
     )
 }
 

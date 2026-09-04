@@ -685,6 +685,18 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
   代入するのは意味論エラーです。if の then/else は別々のパスなので、両方で代入して
   かまいません。if の**後**に同じ変数へ代入するのもエラーです(分岐の内側の書き込み
   が失われるのを防ぐため)。
+- **保守的な write-alias 拒否**: `forall` 本体が反復間で相異性を証明できない
+  インデックス付き location へ書き込む場合、ネイティブの `check`/`verify` と
+  ブラウザ Worker は検証器バックエンドより前に spec を拒否します。これは
+  **確定した重複 write**(例: `m[0]` を 2 回、`forall c { m[0] = ... }`)とは別で、
+  後者は従来の
+  `an action may not assign the same state location more than once` メッセージを
+  維持します。injectivity 未証明は
+  `cannot prove write-index distinctness across forall iterations` と
+  `diagnostic_code: FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED`、問題の代入 `loc`、
+  安全な修復が存在する場合は
+  `forall k: Cell { if k >= BASE and k < BASE + 4 { m[k] = ... } }` のような
+  `hint` で報告されます。
 - `Map<K, Struct>` の値については、フィールドの書き込みはフィールド単位で追跡され
   ます。1 つの action の中で同じ要素の異なる 2 つのフィールドを更新すること、例えば
   `m[k].f1 = 1` に続く `m[k].f2 = 2` は許されます。同じパスで同じフィールドを繰り返す
