@@ -35,6 +35,10 @@ function validNonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
 }
 
+function validIsoTimestamp(value) {
+  return typeof value === "string" && value.length > 0 && Number.isFinite(Date.parse(value));
+}
+
 function listingRequests(totalCount) {
   return Math.max(1, Math.ceil(totalCount / CACHE_PAGE_SIZE)) + 1;
 }
@@ -113,6 +117,9 @@ export async function fetchCacheCollection(api) {
       if (!validNonNegativeSafeInteger(cache.size_in_bytes)) {
         throw new Error(`cache listing page ${page} has an entry with no valid size_in_bytes`);
       }
+      if (!validIsoTimestamp(cache.created_at)) {
+        throw new Error(`cache listing page ${page} has an entry with no valid created_at`);
+      }
       if (cacheIds.has(cache.id)) {
         throw new Error(`cache listing page ${page} repeats cache id ${cache.id}`);
       }
@@ -153,7 +160,12 @@ export function sameCacheCollection(first, second) {
       other &&
       entry.key === other.key &&
       entry.ref === other.ref &&
-      entry.size_in_bytes === other.size_in_bytes
+      entry.size_in_bytes === other.size_in_bytes &&
+      // `created_at` now feeds the pure audit's generation-coexistence
+      // de-duplication (issue #926): a differing value between the two
+      // paired observations is compared for the same reason the three
+      // fields above already are, not left as an unexplained exclusion.
+      entry.created_at === other.created_at
     );
   });
 }

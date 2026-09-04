@@ -111,14 +111,16 @@ function formatGiB(bytes) {
 }
 
 /**
- * @param {{caches: Array<{key: string, ref: string, size_in_bytes: number}>,
+ * @param {{caches: Array<{key: string, ref: string, size_in_bytes: number, created_at: string}>,
  *          usageBytes: number|null,
  *          limitBytes?: number,
  *          warnFraction?: number,
  *          requiredMainEntries?: {key: string, platform: string}[],
  *          ciSharedKeys?: string[],
  *          defaultBranchRef?: string}} input
- * @returns {{findings: Array<{code: string, message: string}>, ok: boolean}}
+ * @returns {{findings: Array<{code: string, message: string}>,
+ *            informational: Array<{code: string, message: string}>,
+ *            ok: boolean}}
  */
 export function auditCacheBudget({
   caches,
@@ -130,6 +132,7 @@ export function auditCacheBudget({
   defaultBranchRef = "refs/heads/main",
 }) {
   const findings = [];
+  const informational = [];
 
   if (!Array.isArray(caches)) {
     findings.push({
@@ -137,16 +140,69 @@ export function auditCacheBudget({
       message:
         "the cache listing is absent or not an array; an unreadable listing is never read as an empty (healthy) cache set",
     });
-    return { findings, ok: false };
+    return { findings, informational, ok: false };
   }
 
-  // 1. Budget headroom. The usage endpoint is observed before the listing, so
-  //    neither endpoint is an atomic snapshot. Use the larger observed value:
-  //    an older, lower usage value must not hide a later, over-threshold
-  //    listing sum, while a higher usage value still protects against a later
-  //    deletion or an incomplete listing.
-  const summed = caches.reduce((total, entry) => total + (entry.size_in_bytes ?? 0), 0);
-  const effective = typeof usageBytes === "number" ? Math.max(usageBytes, summed) : summed;
+  // 1. Budget headroom, judged over the *controllable* footprint (issue
+  //    #926): at most one generation per {sharedKey, platform} pair on the
+  //    default branch, keeping only the most recently created generation.
+  //    `Swatinem/rust-cache` hashes the runner's entire installed-toolchain
+  //    list into its key, not only the one version a workflow pins, so a
+  //    `macos-15`/`windows-latest` runner-image update regenerates a key even
+  //    though nothing this repository controls changed (measured
+  //    2026-09-04: `rust/Cargo.lock` and `.github/workflows/ci.yml` were
+  //    byte-identical across a coexistence window, and both runs resolved the
+  //    pinned toolchain to the identical rustc commit). GitHub's own
+  //    least-recently-used eviction already reclaims a superseded generation
+  //    on its own schedule; judging the raw total would report a defect
+  //    nobody in this repository can fix by any means this audit is willing
+  //    to reward, and the shortest way to silence that false alarm --
+  //    deleting the older generation -- has already caused a *worse*,
+  //    previously observed failure (main-cache-absent) for this exact
+  //    reason. See docs/DESIGN-ci.md, "Generation coexistence (issue #926,
+  //    measured 2026-09-04)".
+  //
+  //    Only default-branch entries attributable to a {sharedKey, platform}
+  //    pair are de-duplicated this way. Every other entry -- including any
+  //    `refs/pull/*` cache -- is counted individually and in full: the
+  //    original #747 incident was many *different* refs each holding their
+  //    own ref-scoped cache, not multiple generations of one key on one ref,
+  //    and de-duplication must not blunt detection of that shape (rules 3
+  //    and 4 below still see every such entry).
+  const rawSummed = caches.reduce((total, entry) => total + (entry.size_in_bytes ?? 0), 0);
+  const rawEffective = typeof usageBytes === "number" ? Math.max(usageBytes, rawSummed) : rawSummed;
+
+  const mainGenerationsByIdentity = new Map();
+  let unattributedMainCount = 0;
+  for (const entry of caches) {
+    if (entry.ref !== defaultBranchRef) continue;
+    const { sharedKey, platform } = entryIdentity(entry.key);
+    if (!sharedKey || !platform) {
+      unattributedMainCount += 1;
+      continue;
+    }
+    const identity = `${sharedKey}::${platform}`;
+    const group = mainGenerationsByIdentity.get(identity) ?? [];
+    group.push(entry);
+    mainGenerationsByIdentity.set(identity, group);
+  }
+
+  let staleGenerationBytes = 0;
+  let staleGenerationCount = 0;
+  for (const group of mainGenerationsByIdentity.values()) {
+    if (group.length < 2) continue;
+    // Newest first: the generation Swatinem/rust-cache would actually restore
+    // today. Every older generation in the same group is the one no lever
+    // this audit rewards can fix -- it can only be waited out.
+    const bySize = [...group].sort(
+      (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
+    );
+    for (const stale of bySize.slice(1)) {
+      staleGenerationBytes += stale.size_in_bytes ?? 0;
+      staleGenerationCount += 1;
+    }
+  }
+
   if (typeof usageBytes !== "number") {
     findings.push({
       code: "usage-unobserved",
@@ -154,17 +210,36 @@ export function auditCacheBudget({
         "the repository cache-usage endpoint returned no total; falling back to the listing sum, which is not independent headroom evidence and can differ because of observation-time changes or an incomplete listing. Absence of the total is not evidence of headroom.",
     });
   }
-  if (effective >= limitBytes * warnFraction) {
+
+  // Informational only, never a pass/fail input: the raw, undeduplicated
+  // total and how many stale generations were excluded from judgment below.
+  // Deleting a stale generation changes this number; it changes nothing the
+  // audit judges (see rule 1 below), so there is no reward for doing so.
+  informational.push({
+    code: "raw-cache-footprint",
+    message: `raw cache total (all refs, all generations) is ${formatGiB(rawEffective)} of a ${formatGiB(
+      limitBytes,
+    )} limit (${Math.round((rawEffective / limitBytes) * 100)}%) across ${caches.length} entr${
+      caches.length === 1 ? "y" : "ies"
+    }; ${staleGenerationCount} superseded generation${
+      staleGenerationCount === 1 ? "" : "s"
+    } on \`${defaultBranchRef}\` (${formatGiB(staleGenerationBytes)}) excluded from the controllable total below as self-healing, not judged.`,
+  });
+
+  const controllableEffective = Math.max(0, rawEffective - staleGenerationBytes);
+  if (controllableEffective >= limitBytes * warnFraction) {
     const limitDiagnostic =
-      effective > limitBytes
-        ? `${formatGiB(effective - limitBytes)} above the limit`
-        : `${formatGiB(limitBytes - effective)} remaining before the limit`;
+      controllableEffective > limitBytes
+        ? `${formatGiB(controllableEffective - limitBytes)} above the limit`
+        : `${formatGiB(limitBytes - controllableEffective)} remaining before the limit`;
     findings.push({
       code: "budget-exhausted",
-      message: `cache usage is ${formatGiB(effective)} of a ${formatGiB(limitBytes)} limit (${Math.round(
-        (effective / limitBytes) * 100,
+      message: `controllable cache usage is ${formatGiB(controllableEffective)} of a ${formatGiB(
+        limitBytes,
+      )} limit (${Math.round(
+        (controllableEffective / limitBytes) * 100,
       )}%), at or above the ${Math.round(warnFraction * 100)}% threshold. ${formatGiB(
-        effective,
+        controllableEffective,
       )} is ${limitDiagnostic}; a sufficiently large save can trigger least-recently-used eviction, including a default-branch cache that a main-targeting pull request depends on.`,
     });
   }
@@ -228,13 +303,21 @@ export function auditCacheBudget({
     });
   }
 
-  return { findings, ok: findings.length === 0 };
+  return { findings, informational, ok: findings.length === 0 };
 }
 
-export function formatReport({ findings, ok }) {
-  if (ok) return "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches";
+export function formatReport({ findings, informational = [], ok }) {
+  const header = ok
+    ? "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches"
+    : [
+        `cache budget audit: FAIL -- ${findings.length} finding(s)`,
+        ...findings.map((finding) => `  ${finding.code}: ${finding.message}`),
+      ].join("\n");
+  if (informational.length === 0) return header;
+  // Informational lines never change PASS/FAIL and are labeled distinctly so
+  // a reader (or a script) cannot mistake one for a judged finding.
   return [
-    `cache budget audit: FAIL -- ${findings.length} finding(s)`,
-    ...findings.map((finding) => `  ${finding.code}: ${finding.message}`),
+    header,
+    ...informational.map((entry) => `  informational/${entry.code}: ${entry.message}`),
   ].join("\n");
 }
