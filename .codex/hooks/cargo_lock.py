@@ -71,11 +71,13 @@ def try_acquire(lock_file: Path):
 
 
 def release(handle) -> None:
-    """Give up an acquired lock."""
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    except OSError:
-        pass
+    """Give up an acquired lock.
+
+    Unchanged from the pre-#946 behavior: an unlock failure propagates rather
+    than being swallowed, exactly as the original inline
+    ``fcntl.flock(...); handle.close()`` did.
+    """
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
     handle.close()
 
 
@@ -85,13 +87,16 @@ def marker_script(lock_file: Path) -> str:
 
 
 def execute(command: str, cwd: Path, lock_file: Path) -> int:
-    """Run the command, handing the re-entrancy marker down to every descendant."""
+    """Run the command, handing the re-entrancy marker down to every descendant.
+
+    Returns the shell's returncode unchanged, including a negative value for a
+    signalled child -- exactly the pre-#946 behavior. POSIX exit-code
+    normalization (128+N) is a separate, out-of-scope concern; see issue #983.
+    """
     env = os.environ.copy()
     env[REENTRANCY_ENV] = str(lock_file)
     script = marker_script(lock_file) + command
     result = subprocess.run(["/bin/bash", "-lc", script], cwd=cwd, env=env, check=False)
-    if result.returncode < 0:
-        return 128 - result.returncode
     return result.returncode
 
 
