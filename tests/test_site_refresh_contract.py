@@ -100,6 +100,55 @@ def _loads_shared_assets(path: Path) -> bool:
     return _loads_shared_asset_links(path.read_text(encoding="utf-8"))
 
 
+def strip_js_comments(js_text: str) -> str:
+    """Blank out // and /* */ comments in site.js, preserving offsets and strings.
+
+    Every substring check in this module that reads site.js source was satisfied by
+    a marker left behind in a comment while the code that used it was gone. (Checks
+    that read page HTML instead are unaffected -- HTML has no // comments.)
+    Measured: commenting out the breadcrumb aria-label assignment left
+    audit_locale_nav_contract green, because both the assignment substring and the
+    label strings survive inside `// crumb.setAttribute(...)`.
+
+    String-aware on purpose -- site.js line 4 holds "http://www.w3.org/2000/svg",
+    which a naive `//` strip would truncate. Comment bodies are replaced with
+    spaces rather than removed so that reported offsets stay comparable.
+    """
+    out = list(js_text)
+    i, n = 0, len(js_text)
+    quote = None
+    while i < n:
+        c = js_text[i]
+        if quote:
+            if c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                quote = None
+            i += 1
+            continue
+        if c in "\"'`":
+            quote = c
+            i += 1
+            continue
+        if c == "/" and i + 1 < n and js_text[i + 1] == "/":
+            while i < n and js_text[i] != "\n":
+                out[i] = " "
+                i += 1
+            continue
+        if c == "/" and i + 1 < n and js_text[i + 1] == "*":
+            while i < n and not (js_text[i] == "*" and i + 1 < n and js_text[i + 1] == "/"):
+                if js_text[i] != "\n":
+                    out[i] = " "
+                i += 1
+            for j in range(i, min(i + 2, n)):
+                out[j] = " "
+            i += 2
+            continue
+        i += 1
+    return "".join(out)
+
+
 def audit_shell_wiring(
     css: str,
     js: str,
@@ -112,7 +161,7 @@ def audit_shell_wiring(
         missing.append("home-missing-site-home-class")
     if "body.site-home" not in css:
         missing.append("css-missing-body-site-home")
-    hook_count = js.count(HOOK)
+    hook_count = strip_js_comments(js).count(HOOK)
     if hook_count != 1:
         missing.append(f"hook-count-{hook_count}-expected-1")
     for marker in SHELL_MARKERS:
@@ -143,8 +192,11 @@ SKIP_LINK_JA = 'class="skip-link" href="#main">メインコンテンツへスキ
 MAIN_LANDMARK_RE = re.compile(r'<main\b[^>]*\bid="main"[^>]*>')
 # A skip link that does not move focus is inert: the target must be programmatically
 # focusable. Measured on 5273c1b0 -- both playground pages activated the link,
-# set location.hash, and left document.activeElement on <body> (keyboard Tab/Enter
-# and click alike), because <main id="main"> carried no tabindex.
+# set location.hash, and left document.activeElement on <body>, because
+# <main id="main"> carried no tabindex. That record also listed a click path, which
+# later re-measurement showed was a tool artifact, not evidence: the skip link is
+# position:fixed at y=-48.7 while unfocused, so elementFromPoint returns <body> and a
+# synthesized click never lands. Only the keyboard path established the defect.
 MAIN_FOCUSABLE_RE = re.compile(
     r'<main\b(?=[^>]*\bid="main")(?=[^>]*\btabindex="-1")[^>]*>'
 )
@@ -212,6 +264,7 @@ def audit_skip_injection_sets_tabindex(js_text: str) -> list[str]:
     browser (see the commit that introduced it), and no CI lane observes it.
     """
     missing: list[str] = []
+    js_text = strip_js_comments(js_text)
     match = INIT_SKIP_LINK_RE.search(js_text)
     if not match:
         return ["skip-js-missing-initSkipLink-body"]
@@ -228,10 +281,11 @@ def audit_skip_injection_sets_tabindex(js_text: str) -> list[str]:
     return missing
 
 
-# The whole assignment expression, not the label strings on their own. Calibration
-# caught this: "Breadcrumb" also appears in the comment directly above the assignment
-# in site.js, so a bare label search stayed green with the en label deleted -- the same
-# comment-shadowing failure this module's other substring checks are subject to.
+# The whole assignment expression, not the label strings on their own: "Breadcrumb"
+# also appears in the comment above the assignment in site.js, so a bare label search
+# stayed green with the en label deleted. Comment shadowing is handled for every
+# js-source check by strip_js_comments() above -- matching the whole expression is the
+# second, independent guard.
 BREADCRUMB_ASSIGNMENT = (
     'crumb.setAttribute("aria-label", lang === "ja" ? "パンくずリスト" : "Breadcrumb")'
 )
@@ -247,6 +301,7 @@ def audit_locale_nav_contract(js_text: str) -> list[str]:
     docs/DESIGN-docs-site.md requires `<nav aria-label="Breadcrumb">`.
     """
     missing: list[str] = []
+    js_text = strip_js_comments(js_text)
     if 'aria-current="true"' not in js_text:
         missing.append("locale-nav-missing-aria-current-true")
     if js_text.count('aria-current="true"') < 2:
@@ -283,6 +338,7 @@ def python_cli_authority_offenders(text: str) -> list[str]:
 def audit_backbone_contract(js_text: str) -> list[str]:
     """Structural contract for the shared correctness backbone in site.js."""
     missing: list[str] = []
+    js_text = strip_js_comments(js_text)
     for marker in BACKBONE_JS_MARKERS:
         if marker not in js_text:
             missing.append(f"backbone-missing-{marker}")
@@ -314,6 +370,7 @@ HOME_STAGE_LABELS = ("Business", "Requirements", "Design", "Implementation")
 def audit_home_backbone_contract(home_text: str, js_text: str) -> list[str]:
     """Homepage must expose the four-stage backbone without a fake confidence meter."""
     missing: list[str] = []
+    js_text = strip_js_comments(js_text)
     for marker in HOME_BACKBONE_MARKERS:
         if marker not in home_text and marker not in js_text:
             missing.append(f"home-backbone-missing-{marker}")
@@ -341,6 +398,7 @@ def _hub_journey_keys(js_text: str) -> set[str] | None:
 def audit_journey_contract(js_text: str, texts: dict[str, dict[str, str]]) -> list[str]:
     """Bounded structural contract for primary journeys (not prose quality)."""
     missing: list[str] = []
+    js_text = strip_js_comments(js_text)
     for step in HUB_JOURNEY_STEPS:
         if f'data-journey="{step}"' not in js_text:
             missing.append(f"hub-template-missing-{step}")
@@ -573,6 +631,53 @@ def test_site_refresh_playground_skip_rejects_unfocusable_main_mutant():
     assert "playground.en-main-not-focusable-tabindex" in audit_playground_skip_contract(mutant)
     assert "playground.en-missing-main-id-main" not in audit_playground_skip_contract(mutant)
     assert audit_playground_skip_contract(texts) == []
+
+
+def test_js_source_checks_reject_commented_out_code():
+    """Comment shadowing, as a class.
+
+    Population: every audit in this module whose verdict depends on site.js source
+    alone -- audit_shell_wiring (hook count), audit_skip_injection_sets_tabindex,
+    audit_locale_nav_contract, audit_backbone_contract, audit_journey_contract. All
+    five are covered below. audit_home_backbone_contract is deliberately excluded:
+    it accepts each marker from home_text *or* js_text, so commenting out the js
+    copy alone cannot change its verdict.
+
+    Cited mutation: comment out the implementation line rather than deleting it, so
+    every marker substring survives. Before strip_js_comments() this left
+    audit_locale_nav_contract green with the breadcrumb assignment commented out.
+    """
+    js = JS.read_text(encoding="utf-8")
+
+    def comment_out(needle):
+        lines = js.splitlines(True)
+        for i, line in enumerate(lines):
+            if needle in line and not line.strip().startswith("//"):
+                indent = line[: len(line) - len(line.lstrip())]
+                lines[i] = f"{indent}// {line.strip()}\n"
+                return "".join(lines)
+        raise AssertionError(f"anchor not found in site.js: {needle}")
+
+    css = CSS.read_text(encoding="utf-8")
+    home = REPRESENTATIVES["home"].read_text(encoding="utf-8")
+    reps = {k: v.read_text(encoding="utf-8") for k, v in REPRESENTATIVES.items()}
+    texts = {
+        stem: {lang: (INTRO / f"{stem}.{lang}.html").read_text(encoding="utf-8")
+               for lang in ("en", "ja")}
+        for stem in ("examples", "guide")
+    }
+    for needle, audit, prefix in (
+        (HOOK, lambda j: audit_shell_wiring(css, j, home, reps), "hook-count-"),
+        ('main.setAttribute("tabindex", "-1")', audit_skip_injection_sets_tabindex, "skip-js-"),
+        ('crumb.setAttribute("aria-label"', audit_locale_nav_contract, "breadcrumb-"),
+        ("initBackbone();", audit_backbone_contract, "backbone-missing-"),
+        ('data-journey="audience"', lambda j: audit_journey_contract(j, texts), "hub-template-"),
+    ):
+        mutant = comment_out(needle)
+        assert mutant != js, needle
+        offenders = [o for o in audit(mutant) if o.startswith(prefix)]
+        assert offenders, f"commented-out {needle} not detected; produced {audit(mutant)}"
+        assert not [o for o in audit(js) if o.startswith(prefix)], f"baseline dirty for {needle}"
 
 
 def test_site_refresh_locale_nav_aria_current_contract():

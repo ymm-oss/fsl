@@ -399,7 +399,7 @@ leadsTo EventuallyDone {
       </div>
       <div class="card">
         <h3>Does not guarantee</h3>
-        <p>That the spec captures the original intent. Liveness is not propagated down automatically; real code is unchecked until testgen or replay anchors it; probabilities, percentiles, real-time milliseconds, and UI usability are out of scope; and verification is bounded by default unless induction is used.</p>
+        <p>That the spec captures the original intent. Liveness is not propagated down automatically; real code is unchecked until a harness is run or <code>replay</code> judges a real log, and even then only the cases or traces actually observed are covered; probabilities, percentiles, real-time milliseconds, and UI usability are out of scope; and verification is bounded by default unless induction is used.</p>
       </div>
     </div>
 

@@ -51,7 +51,7 @@
       <div class="syntax-card"><h3>Bounded safety</h3><p><code>result</code>, <code>completeness:"bounded"</code>, <code>checked_to_depth</code>, counterexample <code>trace</code> when <code>violated</code>. Does <em>not</em> prove infinite depth.</p></div>
       <div class="syntax-card"><h3>Unbounded proof</h3><p><code>result:"proved"</code>, <code>completeness:"unbounded"</code>, engine <code>induction</code> or explicit <code>closure:true</code>. Still scoped to the written properties.</p></div>
       <div class="syntax-card"><h3>Refinement</h3><p><code>refines</code> vs <code>refinement_failed</code>, witness mapping, stutter notes. Establishes layer alignment for the checked mapping — not full system proof.</p></div>
-      <div class="syntax-card"><h3>Implementation observation</h3><p><code>testgen</code> emits a harness; running it, or <code>replay</code> on a real log, yields <code>conformant</code>, <code>failed_at_event</code>, adapter projection. Observed traces only — not all future behaviors.</p></div>
+      <div class="syntax-card"><h3>Implementation observation</h3><p><code>testgen</code> emits a pytest harness whose assertions pass or fail per generated case. <code>replay</code> on a real log is what yields <code>conformant</code> / <code>failed_at_event</code> and the adapter projection. Either way: observed traces only — not all future behaviors.</p></div>
     </div>
     <p class="reveal dim" style="margin-top:14px;font-size:14px">Exit codes follow <code>docs/LANGUAGE.md</code> via native <code>rust/fslc/src/outcome.rs</code> — see <a href="errors.en.html">Errors &amp; Exit Codes</a>.</p>
   </div>

@@ -292,7 +292,7 @@
       </div>
       <div class="card">
         <h3>⚠ What it does not</h3>
-        <p>That the requirements themselves are correct (refine assumes <code>abs</code> was verified separately); automatic liveness propagation; real code correctness until a harness is anchored; and anything outside the kernel — probability, percentiles, real-time milliseconds, or external-service behavior.</p>
+        <p>That the requirements themselves are correct (refine assumes <code>abs</code> was verified separately); automatic liveness propagation; real code correctness — a harness or <code>replay</code> covers only the cases and traces actually observed, never the whole implementation; and anything outside the kernel — probability, percentiles, real-time milliseconds, or external-service behavior.</p>
       </div>
     </div>
   </div>
