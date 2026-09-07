@@ -40,7 +40,7 @@
       <tr data-journey="bounded-verify"><td>有界検証</td><td><code>fslc verify --depth K</code></td><td>深さ <em>K</em> まで反例なし（<code>verified</code>, <code>completeness:"bounded"</code>）</td><td>全深さの安全性や、別途書いていない応答性</td></tr>
       <tr data-journey="proof-induction"><td>証明 / 帰納</td><td><code>fslc verify --engine induction</code></td><td>名前付き不変条件の無制限成立（<code>proved</code>）</td><td>書いていない性質；CTI は補助補題の手がかりであり必ずしも到達バグではない</td></tr>
       <tr data-journey="refinement"><td>詳細化</td><td><code>fslc refine</code>, <code>fslc chain</code></td><td>下位層が上位意図を保つ（<code>refines</code>）</td><td>未検査マッピングや実装全体の正しさ</td></tr>
-      <tr data-journey="implementation-observe"><td>実装観測</td><td><code>fslc testgen</code>, <code>fslc replay</code>, <code>scenarios</code></td><td>観測トレースが仕様オラクルと一致（<code>conformant</code> 等）</td><td>将来の全ランタイム経路 — 実行された証拠のみ</td></tr>
+      <tr data-journey="implementation-observe"><td>実装観測</td><td><code>fslc scenarios</code> → <code>testgen</code>、判定は <code>fslc replay</code></td><td><code>scenarios</code> がケースを列挙し <code>testgen</code> がハーネスを生成。<code>conformant</code> を返すのは <code>replay</code>（またはハーネスの実行）</td><td>将来の全ランタイム経路 — 実行された証拠のみ</td></tr>
     </table>
   </div>
 </section>

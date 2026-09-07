@@ -40,7 +40,7 @@
       <tr data-journey="bounded-verify"><td>Bounded verification</td><td><code>fslc verify --depth K</code></td><td>No counterexample to depth <em>K</em> (<code>verified</code>, <code>completeness:"bounded"</code>)</td><td>Safety at all depths or liveness unless separately checked</td></tr>
       <tr data-journey="proof-induction"><td>Proof / induction</td><td><code>fslc verify --engine induction</code></td><td>Named invariants hold unboundedly (<code>proved</code>) when induction closes</td><td>Properties you did not write; CTI means lemma work, not necessarily a reachable bug</td></tr>
       <tr data-journey="refinement"><td>Refinement</td><td><code>fslc refine</code>, <code>fslc chain</code></td><td>Lower layer behavior maps to upper intent (<code>refines</code>)</td><td>Full implementation correctness or unchecked mappings</td></tr>
-      <tr data-journey="implementation-observe"><td>Implementation observation</td><td><code>fslc testgen</code>, <code>fslc replay</code>, <code>scenarios</code></td><td>Observed traces match the spec oracle (<code>conformant</code>, generated harnesses)</td><td>All possible runtime paths — only the exercised adapter/log evidence</td></tr>
+      <tr data-journey="implementation-observe"><td>Implementation observation</td><td><code>fslc scenarios</code> then <code>testgen</code>, judged by <code>fslc replay</code></td><td><code>scenarios</code> enumerates cases and <code>testgen</code> emits a harness; <code>replay</code> — or running the harness — is what returns <code>conformant</code></td><td>All possible runtime paths — only the exercised adapter/log evidence</td></tr>
     </table>
   </div>
 </section>

@@ -143,19 +143,32 @@ def strip_js_comments(js_text: str) -> str:
     """
     out = list(js_text)
     i, n = 0, len(js_text)
-    quote = None
+    # Stack of open contexts: a quote character, or "}" for a template
+    # interpolation. `${...}` inside a template literal is code, so comments in it
+    # must be stripped too -- otherwise a marker inside
+    # `${(() => { // initBackbone(); ... })()}` shadows the real one.
+    stack: list[str] = []
     while i < n:
         c = js_text[i]
+        quote = stack[-1] if stack and stack[-1] != "}" else None
         if quote:
             if c == "\\":
                 i += 2
                 continue
+            if quote == "`" and c == "$" and i + 1 < n and js_text[i + 1] == "{":
+                stack.append("}")
+                i += 2
+                continue
             if c == quote:
-                quote = None
+                stack.pop()
+            i += 1
+            continue
+        if c == "}" and stack and stack[-1] == "}":
+            stack.pop()
             i += 1
             continue
         if c in "\"'`":
-            quote = c
+            stack.append(c)
             i += 1
             continue
         if c == "/" and _starts_regex_literal(js_text, i):
@@ -693,6 +706,14 @@ def test_strip_js_comments_preserves_code_it_must_not_touch():
         out = strip_js_comments(src)
         assert must_survive in out, f"stripper mangled code: {src!r} -> {out!r}"
         assert "gone" not in out, f"stripper left a comment body: {src!r} -> {out!r}"
+
+    # A comment inside a template interpolation is code, not template text, so it
+    # must be stripped; template *text* containing // must not be.
+    interp = 'const t = `x ${(() => { // initBackbone();\n  return ""; })()} y`;'
+    assert "initBackbone();" not in strip_js_comments(interp), (
+        "comment inside ${...} not stripped -- comment shadowing recurs there"
+    )
+    assert "`a//b ${x} c`" in strip_js_comments("const t = `a//b ${x} c`; // gone")
 
     js = JS.read_text(encoding="utf-8")
     stripped = strip_js_comments(js)
