@@ -31,7 +31,7 @@
   <div class="wrap">
     <p class="kicker reveal">The contract</p>
     <h2 class="reveal">The JSON envelope and exit codes</h2>
-    <p class="lead narrow reveal">Every command prints one JSON object to stdout, and its <code>result</code> field maps to a process exit code. That mapping is defined in <code>docs/LANGUAGE.md</code> and implemented by the native Rust <code>exit_status()</code> in <code>rust/fslc/src/outcome.rs</code> — the <a href="cli.en.html">CLI Reference</a> reproduces the authoritative table.</p>
+    <p class="lead narrow reveal">Verdict-bearing commands print one JSON object to stdout, and its <code>result</code> field maps to a process exit code. Some commands emit a generated artifact on stdout instead under some flags — <code>fslc fmt PATH</code> prints formatted source — so check a command's <code>--help</code> before parsing. That mapping is defined in <code>docs/LANGUAGE.md</code> and implemented by the native Rust <code>exit_status()</code> in <code>rust/fslc/src/outcome.rs</code> — the <a href="cli.en.html">CLI Reference</a> reproduces the authoritative table.</p>
     <table class="matrix reveal">
       <tr><th>Exit code</th><th>Meaning</th><th>Typical <code>result</code></th></tr>
       <tr><td><code>0</code></td><td>Success</td><td><code>verified</code> / <code>proved</code> / <code>refines</code> / <code>conformant</code> / <code>generated</code> / <code>typestate</code> / <code>mutated</code> / <code>explained</code> / <code>ok</code>, etc.</td></tr>

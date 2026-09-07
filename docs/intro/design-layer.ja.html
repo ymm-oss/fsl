@@ -246,7 +246,7 @@
     </table>
 
     <div class="callout warn reveal" style="margin-top:24px">
-      <p style="margin:0"><b>同期では公平性は継承されません。</b> 同期操作が公平なのは、そう宣言したときだけです。さもないと <code>fair_not_inherited</code> の警告が出ます。<code>compose</code> はそれ自体を <code>fslc refine</code> の <code>impl</code> 側にできるので、組み立て全体をひとつの要件契約に対して証明できます。</p>
+      <p style="margin:0"><b>同期では公平性は継承されません。</b> 同期操作が公平なのは、そう宣言したときだけです。さもないと <code>fair_not_inherited</code> の警告が出ます。<code>compose</code> はそれ自体を <code>fslc refine</code> の <code>impl</code> 側にできるので、組み立て全体をひとつの要件契約に対して検査できます（<code>refine</code> が返すのは実行した深さでの <code>refines</code> で、<code>proved</code> ではありません）。</p>
     </div>
   </div>
 </section>

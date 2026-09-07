@@ -395,7 +395,7 @@ leadsTo EventuallyDone {
     <div class="vs reveal" style="margin-top:24px">
       <div class="card">
         <h3>Guarantees</h3>
-        <p>The internal consistency of the spec as written: reachable counterexamples, bounded-type violations, partial-operation safety, unbounded proofs once induction succeeds, safety inclusion under refinement, and conformance wherever an adapter or log is anchored.</p>
+        <p>The internal consistency of the spec as written: reachable counterexamples, bounded-type violations, partial-operation safety, unbounded proofs once induction succeeds, safety inclusion under refinement to the depth you run, and conformance only where <code>replay</code> has judged a real observed trace — anchoring an adapter establishes nothing on its own.</p>
       </div>
       <div class="card">
         <h3>Does not guarantee</h3>

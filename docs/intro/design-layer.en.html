@@ -242,7 +242,7 @@
     </table>
 
     <div class="callout warn reveal" style="margin-top:24px">
-      <p style="margin:0"><b>Fairness is not inherited through synchronization.</b> A synchronized action is fair only if you declare it so; otherwise FSL warns <code>fair_not_inherited</code>. A <code>compose</code> can itself be the <code>impl</code> side of <code>fslc refine</code>, so a whole assembly can be proven against one requirements contract.</p>
+      <p style="margin:0"><b>Fairness is not inherited through synchronization.</b> A synchronized action is fair only if you declare it so; otherwise FSL warns <code>fair_not_inherited</code>. A <code>compose</code> can itself be the <code>impl</code> side of <code>fslc refine</code>, so a whole assembly can be checked against one requirements contract — <code>refine</code> returns <code>refines</code> at the depth you run, not <code>proved</code>.</p>
     </div>
   </div>
 </section>

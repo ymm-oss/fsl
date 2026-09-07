@@ -36,7 +36,7 @@
       <tr><th>目標</th><th>入口</th><th>ネイティブコマンド</th><th>見る <code>result</code></th></tr>
       <tr><td>文法と最初の反例</td><td><code>gallery/valid/tiny_*</code></td><td><code>fslc verify --depth 8</code></td><td><code>verified</code> または <code>violated</code> + <code>trace</code></td></tr>
       <tr><td>層をまたぐ詳細化</td><td><code>e2e/</code>, <code>layers/</code></td><td><code>fslc refine</code>, <code>fslc chain</code></td><td><code>refines</code> または <code>refinement_failed</code></td></tr>
-      <tr><td>実装観測の接続</td><td><code>bank/</code>, <code>e2e/impl/</code></td><td><code>fslc testgen</code>, <code>fslc replay</code></td><td><code>conformant</code> / <code>nonconformant</code> + ログ行</td></tr>
+      <tr><td>実装観測の接続</td><td><code>bank/</code>, <code>e2e/impl/</code></td><td><code>fslc testgen</code> → <code>fslc replay</code></td><td><code>testgen</code>: ハーネス。<code>replay</code>: <code>conformant</code> / <code>nonconformant</code> + ログ行</td></tr>
       <tr><td>診断形状の読み方</td><td><code>gallery/errors/</code></td><td><code>fslc check</code> / <code>verify</code></td><td><code>error</code> + <code>kind</code>、または <code>violated</code> + <code>violation_kind</code></td></tr>
       <tr><td>ダイアレクト replay</td><td><code>domain/</code>, <code>db/</code>, <code>ai/</code></td><td><code>fslc domain replay</code>, <code>db observe</code>, <code>ai replay</code></td><td>方言 <code>result</code> + イベント位置</td></tr>
     </table>
@@ -51,7 +51,7 @@
       <div class="syntax-card"><h3>有界安全性</h3><p><code>result</code>、<code>completeness:"bounded"</code>、<code>checked_to_depth</code>、<code>violated</code> 時の <code>trace</code>。無限深さの証明ではありません。</p></div>
       <div class="syntax-card"><h3>無制限証明</h3><p><code>result:"proved"</code>、<code>completeness:"unbounded"</code>、エンジン <code>induction</code> または explicit <code>closure:true</code>。書いた性質に限定されます。</p></div>
       <div class="syntax-card"><h3>詳細化</h3><p><code>refines</code> と <code>refinement_failed</code>、マッピング証人、stutter 注記。検査したマッピングの層整合 — システム全体の証明ではありません。</p></div>
-      <div class="syntax-card"><h3>実装観測</h3><p><code>replay</code>/<code>testgen</code> の <code>conformant</code>、<code>failed_at_event</code>、アダプタ投影。観測されたトレースのみ — 将来の全経路ではありません。</p></div>
+      <div class="syntax-card"><h3>実装観測</h3><p><code>testgen</code> はハーネスを生成し、それを実行するか <code>replay</code> を実ログに当てると <code>conformant</code>、<code>failed_at_event</code>、アダプタ投影が得られます。観測されたトレースのみ — 将来の全経路ではありません。</p></div>
     </div>
     <p class="reveal dim" style="margin-top:14px;font-size:14px">終了コードは <code>docs/LANGUAGE.md</code> とネイティブ <code>rust/fslc/src/outcome.rs</code> に従います — <a href="errors.ja.html">エラー・終了コード</a> を参照。</p>
   </div>
