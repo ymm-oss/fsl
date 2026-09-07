@@ -1,0 +1,10 @@
+// Preservation control for issue #993 / R8. Undefined const in a verify values
+// bound is rejected by model construction, so the RCIR projection this issue
+// changes is never reached and this control keeps passing under a revert.
+requirements RejectConstBound {
+  number Amount
+  const HI = 2
+  state { amount: Amount }
+  init { amount = 0 }
+}
+verify { values Amount = LO..HI }

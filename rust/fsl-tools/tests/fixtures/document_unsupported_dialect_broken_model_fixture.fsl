@@ -1,0 +1,37 @@
+// Issue #993. An unsupported dialect whose model also fails to build.
+//
+// Detector for removing the early dialect check in
+// `project_requirement_claims_from_source`: this issue moved `build_model`
+// ahead of the analysis-scope extraction, so without that check the model
+// error wins and the projector returns `Other(..)` instead of
+// `UnsupportedDialect`. `DocumentProjectionError`'s own contract (issue #334)
+// exists to let a caller tell a scope boundary apart from a defective input,
+// so `Other(..)` here would report an out-of-scope dialect as a bad spec.
+//
+// `reads users.nonexistent_column` is the model failure; `dbsystem` is the
+// out-of-scope dialect. Both must be present for this fixture to establish
+// anything — a dbsystem spec with a clean model is already covered by
+// `rust/fslc/tests/document_cli.rs`.
+dbsystem UnsupportedDialectBrokenModel {
+  database app {
+    schema 0
+    table users {
+      column id: Int present backfilled not_null;
+    }
+  }
+
+  artifact server_v1 {
+    reads users.nonexistent_column;
+    writes users.id;
+  }
+
+  environment prod {
+    schema 0..0;
+    active server_v1 when schema 0..0;
+    supported server_v1 when schema 0..0;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+  }
+}

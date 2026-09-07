@@ -44,6 +44,34 @@ fn kpi_fixture() -> (String, PathBuf) {
     )
 }
 
+fn const_bound_fixture() -> (String, PathBuf) {
+    (
+        read("tests/fixtures/document_const_bound_fixture.fsl"),
+        manifest_path("tests/fixtures"),
+    )
+}
+
+fn const_bound_reject_fixture() -> (String, PathBuf) {
+    (
+        read("tests/fixtures/document_const_bound_reject_fixture.fsl"),
+        manifest_path("tests/fixtures"),
+    )
+}
+
+fn const_bound_undeclared_literal_fixture() -> (String, PathBuf) {
+    (
+        read("tests/fixtures/document_const_bound_undeclared_literal_fixture.fsl"),
+        manifest_path("tests/fixtures"),
+    )
+}
+
+fn const_bound_undeclared_const_fixture() -> (String, PathBuf) {
+    (
+        read("tests/fixtures/document_const_bound_undeclared_const_fixture.fsl"),
+        manifest_path("tests/fixtures"),
+    )
+}
+
 fn claim_digest<'a>(set: &'a RequirementClaimSet, id: &str) -> &'a str {
     &set.claims
         .iter()
@@ -733,6 +761,120 @@ fn verify_bounds_project_into_analysis_scope_only() {
     assert!(!claim_text.contains("\"Budget\""));
 }
 
+/// Detector for removing the early dialect check in
+/// `project_requirement_claims_from_source`. This issue moved `build_model`
+/// ahead of the analysis-scope extraction; without that check the model error
+/// wins and the projector returns `Other(..)`, which contradicts
+/// `DocumentProjectionError`'s contract (issue #334) that `UnsupportedDialect`
+/// marks a scope boundary rather than a defective input.
+///
+/// `rust/fslc/tests/document_cli.rs` already covers an unsupported dialect
+/// whose model builds cleanly; that case cannot detect the removal. With a
+/// clean model, execution reaches `projection_context_from_parsed`, which
+/// returns the same `UnsupportedDialect` the early check would have — so the
+/// observable outcome is identical with or without it. What separates the two
+/// is an input that also fails between surface parsing and that later check;
+/// this fixture uses a model failure, but a `parse_kernel_source` failure
+/// would separate them too.
+#[test]
+fn unsupported_dialect_reports_scope_not_a_model_defect() {
+    let source = read("tests/fixtures/document_unsupported_dialect_broken_model_fixture.fsl");
+    let root = manifest_path("tests/fixtures");
+    let error = fsl_tools::project_requirement_claims_from_source(
+        &source,
+        Some("document_unsupported_dialect_broken_model_fixture.fsl"),
+        &root,
+    )
+    .expect_err("an unsupported dialect must not project");
+    assert_eq!(
+        error,
+        fsl_tools::DocumentProjectionError::UnsupportedDialect {
+            dialect: "dbsystem"
+        },
+        "expected a scope boundary, got: {error}"
+    );
+}
+
+#[test]
+fn const_bound_analysis_scope_uses_evaluated_domain_bounds() {
+    let (source, root) = const_bound_fixture();
+    let claims = project(&source, "document_const_bound_fixture.fsl", &root);
+
+    let value = claims
+        .analysis_scope
+        .values
+        .iter()
+        .find(|entry| entry["number"] == "Amount")
+        .expect("Amount analysis bound is projected");
+    assert_eq!(value["lo"], serde_json::json!(-1));
+    assert_eq!(value["hi"], serde_json::json!(2));
+}
+
+/// Preservation control, not a detector: the rejection comes from
+/// `build_model`, so the inner RCIR construction is never reached and the test
+/// keeps passing when this issue's change is reverted. It establishes only that an undefined
+/// const in a `verify { values ... }` bound still fails closed.
+#[test]
+fn undefined_const_bound_still_fails_via_model_build() {
+    let (source, root) = const_bound_reject_fixture();
+    let error = fsl_tools::project_requirement_claims_from_source(
+        &source,
+        Some("document_const_bound_reject_fixture.fsl"),
+        &root,
+    )
+    .expect_err("undefined const in verify values bound must fail projection");
+    assert!(
+        error.to_string().contains("unknown constant 'LO'"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn undeclared_number_literal_bound_projects_via_literal_fallback() {
+    let (source, root) = const_bound_undeclared_literal_fixture();
+    let claims = project(
+        &source,
+        "document_const_bound_undeclared_literal_fixture.fsl",
+        &root,
+    );
+
+    let ghost = claims
+        .analysis_scope
+        .values
+        .iter()
+        .find(|entry| entry["number"] == "Ghost")
+        .expect("undeclared Ghost literal bound is projected");
+    assert_eq!(ghost["lo"], serde_json::json!(1));
+    assert_eq!(ghost["hi"], serde_json::json!(3));
+}
+
+#[test]
+fn undeclared_number_const_bound_is_skipped_not_rejected() {
+    let (source, root) = const_bound_undeclared_const_fixture();
+    let claims = project(
+        &source,
+        "document_const_bound_undeclared_const_fixture.fsl",
+        &root,
+    );
+
+    assert!(
+        claims
+            .analysis_scope
+            .values
+            .iter()
+            .all(|entry| entry["number"] != "Ghost"),
+        "undeclared Ghost const bound must not appear in analysis_scope"
+    );
+    assert!(
+        claims
+            .analysis_scope
+            .values
+            .iter()
+            .any(|entry| entry["number"] == "Amount"),
+        "declared Amount bound is still projected"
+    );
+}
+
 // --- Schema conformance ---------------------------------------------------------
 
 fn compiled_schema() -> jsonschema::Validator {
@@ -759,7 +901,20 @@ fn compiled_schema() -> jsonschema::Validator {
 #[test]
 fn rcir_output_validates_against_the_v1_schema() {
     let validator = compiled_schema();
-    let fixtures: [(String, PathBuf, &str); 3] = [
+    // Every fixture that projects. Two are excluded, each because it has no
+    // projected output at all to validate, not because its output varies:
+    //
+    // - `document_const_bound_reject_fixture.fsl` — `build_model` rejects its
+    //   undefined const before the projector runs (see
+    //   `undefined_const_bound_still_fails_via_model_build`).
+    // - `document_unsupported_dialect_broken_model_fixture.fsl` — `dbsystem`
+    //   is outside `RCIR_SUPPORTED_DIALECTS` (see
+    //   `unsupported_dialect_reports_scope_not_a_model_defect`).
+    //
+    // Adding a projecting fixture without adding it here silently drops it
+    // from schema validation; the count in the type below is the only thing
+    // that forces this comment to be re-read.
+    let fixtures: [(String, PathBuf, &str); 6] = [
         (cancel_system().0, cancel_system().1, "cancel_system.fsl"),
         (
             claims_fixture().0,
@@ -767,6 +922,21 @@ fn rcir_output_validates_against_the_v1_schema() {
             "document_claims_fixture.fsl",
         ),
         (kpi_fixture().0, kpi_fixture().1, "document_kpi_fixture.fsl"),
+        (
+            const_bound_fixture().0,
+            const_bound_fixture().1,
+            "document_const_bound_fixture.fsl",
+        ),
+        (
+            const_bound_undeclared_literal_fixture().0,
+            const_bound_undeclared_literal_fixture().1,
+            "document_const_bound_undeclared_literal_fixture.fsl",
+        ),
+        (
+            const_bound_undeclared_const_fixture().0,
+            const_bound_undeclared_const_fixture().1,
+            "document_const_bound_undeclared_const_fixture.fsl",
+        ),
     ];
     for (source, root, path) in fixtures {
         let claims = project(&source, path, &root);

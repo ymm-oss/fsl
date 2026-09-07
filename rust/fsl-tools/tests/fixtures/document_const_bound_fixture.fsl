@@ -1,0 +1,10 @@
+// Synthetic fixture for issue #993. Exercises compile-time const `verify {
+// values ... }` bounds projected as evaluated integers in RCIR analysis_scope.
+requirements ConstBound {
+  number Amount
+  const LO = -1
+  const HI = 2
+  state { amount: Amount }
+  init { amount = 0 }
+}
+verify { values Amount = LO..HI }
