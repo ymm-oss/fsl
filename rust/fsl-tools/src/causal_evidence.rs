@@ -653,24 +653,83 @@ fn scope_application(
     compare_scope(model, claim, &artifact.scope)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WindowConversion {
+    PeriodStartMissing,
+    PeriodEndMissing,
+    PeriodDateUnparsable,
+    PeriodEndBeforeStart,
+    TimebaseNotConvertible,
+    /// The whole-week conversion refused, carrying the day count it refused, so the
+    /// reason never recomputes what the conversion already knew.
+    WeekWindowNotWholeWeeks(u64),
+}
+
+impl WindowConversion {
+    fn code(self) -> &'static str {
+        match self {
+            Self::PeriodStartMissing => "period_start_missing",
+            Self::PeriodEndMissing => "period_end_missing",
+            Self::PeriodDateUnparsable => "period_date_unparsable",
+            Self::PeriodEndBeforeStart => "period_end_before_start",
+            Self::TimebaseNotConvertible => "timebase_not_convertible",
+            Self::WeekWindowNotWholeWeeks(_) => "week_window_not_whole_weeks",
+        }
+    }
+
+    fn reason(self, timebase: &str) -> String {
+        match self {
+            Self::PeriodStartMissing => "the observation period start date is missing".to_owned(),
+            Self::PeriodEndMissing => "the observation period end date is missing".to_owned(),
+            Self::PeriodDateUnparsable => {
+                "an observation period date does not parse as YYYY-MM-DD with a month in 1..12 \
+                 and a day in 1..31"
+                    .to_owned()
+            }
+            Self::PeriodEndBeforeStart => {
+                "the observation period end date is before the start date".to_owned()
+            }
+            Self::TimebaseNotConvertible => format!(
+                "a calendar date interval does not convert to the model timebase '{timebase}' without rounding"
+            ),
+            Self::WeekWindowNotWholeWeeks(days) => {
+                format!("the observation window of {days} days is not a whole number of weeks")
+            }
+        }
+    }
+}
+
 /// Convert an artifact's observation window to model timebase units.
-/// `Ok(None)` means not evaluable (fractional/tick/missing).
-fn window_in_timebase(model: &CausalModel, artifact: &EvidenceArtifact) -> Option<u64> {
-    let (start, end) = (
-        artifact.period_start.as_deref()?,
-        artifact.period_end.as_deref()?,
-    );
-    let days = civil_days(end)? - civil_days(start)?;
+fn window_in_timebase(
+    model: &CausalModel,
+    artifact: &EvidenceArtifact,
+) -> Result<u64, WindowConversion> {
+    let start = artifact
+        .period_start
+        .as_deref()
+        .ok_or(WindowConversion::PeriodStartMissing)?;
+    let end = artifact
+        .period_end
+        .as_deref()
+        .ok_or(WindowConversion::PeriodEndMissing)?;
+    let start_days = civil_days(start).ok_or(WindowConversion::PeriodDateUnparsable)?;
+    let end_days = civil_days(end).ok_or(WindowConversion::PeriodDateUnparsable)?;
+    let days = end_days - start_days;
     if days < 0 {
-        return None;
+        return Err(WindowConversion::PeriodEndBeforeStart);
     }
     #[allow(clippy::cast_sign_loss)]
-    let days = days as u64;
+    let days_u = days as u64;
     match model.timebase.as_str() {
-        "day" => Some(days),
-        "hour" => Some(days * 24),
-        "week" => days.is_multiple_of(7).then_some(days / 7),
-        _ => None,
+        "day" => Ok(days_u),
+        "hour" => Ok(days_u * 24),
+        "week" => {
+            if !days_u.is_multiple_of(7) {
+                return Err(WindowConversion::WeekWindowNotWholeWeeks(days_u));
+            }
+            Ok(days_u / 7)
+        }
+        _ => Err(WindowConversion::TimebaseNotConvertible),
     }
 }
 
@@ -886,36 +945,63 @@ pub fn aggregate_support(
                 }
             }
             // Observation window vs minimum lag.
-            let window = window_in_timebase(model, artifact);
-            match (window, claim.lag) {
-                (Some(window_units), Lag::Known(lag)) => {
-                    if window_units < lag.min {
+            let window_result = window_in_timebase(model, artifact);
+            let window = window_result.ok();
+            let mut edge_not_evaluable: Vec<Value> = Vec::new();
+            let mut timing_reasons: Vec<&'static str> = Vec::new();
+            match window_result {
+                Ok(window_units) => {
+                    if let Lag::Known(lag) = claim.lag
+                        && window_units < lag.min
+                    {
                         exclusions.push("evidence_window_shorter_than_lag");
                         findings.push(evidence_finding(
-                            "evidence_window_shorter_than_lag",
-                            vec![evidence_node.clone(), format!("claim:{claim_id}")],
-                            json!({
-                                "period": {"start": artifact.period_start, "end": artifact.period_end},
-                                "conversion": format!("1 {} timebase units", model.timebase),
-                                "window": window_units,
-                                "lag": {"min": lag.min, "max": lag.max},
-                                "claim": {"id": claim_id, "version": claim.version},
-                            }),
+                                "evidence_window_shorter_than_lag",
+                                vec![evidence_node.clone(), format!("claim:{claim_id}")],
+                                json!({
+                                    "period": {"start": artifact.period_start, "end": artifact.period_end},
+                                    "conversion": format!("1 {} timebase units", model.timebase),
+                                    "window": window_units,
+                                    "lag": {"min": lag.min, "max": lag.max},
+                                    "claim": {"id": claim_id, "version": claim.version},
+                                }),
                             "the observation period is shorter than the claim's minimum lag, so the effect could not have been observed".to_owned(),
                         ));
                     }
                 }
-                (None, _) | (_, Lag::Unknown) => {
-                    not_evaluable.push(json!({
-                        "finding_type": "evidence_window_shorter_than_lag",
-                        "reason": if window.is_none() {
-                            "period missing or not convertible to the model timebase"
-                        } else {
-                            "claim lag is unknown"
-                        },
+                Err(cause) => {
+                    timing_reasons.push(cause.code());
+                    edge_not_evaluable.push(json!({
+                        "finding_type": "evidence_timing_not_evaluable",
+                        "code": cause.code(),
+                        "reason": cause.reason(&model.timebase),
                         "involved_nodes": [evidence_node.clone(), format!("claim:{claim_id}")],
                     }));
                 }
+            }
+            if claim.lag == Lag::Unknown {
+                timing_reasons.push("claim_lag_unknown");
+                edge_not_evaluable.push(json!({
+                    "finding_type": "evidence_timing_not_evaluable",
+                    "code": "claim_lag_unknown",
+                    "reason": "the claim lag is unknown",
+                    "involved_nodes": [evidence_node.clone(), format!("claim:{claim_id}")],
+                }));
+            }
+            if !edge_not_evaluable.is_empty() {
+                exclusions.push("evidence_timing_not_evaluable");
+                findings.push(evidence_finding(
+                    "evidence_timing_not_evaluable",
+                    vec![evidence_node.clone(), format!("claim:{claim_id}")],
+                    json!({
+                        "reasons": timing_reasons,
+                        "period": {"start": artifact.period_start, "end": artifact.period_end},
+                        "timebase": model.timebase,
+                        "claim": {"id": claim_id, "version": claim.version},
+                    }),
+                    "the timing eligibility of this artifact for this claim could not be established, so it is kept in history but casts no vote".to_owned(),
+                ));
+                not_evaluable.extend(edge_not_evaluable.iter().cloned());
             }
             let applicable = exclusions.is_empty();
             if applicable {
@@ -935,7 +1021,7 @@ pub fn aggregate_support(
                 exclusions,
                 scope,
                 window,
-                not_evaluable: Vec::new(),
+                not_evaluable: edge_not_evaluable,
             });
         }
     }
@@ -1240,6 +1326,7 @@ pub fn causal_evidence_graph(
                 "applicable": entry.applicable,
                 "scope_relation": entry.scope.as_str(),
                 "exclusions": entry.exclusions,
+                "not_evaluable": entry.not_evaluable,
             })
         })
         .collect();
@@ -1296,11 +1383,31 @@ mod aggregation_tests {
 
     fn overlay_for(artifacts: Vec<EvidenceArtifact>, as_of: Option<&str>) -> SupportOverlay {
         let (model, _) = build(VALID_MODEL).expect("model");
+        overlay_for_model(&model, artifacts, as_of)
+    }
+
+    fn overlay_for_model(
+        model: &CausalModel,
+        artifacts: Vec<EvidenceArtifact>,
+        as_of: Option<&str>,
+    ) -> SupportOverlay {
         let map: BTreeMap<String, EvidenceArtifact> = artifacts
             .into_iter()
             .map(|artifact| (artifact.evidence_id.clone(), artifact))
             .collect();
-        aggregate_support(&model, &map, as_of)
+        aggregate_support(model, &map, as_of)
+    }
+
+    fn edge_for<'a>(
+        overlay: &'a SupportOverlay,
+        evidence_id: &str,
+        claim_id: &str,
+    ) -> &'a Applicability {
+        overlay
+            .applicability
+            .iter()
+            .find(|entry| entry.evidence_id == evidence_id && entry.claim_id == claim_id)
+            .expect("edge")
     }
 
     #[test]
@@ -1502,6 +1609,243 @@ mod aggregation_tests {
         exact.lifecycle_status = LifecycleStatus::Active;
         let overlay = overlay_for(vec![exact], None);
         assert_eq!(overlay.support["C_SupportHabit"], "supported");
+    }
+
+    fn assert_window_not_evaluable(overlay: &SupportOverlay, expected_code: &str, label: &str) {
+        let edge = edge_for(overlay, "E1", "C_SupportHabit");
+        assert!(!edge.applicable, "{label}");
+        assert_eq!(edge.not_evaluable[0]["code"], expected_code, "{label}");
+        assert_eq!(
+            edge.exclusions
+                .iter()
+                .filter(|token| **token == "evidence_timing_not_evaluable")
+                .count(),
+            1,
+            "{label}"
+        );
+        assert_eq!(
+            overlay.support["C_SupportHabit"], "unsupported_by_current_evidence",
+            "{label}"
+        );
+    }
+
+    fn artifact_with_period(period: &Value) -> EvidenceArtifact {
+        let mut parsed = parse_artifact(&stamped(json!({
+            "schema_version": EVIDENCE_SCHEMA_VERSION,
+            "evidence_id": "E1",
+            "claims": [{"id": "C_SupportHabit", "version": 1}],
+            "design": "randomized_experiment",
+            "support": "supports",
+            "scope": {"population": ["all_users"]},
+            "period": period,
+            "observation": null,
+            "formal_result": "not_run"
+        })))
+        .expect("artifact");
+        parsed.lifecycle_status = LifecycleStatus::Active;
+        parsed
+    }
+
+    #[test]
+    fn unknown_lag_excludes_the_edge_and_the_known_lag_boundary_still_votes() {
+        let source = VALID_MODEL.replace("lag 7..30", "lag unknown");
+        let (model, _) = build(&source).expect("model");
+        let overlay = overlay_for_model(
+            &model,
+            vec![artifact("E1", "C_SupportHabit", 1, "supports")],
+            None,
+        );
+        let edge = edge_for(&overlay, "E1", "C_SupportHabit");
+        assert!(!edge.applicable);
+        assert_eq!(edge.exclusions, vec!["evidence_timing_not_evaluable"]);
+        assert_eq!(edge.not_evaluable.len(), 1);
+        assert_eq!(edge.not_evaluable[0]["code"], "claim_lag_unknown");
+        assert!(
+            overlay
+                .findings
+                .iter()
+                .any(|finding| finding["finding_type"] == "evidence_timing_not_evaluable")
+        );
+        assert_eq!(
+            overlay.support["C_SupportHabit"],
+            "unsupported_by_current_evidence"
+        );
+
+        // Negative control: known lag with an observation window equal to lag.min votes.
+        let mut exact = parse_artifact(&stamped(json!({
+            "schema_version": EVIDENCE_SCHEMA_VERSION,
+            "evidence_id": "E1",
+            "claims": [{"id": "C_SupportHabit", "version": 1}],
+            "design": "randomized_experiment",
+            "support": "supports",
+            "scope": {"population": ["all_users"]},
+            "period": {"start": "2026-01-01", "end": "2026-01-08", "valid_until": "2027-03-31"},
+            "observation": null,
+            "formal_result": "not_run"
+        })))
+        .expect("artifact");
+        exact.lifecycle_status = LifecycleStatus::Active;
+        let overlay = overlay_for(vec![exact], None);
+        let edge = edge_for(&overlay, "E1", "C_SupportHabit");
+        assert!(edge.applicable);
+        assert!(edge.exclusions.is_empty());
+        assert_eq!(overlay.support["C_SupportHabit"], "supported");
+    }
+
+    #[test]
+    fn unconvertible_window_excludes_naming_each_cause_and_a_convertible_window_still_votes() {
+        assert_each_conversion_cause_is_named();
+        assert_timebase_and_week_reasons_are_exact();
+        assert_both_axes_report_two_causes();
+        assert_a_convertible_window_still_votes();
+    }
+
+    /// Every conversion failure names *which* conversion refused, exactly.
+    fn assert_each_conversion_cause_is_named() {
+        const UNPARSABLE: &str = "an observation period date does not parse as YYYY-MM-DD \
+                                  with a month in 1..12 and a day in 1..31";
+        for (label, period, expected_code, expected_reason) in [
+            (
+                "period_start_missing",
+                json!({"start": null, "end": "2026-03-31", "valid_until": "2027-03-31"}),
+                "period_start_missing",
+                "the observation period start date is missing",
+            ),
+            (
+                "period_end_missing",
+                json!({"start": "2026-01-01", "end": null, "valid_until": "2027-03-31"}),
+                "period_end_missing",
+                "the observation period end date is missing",
+            ),
+            (
+                "period_date_unparsable_start",
+                json!({"start": "garbage", "end": "2026-03-31", "valid_until": "2027-03-31"}),
+                "period_date_unparsable",
+                UNPARSABLE,
+            ),
+            (
+                // The end-date conversion is a second, independent call site: the row above
+                // returns before it ever runs.
+                "period_date_unparsable_end",
+                json!({"start": "2026-01-01", "end": "garbage", "valid_until": "2027-03-31"}),
+                "period_date_unparsable",
+                UNPARSABLE,
+            ),
+            (
+                "period_end_before_start",
+                json!({"start": "2026-03-31", "end": "2026-01-01", "valid_until": "2027-03-31"}),
+                "period_end_before_start",
+                "the observation period end date is before the start date",
+            ),
+        ] {
+            let overlay = overlay_for(vec![artifact_with_period(&period)], None);
+            assert_window_not_evaluable(&overlay, expected_code, label);
+            let edge = edge_for(&overlay, "E1", "C_SupportHabit");
+            assert_eq!(
+                edge.not_evaluable[0]["reason"].as_str().expect("reason"),
+                expected_reason,
+                "{label}"
+            );
+        }
+    }
+
+    /// The two model-level conversions that refuse: an unconvertible timebase and a
+    /// window that is not a whole number of weeks.
+    fn assert_timebase_and_week_reasons_are_exact() {
+        let tick_source = tick_timebase_source();
+        let (tick_model, _) = build(&tick_source).expect("tick model");
+        let mut tick_artifact = artifact("E1", "C_SupportHabit", 1, "supports");
+        tick_artifact.lifecycle_status = LifecycleStatus::Active;
+        let overlay = overlay_for_model(&tick_model, vec![tick_artifact], None);
+        assert_window_not_evaluable(&overlay, "timebase_not_convertible", "tick");
+        let edge = edge_for(&overlay, "E1", "C_SupportHabit");
+        assert_eq!(
+            edge.not_evaluable[0]["reason"].as_str().expect("reason"),
+            "a calendar date interval does not convert to the model timebase 'tick' without rounding"
+        );
+
+        let week_model = week_timebase_model();
+        let mut week_artifact = artifact("E1", "C_SupportHabit", 1, "supports");
+        week_artifact.lifecycle_status = LifecycleStatus::Active;
+        let overlay = overlay_for_model(&week_model, vec![week_artifact], None);
+        assert_window_not_evaluable(&overlay, "week_window_not_whole_weeks", "week");
+        let edge = edge_for(&overlay, "E1", "C_SupportHabit");
+        assert_eq!(
+            edge.not_evaluable[0]["reason"].as_str().expect("reason"),
+            "the observation window of 89 days is not a whole number of weeks"
+        );
+    }
+
+    /// Both axes refuse at once: two records, one exclusion, one finding.
+    fn assert_both_axes_report_two_causes() {
+        // Both axes fail at once: the previous single match arm reported only the
+        // window cause and dropped the unknown lag.
+        let combined_source = tick_timebase_source().replace("lag 7..30", "lag unknown");
+        let (combined_model, _) = build(&combined_source).expect("combined model");
+        let mut combined_artifact = artifact("E1", "C_SupportHabit", 1, "supports");
+        combined_artifact.lifecycle_status = LifecycleStatus::Active;
+        let overlay = overlay_for_model(&combined_model, vec![combined_artifact], None);
+        let edge = edge_for(&overlay, "E1", "C_SupportHabit");
+        assert!(!edge.applicable);
+        assert_eq!(edge.not_evaluable.len(), 2);
+        let codes: Vec<&str> = edge
+            .not_evaluable
+            .iter()
+            .map(|record| record["code"].as_str().expect("code"))
+            .collect();
+        assert!(codes.contains(&"timebase_not_convertible"));
+        assert!(codes.contains(&"claim_lag_unknown"));
+        assert_eq!(
+            edge.exclusions
+                .iter()
+                .filter(|token| **token == "evidence_timing_not_evaluable")
+                .count(),
+            1
+        );
+        assert_eq!(
+            overlay
+                .findings
+                .iter()
+                .filter(|finding| finding["finding_type"] == "evidence_timing_not_evaluable")
+                .count(),
+            1
+        );
+        assert_eq!(
+            overlay.support["C_SupportHabit"],
+            "unsupported_by_current_evidence"
+        );
+    }
+
+    /// Preservation control: a window that does convert, meeting the minimum lag, keeps
+    /// voting. An over-broad fix that excluded on any timing record fails here.
+    fn assert_a_convertible_window_still_votes() {
+        let week_model = week_timebase_model();
+        // Preservation control: a window that does convert, meeting the minimum lag,
+        // keeps voting. An over-broad fix that excluded on any timing record fails here.
+        let whole_week = artifact_with_period(&json!({
+            "start": "2026-01-01",
+            "end": "2026-01-08",
+            "valid_until": "2027-03-31"
+        }));
+        let overlay = overlay_for_model(&week_model, vec![whole_week], None);
+        let edge = edge_for(&overlay, "E1", "C_SupportHabit");
+        assert!(edge.applicable);
+        assert!(edge.exclusions.is_empty());
+        assert_eq!(overlay.support["C_SupportHabit"], "supported");
+    }
+
+    fn week_timebase_model() -> CausalModel {
+        let source = VALID_MODEL
+            .replace("timebase day", "timebase week")
+            .replace("1 tick = 1 day", "1 tick = 1 week")
+            .replace("lag 7..30", "lag 1..30");
+        build(&source).expect("week model").0
+    }
+
+    fn tick_timebase_source() -> String {
+        VALID_MODEL
+            .replace("timebase day", "timebase tick")
+            .replace("1 tick = 1 day", "1 tick = 1 tick")
     }
 
     #[test]

@@ -2939,7 +2939,10 @@ claim ごとの `causal_support` を集約します: `untested`、`supported`、
 `challenged`、`inconclusive`、`mixed`、`unsupported_by_current_evidence`。
 現行 claim version を pin し、scope が claim scope を `subsumes` し、
 freshness が宣言され、lifecycle が `active` で、観測 window が claim の最小
-lag 以上の artifact だけが票になります。同一 source lineage は 1 票に
+lag 以上の artifact だけが票になります。換算できない観測 window、または claim の
+lag が `unknown` で比較する `lag_min` が無い場合は、timing eligibility が評価不能に
+なります: その edge は履歴とグラフには残りますが、`evidence_timing_not_evaluable`
+で current support から除外され、票を投じません。同一 source lineage は 1 票に
 collapse されます(lineage 内の矛盾は `inconclusive`)。staleness は明示的な
 `--as-of` 日付に対してだけ判定され、実行環境の時計は決して使いません。
 claim 側または artifact 側の片方だけに存在する scope dimension は

@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 fn run_process(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_fslc"))
@@ -389,6 +389,286 @@ fn check_and_review_outputs_are_deterministic() {
 
 const EVIDENCE: &str = "examples/causal/evidence/onboarding-2026.causal.json";
 const LIFECYCLE: &str = "examples/causal/evidence/onboarding-2026.lifecycle.json";
+
+fn compiled_schema(relative: &str) -> jsonschema::Validator {
+    let schema_text = std::fs::read_to_string(repository_root().join(relative))
+        .unwrap_or_else(|error| panic!("read {relative}: {error}"));
+    let schema_value: Value = serde_json::from_str(&schema_text).expect("schema is valid JSON");
+    jsonschema::validator_for(&schema_value).expect("schema compiles")
+}
+
+fn assert_valid_against(record: &Value, schema_relative: &str) {
+    let validator = compiled_schema(schema_relative);
+    let errors: Vec<String> = validator
+        .iter_errors(record)
+        .map(|error| error.to_string())
+        .collect();
+    assert!(errors.is_empty(), "schema validation errors: {errors:?}");
+}
+
+fn stamped_evidence(mut artifact: Value) -> Value {
+    let digest = fsl_tools::artifact_digest(&artifact);
+    artifact
+        .as_object_mut()
+        .expect("object")
+        .insert("artifact_digest".to_owned(), json!(digest));
+    artifact
+}
+
+fn stamped_lifecycle(evidence_id: &str, artifact_digest: &str, chain: Value) -> Value {
+    let records = chain["records"].as_array().expect("records");
+    let mut stamped_records = Vec::new();
+    let mut previous_digest = None;
+    for record in records {
+        let mut stamped = record.clone();
+        if let Some(previous) = previous_digest.clone() {
+            stamped
+                .as_object_mut()
+                .expect("record object")
+                .insert("previous_record_digest".to_owned(), json!(previous));
+        }
+        let digest = fsl_tools::lifecycle_record_digest(evidence_id, artifact_digest, &stamped);
+        stamped
+            .as_object_mut()
+            .expect("record object")
+            .insert("record_digest".to_owned(), json!(digest));
+        previous_digest = Some(digest);
+        stamped_records.push(stamped);
+    }
+    let mut result = chain;
+    result
+        .as_object_mut()
+        .expect("chain object")
+        .insert("records".to_owned(), json!(stamped_records));
+    result
+}
+
+const UNKNOWN_LAG_MODEL: &str = r"causal LagUnknownVote {
+  timebase day
+  horizon 365
+  scope population { token all_users token new_users subset_of all_users }
+  scope environment { token production }
+  scope segment { token self_serve }
+  default_scope { population new_users environment production segment self_serve }
+  variable onboarding_support { role intervention }
+  variable first_success { role outcome }
+  claim C_Onboarding_FirstSuccess onboarding_support -> first_success {
+    version 1
+    status active
+    polarity positive
+    lag unknown
+    persists 7..30
+    basis hypothesis
+    scope { population new_users environment production segment self_serve }
+  }
+}
+";
+
+fn write_unknown_lag_fixture(scratch: &Path) -> (String, String, String) {
+    let model_path = scratch.join("unknown.fsl");
+    std::fs::write(&model_path, UNKNOWN_LAG_MODEL).expect("write model");
+    let evidence = stamped_evidence(json!({
+        "schema_version": "fsl-causal-evidence.v0",
+        "evidence_id": "S1",
+        "claims": [{"id": "claim:C_Onboarding_FirstSuccess", "version": 1}],
+        "design": "randomized_experiment",
+        "source_study_id": "S1",
+        "derived_from": [],
+        "support": "supports",
+        "scope": {
+            "population": ["new_users"],
+            "environment": ["production"],
+            "segment": ["self_serve"]
+        },
+        "period": {
+            "start": "2026-01-01",
+            "end": "2026-03-31",
+            "valid_until": "2027-03-31"
+        },
+        "estimate": {
+            "estimand": "risk_difference",
+            "value": 0.08,
+            "lower": 0.03,
+            "upper": 0.13,
+            "confidence": 0.95
+        },
+        "assumptions": ["randomization_integrity", "no_interference"],
+        "observation": null,
+        "formal_result": "not_run"
+    }));
+    let artifact_digest = evidence["artifact_digest"]
+        .as_str()
+        .expect("artifact digest");
+    let evidence_path = scratch.join("S1.json");
+    std::fs::write(&evidence_path, evidence.to_string()).expect("write evidence");
+    let lifecycle = stamped_lifecycle(
+        "S1",
+        artifact_digest,
+        json!({
+            "schema_version": "fsl-causal-evidence-lifecycle.v0",
+            "evidence_id": "S1",
+            "artifact_digest": artifact_digest,
+            "records": [{
+                "sequence": 1,
+                "status": "active",
+                "superseded_by": null,
+                "recorded_at": "2026-04-01T00:00:00Z",
+                "previous_record_digest": null
+            }]
+        }),
+    );
+    let lifecycle_path = scratch.join("S1.lifecycle.json");
+    std::fs::write(&lifecycle_path, lifecycle.to_string()).expect("write lifecycle");
+    (
+        model_path.to_str().expect("utf-8 model").to_owned(),
+        evidence_path.to_str().expect("utf-8 evidence").to_owned(),
+        lifecycle_path.to_str().expect("utf-8 lifecycle").to_owned(),
+    )
+}
+
+fn assert_timing_not_evaluable_graph(model: &str, evidence: &str, lifecycle: &str) {
+    let (graph, status) = run_cli(&[
+        "causal",
+        "analyze",
+        model,
+        "--projection",
+        "causal_evidence_graph",
+        "--evidence",
+        evidence,
+        "--lifecycle",
+        lifecycle,
+    ]);
+    assert_eq!(status, 0, "{graph}");
+    let edge = &graph["edges"][0];
+    assert_eq!(edge["applicable"], false);
+    assert_eq!(edge["exclusions"], json!(["evidence_timing_not_evaluable"]));
+    assert!(
+        edge["not_evaluable"][0]["reason"]
+            .as_str()
+            .is_some_and(|reason| !reason.is_empty())
+    );
+    let claim = &graph["claims"][0];
+    assert_eq!(claim["causal_support"], "unsupported_by_current_evidence");
+    assert_eq!(claim["formal_assurance"], "not_run");
+    assert_valid_against(
+        &graph,
+        "schemas/fslc/causal/causal-evidence-graph.v0.schema.json",
+    );
+}
+
+fn assert_timing_not_evaluable_review_schema(model: &str, evidence: &str, lifecycle: &str) {
+    let (review, status) = run_cli(&[
+        "causal",
+        "analyze",
+        model,
+        "--profile",
+        "causal-review",
+        "--evidence",
+        evidence,
+        "--lifecycle",
+        lifecycle,
+    ]);
+    assert_eq!(status, 0, "{review}");
+    assert_valid_against(
+        &review,
+        "schemas/fslc/causal/causal-findings.v0.schema.json",
+    );
+}
+
+fn assert_timing_not_evaluable_ledger(model: &str, evidence: &str, lifecycle: &str) {
+    let (ledger, status) = run_cli(&[
+        "causal",
+        "ledger",
+        model,
+        "--evidence",
+        evidence,
+        "--lifecycle",
+        lifecycle,
+    ]);
+    assert_eq!(status, 0, "{ledger}");
+    let claim_entry = ledger["claims"]
+        .as_array()
+        .expect("claims")
+        .iter()
+        .find(|entry| entry["id"] == "claim:C_Onboarding_FirstSuccess")
+        .expect("claim");
+    let excluded = claim_entry["evidence"]["excluded"]
+        .as_array()
+        .expect("excluded");
+    assert!(
+        excluded.iter().any(|entry| {
+            entry["evidence_id"] == "evidence:S1"
+                && entry["exclusions"]
+                    .as_array()
+                    .is_some_and(|tokens| tokens.contains(&json!("evidence_timing_not_evaluable")))
+        }),
+        "expected excluded evidence with timing token: {excluded:?}"
+    );
+    let reasons = claim_attention(&ledger, "C_Onboarding_FirstSuccess");
+    assert!(reasons.contains(&"current_evidence_missing".to_owned()));
+    assert!(!reasons.iter().any(|reason| reason.contains("freshness")));
+}
+
+/// Preservation control: evidence whose timing *is* evaluable keeps voting, and both
+/// envelopes still validate. This is what fails if the exclusion is made too broad.
+fn assert_onboarding_evidence_still_eligible() {
+    let (eligible_graph, eligible_status) = run_cli(&[
+        "causal",
+        "analyze",
+        RETENTION,
+        "--projection",
+        "causal_evidence_graph",
+        "--evidence",
+        EVIDENCE,
+        "--lifecycle",
+        LIFECYCLE,
+    ]);
+    assert_eq!(eligible_status, 0, "{eligible_graph}");
+    assert_eq!(eligible_graph["edges"][0]["applicable"], true);
+    let supported = eligible_graph["claims"]
+        .as_array()
+        .expect("claims")
+        .iter()
+        .find(|claim| claim["id"] == "claim:C_Onboarding_FirstSuccess")
+        .expect("supported claim");
+    assert_eq!(supported["causal_support"], "supported");
+    assert_valid_against(
+        &eligible_graph,
+        "schemas/fslc/causal/causal-evidence-graph.v0.schema.json",
+    );
+    let (eligible_review, _) = run_cli(&[
+        "causal",
+        "analyze",
+        RETENTION,
+        "--profile",
+        "causal-review",
+        "--evidence",
+        EVIDENCE,
+        "--lifecycle",
+        LIFECYCLE,
+    ]);
+    assert_valid_against(
+        &eligible_review,
+        "schemas/fslc/causal/causal-findings.v0.schema.json",
+    );
+}
+
+/// An evidence/claim edge whose timing eligibility cannot be established must be
+/// excluded consistently everywhere it surfaces: `applicable`/`exclusions` in the
+/// evidence-graph envelope, the `finding_type` enum of `causal-findings.v0` (the
+/// review profile is validated against the published schema, so a finding type
+/// missing from the enum fails here), and the ledger's excluded list and attention
+/// reason. Regression for #989, where such an edge stayed `applicable: true` and
+/// voted while a `not_evaluable` record was recorded beside it.
+#[test]
+fn timing_not_evaluable_edge_excludes_across_graph_schema_and_ledger() {
+    let scratch = tempfile_dir();
+    let (model, evidence, lifecycle) = write_unknown_lag_fixture(&scratch);
+    assert_timing_not_evaluable_graph(&model, &evidence, &lifecycle);
+    assert_timing_not_evaluable_review_schema(&model, &evidence, &lifecycle);
+    assert_timing_not_evaluable_ledger(&model, &evidence, &lifecycle);
+    assert_onboarding_evidence_still_eligible();
+}
 
 #[test]
 fn evidence_graph_overlays_support_without_touching_formal_assurance() {

@@ -230,7 +230,12 @@ deterministic per-claim `causal_support`
 unsupported_by_current_evidence`) counts only artifacts pinning the current
 claim version with `subsumes` scope, declared freshness, an `active`
 lifecycle, and an observation window ≥ the claim's minimum lag; one source
-lineage is one vote. A scope dimension present on only one side is
+lineage is one vote. An observation window that cannot be converted, or a
+claim whose `lag` is `unknown` so there is no `lag_min` to compare against,
+leaves timing eligibility not evaluable: the edge stays in history but is
+excluded from current support with `evidence_timing_not_evaluable` and casts
+no vote — it is never counted on the strength of the other conditions alone.
+A scope dimension present on only one side is
 `unassessable`, never universal. Staleness needs an explicit `--as-of` — never the wall
 clock. **Agents: `causal_support` and `formal_assurance` are separate axes;
 `supported` never means proved, `challenged` never means refuted, and

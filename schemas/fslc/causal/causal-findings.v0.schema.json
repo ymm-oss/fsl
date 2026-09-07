@@ -116,6 +116,7 @@
             "unknown_lifecycle",
             "evidence_claim_version_mismatch",
             "evidence_window_shorter_than_lag",
+            "evidence_timing_not_evaluable",
             "duplicate_evidence_source",
             "unknown_freshness",
             "retracted_or_superseded_evidence",
