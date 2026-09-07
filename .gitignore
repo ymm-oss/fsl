@@ -46,3 +46,9 @@ docs/index.bleve/
 # Relational Design plugin local trace/session state — working scratch for the
 # design process, not a repo deliverable (the decisions land in docs/DESIGN-*.md)
 .relational-design/
+
+# Nix build result symlinks
+/result
+/result-*
+# Devbox generated artifacts
+.devbox/

@@ -1,0 +1,60 @@
+name: Nix flake
+
+# Validates the flake (flake.nix). For most nixify targets Nix is a side
+# concern and the full build can take 10+ minutes, so this workflow runs
+# only on manual dispatch, on published releases, or when flake-relevant
+# files change on a PR.
+#
+# Steps, in order of what they catch:
+#   1. nix flake check --all-systems  — every system's outputs evaluate
+#      (including darwin on an ubuntu runner).
+#   2. nix build .#default            — the from-source build (vendored Z3
+#      + Rust workspace) actually realises for the runner's system.
+#   3. nix run .#default -- --version — the built binary actually execs.
+#      This is the only step that catches the `let ... in rec` shadowing
+#      class of bug (passes flake check, fails nix run). Do NOT drop it.
+
+on:
+  workflow_dispatch: {}
+  release:
+    types: [published]
+  pull_request:
+    branches: [main]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "**/*.nix"
+      - ".github/workflows/nix.yml"
+      - "rust/Cargo.lock"
+      - "rust/Cargo.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nix-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: nix flake check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab602fd15196c2084a2eea5ff2d25 # v22
+
+      - name: nix flake check --all-systems
+        run: nix flake check --all-systems --no-build
+
+      - name: nix build .#default
+        run: nix build .#default --print-build-logs
+
+      - name: nix run .#default -- --version
+        if: github.event_name != 'pull_request'
+        run: nix run .#default -- --version

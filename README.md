@@ -31,6 +31,7 @@ integration. Use one of the other two routes only if it specifically fits you:
 
 - Just want the `fslc` binary, nothing else (no PATH setup, no skills)? [Download a single
   executable](#download-a-single-executable-instead).
+- Already use Nix? [Nix (Flakes)](#nix-flakes) builds `fslc` from source with Z3 bundled in.
 - Building `fslc` yourself, or need the frozen Python reference for compatibility work?
   [Developer setup](#developer-setup-building-from-source).
 
@@ -110,6 +111,62 @@ baseline (glibc 2.39 or newer).
 
 > This binary bundles Z3, so all features including `verify` work without a separately
 > installed solver. Normal operating-system runtime libraries still apply.
+
+### Nix (Flakes)
+
+The project provides optional Nix flake outputs for users who already use Nix. The flake builds `fslc` (and `fslc-lsp`) from source with Z3 bundled in.
+
+```bash
+# Latest source from default branch
+nix run github:ymm-oss/fsl
+
+# Specific release (uses the flake at that git tag)
+nix run github:ymm-oss/fsl/v4.4.1
+
+# Named outputs: #fslc, #source
+nix run github:ymm-oss/fsl#fslc
+nix run github:ymm-oss/fsl#source
+
+# Build / develop
+nix build github:ymm-oss/fsl
+nix develop github:ymm-oss/fsl
+```
+
+The flake exposes `packages.<system>.fslc` / `.default` / `.source`, `apps.<system>.fslc` / `.default`, `devShells.<system>.default`, and `overlays.default`.
+
+Update through the same Nix workflow you used to install. For profile installs, run `nix profile list` and then `nix profile upgrade <index-or-name>`. For flake inputs, run `nix flake update fsl` in your own flake and rebuild.
+
+### Devbox
+
+For a reproducible development environment (Rust toolchain + `cmake` for the bundled Z3 build), use [Devbox](https://www.jetify.com/devbox):
+
+```bash
+# Install Devbox first (if not already installed)
+curl -fsSL https://get.jetify.dev/devbox | bash
+
+# Initialize the environment
+devbox shell
+
+# Build the project (uses --manifest-path rust/Cargo.toml)
+devbox run build
+
+# Run the verifier on a spec
+devbox run check
+```
+
+Or install Devbox via Homebrew:
+
+```bash
+brew install jetify-com/devbox/devbox
+```
+
+> **Note for x86_64-darwin (Intel Mac) users:** Devbox currently uses
+> nixpkgs-unstable internally, which has dropped x86_64-darwin support.
+> Use the Nix flake dev shell instead:
+>
+> ```bash
+> nix develop --extra-experimental-features 'nix-command flakes'
+> ```
 
 ## Write your first spec with an AI agent
 
