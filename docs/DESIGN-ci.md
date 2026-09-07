@@ -1311,8 +1311,16 @@ documentation-artifact context. It has three deliberately separate checks: the
 generated-reference freshness snapshots for `language.{ja,en}.html` and
 `cli.{ja,en}.html`, static manual-route integrity for
 `index.{ja,en}.html` and `examples.{ja,en}.html`, and the sitewide refresh
-contract for palette single-source wiring, docs-sidebar gutter survival, and
-CLI pages that no longer cite frozen Python as authority.
+contract. That third check covers, exhaustively as of this writing: shell CSS/JS
+wiring, playground asset isolation, palette single-source wiring, docs-sidebar
+gutter survival, the sitewide correctness-backbone structure in `site.js` and the
+home page's own backbone markup, the hub journey contract, the
+static playground skip link and its focusable landmark, the landmark attributes
+`site.js` assigns on its skip-link injection path, the locale toggle's
+`aria-current`, the breadcrumb's accessible name, and CLI pages that no longer
+cite frozen Python as authority. Keep this list in step with the module: a
+branch added to one of its `audit_*` functions extends what a required context
+enforces, so an unlisted branch makes this paragraph under-describe the gate.
 
 The workflow invokes `tests/test_site_reference_snapshot.py`,
 `tests/test_site_manual_integrity.py`, and
