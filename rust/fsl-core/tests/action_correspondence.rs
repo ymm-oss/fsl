@@ -2,19 +2,22 @@
 
 use fsl_core::{
     ActionCorrespondenceTarget, CoreError, CorrespondenceOrigin, FileResolver, FsResolver,
-    build_model, parse_kernel_source, parse_refinement, requirements_implements,
+    build_model, filter_scope_overrides_for_abstraction, parse_kernel_source,
+    parse_kernel_source_with_bounds, parse_refinement, requirements_implements,
+    requirements_implements_with_bounds,
 };
+use std::collections::BTreeMap;
 
 fn build(source: &str) -> fsl_core::KernelModel {
     let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse source");
     build_model(kernel).expect("build model")
 }
 
-struct Resolver(&'static str);
+struct Resolver(String);
 
 impl FileResolver for Resolver {
     fn read(&self, _: &str) -> Result<String, CoreError> {
-        Ok(self.0.to_owned())
+        Ok(self.0.clone())
     }
 }
 
@@ -172,7 +175,7 @@ fn requirements_routes_report_both_duplicate_origins() {
   action pay(x: N, retry: N) maps settle(x) { paid = true }
 }"#;
     let implementation = build(source);
-    let error = requirements_implements(source, &Resolver(ABS), &implementation)
+    let error = requirements_implements(source, &Resolver(ABS.to_owned()), &implementation)
         .expect_err("the implementation block and maps clause conflict");
     assert!(error.message.contains("implements_block"));
     assert!(error.message.contains("inline_maps_clause"));
@@ -211,12 +214,14 @@ fn requirements_routes_lower_to_the_same_typed_target() {
   init { paid = false }
   action pay(x: N, retry: N) maps settle(x) { paid = true }
 }"#;
-    let explicit_contract = requirements_implements(explicit, &Resolver(ABS), &build(explicit))
-        .expect("explicit implements route")
-        .expect("implements contract");
-    let inline_contract = requirements_implements(inline, &Resolver(ABS), &build(inline))
-        .expect("inline maps route")
-        .expect("implements contract");
+    let explicit_contract =
+        requirements_implements(explicit, &Resolver(ABS.to_owned()), &build(explicit))
+            .expect("explicit implements route")
+            .expect("implements contract");
+    let inline_contract =
+        requirements_implements(inline, &Resolver(ABS.to_owned()), &build(inline))
+            .expect("inline maps route")
+            .expect("implements contract");
     let explicit_mapping = &explicit_contract.refinement.action_correspondences["pay"];
     let inline_mapping = &inline_contract.refinement.action_correspondences["pay"];
     assert_eq!(explicit_mapping.target, inline_mapping.target);
@@ -241,7 +246,7 @@ fn requirements_implicit_auto_returns_an_error_instead_of_indexing_past_params()
   action pay(x: N) { paid = true }
 }"#;
     let implementation = build(source);
-    let error = requirements_implements(source, &Resolver(abstraction), &implementation)
+    let error = requirements_implements(source, &Resolver(abstraction.to_owned()), &implementation)
         .expect_err("arity mismatch must be diagnosed");
     assert!(
         error
@@ -274,9 +279,66 @@ verify { instances Case = 2 }
 verify { instances Case = 2 }
 "#;
     let implementation = build(source);
-    let error = requirements_implements(source, &Resolver(abstraction), &implementation)
+    let error = requirements_implements(source, &Resolver(abstraction.to_owned()), &implementation)
         .expect_err("auto-mapped actors must match");
     assert!(error.message.contains("actor mismatch"));
     assert!(error.message.contains("System"));
     assert!(error.message.contains("Manager"));
+}
+
+/// detector (mutation A: empty abstraction overrides -> `map_out_of_bounds`;
+/// mutation B: unfiltered overrides -> undeclared-name error on direct `spec`)
+#[test]
+fn bounds_are_filtered_and_propagated_to_inline_abstraction() {
+    let spec_abs = r"spec SharedOnly {
+  entity Item
+  state { st: Map<Item, Bool> }
+  init { forall i: Item { st[i] = false } }
+  action finish(i: Item) {
+    st[i] = true
+  }
+}
+verify { instances Item = 3 }
+";
+    let spec_impl = r#"requirements SharedOnlyReq {
+  implements SharedOnly from "abs.fsl" { maps auto }
+  entity Item
+  entity Extra
+  state { st: Map<Item, Bool> }
+  init { forall i: Item { st[i] = false } }
+  action finish(i: Item) maps finish(i) {
+    st[i] = true
+  }
+}
+verify {
+  instances Item = 1
+  instances Extra = 1
+}
+"#;
+    let overrides = BTreeMap::from([("Item".to_owned(), 1), ("Extra".to_owned(), 1)]);
+    let filtered = filter_scope_overrides_for_abstraction(spec_abs, &overrides, &BTreeMap::new())
+        .expect("filter overrides")
+        .expect("shared override");
+    assert_eq!(filtered.0, BTreeMap::from([("Item".to_owned(), 1)]));
+    assert!(filtered.1.is_empty());
+
+    let implementation = build(spec_impl);
+    let contract = requirements_implements_with_bounds(
+        spec_impl,
+        &Resolver(spec_abs.to_owned()),
+        &implementation,
+        &overrides,
+        &BTreeMap::new(),
+    )
+    .expect("filtered abstraction parse")
+    .expect("implements contract");
+    assert_eq!(contract.abstraction.name, "SharedOnly");
+
+    let error = parse_kernel_source_with_bounds(spec_abs, &overrides, &BTreeMap::new())
+        .expect_err("unfiltered overrides must fail validation on direct spec");
+    assert!(
+        error
+            .message
+            .contains("verify instances references undeclared entity 'Extra'")
+    );
 }

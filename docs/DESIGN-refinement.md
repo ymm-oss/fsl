@@ -509,6 +509,33 @@ Violation:
 
 exit: refines = 0, refinement_failed = 1, error = 2/3.
 
+### Inline `implements` bounds propagation (`fslc verify`)
+
+When `fslc verify` carries `--instances` / `--values` scope overrides, the native
+CLI still evaluates inline `implements` and keeps the nested `implements` field in
+the envelope. Overrides propagate into the abstract spec **only for entity/number
+names the abstraction itself declares**; impl-only names are filtered out before
+direct-spec validation so they cannot trigger undeclared-name errors on a business
+or spec abstract that does not model them.
+
+This matches the language contract in `docs/LANGUAGE.md` (inline `implements`
+bounds propagation). Before #1003 the native Rust CLI violated that documented
+contract; the frozen Python reference exercised the intended behavior in
+`tests/test_implements_bounds_override.py` (#94). Refinement remains a
+same-size forward simulation: a shrunken implementation and an unfiltered
+full-size abstract would otherwise disagree with `map_out_of_bounds`.
+
+**Independent suppressors (not treated as safe):** inline `implements` is still
+omitted silently when any of these hold:
+
+- `--property`
+- `--exclude-properties`
+- `--from-state`
+
+No omission reason is recorded in the envelope today. This design does **not**
+declare those suppressions safe; they remain an explicit follow-up contract
+decision ([#1008](https://github.com/ymm-oss/fsl/issues/1008)).
+
 Static checks (`kind: "type"` error, exit 2):
 - An abs state variable that is not mapped / a nonexistent variable or action
   name

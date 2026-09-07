@@ -1,0 +1,11 @@
+spec CountedFlow {
+  number Limit
+  state { n: Limit }
+  init { n = 0 }
+  action bump() {
+    n = 0
+  }
+}
+verify {
+  values Limit = 0..3
+}

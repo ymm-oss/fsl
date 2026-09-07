@@ -3,7 +3,7 @@
 
 //! Typed kernel lowering and semantic model for the Rust FSL port.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
 use fsl_syntax::{
@@ -12,6 +12,10 @@ use fsl_syntax::{
     TypeExpr, VerifyItem, parse_document,
 };
 use serde_json::Value;
+
+type InstanceOverrides = BTreeMap<String, i64>;
+type ValueOverrides = BTreeMap<String, (i64, i64)>;
+type FilteredScopeOverrides = Option<(InstanceOverrides, ValueOverrides)>;
 
 /// Re-exported so every crate that recurses over `KernelExpr` reaches the same
 /// stack guard without depending on `fsl-syntax` directly (#620).
@@ -83,6 +87,7 @@ pub use public_kernel::{
 pub use refinement::{
     ActionCorrespondence, ActionCorrespondenceTarget, ActionRef, ImplementsContract, ProgressMap,
     Refinement, RefinementError, StateMap, parse_refinement, requirements_implements,
+    requirements_implements_with_bounds,
 };
 pub use trace::{TraceAction, TraceChange, TraceStep};
 pub use trace_json::{
@@ -366,6 +371,130 @@ fn validate_direct_scope_overrides(
         )));
     }
     Ok(())
+}
+
+fn collect_spec_entity_number_names(
+    items: &[SpecItem],
+    entities: &mut HashSet<String>,
+    numbers: &mut HashSet<String>,
+) {
+    for item in items {
+        match item {
+            SpecItem::Entity(name, _) => {
+                entities.insert(name.clone());
+            }
+            SpecItem::Number(name, _) => {
+                numbers.insert(name.clone());
+            }
+            _ => {}
+        }
+    }
+}
+
+fn declared_entity_number_names(document: &SurfaceDocument) -> (HashSet<String>, HashSet<String>) {
+    let mut entities = HashSet::new();
+    let mut numbers = HashSet::new();
+    match document {
+        SurfaceDocument::Spec(spec) => {
+            collect_spec_entity_number_names(&spec.items, &mut entities, &mut numbers);
+        }
+        SurfaceDocument::Business(business) => {
+            // `BusinessItem` has no `Number` variant (`surface.rs:393-433`), so only
+            // entity names are collected here.
+            for item in &business.items {
+                if let BusinessItem::Entity(name, _) = item {
+                    entities.insert(name.clone());
+                }
+            }
+        }
+        SurfaceDocument::Requirements(requirements) => {
+            for item in &requirements.items {
+                if let RequirementsItem::Common(spec_item) = item {
+                    match spec_item {
+                        SpecItem::Entity(name, _) => {
+                            entities.insert(name.clone());
+                        }
+                        SpecItem::Number(name, _) => {
+                            numbers.insert(name.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        // These dialects carry no `VerifyItem`; `VerifyBounds` exists only on
+        // `SpecItem` (`surface.rs:219`) and `BusinessItem` (`surface.rs:430`).
+        SurfaceDocument::Refinement(_)
+        | SurfaceDocument::Governance(_)
+        | SurfaceDocument::Compose(_)
+        | SurfaceDocument::Db(_)
+        | SurfaceDocument::Domain(_)
+        | SurfaceDocument::AiComponent(_)
+        | SurfaceDocument::Agent(_) => {}
+    }
+    (entities, numbers)
+}
+
+/// Restrict scope overrides to entity/number names declared by an abstraction surface.
+///
+/// Used when propagating `fslc verify --instances` / `--values` into an inline
+/// `implements` abstract spec: the implementation already validated the full
+/// override against its own declarations, and the abstract must be shrunk to
+/// the same world size for refinement to stay well-posed — but only for names
+/// the abstraction shares.
+///
+/// # Errors
+///
+/// Returns [`CoreError`] when the abstraction source fails to parse.
+pub fn filter_scope_overrides_for_abstraction(
+    source: &str,
+    instances: &InstanceOverrides,
+    values: &ValueOverrides,
+) -> Result<FilteredScopeOverrides, CoreError> {
+    if instances.is_empty() && values.is_empty() {
+        return Ok(None);
+    }
+    let parsed = parse_document(SourceFile::new(source))?;
+    let (entities, numbers) = declared_entity_number_names(&parsed.surface);
+    let filtered_instances: BTreeMap<String, i64> = instances
+        .iter()
+        .filter(|(name, _)| entities.contains(name.as_str()))
+        .map(|(name, value)| (name.clone(), *value))
+        .collect();
+    let filtered_values: BTreeMap<String, (i64, i64)> = values
+        .iter()
+        .filter(|(name, _)| numbers.contains(name.as_str()))
+        .map(|(name, value)| (name.clone(), *value))
+        .collect();
+    if filtered_instances.is_empty() && filtered_values.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some((filtered_instances, filtered_values)))
+    }
+}
+
+/// Parse an inline-implements abstraction with scope overrides filtered to its
+/// declared entity/number names before validation and lowering.
+///
+/// # Errors
+///
+/// Returns [`CoreError`] with the same contract as [`parse_kernel_source_with_bounds`].
+pub fn parse_abstraction_kernel_source_with_bounds(
+    source: &str,
+    resolver: &dyn FileResolver,
+    instances: &InstanceOverrides,
+    values: &ValueOverrides,
+) -> Result<KernelSpec, CoreError> {
+    let (instances, values) =
+        match filter_scope_overrides_for_abstraction(source, instances, values)? {
+            Some((instances, values)) => (instances, values),
+            None => (BTreeMap::new(), BTreeMap::new()),
+        };
+    if instances.is_empty() && values.is_empty() {
+        parse_kernel_source(source, resolver)
+    } else {
+        parse_kernel_source_with_bounds(source, &instances, &values)
+    }
 }
 
 /// Parse a direct spec/business/requirements document with temporary verify-bound overrides.

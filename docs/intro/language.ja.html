@@ -400,6 +400,10 @@ fslc verify spec.fsl --values Amount=0..3
 これがないと、縮小した impl とフルサイズの抽象は <code>map_out_of_bounds</code> で失敗します)。
 impl 側だけの carried number(例: business の抽象には存在しない <code>Amount</code>)は impl
 のみに適用されます。</p>
+<p><code>fslc verify</code> は <code>--instances</code> / <code>--values</code> の scope override だけが付いている場合でも
+インライン <code>implements</code> を評価します。<code>--property</code>、<code>--exclude-properties</code>、
+<code>--from-state</code> は引き続き理由を記録せず <code>implements</code> フィールドを省略します。
+この挙動は安全とみなされておらず、契約上の未決定事項として残ります。</p>
 <p><code>acceptance</code>/<code>forbidden</code> シナリオは、spec の元の世界の id や数値をハードコード
 しがちで(<code>accept(2)</code>)、それが縮小された上書き(<code>--instances Case=1</code>)の外に出る
 ことがあります。上書きが有効なとき、replay の失敗が<em>純粋に</em>上書き後の境界の外の値を

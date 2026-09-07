@@ -1,0 +1,13 @@
+requirements ClaimReq {
+  implements ClaimFlow from "abs_business.fsl" { }
+
+  process Claim {
+    stages Draft, Submitted, Approved
+    initial Draft
+    transition submit  Draft     -> Submitted by Employee
+    transition approve Submitted -> Approved  by Manager
+  }
+}
+verify {
+  instances Claim = 3
+}

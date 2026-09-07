@@ -307,10 +307,24 @@ const CLASSIFICATIONS: &[Classification] = &[
         ResultOption
     ),
     entry!(
+        Ordinary,
+        "rust/fsl-core/src/refinement.rs",
+        1268,
+        "requirements_implements_with_bounds",
+        ResultOption
+    ),
+    entry!(
         Verdict,
         "rust/fslc/src/verification_output.rs",
         253,
         "requirements_implements_output",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fslc/src/verification_output.rs",
+        322,
+        "requirements_implements_output_with_bounds",
         ResultOption
     ),
     entry!(
@@ -437,6 +451,13 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fslc/src/main.rs",
         14968,
         "implements_result_from_source",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fslc/src/main.rs",
+        15592,
+        "implements_result_from_source_with_bounds",
         ResultOption
     ),
     entry!(

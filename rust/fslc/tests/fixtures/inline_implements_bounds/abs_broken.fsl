@@ -1,0 +1,14 @@
+business OverrideBusiness {
+  actor Operator
+  entity Item
+
+  process Item {
+    stages Ready, Done
+    initial Ready
+    transition finish Ready -> Done by Operator
+  }
+}
+
+verify {
+  instances Item = 1
+}

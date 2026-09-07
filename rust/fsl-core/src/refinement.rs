@@ -12,7 +12,7 @@ use fsl_syntax::{
 use crate::recursion;
 use crate::{
     ActionDef, FileResolver, KernelModel, ParamDef, TypeDef, TypeRef, build_model,
-    parse_kernel_source,
+    parse_abstraction_kernel_source_with_bounds,
 };
 
 #[derive(Clone, Debug)]
@@ -1247,6 +1247,31 @@ pub fn requirements_implements(
     resolver: &dyn FileResolver,
     implementation: &KernelModel,
 ) -> Result<Option<ImplementsContract>, RefinementError> {
+    requirements_implements_with_bounds(
+        source,
+        resolver,
+        implementation,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+}
+
+/// Resolve an inline `implements` contract with abstraction bounds overrides.
+///
+/// Overrides are filtered to entity/number names declared by the abstraction
+/// before validation and lowering.
+///
+/// # Errors
+///
+/// Returns [`RefinementError`] for dependency, lowering, or mapping failures.
+#[allow(clippy::too_many_lines)]
+pub fn requirements_implements_with_bounds(
+    source: &str,
+    resolver: &dyn FileResolver,
+    implementation: &KernelModel,
+    instances: &BTreeMap<String, i64>,
+    values: &BTreeMap<String, (i64, i64)>,
+) -> Result<Option<ImplementsContract>, RefinementError> {
     let document = fsl_syntax::parse_surface_document(source).map_err(|error| RefinementError {
         message: error.message,
         span: Some(error.span),
@@ -1270,10 +1295,12 @@ pub fn requirements_implements(
         message: error.message,
         span: Some(span),
     })?;
-    let kernel = parse_kernel_source(&abs_source, resolver).map_err(|error| RefinementError {
-        message: error.message,
-        span: Some(span),
-    })?;
+    let kernel =
+        parse_abstraction_kernel_source_with_bounds(&abs_source, resolver, instances, values)
+            .map_err(|error| RefinementError {
+                message: error.message,
+                span: Some(span),
+            })?;
     let abstraction = build_model(kernel).map_err(|error| RefinementError {
         message: error.message,
         span: Some(span),

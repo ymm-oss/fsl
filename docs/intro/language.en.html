@@ -410,6 +410,10 @@ declares — so the refinement check runs at the same world size on both sides
 and a full-size abstract would fail with <code>map_out_of_bounds</code>). An impl-only
 carried number (e.g. <code>Amount</code>, absent from a business abstract) applies to the
 impl only.</p>
+<p><code>fslc verify</code> still evaluates inline <code>implements</code> when only <code>--instances</code> /
+<code>--values</code> scope overrides are present. <code>--property</code>, <code>--exclude-properties</code>, and
+<code>--from-state</code> continue to omit the <code>implements</code> field without recording a reason;
+that behavior is not treated as safe and remains an open contract decision.</p>
 <p><code>acceptance</code>/<code>forbidden</code> scenarios often hardcode ids/numbers from the spec's
 original world (<code>accept(2)</code>), which can fall outside a shrunken override
 (<code>--instances Case=1</code>). When overrides are active, a scenario whose replay

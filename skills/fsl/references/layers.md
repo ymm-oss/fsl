@@ -80,7 +80,10 @@ the relevant role skill directs it.
   clauses carry inputs (`with`), guards (`when`), field updates (`set`), and
   traceability (`covers`). Put verifier bounds in `verify { instances E = N
   values T = lo..hi }`. With `implements`, verify simultaneously runs the refine
-  to the upper layer (the `implements` field in the result JSON); an empty body
+  to the upper layer (the `implements` field in the result JSON); CLI
+  `--instances` / `--values` overrides propagate into the abstract spec for that
+  refinement, restricted to entity/number names the abstraction declares (impl-only
+  names stay on the implementation side). An empty body
   auto-generates identity refinement when names match, `maps auto` is allowed for
   same-name kernel-wrapper state/actions, and auto-mapped process transitions are
   actor-checked; the inline block also takes action-correspondence items

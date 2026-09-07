@@ -1,0 +1,16 @@
+requirements OverrideBrokenRequirements {
+  process Item {
+    stages Ready, Done
+    initial Ready
+    transition finish Ready -> Done by Operator
+  }
+
+  implements OverrideBusiness from "abs_broken.fsl" {
+    maps auto
+    action finish(c) -> stutter
+  }
+}
+
+verify {
+  instances Item = 1
+}
