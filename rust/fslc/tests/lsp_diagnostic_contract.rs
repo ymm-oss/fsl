@@ -79,6 +79,39 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
 }
 
 #[test]
+fn distinctness_unproved_diagnostic_shares_cli_and_lsp_identity() {
+    let fixture = format!(
+        "{}/tests/fixtures/issue_698_affine_index.fsl",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let source = std::fs::read_to_string(&fixture).expect("read fixture");
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(["check", &fixture])
+        .output()
+        .expect("run native check");
+    assert_eq!(output.status.code(), Some(2));
+    let cli: Value = serde_json::from_slice(&output.stdout).expect("parse CLI envelope");
+    let shared = fslc_rust::source_diagnostic::diagnostics(
+        &source,
+        &fixture,
+        &fsl_core::FsResolver::new(Path::new(".")),
+    )
+    .into_iter()
+    .find(|diagnostic| diagnostic.kind != "migration")
+    .expect("shared source diagnostic");
+    assert_eq!(cli["kind"], shared.kind);
+    assert_eq!(cli["message"], shared.message);
+    assert_eq!(
+        cli["diagnostic_code"],
+        fsl_core::WRITE_DISTINCTNESS_UNPROVED_CODE
+    );
+    assert_eq!(shared.code, fsl_core::WRITE_DISTINCTNESS_UNPROVED_CODE);
+    assert_eq!(cli["loc"], shared.span.python_loc());
+    assert_eq!(cli["hint"].as_str(), shared.hint.as_deref());
+    assert!(shared.quick_fix.is_some());
+}
+
+#[test]
 fn nested_option_payload_diagnostics_have_cli_lsp_identity() {
     const STATE_HINT: &str = "state types allow scalars, nested Option around a scalar, structs with those fields, Map<bounded scalar, scalar-or-nested-Option-or-struct>, Set<bounded scalar>, Seq<scalar,N>, and bounded-scalar relations; Option cannot wrap a collection or struct";
     const STRUCT_HINT: &str = "struct fields must be a scalar (domain type, enum, Bool, Int) or nested Option around a scalar; use a separate Map for Set, Map, Seq, relation, or struct fields";

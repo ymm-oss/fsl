@@ -3,10 +3,16 @@
 
 """Compare bounded leadsTo decisions and cross-replay liveness witnesses.
 
-Deletion remains deferred (F4). Candidate native owner
-``rust/fslc/tests/liveness_witness_replay.rs`` covers the three legacy cases
-with an exact 3x3 state/action/loop corruption matrix; harness retirement still
-requires review of that evidence.
+Deletion remains deferred (docs/RUST-PORTING.md F4). ``rust/fslc/tests/
+liveness_witness_replay.rs`` (#903) owns a native-only 3x3 state/action/loop
+corruption matrix -- a Monitor-generated trace, corrupted, rejected by the
+native Monitor's own replay path; it also separately checks BMC's safety/
+leadsTo verdicts, but does not cross-replay a BMC witness through Monitor.
+This script does two more things neither of those cover: it diffs the frozen
+Python `verify` envelope against the native one for the same three cases,
+and cross-replays witnesses in both directions (Rust BMC -> Python Monitor
+and Python BMC -> Rust Monitor). Landing the native corruption matrix alone
+does not retire this script.
 """
 from __future__ import annotations
 

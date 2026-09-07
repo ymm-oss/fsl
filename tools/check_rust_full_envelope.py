@@ -3,9 +3,18 @@
 
 """Compare Python and Rust CLI envelopes with a narrow reviewed allowlist.
 
-Disposition: calibrated native/Worker parity owns this
-detector, so deletion is permitted once its shared ``_diff``/``_normalize``
-helpers move without breaking the retained dialect/induction/Phase-2 tools.
+Disposition (docs/RUST-PORTING.md F8): deletion deferred. This is the only
+harness that compares the frozen Python envelope against the native one for
+the *full* ``check``/``verify`` envelope (``leadsto_parity`` and
+``dialect_parity`` separately do the same kind of comparison, narrowed to
+their own dialect/case sets). ``rust/fsl-wasm/test-browser.mjs``'s
+native/Worker parity compares native against WASM and does not observe the
+frozen Python side, so it does not own this detector and is not a substitute
+for it. The shared ``_diff``/
+``_normalize`` helpers moving to ``rust_parity_util.py`` (#913) removed the
+only reason this script's *deletion* was ever blocked on another consumer,
+but that does not make retiring the comparison edge itself safe -- that is a
+separate compatibility decision, tracked in #988.
 """
 from __future__ import annotations
 

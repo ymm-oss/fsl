@@ -170,14 +170,14 @@ The current 17-harness disposition is authoritative for maintenance work:
 | Disposition | Harnesses | Preconditions / scope |
 |---|---|---|
 | Manual compatibility (5) | `ast_parity`, `grammar_fuzz`, `surface_parity`, `kernel_parity`, `cli_snapshot` | Run only for an intentional change to the named frozen-Python projection; never product-gate evidence. |
-| F1 deletion deferred | `corpus_cli_parity` | Bind every corpus `verify` result class to its process exit and calibrate a rejecting mutation. |
-| F2 deletion deferred | `dialect_parity` | Add focused induction output contracts for the business, requirements, and governance paths. |
+| F1 deletion deferred | `corpus_cli_parity` | Native ownership landed: `rust/fslc/tests/corpus_check_sweep.rs`'s `verify_result_and_exit_status_never_contradict` / `verify_result_classes_map_to_exact_public_exit_codes` bind every corpus `verify` result class to its process exit, and `fault_operators/{unknown-result-to-success,failure-verdict-exits-zero}.patch` calibrate rejecting mutations against the same classifier (`fslc_rust::outcome`). #900 recorded this row as only partially closed; confirm the residual scope before retiring the script — this row is stale text, not a closed item. |
+| F2 deletion deferred | `dialect_parity` | Native ownership landed in #900: `rust/fslc/tests/dialect_induction_contract.rs::business_requirements_and_governance_pin_native_induction_contracts` already owns focused induction output contracts for the business, requirements, and governance paths. This row's own text was never updated when that test landed (measured 2026-09-04). Retiring `check_rust_dialect_parity.py` is a separate follow-up decision, not made here. |
 | F3 deletion deferred | `induction_parity` | Own the 16-case CLI stable fields/exits with explicit exclusions and negative controls. |
-| F4 deletion deferred | `leadsto_parity` | Add a native liveness-lasso replay matrix with isolated state/action/loop corruptions. |
+| F4 deletion deferred | `leadsto_parity` | Native ownership of a *native-only* corruption matrix landed in #903: `rust/fslc/tests/liveness_witness_replay.rs`'s `all_nine_case_by_corruption_cells_are_rejected_exactly` corrupts a Monitor-generated trace (state/action/loop, 9 cells) and confirms the native Monitor's own replay path rejects each exactly; a separate test in the same file checks BMC's safety/leadsTo verdicts, but nothing there cross-replays a BMC witness through Monitor. This row's earlier "add a matrix" wording overclaimed the remaining work for that half, but `check_rust_leadsto_parity.py` does two more things neither native test does: it diffs the frozen-Python `verify` envelope against the native one for the same three cases (`tools/check_rust_leadsto_parity.py:33-37,109-136`, `kind: "envelope"` failures), and cross-replays witnesses in both directions, Rust BMC to Python Monitor and Python BMC to Rust Monitor (`tools/check_rust_leadsto_parity.py:62-105,118-122`) — a second frozen-Python-vs-native comparison edge, structurally the same situation as F8/`full_envelope`. It also still imports and executes `fsl-replay-actions` via `check_rust_bmc_parity.DEFAULT_REPLAY_BIN` (import `tools/check_rust_leadsto_parity.py:28`; wired as the `--replay-bin` default and executed via `subprocess.run` at `:76-105,154-161`), so the binary and this harness retire together if the comparison edge is ever retired, not separately (see `DESIGN-bfs-bmc-native-migration.md` §5) — but that retirement is not established by the landed native matrix alone. |
 | F5 deletion deferred | `phase2_commands` | Assert `--keep-going` failure continuation and the human-readable `Layer` stderr table. |
 | F6 native-owned; harness retained | `refinement_parity` | `refine_corpus_parity` compares the complete observed stable projection, excludes only the solver-selected `impl_trace` witness with a stated reason, and rejects a dead exclusion. |
 | F7 deletion deferred | `replay_parity` | Add positive and rejecting native tests for the legacy unversioned `{ "events": [...] }` wrapper. |
-| Deletion-ready after helper move (1) | `full_envelope` | Native/Worker parity owns the detector; first move `_diff`/`_normalize` without breaking its three consumers. |
+| F8 deletion deferred | `full_envelope` | Holds the only frozen-Python-vs-native comparison edge for the full `check`/`verify` envelope; `rust/fsl-wasm/test-browser.mjs` compares native vs. WASM, a different edge, and is not a substitute (measured 2026-09-04: `check_rust_full_envelope.py` diffs `python_check` against `rust_check`, both driven from the same corpus case; `test-browser.mjs` diffs `nativeEnvelope` against `wasmEnvelope`, both native/WASM builds of the same Rust code — neither observes the frozen Python side). Its own `_diff`/`_normalize` helper move (#913) is already complete and does not by itself justify deletion; retiring the comparison edge itself is a separate compatibility decision, tracked in #988, not a cleanup. |
 | Parked (1) | `phase3_commands` | Add a focused native `ai compare` metric/delta contract; AI work is currently parked. |
 | Native migration phase (3) | `bfs_parity`, `bmc_parity`, `scenarios_parity` | Complete the native BFS/BMC/deadlock/reachability/action-coverage/witness matrix before deletion. |
 
@@ -206,8 +206,10 @@ PYTHONPATH=src python tools/check_rust_cli_snapshot.py
 # A nonzero result requires an explicit compatible-subset decision. Do not turn
 # native-only evolution into a broad allowlist or regenerate the snapshot to pass.
 
-# Deletion deferred: related native coverage does not yet own the exact detector.
-# F1-F7 above name the required native controls for these seven scripts.
+# Deletion deferred, for varying reasons named in F1-F8 above: some scripts still lack
+# matching native coverage; some (F2, F4) have landed native coverage but retiring the
+# script itself is a separate, not-yet-made decision; full_envelope (F8) holds a
+# frozen-Python-vs-native comparison edge no native/native check reproduces.
 PYTHONPATH=src python tools/check_rust_corpus_cli_parity.py --depth 3
 PYTHONPATH=src python tools/check_rust_dialect_parity.py
 PYTHONPATH=src python tools/check_rust_induction_parity.py
@@ -215,9 +217,6 @@ PYTHONPATH=src python tools/check_rust_leadsto_parity.py --depth 5
 PYTHONPATH=src python tools/check_rust_phase2_commands.py
 PYTHONPATH=src python tools/check_rust_refinement_parity.py
 PYTHONPATH=src python tools/check_rust_replay_parity.py
-
-# Native owner confirmed, but deletion waits for shared-helper extraction because
-# dialect, induction, and Phase-2 tools import `_diff`/`_normalize` from this module.
 PYTHONPATH=src python tools/check_rust_full_envelope.py --depth 5
 
 # Awaiting native semantic migration; not part of the bounded manual suite above.

@@ -35,16 +35,20 @@ The removed `tests/test_rust_cli_contract.py` compared the evolving Rust CLI wit
 parser plus a large exception file. That made the frozen implementation a second authority. The
 native tests instead compare every live help path with the checked-in embedded contract and directly
 validate the published result/schema contracts. No parity utility is deleted under #761's
-documentation phase. `check_rust_full_envelope.py` is eligible for deletion because calibrated
-native/Worker parity owns its named drift, but it remains until its `_diff`/`_normalize` helpers move
-without breaking three retained consumers. Seven other utilities remain deletion-deferred because
-their exact native contract gaps (F1–F7) are recorded in `RUST-PORTING.md`.
+documentation phase. `check_rust_full_envelope.py`'s own `_diff`/`_normalize` helpers no longer block
+deletion (#913 moved them), but native/Worker parity in `test-browser.mjs` compares native against
+WASM, not against the frozen Python side, so it does not own this harness's drift and is not a
+substitute for it; retiring the harness needs a separate compatibility decision (#988). Eight
+utilities, `check_rust_full_envelope.py` included, remain deletion-deferred because their exact native
+contract gaps or comparison-edge replacement (F1–F8) are recorded in `RUST-PORTING.md`.
 `check_rust_phase3_commands.py` remains parked,
 outside every gate, until its
 unowned `ai compare` metric/delta projection receives a focused native contract test; AI work is
 currently parked. The five bounded manual utilities below are explicitly invoked compatibility
-evidence only; the seven F1–F7-deferred parity harnesses retain their existing detector role
-until the named native controls exist.
+evidence only; the eight F1–F8-deferred parity harnesses retain their existing detector role until
+each is individually reviewed and retired -- some (F2, F4) already have landed native coverage for
+part of what they check, but retirement is a separate, per-harness decision recorded in
+`RUST-PORTING.md`, not a blanket "once native exists" rule.
 
 That bounded manual suite is exactly `check_rust_ast_parity.py`,
 `check_rust_grammar_fuzz.py`, `check_rust_surface_parity.py`,

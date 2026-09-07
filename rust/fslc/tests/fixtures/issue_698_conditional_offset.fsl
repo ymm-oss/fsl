@@ -1,0 +1,9 @@
+spec CondOffset {
+  type Cell = 0..9
+  type Off  = 0..2
+  state { flag: Bool, m: Map<Cell, Bool> }
+  init { flag = false  forall i: Cell { m[i] = false } }
+  action shift() {
+    forall c: Off { m[(if flag then 1 else 2) + c] = true }
+  }
+}

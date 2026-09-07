@@ -710,6 +710,17 @@ variable.
   of an if are separate paths, so you may assign in both. Assigning to the same
   variable **after** an if is also an error (to prevent the writes inside the
   branches from being lost).
+- **Conservative write-alias rejection**: when a `forall` body writes an indexed
+  location whose indices are not provably distinct across iterations, native
+  `check`/`verify` and the browser Worker reject the spec before any verifier
+  backend runs. This is distinct from a **proven duplicate write** (for example
+  `m[0]` twice, or `forall c { m[0] = ... }`), which keeps the legacy
+  `an action may not assign the same state location more than once` message.
+  Unproved injectivity is reported as
+  `cannot prove write-index distinctness across forall iterations` with
+  `diagnostic_code: FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED`, the offending
+  assignment `loc`, and—when a safe repair exists—a `hint` such as
+  `forall k: Cell { if k >= BASE and k < BASE + 4 { m[k] = ... } }`.
 - For `Map<K, Struct>` values, field writes are tracked per field. Updating two
   different fields of the same element in one action, such as `m[k].f1 = 1`
   followed by `m[k].f2 = 2`, is allowed. Repeating the same field on the same
@@ -1216,16 +1227,32 @@ a literate `.md` may `use`/compose `.fsl` files this way, but using another
 `.md` file as a compose target is not supported.
 
 `check`, `verify`, and `scenarios` are the only commands that extract fences
-this way. Every other command that reads a spec path (`lint`, `migrate`,
+this way. Most other commands that read a spec path (`lint`, `migrate`,
 `fmt`, `kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`,
-`testplan`, `html`, `ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, `counterexample export`, and
-`document generate`/`claims`/`check`) rejects a `.md` input as an input-kind
+`testplan`, `html`, `ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, `counterexample export`,
+`db check`/`observe`, `compat check`, `domain check`/`analyze`/`expand`/`generate`/`replay`/`testgen`,
+`ai check`/`replay`/`compat`,
+`causal check`/`analyze`/`diff`/`ledger`/`observe-expectations`/`verify-expectations`, and
+`document generate`/`claims`/`check`) reject a `.md` input as an input-kind
 error instead: `result: "error"`, `kind: "usage"`,
 `diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"`, a message naming the
 commands that do support literate input, and a `loc` that names the input
 file rather than a spec position. This keeps a Markdown document passed to an
 unsupported command from being misreported as a spec syntax error at the
-position of the Markdown's own first non-fsl character.
+position of the Markdown's own first non-fsl character. `chain` (its
+positional is a project manifest, not a spec) and `db import` (its positional is
+a SQL/Prisma schema artifact) are not spec-path commands in this sense.
+`approval create` cannot produce a record whose `spec.path` is `.md` (measured:
+`approval create <.md> --kind requirements_document|ledger ...` fails with
+`FSL-PARSE` before any record is written). `approval check`/`diff` parse their
+positional as an FSL spec when the record's `spec.path` matches it and then
+reproduce the same `1:2` lie (measured with a hand-forged record); excluded
+pending issue #980. `ai eval`/`regress`/`drift`
+already parse `.md` input through their own `load_ai_project` frontend
+(success on a valid literate AI project, a clean semantic error otherwise)
+and are unaffected by this change. See
+`rust/fslc/src/literate_access.rs`'s `LITERATE_EXCLUDED` for the measured
+reason each is excluded.
 
 ## 8. Recommended workflow: make proved the standard
 

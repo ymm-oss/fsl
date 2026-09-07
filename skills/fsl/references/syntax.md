@@ -828,6 +828,13 @@ could read (#570). No other word is reserved — `count`, `sum`, `stage`, `in`,
    variable/field on the same path. then/else are separate paths (assigning in both
    is allowed). Assigning to the same variable **after an if** as inside a branch is
    also an error.
+   **Proven duplicate writes** (for example `m[0]` twice or `forall c { m[0] = ... }`)
+   keep the legacy duplicate-write message. **Conservative rejections** for unproved
+   `forall` index distinctness (for example `forall c { m[BASE + c] = ... }`) report
+   `cannot prove write-index distinctness across forall iterations` with
+   `FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED`, `loc`, and a safe `hint` when one
+   exists. Acceptance is not widened: the checked Kernel model still rejects before
+   any verifier backend runs.
    For `Map<K, Struct>` values, the path includes the field: `m[k].f1 = ...`
    and `m[k].f2 = ...` in one action are allowed independent field writes
    (`check` and `verify --depth 1` succeed in the repro). Repeating the same

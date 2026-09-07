@@ -4,12 +4,14 @@
 
 from __future__ import annotations
 
+import errno
 import importlib.util
 import json
 import os
 from pathlib import Path
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -320,6 +322,553 @@ def test_unwrapped_commands_overlap_but_cargo_lock_serializes(tmp_path: Path) ->
     finally:
         if isinstance(lock_file, Path) and not existed and lock_file.exists():
             lock_file.unlink()
+
+
+PAYLOAD_RELEASE_DEADLINE = 30.0
+REENTRANCY_ENV = "FSL_CARGO_LOCK_HELD"
+
+
+def cargo_lock_repo(tmp_path: Path, name: str = "repo") -> Path:
+    """A Git repository of this test's own.
+
+    The wrapper locks one inode in the Git *common* directory, which every
+    linked worktree of this repository -- including the developer's -- shares.
+    A control that took that inode would have a verdict that depends on whether
+    someone else is running Cargo right now, so each control gets its own
+    repository instead.
+    """
+    repo = tmp_path / name
+    repo.mkdir()
+    git = ["git", "-C", str(repo)]
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run([*git, "config", "user.email", "issue946@example.invalid"], check=True)
+    subprocess.run([*git, "config", "user.name", "issue946"], check=True)
+    (repo / "seed").write_text("seed\n", encoding="utf-8")
+    subprocess.run([*git, "add", "seed"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "seed"], check=True)
+    return repo
+
+
+def cargo_lock_file(repo: Path) -> Path:
+    common = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return Path(common) / "fsl-cargo.lock"
+
+
+def cargo_lock_env(**overrides: str) -> dict[str, str]:
+    """The ambient marker is removed: a control must not read one from outside."""
+    env = dict(os.environ)
+    env.pop(REENTRANCY_ENV, None)
+    env.update(overrides)
+    return env
+
+
+def cargo_lock_argv(command: str, timeout: float, cwd: Path) -> list[str]:
+    return [
+        sys.executable,
+        str(CODEX_HOOKS / "cargo_lock.py"),
+        "--cwd",
+        str(cwd),
+        "--timeout",
+        str(timeout),
+        "--",
+        command,
+    ]
+
+
+def cargo_lock_payload(tmp_path: Path) -> Path:
+    """A payload addressed by bare tokens only.
+
+    ``event_command`` quotes its arguments, which is correct for one wrapper but
+    not for a nested one: the outer ``bash -lc`` consumes that quoting, and the
+    inner wrapper rejoins what is left with spaces, so a quoted ``-c`` program
+    arrives split. Every argument here is a path or a bare label instead, which
+    survives any nesting depth unchanged. The wait for the release file is
+    bounded so that a payload left behind by a failing control cannot hold the
+    repository lock indefinitely.
+    """
+    script = tmp_path / "cargo_lock_payload.py"
+    script.write_text(
+        "import pathlib, sys, time\n"
+        "events, label, release, code = sys.argv[1:5]\n"
+        "handle = pathlib.Path(events).open('a', encoding='utf-8')\n"
+        "handle.write(label + ':start\\n')\n"
+        "handle.flush()\n"
+        "if release == '-':\n"
+        "    time.sleep(0.3)\n"
+        "else:\n"
+        "    target = pathlib.Path(release)\n"
+        "    deadline = time.monotonic() + PAYLOAD_RELEASE_DEADLINE\n"
+        "    while not target.exists() and time.monotonic() < deadline:\n"
+        "        time.sleep(0.01)\n"
+        "handle.write(label + ':end\\n')\n"
+        "handle.close()\n"
+        "sys.exit(int(code))\n".replace(
+            "PAYLOAD_RELEASE_DEADLINE", str(PAYLOAD_RELEASE_DEADLINE)
+        ),
+        encoding="utf-8",
+    )
+    return script
+
+
+def cargo_lock_payload_command(payload: Path, events: Path, label: str, release: str, code: int) -> str:
+    return " ".join([sys.executable, str(payload), str(events), label, release, str(code)])
+
+
+def cargo_lock_spawn(
+    command: str, timeout: float, cwd: Path, **env_overrides: str
+) -> subprocess.Popen[bytes]:
+    """Start a wrapper in its own session so the whole tree can be reaped.
+
+    A payload left running holds the repository-wide Cargo lock. Killing only
+    the direct child leaves the ``bash -lc`` grandchild holding it, so every
+    control starts a session it can kill as a group.
+    """
+    return subprocess.Popen(
+        cargo_lock_argv(command, timeout, cwd),
+        start_new_session=True,
+        env=cargo_lock_env(**env_overrides),
+    )
+
+
+def cargo_lock_reap(*processes: subprocess.Popen[bytes] | None) -> None:
+    """Kill each group, whether or not its leader has already exited.
+
+    A shell can exit while leaving a descendant of its process group running,
+    so ``poll()`` returning a status is not evidence that the group is empty.
+    """
+    for process in processes:
+        if process is None:
+            continue
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=10)
+
+
+def cargo_lock_order(events: Path) -> list[str]:
+    if not events.exists():
+        return []
+    return events.read_text(encoding="utf-8").splitlines()
+
+
+def test_a_nested_cargo_lock_invocation_passes_through_instead_of_deadlocking(
+    tmp_path: Path,
+) -> None:
+    """Issue #946: the inner wrapper must not wait for the lock its parent holds.
+
+    Detector: with the guard reverted this returns 2 with ``timed out`` on
+    stderr after the inner ``--timeout``, never reaching the payload's own exit
+    code -- and the outer wrapper holds the repository-wide lock for that whole
+    time, which is what stalls unrelated worktrees. The elapsed time is reported
+    beside the bound because "eventually" is not what the issue asks for.
+    """
+    repo = cargo_lock_repo(tmp_path)
+    events = tmp_path / "events.txt"
+    payload = cargo_lock_payload(tmp_path)
+    inner_timeout = 4.0
+    innermost = cargo_lock_payload_command(payload, events, "ran", "-", 7)
+    nested = " ".join(cargo_lock_argv(innermost, inner_timeout, repo))
+
+    process = cargo_lock_spawn(nested, 30, repo)
+    started = time.monotonic()
+    try:
+        returncode = process.wait(timeout=60)
+    finally:
+        cargo_lock_reap(process)
+    elapsed = time.monotonic() - started
+
+    assert returncode == 7, f"expected 7, produced {returncode}"
+    assert cargo_lock_order(events) == ["ran:start", "ran:end"]
+    assert elapsed < inner_timeout, f"expected < {inner_timeout}s, produced {elapsed:.2f}s"
+
+
+def test_an_unrelated_invocation_waits_while_a_pass_through_child_runs(
+    tmp_path: Path,
+) -> None:
+    """Issue #946: the guard must not release the lock the outer invocation holds.
+
+    Detector, for the opposite mistake from the test above: a "guard" that
+    simply stopped taking the lock would satisfy that one and fail this one,
+    because the unrelated invocation would start before the pass-through child
+    finished.
+    """
+    repo = cargo_lock_repo(tmp_path)
+    events = tmp_path / "events.txt"
+    release = tmp_path / "release"
+    payload = cargo_lock_payload(tmp_path)
+    innermost = cargo_lock_payload_command(payload, events, "inner", str(release), 0)
+    unrelated = cargo_lock_payload_command(payload, events, "other", "-", 0)
+
+    nested = cargo_lock_spawn(" ".join(cargo_lock_argv(innermost, 30, repo)), 30, repo)
+    other = None
+    try:
+        wait_for_start(events, "inner")
+        other = cargo_lock_spawn(unrelated, 30, repo)
+        time.sleep(1)
+        release.touch()
+        assert nested.wait(timeout=30) == 0
+        assert other.wait(timeout=30) == 0
+    finally:
+        cargo_lock_reap(nested, other)
+
+    assert cargo_lock_order(events) == ["inner:start", "inner:end", "other:start", "other:end"]
+
+
+def test_a_marker_from_another_repository_does_not_bypass_this_lock(tmp_path: Path) -> None:
+    """Issue #946: being inside *a* wrapper is not being inside *this* lock's wrapper.
+
+    Detector for a re-entry guard that trusts the marker too broadly, not for
+    the defect this issue reports: a marker saying only "somebody holds
+    something" lets a wrapper for repository B skip repository B's lock merely
+    because its caller holds repository A's. Reverting the guard leaves this
+    green, because a wrapper that never bypasses cannot bypass wrongly -- so it
+    establishes nothing about the original defect, and everything about the
+    shape of the fix.
+    """
+    repo_a = cargo_lock_repo(tmp_path, "repo_a")
+    repo_b = cargo_lock_repo(tmp_path, "repo_b")
+    events = tmp_path / "events.txt"
+    release = tmp_path / "release"
+    payload = cargo_lock_payload(tmp_path)
+
+    holder = cargo_lock_spawn(
+        cargo_lock_payload_command(payload, events, "b-holder", str(release), 0), 30, repo_b
+    )
+    nested = None
+    try:
+        wait_for_start(events, "b-holder")
+        inner = " ".join(
+            cargo_lock_argv(
+                cargo_lock_payload_command(payload, events, "b-nested", "-", 0), 30, repo_b
+            )
+        )
+        nested = cargo_lock_spawn(inner, 30, repo_a)
+        time.sleep(1)
+        release.touch()
+        assert holder.wait(timeout=30) == 0
+        assert nested.wait(timeout=30) == 0
+    finally:
+        cargo_lock_reap(holder, nested)
+
+    assert cargo_lock_order(events) == [
+        "b-holder:start",
+        "b-holder:end",
+        "b-nested:start",
+        "b-nested:end",
+    ]
+
+
+def test_a_marker_left_behind_after_the_lock_was_released_does_not_bypass(
+    tmp_path: Path,
+) -> None:
+    """Issue #946: the marker outlives the wrapper that minted it.
+
+    Detector for a re-entry guard that does not check whether the lock is still
+    held, not for the defect this issue reports. A shell started under the
+    wrapper can leave a long-lived descendant; once the wrapper exits and
+    releases the lock, that descendant still carries the marker, and must take
+    the lock like anyone else. Reverting the guard leaves this green for the
+    same reason as the control above.
+    """
+    repo = cargo_lock_repo(tmp_path)
+    events = tmp_path / "events.txt"
+    release = tmp_path / "release"
+    payload = cargo_lock_payload(tmp_path)
+    stale_marker = str(cargo_lock_file(repo))
+
+    stale = cargo_lock_spawn(
+        cargo_lock_payload_command(payload, events, "stale", str(release), 0),
+        30,
+        repo,
+        **{REENTRANCY_ENV: stale_marker},
+    )
+    other = None
+    try:
+        wait_for_start(events, "stale")
+        other = cargo_lock_spawn(
+            cargo_lock_payload_command(payload, events, "other", "-", 0), 30, repo
+        )
+        time.sleep(1)
+        release.touch()
+        assert stale.wait(timeout=30) == 0
+        assert other.wait(timeout=30) == 0
+    finally:
+        cargo_lock_reap(stale, other)
+
+    assert cargo_lock_order(events) == ["stale:start", "stale:end", "other:start", "other:end"]
+
+
+def test_a_login_profile_that_unsets_the_marker_does_not_restore_the_deadlock(
+    tmp_path: Path,
+) -> None:
+    """Issue #946: ``/bin/bash -lc`` runs the profile before the command.
+
+    Detector. Passing the marker only through the child's environment leaves it
+    at the mercy of the user's own profile, and a profile that unsets it
+    reintroduces exactly the self-deadlock this issue is about.
+    """
+    repo = cargo_lock_repo(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    for profile in (".bash_profile", ".profile"):
+        (home / profile).write_text(f"unset {REENTRANCY_ENV}\n", encoding="utf-8")
+    events = tmp_path / "events.txt"
+    payload = cargo_lock_payload(tmp_path)
+    innermost = cargo_lock_payload_command(payload, events, "ran", "-", 0)
+    nested = " ".join(cargo_lock_argv(innermost, 4, repo))
+
+    process = cargo_lock_spawn(nested, 30, repo, HOME=str(home))
+    try:
+        returncode = process.wait(timeout=60)
+    finally:
+        cargo_lock_reap(process)
+
+    assert returncode == 0, f"expected 0, produced {returncode}"
+    assert cargo_lock_order(events) == ["ran:start", "ran:end"]
+
+
+def test_two_linked_worktrees_still_serialize_through_one_lock(tmp_path: Path) -> None:
+    """Preservation control: it passes with the guard and with the guard reverted.
+
+    It establishes only that the change did not disturb the behaviour the issue
+    says must not change -- one lock inode per Git common directory, shared by
+    every linked worktree. It is not a detector for the re-entry defect, and
+    reverting the guard leaves it green.
+    """
+    primary = cargo_lock_repo(tmp_path)
+    secondary = tmp_path / "secondary"
+    subprocess.run(
+        ["git", "-C", str(primary), "worktree", "add", "-q", str(secondary)], check=True
+    )
+    events = tmp_path / "events.txt"
+    release = tmp_path / "release"
+    payload = cargo_lock_payload(tmp_path)
+
+    first = cargo_lock_spawn(
+        cargo_lock_payload_command(payload, events, "first", str(release), 0), 30, primary
+    )
+    second = None
+    try:
+        wait_for_start(events, "first")
+        second = cargo_lock_spawn(
+            cargo_lock_payload_command(payload, events, "second", "-", 0), 30, secondary
+        )
+        time.sleep(1)
+        release.touch()
+        assert first.wait(timeout=30) == 0
+        assert second.wait(timeout=30) == 0
+    finally:
+        cargo_lock_reap(first, second)
+
+    assert cargo_lock_order(events) == ["first:start", "first:end", "second:start", "second:end"]
+
+
+def test_without_a_marker_a_plain_invocation_behaves_as_before(tmp_path: Path) -> None:
+    """Preservation control: it passes with the guard and with the guard reverted.
+
+    The issue asks for evidence that behaviour is unchanged when the marker is
+    absent. Reverting the guard leaves this green, which is what makes it a
+    preservation control rather than a detector: it establishes that ordinary
+    single-level use -- exit-code propagation, and timing out under real
+    contention -- was not disturbed.
+    """
+    repo = cargo_lock_repo(tmp_path)
+    events = tmp_path / "events.txt"
+    release = tmp_path / "release"
+    payload = cargo_lock_payload(tmp_path)
+
+    plain = cargo_lock_spawn(
+        cargo_lock_payload_command(payload, events, "plain", "-", 7), 30, repo
+    )
+    try:
+        assert plain.wait(timeout=30) == 7
+    finally:
+        cargo_lock_reap(plain)
+    assert cargo_lock_order(events) == ["plain:start", "plain:end"]
+
+    events.unlink()
+    holder = cargo_lock_spawn(
+        cargo_lock_payload_command(payload, events, "holder", str(release), 0), 30, repo
+    )
+    blocked = None
+    try:
+        wait_for_start(events, "holder")
+        blocked = subprocess.Popen(
+            cargo_lock_argv(cargo_lock_payload_command(payload, events, "blocked", "-", 0), 2, repo),
+            start_new_session=True,
+            env=cargo_lock_env(),
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        blocked_stderr = blocked.communicate(timeout=30)[1] or ""
+        blocked_code = blocked.returncode
+        release.touch()
+        assert holder.wait(timeout=30) == 0
+    finally:
+        cargo_lock_reap(holder, blocked)
+
+    assert blocked_code == 2, f"expected 2, produced {blocked_code}"
+    assert "timed out" in blocked_stderr, f"expected 'timed out', produced {blocked_stderr!r}"
+
+
+def load_cargo_lock_module():
+    spec = importlib.util.spec_from_file_location(
+        "cargo_lock_under_test", CODEX_HOOKS / "cargo_lock.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_a_lock_error_that_is_not_contention_is_reported_at_once(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Preservation control for the pre-existing, unchanged ``acquire()`` path.
+
+    No ``FSL_CARGO_LOCK_HELD`` marker is set here, so ``run()`` takes the
+    ordinary (non-reentrant) branch and this exercises ``acquire()``'s
+    surrounding ``except (OSError, RuntimeError, TimeoutError)`` in ``run()``,
+    which already distinguished a non-contention ``flock`` failure from
+    contention before #946 -- reverting the whole #946 change leaves this
+    green, which is what makes it a preservation control rather than a #946
+    detector. See ``test_the_reentrant_try_acquire_distinguishes_contention_from_other_errors``
+    below for the equivalent guarantee on the new reentrant branch.
+
+    The fault is injected rather than asserted about the source text, and the
+    verdict does not depend on ambient state: with ``flock`` patched no lock is
+    taken, so nothing here contends with another worktree. The marker is
+    explicitly cleared (not merely assumed absent) so an ambient
+    ``FSL_CARGO_LOCK_HELD`` left over from the calling shell cannot silently
+    route this test through the reentrant branch instead.
+    """
+    module = load_cargo_lock_module()
+    lock_file = module.lock_path(ROOT)
+    existed = lock_file.exists()
+    injected = OSError(errno.ENOLCK, "No locks available")
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise injected
+
+    try:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(REENTRANCY_ENV, None)
+            with patch.object(module.fcntl, "flock", side_effect=refuse):
+                started = time.monotonic()
+                returncode = module.run("true", ROOT, 30.0)
+                elapsed = time.monotonic() - started
+    finally:
+        if not existed and lock_file.exists():
+            lock_file.unlink()
+
+    produced = capsys.readouterr().err
+    assert returncode == 2, f"expected 2, produced {returncode}"
+    assert elapsed < 5, f"expected < 5s, produced {elapsed:.2f}s"
+    assert "No locks available" in produced, f"expected the real error, produced {produced!r}"
+    assert "timed out" not in produced, f"expected no timeout claim, produced {produced!r}"
+
+
+def test_the_reentrant_try_acquire_distinguishes_contention_from_other_errors(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Issue #946: ``try_acquire()``'s own contention/error distinction.
+
+    Detector for the new reentrant branch specifically. Setting
+    ``FSL_CARGO_LOCK_HELD`` to match ``lock_path(ROOT)`` puts ``run()`` on the
+    ``try_acquire()`` path added by #946 -- the sibling of the control above,
+    which never sets the marker and so cannot exercise this branch at all.
+    Paired, on the same path: a real non-contention error (``ENOLCK``) must be
+    reported at once, not waited out or treated as "somebody holds it"; a
+    genuine ``BlockingIOError`` must instead take the pass-through branch and
+    actually run the command, proving the two are not conflated on this path
+    either.
+    """
+    module = load_cargo_lock_module()
+    lock_file = module.lock_path(ROOT)
+    existed = lock_file.exists()
+
+    def refuse_with(exc: BaseException):
+        def _side_effect(*_args: object, **_kwargs: object) -> None:
+            raise exc
+
+        return _side_effect
+
+    try:
+        with patch.dict(os.environ, {REENTRANCY_ENV: str(lock_file)}):
+            with patch.object(
+                module.fcntl,
+                "flock",
+                side_effect=refuse_with(OSError(errno.ENOLCK, "No locks available")),
+            ):
+                started = time.monotonic()
+                returncode = module.run("true", ROOT, 4.0)
+                elapsed = time.monotonic() - started
+            produced = capsys.readouterr().err
+            assert returncode == 2, f"expected 2, produced {returncode}"
+            assert elapsed < 4.0, f"expected < 4.0s, produced {elapsed:.2f}s"
+            assert "No locks available" in produced, f"expected the real error, produced {produced!r}"
+            assert "timed out" not in produced, f"expected no timeout claim, produced {produced!r}"
+
+            with patch.object(module.fcntl, "flock", side_effect=refuse_with(BlockingIOError())):
+                started = time.monotonic()
+                # A distinctive exit code, not `true`'s 0: an incorrect
+                # `except BlockingIOError: return 0` would also satisfy an
+                # assertion of `== 0` without ever running the command.
+                returncode = module.run("exit 7", ROOT, 4.0)
+                elapsed = time.monotonic() - started
+            assert returncode == 7, f"expected 7 (pass-through ran `exit 7`), produced {returncode}"
+            assert elapsed < 4.0, f"expected < 4.0s (pass-through, no wait), produced {elapsed:.2f}s"
+    finally:
+        if not existed and lock_file.exists():
+            lock_file.unlink()
+
+
+def test_a_signalled_shells_raw_returncode_is_not_remapped(tmp_path: Path) -> None:
+    """Preservation control: a signalled child's returncode passes through unchanged.
+
+    #946 briefly carried a `128 - returncode` remap for a negative
+    `subprocess.run` returncode, applied unconditionally including this
+    marker-absent case; it was removed because it conflicted with #946's own
+    criterion 5 (behavior with no env var present must be identical to
+    current). The remap itself is a plausible independent correctness fix,
+    filed separately as issue #983 so it is not silently reintroduced here
+    before that issue lands. This guards only against a silent regression back
+    to remapping; it does not implement or test #983's proposal.
+
+    ``fcntl.flock`` is mocked to succeed immediately so this test's verdict
+    does not depend on the real, shared repository-wide lock: an unrelated
+    process contending for it could otherwise make this test time out or
+    return 2 instead of exercising the signal path at all.
+    """
+    module = load_cargo_lock_module()
+    lock_file = module.lock_path(ROOT)
+    existed = lock_file.exists()
+    real_run = module.subprocess.run
+
+    def kill_only_the_shell(argv, *args, **kwargs):
+        if list(argv[:1]) == ["/bin/bash"]:
+            return subprocess.CompletedProcess(args=argv, returncode=-9)
+        return real_run(argv, *args, **kwargs)
+
+    try:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(REENTRANCY_ENV, None)
+            with patch.object(module.fcntl, "flock", return_value=None):
+                with patch.object(module.subprocess, "run", side_effect=kill_only_the_shell):
+                    returncode = module.run("true", ROOT, 30.0)
+    finally:
+        if not existed and lock_file.exists():
+            lock_file.unlink()
+
+    assert returncode == -9, f"expected -9 (unremapped), produced {returncode}"
 
 
 def test_shared_detectors_reject_missing_headers_and_snapshot_paths(tmp_path: Path) -> None:

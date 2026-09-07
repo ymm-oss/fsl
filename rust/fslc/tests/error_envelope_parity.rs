@@ -92,9 +92,8 @@ enum LiterateCoverage {
     /// The command materializes Markdown and has success-path coverage
     /// elsewhere; it is not an error-envelope cell.
     Supported { reason: &'static str },
-    /// This command's Markdown behavior is one of #694's pinned dialect
-    /// asymmetries.
-    PinnedDialect,
+    /// The `approval` commands' Markdown behavior is pinned until #980.
+    Pinned,
     /// Markdown is not a meaningful input for this command. The reason is
     /// required so a `SpecPath` command cannot silently opt out of this axis.
     NotApplicable { reason: &'static str },
@@ -131,7 +130,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["ai", "check", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: AI_COVERAGE,
         not_applicable: &[],
     },
@@ -151,7 +150,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["ai", "compat", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: AI_COMPAT_COVERAGE,
         not_applicable: &[],
     },
@@ -160,7 +159,9 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["ai", "drift", SPEC_PLACEHOLDER, "--logs", EMPTY_RECORDS],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::NotApplicable {
+            reason: "load_ai_project's .md branch calls parse_ai_project independently of literate_access; valid literate AI project .md succeeds and other Markdown gets a clean semantic error, not the #665/#694 lie",
+        },
         coverage: AI_DRIFT_COVERAGE,
         not_applicable: AI_DRIFT_COMPONENT_NOT_APPLICABLE,
     },
@@ -169,7 +170,9 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["ai", "eval", SPEC_PLACEHOLDER, "--records", EMPTY_RECORDS],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::NotApplicable {
+            reason: "load_ai_project's .md branch calls parse_ai_project independently of literate_access; valid literate AI project .md succeeds and other Markdown gets a clean semantic error, not the #665/#694 lie",
+        },
         coverage: AI_EVAL_COVERAGE,
         not_applicable: AI_EVAL_COMPONENT_NOT_APPLICABLE,
     },
@@ -186,7 +189,9 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
                 EMPTY_RECORDS,
             ],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::NotApplicable {
+            reason: "load_ai_project's .md branch calls parse_ai_project independently of literate_access; valid literate AI project .md succeeds and other Markdown gets a clean semantic error, not the #665/#694 lie",
+        },
         coverage: AI_REGRESS_COVERAGE,
         not_applicable: AI_REGRESS_COMPONENT_NOT_APPLICABLE,
     },
@@ -195,7 +200,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["ai", "replay", SPEC_PLACEHOLDER, "--logs", EMPTY_RECORDS],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: AI_REPLAY_COVERAGE,
         not_applicable: &[],
     },
@@ -219,7 +224,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
                 APPROVAL_RECORD_PLACEHOLDER,
             ],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::Pinned,
         coverage: APPROVAL_CHECK_COVERAGE,
         not_applicable: &[],
     },
@@ -238,7 +243,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
                 "parity",
             ],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::Pinned,
         coverage: APPROVAL_CREATE_COVERAGE,
         not_applicable: &[],
     },
@@ -253,7 +258,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
                 APPROVAL_RECORD_PLACEHOLDER,
             ],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::Pinned,
         coverage: APPROVAL_DIFF_COVERAGE,
         not_applicable: &[],
     },
@@ -262,7 +267,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["causal", "analyze", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: CAUSAL_COVERAGE,
         not_applicable: &[],
     },
@@ -271,7 +276,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["causal", "check", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: CAUSAL_COVERAGE,
         not_applicable: &[],
     },
@@ -280,7 +285,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["causal", "diff", SPEC_PLACEHOLDER, SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: CAUSAL_COVERAGE,
         not_applicable: &[],
     },
@@ -289,7 +294,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["causal", "ledger", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: CAUSAL_COVERAGE,
         not_applicable: &[],
     },
@@ -312,7 +317,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
                 "2026-01-02",
             ],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: CAUSAL_COVERAGE,
         not_applicable: &[],
     },
@@ -321,7 +326,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["causal", "verify-expectations", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: CAUSAL_COVERAGE,
         not_applicable: &[],
     },
@@ -352,7 +357,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["compat", "check", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: PARSE_KERNEL_COVERAGE,
         not_applicable: &[],
     },
@@ -387,7 +392,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["db", "check", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: DB_CHECK_COVERAGE,
         not_applicable: &[],
     },
@@ -407,7 +412,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["db", "observe", SPEC_PLACEHOLDER, "--trace", EMPTY_RECORDS],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: DB_OBSERVE_COVERAGE,
         not_applicable: &[],
     },
@@ -457,7 +462,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["domain", "analyze", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: DOMAIN_COVERAGE,
         not_applicable: &[],
     },
@@ -466,7 +471,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["domain", "check", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: DOMAIN_COVERAGE,
         not_applicable: &[],
     },
@@ -475,7 +480,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["domain", "expand", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: DOMAIN_COVERAGE,
         not_applicable: &[],
     },
@@ -484,7 +489,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["domain", "generate", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: DOMAIN_COVERAGE,
         not_applicable: &[],
     },
@@ -499,7 +504,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
                 DOMAIN_REPLAY_LOG,
             ],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: DOMAIN_COVERAGE,
         not_applicable: &[],
     },
@@ -508,7 +513,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         scope: ParityScope::SpecPath {
             invoke: &["domain", "testgen", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::UniformUnsupported,
         coverage: DOMAIN_COVERAGE,
         not_applicable: &[],
     },
@@ -1038,10 +1043,6 @@ const AI_UNKNOWN_TOOL_SEMANTIC: Expectation = Expectation::Json(JsonExpectation 
     ..SEMANTIC_JSON
 });
 
-const PARSE_WITH_DIAGNOSTIC_ALIAS: Expectation = Expectation::Json(JsonExpectation {
-    diagnostic: Diagnostic::Alias("parse"),
-    ..PARSE_JSON
-});
 const LITERATE_UNIFORM: Expectation = Expectation::Json(JsonExpectation {
     result: ExpectedField::Exact("error"),
     kind: ExpectedField::Exact("usage"),
@@ -1052,10 +1053,6 @@ const LITERATE_UNIFORM: Expectation = Expectation::Json(JsonExpectation {
     message: MessageExpectation::MentionsInput,
 });
 
-const CAUSAL_PARSE_WITHOUT_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectation {
-    diagnostic: Diagnostic::None,
-    ..PARSE_JSON
-});
 const CAUSAL_NAME_WITH_DIAGNOSTIC: Expectation = Expectation::Json(JsonExpectation {
     diagnostic: Diagnostic::Alias("causal_unknown_reference"),
     message: MessageExpectation::OmitsInput,
@@ -1082,27 +1079,6 @@ const AI_EVAL_FALSE_GREEN: Expectation = Expectation::Json(JsonExpectation {
     message: MessageExpectation::Absent,
 });
 const AI_REGRESS_FALSE_GREEN: Expectation = AI_EVAL_FALSE_GREEN;
-/// Unlike the similarly shaped #800 observations, these are valid project
-/// documents. #694 tracks the command-specific Markdown handling difference.
-const AI_DRIFT_LITERATE_PROJECT: Expectation = Expectation::Json(JsonExpectation {
-    result: ExpectedField::Exact("observed_supported"),
-    kind: ExpectedField::Absent,
-    location: LocationShape::Absent,
-    diagnostic: Diagnostic::None,
-    exit: 0,
-    dialect: ExpectedField::Absent,
-    message: MessageExpectation::Absent,
-});
-const AI_EVAL_LITERATE_PROJECT: Expectation = Expectation::Json(JsonExpectation {
-    result: ExpectedField::Exact("statistically_supported"),
-    kind: ExpectedField::Absent,
-    location: LocationShape::Absent,
-    diagnostic: Diagnostic::None,
-    exit: 0,
-    dialect: ExpectedField::Absent,
-    message: MessageExpectation::Absent,
-});
-const AI_REGRESS_LITERATE_PROJECT: Expectation = AI_EVAL_LITERATE_PROJECT;
 
 const NO_COVERAGE: &[FailureCoverage] = &[];
 const NOT_APPLICABLE_PARSE_GUARD_NAME: &[NotApplicable] = &[
@@ -1712,270 +1688,24 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
     ),
     pin!(
         FailureClass::Literate,
-        "domain check",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "domain analyze",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "domain expand",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "domain generate",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "domain replay",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "domain testgen",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "db check",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "db observe",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "ai check",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "ai compat",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "ai drift",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "ai eval",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "ai regress",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "ai replay",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    // The AI commands do not share one Literate frontend. Component and
-    // project Markdown bodies are separate matrix shapes, not implicit
-    // variants of the generic source fixture.
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Literate,
-        "ai check",
-        LITERATE_AI_COMPONENT_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Literate,
-        "ai check",
-        LITERATE_AI_PROJECT_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Literate,
-        "ai compat",
-        LITERATE_AI_COMPONENT_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Literate,
-        "ai compat",
-        LITERATE_AI_PROJECT_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Literate,
-        "ai drift",
-        LITERATE_AI_COMPONENT_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Literate,
-        "ai drift",
-        LITERATE_AI_PROJECT_FIXTURE,
-        AI_DRIFT_LITERATE_PROJECT,
-        "#694"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Literate,
-        "ai eval",
-        LITERATE_AI_COMPONENT_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Literate,
-        "ai eval",
-        LITERATE_AI_PROJECT_FIXTURE,
-        AI_EVAL_LITERATE_PROJECT,
-        "#694"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Literate,
-        "ai regress",
-        LITERATE_AI_COMPONENT_FIXTURE,
-        SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Literate,
-        "ai regress",
-        LITERATE_AI_PROJECT_FIXTURE,
-        AI_REGRESS_LITERATE_PROJECT,
-        "#694"
-    ),
-    pin!(
-        shape: InputShape::Component;
-        FailureClass::Literate,
-        "ai replay",
-        LITERATE_AI_COMPONENT_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        shape: InputShape::Project;
-        FailureClass::Literate,
-        "ai replay",
-        LITERATE_AI_PROJECT_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "compat check",
-        LITERATE_FIXTURE,
-        SEMANTIC_WITH_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "causal check",
-        LITERATE_FIXTURE,
-        PARSE_WITH_DIAGNOSTIC_ALIAS,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "causal verify-expectations",
-        LITERATE_FIXTURE,
-        CAUSAL_PARSE_WITHOUT_DIAGNOSTIC,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "causal analyze",
-        LITERATE_FIXTURE,
-        PARSE_WITH_DIAGNOSTIC_ALIAS,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "causal diff",
-        LITERATE_FIXTURE,
-        PARSE_WITH_DIAGNOSTIC_ALIAS,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "causal ledger",
-        LITERATE_FIXTURE,
-        PARSE_WITH_DIAGNOSTIC_ALIAS,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
-        "causal observe-expectations",
-        LITERATE_FIXTURE,
-        CAUSAL_PARSE_WITHOUT_DIAGNOSTIC,
-        "#694"
-    ),
-    pin!(
-        FailureClass::Literate,
         "approval check",
         LITERATE_FIXTURE,
         SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
-        "#694"
+        "#980"
     ),
     pin!(
         FailureClass::Literate,
         "approval create",
         LITERATE_FIXTURE,
         PARSE_UNIFORM,
-        "#694"
+        "#980"
     ),
     pin!(
         FailureClass::Literate,
         "approval diff",
         LITERATE_FIXTURE,
         PARSE_UNIFORM,
-        "#694"
+        "#980"
     ),
 ];
 
@@ -2014,7 +1744,7 @@ fn cells(class: FailureClass) -> Vec<Cell> {
                 .filter(|entry| {
                     matches!(
                         entry.literate,
-                        LiterateCoverage::UniformUnsupported | LiterateCoverage::PinnedDialect
+                        LiterateCoverage::UniformUnsupported | LiterateCoverage::Pinned
                     )
                 })
                 .into_iter()
@@ -2053,7 +1783,7 @@ fn registration(command: &str) -> &'static CommandRegistration {
 fn has_literate_cell(entry: &CommandRegistration) -> bool {
     matches!(
         entry.literate,
-        LiterateCoverage::UniformUnsupported | LiterateCoverage::PinnedDialect
+        LiterateCoverage::UniformUnsupported | LiterateCoverage::Pinned
     )
 }
 
@@ -2137,9 +1867,9 @@ fn class_classification_count(
         .count()
         + usize::from(class == FailureClass::Literate && has_literate_cell(entry))
         + usize::from(
-            shape == InputShape::Source
-                && class == FailureClass::Literate
-                && has_literate_not_applicable(entry),
+            class == FailureClass::Literate
+                && has_literate_not_applicable(entry)
+                && required_input_shapes(entry, FailureClass::Literate).contains(&shape),
         )
         + entry
             .not_applicable
@@ -2602,7 +2332,7 @@ fn parity_registry_exclusions_are_explicit_and_runnable_entries_have_a_spec_slot
                     entry.key
                 );
             }
-            LiterateCoverage::UniformUnsupported | LiterateCoverage::PinnedDialect => {}
+            LiterateCoverage::UniformUnsupported | LiterateCoverage::Pinned => {}
         }
         for class in [
             FailureClass::Parse,
@@ -2869,7 +2599,7 @@ fn missing_ai_parse_project_classification_is_rejected() {
         scope: ParityScope::SpecPath {
             invoke: &["ai", "check", SPEC_PLACEHOLDER],
         },
-        literate: LiterateCoverage::PinnedDialect,
+        literate: LiterateCoverage::Pinned,
         coverage: &AI_PARSE_COVERAGE[..1],
         not_applicable: &[],
     };

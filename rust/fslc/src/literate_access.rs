@@ -32,16 +32,15 @@
 //!
 //! # Scope boundary
 //!
-//! This registry's domain is commands whose spec argument reaches the
-//! *shared kernel frontend* (`fsl_syntax`'s surface parser, by way of
-//! `spec_load::kernel_load_error`/`surface_parse_failure`) the same way
-//! `check`/`verify`/`scenarios` do. [`LITERATE_EXCLUDED`] lists every other
-//! leaf command that reads at least one positional path
+//! This registry's domain is the command keys in [`LITERATE_REGISTRY`]: leaf
+//! commands that read at least one positional spec-shaped path
 //! (`rust/fslc/cli-contract.json`'s notion of "takes a spec-shaped
-//! argument") together with why it is out of this registry's scope, so the
-//! totality test can still be total over the *real* CLI surface without
-//! this module silently claiming ownership of a command it does not
-//! actually gate:
+//! argument") and are gated here before handing a `.md` input to a dialect
+//! or shared-kernel frontend. [`LITERATE_EXCLUDED`] lists every other
+//! spec-shaped leaf command together with why it is out of this registry's
+//! scope, so the totality test can still be total over the *real* CLI
+//! surface without this module silently claiming ownership of a command it
+//! does not actually gate:
 //!
 //! - `chain`'s positional is a project manifest (`fsl-project.toml`); a
 //!   `.md` there fails TOML parsing, never the FSL frontend (measured:
@@ -49,28 +48,39 @@
 //!   message `"invalid TOML at line 1..."`, not the Markdown-as-spec lie
 //!   this issue is about). It is not "a command that takes a spec path" in
 //!   this issue's sense.
-//! - `approval create`/`check`/`diff`'s shared positional's *meaning*
-//!   depends on `--kind`: with `--kind requirements_document` it binds
-//!   against a rendered document, which is legitimately `.md`-shaped
-//!   already. Rejecting `.md` there unconditionally would be a regression,
-//!   not a fix, so approval is left to a dedicated follow-up that can
-//!   thread `--kind` through the decision.
-//! - `db`/`compat check`/`ai`/`causal`/`domain`'s dialect-specific spec
-//!   arguments hit **the same defect**, not a different one: measured
-//!   against `examples/literate/toggle.md`, `db check`/`domain check`/
-//!   `ai check`/`compat check` all report `kind:"semantics"`,
-//!   `"unexpected character '!' at examples/literate/toggle.md:1:2"` --
-//!   the same false spec position, exit 2 -- and `causal check` reports
-//!   `kind:"parse"`, `"unexpected character '!'"` with a `"diagnostic"` key
-//!   instead of `"diagnostic_code"`. Only the `kind` label (and, for
-//!   `causal`, the field name) differs from what `check` used to report
-//!   before this fix. Excluding them from this change is a scope decision,
-//!   not a claim that their symptom is different: issue #665's measured
-//!   table has 17 rows and none of these five commands is in it. Tracked as
-//!   issue #694 (with the measurements above), which also needs to decide
-//!   whether these five get `FSL-INPUT-LITERATE-UNSUPPORTED` or a
-//!   dialect-appropriate variant, since none of them shares `check`'s
-//!   `command()`-arm shape that this module's registry keys on.
+//! - `approval create`/`check`/`diff` share the same defect as the
+//!   registered commands, but stay excluded (tracked as #980). Measured on
+//!   `a3703211`: `approval create` always parses its positional as an FSL
+//!   spec regardless of `--kind` (`approval create toggle.md
+//!   --kind requirements_document|ledger …` both report `kind:"parse"`,
+//!   `diagnostic_code:"FSL-PARSE"`, `unexpected character '!'` at `1:2`;
+//!   the legitimately `.md`-shaped input under `requirements_document` is
+//!   `--artifact`, not the positional) and cannot produce a record whose
+//!   `spec.path` is `.md` (it fails with `FSL-PARSE` before any record is
+//!   written). `approval check`/`diff` compare the record's `spec.path`
+//!   against the positional first; a mismatch short-circuits to a clean
+//!   target-mismatch message, but when they match -- including a hand-forged
+//!   record whose `spec.path` is a `.md` file, which `create` cannot
+//!   construct -- they reach the FSL frontend and reproduce the exact `1:2`
+//!   lie (measured with such a forged record).
+//! - `db`/`compat check`/`ai check`/`ai replay`/`ai compat`/`causal`/`domain`'s
+//!   dialect-specific spec arguments used to hit the same Markdown-as-spec-syntax
+//!   lie; they are now registered [`LiterateSupport::Unsupported`] and gated at
+//!   their dispatch arms (#694). `db import` is the one `db` leaf that stays
+//!   excluded: its positional is a SQL/Prisma schema artifact (`--source
+//!   auto|sql|prisma`; `run_db_import` → `std::fs::read_to_string` →
+//!   `fsl_tools::import_db`), and `fslc db import
+//!   examples/literate/toggle.md` reads the Markdown as SQL DDL and reports
+//!   `result:"imported_with_warnings"` with `unsupported_sql` and
+//!   `empty_import` warnings, exit 0 -- `db import`'s own contract, never
+//!   the FSL frontend.
+//! - `ai eval`/`ai regress`/`ai drift` call `load_ai_project`, which has its
+//!   own `.md` branch that calls `fsl_syntax::parse_ai_project` independently
+//!   of this module; measured on `a3703211`, a valid literate AI project `.md`
+//!   succeeds (exit 0) and other Markdown reports a clean semantic error
+//!   (`expected fsl-ai project declarations`) with no false spec position --
+//!   not the #665/#694 lie, and gating it here would regress working literate
+//!   support.
 //!
 //! Implementing literate support for every command is issue #666, and is
 //! deliberately not attempted here: [`LiterateSupport::Unsupported`] commands
@@ -149,10 +159,11 @@ pub enum LiterateSupport {
 /// drift apart from each other.
 pub const LITERATE_SUPPORTED_COMMANDS: &[&str] = &["check", "verify", "scenarios"];
 
-/// The total registry of command keys whose spec argument reaches the shared
-/// kernel frontend through `main.rs`'s top-level `command()` dispatch, its
-/// `fmt_command()` sibling, or `document_command`'s shared `path` prelude --
-/// the same textual seam `materialize_literate`'s original two call sites
+/// The total registry of command keys whose spec argument is classified
+/// through `main.rs`'s top-level `command()` dispatch (including the `compat`
+/// arm), `fmt_command()`, `document_command`'s shared `path` prelude,
+/// `db_command`, `ai_command`, `domain_command`, or `causal::causal_command`
+/// -- the same textual seams `materialize_literate`'s original two call sites
 /// (`check`, and the combined `verify`/`scenarios` arm) already sat in.
 ///
 /// A nested command's key is its space-joined path (`"document generate"`),
@@ -183,6 +194,24 @@ pub const LITERATE_REGISTRY: &[(&str, LiterateSupport)] = &[
     ("document generate", LiterateSupport::Unsupported),
     ("document claims", LiterateSupport::Unsupported),
     ("document check", LiterateSupport::Unsupported),
+    ("db check", LiterateSupport::Unsupported),
+    ("db observe", LiterateSupport::Unsupported),
+    ("compat check", LiterateSupport::Unsupported),
+    ("domain check", LiterateSupport::Unsupported),
+    ("domain analyze", LiterateSupport::Unsupported),
+    ("domain expand", LiterateSupport::Unsupported),
+    ("domain generate", LiterateSupport::Unsupported),
+    ("domain replay", LiterateSupport::Unsupported),
+    ("domain testgen", LiterateSupport::Unsupported),
+    ("ai check", LiterateSupport::Unsupported),
+    ("ai replay", LiterateSupport::Unsupported),
+    ("ai compat", LiterateSupport::Unsupported),
+    ("causal check", LiterateSupport::Unsupported),
+    ("causal analyze", LiterateSupport::Unsupported),
+    ("causal diff", LiterateSupport::Unsupported),
+    ("causal ledger", LiterateSupport::Unsupported),
+    ("causal observe-expectations", LiterateSupport::Unsupported),
+    ("causal verify-expectations", LiterateSupport::Unsupported),
 ];
 
 /// Leaf commands in `rust/fslc/cli-contract.json` that read at least one
@@ -200,134 +229,31 @@ pub const LITERATE_EXCLUDED: &[(&str, &str)] = &[
     ),
     (
         "approval create",
-        "shared positional's meaning depends on --kind; --kind requirements_document legitimately binds a rendered .md document",
+        "the positional is always parsed as an FSL spec regardless of `--kind`; measured on a3703211: `approval create toggle.md --kind requirements_document|ledger ...` both report kind:\"parse\", diagnostic_code:\"FSL-PARSE\", unexpected character '!' at 1:2. Tracked as #980.",
     ),
     (
         "approval check",
-        "shared positional's meaning depends on --kind; --kind requirements_document legitimately binds a rendered .md document",
+        "approval create cannot produce a record whose spec.path is a .md file (measured on a3703211: approval create <.md> --kind requirements_document|ledger ... fails with FSL-PARSE before a record is written); if such a record exists from any other source, the record's spec.path must match the positional before parsing, and when it does, approval check/diff reach the FSL frontend and reproduce the exact 1:2 lie (measured with a hand-forged record whose spec.path matches a .md positional -- a mismatched record short-circuits to a clean target mismatch instead). Same defect this PR fixes elsewhere; gated because create cannot construct the precondition today. Tracked as #980.",
     ),
     (
         "approval diff",
-        "shared positional's meaning depends on --kind; --kind requirements_document legitimately binds a rendered .md document",
-    ),
-    (
-        "db check",
-        "measured: same defect as the commands this issue fixes -- kind:\"semantics\", \
-         \"unexpected character '!' at examples/literate/toggle.md:1:2\", exit 2, same false \
-         spec position. Only the kind label differs. Excluded as #665's measured scope (17 \
-         rows, none of them this command); tracked as #694",
+        "approval create cannot produce a record whose spec.path is a .md file (measured on a3703211: approval create <.md> --kind requirements_document|ledger ... fails with FSL-PARSE before a record is written); if such a record exists from any other source, the record's spec.path must match the positional before parsing, and when it does, approval check/diff reach the FSL frontend and reproduce the exact 1:2 lie (measured with a hand-forged record whose spec.path matches a .md positional -- a mismatched record short-circuits to a clean target mismatch instead). Same defect this PR fixes elsewhere; gated because create cannot construct the precondition today. Tracked as #980.",
     ),
     (
         "db import",
-        "same dialect family as \"db check\" (measured); presumed same shape, not independently \
-         measured. Tracked as #694",
-    ),
-    (
-        "db observe",
-        "same dialect family as \"db check\" (measured); presumed same shape, not independently \
-         measured. Tracked as #694",
-    ),
-    (
-        "compat check",
-        "delegates to the same db-check path; see \"db check\" (measured). Tracked as #694",
-    ),
-    (
-        "ai check",
-        "measured: same defect as the commands this issue fixes -- kind:\"semantics\", \
-         \"unexpected character '!' at examples/literate/toggle.md:1:2\", exit 2, same false \
-         spec position. Only the kind label differs. Excluded as #665's measured scope (17 \
-         rows, none of them this command); tracked as #694",
-    ),
-    (
-        "ai replay",
-        "same dialect family as \"ai check\" (measured); presumed same shape, not independently \
-         measured. Tracked as #694",
+        "positional is a SQL/Prisma schema artifact (--source auto|sql|prisma), read by run_db_import -> fsl_tools::import_db, never the FSL frontend; measured on a3703211: `fslc db import examples/literate/toggle.md` imports the Markdown as SQL DDL and reports result:\"imported_with_warnings\" with unsupported_sql and empty_import warnings, exit 0 -- db import's own contract, the same fact PARITY_REGISTRY states",
     ),
     (
         "ai eval",
-        "same dialect family as \"ai check\" (measured); presumed same shape, not independently \
-         measured. Tracked as #694",
+        "calls load_ai_project, whose .md branch invokes fsl_syntax::parse_ai_project independently of this module; measured on a3703211, a valid literate AI project .md succeeds (exit 0) and other Markdown reports a clean semantic error with no false spec position -- not the #665/#694 lie, and gating here would regress working literate support",
     ),
     (
         "ai regress",
-        "same dialect family as \"ai check\" (measured); presumed same shape, not independently \
-         measured. Tracked as #694",
+        "calls load_ai_project, whose .md branch invokes fsl_syntax::parse_ai_project independently of this module; measured on a3703211, a valid literate AI project .md succeeds (exit 0) and other Markdown reports a clean semantic error with no false spec position -- not the #665/#694 lie, and gating here would regress working literate support",
     ),
     (
         "ai drift",
-        "same dialect family as \"ai check\" (measured); presumed same shape, not independently \
-         measured. Tracked as #694",
-    ),
-    (
-        "ai compat",
-        "same dialect family as \"ai check\" (measured); presumed same shape, not independently \
-         measured. Tracked as #694",
-    ),
-    (
-        "causal analyze",
-        "same dialect family as \"causal check\" (measured); presumed same shape, not \
-         independently measured. Tracked as #694",
-    ),
-    (
-        "causal check",
-        "measured: same defect as the commands this issue fixes -- kind:\"parse\", \
-         \"unexpected character '!'\", exit 2, same false spec position, but rendered with a \
-         \"diagnostic\" key instead of \"diagnostic_code\". Excluded as #665's measured scope \
-         (17 rows, none of them this command); tracked as #694",
-    ),
-    (
-        "causal diff",
-        "same dialect family as \"causal check\" (measured); presumed same shape, not \
-         independently measured. Tracked as #694",
-    ),
-    (
-        "causal ledger",
-        "same dialect family as \"causal check\" (measured); presumed same shape, not \
-         independently measured. Tracked as #694",
-    ),
-    (
-        "causal observe-expectations",
-        "same dialect family as \"causal check\" (measured); presumed same shape, not \
-         independently measured. Tracked as #694",
-    ),
-    (
-        "causal verify-expectations",
-        "same dialect family as \"causal check\" (measured); presumed same shape, not \
-         independently measured. Tracked as #694",
-    ),
-    (
-        "domain analyze",
-        "same dialect family as \"domain check\" (measured); presumed same shape, not \
-         independently measured. Tracked as #694",
-    ),
-    (
-        "domain check",
-        "measured: same defect as the commands this issue fixes -- kind:\"semantics\", \
-         \"unexpected character '!' at examples/literate/toggle.md:1:2\", exit 2, same false \
-         spec position. Only the kind label differs. Excluded as #665's measured scope (17 \
-         rows, none of them this command); tracked as #694",
-    ),
-    (
-        "domain expand",
-        "same dialect family as \"domain check\" (measured); presumed same shape, not \
-         independently measured. Tracked as #694",
-    ),
-    (
-        "domain generate",
-        "domain's own codegen command (distinct from \"document generate\"); same dialect \
-         family as \"domain check\" (measured), presumed same kind:\"semantics\" shape. Tracked \
-         as #694",
-    ),
-    (
-        "domain replay",
-        "same dialect family as \"domain check\" (measured); presumed same shape, not \
-         independently measured. Tracked as #694",
-    ),
-    (
-        "domain testgen",
-        "domain's own testgen command (distinct from the top-level \"testgen\"); same dialect \
-         family as \"domain check\" (measured), presumed same kind:\"semantics\" shape. Tracked \
-         as #694",
+        "calls load_ai_project, whose .md branch invokes fsl_syntax::parse_ai_project independently of this module; measured on a3703211, a valid literate AI project .md succeeds (exit 0) and other Markdown reports a clean semantic error with no false spec position -- not the #665/#694 lie, and gating here would regress working literate support",
     ),
 ];
 

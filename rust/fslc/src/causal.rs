@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use fsl_core::{FileResolver, FslValue, KernelExpr, KernelModel, TypeRef};
+use fslc_rust::literate_access::literate_access;
 use serde_json::{Map, Value, json};
 
 use super::{
@@ -24,6 +25,9 @@ pub(super) fn causal_command(
                 args.next()
                     .ok_or_else(|| "fslc causal check requires a file".to_owned())?,
             );
+            if let Err(early_return) = literate_access("causal check", &path) {
+                return Ok(early_return);
+            }
             if let Some(option) = args.next() {
                 return Err(format!("unknown causal check option '{option}'"));
             }
@@ -34,6 +38,9 @@ pub(super) fn causal_command(
                 args.next()
                     .ok_or_else(|| "fslc causal analyze requires a file".to_owned())?,
             );
+            if let Err(early_return) = literate_access("causal analyze", &path) {
+                return Ok(early_return);
+            }
             let mut projection = None;
             let mut profile = None;
             let mut format = "json".to_owned();
@@ -76,6 +83,9 @@ pub(super) fn causal_command(
                 args.next()
                     .ok_or_else(|| "fslc causal verify-expectations requires a file".to_owned())?,
             );
+            if let Err(early_return) = literate_access("causal verify-expectations", &path) {
+                return Ok(early_return);
+            }
             let mut depth = 8_usize;
             while let Some(option) = args.next() {
                 match option.as_str() {
@@ -98,6 +108,9 @@ pub(super) fn causal_command(
                 PathBuf::from(args.next().ok_or_else(|| {
                     "fslc causal observe-expectations requires a file".to_owned()
                 })?);
+            if let Err(early_return) = literate_access("causal observe-expectations", &path) {
+                return Ok(early_return);
+            }
             let mut from_log = None;
             let mut mapping = None;
             let mut scope_path = None;
@@ -194,10 +207,16 @@ pub(super) fn causal_command(
                 args.next()
                     .ok_or_else(|| "fslc causal diff requires two files".to_owned())?,
             );
+            if let Err(early_return) = literate_access("causal diff", &before) {
+                return Ok(early_return);
+            }
             let after = PathBuf::from(
                 args.next()
                     .ok_or_else(|| "fslc causal diff requires two files".to_owned())?,
             );
+            if let Err(early_return) = literate_access("causal diff", &after) {
+                return Ok(early_return);
+            }
             while let Some(option) = args.next() {
                 match option.as_str() {
                     "--format" => {
@@ -215,6 +234,9 @@ pub(super) fn causal_command(
                 args.next()
                     .ok_or_else(|| "fslc causal ledger requires a file".to_owned())?,
             );
+            if let Err(early_return) = literate_access("causal ledger", &path) {
+                return Ok(early_return);
+            }
             let mut plans = Vec::new();
             let mut evidence = Vec::new();
             let mut lifecycle = Vec::new();

@@ -1,7 +1,39 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
-"""CI validator inventory: discover pytest modules and required-gate wiring."""
+"""CI validator inventory: discover validator modules and required-gate wiring.
+
+Scope, since issue #761 stage 2: `tests/test_*.py` pytest modules and
+`tools/check_rust_*.py` frozen-Python/Rust parity harnesses (the family
+`docs/DESIGN-ci-validator-inventory.md`'s "Scope boundaries" originally
+reserved as out of scope for slice 1).
+
+Guarantee boundary, load-bearing for why `--exempt path:reason` is an
+acceptable way to satisfy this check: this tool establishes only that a
+validator module's tier and reason were *recorded*, not that the recorded
+reason is *correct*. Passing `--exempt tools/check_rust_x.py:some-reason`
+once is the entire cost of satisfying `generate`'s guard, and that is
+intentional -- the property this check protects is "no validator module can
+accumulate silently, unclassified" (issue #761's own root problem: 17
+`tools/check_rust_*.py` harnesses existed with nobody having recorded why).
+Whether a recorded reason accurately describes the module -- the F1-F8
+precondition analysis, native-owner cross-referencing, and retirement
+readiness -- is `docs/RUST-PORTING.md`'s job, a human-maintained document
+this tool does not read and cannot verify.
+
+Wiring-detection scope, deliberate, shared by PYTEST_PATH and
+RUST_HARNESS_PATH alike: both regexes match a path preceded by whitespace,
+a quote, or `=`, including inside a `#` comment -- a commented-out mention
+is treated the same as a real invocation, and this was already true for
+`tests/test_*.py` before this file existed (verified: unchanged by this
+extension, not introduced by it). Neither regex has an
+`IMPORT_PATH`-style companion for a `from tools.check_rust_x import` form,
+because no `REQUIRED_GATE_ENTRYPOINTS` file currently wires a
+`tools/check_rust_*.py` harness that way (`tools/check-merge-readiness.sh`'s
+own inline `from tests.test_x import` pattern, which `IMPORT_PATH` exists
+to catch, has no `tools/check_rust_*.py` analogue today); add one only if
+and when such a wiring pattern is actually introduced, not speculatively.
+"""
 
 from __future__ import annotations
 
@@ -27,20 +59,34 @@ PYTEST_PATH = re.compile(
 IMPORT_PATH = re.compile(
     r"from\s+tests\.(test_[A-Za-z0-9_]+)\s+import"
 )
+RUST_HARNESS_PATH = re.compile(
+    r"(?:^|[\s\"'=])(tools/check_rust_[A-Za-z0-9_]+\.py)"
+)
 
 EXEMPT_REASONS = frozenset(
     {
         "frozen-python-compatibility",
         "hook-local",
+        # issue #761 stage 2: tools/check_rust_*.py-specific reasons. Each
+        # names a distinct cause a harness is unwired, matching #761's own
+        # classification table -- collapsing them into
+        # frozen-python-compatibility would lose that distinction (a
+        # `manual-developer-run` harness like `surface_parity` does not even
+        # import the frozen Python package; `parked-pending-unrelated-work`
+        # and `pending-native-migration` are blocked on work with no relation
+        # to Python compatibility at all).
+        "manual-developer-run",
+        "parked-pending-unrelated-work",
+        "pending-native-migration",
     }
 )
 
 HOOK_LOCAL_TESTS = frozenset({"tests/test_hook_enforcement.py"})
 
 
-def git_tracked_test_modules(root: Path) -> list[str]:
+def _git_tracked_py_modules(root: Path, scope_dir: str, name_prefix: str) -> list[str]:
     result = subprocess.run(
-        ["git", "ls-files", "-z", "--", "tests"],
+        ["git", "ls-files", "-z", "--", scope_dir],
         cwd=root,
         check=False,
         capture_output=True,
@@ -53,9 +99,21 @@ def git_tracked_test_modules(root: Path) -> list[str]:
     paths = [
         name
         for name in result.stdout.decode("utf-8").split("\0")
-        if name.startswith("tests/test_") and name.endswith(".py")
+        if name.startswith(name_prefix) and name.endswith(".py")
     ]
     return sorted(paths)
+
+
+def git_tracked_test_modules(root: Path) -> list[str]:
+    return _git_tracked_py_modules(root, "tests", "tests/test_")
+
+
+def git_tracked_rust_harness_modules(root: Path) -> list[str]:
+    return _git_tracked_py_modules(root, "tools", "tools/check_rust_")
+
+
+def git_tracked_validator_modules(root: Path) -> list[str]:
+    return sorted(git_tracked_test_modules(root) + git_tracked_rust_harness_modules(root))
 
 
 def read_entrypoint_text(root: Path, entrypoint: str) -> str:
@@ -63,7 +121,7 @@ def read_entrypoint_text(root: Path, entrypoint: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def wired_test_modules(root: Path) -> dict[str, list[str]]:
+def wired_validator_modules(root: Path) -> dict[str, list[str]]:
     wiring: dict[str, set[str]] = {}
     for entrypoint in REQUIRED_GATE_ENTRYPOINTS:
         text = read_entrypoint_text(root, entrypoint)
@@ -72,6 +130,8 @@ def wired_test_modules(root: Path) -> dict[str, list[str]]:
         for match in IMPORT_PATH.finditer(text):
             path = f"tests/{match.group(1)}.py"
             wiring.setdefault(path, set()).add(entrypoint)
+        for match in RUST_HARNESS_PATH.finditer(text):
+            wiring.setdefault(match.group(1), set()).add(entrypoint)
     return {
         path: sorted(entrypoints)
         for path, entrypoints in sorted(wiring.items())
@@ -88,6 +148,21 @@ def inventory_index(inventory: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def default_exempt_reason(path: str) -> str:
+    # A deliberately conservative fallback. Reached via --bootstrap for a
+    # genuinely new path with no prior recorded reason and no explicit
+    # --exempt override; also reached, pre-existing and unrelated to issue
+    # #761's extension, via an ordinary (non-bootstrap) generate for a path
+    # whose wiring/prior tier falls through build_entry()'s more specific
+    # branches -- for example a previously `required` module that is no
+    # longer wired anywhere (confirmed directly: inventory_document(...,
+    # bootstrap=False) with such a prior still reaches this function). It
+    # does not attempt to distinguish manual-developer-run,
+    # parked-pending-unrelated-work, or pending-native-migration from
+    # frozen-python-compatibility for a tools/check_rust_*.py path: getting
+    # that distinction right needs the classification behind issue #761's
+    # table, which a caller is expected to supply via explicit --exempt
+    # pairs (see docs/DESIGN-ci-validator-inventory.md) rather than rely on
+    # this guess.
     if path in HOOK_LOCAL_TESTS:
         return "hook-local"
     return "frozen-python-compatibility"
@@ -244,14 +319,22 @@ def inventory_findings(
     return findings
 
 
+def _is_validator_path(path: str) -> bool:
+    if path.startswith("tests/test_") and path.endswith(".py"):
+        return True
+    return path.startswith("tools/check_rust_") and path.endswith(".py")
+
+
 def parse_exempt_pairs(pairs: list[str]) -> dict[str, str]:
     parsed: dict[str, str] = {}
     for pair in pairs:
         if ":" not in pair:
             raise ValueError(f"--exempt expects path:reason, got {pair!r}")
         path, reason = pair.split(":", 1)
-        if not path.startswith("tests/test_") or not path.endswith(".py"):
-            raise ValueError(f"--exempt path must be tests/test_*.py, got {path!r}")
+        if not _is_validator_path(path):
+            raise ValueError(
+                f"--exempt path must be tests/test_*.py or tools/check_rust_*.py, got {path!r}"
+            )
         parsed[path] = reason
     return parsed
 
@@ -418,15 +501,148 @@ def selftest(root: Path) -> int:
         print("selftest: FAIL: wired new validator must become required", file=sys.stderr)
         ok = False
 
+    # issue #761 stage 2: the same accepting/rejecting shape, for
+    # tools/check_rust_*.py instead of tests/test_*.py -- the failure/success
+    # side is calibrated on the identical execution path (inventory_findings
+    # / inventory_document), not a separate code path that could silently
+    # diverge from the tests/ behavior above.
+    rust_inventory = {
+        "schema_version": SCHEMA_VERSION,
+        "required_gate_entrypoints": list(REQUIRED_GATE_ENTRYPOINTS),
+        "validators": [
+            {
+                "path": "tools/check_rust_required.py",
+                "tier": "required",
+                "entrypoints": ["tools/check-merge-readiness.sh"],
+            },
+            {
+                "path": "tools/check_rust_exempt.py",
+                "tier": "exempt",
+                "exempt_reason": "manual-developer-run",
+            },
+        ],
+    }
+    run_case(
+        "complete inventory (rust harness)",
+        discovered=["tools/check_rust_required.py", "tools/check_rust_exempt.py"],
+        wiring={
+            "tools/check_rust_required.py": ["tools/check-merge-readiness.sh"],
+        },
+        inventory=rust_inventory,
+        expected_fragments=[],
+        should_pass=True,
+    )
+    run_case(
+        "untracked rust harness",
+        discovered=[
+            "tools/check_rust_required.py",
+            "tools/check_rust_exempt.py",
+            "tools/check_rust_new.py",
+        ],
+        wiring={
+            "tools/check_rust_required.py": ["tools/check-merge-readiness.sh"],
+        },
+        inventory=rust_inventory,
+        expected_fragments=["untracked validator module"],
+        should_pass=False,
+    )
+    run_case(
+        "exempt rust harness with unknown reason",
+        discovered=["tools/check_rust_required.py", "tools/check_rust_exempt.py"],
+        wiring={
+            "tools/check_rust_required.py": ["tools/check-merge-readiness.sh"],
+        },
+        inventory={
+            "schema_version": SCHEMA_VERSION,
+            "required_gate_entrypoints": list(REQUIRED_GATE_ENTRYPOINTS),
+            "validators": [
+                rust_inventory["validators"][0],
+                {
+                    "path": "tools/check_rust_exempt.py",
+                    "tier": "exempt",
+                    "exempt_reason": "not-a-declared-reason",
+                },
+            ],
+        },
+        expected_fragments=["unknown exempt_reason"],
+        should_pass=False,
+    )
+
+    try:
+        inventory_document(
+            fixture_root,
+            discovered=[
+                "tools/check_rust_required.py",
+                "tools/check_rust_exempt.py",
+                "tools/check_rust_new.py",
+            ],
+            wiring={
+                "tools/check_rust_required.py": ["tools/check-merge-readiness.sh"],
+            },
+            prior=inventory_index(rust_inventory),
+            bootstrap=False,
+        )
+        print(
+            "selftest: FAIL: generate must reject new unwired rust harnesses without classification",
+            file=sys.stderr,
+        )
+        ok = False
+    except RuntimeError as error:
+        if "new validator module(s) require explicit classification" not in str(error):
+            print(f"selftest: FAIL: unexpected generate error (rust harness): {error}", file=sys.stderr)
+            ok = False
+
+    generated_exempt = inventory_document(
+        fixture_root,
+        discovered=[
+            "tools/check_rust_required.py",
+            "tools/check_rust_exempt.py",
+            "tools/check_rust_new.py",
+        ],
+        wiring={
+            "tools/check_rust_required.py": ["tools/check-merge-readiness.sh"],
+        },
+        prior=inventory_index(rust_inventory),
+        new_exempt={"tools/check_rust_new.py": "pending-native-migration"},
+        bootstrap=False,
+    )
+    generated_exempt_index = inventory_index(generated_exempt)
+    new_entry = generated_exempt_index["tools/check_rust_new.py"]
+    if new_entry["tier"] != "exempt" or new_entry["exempt_reason"] != "pending-native-migration":
+        print(
+            f"selftest: FAIL: --exempt classification did not stick for a rust harness: {new_entry!r}",
+            file=sys.stderr,
+        )
+        ok = False
+
+    generated_rust = inventory_document(
+        fixture_root,
+        discovered=[
+            "tools/check_rust_required.py",
+            "tools/check_rust_exempt.py",
+            "tools/check_rust_new.py",
+        ],
+        wiring={
+            "tools/check_rust_required.py": ["tools/check-merge-readiness.sh"],
+            "tools/check_rust_new.py": ["tools/check-merge-readiness.sh"],
+        },
+        prior=inventory_index(rust_inventory),
+        bootstrap=False,
+    )
+    generated_rust_index = inventory_index(generated_rust)
+    if generated_rust_index["tools/check_rust_new.py"]["tier"] != "required":
+        print("selftest: FAIL: wired new rust harness must become required", file=sys.stderr)
+        ok = False
+
     if ok:
-        print("selftest: PASS: inventory_accepting=1 inventory_rejecting=5")
+        print("selftest: PASS: inventory_accepting=2 inventory_rejecting=7")
         return 0
     return 1
 
 
 def check(root: Path) -> int:
-    discovered = git_tracked_test_modules(root)
-    wiring = wired_test_modules(root)
+    discovered = git_tracked_validator_modules(root)
+    wiring = wired_validator_modules(root)
     inventory = load_inventory(root)
     findings = inventory_findings(
         root,
@@ -452,8 +668,8 @@ def generate(
     bootstrap: bool,
     exempt_pairs: list[str],
 ) -> int:
-    discovered = git_tracked_test_modules(root)
-    wiring = wired_test_modules(root)
+    discovered = git_tracked_validator_modules(root)
+    wiring = wired_validator_modules(root)
     prior = None
     inventory_path = root / INVENTORY_PATH
     if inventory_path.is_file():
