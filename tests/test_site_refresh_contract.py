@@ -100,6 +100,33 @@ def _loads_shared_assets(path: Path) -> bool:
     return _loads_shared_asset_links(path.read_text(encoding="utf-8"))
 
 
+def _starts_regex_literal(src: str, i: int) -> bool:
+    """Whether src[i] == "/" opens a regex literal rather than a comment or division.
+
+    Needed because a regex may legally contain "//" or "/*", which the comment
+    scanner would otherwise treat as the start of a comment and blank out real code.
+    Decided from the previous significant character: after a value (identifier,
+    literal, closing bracket) a "/" is division; after an operator, an opening
+    bracket, or a keyword it opens a regex.
+    """
+    if i + 1 >= len(src) or src[i + 1] in "/*":
+        return False
+    j = i - 1
+    while j >= 0 and src[j] in " \t":
+        j -= 1
+    if j < 0:
+        return True
+    prev = src[j]
+    if prev in "=(,:[!&|?{};\n+-*%~^<>":
+        return True
+    for keyword in ("return", "typeof", "case", "in", "of", "new", "delete", "void"):
+        if src[: j + 1].endswith(keyword) and (
+            j + 1 - len(keyword) == 0 or not (src[j - len(keyword)].isalnum() or src[j - len(keyword)] == "_")
+        ):
+            return True
+    return False
+
+
 def strip_js_comments(js_text: str) -> str:
     """Blank out // and /* */ comments in site.js, preserving offsets and strings.
 
@@ -129,6 +156,17 @@ def strip_js_comments(js_text: str) -> str:
             continue
         if c in "\"'`":
             quote = c
+            i += 1
+            continue
+        if c == "/" and _starts_regex_literal(js_text, i):
+            i += 1
+            while i < n and js_text[i] != "/":
+                if js_text[i] == "\\":
+                    i += 2
+                    continue
+                if js_text[i] == "\n":
+                    break
+                i += 1
             i += 1
             continue
         if c == "/" and i + 1 < n and js_text[i + 1] == "/":
@@ -631,6 +669,37 @@ def test_site_refresh_playground_skip_rejects_unfocusable_main_mutant():
     assert "playground.en-main-not-focusable-tabindex" in audit_playground_skip_contract(mutant)
     assert "playground.en-missing-main-id-main" not in audit_playground_skip_contract(mutant)
     assert audit_playground_skip_contract(texts) == []
+
+
+def test_strip_js_comments_preserves_code_it_must_not_touch():
+    """The comment scanner is hand-written and six checks depend on it.
+
+    Cited mutation for the regex arm: drop _starts_regex_literal's regex handling and
+    the first case below mangles real code into `const re = /\\/\\`.
+
+    site.js has no regex containing // or /* today, so this guards a latent defect:
+    mangled code would make a check report a marker missing that is actually present.
+    """
+    keep_cases = (
+        (r'const re = /\/\//g; const keep = 1;', "const keep = 1;"),
+        (r'const re = /\/\*/g; const keep = 2;', "const keep = 2;"),
+        ("const x = a / b; // gone", "const x = a / b;"),
+        ("const p = h.scrollTop / (h.scrollHeight - 1); // gone", "h.scrollHeight - 1)"),
+        ('const u = "http://x.y/z"; // gone', '"http://x.y/z"'),
+        ("const t = `a//b ${x} c`; // gone", "`a//b ${x} c`"),
+        ('const s = "*/"; const keep = 3;', "const keep = 3;"),
+    )
+    for src, must_survive in keep_cases:
+        out = strip_js_comments(src)
+        assert must_survive in out, f"stripper mangled code: {src!r} -> {out!r}"
+        assert "gone" not in out, f"stripper left a comment body: {src!r} -> {out!r}"
+
+    js = JS.read_text(encoding="utf-8")
+    stripped = strip_js_comments(js)
+    assert len(stripped) == len(js), "stripper must preserve offsets"
+    assert 'http://www.w3.org/2000/svg' in stripped, "string content must survive"
+    for marker in ('main.setAttribute("tabindex", "-1")', "initBackbone();", HOOK):
+        assert marker in stripped, f"stripper removed real code: {marker}"
 
 
 def test_js_source_checks_reject_commented_out_code():
