@@ -36,7 +36,7 @@
       <tr><th>目標</th><th>入口</th><th>ネイティブコマンド</th><th>見る <code>result</code></th></tr>
       <tr><td>文法と最初の反例</td><td><code>gallery/valid/tiny_*</code></td><td><code>fslc verify --depth 8</code></td><td><code>verified</code> または <code>violated</code> + <code>trace</code></td></tr>
       <tr><td>層をまたぐ詳細化</td><td><code>e2e/</code>, <code>layers/</code></td><td><code>fslc refine</code>, <code>fslc chain</code></td><td><code>refines</code> または <code>refinement_failed</code></td></tr>
-      <tr><td>実装観測の接続</td><td><code>bank/</code>, <code>e2e/impl/</code></td><td><code>fslc testgen</code> → <code>fslc replay</code></td><td><code>testgen</code>: ハーネス。<code>replay</code>: <code>conformant</code> / <code>nonconformant</code> + ログ行</td></tr>
+      <tr><td>実装観測の接続</td><td><code>bank/</code>, <code>e2e/impl/</code></td><td><code>fslc testgen</code> と <code>fslc replay</code> — 独立</td><td><code>testgen</code>: test runner が実行するハーネス。<code>replay</code>: 実ログに対する <code>conformant</code> / <code>nonconformant</code> + ログ行</td></tr>
       <tr><td>診断形状の読み方</td><td><code>gallery/errors/</code></td><td><code>fslc check</code> / <code>verify</code></td><td><code>error</code> + <code>kind</code>、または <code>violated</code> + <code>violation_kind</code></td></tr>
       <tr><td>ダイアレクト replay</td><td><code>domain/</code>, <code>db/</code>, <code>ai/</code></td><td><code>fslc domain replay</code>, <code>db observe</code>, <code>ai replay</code></td><td>方言 <code>result</code> + イベント位置</td></tr>
     </table>

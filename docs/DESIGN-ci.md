@@ -1336,10 +1336,13 @@ they find is reached at runtime. They are no longer satisfied by a marker left
 behind in a *whole-line* comment: every such check first blanks lines whose first
 non-space characters are `//`, and lines inside a `/* */` block opening at line start.
 Commenting out an assignment is a calibrated rejecting mutation for the skip-link,
-backbone, locale-nav, and breadcrumb checks. The stripper is deliberately line-oriented,
-so it never alters a line containing code and cannot mangle a string, regex, or template
-literal; the cost is that a **trailing** comment after code on the same line is not
-stripped, which issue #1006 records. Being reached at runtime is still not established --
+backbone, locale-nav, and breadcrumb checks. The stripper is deliberately line-oriented: it does not
+tokenize, so it cannot be defeated by a string, a regex literal, or a division. It is
+**not** immune to altering a code line — a multi-line template literal whose inner line
+begins with `//` has that line blanked, and `*/ realCode();` loses the whole line. Both
+are measured, and neither occurs in the current `site.js`: of its 64 blanked lines, zero
+fall outside a comment region. A **trailing** comment after code is also not stripped.
+Issue #1006 records all three gaps. Being reached at runtime is still not established --
 only that a line of code, not a whole-line comment, contains the marker. None of the three checks establishes
 Rust/solver behavior, native CLI parity, browser rendering,
 or assistive-technology behavior. This expands the context's bounded documentation-artifact scope

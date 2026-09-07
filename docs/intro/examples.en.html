@@ -36,7 +36,7 @@
       <tr><th>Your goal</th><th>Start here</th><th>Native command</th><th><code>result</code> to inspect</th></tr>
       <tr><td>Learn syntax and a first counterexample</td><td><code>gallery/valid/tiny_*</code></td><td><code>fslc verify --depth 8</code></td><td><code>verified</code> or <code>violated</code> + <code>trace</code></td></tr>
       <tr><td>See cross-layer refinement</td><td><code>e2e/</code>, <code>layers/</code></td><td><code>fslc refine</code>, <code>fslc chain</code></td><td><code>refines</code> or <code>refinement_failed</code></td></tr>
-      <tr><td>Connect implementation observations</td><td><code>bank/</code>, <code>e2e/impl/</code></td><td><code>fslc testgen</code> then <code>fslc replay</code></td><td><code>testgen</code>: a harness; <code>replay</code>: <code>conformant</code> / <code>nonconformant</code> + log line</td></tr>
+      <tr><td>Connect implementation observations</td><td><code>bank/</code>, <code>e2e/impl/</code></td><td><code>fslc testgen</code> and <code>fslc replay</code> — independent</td><td><code>testgen</code>: a harness a test runner runs; <code>replay</code>: <code>conformant</code> / <code>nonconformant</code> + log line from a real log</td></tr>
       <tr><td>Read diagnostic shapes</td><td><code>gallery/errors/</code></td><td><code>fslc check</code> / <code>verify</code></td><td><code>error</code> + <code>kind</code>, or <code>violated</code> + <code>violation_kind</code></td></tr>
       <tr><td>Dialect-specific replay</td><td><code>domain/</code>, <code>db/</code>, <code>ai/</code></td><td><code>fslc domain replay</code>, <code>db observe</code>, <code>ai replay</code></td><td>dialect <code>result</code> + event index</td></tr>
     </table>

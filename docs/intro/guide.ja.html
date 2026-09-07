@@ -40,7 +40,7 @@
       <tr data-journey="bounded-verify"><td>有界検証</td><td><code>fslc verify --depth K</code></td><td>深さ <em>K</em> まで反例なし（<code>verified</code>, <code>completeness:"bounded"</code>）</td><td>全深さの安全性や、別途書いていない応答性</td></tr>
       <tr data-journey="proof-induction"><td>証明 / 帰納</td><td><code>fslc verify --engine induction</code></td><td>名前付き不変条件の無制限成立（<code>proved</code>）</td><td>書いていない性質；CTI は補助補題の手がかりであり必ずしも到達バグではない</td></tr>
       <tr data-journey="refinement"><td>詳細化</td><td><code>fslc refine</code>, <code>fslc chain</code></td><td>下位層が上位意図を保つ（<code>refines</code>）</td><td>未検査マッピングや実装全体の正しさ</td></tr>
-      <tr data-journey="implementation-observe"><td>実装観測</td><td><code>fslc scenarios</code> → <code>testgen</code>、判定は <code>fslc replay</code></td><td><code>scenarios</code> がケースを列挙し、<code>testgen</code> が生成するハーネスは assertion が pass / fail します。<code>conformant</code> を返すのは実ログに当てた <code>replay</code> です</td><td>将来の全ランタイム経路 — 実行された証拠のみ</td></tr>
+      <tr data-journey="implementation-observe"><td>実装観測</td><td><code>fslc scenarios</code>、<code>fslc testgen</code>、<code>fslc replay</code> — 独立した3経路</td><td><code>scenarios</code> はケースを列挙。<code>testgen</code> が生成するハーネスは test runner が実行し pass / fail します。<code>replay</code> は独立に実ログを判定し <code>conformant</code> を返します</td><td>将来の全ランタイム経路 — 実行された証拠のみ</td></tr>
     </table>
   </div>
 </section>

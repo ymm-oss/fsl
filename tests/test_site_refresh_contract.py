@@ -109,12 +109,23 @@ def strip_js_comments(js_text: str) -> str:
     audit_locale_nav_contract green, because the assignment substring and both label
     strings survive inside `// crumb.setAttribute(...)`.
 
-    Deliberately line-oriented rather than a JS tokenizer. Only lines whose first
-    non-space characters are `//`, and lines inside a `/* ... */` block that opens at
-    the start of a line, are blanked; a line containing code is never touched. That
-    makes it correct by construction -- it cannot mangle a string, a regex literal, a
-    template literal, or a division -- at the cost of not stripping a trailing comment
-    after code on the same line.
+    Deliberately line-oriented rather than a JS tokenizer: only whole-line comments
+    are blanked (`//`, `<!--`, a line-leading `-->`, and lines inside a `/* ... */`
+    block opening at line start). It does not tokenize, so it cannot be defeated by a
+    string, a regex literal, or a division the way four tokenizer attempts here were.
+
+    It is **not** true that it can never alter a line containing code. Two cases,
+    both measured and neither present in site.js:
+
+    - a multi-line template literal whose inner line begins with `//` -- that is
+      template *text*, and it is blanked
+    - `*/ realCode();` -- the block-comment close and the code share a line, and the
+      whole line is blanked
+
+    Also not stripped: a trailing comment after code on the same line.
+
+    Verified on the current site.js: of 64 blanked lines, zero fall outside a comment
+    region. Issue #1006 records all three gaps.
 
     Three attempts at a real tokenizer here each shipped a new defect (regex literals
     containing `//`, comments inside `${...}`, nested braces in an interpolation, and
@@ -133,7 +144,12 @@ def strip_js_comments(js_text: str) -> str:
             blanked = True
             if "*/" in body:
                 in_block = False
-        elif stripped.startswith("//"):
+        elif stripped.startswith(("//", "<!--")) or stripped == "-->" or stripped.startswith("--> "):
+            # "<!--" and a line-leading "-->" are legal single-line comments in a
+            # classic script (Annex B). site.js is loaded as a classic script, so
+            # commenting a call out with "<!--" disabled it while the gate stayed
+            # green -- measured: audit_backbone_contract returned [] for both the
+            # baseline and a "<!-- initBackbone();" mutant.
             blanked = True
         elif stripped.startswith("/*"):
             blanked = True
@@ -654,6 +670,9 @@ def test_strip_js_comments_blanks_only_comment_lines():
 
     # Comment lines are blanked, and the line structure is kept.
     assert strip_js_comments("  // initBackbone();\n").strip() == ""
+    # Legal single-line comments in a classic script (Annex B); site.js is one.
+    assert strip_js_comments("  <!-- initBackbone();\n").strip() == ""
+    assert strip_js_comments("  --> initBackbone();\n").strip() == ""
     block = "  /* initBackbone();\n     more\n  */\n  keep();\n"
     out = strip_js_comments(block)
     assert "initBackbone();" not in out, out
@@ -689,12 +708,12 @@ def test_js_source_checks_reject_commented_out_code():
     """
     js = JS.read_text(encoding="utf-8")
 
-    def comment_out(needle):
+    def comment_out(needle, marker="//"):
         lines = js.splitlines(True)
         for i, line in enumerate(lines):
-            if needle in line and not line.strip().startswith("//"):
+            if needle in line and not line.strip().startswith(("//", "<!--")):
                 indent = line[: len(line) - len(line.lstrip())]
-                lines[i] = f"{indent}// {line.strip()}\n"
+                lines[i] = f"{indent}{marker} {line.strip()}\n"
                 return "".join(lines)
         raise AssertionError(f"anchor not found in site.js: {needle}")
 
@@ -718,6 +737,13 @@ def test_js_source_checks_reject_commented_out_code():
         offenders = [o for o in audit(mutant) if o.startswith(prefix)]
         assert offenders, f"commented-out {needle} not detected; produced {audit(mutant)}"
         assert not [o for o in audit(js) if o.startswith(prefix)], f"baseline dirty for {needle}"
+        # The HTML-style form is a comment too, and left this gate blind until it
+        # was handled: audit_backbone_contract returned [] for a "<!-- initBackbone();"
+        # mutant as well as for the baseline.
+        html_mutant = comment_out(needle, marker="<!--")
+        assert [o for o in audit(html_mutant) if o.startswith(prefix)], (
+            f"<!-- commented {needle} not detected; produced {audit(html_mutant)}"
+        )
 
 
 def test_site_refresh_locale_nav_aria_current_contract():
