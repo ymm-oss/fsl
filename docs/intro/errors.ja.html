@@ -31,7 +31,7 @@
   <div class="wrap">
     <p class="kicker reveal">契約</p>
     <h2 class="reveal">JSONエンベロープと終了コード</h2>
-    <p class="lead narrow reveal">すべてのコマンドは stdout に1つのJSONを出し、<code>result</code>フィールドが終了コードに対応します。この対応（<code>exit_code()</code>）は<a href="cli.ja.html">CLIリファレンス</a>にソースそのものが載っています——ここでは要点だけを表にします。</p>
+    <p class="lead narrow reveal">判定を返すコマンドは stdout に1つのJSONを出し、<code>result</code> フィールドが終了コードに対応します。フラグによっては生成物をそのまま stdout に出すコマンドもあります（<code>fslc fmt PATH</code> は整形済みソースを出力）。パースする前に各コマンドの <code>--help</code> を確認してください。この対応は <code>docs/LANGUAGE.md</code> に定義され、ネイティブ Rust の <code>rust/fslc/src/outcome.rs</code> の <code>exit_status()</code> が実装します——<a href="cli.ja.html">CLIリファレンス</a>に正典の表があります。</p>
     <table class="matrix reveal">
       <tr><th>終了コード</th><th>意味</th><th>代表的な<code>result</code></th></tr>
       <tr><td><code>0</code></td><td>成功</td><td><code>verified</code> / <code>proved</code> / <code>refines</code> / <code>conformant</code> / <code>generated</code> / <code>typestate</code> / <code>mutated</code> / <code>explained</code> / <code>ok</code> など</td></tr>

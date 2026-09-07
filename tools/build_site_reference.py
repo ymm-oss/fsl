@@ -3,7 +3,7 @@
 """Generate the two site "generated reference" pages from their canonical sources.
 
     docs/intro/language.{ja,en}.html  <-  docs/LANGUAGE.md
-    docs/intro/cli.{ja,en}.html       <-  src/fslc/cli.py (argparse introspection)
+    docs/intro/cli.{ja,en}.html       <-  rust/fslc/cli-contract.json (native CLI)
 
 Design contract (see docs/DESIGN-docs-site.md D3/D4/D5/D7): the ja page body is rendered
 from docs/LANGUAGE.ja.md, a second canonical source kept section-aligned 1:1 with
@@ -28,9 +28,7 @@ LANGUAGE.md or the fslc CLI surface:
 
 from __future__ import annotations
 
-import argparse
 import html
-import inspect
 import re
 import sys
 from pathlib import Path
@@ -40,14 +38,12 @@ import markdown
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LANGUAGE_MD = REPO_ROOT / "docs" / "LANGUAGE.md"
 LANGUAGE_MD_JA = REPO_ROOT / "docs" / "LANGUAGE.ja.md"
+CLI_CONTRACT_JSON = REPO_ROOT / "rust" / "fslc" / "cli-contract.json"
 OUT_DIR = REPO_ROOT / "docs" / "intro"
 
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from fslc.cli_help import (  # noqa: E402
-    canonical_help,
-    normalize_argparse_help as _normalize_argparse_help,
-)
+from fslc.cli_help import normalize_argparse_help as _normalize_argparse_help  # noqa: E402
 
 GENERATED_BANNER = (
     "<!-- GENERATED — do not edit by hand. Regenerate with:\n"
@@ -267,69 +263,98 @@ def render_language_tree(lang: str) -> str:
     return '<div class="disclosure-tree">' + "\n".join(nodes) + "</div>"
 
 
-def get_subparsers_action(parser: argparse.ArgumentParser):
-    for action in parser._actions:  # noqa: SLF001 - intentional argparse introspection
-        if isinstance(action, argparse._SubParsersAction):  # noqa: SLF001
-            return action
-    return None
+def _load_cli_contract() -> dict:
+    import json
+
+    return json.loads(CLI_CONTRACT_JSON.read_text(encoding="utf-8"))
 
 
-# argparse's own group heading changed from "optional arguments:" to
-# "options:" in Python 3.10 (bpo-9694) — purely cosmetic, but it makes
-# format_help() output depend on which Python generated this page. CI runs
-# the full suite (and this generator) on multiple Python versions
-# (pyproject: requires-python >=3.9), so normalize to the modern spelling
-# rather than letting the committed page's exact bytes depend on which
-# interpreter happened to regenerate it last.
-def render_cli_tree() -> str:
-    from fslc.cli import _build_arg_parser, exit_code, _envelope, _error_envelope  # noqa: PLC0415
+def _extract_exit_codes_paragraph() -> str:
+    text = LANGUAGE_MD.read_text(encoding="utf-8")
+    match = re.search(
+        r"(Exit codes:.*?)(?=\n\n`approval_check`|\n\n### )",
+        text,
+        flags=re.S,
+    )
+    if not match:
+        raise SystemExit(
+            "build_site_reference: could not locate the Exit codes paragraph in "
+            "docs/LANGUAGE.md — reconcile LANGUAGE.md before regenerating."
+        )
+    return match.group(1).strip()
 
-    top = _build_arg_parser()
-    top_sub = get_subparsers_action(top)
+
+def _render_cli_command_nodes(node: dict, *, skip_top_level: tuple[str, ...] = ("version",)) -> str:
     nodes = []
-    for name, sub in top_sub.choices.items():
-        if name == "version":
+    for command in node.get("commands", []):
+        path = command.get("path", [])
+        if not path:
             continue
-        nested = get_subparsers_action(sub)
-        if nested:
-            children = []
-            for name2, sub2 in nested.choices.items():
-                help_text = html.escape(canonical_help(sub2))
-                children.append(
-                    f'<details><summary>fslc {html.escape(name)} {html.escape(name2)}</summary>'
-                    f'<div class="tree-body"><pre>{help_text}</pre></div></details>'
-                )
-            body = '<div class="disclosure-tree">' + "\n".join(children) + "</div>"
+        name = path[-1]
+        if len(path) == 1 and name in skip_top_level:
+            continue
+        label = "fslc " + " ".join(html.escape(part) for part in path)
+        children = command.get("commands", [])
+        if children:
+            child_body = _render_cli_command_nodes(command, skip_top_level=())
+            # The parent carries its own help in the contract. Rendering only the child
+            # list would drop it, and the page's lead promises that each command's usage
+            # is the native --help output.
+            own_help = command.get("help", "")
+            own = f"<pre>{html.escape(own_help)}</pre>" if own_help else ""
+            body = own + '<div class="disclosure-tree">' + child_body + "</div>"
             nodes.append(
-                f'<details><summary>fslc {html.escape(name)} <span class="tree-blurb">'
-                f"— {len(nested.choices)} subcommands</span></summary>"
+                f'<details><summary>{label} <span class="tree-blurb">'
+                f"— {len(children)} subcommands</span></summary>"
                 f'<div class="tree-body">{body}</div></details>'
             )
         else:
-            help_text = html.escape(canonical_help(sub))
+            help_text = html.escape(command.get("help", ""))
             nodes.append(
-                f'<details><summary>fslc {html.escape(name)}</summary>'
+                f"<details><summary>{label}</summary>"
                 f'<div class="tree-body"><pre>{help_text}</pre></div></details>'
             )
-    tree = '<div class="disclosure-tree">' + "\n".join(nodes) + "</div>"
+    return "\n".join(nodes)
 
-    exit_code_src = html.escape(inspect.getsource(exit_code))
-    envelope_src = html.escape(inspect.getsource(_envelope) + "\n\n" + inspect.getsource(_error_envelope))
-    contract = (
+
+def render_cli_tree() -> str:
+    contract = _load_cli_contract()
+    root = contract["root"]
+    exit_codes = html.escape(_extract_exit_codes_paragraph())
+    contract_block = (
         '<details open><summary>Exit codes &amp; JSON envelope <span class="tree-blurb">'
-        "— exit_code() / _envelope() / _error_envelope(), from src/fslc/cli.py</span></summary>"
+        "— docs/LANGUAGE.md + rust/fslc/src/outcome.rs::exit_status()</span></summary>"
         '<div class="tree-body">'
-        "<p>Every command prints one JSON object to stdout and maps its <code>result</code> "
-        "field to a process exit code through this function — verbatim from the source, "
-        "so this table cannot drift from the actual contract:</p>"
-        f"<pre>{exit_code_src}</pre>"
-        "<p>Every result is wrapped by <code>_envelope()</code> (adds <code>{&quot;fsl&quot;: "
-        '&quot;1.0&quot;, ...}</code> + faithfulness metadata); parse/name/type/semantics/io '
-        "errors additionally go through <code>_error_envelope()</code>:</p>"
-        f"<pre>{envelope_src}</pre>"
+        "<p>The authoritative native CLI maps every JSON <code>result</code> to a process "
+        "exit code through <code>rust/fslc/src/outcome.rs</code> "
+        "<code>exit_status()</code>, which implements the table in "
+        "<code>docs/LANGUAGE.md</code>:</p>"
+        f"<pre>{exit_codes}</pre>"
+        "<p>Verdict-bearing commands print one JSON object to stdout with "
+        '<code>{"fsl":"1.0", ...}</code>, and the exit code is derived from its '
+        "<code>result</code>. Commands that emit a generated artifact write that "
+        "artifact to stdout <em>under some flag combinations</em> instead — "
+        "<code>fslc fmt PATH</code> prints formatted source, while "
+        "<code>fslc fmt --check</code> returns a <code>format_check</code> envelope, and "
+        "<code>document</code>, <code>db</code>, and <code>domain</code> subcommands print "
+        "generated content or return an envelope depending on whether an output path is "
+        "given. The rule is per command and per flag, so read a command's own "
+        "<code>--help</code> before parsing its stdout as JSON. Native CLI and browser Worker "
+        "<code>check</code>/<code>verify</code> envelopes also include "
+        "<code>versions.verifier</code>, <code>versions.core</code>, and "
+        "<code>versions.solver</code> (see <code>docs/LANGUAGE.md</code> §14). "
+        "The machine-readable schema is "
+        "<code>schemas/fslc/envelope.v1.schema.json</code>. "
+        "The frozen Python compatibility reference under <code>src/fslc/</code> "
+        "mirrors a subset for parity tests only — it is not the distribution surface.</p>"
         "</div></details>"
     )
-    return contract + tree
+    tree = (
+        '<div class="disclosure-tree">'
+        + _render_cli_command_nodes(root)
+        + "</div>"
+    )
+    return contract_block + tree
 
 
 PAGE_STRINGS = {
@@ -367,31 +392,35 @@ PAGE_STRINGS = {
     },
     "cli": {
         "ja": {
-            "title": "FSL CLI リファレンス — fslc の全コマンド",
-            "description": "src/fslc/cli.py から生成される、fslcの全サブコマンド・終了コード・JSON契約のリファレンス。",
+            "title": "FSL CLI リファレンス — ネイティブ fslc のコマンド一覧",
+            "description": "rust/fslc/cli-contract.json から生成される、ネイティブ fslc のコマンド・終了コード・JSON契約のリファレンス（version を除く）。",
             "kicker": "Generated Reference",
             "h1": "CLI リファレンス",
             "lead": (
-                "これは <code>src/fslc/cli.py</code> の argparse 定義から生成されています。"
-                "各コマンドの使い方はPython自身の <code>--help</code> 出力そのものなので、"
-                "手書きの一覧が実装から取り残されることはありません。"
+                "これは権威あるネイティブ CLI 契約 <code>rust/fslc/cli-contract.json</code> "
+                "から生成されています。各コマンドの使い方はネイティブ <code>fslc</code> の "
+                "<code>--help</code> 出力そのものです。"
+                "<code>src/fslc/</code> の凍結 Python 互換参照は配布面ではなく、"
+                "明示的な parity テスト用のみに言及します。"
             ),
-            "badge": "Generated from cli.py",
+            "badge": "Generated from cli-contract.json",
             "expand": "すべて展開",
             "collapse": "すべて折りたたむ",
             "top": "↑ 先頭へ",
         },
         "en": {
-            "title": "FSL CLI Reference — every fslc subcommand",
-            "description": "The full fslc CLI surface, exit codes, and JSON contract, generated from src/fslc/cli.py.",
+            "title": "FSL CLI Reference — the native fslc command surface",
+            "description": "The native fslc CLI surface except version, with exit codes and the JSON contract, generated from rust/fslc/cli-contract.json.",
             "kicker": "Generated Reference",
             "h1": "CLI Reference",
             "lead": (
-                "Generated directly from the argparse definitions in <code>src/fslc/cli.py</code> — "
-                "each command's usage is Python's own <code>--help</code> output, so this page "
-                "cannot lag the implementation."
+                "Generated from the authoritative native CLI contract "
+                "<code>rust/fslc/cli-contract.json</code> — each command's usage is the native "
+                "<code>fslc --help</code> output. The frozen Python compatibility reference "
+                "under <code>src/fslc/</code> is mentioned only where parity testing requires it; "
+                "it is not the distribution surface."
             ),
-            "badge": "Generated from cli.py",
+            "badge": "Generated from cli-contract.json",
             "expand": "Expand all",
             "collapse": "Collapse all",
             "top": "↑ Top",
@@ -462,7 +491,8 @@ def main():
     cli_tree = render_cli_tree()
     for lang in ("ja", "en"):
         (OUT_DIR / f"cli.{lang}.html").write_text(
-            page_shell("cli", lang, cli_tree, "src/fslc/cli.py"), encoding="utf-8"
+            page_shell("cli", lang, cli_tree, "rust/fslc/cli-contract.json"),
+            encoding="utf-8",
         )
     print("Generated docs/intro/{language,cli}.{ja,en}.html")
 

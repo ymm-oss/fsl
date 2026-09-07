@@ -27,6 +27,36 @@
 
 <hr class="soft" />
 
+<section data-journey="choose-goal">
+  <div class="wrap">
+    <p class="kicker reveal">Choose by verification goal</p>
+    <h2 class="reveal">Pick the example that matches what you want to establish</h2>
+    <p class="lead narrow reveal">Every gallery file names an <code>expected-command</code> and <code>expected-result</code>. Match your goal first, then open source — the native Rust <code>fslc</code> JSON tells you whether the claim held.</p>
+    <table class="matrix reveal">
+      <tr><th>Your goal</th><th>Start here</th><th>Native command</th><th><code>result</code> to inspect</th></tr>
+      <tr><td>Learn syntax and a first counterexample</td><td><code>gallery/valid/tiny_*</code></td><td><code>fslc verify --depth 8</code></td><td><code>verified</code> or <code>violated</code> + <code>trace</code></td></tr>
+      <tr><td>See cross-layer refinement</td><td><code>e2e/</code>, <code>layers/</code></td><td><code>fslc refine</code>, <code>fslc chain</code></td><td><code>refines</code> or <code>refinement_failed</code></td></tr>
+      <tr><td>Connect implementation observations</td><td><code>bank/</code>, <code>e2e/impl/</code></td><td><code>fslc testgen</code> and <code>fslc replay</code> — independent</td><td><code>testgen</code>: a harness a test runner runs; <code>replay</code>: <code>conformant</code> / <code>nonconformant</code> + log line from a real log</td></tr>
+      <tr><td>Read diagnostic shapes</td><td><code>gallery/errors/</code></td><td><code>fslc check</code> / <code>verify</code></td><td><code>error</code> + <code>kind</code>, or <code>violated</code> + <code>violation_kind</code></td></tr>
+      <tr><td>Dialect-specific replay</td><td><code>domain/</code>, <code>db/</code>, <code>ai/</code></td><td><code>fslc domain replay</code>, <code>db observe</code>, <code>ai replay</code></td><td>dialect <code>result</code> + event index</td></tr>
+    </table>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)" data-journey="inspect-evidence">
+  <div class="wrap">
+    <p class="kicker reveal">What evidence to inspect</p>
+    <h2 class="reveal">Read the fields that match the assurance class</h2>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card"><h3>Bounded safety</h3><p><code>result</code>, <code>completeness:"bounded"</code>, <code>checked_to_depth</code>, counterexample <code>trace</code> when <code>violated</code>. Does <em>not</em> prove infinite depth.</p></div>
+      <div class="syntax-card"><h3>Unbounded proof</h3><p><code>result:"proved"</code>, <code>completeness:"unbounded"</code>, engine <code>induction</code> or explicit <code>closure:true</code>. Still scoped to the written properties.</p></div>
+      <div class="syntax-card"><h3>Refinement</h3><p><code>refines</code> vs <code>refinement_failed</code>, witness mapping, stutter notes. Establishes layer alignment for the checked mapping — not full system proof.</p></div>
+      <div class="syntax-card"><h3>Implementation observation</h3><p><code>testgen</code> emits a pytest harness whose assertions pass or fail per generated case. <code>replay</code> on a real log is what yields <code>conformant</code> / <code>failed_at_event</code> and the adapter projection. Either way: observed traces only — not all future behaviors.</p></div>
+    </div>
+    <p class="reveal dim" style="margin-top:14px;font-size:14px">Exit codes follow <code>docs/LANGUAGE.md</code> via native <code>rust/fslc/src/outcome.rs</code> — see <a href="errors.en.html">Errors &amp; Exit Codes</a>.</p>
+  </div>
+</section>
+
 <section>
   <div class="wrap">
     <p class="kicker reveal">Start here</p>
@@ -70,6 +100,40 @@
         <p>Confirms propagation through a layer chain (<code>business ⊒ requirements ⊒ design …</code>).</p>
       </div>
     </div>
+  </div>
+</section>
+
+<section id="correctness-chain" aria-labelledby="correctness-chain-title">
+  <div class="wrap">
+    <p class="kicker reveal">One bounded correctness chain</p>
+    <h2 class="reveal" id="correctness-chain-title">From policy to implementation observations</h2>
+    <p class="reveal">The expense example makes each hand-off navigable; each link names the evidence it provides, not a universal claim.</p>
+    <div class="syntax-grid reveal">
+      <div class="syntax-card">
+        <h3><a href="business-layer.en.html">Policy and business flow</a></h3>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/1_business.fsl">1_business.fsl</a> states the consultant's To-Be controls and goals.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><a href="requirements-layer.en.html">Product requirements</a></h3>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/2_requirements.fsl">2_requirements.fsl</a> carries acceptance and approval-boundary requirements.</p>
+      </div>
+      <div class="syntax-card">
+        <h3><a href="design-layer.en.html">Design and refinement</a></h3>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/3_design.fsl">3_design.fsl</a> models the implementation-facing payment steps.</p>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/3_refines_2.fsl">3_refines_2.fsl</a> maps that design back to the requirements.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Implementation observation</h3>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/impl/expense.py">expense.py</a> is a plain implementation, independent of FSL.</p>
+        <p><a href="https://github.com/ymm-oss/fsl/blob/f565aeb9c46daa28a927ecad79bfdb72e44b6bb7/examples/e2e/impl/test_conformance.py">test_conformance.py</a> drives it through an Adapter.</p>
+      </div>
+      <div class="syntax-card">
+        <h3>Verification bridges</h3>
+        <p><a href="language.en.html#12-the-bridge-to-implementation">testgen</a> generates an implementation-conformance harness.</p>
+        <p><a href="language.en.html#12-the-bridge-to-implementation">replay</a> compares mapped complete observed state.</p>
+      </div>
+    </div>
+    <p class="reveal" style="margin-top:14px">The mapping and harness can detect stated drift. Replay is observed-trace evidence, not a proof of all future behavior.</p>
   </div>
 </section>
 

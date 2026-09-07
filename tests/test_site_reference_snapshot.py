@@ -6,10 +6,10 @@
 generated output (tools/build_site_reference.py), not hand-authored — the same
 "commit the generated artifact, diff it in review" discipline as
 test_corpus_snapshot.py. This test regenerates into memory and compares against the
-committed files so a change to docs/LANGUAGE.md or the fslc CLI surface that forgot to
+committed files so a change to docs/LANGUAGE.md or the native CLI contract that forgot to
 regenerate the site fails loudly instead of silently shipping a stale reference page.
 
-Regenerate after an intended change to LANGUAGE.md or the CLI surface with::
+Regenerate after an intended change to LANGUAGE.md or the native CLI contract with::
 
     python tools/build_site_reference.py
 """
@@ -159,7 +159,7 @@ def test_generated_reference_pages_are_fresh(page_id):
             source_note = "docs/LANGUAGE.ja.md" if lang == "ja" else "docs/LANGUAGE.md"
         else:
             tree = mod.render_cli_tree()
-            source_note = "src/fslc/cli.py"
+            source_note = "rust/fslc/cli-contract.json"
         fresh = mod.page_shell(page_id, lang, tree, source_note)
         assert fresh == committed, (
             f"docs/intro/{page_id}.{lang}.html is stale — run "

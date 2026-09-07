@@ -32,11 +32,12 @@
 <section>
   <div class="wrap">
     <p class="kicker reveal">0. 導入</p>
-    <h2 class="reveal">依存はlarkとz3-solverの2つだけ</h2>
-    <p class="lead narrow reveal">C++コンパイラや別途のZ3インストールは不要です。Mac/Windows/Linuxとも <code>pip install</code> だけで揃います（Python 3.9+）。</p>
+    <h2 class="reveal">ネイティブ Rust 検証器をビルドする</h2>
+    <p class="lead narrow reveal">権威ある <code>fslc</code> CLI は <code>rust/fslc</code> のネイティブ Rust バイナリです。ブラウザ Worker と同じ JSON/終了コード/replay 契約を共有します。以下の各コマンドは同じネイティブチェーン — <code>fsl-syntax</code> → <code>fsl-core</code> → ソルバー非依存の <code>fsl-runtime</code> Monitor/BFS → <code>fsl-verifier</code> — で動きます。<code>src/fslc/</code> の凍結 Python パッケージは互換性 parity 用のみで、配布面ではありません。</p>
     <pre><code>git clone https://github.com/ymm-oss/fsl && cd fsl
-python3 -m venv .venv &amp;&amp; source .venv/bin/activate
-pip install -e ".[dev]"   # lark, z3-solver, pytest + fslc を editable install</code></pre>
+cargo build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --locked
+export PATH="$PWD/rust/target/debug:$PATH"   # --release なら target/release
+fslc --version</code></pre>
   </div>
 </section>
 

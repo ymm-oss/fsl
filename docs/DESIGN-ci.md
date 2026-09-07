@@ -1304,6 +1304,51 @@ deferred precisely because they never report on an ordinary pull request.
 `current_user_can_bypass` is `"never"` for every account — an administrator cannot merge past a
 failing or missing required context.
 
+### Site reference context scope
+
+`site reference freshness` remains one required, unfiltered, non-product
+documentation-artifact context. It has three deliberately separate checks: the
+generated-reference freshness snapshots for `language.{ja,en}.html` and
+`cli.{ja,en}.html`, static manual-route integrity for
+`index.{ja,en}.html` and `examples.{ja,en}.html`, and the sitewide refresh
+contract. That third check covers, exhaustively as of this writing: shell CSS/JS
+wiring, playground asset isolation, palette single-source wiring, docs-sidebar
+gutter survival, the sitewide correctness-backbone structure in `site.js` and the
+home page's own backbone markup, the hub journey contract, the
+static playground skip link and its focusable landmark, the landmark attributes
+`site.js` assigns on its skip-link injection path, the locale toggle's
+`aria-current`, the breadcrumb's accessible name, and CLI pages that no longer
+cite frozen Python as authority. Keep this list in step with the module: a
+branch added to one of its `audit_*` functions extends what a required context
+enforces, so an unlisted branch makes this paragraph under-describe the gate.
+
+The workflow invokes `tests/test_site_reference_snapshot.py`,
+`tests/test_site_manual_integrity.py`, and
+`tests/test_site_refresh_contract.py` explicitly. The snapshot module remains
+generated-reference-only; the manual test checks ordered static routes, unique labels,
+local fragments, and pinned blob objects in checked-out Git history without fetching URLs;
+the refresh-contract test reads checked-out static files only, with no live server, no URL
+fetching, and no browser-automation or subprocess dependency, and carries rejecting mutant
+controls alongside its positive assertions. Those controls establish that each checker
+returns a non-empty offender list under the mutation it is cited for; several of the
+checks are substring searches over `site.js`, so they do not establish that the marker
+they find is reached at runtime. They are no longer satisfied by a marker left
+behind in a *whole-line* comment: every such check first blanks lines whose first
+non-space characters are `//`, and lines inside a `/* */` block opening at line start.
+Commenting out an assignment is a calibrated rejecting mutation for the skip-link,
+backbone, locale-nav, and breadcrumb checks. The stripper is deliberately line-oriented: it does not
+tokenize, so it cannot be defeated by a string, a regex literal, or a division. It is
+**not** immune to altering a code line — a multi-line template literal whose inner line
+begins with `//` has that line blanked, and `*/ realCode();` loses the whole line. Both
+are measured, and neither occurs in the current `site.js`: of its 64 blanked lines, zero
+fall outside a comment region. A **trailing** comment after code is also not stripped.
+Issue #1006 records all three gaps. Being reached at runtime is still not established --
+only that a line of code, not a whole-line comment, contains the marker. None of the three checks establishes
+Rust/solver behavior, native CLI parity, browser rendering,
+or assistive-technology behavior. This expands the context's bounded documentation-artifact scope
+without changing its name, ruleset membership, job, triggers, Python package dependencies,
+permissions, timeout, or concurrency; `fetch-depth: 0` supplies local Git history for pinned blobs.
+
 This closes the gap issue #707 opened: the Safe rollout section below has always required the
 Linux evidence to be *required*, not merely running, and until this change only `merge readiness`
 was. Making the other four required was blocked before, because `ci.yml`'s `paths-ignore` exemption

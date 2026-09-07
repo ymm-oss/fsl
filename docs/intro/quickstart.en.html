@@ -32,11 +32,12 @@
 <section>
   <div class="wrap">
     <p class="kicker reveal">0. Install</p>
-    <h2 class="reveal">Two dependencies: lark and z3-solver</h2>
-    <p class="lead narrow reveal">No C++ compiler or separate Z3 install needed. Mac/Windows/Linux all work with plain <code>pip install</code> (Python 3.9+).</p>
+    <h2 class="reveal">Build the native Rust verifier</h2>
+    <p class="lead narrow reveal">The authoritative <code>fslc</code> CLI is the native Rust binary under <code>rust/fslc</code>. It shares the JSON/exit/replay contract with the browser Worker. The same native chain — <code>fsl-syntax</code> → <code>fsl-core</code> → solver-free <code>fsl-runtime</code> Monitor/BFS → <code>fsl-verifier</code> — powers every command below. The frozen Python package in <code>src/fslc/</code> exists for compatibility parity only — do not treat it as the distribution surface.</p>
     <pre><code>git clone https://github.com/ymm-oss/fsl && cd fsl
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"   # lark, z3-solver, pytest + an editable install of fslc</code></pre>
+cargo build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --locked
+export PATH="$PWD/rust/target/debug:$PATH"   # or use target/release after --release
+fslc --version</code></pre>
   </div>
 </section>
 

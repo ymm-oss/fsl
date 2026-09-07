@@ -21,7 +21,7 @@
     <nav class="breadcrumb" data-nav></nav>
     <p class="kicker reveal">Writing the Design Layer</p>
     <h1 class="reveal">Turn a requirements contract into<br><span class="hl">implementable, provable state</span>.</h1>
-    <p class="lead reveal">The design layer is an ordinary <code>spec</code>: internal state, actions, queues, and outboxes. A separate <code>refinement</code> mapping proves the design still obeys the requirements above, and the same spec becomes the oracle for implementation conformance below — this file <b>is</b> the design document, not a stand-in for one, so there's nothing else to keep in sync.</p>
+    <p class="lead reveal">The design layer is an ordinary <code>spec</code>: internal state, actions, queues, and outboxes. A separate <code>refinement</code> mapping checks, to the depth you run, that the design still obeys the requirements above (<code>refine</code> returns <code>refines</code>, not <code>proved</code>), and the same spec becomes the oracle for implementation conformance below — this file <b>is</b> the design document, not a stand-in for one, so there's nothing else to keep in sync.</p>
   </div>
 </section>
 
@@ -121,7 +121,7 @@
 <section id="refine" style="background:var(--surface-2)">
   <div class="wrap">
     <p class="kicker reveal">3. Refine Up</p>
-    <h2 class="reveal">Prove the design still obeys requirements with a <code>refinement</code> mapping</h2>
+    <h2 class="reveal">Check the design still obeys requirements with a <code>refinement</code> mapping</h2>
     <p class="lead narrow reveal">The mapping lives in a third file that pollutes neither spec. It maps every internal action either to one requirement action or to <code>stutter</code> ("nothing happens upstairs"), and maps every abstract state variable back out of the internal state.</p>
 
     <div class="panel reveal">
@@ -242,7 +242,7 @@
     </table>
 
     <div class="callout warn reveal" style="margin-top:24px">
-      <p style="margin:0"><b>Fairness is not inherited through synchronization.</b> A synchronized action is fair only if you declare it so; otherwise FSL warns <code>fair_not_inherited</code>. A <code>compose</code> can itself be the <code>impl</code> side of <code>fslc refine</code>, so a whole assembly can be proven against one requirements contract.</p>
+      <p style="margin:0"><b>Fairness is not inherited through synchronization.</b> A synchronized action is fair only if you declare it so; otherwise FSL warns <code>fair_not_inherited</code>. A <code>compose</code> can itself be the <code>impl</code> side of <code>fslc refine</code>, so a whole assembly can be checked against one requirements contract — <code>refine</code> returns <code>refines</code> at the depth you run, not <code>proved</code>.</p>
     </div>
   </div>
 </section>
@@ -287,12 +287,12 @@
 
     <div class="vs reveal" style="margin-top:24px">
       <div class="card">
-        <h3>✅ What the design layer guarantees</h3>
-        <p>The design's own invariants and partial-op safety (with induction, unboundedly); <b>safety inclusion</b> up to requirements via <code>refine</code>; opt-in liveness where you wrote <code>preserve progress</code> + <code>fair</code>; and implementation conformance <i>only where</i> <code>testgen</code> or <code>replay</code> is anchored to real code or logs.</p>
+        <h3>✅ What the design layer establishes, and how far</h3>
+        <p>The design's own invariants and partial-op safety (with induction, unboundedly); <b>safety inclusion</b> up to requirements via <code>refine</code>; opt-in liveness where you wrote <code>preserve progress</code> + <code>fair</code>; and implementation conformance <i>only where</i> <code>replay</code> has judged a real observed trace — <code>testgen</code> emits a harness, so generating one establishes nothing until it is run against real code.</p>
       </div>
       <div class="card">
         <h3>⚠ What it does not</h3>
-        <p>That the requirements themselves are correct (refine assumes <code>abs</code> was verified separately); automatic liveness propagation; real code correctness until a harness is anchored; and anything outside the kernel — probability, percentiles, real-time milliseconds, or external-service behavior.</p>
+        <p>That the requirements themselves are correct (refine assumes <code>abs</code> was verified separately); automatic liveness propagation; real code correctness — a harness or <code>replay</code> covers only the cases and traces actually observed, never the whole implementation; and anything outside the kernel — probability, percentiles, real-time milliseconds, or external-service behavior.</p>
       </div>
     </div>
   </div>
@@ -307,7 +307,7 @@
       <li><h3>Is every abstract variable mapped?</h3><p>The mapping must cover all requirement-layer state, or <code>refine</code> reports a missing map.</p></li>
       <li><h3>Did you prove the design on its own?</h3><p>Re-check its invariants with <code>verify</code> and <code>--engine induction</code> before connecting upward.</p></li>
       <li><h3>Does any response still matter?</h3><p>If so, cover it with <code>preserve progress</code> <i>and</i> a lower <code>fair</code> action — safety refinement alone will not keep it.</p></li>
-      <li><h3>Are proof categories reported separately?</h3><p>Design invariants proved, refinement-to-requirements proved, and implementation conformance <b>not</b> proved unless <code>testgen</code> or <code>replay</code> is anchored to real code or logs.</p></li>
+      <li><h3>Are proof categories reported separately?</h3><p>Design invariants <code>proved</code>, refinement-to-requirements <code>refines</code> (a separate result class, bounded at the depth you ran), and implementation conformance <b>not</b> proved unless <code>testgen</code> or <code>replay</code> is anchored to real code or logs.</p></li>
     </ol>
 
     <div class="cta reveal" style="margin-top:32px">

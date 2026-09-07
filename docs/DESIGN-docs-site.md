@@ -262,6 +262,18 @@ readable in Japanese, accepting the resulting maintenance cost.
   `#688` frozen-`cli.py` asymmetry this addendum flagged is unchanged by any of this and stays
   open: requiring the check makes a frozen-reference argparse edit force a site update exactly as
   before, and the two surfaces' actual flag/subcommand parity remains unmeasured.
+  **Superseded by the SITE-RUST-CONTENT-REFRESH-R1 addendum below**, which moves the CLI pages off
+  frozen-`cli.py` generation; read that addendum for the current authority. The paragraph above is
+  kept as the record of why the check was required while the asymmetry still existed.
+- **Addendum (SITE-RUST-CONTENT-REFRESH-R1) — CLI reference authority moves to the native contract.**
+  `docs/intro/cli.{ja,en}.html` are now generated from `rust/fslc/cli-contract.json`, the same
+  artifact the native `fslc` binary embeds (`fslc --cli-contract`). Exit-code and JSON-envelope
+  prose on those pages cites `docs/LANGUAGE.md` and `rust/fslc/src/outcome.rs::exit_status()`;
+  it must not present `src/fslc/cli.py` argparse introspection as the current CLI authority.
+  The frozen Python compatibility reference under `src/fslc/` may appear on hand-authored pages
+  only when explicitly labeled frozen/compatibility-only. `#688`'s site-generator asymmetry is
+  resolved; parity between the native contract and the frozen exporter remains a separate harness
+  concern (`tools/export_cli_contract.py` refuses to overwrite the native file).
 - **Addendum (#741) — heading-correspondence check, not just count.** `render_language_tree()`'s
   section-count comparison (above) only asserted `len(ja_sections) == len(en_sections)`; it paired
   the two languages **positionally** (`zip(en_sections, render_sections)`) and never compared the
