@@ -100,103 +100,47 @@ def _loads_shared_assets(path: Path) -> bool:
     return _loads_shared_asset_links(path.read_text(encoding="utf-8"))
 
 
-def _starts_regex_literal(src: str, i: int) -> bool:
-    """Whether src[i] == "/" opens a regex literal rather than a comment or division.
-
-    Needed because a regex may legally contain "//" or "/*", which the comment
-    scanner would otherwise treat as the start of a comment and blank out real code.
-    Decided from the previous significant character: after a value (identifier,
-    literal, closing bracket) a "/" is division; after an operator, an opening
-    bracket, or a keyword it opens a regex.
-    """
-    if i + 1 >= len(src) or src[i + 1] in "/*":
-        return False
-    j = i - 1
-    while j >= 0 and src[j] in " \t":
-        j -= 1
-    if j < 0:
-        return True
-    prev = src[j]
-    if prev in "=(,:[!&|?{};\n+-*%~^<>":
-        return True
-    for keyword in ("return", "typeof", "case", "in", "of", "new", "delete", "void"):
-        if src[: j + 1].endswith(keyword) and (
-            j + 1 - len(keyword) == 0 or not (src[j - len(keyword)].isalnum() or src[j - len(keyword)] == "_")
-        ):
-            return True
-    return False
-
-
 def strip_js_comments(js_text: str) -> str:
-    """Blank out // and /* */ comments in site.js, preserving offsets and strings.
+    """Blank out whole-line comments in site.js, preserving line count and offsets.
 
-    Every substring check in this module that reads site.js source was satisfied by
-    a marker left behind in a comment while the code that used it was gone. (Checks
-    that read page HTML instead are unaffected -- HTML has no // comments.)
-    Measured: commenting out the breadcrumb aria-label assignment left
-    audit_locale_nav_contract green, because both the assignment substring and the
-    label strings survive inside `// crumb.setAttribute(...)`.
+    Every check below that reads site.js searches it for marker substrings, so a
+    marker left behind in a comment satisfied them while the code that used it was
+    gone. Measured: commenting out the breadcrumb aria-label assignment left
+    audit_locale_nav_contract green, because the assignment substring and both label
+    strings survive inside `// crumb.setAttribute(...)`.
 
-    String-aware on purpose -- site.js line 4 holds "http://www.w3.org/2000/svg",
-    which a naive `//` strip would truncate. Comment bodies are replaced with
-    spaces rather than removed so that reported offsets stay comparable.
+    Deliberately line-oriented rather than a JS tokenizer. Only lines whose first
+    non-space characters are `//`, and lines inside a `/* ... */` block that opens at
+    the start of a line, are blanked; a line containing code is never touched. That
+    makes it correct by construction -- it cannot mangle a string, a regex literal, a
+    template literal, or a division -- at the cost of not stripping a trailing comment
+    after code on the same line.
+
+    Three attempts at a real tokenizer here each shipped a new defect (regex literals
+    containing `//`, comments inside `${...}`, nested braces in an interpolation, and
+    a guard that misread `(x1 + x2) / 2` as ambiguous). site.js has 22 whole-line
+    comments and 6 trailing ones, and every mutation that actually defeated a check
+    was a commented-out implementation line, i.e. whole-line. The trailing-comment gap
+    is recorded in issue #1006 rather than patched again here.
     """
-    out = list(js_text)
-    i, n = 0, len(js_text)
-    # Stack of open contexts: a quote character, or "}" for a template
-    # interpolation. `${...}` inside a template literal is code, so comments in it
-    # must be stripped too -- otherwise a marker inside
-    # `${(() => { // initBackbone(); ... })()}` shadows the real one.
-    stack: list[str] = []
-    while i < n:
-        c = js_text[i]
-        quote = stack[-1] if stack and stack[-1] != "}" else None
-        if quote:
-            if c == "\\":
-                i += 2
-                continue
-            if quote == "`" and c == "$" and i + 1 < n and js_text[i + 1] == "{":
-                stack.append("}")
-                i += 2
-                continue
-            if c == quote:
-                stack.pop()
-            i += 1
-            continue
-        if c == "}" and stack and stack[-1] == "}":
-            stack.pop()
-            i += 1
-            continue
-        if c in "\"'`":
-            stack.append(c)
-            i += 1
-            continue
-        if c == "/" and _starts_regex_literal(js_text, i):
-            i += 1
-            while i < n and js_text[i] != "/":
-                if js_text[i] == "\\":
-                    i += 2
-                    continue
-                if js_text[i] == "\n":
-                    break
-                i += 1
-            i += 1
-            continue
-        if c == "/" and i + 1 < n and js_text[i + 1] == "/":
-            while i < n and js_text[i] != "\n":
-                out[i] = " "
-                i += 1
-            continue
-        if c == "/" and i + 1 < n and js_text[i + 1] == "*":
-            while i < n and not (js_text[i] == "*" and i + 1 < n and js_text[i + 1] == "/"):
-                if js_text[i] != "\n":
-                    out[i] = " "
-                i += 1
-            for j in range(i, min(i + 2, n)):
-                out[j] = " "
-            i += 2
-            continue
-        i += 1
+    out = []
+    in_block = False
+    for line in js_text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        eol = line[len(body):]
+        stripped = body.strip()
+        if in_block:
+            blanked = True
+            if "*/" in body:
+                in_block = False
+        elif stripped.startswith("//"):
+            blanked = True
+        elif stripped.startswith("/*"):
+            blanked = True
+            in_block = "*/" not in stripped[2:]
+        else:
+            blanked = False
+        out.append((" " * len(body)) + eol if blanked else line)
     return "".join(out)
 
 
@@ -684,43 +628,49 @@ def test_site_refresh_playground_skip_rejects_unfocusable_main_mutant():
     assert audit_playground_skip_contract(texts) == []
 
 
-def test_strip_js_comments_preserves_code_it_must_not_touch():
-    """The comment scanner is hand-written and six checks depend on it.
+def test_strip_js_comments_blanks_only_comment_lines():
+    """The scanner is line-oriented, and six checks depend on it.
 
-    Cited mutation for the regex arm: drop _starts_regex_literal's regex handling and
-    the first case below mangles real code into `const re = /\\/\\`.
+    Cited mutations, each below: a whole-line `//` comment and a `/* */` block must be
+    blanked; a line containing code must be returned byte-for-byte, whatever it holds.
 
-    site.js has no regex containing // or /* today, so this guards a latent defect:
-    mangled code would make a check report a marker missing that is actually present.
+    The second half is why this is line-oriented rather than a tokenizer: it makes
+    mangling structurally impossible instead of a case to get right. It also bounds
+    what the scanner claims -- a trailing comment after code is *not* stripped, which
+    issue #1006 records.
     """
-    keep_cases = (
-        (r'const re = /\/\//g; const keep = 1;', "const keep = 1;"),
-        (r'const re = /\/\*/g; const keep = 2;', "const keep = 2;"),
-        ("const x = a / b; // gone", "const x = a / b;"),
-        ("const p = h.scrollTop / (h.scrollHeight - 1); // gone", "h.scrollHeight - 1)"),
-        ('const u = "http://x.y/z"; // gone', '"http://x.y/z"'),
-        ("const t = `a//b ${x} c`; // gone", "`a//b ${x} c`"),
-        ('const s = "*/"; const keep = 3;', "const keep = 3;"),
-    )
-    for src, must_survive in keep_cases:
-        out = strip_js_comments(src)
-        assert must_survive in out, f"stripper mangled code: {src!r} -> {out!r}"
-        assert "gone" not in out, f"stripper left a comment body: {src!r} -> {out!r}"
+    # Lines containing code are returned unchanged, including the constructs that
+    # defeated three tokenizer attempts here.
+    for line in (
+        r'  const re = /\/\//g;',
+        r'  const re = /\/\*/g;',
+        "  const cx = (x1 + x2) / 2;",
+        '  const NS = "http://www.w3.org/2000/svg";',
+        "  const t = `a//b ${x} c`;",
+        '  const s = "*/";',
+        '  const t = `x ${(() => { const o = {}; return ""; })()} y`;',
+    ):
+        assert strip_js_comments(line + "\n") == line + "\n", f"code line altered: {line!r}"
 
-    # A comment inside a template interpolation is code, not template text, so it
-    # must be stripped; template *text* containing // must not be.
-    interp = 'const t = `x ${(() => { // initBackbone();\n  return ""; })()} y`;'
-    assert "initBackbone();" not in strip_js_comments(interp), (
-        "comment inside ${...} not stripped -- comment shadowing recurs there"
-    )
-    assert "`a//b ${x} c`" in strip_js_comments("const t = `a//b ${x} c`; // gone")
+    # Comment lines are blanked, and the line structure is kept.
+    assert strip_js_comments("  // initBackbone();\n").strip() == ""
+    block = "  /* initBackbone();\n     more\n  */\n  keep();\n"
+    out = strip_js_comments(block)
+    assert "initBackbone();" not in out, out
+    assert "keep();" in out
+    assert len(out.splitlines()) == len(block.splitlines())
 
     js = JS.read_text(encoding="utf-8")
     stripped = strip_js_comments(js)
-    assert len(stripped) == len(js), "stripper must preserve offsets"
-    assert 'http://www.w3.org/2000/svg' in stripped, "string content must survive"
-    for marker in ('main.setAttribute("tabindex", "-1")', "initBackbone();", HOOK):
-        assert marker in stripped, f"stripper removed real code: {marker}"
+    assert len(stripped) == len(js), "offsets must be preserved"
+    assert len(stripped.splitlines()) == len(js.splitlines())
+    for survives in (
+        'http://www.w3.org/2000/svg', "(x1 + x2) / 2", r"/\{(\w+)\}/g",
+        'main.setAttribute("tabindex", "-1")', "initBackbone();", HOOK,
+        'crumb.setAttribute("aria-label"',
+    ):
+        assert survives in stripped, f"scanner removed real code: {survives}"
+    assert "technology never receives" not in stripped, "block comment body kept"
 
 
 def test_js_source_checks_reject_commented_out_code():
