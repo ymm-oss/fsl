@@ -273,7 +273,7 @@ verify { values Amount = 0..3 }</code></pre>
 $ fslc verify examples/e2e/2_requirements.fsl --engine induction
 # JSON implements.result == "refines" を確認
 $ fslc refine examples/e2e/3_design.fsl examples/e2e/2_requirements.fsl examples/e2e/3_refines_2.fsl --depth 8</code></pre>
-      <p style="margin:14px 0 0;font-size:14px;color:var(--muted)">各ステップの緑は1つの seam の有界証拠であり、全ランタイム経路の証明ではありません。実装観測（<code>testgen</code>、replay）は <a href="examples.ja.html#correctness-chain">e2e ウォークスルー</a> を参照。</p>
+      <p style="margin:14px 0 0;font-size:14px;color:var(--muted)">各ステップの緑は1つの seam の証拠ですが、種類はステップごとに違います。<code>--engine induction</code> の2本は <code>proved</code>（検査した性質について無制限）を返し、<code>refine --depth 8</code> は深さ8の有界検査です。どちらも全ランタイム経路の証明ではありません。実装観測（<code>testgen</code>、replay）は <a href="examples.ja.html#correctness-chain">e2e ウォークスルー</a> を参照。</p>
     </div>
   </div>
 </section>

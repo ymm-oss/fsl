@@ -265,7 +265,7 @@ verify { values Amount = 0..3 }</code></pre>
 $ fslc verify examples/e2e/2_requirements.fsl --engine induction
 # assert JSON implements.result == "refines"
 $ fslc refine examples/e2e/3_design.fsl examples/e2e/2_requirements.fsl examples/e2e/3_refines_2.fsl --depth 8</code></pre>
-      <p style="margin:14px 0 0;font-size:14px;color:var(--muted)">Each green step is bounded evidence for one seam — not proof that every runtime path is correct. See <a href="examples.en.html#correctness-chain">the e2e walkthrough</a> for implementation observation (<code>testgen</code>, replay).</p>
+      <p style="margin:14px 0 0;font-size:14px;color:var(--muted)">Each green step is evidence for one seam, and the kind differs per step: the two <code>--engine induction</code> runs return <code>proved</code> (unbounded for the properties they check), while <code>refine --depth 8</code> is bounded at depth 8. Neither is proof that every runtime path is correct. See <a href="examples.en.html#correctness-chain">the e2e walkthrough</a> for implementation observation (<code>testgen</code>, replay).</p>
     </div>
   </div>
 </section>

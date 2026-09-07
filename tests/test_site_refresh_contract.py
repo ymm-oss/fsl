@@ -188,7 +188,17 @@ def audit_playground_skip_contract(texts: dict[str, str]) -> list[str]:
 #
 # Matched inside initSkipLink's own body rather than anywhere in the file, so the shortest
 # way to satisfy this is to actually set the attribute on the injection path.
-SKIP_JS_FOCUSABLE_MARKERS = ('hasAttribute("tabindex")', 'setAttribute("tabindex", "-1")')
+# Receiver-qualified on purpose. Bare 'setAttribute("tabindex", "-1")' is satisfied by
+# link.setAttribute(...) too, which would leave the landmark unfocusable while the check
+# stayed green. The id assignment is here for the same reason the tabindex one is: on the
+# 48 injected pages there is no static id="main" (measured: index.en.html and cli.en.html
+# both contain zero <main ... id="main">), so the injected href="#main" has no target at
+# all without it.
+SKIP_JS_FOCUSABLE_MARKERS = (
+    'main.hasAttribute("tabindex")',
+    'main.setAttribute("tabindex", "-1")',
+    'main.id = "main"',
+)
 INIT_SKIP_LINK_RE = re.compile(
     r"function initSkipLink\(\)\s*\{(.*?)\n  \}", re.S
 )
@@ -212,7 +222,7 @@ def audit_skip_injection_sets_tabindex(js_text: str) -> list[str]:
     # The attribute has to be set before the early return that fires when a static skip
     # link already exists, or a page shipping its own link keeps an inert landmark.
     early_return = body.find('if ($(".skip-link")) return;')
-    tabindex_at = body.find('setAttribute("tabindex", "-1")')
+    tabindex_at = body.find('main.setAttribute("tabindex", "-1")')
     if early_return >= 0 and tabindex_at >= 0 and tabindex_at > early_return:
         missing.append("skip-js-tabindex-set-after-early-return")
     return missing
@@ -492,8 +502,17 @@ def test_site_js_skip_injection_rejects_the_missing_tabindex_mutant():
     )
     assert mutant != js, "anchor for the focusability assignment not found in site.js"
     offenders = audit_skip_injection_sets_tabindex(mutant)
-    assert 'skip-js-missing-hasAttribute("tabindex")' in offenders
-    assert 'skip-js-missing-setAttribute("tabindex", "-1")' in offenders
+    assert 'skip-js-missing-main.hasAttribute("tabindex")' in offenders
+    assert 'skip-js-missing-main.setAttribute("tabindex", "-1")' in offenders
+    assert audit_skip_injection_sets_tabindex(js) == []
+
+
+def test_site_js_skip_injection_rejects_the_missing_landmark_id_mutant():
+    """Without main.id the injected href="#main" has no target on the 48 injected pages."""
+    js = JS.read_text(encoding="utf-8")
+    mutant = js.replace('    if (!main.id) main.id = "main";\n', "", 1)
+    assert mutant != js, "anchor for the landmark id assignment not found in site.js"
+    assert 'skip-js-missing-main.id = "main"' in audit_skip_injection_sets_tabindex(mutant)
     assert audit_skip_injection_sets_tabindex(js) == []
 
 

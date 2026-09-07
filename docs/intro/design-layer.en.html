@@ -307,7 +307,7 @@
       <li><h3>Is every abstract variable mapped?</h3><p>The mapping must cover all requirement-layer state, or <code>refine</code> reports a missing map.</p></li>
       <li><h3>Did you prove the design on its own?</h3><p>Re-check its invariants with <code>verify</code> and <code>--engine induction</code> before connecting upward.</p></li>
       <li><h3>Does any response still matter?</h3><p>If so, cover it with <code>preserve progress</code> <i>and</i> a lower <code>fair</code> action — safety refinement alone will not keep it.</p></li>
-      <li><h3>Are proof categories reported separately?</h3><p>Design invariants proved, refinement-to-requirements proved, and implementation conformance <b>not</b> proved unless <code>testgen</code> or <code>replay</code> is anchored to real code or logs.</p></li>
+      <li><h3>Are proof categories reported separately?</h3><p>Design invariants <code>proved</code>, refinement-to-requirements <code>refines</code> (a separate result class, bounded at the depth you ran), and implementation conformance <b>not</b> proved unless <code>testgen</code> or <code>replay</code> is anchored to real code or logs.</p></li>
     </ol>
 
     <div class="cta reveal" style="margin-top:32px">

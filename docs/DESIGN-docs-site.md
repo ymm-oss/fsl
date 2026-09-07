@@ -262,6 +262,9 @@ readable in Japanese, accepting the resulting maintenance cost.
   `#688` frozen-`cli.py` asymmetry this addendum flagged is unchanged by any of this and stays
   open: requiring the check makes a frozen-reference argparse edit force a site update exactly as
   before, and the two surfaces' actual flag/subcommand parity remains unmeasured.
+  **Superseded by the SITE-RUST-CONTENT-REFRESH-R1 addendum below**, which moves the CLI pages off
+  frozen-`cli.py` generation; read that addendum for the current authority. The paragraph above is
+  kept as the record of why the check was required while the asymmetry still existed.
 - **Addendum (SITE-RUST-CONTENT-REFRESH-R1) — CLI reference authority moves to the native contract.**
   `docs/intro/cli.{ja,en}.html` are now generated from `rust/fslc/cli-contract.json`, the same
   artifact the native `fslc` binary embeds (`fslc --cli-contract`). Exit-code and JSON-envelope

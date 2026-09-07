@@ -311,7 +311,7 @@
       <li><h3>すべての抽象変数が対応づいているか</h3><p>対応表は要件層の状態をすべて覆う必要があります。さもないと <code>refine</code> が対応漏れを報告します。</p></li>
       <li><h3>設計を単体で証明したか</h3><p>上につなぐ前に、<code>verify</code> と <code>--engine induction</code> で不変条件を再確認します。</p></li>
       <li><h3>まだ重要な応答があるか</h3><p>あるなら <code>preserve progress</code> <i>と</i> 下位の <code>fair</code> 操作で覆います。安全性の詳細化だけでは保てません。</p></li>
-      <li><h3>証明の種類を分けて報告したか</h3><p>設計の不変条件を証明、要件への詳細化を証明、そして実装適合は <code>testgen</code> か <code>replay</code> を実コード・実ログにつながない限り<b>証明していない</b>と分けます。</p></li>
+      <li><h3>証明の種類を分けて報告したか</h3><p>設計の不変条件は <code>proved</code>、要件への詳細化は <code>refines</code>（別の result class で、実行した深さでの有界検査）、そして実装適合は <code>testgen</code> か <code>replay</code> を実コード・実ログにつながない限り<b>証明していない</b>と分けます。</p></li>
     </ol>
 
     <div class="cta reveal" style="margin-top:32px">

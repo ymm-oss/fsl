@@ -452,7 +452,7 @@
         seam: "Adapter / oracle",
         intent: "Runtime code or logs projected into the design spec's logical state.",
         contract: "Design spec is the oracle; <code>Adapter.observe()</code> must be honest.",
-        evidence: "<code>fslc scenarios</code> and <code>testgen</code> generate cases; <code>replay</code> judges an observed trace <code>conformant</code> / <code>nonconformant</code>.",
+        evidence: "<code>fslc scenarios</code> enumerates cases and <code>testgen</code> emits a conformance harness; <code>replay</code> judges an observed trace <code>conformant</code> / <code>nonconformant</code>.",
         limitation: "Observed traces only — not all future paths; <code>leadsTo</code> cannot be judged from a finite log.",
         next: "Repair loop: counterexample → spec or code fix → re-run native <code>fslc</code>. Walkthrough: <a href=\"{href:examples}#correctness-chain\">examples/e2e</a>.",
       },
@@ -461,7 +461,7 @@
         seam: "Adapter / oracle",
         intent: "設計仕様の論理状態へ射影したランタイムコードまたはログ。",
         contract: "設計仕様が oracle；<code>Adapter.observe()</code> は正直であること。",
-        evidence: "<code>fslc scenarios</code> と <code>testgen</code> はケースを生成し、<code>replay</code> が観測トレースを <code>conformant</code> / <code>nonconformant</code> と判定します。",
+        evidence: "<code>fslc scenarios</code> はケースを列挙し <code>testgen</code> は適合ハーネスを生成します。<code>replay</code> が観測トレースを <code>conformant</code> / <code>nonconformant</code> と判定します。",
         limitation: "観測されたトレースのみ — 将来の全経路ではない；有限ログから <code>leadsTo</code> は判定できない。",
         next: "修復ループ：反例 → 仕様またはコード修正 → ネイティブ <code>fslc</code> を再実行。手順: <a href=\"{href:examples}#correctness-chain\">examples/e2e</a>。",
       },
@@ -818,6 +818,9 @@
     // "back to category" affordance — see DESIGN-docs-site.md D2).
     const crumb = $("nav.breadcrumb[data-nav]");
     if (crumb) {
+      // docs/DESIGN-docs-site.md requires <nav aria-label="Breadcrumb">; the static
+      // hosts ship unlabeled, so the accessible name is set here or nowhere.
+      crumb.setAttribute("aria-label", lang === "ja" ? "パンくずリスト" : "Breadcrumb");
       if (chapter) {
         const cat = CATEGORIES.find((c) => c.id === chapter.categoryId);
         const cm = catMeta(cat);
