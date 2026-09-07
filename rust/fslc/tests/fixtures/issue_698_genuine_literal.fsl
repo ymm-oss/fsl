@@ -1,0 +1,9 @@
+spec GenuineLiteral {
+  type Idx = 0..3
+  state { m: Map<Idx, Bool> }
+  init { forall i: Idx { m[i] = false } }
+  action twice() {
+    m[0] = true
+    m[0] = false
+  }
+}

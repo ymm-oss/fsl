@@ -63,6 +63,9 @@ fn reject(name: &str, position: &str, span: Option<Span>) -> ModelError {
         // classification did not exist yet (issue 565), and recorded the move
         // as pending.
         name_resolution: true,
+        diagnostic_code: None,
+        hint: None,
+        quick_fix: None,
     }
 }
 

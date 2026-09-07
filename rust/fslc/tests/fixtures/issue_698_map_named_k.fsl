@@ -1,0 +1,10 @@
+spec MapNamedK {
+  type Cell = 0..7
+  type Off  = 0..3
+  const BASE = 2
+  state { k: Map<Cell, Bool> }
+  init { forall i: Cell { k[i] = false } }
+  action shift() {
+    forall c: Off { k[BASE + c] = true }
+  }
+}
