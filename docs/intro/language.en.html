@@ -2967,7 +2967,11 @@ per-claim <code>causal_support</code>: <code>untested</code>, <code>supported</c
 that pin the current claim version, whose scope <code>subsumes</code> the claim scope,
 with declared freshness, an <code>active</code> lifecycle, and an observation window at
 least the claim's minimum lag count; one source lineage collapses to one vote
-(contradictions inside a lineage are <code>inconclusive</code>). Staleness is judged only
+(contradictions inside a lineage are <code>inconclusive</code>). An observation window
+that cannot be converted, or a claim whose <code>lag</code> is <code>unknown</code> so there is no
+<code>lag_min</code> to compare against, leaves timing eligibility not evaluable: the
+edge stays in history and in the graph but is excluded from current support
+with <code>evidence_timing_not_evaluable</code> and casts no vote. Staleness is judged only
 against an explicit <code>--as-of</code> date — never the wall clock. A scope dimension
 present on only the claim or artifact side is <code>unassessable</code>; absence is never
 treated as universal. <strong><code>causal_support</code>

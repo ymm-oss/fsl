@@ -488,6 +488,17 @@ check (`causal-check.v0`):
 ```
 
 analyze finding (every finding carries `formal_status: "not_a_violation"`).
+That holds by construction — `evidence_finding` in
+`rust/fsl-tools/src/causal_evidence.rs` writes the field for all fourteen
+evidence-plane finding types, and the structural-review builder does the same
+— but the executable check over the evidence plane is narrower than the claim:
+`causal_review_findings_are_never_violations` drives
+`--profile causal-review` **without** `--evidence`, so it observes none of the
+fourteen, and the `causal-findings.v0` validation added for #989 observes
+exactly one of them (`evidence_timing_not_evaluable`). Widening it to the
+remaining thirteen needs a triggering configuration per type — a single artifact for
+most, but two sharing a lineage for `duplicate_evidence_source` and two disagreeing
+within one lineage for `conflicting_evidence` — and is tracked separately.
 `confidence` is a deterministic structural score (e.g. the fraction of
 reachable outcomes that depend on the flagged claim, computed from the
 graph alone) — it is not a probability of causality, a Bayesian posterior,
@@ -673,7 +684,23 @@ never contradict, the sections above.
   (days × 24); `week` only when the difference is a whole number of weeks;
   `tick` and fractional conversions are `not_evaluable` (never rounded).
   `w < lag_min` excludes with `evidence_window_shorter_than_lag`;
-  `w == lag_min` passes.
+  `w == lag_min` passes. When that comparison cannot be made at all — the
+  window is `not_evaluable`, or the claim's `lag` is `unknown` so there is no
+  `lag_min` — the artifact excludes with `evidence_timing_not_evaluable` and
+  casts no vote, under the same rule as every other applicability condition:
+  it stays in history and in the graph. The window and the lag are two
+  independent reasons the comparison can fail, and each contributes its own
+  `not_evaluable` record on that evidence/claim edge, so a window that cannot
+  convert for a claim whose lag is also unknown reports both. The window side
+  reports the **first** check that refuses, in this fixed order:
+  `period_start_missing`, `period_end_missing`, `period_date_unparsable`,
+  `period_end_before_start`, `timebase_not_convertible`,
+  `week_window_not_whole_weeks`; the lag side reports `claim_lag_unknown`.
+  A date is parsed as `YYYY-MM-DD` with a month in 1..12 and a day in 1..31 —
+  day-of-month validity against the month is **not** checked, so an impossible
+  date such as `2026-02-31` converts as its normalized value rather than
+  reporting `period_date_unparsable`. That is pre-existing `civil_days`
+  behaviour and also governs `valid_until` staleness.
 - **Lineage.** The lineage root is the transitive `derived_from` root when
   present, else `source_study_id`, else the artifact itself. Roots sharing
   members emit `duplicate_evidence_source`; one root is one vote; support
