@@ -69,8 +69,8 @@ re-derive classes locally.
      `slice_missing`/`inconclusive` → `not_run`. Schema names such as
      `fsl-ai-statistical-result.v0` are not consulted.
   4. else → `not_run`.
-- `classify_source` — **not** in `src/fslc/assurance.py` (none of its seven
-  `def`s map a result dict to a pass/fail verdict). Issue #508's verdict
+- `classify_source` — **not** in `src/fslc/assurance.py` (none of its `def`s
+  map a result dict to a pass/fail verdict). Issue #508's verdict
   mapping lives in the native ledger as `evidence_verdict`
   (`rust/fsl-tools/src/ledger.rs`), which returns `Option<bool>`:
   `Some(true)` / `Some(false)` on rule 2's same 10 `result` tokens —
@@ -103,19 +103,20 @@ The shared classifier is a **display mapper**: it reads fields already present
 in a JSON dict and renders assurance labels. It is **not** a trust boundary
 for external evidence files.
 
-The loader rejects unreadable paths, non-UTF-8 bytes, invalid JSON, and
-non-object envelopes — and performs no schema, version, or producer checks
-beyond that.
+Both evidence-loading paths — `fslc ledger`'s inline read and the one
+`fslc document` uses — reject unreadable paths, non-UTF-8 bytes, invalid
+JSON, and non-object envelopes, and neither applies a schema, version, or
+producer check beyond that.
 
 - **Completeness-only upgrade.** `completeness` / `kernel.completeness` alone
   can classify as `proved` or `bounded` (e.g.
   `{"completeness":"unbounded",...}` without a matching `result` token). The
   loader and classifier do not confirm that the value came from a completed
   verification run.
-- **No binding.** Classification does not tie evidence to producer identity,
-  target spec digest/revision, or proof artifacts. The same `fslc ledger`
-  `--approval` path does compare versioned approval record spec/rendering
-  digests; external evidence has no equivalent.
+- **No binding.** Classification of external evidence does not tie it to
+  producer identity, target spec digest/revision, or proof artifacts. The same
+  `fslc ledger` `--approval` path does compare versioned approval record
+  spec/rendering digests; external evidence has no equivalent.
 - **Confirmation is out of band.** Responsibility for confirming that external
   evidence is authentic and applicable rests with a **versioned public
   Adapter** (rules under design in issue #994, go/no-go pending). FSL core —
