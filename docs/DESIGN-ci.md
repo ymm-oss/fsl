@@ -1321,8 +1321,11 @@ generated-reference-only; the manual test checks ordered static routes, unique l
 local fragments, and pinned blob objects in checked-out Git history without fetching URLs;
 the refresh-contract test reads checked-out static files only, with no live server, no URL
 fetching, and no browser-automation or subprocess dependency, and carries rejecting mutant
-controls alongside its positive assertions so the module cannot go green merely by
-describing whatever the pages currently say. None of the three checks establishes
+controls alongside its positive assertions. Those controls establish that each checker
+returns a non-empty offender list under the mutation it is cited for; several of the
+checks are substring searches over `site.js`, so they do not establish that the marker
+they find is reached at runtime, and a marker left behind in a comment would still
+satisfy them. None of the three checks establishes
 Rust/solver behavior, native CLI parity, browser rendering,
 or assistive-technology behavior. This expands the context's bounded documentation-artifact scope
 without changing its name, ruleset membership, job, triggers, Python package dependencies,

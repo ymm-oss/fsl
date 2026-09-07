@@ -194,8 +194,13 @@ INIT_SKIP_LINK_RE = re.compile(
 )
 
 
-def audit_injected_skip_focusability(js_text: str) -> list[str]:
-    """site.js must make the <main> landmark focusable where it injects a skip link."""
+def audit_skip_injection_sets_tabindex(js_text: str) -> list[str]:
+    """site.js's skip-link injection path must assign tabindex to the landmark.
+
+    Source-structure check on site.js, not a focus-behavior check: nothing here
+    renders a page. That the assignment actually moves focus was measured in a
+    browser (see the commit that introduced it), and no CI lane observes it.
+    """
     missing: list[str] = []
     match = INIT_SKIP_LINK_RE.search(js_text)
     if not match:
@@ -458,31 +463,31 @@ def test_site_refresh_playground_skip_link_contract():
     assert audit_playground_skip_contract(texts) == []
 
 
-def test_site_refresh_injected_skip_link_targets_a_focusable_landmark():
-    assert audit_injected_skip_focusability(JS.read_text(encoding="utf-8")) == []
+def test_site_js_skip_injection_sets_tabindex_on_the_landmark():
+    assert audit_skip_injection_sets_tabindex(JS.read_text(encoding="utf-8")) == []
 
 
-def test_site_refresh_injected_skip_rejects_unfocusable_landmark_mutant():
+def test_site_js_skip_injection_rejects_the_missing_tabindex_mutant():
     js = JS.read_text(encoding="utf-8")
     mutant = js.replace(
         '    if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");\n', "", 1
     )
     assert mutant != js, "anchor for the focusability assignment not found in site.js"
-    offenders = audit_injected_skip_focusability(mutant)
+    offenders = audit_skip_injection_sets_tabindex(mutant)
     assert 'skip-js-missing-hasAttribute("tabindex")' in offenders
     assert 'skip-js-missing-setAttribute("tabindex", "-1")' in offenders
-    assert audit_injected_skip_focusability(js) == []
+    assert audit_skip_injection_sets_tabindex(js) == []
 
 
-def test_site_refresh_injected_skip_rejects_late_tabindex_mutant():
+def test_site_js_skip_injection_rejects_the_late_tabindex_mutant():
     """Setting the attribute after the early return leaves static-link pages inert."""
     js = JS.read_text(encoding="utf-8")
     assignment = '    if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");\n'
     early = '    if ($(".skip-link")) return;\n'
     mutant = js.replace(assignment, "", 1).replace(early, early + assignment, 1)
     assert mutant != js, "anchors for the reordering mutant not found in site.js"
-    assert "skip-js-tabindex-set-after-early-return" in audit_injected_skip_focusability(mutant)
-    assert audit_injected_skip_focusability(js) == []
+    assert "skip-js-tabindex-set-after-early-return" in audit_skip_injection_sets_tabindex(mutant)
+    assert audit_skip_injection_sets_tabindex(js) == []
 
 
 def test_site_refresh_playground_skip_rejects_english_label_mutant():

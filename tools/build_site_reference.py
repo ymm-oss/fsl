@@ -297,7 +297,12 @@ def _render_cli_command_nodes(node: dict, *, skip_top_level: tuple[str, ...] = (
         children = command.get("commands", [])
         if children:
             child_body = _render_cli_command_nodes(command, skip_top_level=())
-            body = '<div class="disclosure-tree">' + child_body + "</div>"
+            # The parent carries its own help in the contract. Rendering only the child
+            # list would drop it, and the page's lead promises that each command's usage
+            # is the native --help output.
+            own_help = command.get("help", "")
+            own = f"<pre>{html.escape(own_help)}</pre>" if own_help else ""
+            body = own + '<div class="disclosure-tree">' + child_body + "</div>"
             nodes.append(
                 f'<details><summary>{label} <span class="tree-blurb">'
                 f"— {len(children)} subcommands</span></summary>"
@@ -325,8 +330,14 @@ def render_cli_tree() -> str:
         "<code>exit_status()</code>, which implements the table in "
         "<code>docs/LANGUAGE.md</code>:</p>"
         f"<pre>{exit_codes}</pre>"
-        "<p>Every command prints one JSON object to stdout with "
-        '<code>{"fsl":"1.0", ...}</code>. Native CLI and browser Worker '
+        "<p>Verdict-bearing commands print one JSON object to stdout with "
+        '<code>{"fsl":"1.0", ...}</code>, and the exit code is derived from its '
+        "<code>result</code>. Commands that emit a generated artifact write that "
+        "artifact to stdout instead — <code>fslc fmt PATH</code> prints formatted "
+        "source (use <code>--check</code> for a <code>format_check</code> envelope), "
+        "and <code>document</code>, <code>db</code>, and <code>domain</code> have "
+        "subcommands that print generated content — so read a command's own "
+        "<code>--help</code> before parsing its stdout as JSON. Native CLI and browser Worker "
         "<code>check</code>/<code>verify</code> envelopes also include "
         "<code>versions.verifier</code>, <code>versions.core</code>, and "
         "<code>versions.solver</code> (see <code>docs/LANGUAGE.md</code> §14). "
@@ -379,8 +390,8 @@ PAGE_STRINGS = {
     },
     "cli": {
         "ja": {
-            "title": "FSL CLI リファレンス — ネイティブ fslc の全コマンド",
-            "description": "rust/fslc/cli-contract.json から生成される、ネイティブ fslc の全サブコマンド・終了コード・JSON契約のリファレンス。",
+            "title": "FSL CLI リファレンス — ネイティブ fslc のコマンド一覧",
+            "description": "rust/fslc/cli-contract.json から生成される、ネイティブ fslc のコマンド・終了コード・JSON契約のリファレンス（version を除く）。",
             "kicker": "Generated Reference",
             "h1": "CLI リファレンス",
             "lead": (
@@ -396,8 +407,8 @@ PAGE_STRINGS = {
             "top": "↑ 先頭へ",
         },
         "en": {
-            "title": "FSL CLI Reference — every native fslc subcommand",
-            "description": "The full native fslc CLI surface, exit codes, and JSON contract, generated from rust/fslc/cli-contract.json.",
+            "title": "FSL CLI Reference — the native fslc command surface",
+            "description": "The native fslc CLI surface except version, with exit codes and the JSON contract, generated from rust/fslc/cli-contract.json.",
             "kicker": "Generated Reference",
             "h1": "CLI Reference",
             "lead": (
