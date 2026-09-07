@@ -228,8 +228,24 @@ def audit_skip_injection_sets_tabindex(js_text: str) -> list[str]:
     return missing
 
 
+# The whole assignment expression, not the label strings on their own. Calibration
+# caught this: "Breadcrumb" also appears in the comment directly above the assignment
+# in site.js, so a bare label search stayed green with the en label deleted -- the same
+# comment-shadowing failure this module's other substring checks are subject to.
+BREADCRUMB_ASSIGNMENT = (
+    'crumb.setAttribute("aria-label", lang === "ja" ? "パンくずリスト" : "Breadcrumb")'
+)
+
+
 def audit_locale_nav_contract(js_text: str) -> list[str]:
-    """Shared locale toggle must mark exactly one active link with aria-current."""
+    """Shared nav chrome that initNav() renders: the locale toggle's aria-current,
+    and the breadcrumb's accessible name.
+
+    Both are runtime-only. The static hosts ship
+    `<nav class="breadcrumb" data-nav>` with no aria-label, so if initNav() stops
+    setting one, nothing in the static pages reveals it.
+    docs/DESIGN-docs-site.md requires `<nav aria-label="Breadcrumb">`.
+    """
     missing: list[str] = []
     if 'aria-current="true"' not in js_text:
         missing.append("locale-nav-missing-aria-current-true")
@@ -241,6 +257,12 @@ def audit_locale_nav_contract(js_text: str) -> list[str]:
     ):
         if marker not in js_text:
             missing.append(f"locale-nav-missing-{marker[:24]}")
+    # Receiver-qualified: a bare aria-label search matches six other assignments in
+    # site.js, so it would stay green with the breadcrumb's own label deleted.
+    if 'crumb.setAttribute("aria-label"' not in js_text:
+        missing.append("breadcrumb-missing-aria-label-assignment")
+    if BREADCRUMB_ASSIGNMENT not in js_text:
+        missing.append("breadcrumb-missing-localized-labels")
     return missing
 
 
