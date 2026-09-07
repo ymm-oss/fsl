@@ -34,6 +34,13 @@
     const main = $("main");
     if (!main) return;
     if (!main.id) main.id = "main";
+    // A skip link that does not move focus is inert: activating it sets
+    // location.hash but leaves document.activeElement on <body>, so assistive
+    // technology never receives the context change. The landmark has to be
+    // programmatically focusable for the link below to mean anything. Set this
+    // before the early return, so pages that ship their own static skip link
+    // still get a focusable target.
+    if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");
     if ($(".skip-link")) return;
     const lang = (document.documentElement.lang || "en").slice(0, 2) === "ja" ? "ja" : "en";
     const label = lang === "ja" ? "メインコンテンツへスキップ" : "Skip to main content";

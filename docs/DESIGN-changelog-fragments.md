@@ -868,9 +868,9 @@ unchanged. In particular, the **section-alignment enforcement between `docs/LANG
 - `tests/test_site_reference_snapshot.py` re-runs the generator and byte-compares
   the four committed `docs/intro/{language,cli}.{ja,en}.html` pages.
 
-`tests/test_site_manual_integrity.py` is not a section-alignment enforcement point; it separately checks ordered bilingual route links, unique labels, local fragments, and pinned blob objects.
+`tests/test_site_manual_integrity.py` is not a section-alignment enforcement point; it separately checks ordered bilingual route links, unique labels, local fragments, and pinned blob objects. Neither is `tests/test_site_refresh_contract.py`, which checks sitewide shell wiring, palette single-sourcing, the docs-sidebar gutter, and the skip-link/landmark contract.
 
-- `.github/workflows/site-reference-freshness.yml` runs both exact test files on every
+- `.github/workflows/site-reference-freshness.yml` runs all three exact test files on every
   pull request with no path filter; its `site reference freshness` context is required
   on the `main safety and CI` ruleset (`.github/ruleset-contract.json`;
   `docs/DESIGN-ci.md`, "Required pre-merge contexts, and why the merge queue was rejected").

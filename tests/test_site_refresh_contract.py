@@ -175,6 +175,44 @@ def audit_playground_skip_contract(texts: dict[str, str]) -> list[str]:
     return missing
 
 
+# The two playground pages carry a *static* skip link, but site.js injects one into
+# every other page that has a <main> -- 48 of them on dd00fed5. The focusable-landmark
+# requirement above therefore has to hold on the injection path too, and MAIN_FOCUSABLE_RE
+# cannot see it: the attribute is set at runtime, so no static page text contains it.
+#
+# Measured on dd00fed5 with the injection path NOT setting it (headless Chrome, viewport
+# 360x800, keyboard Tab then Enter, 2 runs per page): index.{en,ja}.html, cli.en.html,
+# guide.ja.html and examples.en.html all set location.hash to "#main" and left
+# document.activeElement on <body>. With it set, document.activeElement === <main> on all
+# five, 2 runs each. The URL moved either way -- only focus distinguishes the two states.
+#
+# Matched inside initSkipLink's own body rather than anywhere in the file, so the shortest
+# way to satisfy this is to actually set the attribute on the injection path.
+SKIP_JS_FOCUSABLE_MARKERS = ('hasAttribute("tabindex")', 'setAttribute("tabindex", "-1")')
+INIT_SKIP_LINK_RE = re.compile(
+    r"function initSkipLink\(\)\s*\{(.*?)\n  \}", re.S
+)
+
+
+def audit_injected_skip_focusability(js_text: str) -> list[str]:
+    """site.js must make the <main> landmark focusable where it injects a skip link."""
+    missing: list[str] = []
+    match = INIT_SKIP_LINK_RE.search(js_text)
+    if not match:
+        return ["skip-js-missing-initSkipLink-body"]
+    body = match.group(1)
+    for marker in SKIP_JS_FOCUSABLE_MARKERS:
+        if marker not in body:
+            missing.append(f"skip-js-missing-{marker}")
+    # The attribute has to be set before the early return that fires when a static skip
+    # link already exists, or a page shipping its own link keeps an inert landmark.
+    early_return = body.find('if ($(".skip-link")) return;')
+    tabindex_at = body.find('setAttribute("tabindex", "-1")')
+    if early_return >= 0 and tabindex_at >= 0 and tabindex_at > early_return:
+        missing.append("skip-js-tabindex-set-after-early-return")
+    return missing
+
+
 def audit_locale_nav_contract(js_text: str) -> list[str]:
     """Shared locale toggle must mark exactly one active link with aria-current."""
     missing: list[str] = []
@@ -418,6 +456,33 @@ def test_site_refresh_playground_skip_link_contract():
         for p in PLAYGROUND
     }
     assert audit_playground_skip_contract(texts) == []
+
+
+def test_site_refresh_injected_skip_link_targets_a_focusable_landmark():
+    assert audit_injected_skip_focusability(JS.read_text(encoding="utf-8")) == []
+
+
+def test_site_refresh_injected_skip_rejects_unfocusable_landmark_mutant():
+    js = JS.read_text(encoding="utf-8")
+    mutant = js.replace(
+        '    if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");\n', "", 1
+    )
+    assert mutant != js, "anchor for the focusability assignment not found in site.js"
+    offenders = audit_injected_skip_focusability(mutant)
+    assert 'skip-js-missing-hasAttribute("tabindex")' in offenders
+    assert 'skip-js-missing-setAttribute("tabindex", "-1")' in offenders
+    assert audit_injected_skip_focusability(js) == []
+
+
+def test_site_refresh_injected_skip_rejects_late_tabindex_mutant():
+    """Setting the attribute after the early return leaves static-link pages inert."""
+    js = JS.read_text(encoding="utf-8")
+    assignment = '    if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");\n'
+    early = '    if ($(".skip-link")) return;\n'
+    mutant = js.replace(assignment, "", 1).replace(early, early + assignment, 1)
+    assert mutant != js, "anchors for the reordering mutant not found in site.js"
+    assert "skip-js-tabindex-set-after-early-return" in audit_injected_skip_focusability(mutant)
+    assert audit_injected_skip_focusability(js) == []
 
 
 def test_site_refresh_playground_skip_rejects_english_label_mutant():
