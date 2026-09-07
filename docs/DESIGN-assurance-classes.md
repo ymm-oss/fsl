@@ -32,7 +32,8 @@ gate failure that produced **no interval** (`dataset_invalid`,
 `evaluator_untrusted`, `insufficient_samples`, `slice_missing`, `inconclusive`)
 is `not_run` — there is no bound to point at — while
 `statistically_unsupported` (interval computed, threshold missed) stays
-`statistical` with a failing verdict.
+`statistical` with a failing verdict. The classifier matches the status token
+itself; it does not inspect whether an interval was produced.
 
 ## Classification table (what each class does / does not guarantee)
 
@@ -51,24 +52,38 @@ re-derive classes locally.
 
 - `classify_result(result: dict) -> str` — one command's result dict (envelope
   or bare) to a token. Ordered rules, first match wins:
-  1. formal evidence present (`completeness` / `kernel.completeness` /
-     `formal_result` in kernel vocabulary): `"unbounded"` or `proved` →
-     `proved`; `"bounded"` or `verified/violated/reachable_failed/unknown_cti`
-     → `bounded`.
+  1. formal completeness (`completeness` or nested `kernel.completeness`):
+     `"unbounded"` → `proved`; `"bounded"` → `bounded`. Keys such as
+     `formal_result` and the top-level `result` token are **not** read for
+     this step — e.g. `{"result":"proved",...}` without `completeness` does
+     not upgrade assurance class.
   2. observation markers (`guarantee_kind:"runtime_observed"`,
-     `evidence.kind` in `runtime_replay`/`runtime_telemetry`, or result in
-     `conformant`/`nonconformant`/`replay_*`/`observed_*`/
+     `evidence.kind` in `runtime_replay`/`runtime_telemetry`, or `result` in
+     `conformant`/`nonconformant`/`replay_conformant`/`replay_nonconformant`/
+     `observed_conformant`/`observed_mismatch`/`observed_supported`/
      `conformance_checked`/`evidence_supported`/`evidence_failed`) →
      `replay-observed`.
-  3. statistical markers (schema `fsl-ai-statistical-result.v0` /
-     `fsl-ai-migration-result.v0` with status
-     `statistically_supported|statistically_unsupported`) → `statistical`;
-     gate statuses (see above) → `not_run`.
+  3. statistical: `status` (when absent, fall back to `result`) in
+     `statistically_supported`/`statistically_unsupported` → `statistical`;
+     `dataset_invalid`/`evaluator_untrusted`/`insufficient_samples`/
+     `slice_missing`/`inconclusive` → `not_run`. Schema names such as
+     `fsl-ai-statistical-result.v0` are not consulted.
   4. else → `not_run`.
-- `classify_source(result: dict) -> dict` —
-  `{"assurance", "verdict": "pass"|"fail"|"none", "under_assumptions": bool,
-  "label", "detail"}`; `under_assumptions` is true for dialect wrappers
-  (`verified_under_assumptions`).
+- `classify_source` — **not** in `src/fslc/assurance.py` (none of its seven
+  `def`s map a result dict to a pass/fail verdict). Issue #508's verdict
+  mapping lives in the native ledger as `evidence_verdict`
+  (`rust/fsl-tools/src/ledger.rs`), which returns `Option<bool>`:
+  `Some(true)` / `Some(false)` on rule 2's same 10 `result` tokens —
+  `Some(true)`: `conformant`/`replay_conformant`/`observed_conformant`/
+  `conformance_checked`/`observed_supported`/`evidence_supported`;
+  `Some(false)`: `nonconformant`/`replay_nonconformant`/`observed_mismatch`/
+  `evidence_failed` — or from `status` `statistically_supported` /
+  `statistically_unsupported`;
+  `None` when the envelope carries no verdict (gate failures like
+  `dataset_invalid`, structural output like `compared`). It does **not**
+  return a dict. Class (method strength) and verdict (outcome) remain
+  orthogonal — a failing source must never change the assurance label, only
+  add a finding.
 - `classify_element(group, name, verification) -> str` — per spec element.
   Under BMC everything is `bounded`. Under `result:"proved"`: `invariants`,
   `transitions` → `proved`; a `leadstos` entry → `proved` iff
@@ -76,11 +91,41 @@ re-derive classes locally.
   else `bounded`; `reachables` and action coverage → `bounded` (base BMC only —
   `prove()` already notes this). `result:"error"` without `completeness` →
   `not_run`.
-- `strongest(classes) -> str`, `ASSURANCE_ORDER`, `assurance_label(token, *,
-  depth=None, confidence=None, steps=None, under_assumptions=False) -> str`.
-- `requirement_assurance(registry, verification, replay_result=None,
-  evidence_results=()) -> dict` — `{req_id: {"assurance", "sources": [...],
-  "under_assumptions"}}`.
+- `strongest(classes) -> str`, `weakest(classes) -> str`, `ASSURANCE_ORDER`,
+  `assurance_label(token, *, depth=None, confidence=None,
+  under_assumptions=False) -> str`, `confidence_of(result) -> float | None`.
+- `requirement_assurance(registry, verification, evidence_results=()) -> dict`
+  — `{req_id: {"assurance", "sources": [...], "under_assumptions"}}`.
+
+### External evidence — classification without verification (issue #990)
+
+The shared classifier is a **display mapper**: it reads fields already present
+in a JSON dict and renders assurance labels. It is **not** a trust boundary
+for external evidence files.
+
+The loader rejects unreadable paths, non-UTF-8 bytes, invalid JSON, and
+non-object envelopes — and performs no schema, version, or producer checks
+beyond that.
+
+- **Completeness-only upgrade.** `completeness` / `kernel.completeness` alone
+  can classify as `proved` or `bounded` (e.g.
+  `{"completeness":"unbounded",...}` without a matching `result` token). The
+  loader and classifier do not confirm that the value came from a completed
+  verification run.
+- **No binding.** Classification does not tie evidence to producer identity,
+  target spec digest/revision, or proof artifacts. The same `fslc ledger`
+  `--approval` path does compare versioned approval record spec/rendering
+  digests; external evidence has no equivalent.
+- **Confirmation is out of band.** Responsibility for confirming that external
+  evidence is authentic and applicable rests with a **versioned public
+  Adapter** (rules under design in issue #994, go/no-go pending). FSL core —
+  evidence loading and this classifier — does not perform that confirmation.
+- **Caller bears trust.** Treating ledger/html assurance labels as audit
+  conclusions requires upstream trust decisions; the labels alone assert no
+  integrity or applicability guarantee.
+
+This section records that FSL core does not verify external evidence and does
+not adopt a future trust model or Adapter contract (issue #994).
 
 ### Producer → class map (the acceptance-criteria table)
 
