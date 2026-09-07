@@ -298,15 +298,33 @@ def audit_home_backbone_contract(home_text: str, js_text: str) -> list[str]:
     return missing
 
 
+def _hub_journey_keys(js_text: str) -> set[str] | None:
+    """Top-level keys of site.js's HUB_JOURNEYS object, or None if it is absent."""
+    match = re.search(r"const HUB_JOURNEYS = \{(.*?)\n  \};", js_text, re.S)
+    if not match:
+        return None
+    return set(re.findall(r'^\s{4}"?([a-z][a-z0-9-]*)"?:\s*\{', match.group(1), re.M))
+
+
 def audit_journey_contract(js_text: str, texts: dict[str, dict[str, str]]) -> list[str]:
     """Bounded structural contract for primary journeys (not prose quality)."""
     missing: list[str] = []
     for step in HUB_JOURNEY_STEPS:
         if f'data-journey="{step}"' not in js_text:
             missing.append(f"hub-template-missing-{step}")
-    for hub in HUB_STEMS:
-        if f'"{hub}"' not in js_text:
-            missing.append(f"hub-journey-missing-{hub}")
+    # Keys of the HUB_JOURNEYS object, not merely the stem appearing somewhere in
+    # site.js: every hub stem is also a CATEGORIES id, so a substring search stays
+    # green when the journey entry itself is deleted. initHub() early-returns
+    # without a journey, which renders that hub blank -- measured on 73744f72 by
+    # deleting HUB_JOURNEYS.guides (27 lines): the whole freshness lane still
+    # returned exit 0 / 32 passed before this was keyed off the object.
+    journey_keys = _hub_journey_keys(js_text)
+    if journey_keys is None:
+        missing.append("hub-journeys-object-not-found")
+    else:
+        for hub in HUB_STEMS:
+            if hub not in journey_keys:
+                missing.append(f"hub-journey-missing-{hub}")
     for marker in REFERENCE_HUB_MARKERS:
         if marker not in js_text:
             missing.append(f"reference-hub-missing-{marker}")
