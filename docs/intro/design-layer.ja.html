@@ -21,7 +21,7 @@
     <nav class="breadcrumb" data-nav></nav>
     <p class="kicker reveal">設計層を書く</p>
     <h1 class="reveal">要件契約を、<br><span class="hl">実装でき、証明できる状態</span>にする。</h1>
-    <p class="lead reveal">設計層は普通の <code>spec</code> です。内部の状態・操作・キュー・アウトボックスを書き、別ファイルの <code>refinement</code> 対応表で「上位の要件をまだ守っていること」を証明します。同じ spec が、下位の実装適合の判定基準にもなります——このファイルそのものが<b>設計ドキュメント</b>であり、別に保守すべき文書は存在しません。</p>
+    <p class="lead reveal">設計層は普通の <code>spec</code> です。内部の状態・操作・キュー・アウトボックスを書き、別ファイルの <code>refinement</code> 対応表で「上位の要件をまだ守っていること」を、実行した深さまで検査します（<code>refine</code> が返すのは <code>refines</code> で、<code>proved</code> ではありません）。同じ spec が、下位の実装適合の判定基準にもなります——このファイルそのものが<b>設計ドキュメント</b>であり、別に保守すべき文書は存在しません。</p>
   </div>
 </section>
 
@@ -125,7 +125,7 @@
 <section id="refine" style="background:var(--surface-2)">
   <div class="wrap">
     <p class="kicker reveal">3. 上位へ詳細化</p>
-    <h2 class="reveal"><code>refinement</code> 対応表で、設計が要件を守ることを証明する</h2>
+    <h2 class="reveal"><code>refinement</code> 対応表で、設計が要件を守ることを検査する</h2>
     <p class="lead narrow reveal">対応表は、どちらの spec も汚さない第3のファイルに書きます。すべての内部操作を「ひとつの要件操作」か「<code>stutter</code>（上では何も起きない）」のどちらかに対応づけ、すべての抽象状態を内部状態から取り出します。</p>
 
     <div class="panel reveal">
@@ -291,8 +291,8 @@
 
     <div class="vs reveal" style="margin-top:24px">
       <div class="card">
-        <h3>✅ 設計層が保証すること</h3>
-        <p>設計自身の不変条件と部分操作の安全性（帰納法を使えば無限の深さで）。<code>refine</code> による要件層までの<b>安全性の包含</b>。<code>preserve progress</code> と <code>fair</code> を書いたところの応答性。そして実装適合は、<code>testgen</code> や <code>replay</code> を実コード・実ログに<i>つないだところだけ</i>。</p>
+        <h3>✅ 設計層が確立すること、およびその範囲</h3>
+        <p>設計自身の不変条件と部分操作の安全性（帰納法を使えば無限の深さで）。<code>refine</code> による要件層までの<b>安全性の包含</b>。<code>preserve progress</code> と <code>fair</code> を書いたところの応答性。そして実装適合は、<code>replay</code> が実際の観測トレースを判定したところ<i>だけ</i>。<code>testgen</code> はハーネスを生成するだけなので、生成した時点では何も確立しません。</p>
       </div>
       <div class="card">
         <h3>⚠ 保証しないこと</h3>

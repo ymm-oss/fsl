@@ -497,7 +497,7 @@
         aria: "Four-stage correctness backbone",
         doc: "The spec you write is the readable document — Document is a property, not a stage.",
         repair: "Counterexamples, test results, and replay observations verify at every stage and loop back into spec or code.",
-        outcome: "Confidence grows with bounded evidence — never as a percentage or certainty claim.",
+        outcome: "Confidence grows as evidence accumulates — never as a percentage or certainty claim.",
         hints: ["Policy verify", "implements + counterexamples", "refine + verify", "replay / testgen"],
       };
     const items = BACKBONE_STAGES.map((st, i) => {
@@ -546,8 +546,8 @@
     const page = document.body.dataset.page || "";
     const focus = PAGE_BACKBONE_FOCUS[page] || null;
     const t = lang === "ja"
-      ? { aria: "正しさの背骨 — 連鎖する有界証拠", note: "各段階は有界な主張を確立する。強調はこの章の位置づけであり、全体証明ではありません。", rail: "四段階" }
-      : { aria: "Correctness backbone — connected bounded evidence", note: "Each stage establishes a bounded claim. A highlight marks this chapter’s place, not whole-system proof.", rail: "Four stages" };
+      ? { aria: "正しさの背骨 — 連鎖する有界証拠", note: "各段階が確立する主張の種類は段階ごとに違います（帰納法は無制限、BMC と refine は有界）。強調はこの章の位置づけであり、全体証明ではありません。", rail: "四段階" }
+      : { aria: "Correctness backbone — connected bounded evidence", note: "What each stage establishes differs in kind — induction is unbounded, BMC and refine are bounded at the depth you ran. A highlight marks this chapter’s place, not whole-system proof.", rail: "Four stages" };
     const stages = BACKBONE_STAGES.map((st) => {
       const m = lang === "ja" ? st.ja : st.en;
       const isCurrent = focus === st.id;
