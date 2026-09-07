@@ -385,6 +385,11 @@ and a full-size abstract would fail with `map_out_of_bounds`). An impl-only
 carried number (e.g. `Amount`, absent from a business abstract) applies to the
 impl only.
 
+`fslc verify` still evaluates inline `implements` when only `--instances` /
+`--values` scope overrides are present. `--property`, `--exclude-properties`, and
+`--from-state` continue to omit the `implements` field without recording a reason;
+that behavior is not treated as safe and remains an open contract decision.
+
 `acceptance`/`forbidden` scenarios often hardcode ids/numbers from the spec's
 original world (`accept(2)`), which can fall outside a shrunken override
 (`--instances Case=1`). When overrides are active, a scenario whose replay

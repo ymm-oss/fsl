@@ -15586,8 +15586,25 @@ fn implements_result_from_source(
     model: &KernelModel,
     depth: usize,
 ) -> Result<Option<Value>, fslc_rust::verification_output::RequirementsImplementsError> {
+    implements_result_from_source_with_bounds(path, source, model, depth, &ScopeBounds::default())
+}
+
+fn implements_result_from_source_with_bounds(
+    path: &Path,
+    source: &str,
+    model: &KernelModel,
+    depth: usize,
+    scope: &ScopeBounds,
+) -> Result<Option<Value>, fslc_rust::verification_output::RequirementsImplementsError> {
     let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-    fslc_rust::verification_output::requirements_implements_output(source, &resolver, model, depth)
+    fslc_rust::verification_output::requirements_implements_output_with_bounds(
+        source,
+        &resolver,
+        model,
+        depth,
+        &scope.instances,
+        &scope.values,
+    )
 }
 
 fn implements_error_output(

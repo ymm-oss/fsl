@@ -302,12 +302,36 @@ pub fn requirements_implements_output(
     model: &KernelModel,
     depth: usize,
 ) -> Result<Option<Value>, RequirementsImplementsError> {
+    requirements_implements_output_with_bounds(
+        source,
+        resolver,
+        model,
+        depth,
+        &std::collections::BTreeMap::new(),
+        &std::collections::BTreeMap::new(),
+    )
+}
+
+/// Evaluate inline `implements` with abstraction bounds overrides propagated
+/// from `fslc verify --instances` / `--values`.
+///
+/// # Errors
+///
+/// Returns a diagnostic when dependency resolution, lowering, or concrete
+/// refinement checking fails.
+pub fn requirements_implements_output_with_bounds(
+    source: &str,
+    resolver: &dyn fsl_core::FileResolver,
+    model: &KernelModel,
+    depth: usize,
+    instances: &std::collections::BTreeMap<String, i64>,
+    values: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> Result<Option<Value>, RequirementsImplementsError> {
     let Some(contract) =
-        fsl_core::requirements_implements(source, resolver, model).map_err(|error| {
-            RequirementsImplementsError {
-                message: error.message,
-                span: error.span,
-            }
+        fsl_core::requirements_implements_with_bounds(source, resolver, model, instances, values)
+            .map_err(|error| RequirementsImplementsError {
+            message: error.message,
+            span: error.span,
         })?
     else {
         return Ok(None);

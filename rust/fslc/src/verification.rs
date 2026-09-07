@@ -10,8 +10,8 @@ use sha2::{Digest, Sha256};
 use super::{
     CliVerifyOptions, ScopeBounds, SpecLoadError, add_strict_tag_warnings, apply_vacuity_mode,
     block_on_native, display, envelope, error_output, implements_error_output,
-    implements_result_from_source, invariant_names, load_kernel_model_from_source, load_model,
-    load_model_from_source, load_model_scoped, load_model_scoped_from_source,
+    implements_result_from_source_with_bounds, invariant_names, load_kernel_model_from_source,
+    load_model, load_model_from_source, load_model_scoped, load_model_scoped_from_source,
     load_snapshot_value_object, load_state_snapshot, read_spec_source, select_properties,
     selected_implicit_bounds, semantic_error_output, spec_load_error_output,
     surface_parse_error_output, validate_requirement_traces_from_source,
@@ -2210,11 +2210,10 @@ fn execute_cli_verification(
     options: &CliVerifyOptions,
     prepared: &PreparedCliVerification,
 ) -> CommandResult {
-    let filtered = prepared.has_scope
-        || options.property.is_some()
+    let selection_filtered = options.property.is_some()
         || !options.exclude_properties.is_empty()
         || prepared.initial_state.is_some();
-    if !filtered && prepared.is_agent_document {
+    if !(selection_filtered || prepared.has_scope) && prepared.is_agent_document {
         return (
             error_output(
                 "parse",
@@ -2231,10 +2230,16 @@ fn execute_cli_verification(
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(error), 2),
     };
-    let implements = if filtered {
+    let implements = if selection_filtered {
         None
     } else {
-        match implements_result_from_source(path, source, model, options.depth) {
+        match implements_result_from_source_with_bounds(
+            path,
+            source,
+            model,
+            options.depth,
+            &options.scope,
+        ) {
             Ok(implements) => implements,
             Err(error) => return (implements_error_output(&error), 2),
         }
@@ -2290,7 +2295,7 @@ fn execute_cli_verification(
         }),
         Err(error) => return (error_output("usage", &error), 2),
     };
-    if !filtered {
+    if !selection_filtered {
         decorate_default_cli_verification(
             &mut output,
             source,

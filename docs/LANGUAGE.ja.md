@@ -373,6 +373,11 @@ spec がインラインの `implements` を持つ場合、上書きは抽象 spe
 impl 側だけの carried number(例: business の抽象には存在しない `Amount`)は impl
 のみに適用されます。
 
+`fslc verify` は `--instances` / `--values` の scope override だけが付いている場合でも
+インライン `implements` を評価します。`--property`、`--exclude-properties`、
+`--from-state` は引き続き理由を記録せず `implements` フィールドを省略します。
+この挙動は安全とみなされておらず、契約上の未決定事項として残ります。
+
 `acceptance`/`forbidden` シナリオは、spec の元の世界の id や数値をハードコード
 しがちで(`accept(2)`)、それが縮小された上書き(`--instances Case=1`)の外に出る
 ことがあります。上書きが有効なとき、replay の失敗が*純粋に*上書き後の境界の外の値を

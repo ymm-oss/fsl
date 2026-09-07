@@ -1,0 +1,9 @@
+spec SharedOnly {
+  entity Item
+  state { st: Map<Item, Bool> }
+  init { forall i: Item { st[i] = false } }
+  action finish(i: Item) { st[i] = true }
+}
+verify {
+  instances Item = 3
+}
