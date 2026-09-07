@@ -86,6 +86,22 @@
           "exclusions": {
             "type": "array",
             "items": { "type": "string" }
+          },
+          "not_evaluable": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["finding_type", "reason", "involved_nodes"],
+              "properties": {
+                "finding_type": { "type": "string" },
+                "reason": { "type": "string" },
+                "involved_nodes": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              },
+              "additionalProperties": true
+            }
           }
         },
         "additionalProperties": true
