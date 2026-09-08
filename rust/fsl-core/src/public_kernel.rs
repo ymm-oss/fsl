@@ -308,6 +308,26 @@ fn expr_json_inner(
                 // Relation literals only support the empty initializer `Set {}`;
                 // emptiness is enforced by typecheck, and there is no per-element
                 // type to project against.
+                //
+                // The guard below is unreachable on today's paths, and is kept
+                // anyway. `expression_type` at the head of this function already
+                // ran `infer_type`, which rejects a non-empty relation literal with
+                // its own `relation literals only support the empty initializer
+                // Set {}` diagnostic; `ensure_assignable` and `validate_expression`
+                // reject it too, and `statement_json` repeats `ensure_assignable`
+                // immediately before calling into here. Measured: across the 485
+                // `.fsl` files under `specs/`, `examples/` and
+                // `rust/fslc/tests/fixtures/`, no non-empty relation literal
+                // produced this arm's message under either the base or the head
+                // binary. (Four forms did produce it under base -- all *empty*
+                // relation initializers, which this change makes project instead.)
+                //
+                // Deleting it would not fall back on the checked-model contract: the
+                // branch never reads `items`, so a non-empty literal would project
+                // as `set_lit` with `items: []` and silently drop its pairs if any
+                // of those upstream checks ever stopped rejecting it. The `_` arm
+                // below is unreachable for the same reason and is kept on the same
+                // grounds.
                 if !items.is_empty() {
                     return Err(error("collection literal type mismatch"));
                 }
