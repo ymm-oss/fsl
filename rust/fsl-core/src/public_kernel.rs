@@ -308,16 +308,16 @@ fn expr_json_inner(
                 // Relation literals only support the empty initializer `Set {}`;
                 // there is no per-element type to project against.
                 //
-                // This guard is unreachable on today's paths and is kept regardless:
-                // the branch never reads `items`, so without it a non-empty literal
-                // would project as `set_lit` with `items: []` and silently drop its
-                // pairs. The `_` arm below is kept on the same grounds.
+                // This guard is kept as a fail-closed defense: the branch never reads
+                // `items`, so without it a non-empty literal would project as
+                // `set_lit` with `items: []` and silently drop its pairs. The `_` arm
+                // below is kept on the same grounds.
                 //
-                // The reachability derivation -- which sites enforce the emptiness
-                // rule, which only record it, and what would have to change for this
-                // arm to run -- is recorded in #1000, not here. Four attempts to
-                // state it in this comment were each corrected by review; it depends
-                // on the call graph, which a comment cannot track.
+                // Whether either arm can be reached today, which sites enforce the
+                // emptiness rule, which only record it, and what would have to change
+                // -- all of that depends on the call graph and is recorded in #1000,
+                // not here. Four attempts to state it in this comment were each
+                // corrected by review.
                 if !items.is_empty() {
                     return Err(error("collection literal type mismatch"));
                 }
