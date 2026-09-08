@@ -334,7 +334,11 @@ fn producer_result_exit_valid(row: &Value, accepted_results: &[&str]) -> bool {
     match exit {
         0 => accepted_results.contains(&result),
         1 => match row["phase"].as_str() {
-            Some("verify") => matches!(result, "violated" | "reachable_failed"),
+            Some("verify") => matches!(
+                result,
+                "violated" | "reachable_failed" | "refinement_failed" | "impl_violated"
+            ),
+            Some("check") => matches!(result, "refinement_failed" | "impl_violated"),
             Some("refine" | "comparison_mapping") => result == "refinement_failed",
             _ => false,
         },
@@ -375,6 +379,12 @@ fn producer_envelope_valid(row: &Value) -> bool {
                     && output["checked_to_depth"].is_u64()
                     && output["versions"].is_object()
                     && output["unreached"].is_array()
+            }
+            Some("refinement_failed" | "impl_violated") => {
+                output["completeness"] == "bounded"
+                    && output["checked_to_depth"].is_u64()
+                    && output["versions"].is_object()
+                    && output.get("implements").is_some()
             }
             _ => false,
         },
@@ -872,13 +882,17 @@ fn negative_controls_reject_false_family_success() {
         &repository_file("tests/fixtures/chain"),
         &["check".into(), "requirements_broken_implements.fsl".into()],
     );
-    assert_eq!(inline.status.code(), Some(0));
+    // A broken inline seam used to exit 0 while only nesting the failure under
+    // `implements`; that documented fail-open contract was withdrawn, so check
+    // must now fail closed at the top level.
+    assert_eq!(inline.status.code(), Some(1));
     let inline_json = json_stdout(&inline);
+    assert_eq!(inline_json["result"], "refinement_failed");
     assert_eq!(inline_json["implements"]["result"], "refinement_failed");
     assert_eq!(nested_implements_gate(&inline_json), 1);
     let nested_row = json!({
         "phase": "check",
-        "exit_code": 0,
+        "exit_code": 1,
         "json_parsed": true,
         "stdout_json": inline_json,
     });
