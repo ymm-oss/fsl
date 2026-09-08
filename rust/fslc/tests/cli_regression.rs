@@ -937,3 +937,120 @@ fn native_cli_preserves_induction_outcomes() {
     assert_eq!(cti["completeness"], "bounded");
     assert!(cti["cost"]["solver"]["checks"].as_u64().unwrap_or(0) > 0);
 }
+
+const STRICT_TAG_UNREFERENCED_HINT: &str =
+    "no declaration tag, acceptance, or forbidden block references this requirement ID";
+const STRICT_TAG_UNTAGGED_HINT: &str = "tag the declaration with a typed annotation such as @requirement(\"REQ-SCOPE-001\", \"original requirement\"); use a MODEL-/ASSUME-prefixed id for modeling intent, or process `covers` in the business/requirements dialects. The legacy \"REQ-1: text\" string slot is non-canonical (fslc lint reports it as legacy_string_metadata)";
+
+fn strict_tag_traceability_only_missing_warning() -> serde_json::Value {
+    serde_json::json!([{
+        "kind": "unreferenced_requirement",
+        "element": "requirement",
+        "name": "MISSING-001",
+        "loc": null,
+        "hint": STRICT_TAG_UNREFERENCED_HINT
+    }])
+}
+
+fn strict_tag_traceability_annotation_removed_warnings() -> Vec<serde_json::Value> {
+    let unreferenced = [
+        "INIT-001",
+        "DECL-001",
+        "INVARIANT-001",
+        "TRANS-001",
+        "BLOCK-001",
+        "ACCEPT-001",
+        "FORBID-001",
+        "MISSING-001",
+    ]
+    .iter()
+    .map(|name| {
+        serde_json::json!({
+            "kind": "unreferenced_requirement",
+            "element": "requirement",
+            "name": name,
+            "loc": null,
+            "hint": STRICT_TAG_UNREFERENCED_HINT
+        })
+    });
+    serde_json::json!([
+        {
+            "kind": "untagged",
+            "element": "action",
+            "name": "bump",
+            "loc": {"line": 21, "column": 3},
+            "hint": STRICT_TAG_UNTAGGED_HINT
+        },
+        {
+            "kind": "untagged",
+            "element": "invariant",
+            "name": "ReadyBounded",
+            "loc": {"line": 17, "column": 3},
+            "hint": STRICT_TAG_UNTAGGED_HINT
+        },
+        {
+            "kind": "untagged",
+            "element": "trans",
+            "name": "Monotone",
+            "loc": {"line": 26, "column": 3},
+            "hint": STRICT_TAG_UNTAGGED_HINT
+        },
+    ])
+    .as_array()
+    .expect("untagged warnings")
+    .iter()
+    .cloned()
+    .chain(unreferenced)
+    .collect()
+}
+
+#[test]
+fn strict_tag_traceability_counts_init_block_and_trace_case_annotations() {
+    let requirements = "rust/fslc/tests/fixtures/strict_tag_traceability_requirements.txt";
+    let annotated = "rust/fslc/tests/fixtures/strict_tag_traceability_annotated.fsl";
+    let unannotated = "rust/fslc/tests/fixtures/strict_tag_traceability_unannotated.fsl";
+    let only_missing = strict_tag_traceability_only_missing_warning();
+    let annotation_removed_warnings = strict_tag_traceability_annotation_removed_warnings();
+
+    for (command, extra_args, expected_result) in [
+        ("check", vec![], "ok"),
+        (
+            "verify",
+            vec!["--depth", "2", "--deadlock", "ignore", "--no-cache"],
+            "verified",
+        ),
+    ] {
+        let mut annotated_args = vec![
+            command,
+            annotated,
+            "--strict-tags",
+            "--requirements",
+            requirements,
+        ];
+        annotated_args.extend(extra_args.iter().copied());
+        let (checked, status) = run_cli(&annotated_args);
+        assert_eq!(status, 0, "{command}: {checked}");
+        assert_eq!(checked["result"], expected_result, "{command}: {checked}");
+        assert_eq!(
+            checked["warnings"], only_missing,
+            "{command} annotated: {checked}"
+        );
+
+        let mut unannotated_args = vec![
+            command,
+            unannotated,
+            "--strict-tags",
+            "--requirements",
+            requirements,
+        ];
+        unannotated_args.extend(extra_args.iter().copied());
+        let (stripped, status) = run_cli(&unannotated_args);
+        assert_eq!(status, 0, "{command}: {stripped}");
+        assert_eq!(stripped["result"], expected_result, "{command}: {stripped}");
+        assert_eq!(
+            stripped["warnings"],
+            serde_json::Value::Array(annotation_removed_warnings.clone()),
+            "{command} annotation-removed: {stripped}"
+        );
+    }
+}
