@@ -303,21 +303,33 @@ fn expr_json_inner(
             );
         }
         Expr::Set(items) | Expr::Seq(items) => {
-            let (kind, item_ty) = match resolve(model, &ty)? {
-                TypeRef::Set(item) => ("set_lit", item),
-                TypeRef::Seq(item, _) => ("seq_lit", item),
-                _ => return Err(error("collection literal type mismatch")),
-            };
-            output.insert("kind".to_owned(), json!(kind));
-            output.insert(
-                "items".to_owned(),
-                Value::Array(
-                    items
-                        .iter()
-                        .map(|item| expr_json(item, env, model, path, span, Some(&item_ty)))
-                        .collect::<Result<_, _>>()?,
-                ),
-            );
+            let resolved = resolve(model, &ty)?;
+            if matches!(resolved, TypeRef::Relation(_, _)) {
+                // Relation literals only support the empty initializer `Set {}`;
+                // emptiness is enforced by typecheck, and there is no per-element
+                // type to project against.
+                if !items.is_empty() {
+                    return Err(error("collection literal type mismatch"));
+                }
+                output.insert("kind".to_owned(), json!("set_lit"));
+                output.insert("items".to_owned(), Value::Array(vec![]));
+            } else {
+                let (kind, item_ty) = match resolved {
+                    TypeRef::Set(item) => ("set_lit", item),
+                    TypeRef::Seq(item, _) => ("seq_lit", item),
+                    _ => return Err(error("collection literal type mismatch")),
+                };
+                output.insert("kind".to_owned(), json!(kind));
+                output.insert(
+                    "items".to_owned(),
+                    Value::Array(
+                        items
+                            .iter()
+                            .map(|item| expr_json(item, env, model, path, span, Some(&item_ty)))
+                            .collect::<Result<_, _>>()?,
+                    ),
+                );
+            }
         }
         Expr::Struct { name, fields } => {
             output.insert("kind".to_owned(), json!("struct_lit"));

@@ -750,6 +750,9 @@ variable.</p></div></details>
 <li>Assignment: <code>x = expr</code>, <code>m[k] = expr</code>, <code>m[k].field = expr</code>, <code>o.field = expr</code></li>
 <li>Updating a Set/Seq/relation uses the <strong>reassignment idiom</strong>:
   <code>s = s.add(x)</code>, <code>q = q.pop()</code>, <code>r = r.add(a, b)</code></li>
+<li>A relation-typed field's <strong>literal</strong> initializer must be the empty <code>Set {}</code> — a non-empty
+  Set literal is rejected in both <code>init</code> and an inline initializer — and pairs are added with
+  the reassignment idiom <code>r = r.add(a, b)</code>, which is also allowed inside <code>init</code>.</li>
 <li><code>if expr { stmt... } else { stmt... }</code> is allowed in both <code>init</code> and action bodies
   (can be nested with an if inside the else)</li>
 <li><code>forall x: T { stmt... }</code> (bulk initialization / bulk update)</li>

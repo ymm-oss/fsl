@@ -699,6 +699,9 @@ variable.
 - Assignment: `x = expr`, `m[k] = expr`, `m[k].field = expr`, `o.field = expr`
 - Updating a Set/Seq/relation uses the **reassignment idiom**:
   `s = s.add(x)`, `q = q.pop()`, `r = r.add(a, b)`
+- A relation-typed field's **literal** initializer must be the empty `Set {}` — a non-empty
+  Set literal is rejected in both `init` and an inline initializer — and pairs are added with
+  the reassignment idiom `r = r.add(a, b)`, which is also allowed inside `init`.
 - `if expr { stmt... } else { stmt... }` is allowed in both `init` and action bodies
   (can be nested with an if inside the else)
 - `forall x: T { stmt... }` (bulk initialization / bulk update)

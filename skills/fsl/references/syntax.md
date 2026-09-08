@@ -815,6 +815,9 @@ could read (#570). No other word is reserved — `count`, `sum`, `stage`, `in`,
 - Assignment: `x = e`, `m[k] = e`, `m[k].f = e`, `o.f = e`, `o.f = some(e)`
 - Set/Seq/relation are re-assigned: `s = s.add(x)`, `q = q.pop().push(y)`,
   `r = r.add(a,b)` (chaining allowed)
+- A relation-typed field's **literal** initializer must be the empty `Set {}` — a non-empty
+  Set literal is rejected in both `init` and an inline initializer — and pairs are added with
+  the reassignment idiom `r = r.add(a, b)`, which is also allowed inside `init`.
 - `if expr { stmt... } [else { stmt... }]` is allowed in both `init` and action
   bodies (may nest with an if inside else)
 - `forall x: T { stmt... }` (bulk assignment)
