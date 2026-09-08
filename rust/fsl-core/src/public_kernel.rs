@@ -306,34 +306,18 @@ fn expr_json_inner(
             let resolved = resolve(model, &ty)?;
             if matches!(resolved, TypeRef::Relation(_, _)) {
                 // Relation literals only support the empty initializer `Set {}`;
-                // emptiness is enforced by typecheck, and there is no per-element
-                // type to project against.
+                // there is no per-element type to project against.
                 //
-                // The guard below is unreachable on today's paths, and is kept
-                // anyway. `expression_type` at the head of this function already
-                // ran `infer_type`, which rejects a non-empty relation literal with
-                // its own `relation literals only support the empty initializer
-                // Set {}` diagnostic; `ensure_assignable` and `validate_expression`
-                // reject it too, and `statement_json` repeats `ensure_assignable`
-                // immediately before calling into here. Measured: across the 485
-                // `.fsl` files under `specs/`, `examples/` and
-                // `rust/fslc/tests/fixtures/`, no non-empty relation literal
-                // produced this arm's message under either the base or the head
-                // binary. (Four forms did produce it under base -- all *empty*
-                // relation initializers, which this change makes project instead.)
+                // This guard is unreachable on today's paths and is kept regardless:
+                // the branch never reads `items`, so without it a non-empty literal
+                // would project as `set_lit` with `items: []` and silently drop its
+                // pairs. The `_` arm below is kept on the same grounds.
                 //
-                // Deleting it would not fall back on the checked-model contract: the
-                // branch never reads `items`, so a non-empty literal would project
-                // as `set_lit` with `items: []` and silently drop its pairs. The
-                // condition for that is narrow and worth stating exactly:
-                // `expression_type` would have to start returning a relation type for
-                // a *non-empty* `Expr::Set`, because this branch is reached only when
-                // the resolved type is a relation and `infer_type` applies the
-                // emptiness rule on precisely that path. A caller cannot arrange it by
-                // omitting `expected`: with no expected relation type an `Expr::Set`
-                // infers as a `Set`, or fails outright when it is empty, so it never
-                // enters here. The `_` arm below is unreachable for the same reason
-                // and is kept on the same grounds.
+                // The reachability derivation -- which sites enforce the emptiness
+                // rule, which only record it, and what would have to change for this
+                // arm to run -- is recorded in #1000, not here. Four attempts to
+                // state it in this comment were each corrected by review; it depends
+                // on the call graph, which a comment cannot track.
                 if !items.is_empty() {
                     return Err(error("collection literal type mismatch"));
                 }
