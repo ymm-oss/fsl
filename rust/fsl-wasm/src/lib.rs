@@ -335,10 +335,7 @@ fn add_frontend_metadata(
         depth,
     ) {
         Ok(Some(implements)) => {
-            output
-                .as_object_mut()
-                .expect("verify envelope")
-                .insert("implements".to_owned(), implements);
+            fslc_rust::verification_output::attach_requirements_implements(&mut output, implements);
         }
         Ok(None) => {}
         Err(failure) => return implements_error(solver_version, &failure),
@@ -1454,7 +1451,7 @@ mod tests {
             &request(source.replace("C -> Y", "C -> X")),
             TEST_SOLVER_VERSION,
         ));
-        assert_eq!(wrong["result"], "ok", "{wrong}");
+        assert_eq!(wrong["result"], "refinement_failed", "{wrong}");
         assert_eq!(
             wrong["implements"]["result"], "refinement_failed",
             "{wrong}"

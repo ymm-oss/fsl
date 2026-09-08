@@ -362,6 +362,60 @@ pub fn requirements_implements_output_with_bounds(
     }))
 }
 
+/// Attach inline `implements` metadata and, when the command envelope is still
+/// success-class, fold a failed seam into the top-level `result`.
+///
+/// On `result:"error"` envelopes, does nothing. When the envelope is already
+/// failure-class (`violated`, `reachable_failed`, …), inserts `implements` as
+/// evidence but leaves the primary verdict and its replay fields untouched.
+/// Only success-class envelopes (`ok`, `verified`, `proved`, …) may have a
+/// failing nested seam promoted to top-level `refinement_failed` / `impl_violated`
+/// with `Some(1)`. Unknown or malformed nested results on a success-class
+/// envelope fail closed with an internal error (`Some(3)`).
+pub fn attach_requirements_implements(envelope: &mut Value, implements: Value) -> Option<i32> {
+    let already_failing = !crate::outcome::outcome_class(envelope).is_success();
+    let Value::Object(map) = envelope else {
+        return Some(3);
+    };
+    if map.get("result").and_then(Value::as_str) == Some("error") {
+        return None;
+    }
+    map.insert("implements".to_owned(), implements);
+    if already_failing {
+        return None;
+    }
+    let nested_result = map
+        .get("implements")
+        .and_then(|value| value.get("result"))
+        .and_then(Value::as_str);
+    match nested_result {
+        Some("refines") => None,
+        // Keep this `1` in step with the row-1 arm of `outcome::exit_status`:
+        // both encode the exit class of an inline `implements` failure, and
+        // changing that class means changing both. They are reached by
+        // independent paths -- `check`/`verify` fold here, while `mutate` and
+        // `ledger` re-emit a baseline envelope through `exit_status` -- so a
+        // mutation that breaks one does not make the other's tests fail
+        // (measured 2026-09-08: sending `exit_status`'s row 1 to 0 kills
+        // `issue_554_mutate_exit_status::a_violated_baseline_exits_one` and
+        // leaves `check_folds_failed_inline_refinement_into_command_failure`
+        // green). Nothing here detects the two drifting apart.
+        Some("refinement_failed" | "impl_violated") => {
+            map.insert("result".to_owned(), json!(nested_result));
+            Some(1)
+        }
+        _ => {
+            map.insert("result".to_owned(), json!("error"));
+            map.insert("kind".to_owned(), json!("internal"));
+            map.insert(
+                "message".to_owned(),
+                json!("malformed inline implements verdict"),
+            );
+            Some(3)
+        }
+    }
+}
+
 /// Render governance relationships while delegating preservation verification
 /// to the delivery surface that owns the refinement backend.
 ///
@@ -2408,5 +2462,131 @@ mod tests {
             serde_json::to_vec_pretty(&explicit_output).expect("serialize explicit output"),
             serde_json::to_vec_pretty(&bmc).expect("serialize BMC output")
         );
+    }
+
+    /// Rejecting control for the three branches the fold treats specially and
+    /// that no other test reaches: an `error` envelope (left untouched, and the
+    /// nested field is not even attached), a `refines` verdict (attached, exit
+    /// untouched), and a nested value outside the closed vocabulary (fails
+    /// closed with an internal error rather than passing through).
+    #[test]
+    fn attach_requirements_implements_handles_error_refines_and_unknown_verdicts() {
+        // `error`: nothing is attached and the caller's exit is left alone.
+        let mut errored = Value::Object(test_envelope());
+        errored
+            .as_object_mut()
+            .expect("envelope")
+            .insert("result".to_owned(), json!("error"));
+        assert_eq!(
+            attach_requirements_implements(
+                &mut errored,
+                json!({"abs": "Abs", "result": "refines"})
+            ),
+            None
+        );
+        assert!(
+            errored.get("implements").is_none(),
+            "an error envelope must not gain an implements field: {errored}"
+        );
+
+        // `refines`: attached as evidence, exit untouched.
+        let mut passing = Value::Object(test_envelope());
+        passing
+            .as_object_mut()
+            .expect("envelope")
+            .insert("result".to_owned(), json!("verified"));
+        assert_eq!(
+            attach_requirements_implements(
+                &mut passing,
+                json!({"abs": "Abs", "result": "refines"})
+            ),
+            None
+        );
+        assert_eq!(passing["result"], "verified");
+        assert_eq!(passing["implements"]["result"], "refines");
+
+        // Outside the closed vocabulary: fail closed, never pass through.
+        let mut unknown = Value::Object(test_envelope());
+        unknown
+            .as_object_mut()
+            .expect("envelope")
+            .insert("result".to_owned(), json!("ok"));
+        assert_eq!(
+            attach_requirements_implements(
+                &mut unknown,
+                json!({"abs": "Abs", "result": "who_knows"})
+            ),
+            Some(3)
+        );
+        assert_eq!(unknown["result"], "error");
+        assert_eq!(unknown["kind"], "internal");
+    }
+
+    #[test]
+    fn attach_requirements_implements_folds_failed_seams_verbatim() {
+        let mut envelope = Value::Object(test_envelope());
+        envelope
+            .as_object_mut()
+            .expect("envelope")
+            .insert("result".to_owned(), json!("ok"));
+        assert_eq!(
+            attach_requirements_implements(
+                &mut envelope,
+                json!({
+                    "abs": "Abs",
+                    "result": "refinement_failed",
+                    "violation": {"result": "refinement_failed", "kind": "stutter_changed_abs"},
+                }),
+            ),
+            Some(1)
+        );
+        assert_eq!(envelope["result"], "refinement_failed");
+        assert_eq!(envelope["implements"]["result"], "refinement_failed");
+
+        envelope
+            .as_object_mut()
+            .expect("envelope")
+            .insert("result".to_owned(), json!("verified"));
+        assert_eq!(
+            attach_requirements_implements(
+                &mut envelope,
+                json!({
+                    "abs": "Abs",
+                    "result": "impl_violated",
+                    "violation": {"result": "violated", "kind": "invariant"},
+                }),
+            ),
+            Some(1)
+        );
+        assert_eq!(envelope["result"], "impl_violated");
+        assert_eq!(envelope["implements"]["result"], "impl_violated");
+
+        let mut violated = Value::Object(test_envelope());
+        violated
+            .as_object_mut()
+            .expect("envelope")
+            .insert("result".to_owned(), json!("violated"));
+        violated
+            .as_object_mut()
+            .expect("envelope")
+            .insert("violation_kind".to_owned(), json!("invariant"));
+        violated
+            .as_object_mut()
+            .expect("envelope")
+            .insert("trace_type".to_owned(), json!("invariant"));
+        assert_eq!(
+            attach_requirements_implements(
+                &mut violated,
+                json!({
+                    "abs": "AbsIV",
+                    "result": "impl_violated",
+                    "violation": {"result": "violated", "kind": "invariant"},
+                }),
+            ),
+            None
+        );
+        assert_eq!(violated["result"], "violated");
+        assert_eq!(violated["violation_kind"], "invariant");
+        assert_eq!(violated["implements"]["result"], "impl_violated");
     }
 }

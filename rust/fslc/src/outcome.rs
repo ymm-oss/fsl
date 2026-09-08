@@ -559,11 +559,13 @@ pub fn exit_status(output: &Value, error_status: i32) -> i32 {
     }
     match output.get("result").and_then(Value::as_str) {
         Some("error") => error_status,
-        // Row 1, restricted to the members a baseline `verify` envelope can
-        // actually carry. The row's remaining members (`nonconformant`,
-        // `refinement_failed`, `sweep_failed`, `observed_mismatch`) belong to
-        // other commands and cannot appear here.
-        Some("violated" | "reachable_failed" | "unknown_cti" | "unknown_budget") => 1,
+        // Row 1: kernel verification verdicts plus inline `implements` failures
+        // folded into `check` / `verify` / `mutate` baselines. `nonconformant`,
+        // `sweep_failed`, and `observed_mismatch` still belong to other commands.
+        Some(
+            "violated" | "reachable_failed" | "unknown_cti" | "unknown_budget"
+            | "refinement_failed" | "impl_violated",
+        ) => 1,
         // A failure-class value outside this command's vocabulary, or one
         // nobody registered at all, is an internal inconsistency -- never a
         // silent success.
@@ -781,6 +783,8 @@ mod tests {
             "reachable_failed",
             "unknown_cti",
             "unknown_budget",
+            "refinement_failed",
+            "impl_violated",
         ] {
             assert_eq!(exit_status(&json!({"result": result}), 2), 1);
         }
@@ -789,8 +793,8 @@ mod tests {
         // An unmapped result is an internal inconsistency, never a silent
         // success -- and keeps the table's distinct code for it.
         assert_eq!(exit_status(&json!({"result": "who_knows"}), 2), 3);
-        // A registered failure outside a verify baseline's vocabulary is the
-        // same kind of inconsistency when it reaches `mutate`.
+        // A registered failure outside the baseline vocabulary folded here is
+        // still an internal inconsistency when it reaches `mutate`.
         assert_eq!(exit_status(&json!({"result": "nonconformant"}), 2), 3);
     }
 }
