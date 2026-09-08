@@ -324,10 +324,14 @@ fn expr_json_inner(
                 //
                 // Deleting it would not fall back on the checked-model contract: the
                 // branch never reads `items`, so a non-empty literal would project
-                // as `set_lit` with `items: []` and silently drop its pairs if any
-                // of those upstream checks ever stopped rejecting it. The `_` arm
-                // below is unreachable for the same reason and is kept on the same
-                // grounds.
+                // as `set_lit` with `items: []` and silently drop its pairs. That
+                // needs the upstream rejection *invariant* to stop holding, not any
+                // single check above -- those are redundant, and `expression_type`
+                // always runs first within this function -- so the ways in are a
+                // change that relaxes all of them together, or a new caller reaching
+                // `expr_json` without an `expected` type that carries the relation.
+                // The `_` arm below is unreachable for the same reason and is kept on
+                // the same grounds.
                 if !items.is_empty() {
                     return Err(error("collection literal type mismatch"));
                 }
