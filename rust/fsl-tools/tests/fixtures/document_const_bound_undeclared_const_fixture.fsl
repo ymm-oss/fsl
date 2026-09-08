@@ -1,0 +1,17 @@
+// Issue #993. Undeclared number name with const bounds has no model type and
+// no literal fallback; the entry is skipped (exit 0, no Ghost).
+//
+// Detector for reverting this issue's change: the pre-fix projector rejects
+// this input outright (measured: exit 2, `analysis bound for 'Ghost' must be
+// an integer literal`), so projection fails and the test fails. It is also a
+// detector for two narrower mutations, one per independent assertion —
+// resolving `Expr::Var` from `KernelModel::consts` makes `Ghost` appear, and
+// emptying `values` on any unresolvable name makes `Amount` disappear.
+requirements UndeclaredConstBound {
+  number Amount
+  const LO = 1
+  const HI = 3
+  state { amount: Amount }
+  init { amount = 0 }
+}
+verify { values Amount = 0..2; values Ghost = LO..HI }

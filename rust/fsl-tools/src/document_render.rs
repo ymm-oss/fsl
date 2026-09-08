@@ -626,15 +626,10 @@ fn undecided_section(claims: &RequirementClaimSet, locale: Locale) -> String {
     format!("{head}\n\n{intro}\n\n{blocks}")
 }
 
-/// `verify { values N = lo..hi }` bounds are almost always plain integer
-/// literals (normalized AST shape `["num", N]`); show the bare number rather
-/// than the raw AST JSON. Anything else (e.g. a const reference) falls back
-/// to a compact JSON dump rather than fabricating a number.
+/// RCIR stores compile-time evaluated integer bounds in `lo`/`hi`; render them
+/// as plain numbers rather than raw JSON.
 fn ast_bound_text(value: &serde_json::Value) -> String {
-    match value.as_array().map(Vec::as_slice) {
-        Some([tag, number]) if tag.as_str() == Some("num") => number.to_string(),
-        _ => value.to_string(),
-    }
+    value.to_string()
 }
 
 fn analysis_scope_section(claims: &RequirementClaimSet, locale: Locale) -> String {

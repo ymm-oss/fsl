@@ -129,9 +129,8 @@ just wording discipline:
 their own section with a fixed "not a verification condition" disclaimer.
 `analysis_scope` (`instances`/`values`) renders in its own section with a
 fixed "these are analysis bounds, not operational capacity" disclaimer;
-numeric bounds are read from RCIR's normalized-AST `["num", N]` shape and
-shown as the plain number (any other shape — e.g. a `const` reference — falls
-back to a compact JSON dump rather than fabricating a value).
+numeric bounds are plain evaluated integers from RCIR and are shown as the
+bare number.
 
 A claim referenced by more than one requirement (RCIR's many-to-many
 relation) renders in full only the first time it is encountered while
@@ -149,14 +148,14 @@ anywhere in the renderer. Two runs over the same `RequirementClaimSet` and
 
 ## Verification evidence
 
-`rust/fsl-tools/tests/document_render.rs` (28 tests): an exact byte-for-byte
+`rust/fsl-tools/tests/document_render.rs` (29 tests): an exact byte-for-byte
 golden match of `examples/pm/cancel_system.fsl`'s REQ-2 in both locales
 (issue #326's acceptance criterion 1 — two guards, a struct-literal update,
 and fairness, all present); requirement text and formalized meaning kept in
 separate sections; the acceptance/forbidden non-generalization disclaimer
 (with a negative check that no absolute-guarantee phrasing appears);
 analysis-scope's not-a-capacity disclaimer and correct plain-number
-rendering; byte-identical repeated renders; `requires`-as-enablement and
+rendering (including negative compile-time const bounds); byte-identical repeated renders; `requires`-as-enablement and
 `not`-is-preserved meaning-fidelity checks; the transition-rule N-AND
 special case together with `old(...)`; the deadline/progress/reachability
 distinctions; undecided exclusion from claims; a forbidden case with an

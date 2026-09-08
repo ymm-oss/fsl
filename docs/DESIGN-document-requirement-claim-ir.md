@@ -173,7 +173,9 @@ digest even though the claim record itself only holds a reference.
   annotation's span; `undecided_declarations`'s existing JSON output and callers
   are unchanged (it is now a thin projection over the typed records). Undecided
   items are metadata, never claims, and never verification conditions.
-- `analysis_scope` carries authored `verify { instances ...; values ... }` bounds.
+- `analysis_scope` carries the authored `verify { instances ...; values ... }`
+  bounds it can resolve to integers; a `values` bound naming a number the spec
+  never declares is omitted when it cannot (see the end of this item).
   **These do not survive kernel lowering**: `entity`/`number` declarations plus
   their `verify` bounds are fully consumed by `lower_requirements` into concrete
   bounded types (an `entity Case` + `verify { instances Case = 2 }` becomes a plain
@@ -181,7 +183,12 @@ digest even though the claim record itself only holds a reference.
   `_from_source` entry point instead reads `RequirementsItem::Common(SpecItem::
   VerifyBounds { .. })` directly from the parsed `SurfaceRequirements` — the same
   surface tree it already inspects for `implements` names — before lowering
-  erases it, and passes the result into `DocumentInput::analysis_scope`. Direct
+  erases it, and passes the result into `DocumentInput::analysis_scope`. The
+  number name comes from that surface tree; when `KernelModel::types` holds a
+  `TypeDef::Domain` for the name, `lo`/`hi` are the compile-time evaluated
+  bounds from model construction (the same constant expressions `fslc check`
+  accepts). Otherwise the projector falls back to integer literals in the
+  surface tree; unresolvable bounds are skipped. Direct
   `spec` dialect has no `entity`/`number`/`verify` concept at all, so its
   `analysis_scope` is always empty. Scope is disclosure of analysis coverage, not a
   system limit, and is never merged into requirement bodies.
@@ -325,13 +332,23 @@ classifies checked nodes and serializes them.
 
 ## Verification evidence
 
-`rust/fsl-tools/tests/document.rs` (29 tests) against
-`examples/pm/cancel_system.fsl` and two dedicated fixtures
+`rust/fsl-tools/tests/document.rs` (34 tests) against
+`examples/pm/cancel_system.fsl` and seven dedicated fixtures
 (`document_claims_fixture.fsl` — kernel-wrapper `requirements` covering `trans`,
 `reachable`, `leadsTo`, `terminal`, a deadline, `forbidden`, a multi-statement
 requirement, a multi-requirement action, `@undecided`, and `entity`/`number`/
 `verify` bounds; `document_kpi_fixture.fsl` — the process+data profile plus a
-`kpi` projection):
+`kpi` projection; `document_const_bound_fixture.fsl` — compile-time const
+`verify { values ... }` bounds projected as evaluated integers;
+`document_const_bound_reject_fixture.fsl` — preservation control for undefined
+const bounds (the rejection comes from `build_model`, so it keeps passing when
+this change is reverted); `document_const_bound_undeclared_literal_fixture.fsl`
+— undeclared number names with literal bounds, a detector cited for the
+mutation "reject when `KernelModel::types` has no entry" and a preservation
+control with respect to the revert (its bounds are all literals, so pre-fix
+output is byte-identical); `document_const_bound_undeclared_const_fixture.fsl`
+— undeclared number names with const bounds skipped without rejection, a
+detector for the revert and for one mutation per independent assertion):
 
 - projection completeness (exact target-universe partition, all nine claim kinds,
   unattributed claims are still emitted, dialect rejection is fail-closed);
@@ -349,6 +366,16 @@ requirement, a multi-requirement action, `@undecided`, and `entity`/`number`/
   `terminal_rule` under a stripped origin registry, never for claims with a real
   declared span);
 - undecided/analysis-scope separation from claims;
-- schema validation of every fixture's output against
+- compile-time const `verify { values ... }` bounds project as evaluated
+  integers, and a `values` bound naming a number the spec never declares is not
+  rejected — it projects through the integer-literal path when it can and is
+  omitted otherwise, so no `values` bound causes `document claims` to refuse a
+  `requirements` input that `check` accepts (a dialect outside
+  `RCIR_SUPPORTED_DIALECTS` is still refused, as a scope boundary);
+- schema validation of the output of every fixture that projects, against
   `requirement-claims.v1.schema.json` via the `jsonschema` crate, plus one negative
-  control (a truncated document fails validation).
+  control (a truncated document fails validation). Two fixtures are excluded,
+  each because it has no projected output to validate at all:
+  `document_const_bound_reject_fixture.fsl` (`build_model` rejects it first) and
+  `document_unsupported_dialect_broken_model_fixture.fsl` (`dbsystem` is outside
+  `RCIR_SUPPORTED_DIALECTS`).
