@@ -676,6 +676,9 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 - 代入: `x = expr`、`m[k] = expr`、`m[k].field = expr`、`o.field = expr`
 - Set/Seq/relation の更新は**再代入イディオム**を使います:
   `s = s.add(x)`、`q = q.pop()`、`r = r.add(a, b)`
+- relation 型フィールドの**リテラル**初期化子は空の `Set {}` でなければならず、空でない Set
+  リテラルは `init` と inline 初期化子の両方で拒否される。対の追加は再代入イディオム
+  `r = r.add(a, b)` で行い、これは `init` の中でも使える。
 - `if expr { stmt... } else { stmt... }` は `init` と action 本体の両方で使えます
   (else の内側の if でネストできます)
 - `forall x: T { stmt... }`(一括初期化 / 一括更新)

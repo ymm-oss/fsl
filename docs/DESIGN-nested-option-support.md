@@ -270,6 +270,11 @@ Full language support is incomplete if engines distinguish `none` from
 collapse them. Preserve the legacy `null`/value bytes for `Option<scalar>` and
 introduce a tag only when the declared payload is itself an Option:
 
+Public Kernel projection (`expr_json`): an accepted empty relation initializer
+is exported as `kind="set_lit"` with `type` naming the relation endpoints and
+`items` as an empty array. The closed public Kernel schema introduces no new
+expression `kind`; there is no `relation_lit` variant.
+
 | Type and value | Canonical ordinary JSON |
 |---|---|
 | `Option<T> = none` | `null` |

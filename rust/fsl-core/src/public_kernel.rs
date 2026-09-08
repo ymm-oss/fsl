@@ -303,21 +303,43 @@ fn expr_json_inner(
             );
         }
         Expr::Set(items) | Expr::Seq(items) => {
-            let (kind, item_ty) = match resolve(model, &ty)? {
-                TypeRef::Set(item) => ("set_lit", item),
-                TypeRef::Seq(item, _) => ("seq_lit", item),
-                _ => return Err(error("collection literal type mismatch")),
-            };
-            output.insert("kind".to_owned(), json!(kind));
-            output.insert(
-                "items".to_owned(),
-                Value::Array(
-                    items
-                        .iter()
-                        .map(|item| expr_json(item, env, model, path, span, Some(&item_ty)))
-                        .collect::<Result<_, _>>()?,
-                ),
-            );
+            let resolved = resolve(model, &ty)?;
+            if matches!(resolved, TypeRef::Relation(_, _)) {
+                // Relation literals only support the empty initializer `Set {}`;
+                // there is no per-element type to project against.
+                //
+                // This guard is kept as a fail-closed defense: the branch never reads
+                // `items`, so without it a non-empty literal would project as
+                // `set_lit` with `items: []` and silently drop its pairs. The `_` arm
+                // below is kept on the same grounds.
+                //
+                // Whether either arm can be reached today, which sites enforce the
+                // emptiness rule, which only record it, and what would have to change
+                // -- all of that depends on the call graph and is recorded in #1000,
+                // not here. Four attempts to state it in this comment were each
+                // corrected by review.
+                if !items.is_empty() {
+                    return Err(error("collection literal type mismatch"));
+                }
+                output.insert("kind".to_owned(), json!("set_lit"));
+                output.insert("items".to_owned(), Value::Array(vec![]));
+            } else {
+                let (kind, item_ty) = match resolved {
+                    TypeRef::Set(item) => ("set_lit", item),
+                    TypeRef::Seq(item, _) => ("seq_lit", item),
+                    _ => return Err(error("collection literal type mismatch")),
+                };
+                output.insert("kind".to_owned(), json!(kind));
+                output.insert(
+                    "items".to_owned(),
+                    Value::Array(
+                        items
+                            .iter()
+                            .map(|item| expr_json(item, env, model, path, span, Some(&item_ty)))
+                            .collect::<Result<_, _>>()?,
+                    ),
+                );
+            }
         }
         Expr::Struct { name, fields } => {
             output.insert("kind".to_owned(), json!("struct_lit"));

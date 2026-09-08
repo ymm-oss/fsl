@@ -728,6 +728,9 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 <li>代入: <code>x = expr</code>、<code>m[k] = expr</code>、<code>m[k].field = expr</code>、<code>o.field = expr</code></li>
 <li>Set/Seq/relation の更新は<strong>再代入イディオム</strong>を使います:
   <code>s = s.add(x)</code>、<code>q = q.pop()</code>、<code>r = r.add(a, b)</code></li>
+<li>relation 型フィールドの<strong>リテラル</strong>初期化子は空の <code>Set {}</code> でなければならず、空でない Set
+  リテラルは <code>init</code> と inline 初期化子の両方で拒否される。対の追加は再代入イディオム
+  <code>r = r.add(a, b)</code> で行い、これは <code>init</code> の中でも使える。</li>
 <li><code>if expr { stmt... } else { stmt... }</code> は <code>init</code> と action 本体の両方で使えます
   (else の内側の if でネストできます)</li>
 <li><code>forall x: T { stmt... }</code>(一括初期化 / 一括更新)</li>
