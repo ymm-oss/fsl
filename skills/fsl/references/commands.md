@@ -97,6 +97,8 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
                [--from-state state.json]            # complete Monitor/replay state; replaces init (BMC only)
                [--strict-tags] [--requirements ids.txt] [--no-cache]
                [--lemma "<expr>"]...                 # induction only; independently adjudicated
+               # Inline `implements`: `refines` keeps the ordinary top-level result/exit;
+               # `refinement_failed` or `impl_violated` becomes the top-level result with exit 1.
 fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view

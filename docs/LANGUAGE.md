@@ -1035,10 +1035,12 @@ mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) 
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
-refinement_failed / sweep_failed / observed_mismatch,
+refinement_failed / impl_violated / sweep_failed / observed_mismatch,
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
-result; `imported`/`imported_with_warnings` is `fslc db import`'s. The same
+result; `imported`/`imported_with_warnings` is `fslc db import`'s. `impl_violated` is listed
+because inline `implements` on `check` and `verify` propagates that seam verdict to the
+top-level `result`. The same
 `2` mapping is fail-closed for `chain`'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
 `docs/DESIGN-layers.md` §7) and for `ledger --impl-log`'s replay input (a
@@ -2154,19 +2156,27 @@ verify {
 - `kpi NAME = count ENTITY in STAGE` is a declarative projection in both
   business and requirements. It does not create a ghost counter or an automatic
   `_kpi_*` invariant.
-- With `implements`, `fslc verify` **also runs the refine to the upper layer
-  simultaneously**, and the result carries `implements: {abs, result}`, whose
-  values are `refines` / `refinement_failed` / `impl_violated`. **That verdict is
-  reported only in this field. It is not folded into the top-level `result` or
-  the exit code**, so a broken seam still returns `result:"ok"`/`"verified"` and
-  exit 0 — the one exception to the exit-code table above, and the reason
-  `implements` has no row in it. Gate on `implements.result == "refines"`, or run
-  `fslc chain`, which applies exactly that gate to the layer and exits 1
-  (`docs/DESIGN-design-family.md` states the same rule for orchestrators).
-  Standalone `fslc refine` does exit 1 on `refinement_failed`; only the inline
-  seam is silent. An empty
-  body (`implements X from "..." { }`) auto-generates identity refinement when
-  process/action/stage names match. Inside the `implements { }` block you write
+- With `implements`, `fslc check` and `fslc verify` both run the refinement to the upper layer
+  as well, and the result carries `implements: {abs, result}`, whose values are `refines`,
+  `refinement_failed`, and `impl_violated`. **A failing seam is not confined to this field.**
+  `refines` leaves the command's own top-level `result` and exit code untouched; either failure
+  value becomes the top-level `result` verbatim — `refinement_failed` stays `refinement_failed`
+  and `impl_violated` stays `impl_violated`, so the two remain distinguishable at both levels —
+  and the process exits 1, the same class standalone `fslc refine` already uses for
+  `refinement_failed`. `implements.violation` keeps the seam-specific evidence, except under
+  `--vacuity error`, which replaces the whole envelope with its own `error` result and does not
+  carry `implements` over.
+  `fslc chain` applies the same gate to the layer and exits 1
+  (`docs/DESIGN-design-family.md` states the same rule for orchestrators); a caller no longer
+  needs a second gate of its own for the inline seam. An empty body
+  (`implements X from "..." { }`) auto-generates identity refinement when process/action/stage
+  names match. Inline refinement is **not** evaluated when `verify` is scoped with
+  `--property`, `--exclude-properties`, or `--from-state`; the envelope omits `implements`
+  on those runs. **A scoped run therefore cannot gate the seam**: with `implements` absent,
+  `result` and the exit code speak only for the selected properties, so a broken seam passes
+  such a run. Gate on an unscoped `check`/`verify`, or on `fslc chain`. Whether those three
+  options should project the refinement or record why they skipped it is undecided
+  ([#1008](https://github.com/ymm-oss/fsl/issues/1008)). Inside the `implements { }` block you write
   state `map` entries, `maps auto`, `preserve progress`, and — since #73 —
   `action <impl_act>(<params>) -> <abs_act>(<args>) | stutter`, the same
   correspondence syntax as a separate refinement file's `refinement_action`

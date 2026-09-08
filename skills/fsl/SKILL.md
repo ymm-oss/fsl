@@ -61,17 +61,18 @@ Python AST or source re-parsing. Validate independent implementations with
 
 Output is always a single JSON document on stdout. exit: 0=success
 (verified/proved/generated/analyzed), 1=property not satisfied
-(violated/reachable_failed/unknown_cti/nonconformant), 2=spec error
+(violated/reachable_failed/unknown_cti/nonconformant/refinement_failed/impl_violated),
+2=spec error
 (parse/type/semantics/io), 3=internal error.
 
-**The one exception is the inline `implements` seam.** A requirements spec with
+**Inline `implements` failures are fail-closed.** A requirements spec with
 `implements Abs from "business.fsl" { ... }` has its refinement to the upper
-layer checked during `check`/`verify`, but that verdict is reported *only* in the
-`implements` field — it is not folded into the top-level `result` or the exit
-code. A broken business seam still returns `result: "ok"` / `"verified"` and
-exit 0. Gate it explicitly on `implements.result == "refines"` (the only passing
-value; the failing ones are `refinement_failed` and `impl_violated`), or run
-`fslc chain`, which applies that gate for you and does exit 1.
+layer checked during `check`/`verify`. A `refines` verdict preserves the
+command's ordinary top-level `result` and exit code. Either failing nested value
+(`refinement_failed` or `impl_violated`) becomes the top-level `result` verbatim
+and the process exits 1, while `implements.violation` keeps the seam-specific
+evidence. Gate on `implements.result == "refines"` (the only passing value), or
+run `fslc chain`, which applies that gate for you.
 
 ## Before writing a spec: source fidelity and the formalization memo
 

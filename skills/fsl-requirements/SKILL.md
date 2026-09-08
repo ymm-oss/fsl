@@ -152,10 +152,9 @@ skill produced.
   or API shape unless the source explicitly requires them.
 - A green `implements` result means the requirements contract conforms to the
   agreed business layer. It does not prove any design or implementation. Green
-  means `implements.result == "refines"` in the result JSON: the seam's verdict
-  is not folded into the top-level `result` or the exit code, so a
-  `refinement_failed` / `impl_violated` seam still exits 0 on `check`/`verify`.
-  Assert the field, or gate with `fslc chain`.
+  means `implements.result == "refines"` in the result JSON. A
+  `refinement_failed` / `impl_violated` seam makes `check`/`verify` exit 1 with
+  that value at the top level. Assert the field, or gate with `fslc chain`.
 - When a counterexample suggests a repair, decide whether it is a missing
   requirement, a wrong interpretation, or an intentional exception before changing
   guards or invariants.

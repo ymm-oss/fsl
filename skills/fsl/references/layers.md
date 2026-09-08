@@ -14,9 +14,9 @@ route authoring through the role skills.
    - requirements → business: put `implements BusinessName from "business.fsl" { }`
      in the requirements spec; `verify` then also runs the refine and reports it under
      the `implements` field of the result JSON (an empty body auto-generates identity
-     refinement when names match). This seam is the exception to the exit-code
-     contract: assert `implements.result == "refines"` yourself — a failed seam
-     still exits 0.
+     refinement when names match). A failing seam makes `check`/`verify` exit 1
+     with top-level `refinement_failed` or `impl_violated`; only `refines` keeps
+     the ordinary success envelope.
    - design → requirements: a mapping file + `fslc refine design.fsl requirements.fsl
      mapping.fsl`.
    - when an upper response must survive the seam, add
@@ -325,10 +325,9 @@ verify {
   verdict is reported as `implements: {abs, result}` with `result` one of
   `refines` / `refinement_failed` / `impl_violated` (the last one meaning the
   requirements spec breaks its own bounds/invariants, so no refinement verdict
-  was reached), plus `violation` on the two failing values. It is **not** folded
-  into the top-level `result` or the exit code — unlike standalone `fslc refine`,
-  where `refinement_failed` is exit 1 — so a broken seam returns
-  `result: "ok"` / `"verified"` and exit 0. Gate on
+  was reached), plus `violation` on the two failing values. A failing seam makes
+  the command exit 1 with the same top-level `result` (`refinement_failed` or
+  `impl_violated`). Read `implements.violation` for seam-specific evidence. Gate on
   `implements.result == "refines"`, or use `fslc chain`, which applies exactly
   that gate to the layer and exits 1.
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
