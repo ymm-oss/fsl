@@ -39,8 +39,12 @@ refinement_failed / impl_violated / sweep_failed / observed_mismatch,
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`&#x27;s
 result; `imported`/`imported_with_warnings` is `fslc db import`&#x27;s. `impl_violated` is listed
-because inline `implements` on `check` and `verify` propagates that seam verdict to the
-top-level `result`. The same
+because inline `implements` propagates that seam verdict to the top-level `result`. The fold
+happens where the verification envelope is produced, so it is not confined to `check` and
+`verify`: on a spec whose seam fails, `mutate` re-emits the baseline verdict (generating no
+mutants, because its baseline is no longer `verified`), `ledger` inherits the same exit, and
+`sweep` reports `sweep_failed`. `fslc html` embeds the folded envelope; its exit code is
+unchanged. The same
 `2` mapping is fail-closed for `chain`&#x27;s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
 `docs/DESIGN-layers.md` §7) and for `ledger --impl-log`&#x27;s replay input (a

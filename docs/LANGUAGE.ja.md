@@ -374,7 +374,7 @@ impl 側だけの carried number(例: business の抽象には存在しない `A
 のみに適用されます。
 
 `fslc verify` は `--instances` / `--values` の scope override だけが付いている場合でも
-インライン `implements` を評価します。`--property`、`--exclude-properties`、
+インライン `implements` を評価します。`--property`、`--exclude-property`、
 `--from-state` は引き続き理由を記録せず `implements` フィールドを省略します。
 この挙動は安全とみなされておらず、契約上の未決定事項として残ります。
 
@@ -1005,7 +1005,11 @@ refinement_failed / impl_violated / sweep_failed / observed_mismatch、
 `2` = spec エラー(parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
 `imported`/`imported_with_warnings` は `fslc db import` の結果です。`impl_violated` は
-inline `implements` が `check` / `verify` の top-level `result` へ伝播するため列挙しています。同じ `2` の
+inline `implements` が top-level `result` へ伝播するため列挙しています。畳み込みは検証封筒を
+生成する場所で起きるので、`check` / `verify` に閉じません。seam が失敗する spec では、`mutate` は
+baseline の verdict をそのまま返し(baseline が `verified` でなくなるため変異を1つも生成しません)、
+`ledger` は同じ exit を引き継ぎ、`sweep` は `sweep_failed` を返します。`fslc html` は畳み込まれた
+封筒を埋め込みます(exit code は変わりません)。同じ `2` の
 対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な `depth`/`refine_depth` — `docs/DESIGN-layers.md` §7)
 と、`ledger --impl-log` の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -2102,7 +2106,7 @@ verify {
   （`docs/DESIGN-design-family.md` がオーケストレーター向けに同じ規則を述べています）。
   呼び出し側が inline seam のために独自の第二のゲートを持つ必要はなくなりました。
   空のボディ（`implements X from "..." { }`）は、process / action / stage の名前が一致するとき
-  恒等の refinement を自動生成します。`verify` が `--property`、`--exclude-properties`、
+  恒等の refinement を自動生成します。`verify` が `--property`、`--exclude-property`、
   または `--from-state` でスコープされている run では inline refinement は評価されず、
   封筒から `implements` は省略されます。**したがってスコープされた run で seam を
   ゲートすることはできません**——`implements` が無いので、`result` と exit code は

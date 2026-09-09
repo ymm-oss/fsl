@@ -386,7 +386,7 @@ carried number (e.g. `Amount`, absent from a business abstract) applies to the
 impl only.
 
 `fslc verify` still evaluates inline `implements` when only `--instances` /
-`--values` scope overrides are present. `--property`, `--exclude-properties`, and
+`--values` scope overrides are present. `--property`, `--exclude-property`, and
 `--from-state` continue to omit the `implements` field without recording a reason;
 that behavior is not treated as safe and remains an open contract decision.
 
@@ -1039,8 +1039,12 @@ refinement_failed / impl_violated / sweep_failed / observed_mismatch,
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
 result; `imported`/`imported_with_warnings` is `fslc db import`'s. `impl_violated` is listed
-because inline `implements` on `check` and `verify` propagates that seam verdict to the
-top-level `result`. The same
+because inline `implements` propagates that seam verdict to the top-level `result`. The fold
+happens where the verification envelope is produced, so it is not confined to `check` and
+`verify`: on a spec whose seam fails, `mutate` re-emits the baseline verdict (generating no
+mutants, because its baseline is no longer `verified`), `ledger` inherits the same exit, and
+`sweep` reports `sweep_failed`. `fslc html` embeds the folded envelope; its exit code is
+unchanged. The same
 `2` mapping is fail-closed for `chain`'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
 `docs/DESIGN-layers.md` §7) and for `ledger --impl-log`'s replay input (a
@@ -2171,7 +2175,7 @@ verify {
   needs a second gate of its own for the inline seam. An empty body
   (`implements X from "..." { }`) auto-generates identity refinement when process/action/stage
   names match. Inline refinement is **not** evaluated when `verify` is scoped with
-  `--property`, `--exclude-properties`, or `--from-state`; the envelope omits `implements`
+  `--property`, `--exclude-property`, or `--from-state`; the envelope omits `implements`
   on those runs. **A scoped run therefore cannot gate the seam**: with `implements` absent,
   `result` and the exit code speak only for the selected properties, so a broken seam passes
   such a run. Gate on an unscoped `check`/`verify`, or on `fslc chain`. Whether those three

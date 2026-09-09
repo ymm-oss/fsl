@@ -247,7 +247,7 @@ verify {
     </div>
 
     <div class="callout warn reveal" style="margin-top:24px">
-      <p style="margin:0"><b>seam の終了コード:</b> 壊れた <code>implements</code> リンクは入れ子のフィールドの中に閉じません。<code>refinement_failed</code> と <code>impl_violated</code> は top-level の <code>result</code> になり、<code>violated</code> と同じくコマンドは exit 1 で終了します。残る穴が1つあります: <code>--property</code>、<code>--exclude-properties</code>、<code>--from-state</code> でスコープした <code>verify</code> は <code>implements</code> 自体を省略するため、seam をゲートできません(<a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>)。スコープ無しの <code>check</code>/<code>verify</code>、または <code>fslc chain</code> でゲートしてください — 全体の流れは <a href="examples.ja.html#correctness-chain">e2e 連鎖</a> を参照。</p>
+      <p style="margin:0"><b>seam の終了コード:</b> 壊れた <code>implements</code> リンクは入れ子のフィールドの中に閉じません。<code>refinement_failed</code> と <code>impl_violated</code> は top-level の <code>result</code> になり、<code>violated</code> と同じくコマンドは exit 1 で終了します。残る穴が1つあります: <code>--property</code>、<code>--exclude-property</code>、<code>--from-state</code> でスコープした <code>verify</code> は <code>implements</code> 自体を省略するため、seam をゲートできません(<a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>)。スコープ無しの <code>check</code>/<code>verify</code>、または <code>fslc chain</code> でゲートしてください — 全体の流れは <a href="examples.ja.html#correctness-chain">e2e 連鎖</a> を参照。</p>
     </div>
   </div>
 </section>

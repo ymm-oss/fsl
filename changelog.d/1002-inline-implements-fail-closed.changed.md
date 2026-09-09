@@ -9,5 +9,5 @@ with a failing seam -- `check`, `verify`, `sweep` (`sweep_passed` becomes
 mutants, because its baseline is no longer `verified`), and `ledger`. `db check`
 and `domain check` are unaffected: their nested kernel projection drops the
 `implements` key by design. A `verify` scoped with `--property`,
-`--exclude-properties`, or `--from-state` still omits `implements` entirely and
+`--exclude-property`, or `--from-state` still omits `implements` entirely and
 therefore still cannot gate the seam (#1008).
