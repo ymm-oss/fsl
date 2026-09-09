@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: Apache-2.0
+
+requirements StrictTagTraceabilityAnnotated {
+  process Trace {
+    stages Open, Closed
+    initial Open
+    transition close Open -> Closed by User
+  }
+
+  state { ready: Bool, n: 0..3 }
+
+  @requirement("INIT-001", "init annotation participates in traceability")
+  init {
+    ready = false
+    n = 0
+  }
+
+  @requirement("INVARIANT-001", "invariant annotation participates in traceability")
+  invariant ReadyBounded {
+    ready == ready and n <= 3
+  }
+
+  @requirement("DECL-001", "declaration annotation participates in traceability")
+  action bump() {
+    requires n < 3
+    n = n + 1
+  }
+
+  @requirement("TRANS-001", "trans annotation participates in traceability")
+  trans Monotone {
+    n >= old(n)
+  }
+
+  @requirement("BLOCK-001", "requirement block annotation participates in traceability")
+  requirement REQ-BLOCK "block requirement" {
+    action mark_ready() {
+      ready = true
+    }
+  }
+
+  @requirement("ACCEPT-001", "acceptance annotation participates in traceability")
+  acceptance AC-TRACE-001 "close one trace item" {
+    close(0)
+    expect Trace 0 in Closed
+  }
+
+  @requirement("FORBID-001", "forbidden annotation participates in traceability")
+  forbidden FB-TRACE-001 "cannot close twice" {
+    close(0)
+    close(0)
+    expect rejected
+  }
+}
+
+verify {
+  instances Trace = 1
+}

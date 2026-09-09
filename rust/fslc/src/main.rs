@@ -5890,6 +5890,51 @@ fn strict_tag_warnings(
     strict_tag_warnings_from_source(model, &source, requirements)
 }
 
+/// Collect every requirement ID that some declaration or trace case references.
+///
+/// The two halves are not the same shape. The first enumerates the `KernelModel` collections
+/// that carry annotations, so a newly added annotation-bearing collection has to be added here
+/// as well. The second reads a trace case's whole annotation set rather than its `id`, because
+/// lowering synthesises the case's own `Requirement{id,text}` into that set before extending it
+/// with the surface annotations (`fsl_core::dialect::trace_case_annotations`) -- so one read
+/// yields both the owned and the linked IDs, and neither can be forgotten separately.
+fn referenced_requirement_ids(
+    model: &KernelModel,
+    source: &str,
+) -> std::collections::BTreeSet<String> {
+    let mut referenced = std::collections::BTreeSet::new();
+    for annotations in model
+        .actions
+        .iter()
+        .map(|item| &item.annotations)
+        .chain(model.invariants.iter().map(|item| &item.annotations))
+        .chain(model.transitions.iter().map(|item| &item.annotations))
+        .chain(model.leadstos.iter().map(|item| &item.annotations))
+        .chain(model.reachables.iter().map(|item| &item.annotations))
+        .chain(std::iter::once(&model.init_annotations))
+    {
+        referenced.extend(
+            annotations
+                .requirements()
+                .expect("checked model annotations are valid")
+                .into_iter()
+                .map(|requirement| requirement.id),
+        );
+    }
+    if let Ok(Some(contract)) = fsl_core::requirements_trace_contract(source) {
+        for case in contract.acceptance.into_iter().chain(contract.forbidden) {
+            referenced.extend(
+                case.annotations
+                    .requirements()
+                    .expect("checked trace case annotations are valid")
+                    .into_iter()
+                    .map(|requirement| requirement.id),
+            );
+        }
+    }
+    referenced
+}
+
 fn strict_tag_warnings_from_source(
     model: &KernelModel,
     source: &str,
@@ -5946,28 +5991,7 @@ fn strict_tag_warnings_from_source(
         }
     }
 
-    let mut referenced = std::collections::BTreeSet::new();
-    for annotations in model
-        .actions
-        .iter()
-        .map(|item| &item.annotations)
-        .chain(model.invariants.iter().map(|item| &item.annotations))
-        .chain(model.transitions.iter().map(|item| &item.annotations))
-        .chain(model.leadstos.iter().map(|item| &item.annotations))
-        .chain(model.reachables.iter().map(|item| &item.annotations))
-    {
-        referenced.extend(
-            annotations
-                .requirements()
-                .expect("checked model annotations are valid")
-                .into_iter()
-                .map(|requirement| requirement.id),
-        );
-    }
-    if let Ok(Some(contract)) = fsl_core::requirements_trace_contract(source) {
-        referenced.extend(contract.acceptance.into_iter().map(|case| case.id));
-        referenced.extend(contract.forbidden.into_iter().map(|case| case.id));
-    }
+    let referenced = referenced_requirement_ids(model, source);
     if let Some(path) = requirements {
         let source = std::fs::read_to_string(path).map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
