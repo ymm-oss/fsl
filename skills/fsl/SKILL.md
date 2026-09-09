@@ -59,13 +59,21 @@ Python AST or source re-parsing. Validate independent implementations with
 `fslc conformance <spec> --depth N`; versioning and rollback semantics are in
 `docs/DESIGN-kernel-contract.md`.
 
-Output is always a single JSON document on stdout. exit: 0=success (verified /
-proved / generated / analyzed — a gloss, not the full row), 1=property not
-satisfied, whose vocabulary is complete here: violated / reachable_failed /
-unknown_cti / unknown_budget / nonconformant / refinement_failed /
-impl_violated / sweep_failed / observed_mismatch. 2=spec error
-(parse/type/semantics/io), 3=internal error. `docs/LANGUAGE.md` carries the
-same two rows with each value's producing command.
+Most commands print a single JSON document on stdout; `fslc ledger` and
+`fslc document generate` print Markdown instead, so gate on the exit code, not
+on stdout being parseable.
+
+exit: 0=success, 1=property not satisfied, 2=spec error
+(parse/type/semantics/io), 3=internal error. **Do not treat any list of
+result values as the whole of exit 1.** The rule, not a list, decides: a
+`result` the verifier classifies as a failure exits 1 unless it is a spec
+error. The values you will meet most often are `violated`,
+`reachable_failed`, `unknown_cti`, `unknown_budget`, `nonconformant`,
+`refinement_failed`, `impl_violated`, `sweep_failed` and `observed_mismatch`,
+and the dialect commands add their own (`document check`'s
+`document_drifted`, `ai replay`'s `replay_nonconformant`, `ai eval`'s gate
+statuses). `docs/LANGUAGE.md` lists the verify-family values with each one's
+producing command.
 
 **Inline `implements` failures are fail-closed.** A requirements spec with
 `implements Abs from "business.fsl" { ... }` has its refinement to the upper
