@@ -205,7 +205,9 @@ contract, including non-obvious details:
 - `faithfulness` defaults are applied recursively to nested result dictionaries;
 - `trace_type` is a top-level trailing default;
 - exit codes 0/1/2/3 retain their current meaning;
-- `mutate` always exits zero;
+- `mutate` exits zero for its own `mutated` result, but re-emits a non-`verified`
+  baseline envelope with that baseline's own exit code rather than forcing zero (since
+  #1002 a failed inline `implements` seam is such a baseline);
 - `chain` keeps its separately assembled envelope and stderr table behavior; and
 - raw-output modes remain raw rather than being wrapped opportunistically.
 
