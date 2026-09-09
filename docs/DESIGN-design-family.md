@@ -201,8 +201,9 @@ mapping that must return `refinement_failed`. The shared controls establish:
 - changing only a checked imported dependency changes the source-bundle digest;
 - depth-1 comparison remains explicitly bounded and is never called equivalent;
 - reversing OLD/NEW changes the directed result while retaining both identities;
-- a top-level successful `check` with nested `implements.result:
-  refinement_failed` maps to a gated exit 1 rather than family success;
+- a `check` whose nested `implements.result` is `refinement_failed` reports that
+  value as its own top-level `result` and exits 1, so the family gate reads a
+  command failure instead of deriving one from an otherwise successful envelope;
 - a failed variant refinement yields a failed Gate A/family report without
   omitting other variants, comparison results, or raw evidence;
 - an unknown manifest field and an unknown comparison endpoint fail closed;

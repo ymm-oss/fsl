@@ -240,14 +240,14 @@ verify {
       <div class="syntax-card">
         <h3>検証時の見え方</h3>
         <pre><code>$ fslc verify requirements.fsl --depth 8
-# JSON の implements.result == "refines" を確認
-# （seam 失敗でも exit 0 のことがある）</code></pre>
+# seam が失敗すると top-level result になり exit 1
+# implements.result は "refines" だけが合格値</code></pre>
         <p>要件自身の検証に加えて、業務層への詳細化結果が <code>implements</code> に含まれます。</p>
       </div>
     </div>
 
     <div class="callout warn reveal" style="margin-top:24px">
-      <p style="margin:0"><b>seam の終了コード注意:</b> <code>violated</code> や <code>refinement_failed</code> と違い、壊れた <code>implements</code> リンクでも exit 0 になり得ます。CI では必ず <code>implements.result == "refines"</code> を確認してください — 全体の流れは <a href="examples.ja.html#correctness-chain">e2e 連鎖</a> を参照。</p>
+      <p style="margin:0"><b>seam の終了コード:</b> 壊れた <code>implements</code> リンクは入れ子のフィールドの中に閉じません。<code>refinement_failed</code> と <code>impl_violated</code> は top-level の <code>result</code> になり、<code>violated</code> と同じくコマンドは exit 1 で終了します。残る穴が1つあります: <code>--property</code>、<code>--exclude-properties</code>、<code>--from-state</code> でスコープした <code>verify</code> は <code>implements</code> 自体を省略するため、seam をゲートできません(<a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>)。スコープ無しの <code>check</code>/<code>verify</code>、または <code>fslc chain</code> でゲートしてください — 全体の流れは <a href="examples.ja.html#correctness-chain">e2e 連鎖</a> を参照。</p>
     </div>
   </div>
 </section>
