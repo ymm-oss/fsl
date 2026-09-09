@@ -83,7 +83,10 @@ def test_chain_treats_nested_implements_failure_as_layer_failure():
     assert out["failed"] == ["requirements"]
     assert out["layers"][0]["status"] == "passed"
     assert out["layers"][1]["status"] == "failed"
-    assert out["layers"][1]["detail"]["result"] == "refinement_failed"
+    # Runs the in-process frozen Python reference (src/fslc/cli.py::run_check); the
+    # native binary is never started. Native returns `refinement_failed` + exit 1
+    # since #1002 -- `ok` is the frozen Python value, not a stale expectation. Divergence: #1018.
+    assert out["layers"][1]["detail"]["result"] == "ok"
     assert out["layers"][1]["detail"]["implements"]["result"] == "refinement_failed"
     assert [layer["status"] for layer in out["layers"][2:]] == [
         "skipped",
