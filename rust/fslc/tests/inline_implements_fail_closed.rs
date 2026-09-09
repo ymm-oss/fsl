@@ -36,6 +36,21 @@ fn run(command: &str, arguments: &[&str]) -> (Value, i32) {
     (value, output.status.code().expect("native exit status"))
 }
 
+/// `ledger` writes Markdown, not JSON, so its exit code has to be read without
+/// parsing stdout. Returns the parsed envelope only when there is one.
+fn run_raw(command: &str, arguments: &[&str]) -> (Option<Value>, i32) {
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .arg(command)
+        .args(arguments)
+        .current_dir(repository_root())
+        .output()
+        .expect("run native fslc");
+    (
+        serde_json::from_slice(&output.stdout).ok(),
+        output.status.code().expect("native exit status"),
+    )
+}
+
 /// detector (mutation C: disabling the fold leaves `check` green)
 #[test]
 fn check_folds_failed_inline_refinement_into_command_failure() {
@@ -128,4 +143,35 @@ fn verify_preserves_primary_violation_when_impl_seam_also_fails() {
     assert_eq!(output["implements"]["violation"]["kind"], "invariant");
     assert!(output["trace"].is_array());
     assert!(output["violated_at_step"].is_u64());
+}
+
+/// detector (mutation C, reached through the other commands that report a
+/// verification verdict). The fold lives where the envelope is produced, so it
+/// is not confined to `check`/`verify`. Measured against a binary built from
+/// this branch's base: on `CHAIN_FIXTURE` these three commands exited 0 before
+/// the fold and exit 1 after it, so this test fails if the fold is removed.
+///
+/// `mutate` is the one whose failure mode is a silent loss of coverage rather
+/// than a wrong verdict: its baseline is no longer `verified`, so it re-emits
+/// the baseline envelope and generates no mutants at all. Asserting the
+/// baseline's `result` here is what makes that visible; the mutant count itself
+/// is deliberately not pinned, because whether `mutate` should still explore a
+/// spec whose seam is broken is a separate decision nobody has taken.
+#[test]
+fn other_verdict_reporting_commands_fail_closed_on_the_same_seam() {
+    let (sweep, sweep_status) = run("sweep", &[CHAIN_FIXTURE]);
+    assert_eq!(sweep_status, 1, "{sweep:#}");
+    assert_eq!(sweep["result"], "sweep_failed");
+
+    let (mutate, mutate_status) = run(
+        "mutate",
+        &[CHAIN_FIXTURE, "--depth", "3", "--max-mutants", "2"],
+    );
+    assert_eq!(mutate_status, 1, "{mutate:#}");
+    assert_eq!(mutate["result"], "refinement_failed");
+    assert_eq!(mutate["implements"]["result"], "refinement_failed");
+
+    // Markdown on stdout; the exit code is the whole contract here.
+    let (ledger, ledger_status) = run_raw("ledger", &[CHAIN_FIXTURE]);
+    assert_eq!(ledger_status, 1, "ledger envelope: {ledger:?}");
 }
