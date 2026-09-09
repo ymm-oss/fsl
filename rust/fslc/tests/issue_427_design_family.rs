@@ -119,7 +119,14 @@ fn nested_implements_gate(result: &Value) -> i32 {
     };
     match nested {
         "refines" => 0,
-        "refinement_failed" => 1,
+        // Both seam failure values are legitimate family failures, not contract
+        // errors. `impl_violated` had to be added when #1002 made it reachable
+        // as a top-level `check`/`verify` verdict: without it this gate returns
+        // 2, `producer_envelope_valid` rejects the row, and the exit-1 arm in
+        // `producer_gate` never runs -- a real verdict read as a broken
+        // producer. The two `producer_result_exit_valid` arms below list the
+        // same pair; all three have to move together.
+        "refinement_failed" | "impl_violated" => 1,
         _ => 2,
     }
 }
@@ -897,6 +904,27 @@ fn negative_controls_reject_false_family_success() {
         "stdout_json": inline_json,
     });
     assert_eq!(producer_gate(&nested_row, &["ok"]), 1);
+
+    // The other seam failure value, through the same path. Before
+    // `nested_implements_gate` learned `impl_violated`, this row graded 2
+    // (contract error) instead of 1 (family failure), so a legitimate verdict
+    // was rejected as a broken producer.
+    let impl_violated = run(
+        &repository_file("rust/fslc/tests/fixtures/inline_implements_fail_closed"),
+        &["check".into(), "impl_iv.fsl".into()],
+    );
+    assert_eq!(impl_violated.status.code(), Some(1));
+    let impl_violated_json = json_stdout(&impl_violated);
+    assert_eq!(impl_violated_json["result"], "impl_violated");
+    assert_eq!(impl_violated_json["implements"]["result"], "impl_violated");
+    assert_eq!(nested_implements_gate(&impl_violated_json), 1);
+    let impl_violated_row = json!({
+        "phase": "check",
+        "exit_code": 1,
+        "json_parsed": true,
+        "stdout_json": impl_violated_json,
+    });
+    assert_eq!(producer_gate(&impl_violated_row, &["ok"]), 1);
 
     assert_producer_contract_negative_controls();
 
