@@ -251,6 +251,21 @@ fn class_of(success: bool) -> OutcomeClass {
 /// are all failure-class *and* cacheable. The two predicates live in the same
 /// file so the vocabulary has one home, and stay distinct so that a new result
 /// value forces an explicit decision in both.
+///
+/// **Decision for the two values #1002 made reachable here
+/// (`refinement_failed`, `impl_violated`): not admitted.** They are settled
+/// verdicts, so the reason is not their failure class. It is that the read side
+/// validates the *shape* of every cached verdict before replaying it —
+/// `verification::cached_output_status` requires a `trace` and a
+/// `violated_at_step` for `violated`, a `cti` for `unknown_cti`, and so on —
+/// and the seam's evidence lives under `implements.violation`, for which no
+/// such validator exists. Admitting the verdict without one would put an
+/// unvalidated envelope on the replay path, which is the direction this
+/// predicate exists to avoid. The cost is that a failing seam re-verifies every
+/// time; the alternative is tracked in #1022, not decided by omission.
+/// `cached_output_status` has no arm for either value either, so the two sides
+/// agree and both fail closed. `cacheability_records_the_seam_verdict_decision`
+/// fails if one side is changed without the other.
 #[must_use]
 pub fn verify_cache_admits(output: &Value) -> bool {
     matches!(
@@ -577,7 +592,9 @@ pub fn exit_status(output: &Value, error_status: i32) -> i32 {
 mod tests {
     use serde_json::json;
 
-    use super::{OutcomeClass, is_definitive_kernel_verdict, outcome_class, verify_cache_admits};
+    use super::{
+        OutcomeClass, exit_status, is_definitive_kernel_verdict, outcome_class, verify_cache_admits,
+    };
 
     /// The rule `run_db_check` and `run_domain_check` share, pinned where it
     /// now lives. Both once carried it separately and one of them carried it
@@ -766,6 +783,35 @@ mod tests {
         let generated = json!({"result": "generated"});
         assert!(!verify_cache_admits(&generated));
         assert_eq!(outcome_class(&generated), OutcomeClass::Success);
+    }
+
+    /// #1002 made `refinement_failed` and `impl_violated` reachable as
+    /// top-level `verify` results, and this predicate's contract is that a new
+    /// result value forces an explicit decision here. The decision is "not
+    /// admitted" (see the doc comment); this test is what makes the difference
+    /// between deciding that and forgetting it visible. It fails if either
+    /// value is added here without the matching shape validation on the read
+    /// side in `verification::cached_output_status`.
+    #[test]
+    fn cacheability_records_the_seam_verdict_decision() {
+        for result in ["refinement_failed", "impl_violated"] {
+            let envelope = json!({"result": result});
+            assert!(
+                !verify_cache_admits(&envelope),
+                "{result} is deliberately not cacheable: the replay side has no \
+                 shape validator for `implements.violation` (#1022)"
+            );
+            assert_eq!(
+                outcome_class(&envelope),
+                OutcomeClass::Failure,
+                "{result} is still failure-class"
+            );
+            assert_eq!(
+                exit_status(&envelope, 3),
+                1,
+                "{result} still exits 1 -- not caching it changes nothing about the verdict"
+            );
+        }
     }
 
     /// The exit-code derivation is separate from the classification: the
