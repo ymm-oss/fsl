@@ -59,11 +59,13 @@ Python AST or source re-parsing. Validate independent implementations with
 `fslc conformance <spec> --depth N`; versioning and rollback semantics are in
 `docs/DESIGN-kernel-contract.md`.
 
-Output is always a single JSON document on stdout. exit: 0=success
-(verified/proved/generated/analyzed), 1=property not satisfied
-(violated/reachable_failed/unknown_cti/nonconformant/refinement_failed/impl_violated),
-2=spec error
-(parse/type/semantics/io), 3=internal error.
+Output is always a single JSON document on stdout. exit: 0=success (verified /
+proved / generated / analyzed — a gloss, not the full row), 1=property not
+satisfied, whose vocabulary is complete here: violated / reachable_failed /
+unknown_cti / unknown_budget / nonconformant / refinement_failed /
+impl_violated / sweep_failed / observed_mismatch. 2=spec error
+(parse/type/semantics/io), 3=internal error. `docs/LANGUAGE.md` carries the
+same two rows with each value's producing command.
 
 **Inline `implements` failures are fail-closed.** A requirements spec with
 `implements Abs from "business.fsl" { ... }` has its refinement to the upper
