@@ -67,13 +67,14 @@ exit: 0=success, 1=property not satisfied, 2=spec error
 (parse/type/semantics/io), 3=internal error. **Do not treat any list of
 result values as the whole of exit 1.** The invariant to gate on is narrower
 and safer: **a `result` the verifier classifies as a failure never exits 0.**
-Which non-zero code it gets depends on the command. `check`/`verify` and the
-commands sharing their envelope map **their own listed verdicts** to 1 and
-everything else in the failure class to 3 — including a value that is
-registered as a failure but belongs to another command, so `nonconformant`
-exits 3 there. The dialect commands map any non-`error` failure to 1. So branch
-on the exit code being non-zero, and read `result` when you need to know which
-failure it was. The values you will meet most often are
+Which non-zero code it gets depends on the command. `result: "error"` is a spec
+or internal error and carries its own code, 2 or 3, everywhere. For the rest of
+the failure class, `check`/`verify` and the commands sharing their envelope map
+**their own listed verdicts** to 1 and anything else to 3 — including a value
+that is registered as a failure but belongs to another command, so
+`nonconformant` exits 3 there. The dialect commands map every non-`error`
+failure to 1 instead. So branch on the exit code being non-zero, and read
+`result` when you need to know which failure it was. The values you will meet most often are
 `violated`,
 `reachable_failed`, `unknown_cti`, `unknown_budget`, `nonconformant`,
 `refinement_failed`, `impl_violated`, `sweep_failed` and `observed_mismatch`,
