@@ -81,13 +81,18 @@ fn run_raw(command: &str, arguments: &[&str]) -> (Option<Value>, i32) {
 ///   counters by saying they "were observed identical", one sentence before
 ///   forbidding exactly that reasoning for `solver.memory_mb`. **Two standards
 ///   in one paragraph, and the weaker one was applied to the larger set.** The
-///   counters are compared on two premises. The first is that each side is
-///   *reproducible*: `random_seed` and `smt.random_seed` are pinned to a
-///   constant, and no `timeout`, `rlimit`, `soft_timeout` or `max_memory` is
-///   set in `fsl-solver-z3` or `fsl-solver` (**measured, by reading both
-///   crates**), so re-running one fixture gives the same counters. That alone
-///   is **not** enough for this assertion, which compares two *different*
-///   fixtures.
+///   counters are compared on two premises, and **neither is established
+///   here**. The first is that each side is *reproducible*. What is measured is
+///   only that this workspace does not deliberately introduce variation:
+///   `random_seed` and `smt.random_seed` are pinned to a constant, and no
+///   `timeout`, `rlimit`, `soft_timeout` or `max_memory` is set in
+///   `fsl-solver-z3` or `fsl-solver` (**measured, by reading both crates**).
+///   That is not the same as re-running one fixture being guaranteed to give
+///   the same counters --- it would follow only if Z3's defaults are also
+///   single-threaded and unbounded, which is assumed below and not verified,
+///   and only up to whatever varies between processes. And reproducibility
+///   alone is **not** enough for this assertion in any case, because it
+///   compares two *different* fixtures.
 ///
 ///   The second premise is the one that carries the weight: that the two
 ///   fixtures generate the same primary solver queries in the same order, so
@@ -98,12 +103,11 @@ fn run_raw(command: &str, arguments: &[&str]) -> (Option<Value>, i32) {
 ///   measurement.** Nothing here demonstrates query-level equality, and if it
 ///   is false this assertion is pinning a coincidence.
 ///
-///   Two further conditions are worth stating because they are not
-///   established here: Z3's own defaults are assumed single-threaded and
-///   unbounded (**not verified**), and the two sides are produced by **two
-///   separate `fslc` child processes** of one build, not by one solver
-///   process, so cross-process variation is in scope. A different Z3 build may
-///   legitimately search differently.
+///   The two conditions both premises lean on, stated once: Z3's own defaults
+///   are assumed single-threaded and unbounded (**not verified**), and the two
+///   sides are produced by **two separate `fslc` child processes** of one
+///   build, not by one solver process, so cross-process variation is in scope.
+///   A different Z3 build may legitimately search differently.
 ///
 ///   ⚠️ **This comparison is not a detector for its own premises**, and an
 ///   earlier version of this comment claimed it was. Nondeterminism that
