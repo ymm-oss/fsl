@@ -81,31 +81,45 @@ fn run_raw(command: &str, arguments: &[&str]) -> (Option<Value>, i32) {
 ///   counters by saying they "were observed identical", one sentence before
 ///   forbidding exactly that reasoning for `solver.memory_mb`. **Two standards
 ///   in one paragraph, and the weaker one was applied to the larger set.** The
-///   counters are compared because the search that produces them is
-///   *deterministic*, which is a claim about what they are, not about how they
-///   behaved. It rests on three conditions, kept separate because they are not
-///   equally well established:
+///   counters are compared on two premises. The first is that each side is
+///   *reproducible*: `random_seed` and `smt.random_seed` are pinned to a
+///   constant, and no `timeout`, `rlimit`, `soft_timeout` or `max_memory` is
+///   set in `fsl-solver-z3` or `fsl-solver` (**measured, by reading both
+///   crates**), so re-running one fixture gives the same counters. That alone
+///   is **not** enough for this assertion, which compares two *different*
+///   fixtures.
 ///
-///   1. Nothing here bounds or randomises the search: `random_seed` and
-///      `smt.random_seed` are pinned to a constant, and no `timeout`,
-///      `rlimit`, `soft_timeout` or `max_memory` is set in `fsl-solver-z3` or
-///      `fsl-solver`. **Measured, by reading both crates.**
-///   2. Z3's own defaults are single-threaded and unbounded, so nothing
-///      outside this workspace introduces a race or a resource cutoff.
-///      **Not verified here** --- an assumption about the solver's defaults,
-///      and the condition likeliest to be wrong.
-///   3. The two sides are compared inside one run of one build. A different
-///      Z3 build may legitimately search differently.
+///   The second premise is the one that carries the weight: that the two
+///   fixtures generate the same primary solver queries in the same order, so
+///   that equal counters are the expected outcome rather than a coincidence.
+///   The fixtures differ only in the seam --- a declaration name, a two-line
+///   comment, and `BDone` -> `BOpen` inside the `map` --- none of which changes
+///   the primary invariant or its bound. ⚠️ **That is an argument, not a
+///   measurement.** Nothing here demonstrates query-level equality, and if it
+///   is false this assertion is pinning a coincidence.
 ///
-///   No separate check guards those conditions, and none is added: if the
-///   search stops being deterministic, **this comparison is what turns red**.
-///   It is the guardian of its own premise, which is worth more than a second
-///   detector that could rot without anyone noticing.
+///   Two further conditions are worth stating because they are not
+///   established here: Z3's own defaults are assumed single-threaded and
+///   unbounded (**not verified**), and the two sides are produced by **two
+///   separate `fslc` child processes** of one build, not by one solver
+///   process, so cross-process variation is in scope. A different Z3 build may
+///   legitimately search differently.
 ///
-///   `decisions` is among the compared counters and is worth naming: Z3
-///   reports neither `decisions` nor `sat decisions` here, so the leaf
-///   serialises as `null` and the comparison is `null` against `null`. It stays
-///   compared, because a build that began reporting it would be worth seeing.
+///   ⚠️ **This comparison is not a detector for its own premises**, and an
+///   earlier version of this comment claimed it was. Nondeterminism that
+///   perturbs both sides equally, or that happens to land on equal counters,
+///   leaves the assertion green. What the assertion establishes is that the
+///   seam did not change these counters, on the runs that were executed --- not
+///   that the search is deterministic.
+///
+///   `decisions` is among the compared counters and is worth naming: the
+///   backend queries both `decisions` and `sat decisions`, and on the runs
+///   observed here Z3 reported neither, so the leaf serialises as `null` and
+///   the comparison is `null` against `null`. **That is a run observation, not
+///   a property of the tree.** It stays compared, because a build that began
+///   reporting it would be worth seeing --- though note the comparison is
+///   between the two sides, so a build that reported the *same* non-null value
+///   on both would pass unnoticed.
 ///
 ///   `solver.memory_mb` is the one exception, excluded for what it is rather
 ///   than for how it behaved: it is Z3's `memory`/`max memory` statistic, a
