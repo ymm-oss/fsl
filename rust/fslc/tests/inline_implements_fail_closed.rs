@@ -73,10 +73,18 @@ fn run_raw(command: &str, arguments: &[&str]) -> (Option<Value>, i32) {
 ///   asserted explicitly above rather than skipped.
 /// * `spec` carries the declaration name, which the fixtures deliberately do
 ///   not share.
-/// * `cost` is wall-clock and solver timing.
+/// * `cost` differs only in its elapsed-time leaves. Its counters --- solver
+///   checks, conflicts, propagations, memory, and every per-property check
+///   count --- were observed identical, so they are compared and only the
+///   timings are dropped.
 /// * `deadlock` was observed to differ in exactly one leaf, `action.loc.line`,
 ///   by exactly the two lines the comment adds. That is checked as a relation
-///   rather than waved through, and the rest of the trace is compared in full.
+///   rather than waved through; `action.loc.column` was observed identical and
+///   is compared, and the rest of the trace is compared in full.
+///
+/// Neither `cost` nor `deadlock` is dropped as a branch. A leaf that differs is
+/// not a reason to stop looking at its siblings --- that is how a whole subtree
+/// stops being checked for the sake of one timestamp.
 ///
 /// Each excluded key is asserted present on **both** sides, so an exclusion
 /// cannot quietly become dead when a field is renamed or dropped.
@@ -103,6 +111,16 @@ fn the_seam_is_the_only_envelope_difference_on_the_default_verify_path() {
     assert_eq!(failing["result"], "refinement_failed");
     assert_eq!(failing["implements"]["result"], "refinement_failed");
     assert!(failing["implements"]["violation"].is_object());
+
+    // The seam envelope itself, compared rather than sampled: the abstract it
+    // refines against is the same on both sides, and `violation` is the only
+    // key the failure adds.
+    assert_eq!(refines["implements"]["abs"], failing["implements"]["abs"]);
+    assert_eq!(sorted_keys(&refines["implements"]), ["abs", "result"]);
+    assert_eq!(
+        sorted_keys(&failing["implements"]),
+        ["abs", "result", "violation"]
+    );
 
     let refines = refines.as_object().expect("verify envelope is an object");
     let failing = failing.as_object().expect("verify envelope is an object");
@@ -133,6 +151,20 @@ fn the_seam_is_the_only_envelope_difference_on_the_default_verify_path() {
         );
     }
 
+    // `cost` is excluded only for its timings, so compare what is left of it.
+    let mut refines_cost = refines["cost"].clone();
+    let mut failing_cost = failing["cost"].clone();
+    let refines_timings = strip_elapsed(&mut refines_cost);
+    let failing_timings = strip_elapsed(&mut failing_cost);
+    assert_eq!(
+        refines_cost, failing_cost,
+        "the seam changed a cost counter, not just a timing"
+    );
+    assert!(
+        refines_timings > 0 && refines_timings == failing_timings,
+        "no timings were found to drop: {refines_timings} {failing_timings}"
+    );
+
     // `deadlock` is excluded only for its one observed leaf, so compare the
     // rest of it exactly and check that leaf as a relation.
     let mut refines_deadlock = refines["deadlock"].clone();
@@ -158,8 +190,51 @@ fn the_seam_is_the_only_envelope_difference_on_the_default_verify_path() {
     }
 }
 
-/// Removes every `action.loc` from a deadlock trace in place and returns the
-/// `line` each one carried, in order.
+/// The sorted key set of a JSON object, for comparing an envelope's shape
+/// rather than a hand-picked subset of its fields.
+fn sorted_keys(value: &Value) -> Vec<&str> {
+    let mut keys: Vec<&str> = value
+        .as_object()
+        .expect("expected a JSON object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    keys
+}
+
+/// Removes every elapsed-time leaf from a `cost` object in place and returns
+/// how many were removed, so an empty removal cannot pass as agreement.
+fn strip_elapsed(cost: &mut Value) -> usize {
+    fn visit(value: &mut Value, removed: &mut usize) {
+        match value {
+            Value::Object(map) => {
+                map.retain(|key, _| {
+                    let keep = !key.ends_with("elapsed_s");
+                    if !keep {
+                        *removed += 1;
+                    }
+                    keep
+                });
+                for nested in map.values_mut() {
+                    visit(nested, removed);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    visit(item, removed);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut removed = 0;
+    visit(cost, &mut removed);
+    removed
+}
+
+/// Removes every `action.loc.line` from a deadlock trace in place, leaving the
+/// rest of each location to be compared, and returns the lines in order.
 fn strip_action_locations(deadlock: &mut Value) -> Vec<i64> {
     let mut lines = Vec::new();
     let Some(trace) = deadlock.get_mut("trace").and_then(Value::as_array_mut) else {
@@ -169,12 +244,18 @@ fn strip_action_locations(deadlock: &mut Value) -> Vec<i64> {
         let Some(action) = step.get_mut("action").and_then(Value::as_object_mut) else {
             continue;
         };
-        if let Some(location) = action.remove("loc") {
-            lines.push(
-                location["line"]
-                    .as_i64()
-                    .expect("action location carries a line number"),
-            );
+        if let Some(mut location) = action.remove("loc") {
+            let line = location["line"]
+                .as_i64()
+                .expect("action location carries a line number");
+            // The column was observed identical on both sides, so it stays in
+            // the compared part rather than leaving with the line.
+            location
+                .as_object_mut()
+                .expect("loc is an object")
+                .remove("line");
+            action.insert("loc_without_line".to_owned(), location);
+            lines.push(line);
         }
     }
     lines
