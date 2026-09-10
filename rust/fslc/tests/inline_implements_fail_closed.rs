@@ -74,14 +74,50 @@ fn run_raw(command: &str, arguments: &[&str]) -> (Option<Value>, i32) {
 /// * `spec` carries the declaration name, which the fixtures deliberately do
 ///   not share.
 /// * `cost` differs only in its elapsed-time leaves. Its counters --- solver
-///   checks, conflicts, propagations, and every per-property check count ---
-///   were observed identical, so they are compared and only the timings are
-///   dropped. `solver.memory_mb` is the exception among them: it was observed
-///   identical too, three runs in a row, but it is Z3's `memory`/`max memory`
-///   statistic, a reading of the process rather than a property of the spec.
-///   An observable that *can* vary with ambient state is not made stable by
-///   agreeing three times, so it is compared for presence and shape instead of
-///   for equality.
+///   checks, conflicts, decisions, propagations, and every per-property check
+///   count --- are compared, and only the timings are dropped.
+///
+///   ⚠️ An earlier version of this paragraph justified comparing those
+///   counters by saying they "were observed identical", one sentence before
+///   forbidding exactly that reasoning for `solver.memory_mb`. **Two standards
+///   in one paragraph, and the weaker one was applied to the larger set.** The
+///   counters are compared because the search that produces them is
+///   *deterministic*, which is a claim about what they are, not about how they
+///   behaved. It rests on three conditions, kept separate because they are not
+///   equally well established:
+///
+///   1. Nothing here bounds or randomises the search: `random_seed` and
+///      `smt.random_seed` are pinned to a constant, and no `timeout`,
+///      `rlimit`, `soft_timeout` or `max_memory` is set in `fsl-solver-z3` or
+///      `fsl-solver`. **Measured, by reading both crates.**
+///   2. Z3's own defaults are single-threaded and unbounded, so nothing
+///      outside this workspace introduces a race or a resource cutoff.
+///      **Not verified here** --- an assumption about the solver's defaults,
+///      and the condition likeliest to be wrong.
+///   3. The two sides are compared inside one run of one build. A different
+///      Z3 build may legitimately search differently.
+///
+///   No separate check guards those conditions, and none is added: if the
+///   search stops being deterministic, **this comparison is what turns red**.
+///   It is the guardian of its own premise, which is worth more than a second
+///   detector that could rot without anyone noticing.
+///
+///   `decisions` is among the compared counters and is worth naming: Z3
+///   reports neither `decisions` nor `sat decisions` here, so the leaf
+///   serialises as `null` and the comparison is `null` against `null`. It stays
+///   compared, because a build that began reporting it would be worth seeing.
+///
+///   `solver.memory_mb` is the one exception, excluded for what it is rather
+///   than for how it behaved: it is Z3's `memory`/`max memory` statistic, a
+///   high-water reading of the process rather than a statistic of the search,
+///   so it answers to the allocator and to whatever else the process did. It
+///   was in fact observed identical across runs, and that is **not** why it is
+///   excluded --- an observable that *can* vary with ambient state is not made
+///   stable by agreeing. It is compared for presence and shape instead.
+///   Presence cannot fail from ambient variation, because the field carries no
+///   `skip_serializing_if` and is therefore always emitted; the shape
+///   assertion does require that Z3 reported the statistic at all, which this
+///   repository already depends on in `fsl-solver-z3`'s own tests.
 /// * `deadlock` was observed to differ in exactly one leaf, `action.loc.line`,
 ///   by exactly the two lines the comment adds. That is checked as a relation
 ///   rather than waved through; `action.loc.column` was observed identical and
