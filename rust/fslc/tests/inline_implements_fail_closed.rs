@@ -74,9 +74,14 @@ fn run_raw(command: &str, arguments: &[&str]) -> (Option<Value>, i32) {
 /// * `spec` carries the declaration name, which the fixtures deliberately do
 ///   not share.
 /// * `cost` differs only in its elapsed-time leaves. Its counters --- solver
-///   checks, conflicts, propagations, memory, and every per-property check
-///   count --- were observed identical, so they are compared and only the
-///   timings are dropped.
+///   checks, conflicts, propagations, and every per-property check count ---
+///   were observed identical, so they are compared and only the timings are
+///   dropped. `solver.memory_mb` is the exception among them: it was observed
+///   identical too, three runs in a row, but it is Z3's `memory`/`max memory`
+///   statistic, a reading of the process rather than a property of the spec.
+///   An observable that *can* vary with ambient state is not made stable by
+///   agreeing three times, so it is compared for presence and shape instead of
+///   for equality.
 /// * `deadlock` was observed to differ in exactly one leaf, `action.loc.line`,
 ///   by exactly the two lines the comment adds. That is checked as a relation
 ///   rather than waved through; `action.loc.column` was observed identical and
@@ -156,6 +161,18 @@ fn the_seam_is_the_only_envelope_difference_on_the_default_verify_path() {
     let mut failing_cost = failing["cost"].clone();
     let refines_timings = strip_elapsed(&mut refines_cost);
     let failing_timings = strip_elapsed(&mut failing_cost);
+    for cost in [&mut refines_cost, &mut failing_cost] {
+        let solver = cost["solver"]
+            .as_object_mut()
+            .expect("cost carries a solver object");
+        let memory = solver
+            .remove("memory_mb")
+            .expect("solver statistics carry memory_mb");
+        assert!(
+            memory.as_f64().is_some_and(|value| value > 0.0),
+            "memory_mb is ambient, so it is checked for shape, not equality: {memory}"
+        );
+    }
     assert_eq!(
         refines_cost, failing_cost,
         "the seam changed a cost counter, not just a timing"
