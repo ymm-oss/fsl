@@ -65,9 +65,14 @@ on stdout being parseable.
 
 exit: 0=success, 1=property not satisfied, 2=spec error
 (parse/type/semantics/io), 3=internal error. **Do not treat any list of
-result values as the whole of exit 1.** The rule, not a list, decides: a
-`result` the verifier classifies as a failure exits 1 unless it is a spec
-error. The values you will meet most often are `violated`,
+result values as the whole of exit 1.** The invariant to gate on is narrower
+and safer: **a `result` the verifier classifies as a failure never exits 0.**
+Which non-zero code it gets depends on the command — `check`/`verify` and the
+commands sharing their envelope map a registered failure verdict to 1 and an
+unregistered one to 3, while the dialect commands map any non-`error` failure
+to 1. So branch on the exit code being non-zero, and read `result` when you
+need to know which failure it was. The values you will meet most often are
+`violated`,
 `reachable_failed`, `unknown_cti`, `unknown_budget`, `nonconformant`,
 `refinement_failed`, `impl_violated`, `sweep_failed` and `observed_mismatch`,
 and the dialect commands add their own (`document check`'s
