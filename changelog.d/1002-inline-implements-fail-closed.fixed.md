@@ -26,3 +26,10 @@ at the former and `e1129ccb` at the latter, differing by two added comment
 lines and nothing else -- whose `implements ... from "business.fsl"` import
 resolves to blob `ce15ac77` in both. The five went 0 -> 1; `db check` and
 `domain check` returned exit 2 with the quoted messages on both binaries.
+
+`fslc html` is worth one more line, because its report was actively misleading
+rather than merely incomplete: on the same spec its top-level Result went from
+a green `verified` badge to a red `refinement_failed` one. Its exit code is
+unchanged -- `html` still exits 0 over a failing spec, which is #1009 and is
+not fixed here -- so the badge and the exit code now disagree deliberately,
+and only the badge has been corrected.
