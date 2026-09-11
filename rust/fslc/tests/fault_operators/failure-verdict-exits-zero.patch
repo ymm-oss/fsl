@@ -7,7 +7,8 @@ sends a failed inline `implements` seam to zero as well.
 
 --- a/rust/fslc/src/outcome.rs
 +++ b/rust/fslc/src/outcome.rs
-@@ -283,7 +283,7 @@
+@@ -580,7 +580,7 @@ pub fn exit_status(output: &Value, error_status: i32) -> i32 {
+         Some(
              "violated" | "reachable_failed" | "unknown_cti" | "unknown_budget"
              | "refinement_failed" | "impl_violated",
 -        ) => 1,
