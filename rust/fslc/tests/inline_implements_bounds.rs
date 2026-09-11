@@ -134,8 +134,8 @@ fn verify_with_instances_keeps_inline_implements_in_envelope() {
         "--instances",
         "Item=1",
     ]);
-    assert_eq!(status, 0, "{output:#}");
-    assert_eq!(output["result"], "verified");
+    assert_eq!(status, 1, "{output:#}");
+    assert_eq!(output["result"], "refinement_failed");
     assert_eq!(output["implements"]["result"], "refinement_failed");
     assert_eq!(
         output["implements"]["violation"]["kind"],

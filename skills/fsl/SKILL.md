@@ -59,19 +59,38 @@ Python AST or source re-parsing. Validate independent implementations with
 `fslc conformance <spec> --depth N`; versioning and rollback semantics are in
 `docs/DESIGN-kernel-contract.md`.
 
-Output is always a single JSON document on stdout. exit: 0=success
-(verified/proved/generated/analyzed), 1=property not satisfied
-(violated/reachable_failed/unknown_cti/nonconformant), 2=spec error
-(parse/type/semantics/io), 3=internal error.
+Most commands print a single JSON document on stdout; `fslc ledger` and
+`fslc document generate` print Markdown instead, so gate on the exit code, not
+on stdout being parseable.
 
-**The one exception is the inline `implements` seam.** A requirements spec with
+exit: 0=success, 1=property not satisfied, 2=spec error
+(parse/type/semantics/io), 3=internal error. **Do not treat any list of
+result values as the whole of exit 1.** The invariant to gate on is narrower
+and safer: **a `result` the verifier classifies as a failure never exits 0.**
+Which non-zero code it gets depends on the command. `result: "error"` is a spec
+or internal error and carries its own code, 2 or 3, everywhere. For the rest of
+the failure class, `check`/`verify` and the commands sharing their envelope map
+**their own listed verdicts** to 1 and anything else to 3 — including a value
+that is registered as a failure but belongs to another command, so
+`nonconformant` exits 3 there. The dialect commands map every non-`error`
+failure to 1 instead. So branch on the exit code being non-zero, and read
+`result` when you need to know which failure it was. The values you will meet most often are
+`violated`,
+`reachable_failed`, `unknown_cti`, `unknown_budget`, `nonconformant`,
+`refinement_failed`, `impl_violated`, `sweep_failed` and `observed_mismatch`,
+and the dialect commands add their own (`document check`'s
+`document_drifted`, `ai replay`'s `replay_nonconformant`, `ai eval`'s gate
+statuses). `docs/LANGUAGE.md` lists the verify-family values with each one's
+producing command.
+
+**Inline `implements` failures are fail-closed.** A requirements spec with
 `implements Abs from "business.fsl" { ... }` has its refinement to the upper
-layer checked during `check`/`verify`, but that verdict is reported *only* in the
-`implements` field — it is not folded into the top-level `result` or the exit
-code. A broken business seam still returns `result: "ok"` / `"verified"` and
-exit 0. Gate it explicitly on `implements.result == "refines"` (the only passing
-value; the failing ones are `refinement_failed` and `impl_violated`), or run
-`fslc chain`, which applies that gate for you and does exit 1.
+layer checked during `check`/`verify`. A `refines` verdict preserves the
+command's ordinary top-level `result` and exit code. Either failing nested value
+(`refinement_failed` or `impl_violated`) becomes the top-level `result` verbatim
+and the process exits 1, while `implements.violation` keeps the seam-specific
+evidence. Gate on `implements.result == "refines"` (the only passing value), or
+run `fslc chain`, which applies that gate for you.
 
 ## Before writing a spec: source fidelity and the formalization memo
 

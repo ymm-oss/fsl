@@ -1835,6 +1835,19 @@ pub(super) fn run_verify_cli(
     run_verify_cli_from_source(path, cache_identity_path, &source, options)
 }
 
+/// Whether this run selects a subset of the model, and therefore does not
+/// evaluate the inline `implements` seam.
+///
+/// This is the whole population of seam suppressors: `docs/LANGUAGE.md` names
+/// these three options and nothing else, and both call sites read it from here
+/// so the list cannot drift in one of them. #1008 is open against the semantics
+/// of these three, so a change there has to land in one place.
+fn seam_is_suppressed(options: &CliVerifyOptions, prepared: &PreparedCliVerification) -> bool {
+    options.property.is_some()
+        || !options.exclude_properties.is_empty()
+        || prepared.initial_state.is_some()
+}
+
 pub(super) fn run_verify_cli_from_source(
     path: &Path,
     cache_identity_path: &Path,
@@ -1872,7 +1885,36 @@ pub(super) fn run_verify_cli_from_source(
         Err(output) => return output,
     };
     if !options.lemmas.is_empty() {
-        let (output, status) = run_induction_with_lemmas(path, options, &prepared);
+        let (mut output, mut status) = run_induction_with_lemmas(path, options, &prepared);
+        // The `--lemma` path returns before `execute_cli_verification`, so the
+        // inline `implements` seam has to be evaluated and folded here as well.
+        // Without this, `verify --engine induction --lemma ...` is another way
+        // to pass a broken seam with exit 0 (#1002), and the suppressor list in
+        // `docs/LANGUAGE.md` would be missing an entry.
+        if !seam_is_suppressed(options, &prepared)
+            && let Ok(model) = &prepared.model
+        {
+            match implements_result_from_source_with_bounds(
+                path,
+                source,
+                model,
+                options.depth,
+                &options.scope,
+            ) {
+                Ok(Some(implements)) => {
+                    if let Some(code) =
+                        fslc_rust::verification_output::attach_requirements_implements(
+                            &mut output,
+                            implements,
+                        )
+                    {
+                        status = code;
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => return (implements_error_output(&error), 2),
+            }
+        }
         return finalize_cli_verification(path, options, &prepared, None, output, status);
     }
     // `auto` never keys a cache entry under the literal string "auto": a
@@ -2210,9 +2252,7 @@ fn execute_cli_verification(
     options: &CliVerifyOptions,
     prepared: &PreparedCliVerification,
 ) -> CommandResult {
-    let selection_filtered = options.property.is_some()
-        || !options.exclude_properties.is_empty()
-        || prepared.initial_state.is_some();
+    let selection_filtered = seam_is_suppressed(options, prepared);
     if !(selection_filtered || prepared.has_scope) && prepared.is_agent_document {
         return (
             error_output(
@@ -2295,14 +2335,16 @@ fn execute_cli_verification(
         }),
         Err(error) => return (error_output("usage", &error), 2),
     };
-    if !selection_filtered {
-        decorate_default_cli_verification(
+    if !selection_filtered
+        && let Some(code) = decorate_default_cli_verification(
             &mut output,
             source,
             model,
             implements,
             &prepared.compose_warnings,
-        );
+        )
+    {
+        return (output, code);
     }
     (output, status)
 }
@@ -2313,18 +2355,15 @@ fn decorate_default_cli_verification(
     model: &KernelModel,
     implements: Option<Value>,
     compose_warnings: &[Value],
-) {
-    if let Value::Object(envelope) = output
-        && envelope.get("result").and_then(Value::as_str) != Some("error")
-        && let Some(implements) = implements
-    {
-        envelope.insert("implements".to_owned(), implements);
-    }
+) -> Option<i32> {
+    let implements_exit = implements.and_then(|implements| {
+        fslc_rust::verification_output::attach_requirements_implements(output, implements)
+    });
     if let Ok(ctx) = fsl_core::ModelWarningContext::from_source(model, source) {
         fsl_core::finalize_envelope_model_warnings(output, &ctx);
     }
     let Value::Object(envelope) = output else {
-        return;
+        return Some(3);
     };
     if !compose_warnings.is_empty()
         && envelope.get("result").and_then(Value::as_str) != Some("error")
@@ -2336,6 +2375,7 @@ fn decorate_default_cli_verification(
         // recovered from `model`/`fsl_runtime::verification_warnings` alone.
         warnings.splice(0..0, compose_warnings.iter().cloned());
     }
+    implements_exit
 }
 
 fn finalize_cli_verification(

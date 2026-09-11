@@ -150,8 +150,9 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
 7. When an `implements ... { ... }` is present, at verify / check time **also
    run a refine check against the upper layer**, and add
    `"implements": {"abs": "ReturnPolicy", "result": "refines" | {...violation}}`
-   to the result JSON (even if refine fails, the verify result itself is returned
-   separately). An empty body auto-generates identity maps when process/action/
+   to the result JSON. A failing seam becomes the top-level `result`
+   (`refinement_failed` or `impl_violated`) and exits 1; only `refines` leaves
+   the command's ordinary success envelope. An empty body auto-generates identity maps when process/action/
    stage names match. `maps auto` is allowed for same-name kernel-wrapper
    state/actions, explicit maps override it, and auto-mapped process transitions
    are statically actor-checked. Explicit `implements` items, action/branch

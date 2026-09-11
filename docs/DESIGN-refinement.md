@@ -529,7 +529,7 @@ full-size abstract would otherwise disagree with `map_out_of_bounds`.
 omitted silently when any of these hold:
 
 - `--property`
-- `--exclude-properties`
+- `--exclude-property`
 - `--from-state`
 
 No omission reason is recorded in the envelope today. This design does **not**

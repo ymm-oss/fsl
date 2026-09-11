@@ -209,6 +209,9 @@ def test_req_dialect_broken_action_map_reports_implements_failure(tmp_path):
 
     result = run_verify(str(req), 8, "warn")
 
+    # Runs the in-process frozen Python reference (src/fslc/cli.py::run_verify); the
+    # native binary is never started. Native folds this seam failure into the top
+    # level (`refinement_failed` + exit 1) since #1002; `verified` is Python's value. Divergence: #1018.
     assert result["result"] == "verified"
     assert result["implements"]["abs"] == "ReturnPolicy"
     assert result["implements"]["result"] == "refinement_failed"

@@ -11,8 +11,13 @@ existence check. This productizes mutation as a repeatable non-triviality check.
 `fslc mutate <f> [--depth K=8] [--by-requirement] [--oracle-attribution]
 [--max-mutants N=200]
 [--from mutants.jsonl]`. Output
-`result:"mutated"`, **exit 0 always** (a generator in the same family as scenarios/testgen;
+`result:"mutated"`, exit 0 (a generator in the same family as scenarios/testgen;
 survivors are review data, not failures. `--fail-on-survivors` is future work).
+**That is the code for its own result, not an unconditional 0.** `mutate` verifies the
+spec first and re-emits that baseline envelope unchanged when it is not `verified`, so a
+spec that fails its own verification exits with the baseline's code and produces no
+mutants at all. Since #1002 a failed inline `implements` seam is such a baseline
+(`refinement_failed` / `impl_violated`, exit 1).
 
 `--from` adds every external JSONL record after the selected built-in catalog.
 `--max-mutants` caps only built-in enumeration; `--max-mutants 0 --from ...`

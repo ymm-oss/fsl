@@ -401,7 +401,7 @@ fslc verify spec.fsl --values Amount=0..3
 impl 側だけの carried number(例: business の抽象には存在しない <code>Amount</code>)は impl
 のみに適用されます。</p>
 <p><code>fslc verify</code> は <code>--instances</code> / <code>--values</code> の scope override だけが付いている場合でも
-インライン <code>implements</code> を評価します。<code>--property</code>、<code>--exclude-properties</code>、
+インライン <code>implements</code> を評価します。<code>--property</code>、<code>--exclude-property</code>、
 <code>--from-state</code> は引き続き理由を記録せず <code>implements</code> フィールドを省略します。
 この挙動は安全とみなされておらず、契約上の未決定事項として残ります。</p>
 <p><code>acceptance</code>/<code>forbidden</code> シナリオは、spec の元の世界の id や数値をハードコード
@@ -1067,10 +1067,15 @@ mutated / explained / analyzed / semantic_diff(明示的なゲートが失敗し
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings、
 <code>1</code> = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
-refinement_failed / sweep_failed / observed_mismatch、
+refinement_failed / impl_violated / sweep_failed / observed_mismatch、
 <code>2</code> = spec エラー(parse / type / semantics / io / vacuous / acceptance / forbidden /
 <code>--vacuity error</code>)、<code>3</code> = 内部エラー。<code>observed_*</code> は <code>fslc db observe</code> の結果、
-<code>imported</code>/<code>imported_with_warnings</code> は <code>fslc db import</code> の結果です。同じ <code>2</code> の
+<code>imported</code>/<code>imported_with_warnings</code> は <code>fslc db import</code> の結果です。<code>impl_violated</code> は
+inline <code>implements</code> が top-level <code>result</code> へ伝播するため列挙しています。畳み込みは検証封筒を
+生成する場所で起きるので、<code>check</code> / <code>verify</code> に閉じません。seam が失敗する spec では、<code>mutate</code> は
+baseline の verdict をそのまま返し(baseline が <code>verified</code> でなくなるため変異を1つも生成しません)、
+<code>ledger</code> は同じ exit を引き継ぎ、<code>sweep</code> は <code>sweep_failed</code> を返します。<code>fslc html</code> は畳み込まれた
+封筒を埋め込みます(exit code は変わりません)。同じ <code>2</code> の
 対応付けは <code>chain</code> のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な <code>depth</code>/<code>refine_depth</code> — <code>docs/DESIGN-layers.md</code> §7)
 と、<code>ledger --impl-log</code> の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -2105,19 +2110,26 @@ verify {
 <li><code>kpi NAME = count ENTITY in STAGE</code> は、business と requirements の両方における
   宣言的な射影です。ghost のカウンターや自動の <code>_kpi_*</code> invariant を作ることは
   ありません。</li>
-<li><code>implements</code> があると、<code>fslc verify</code> は<strong>上位レイヤーへの refine も同時に実行</strong>
-  し、結果は <code>implements: {abs, result}</code> を運びます。値は
-  <code>refines</code> / <code>refinement_failed</code> / <code>impl_violated</code> のいずれかです。<strong>この判定は
-  このフィールドにしか現れません。トップレベルの <code>result</code> にも exit code にも
-  畳み込まれない</strong>ため、seam が壊れていても <code>result:"ok"</code>/<code>"verified"</code> と exit 0 を
-  返します — 上の exit code 表の唯一の例外であり、<code>implements</code> が表に無い理由です。
-  <code>implements.result == "refines"</code> でゲートするか、<code>fslc chain</code> を使ってください
-  (chain はまさにこのゲートをレイヤーに適用し exit 1 します。
-  <code>docs/DESIGN-design-family.md</code> がオーケストレータ向けに同じ規則を述べています)。
-  スタンドアロンの <code>fslc refine</code> は <code>refinement_failed</code> で exit 1 します。
-  黙るのはインラインの seam だけです。空のボディ
-  (<code>implements X from "..." { }</code>)は、process/action/stage の名前が一致するとき、
-  恒等の refinement を自動生成します。<code>implements { }</code> ブロックの内側には、状態の
+<li><code>implements</code> があると、<code>fslc check</code> と <code>fslc verify</code> はどちらも上位レイヤーへの refinement も
+  実行し、結果は <code>implements: {abs, result}</code> を持ちます。値は <code>refines</code> / <code>refinement_failed</code> /
+  <code>impl_violated</code> の3つです。<strong>失敗した seam はこのフィールドの中に閉じません。</strong>
+  <code>refines</code> のときはコマンド自身の top-level <code>result</code> と exit code をそのまま保ちます。
+  どちらの失敗値も<strong>そのまま</strong> top-level <code>result</code> になり（<code>refinement_failed</code> は
+  <code>refinement_failed</code>、<code>impl_violated</code> は <code>impl_violated</code>。両者はどちらの階層でも区別できます）、
+  process は 1 で終了します。これは standalone の <code>fslc refine</code> が <code>refinement_failed</code> に対して
+  既に使っているクラスと同じです。seam 固有の証拠は <code>implements.violation</code> に残ります（ただし <code>--vacuity error</code> は封筒全体を自身の <code>error</code> 結果へ置き換え、<code>implements</code> を引き継ぎません）。
+  <code>fslc chain</code> は同じゲートをレイヤーへ適用して 1 で終了します
+  （<code>docs/DESIGN-design-family.md</code> がオーケストレーター向けに同じ規則を述べています）。
+  呼び出し側が inline seam のために独自の第二のゲートを持つ必要はなくなりました。
+  空のボディ（<code>implements X from "..." { }</code>）は、process / action / stage の名前が一致するとき
+  恒等の refinement を自動生成します。<code>verify</code> が <code>--property</code>、<code>--exclude-property</code>、
+  または <code>--from-state</code> でスコープされている run では inline refinement は評価されず、
+  封筒から <code>implements</code> は省略されます。<strong>したがってスコープされた run で seam を
+  ゲートすることはできません</strong>——<code>implements</code> が無いので、<code>result</code> と exit code は
+  選択されたプロパティについてしか述べておらず、壊れた seam はその run を通過します。
+  スコープ無しの <code>check</code> / <code>verify</code>、または <code>fslc chain</code> でゲートしてください。
+  この3つのオプションが refinement を射影すべきか、省略した理由を記録すべきかは未決です
+  （<a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>）。<code>implements { }</code> ブロックの内側には、状態の
   <code>map</code> エントリ、<code>maps auto</code>、<code>preserve progress</code>、そして — #73 以降 —
   <code>action &lt;impl_act&gt;(&lt;params&gt;) -&gt; &lt;abs_act&gt;(&lt;args&gt;) | stutter</code> を書きます。これは
   別の refinement ファイルの <code>refinement_action</code>

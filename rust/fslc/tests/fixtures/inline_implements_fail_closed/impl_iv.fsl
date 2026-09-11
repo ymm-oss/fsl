@@ -1,0 +1,10 @@
+requirements ImplIV {
+  implements AbsIV from "abs_iv.fsl" { maps auto }
+
+  entity Item
+  state { flag: Map<Item, Bool> }
+  init { forall i: Item { flag[i] = false } }
+  invariant NeverFlipped { forall i: Item { flag[i] == false } }
+  action flip(i: Item) maps flip(i) { flag[i] = true }
+}
+verify { instances Item = 1 }

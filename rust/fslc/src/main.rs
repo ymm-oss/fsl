@@ -5713,9 +5713,9 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
                 .chain(model_level_warnings)
                 .collect::<Vec<_>>();
             output.insert("warnings".to_owned(), Value::Array(warnings));
-            if let Some(implements) = implements {
-                output.insert("implements".to_owned(), implements);
-            }
+            let Ok((mut output, status)) = attach_check_implements(output, implements) else {
+                return (error_output("internal", "check envelope"), 3);
+            };
             match governance_result_from_source(path, source, 8) {
                 Ok(Some(governance)) => {
                     output.insert("governance".to_owned(), governance);
@@ -5728,7 +5728,7 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
                     );
                 }
             }
-            (Value::Object(output), 0)
+            (Value::Object(output), status)
         }
         Err(error) => (spec_load_error_output(&error), 2),
     }
@@ -15604,6 +15604,27 @@ fn governance_result_from_source(
     })
 }
 
+fn attach_check_implements(
+    output: Map<String, Value>,
+    implements: Option<Value>,
+) -> Result<(Map<String, Value>, i32), ()> {
+    let mut envelope = Value::Object(output);
+    // `attach_requirements_implements` returns `None` for "leave this command's
+    // own exit alone", so the fallback must derive the code from the finished
+    // envelope rather than assert 0. Writing 0 here would make `check` depend on
+    // the unwritten invariant that its envelope is always successful at this
+    // point; when that stops holding, a `_ => 0` fallthrough reports success and
+    // nothing detects it (the class behind #594, #600, and #601).
+    let folded = implements.and_then(|implements| {
+        fslc_rust::verification_output::attach_requirements_implements(&mut envelope, implements)
+    });
+    let status = folded.unwrap_or_else(|| fslc_rust::outcome::exit_status(&envelope, 3));
+    let Value::Object(output) = envelope else {
+        return Err(());
+    };
+    Ok((output, status))
+}
+
 fn implements_result_from_source(
     path: &Path,
     source: &str,
@@ -16349,15 +16370,18 @@ fn run_verify_from_source(
         // recovered from `model`/`fsl_runtime::verification_warnings` alone.
         warnings.splice(0..0, compose_warnings);
     }
+    let mut implements_exit = None;
     if let Value::Object(envelope) = &mut output
         && envelope.get("result").and_then(Value::as_str) != Some("error")
         && let Some(implements) = implements
     {
-        envelope.insert("implements".to_owned(), implements);
+        implements_exit =
+            fslc_rust::verification_output::attach_requirements_implements(&mut output, implements);
     }
     if let Ok(ctx) = ModelWarningContext::from_source(&model, source) {
         finalize_envelope_model_warnings(&mut output, &ctx);
     }
+    let status = implements_exit.unwrap_or(status);
     (output, status)
 }
 
@@ -17185,6 +17209,44 @@ fn block_on_native<F: Future>(future: F) -> F::Output {
 #[cfg(test)]
 mod exit_status_tests {
     use super::*;
+
+    /// Rejecting control for the same `_ => 0` class inside `check`'s inline
+    /// `implements` attachment. `attach_requirements_implements` returns `None`
+    /// for "leave this command's own exit alone", so the fallback decides what
+    /// that exit is. Deriving it from the finished envelope keeps a
+    /// non-successful `check` envelope non-zero; writing a literal 0 would make
+    /// the code correct only while `run_check_from_source` can put nothing but
+    /// `"ok"` in `result`.
+    ///
+    /// Asserted at the attachment rather than end-to-end: no corpus input
+    /// reaches it today, because every path in `run_check_from_source` that
+    /// produces a non-`"ok"` result returns before the attachment runs. That is
+    /// the same posture the `wrap_specialized` control above takes, and the same
+    /// class as issues #594, #600, and #601.
+    #[test]
+    fn check_attachment_derives_its_exit_instead_of_asserting_zero() {
+        let mut successful = Map::new();
+        successful.insert("result".to_owned(), json!("ok"));
+        let (_, status) = attach_check_implements(successful, None).expect("object envelope");
+        assert_eq!(status, 0, "a successful check envelope keeps exit 0");
+
+        let mut failing = Map::new();
+        failing.insert("result".to_owned(), json!("violated"));
+        let (envelope, status) = attach_check_implements(failing, None).expect("object envelope");
+        assert_eq!(
+            status, 1,
+            "a non-successful check envelope must not exit 0: {envelope:?}"
+        );
+
+        let mut unregistered = Map::new();
+        unregistered.insert("result".to_owned(), json!("who_knows"));
+        let (envelope, status) =
+            attach_check_implements(unregistered, None).expect("object envelope");
+        assert_eq!(
+            status, 3,
+            "an unregistered result is an internal inconsistency, never 0: {envelope:?}"
+        );
+    }
 
     /// Rejecting control for the `wrap_specialized` fallthrough (issue #601).
     /// The specialized-dialect aggregation used to end in `_ => 0`, so

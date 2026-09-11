@@ -212,14 +212,14 @@ requirement NFR-1 "respond within 3 ticks after acceptance" {
       <div class="syntax-card">
         <h3>Verification</h3>
         <pre><code>$ fslc verify requirements.fsl --depth 8
-# assert JSON implements.result == "refines"
-# (a failed seam can still exit 0 — check the field)</code></pre>
+# a failed seam becomes the top-level result and exits 1
+# "refines" is the only passing implements.result</code></pre>
         <p>The JSON includes both requirements verification and the business refinement result under <code>implements</code>.</p>
       </div>
     </div>
 
     <div class="callout warn reveal" style="margin-top:24px">
-      <p style="margin:0"><b>Seam exit-code caveat:</b> unlike <code>violated</code> or <code>refinement_failed</code>, a broken <code>implements</code> link may still return exit code 0. Always assert <code>implements.result == "refines"</code> in CI — see the <a href="examples.en.html#correctness-chain">e2e chain</a> for a full walkthrough.</p>
+      <p style="margin:0"><b>Seam exit code:</b> a broken <code>implements</code> link is not confined to the nested field. <code>refinement_failed</code> and <code>impl_violated</code> become the top-level <code>result</code> and the command exits 1, the same class as <code>violated</code>. One gap remains: a <code>verify</code> scoped with <code>--property</code>, <code>--exclude-property</code>, or <code>--from-state</code> omits <code>implements</code> altogether and therefore cannot gate the seam (<a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>). Gate on an unscoped <code>check</code>/<code>verify</code>, or on <code>fslc chain</code> — see the <a href="examples.en.html#correctness-chain">e2e chain</a> for a full walkthrough.</p>
     </div>
   </div>
 </section>

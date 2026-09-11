@@ -411,7 +411,7 @@ and a full-size abstract would fail with <code>map_out_of_bounds</code>). An imp
 carried number (e.g. <code>Amount</code>, absent from a business abstract) applies to the
 impl only.</p>
 <p><code>fslc verify</code> still evaluates inline <code>implements</code> when only <code>--instances</code> /
-<code>--values</code> scope overrides are present. <code>--property</code>, <code>--exclude-properties</code>, and
+<code>--values</code> scope overrides are present. <code>--property</code>, <code>--exclude-property</code>, and
 <code>--from-state</code> continue to omit the <code>implements</code> field without recording a reason;
 that behavior is not treated as safe and remains an open contract decision.</p>
 <p><code>acceptance</code>/<code>forbidden</code> scenarios often hardcode ids/numbers from the spec's
@@ -1100,10 +1100,16 @@ mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) 
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 <code>1</code> = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
-refinement_failed / sweep_failed / observed_mismatch,
+refinement_failed / impl_violated / sweep_failed / observed_mismatch,
 <code>2</code> = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 <code>--vacuity error</code>), <code>3</code> = internal error. <code>observed_*</code> is <code>fslc db observe</code>'s
-result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc db import</code>'s. The same
+result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc db import</code>'s. <code>impl_violated</code> is listed
+because inline <code>implements</code> propagates that seam verdict to the top-level <code>result</code>. The fold
+happens where the verification envelope is produced, so it is not confined to <code>check</code> and
+<code>verify</code>: on a spec whose seam fails, <code>mutate</code> re-emits the baseline verdict (generating no
+mutants, because its baseline is no longer <code>verified</code>), <code>ledger</code> inherits the same exit, and
+<code>sweep</code> reports <code>sweep_failed</code>. <code>fslc html</code> embeds the folded envelope; its exit code is
+unchanged. The same
 <code>2</code> mapping is fail-closed for <code>chain</code>'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable <code>depth</code>/<code>refine_depth</code> —
 <code>docs/DESIGN-layers.md</code> §7) and for <code>ledger --impl-log</code>'s replay input (a
@@ -2169,19 +2175,27 @@ verify {
 <li><code>kpi NAME = count ENTITY in STAGE</code> is a declarative projection in both
   business and requirements. It does not create a ghost counter or an automatic
   <code>_kpi_*</code> invariant.</li>
-<li>With <code>implements</code>, <code>fslc verify</code> <strong>also runs the refine to the upper layer
-  simultaneously</strong>, and the result carries <code>implements: {abs, result}</code>, whose
-  values are <code>refines</code> / <code>refinement_failed</code> / <code>impl_violated</code>. <strong>That verdict is
-  reported only in this field. It is not folded into the top-level <code>result</code> or
-  the exit code</strong>, so a broken seam still returns <code>result:"ok"</code>/<code>"verified"</code> and
-  exit 0 — the one exception to the exit-code table above, and the reason
-  <code>implements</code> has no row in it. Gate on <code>implements.result == "refines"</code>, or run
-  <code>fslc chain</code>, which applies exactly that gate to the layer and exits 1
-  (<code>docs/DESIGN-design-family.md</code> states the same rule for orchestrators).
-  Standalone <code>fslc refine</code> does exit 1 on <code>refinement_failed</code>; only the inline
-  seam is silent. An empty
-  body (<code>implements X from "..." { }</code>) auto-generates identity refinement when
-  process/action/stage names match. Inside the <code>implements { }</code> block you write
+<li>With <code>implements</code>, <code>fslc check</code> and <code>fslc verify</code> both run the refinement to the upper layer
+  as well, and the result carries <code>implements: {abs, result}</code>, whose values are <code>refines</code>,
+  <code>refinement_failed</code>, and <code>impl_violated</code>. <strong>A failing seam is not confined to this field.</strong>
+  <code>refines</code> leaves the command's own top-level <code>result</code> and exit code untouched; either failure
+  value becomes the top-level <code>result</code> verbatim — <code>refinement_failed</code> stays <code>refinement_failed</code>
+  and <code>impl_violated</code> stays <code>impl_violated</code>, so the two remain distinguishable at both levels —
+  and the process exits 1, the same class standalone <code>fslc refine</code> already uses for
+  <code>refinement_failed</code>. <code>implements.violation</code> keeps the seam-specific evidence, except under
+  <code>--vacuity error</code>, which replaces the whole envelope with its own <code>error</code> result and does not
+  carry <code>implements</code> over.
+  <code>fslc chain</code> applies the same gate to the layer and exits 1
+  (<code>docs/DESIGN-design-family.md</code> states the same rule for orchestrators); a caller no longer
+  needs a second gate of its own for the inline seam. An empty body
+  (<code>implements X from "..." { }</code>) auto-generates identity refinement when process/action/stage
+  names match. Inline refinement is <strong>not</strong> evaluated when <code>verify</code> is scoped with
+  <code>--property</code>, <code>--exclude-property</code>, or <code>--from-state</code>; the envelope omits <code>implements</code>
+  on those runs. <strong>A scoped run therefore cannot gate the seam</strong>: with <code>implements</code> absent,
+  <code>result</code> and the exit code speak only for the selected properties, so a broken seam passes
+  such a run. Gate on an unscoped <code>check</code>/<code>verify</code>, or on <code>fslc chain</code>. Whether those three
+  options should project the refinement or record why they skipped it is undecided
+  (<a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>). Inside the <code>implements { }</code> block you write
   state <code>map</code> entries, <code>maps auto</code>, <code>preserve progress</code>, and — since #73 —
   <code>action &lt;impl_act&gt;(&lt;params&gt;) -&gt; &lt;abs_act&gt;(&lt;args&gt;) | stutter</code>, the same
   correspondence syntax as a separate refinement file's <code>refinement_action</code>
