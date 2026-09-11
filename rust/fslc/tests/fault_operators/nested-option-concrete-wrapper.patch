@@ -1,0 +1,14 @@
+diff --git a/rust/fsl-runtime/src/lib.rs b/rust/fsl-runtime/src/lib.rs
+--- a/rust/fsl-runtime/src/lib.rs
++++ b/rust/fsl-runtime/src/lib.rs
+@@ -104,9 +104,7 @@ pub fn eval(
+         Expr::Num(value) => Ok(Value::Int(*value)),
+         Expr::Bool(value) => Ok(Value::Bool(*value)),
+         Expr::None => Ok(Value::None),
+-        Expr::Some(expr) => Ok(Value::Some(Box::new(eval(
+-            expr, state, bindings, model, old_state,
+-        )?))),
++        Expr::Some(expr) => eval(expr, state, bindings, model, old_state),
+         Expr::Set(items) => Ok(Value::Set(
+             items
+                 .iter()

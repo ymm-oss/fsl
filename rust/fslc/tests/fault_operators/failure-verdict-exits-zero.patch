@@ -1,16 +1,18 @@
 Sends row 1 of `docs/LANGUAGE.md`'s exit-code table to zero: a `mutate` whose
 baseline `verify` came back `violated`/`reachable_failed`/`unknown_cti`/
 `unknown_budget` exits 0 while its envelope still reports the failure. A gate
-reading only the exit code sees a pass. This is #554 itself.
+reading only the exit code sees a pass. This is #554 itself. Since #1002 the
+same row also carries `refinement_failed`/`impl_violated`, so the mutation now
+sends a failed inline `implements` seam to zero as well.
 
 --- a/rust/fslc/src/outcome.rs
 +++ b/rust/fslc/src/outcome.rs
-@@ -283,7 +283,7 @@
-         // actually carry. The row's remaining members (`nonconformant`,
-         // `refinement_failed`, `sweep_failed`, `observed_mismatch`) belong to
-         // other commands and cannot appear here.
--        Some("violated" | "reachable_failed" | "unknown_cti" | "unknown_budget") => 1,
-+        Some("violated" | "reachable_failed" | "unknown_cti" | "unknown_budget") => 0,
+@@ -580,7 +580,7 @@ pub fn exit_status(output: &Value, error_status: i32) -> i32 {
+         Some(
+             "violated" | "reachable_failed" | "unknown_cti" | "unknown_budget"
+             | "refinement_failed" | "impl_violated",
+-        ) => 1,
++        ) => 0,
          // A failure-class value outside this command's vocabulary, or one
          // nobody registered at all, is an internal inconsistency -- never a
          // silent success.

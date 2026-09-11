@@ -13,13 +13,13 @@ use std::path::Path;
 use fsl_core::{
     ActionDef, ActionGuard, Annotation, Annotations, FsResolver, INIT_TARGET, KernelModel,
     KernelSpec, OriginChain, ParamDef, PublicKernelVersion, RequirementLink, RequirementsTraceCase,
-    RequirementsTraceContract, RequirementsTraceExpectation, TERMINAL_TARGET, TypeRef,
+    RequirementsTraceContract, RequirementsTraceExpectation, TERMINAL_TARGET, TypeDef, TypeRef,
     action_target, build_model, display_name, parse_kernel_source, property_target,
     public_kernel_contract_for_version, public_kernel_expression, requirements_trace_contract,
 };
 use fsl_syntax::{
-    Expr, RequirementsItem, SourceFile, SourcePos, Span, SpecItem, SurfaceDocument, VerifyItem,
-    parse_document,
+    Expr, ParsedDocument, RequirementsItem, SourceFile, SourcePos, Span, SpecItem, SurfaceDocument,
+    VerifyItem, parse_document,
 };
 use serde_json::{Value, json};
 
@@ -95,12 +95,30 @@ pub struct DocumentInput<'a> {
 /// consumed during `lower_requirements` (folded into concrete bounded types)
 /// and leave no trace in the lowered `KernelSpec`/`SurfaceSpec`, so analysis
 /// scope must be read from the surface `requirements` tree directly, the same
-/// way `implements` names are.
+/// way `implements` names are. Number names come from that tree; when
+/// `KernelModel::types` holds a `TypeDef::Domain` for the name, `lo`/`hi` are
+/// the compile-time evaluated bounds from model construction (the same
+/// expressions `fslc check` accepts). Otherwise the projector falls back to
+/// integer literals in the surface tree; unresolvable bounds are skipped
+/// rather than reported. This function has no rejection path at all, which is
+/// the point: no `values` bound can make `project_requirement_claims_from_source`
+/// refuse a `requirements` input that `fslc check` accepts. (A dialect outside
+/// `RCIR_SUPPORTED_DIALECTS` is still refused there, by design — that is a
+/// scope boundary, not a bound.)
 fn requirements_analysis_scope(
     requirements: &fsl_syntax::SurfaceRequirements,
-) -> Result<AnalysisScope, String> {
+    model: &KernelModel,
+) -> AnalysisScope {
     let mut instances = Vec::new();
     let mut values = Vec::new();
+    let literal_bound = |expr: &Expr| match expr {
+        Expr::Num(value) => Some(*value),
+        Expr::Neg(inner) => match inner.as_ref() {
+            Expr::Num(value) => value.checked_neg(),
+            _ => None,
+        },
+        _ => None,
+    };
     for item in &requirements.items {
         if let RequirementsItem::Common(SpecItem::VerifyBounds { items, .. }) = item {
             for verify_item in items {
@@ -109,31 +127,29 @@ fn requirements_analysis_scope(
                         instances.push(json!({"entity": name, "count": count}));
                     }
                     VerifyItem::Values(name, lo, hi, _) => {
-                        let bound = |expr: &Expr| match expr {
-                            Expr::Num(value) => Some(*value),
-                            Expr::Neg(inner) => match inner.as_ref() {
-                                Expr::Num(value) => value.checked_neg(),
+                        let resolved = if let Some(TypeDef::Domain { lo, hi, .. }) =
+                            model.types.get(name.as_str())
+                        {
+                            Some((*lo, *hi))
+                        } else {
+                            match (literal_bound(lo), literal_bound(hi)) {
+                                (Some(lo), Some(hi)) => Some((lo, hi)),
                                 _ => None,
-                            },
-                            _ => None,
+                            }
                         };
-                        let lo = bound(lo).ok_or_else(|| {
-                            format!("analysis bound for '{name}' must be an integer literal")
-                        })?;
-                        let hi = bound(hi).ok_or_else(|| {
-                            format!("analysis bound for '{name}' must be an integer literal")
-                        })?;
-                        values.push(json!({
-                            "number": name,
-                            "lo": lo,
-                            "hi": hi,
-                        }));
+                        if let Some((lo, hi)) = resolved {
+                            values.push(json!({
+                                "number": name,
+                                "lo": lo,
+                                "hi": hi,
+                            }));
+                        }
                     }
                 }
             }
         }
     }
-    Ok(AnalysisScope { instances, values })
+    AnalysisScope { instances, values }
 }
 
 /// Parse, lower, build, and project `source` in one call (test/tooling
@@ -150,12 +166,23 @@ pub fn project_requirement_claims_from_source(
     source_path: Option<&str>,
     resolver_root: &Path,
 ) -> Result<RequirementClaimSet, DocumentProjectionError> {
-    let (dialect, implements_names, analysis_scope) = projection_context(source)?;
+    let parsed = parse_document(SourceFile::new(source))
+        .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
+    if !matches!(
+        &parsed.surface,
+        SurfaceDocument::Spec(_) | SurfaceDocument::Requirements(_)
+    ) {
+        return Err(DocumentProjectionError::UnsupportedDialect {
+            dialect: surface_dialect_name(&parsed.surface),
+        });
+    }
     let resolver = FsResolver::new(resolver_root);
     let kernel = parse_kernel_source(source, &resolver)
         .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
     let model = build_model(kernel.clone())
         .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
+    let (dialect, implements_names, analysis_scope) =
+        projection_context_from_parsed(&parsed, &model)?;
     project_requirement_claims(&DocumentInput {
         kernel: &kernel,
         model: &model,
@@ -170,9 +197,17 @@ pub fn project_requirement_claims_from_source(
 
 fn projection_context(
     source: &str,
+    model: &KernelModel,
 ) -> Result<(DocumentDialect, Vec<String>, AnalysisScope), DocumentProjectionError> {
     let parsed = parse_document(SourceFile::new(source))
         .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
+    projection_context_from_parsed(&parsed, model)
+}
+
+fn projection_context_from_parsed(
+    parsed: &ParsedDocument,
+    model: &KernelModel,
+) -> Result<(DocumentDialect, Vec<String>, AnalysisScope), DocumentProjectionError> {
     Ok(match &parsed.surface {
         SurfaceDocument::Spec(_) => (DocumentDialect::Spec, Vec::new(), AnalysisScope::default()),
         SurfaceDocument::Requirements(requirements) => {
@@ -187,8 +222,7 @@ fn projection_context(
             (
                 DocumentDialect::Requirements,
                 names,
-                requirements_analysis_scope(requirements)
-                    .map_err(DocumentProjectionError::Other)?,
+                requirements_analysis_scope(requirements, model),
             )
         }
         other => {
@@ -1224,7 +1258,7 @@ pub(crate) fn project_renderer_contract(
     trace: Option<&RequirementsTraceContract>,
 ) -> Result<RequirementClaimSet, String> {
     let (dialect, implements_names, analysis_scope) =
-        projection_context(source).map_err(|error| error.to_string())?;
+        projection_context(source, model).map_err(|error| error.to_string())?;
     project_requirement_claims_with_trace(
         &DocumentInput {
             kernel,

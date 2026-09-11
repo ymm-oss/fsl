@@ -46,6 +46,14 @@ fn kpi_fixture() -> Fixture {
     }
 }
 
+fn const_bound_fixture() -> Fixture {
+    Fixture {
+        source: read("tests/fixtures/document_const_bound_fixture.fsl"),
+        root: manifest_path("tests/fixtures"),
+        source_path: "document_const_bound_fixture.fsl".to_owned(),
+    }
+}
+
 fn render(fixture: &Fixture, locale: Locale) -> (RequirementClaimSet, RenderedDocument) {
     let claims = fsl_tools::project_requirement_claims_from_source(
         &fixture.source,
@@ -555,6 +563,16 @@ fn analysis_scope_numeric_bounds_render_as_plain_numbers() {
     );
     // Never the raw normalized-AST JSON shape leaking into the document.
     assert!(!ja.markdown.contains("[\"num\""));
+}
+
+#[test]
+fn const_bound_analysis_scope_renders_evaluated_negative_bounds() {
+    let fixture = const_bound_fixture();
+    let (_, en) = render(&fixture, Locale::En);
+    assert!(
+        en.markdown
+            .contains("Analysis range of number `Amount`: `-1` to `2`")
+    );
 }
 
 // --- Acceptance criterion 5: repeated runs are byte-identical. ---

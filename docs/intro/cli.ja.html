@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>FSL CLI リファレンス — fslc の全コマンド</title>
-<meta name="description" content="src/fslc/cli.py から生成される、fslcの全サブコマンド・終了コード・JSON契約のリファレンス。" />
+<title>FSL CLI リファレンス — ネイティブ fslc のコマンド一覧</title>
+<meta name="description" content="rust/fslc/cli-contract.json から生成される、ネイティブ fslc のコマンド・終了コード・JSON契約のリファレンス（version を除く）。" />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="docs-page" data-page="cli">
 <!-- GENERATED — do not edit by hand. Regenerate with:
      python tools/build_site_reference.py
-     Source: src/fslc/cli.py -->
+     Source: rust/fslc/cli-contract.json -->
 <div class="progress"></div>
 
 <header class="topbar" data-nav></header>
@@ -23,283 +23,51 @@
   <div class="wrap">
     <nav class="breadcrumb" data-nav></nav>
     <p class="kicker mono reveal">Generated Reference</p>
-    <span class="badge ref reveal">Generated from cli.py</span>
+    <span class="badge ref reveal">Generated from cli-contract.json</span>
     <h1 class="reveal" style="margin-top:14px">CLI リファレンス</h1>
-    <p class="lead narrow reveal">これは <code>src/fslc/cli.py</code> の argparse 定義から生成されています。各コマンドの使い方はPython自身の <code>--help</code> 出力そのものなので、手書きの一覧が実装から取り残されることはありません。</p>
+    <p class="lead narrow reveal">これは権威あるネイティブ CLI 契約 <code>rust/fslc/cli-contract.json</code> から生成されています。各コマンドの使い方はネイティブ <code>fslc</code> の <code>--help</code> 出力そのものです。<code>src/fslc/</code> の凍結 Python 互換参照は配布面ではなく、明示的な parity テスト用のみに言及します。</p>
     <div class="tree-controls reveal">
       <button class="btn op-expand" type="button">すべて展開</button>
       <button class="btn op-collapse" type="button">すべて折りたたむ</button>
     </div>
-    <details open><summary>Exit codes &amp; JSON envelope <span class="tree-blurb">— exit_code() / _envelope() / _error_envelope(), from src/fslc/cli.py</span></summary><div class="tree-body"><p>Every command prints one JSON object to stdout and maps its <code>result</code> field to a process exit code through this function — verbatim from the source, so this table cannot drift from the actual contract:</p><pre>def exit_code(result):
-    r = result.get(&quot;result&quot;)
-    if r in (&quot;semantic_diff&quot;, &quot;semantic_diff_batch&quot;):
-        return 0 if result.get(&quot;gate&quot;, {}).get(&quot;passed&quot;, True) else 1
-    if r in (&quot;verified&quot;, &quot;proved&quot;, &quot;scenarios&quot;, &quot;conformant&quot;, &quot;generated&quot;,
-             &quot;refines&quot;, &quot;typestate&quot;, &quot;mutated&quot;, &quot;explained&quot;, &quot;analyzed&quot;,
-             &quot;verified_under_assumptions&quot;, &quot;agent_analyzed&quot;, &quot;replay_conformant&quot;,
-             &quot;observed_conformant&quot;, &quot;imported&quot;, &quot;imported_with_warnings&quot;,
-             &quot;expanded&quot;, &quot;conformance_checked&quot;, &quot;ai_project_analyzed&quot;,
-             &quot;statistically_supported&quot;, &quot;observed_supported&quot;, &quot;compared&quot;,
-             &quot;compat_profile_generated&quot;):
-        return 0
-    if r == &quot;sweep_passed&quot;:
-        return 0
-    if r in (&quot;violated&quot;, &quot;reachable_failed&quot;, &quot;unknown_cti&quot;, &quot;nonconformant&quot;,
-             &quot;refinement_failed&quot;, &quot;sweep_failed&quot;, &quot;replay_nonconformant&quot;,
-             &quot;observed_mismatch&quot;, &quot;statistically_unsupported&quot;,
-             &quot;dataset_invalid&quot;, &quot;evaluator_untrusted&quot;, &quot;slice_missing&quot;,
-             &quot;insufficient_samples&quot;, &quot;inconclusive&quot;):
-        return 1
-    if r == &quot;error&quot;:
-        kind = result.get(&quot;kind&quot;)
-        if kind == &quot;internal&quot;:
-            return 3
-        return 2
-    if r == &quot;ok&quot;:
-        return 0
-    return 3
-</pre><p>Every result is wrapped by <code>_envelope()</code> (adds <code>{&quot;fsl&quot;: &quot;1.0&quot;, ...}</code> + faithfulness metadata); parse/name/type/semantics/io errors additionally go through <code>_error_envelope()</code>:</p><pre>def _envelope(result):
-    out = {&quot;fsl&quot;: FSL_VERSION}
-    out.update(result)
-    out = with_faithfulness(out)
-    tt = trace_type_for(out)
-    if tt is not None:
-        out.setdefault(&quot;trace_type&quot;, tt)
-    return out
-
-
-def _error_envelope(kind, message, loc=None, expected=None, hint=None):
-    err = {&quot;result&quot;: &quot;error&quot;, &quot;kind&quot;: kind, &quot;message&quot;: message}
-    if kind in (&quot;parse&quot;, &quot;name&quot;, &quot;type&quot;, &quot;semantics&quot;) and loc:
-        err[&quot;loc&quot;] = loc
-    elif loc:
-        err[&quot;loc&quot;] = loc
-    if expected:
-        err[&quot;expected&quot;] = expected
-    if hint:
-        err[&quot;hint&quot;] = hint
-    return _envelope(err)
-</pre></div></details><div class="disclosure-tree"><details><summary>fslc check</summary><div class="tree-body"><pre>usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] [--edition {current,next}] file
+    <details open><summary>Exit codes &amp; JSON envelope <span class="tree-blurb">— docs/LANGUAGE.md + rust/fslc/src/outcome.rs::exit_status()</span></summary><div class="tree-body"><p>The authoritative native CLI maps every JSON <code>result</code> to a process exit code through <code>rust/fslc/src/outcome.rs</code> <code>exit_status()</code>, which implements the table in <code>docs/LANGUAGE.md</code>:</p><pre>Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
+mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
+typestate / sweep_passed / observed_conformant /
+imported / imported_with_warnings,
+`1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
+refinement_failed / impl_violated / sweep_failed / observed_mismatch,
+`2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
+`--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`&#x27;s
+result; `imported`/`imported_with_warnings` is `fslc db import`&#x27;s. `impl_violated` is listed
+because inline `implements` propagates that seam verdict to the top-level `result`. The fold
+happens where the verification envelope is produced, so it is not confined to `check` and
+`verify`: on a spec whose seam fails, `mutate` re-emits the baseline verdict (generating no
+mutants, because its baseline is no longer `verified`), `ledger` inherits the same exit, and
+`sweep` reports `sweep_failed`. `fslc html` embeds the folded envelope; its exit code is
+unchanged. The same
+`2` mapping is fail-closed for `chain`&#x27;s project-manifest reader (unrecognized
+section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
+`docs/DESIGN-layers.md` §7) and for `ledger --impl-log`&#x27;s replay input (a
+replay error is not implementation-log evidence and must not be rendered as
+an empty ledger row — `docs/DESIGN-ledger.md`).</pre><p>Verdict-bearing commands print one JSON object to stdout with <code>{"fsl":"1.0", ...}</code>, and the exit code is derived from its <code>result</code>. Commands that emit a generated artifact write that artifact to stdout <em>under some flag combinations</em> instead — <code>fslc fmt PATH</code> prints formatted source, while <code>fslc fmt --check</code> returns a <code>format_check</code> envelope, and <code>document</code>, <code>db</code>, and <code>domain</code> subcommands print generated content or return an envelope depending on whether an output path is given. The rule is per command and per flag, so read a command's own <code>--help</code> before parsing its stdout as JSON. Native CLI and browser Worker <code>check</code>/<code>verify</code> envelopes also include <code>versions.verifier</code>, <code>versions.core</code>, and <code>versions.solver</code> (see <code>docs/LANGUAGE.md</code> §14). The machine-readable schema is <code>schemas/fslc/envelope.v1.schema.json</code>. The frozen Python compatibility reference under <code>src/fslc/</code> mirrors a subset for parity tests only — it is not the distribution surface.</p></div></details><div class="disclosure-tree"><details><summary>fslc ai <span class="tree-blurb">— 7 subcommands</span></summary><div class="tree-body"><pre>usage: fslc ai [-h] {check,replay,eval,regress,compare,drift,compat}
 
 positional arguments:
-  file
+  {check,replay,eval,regress,compare,drift,compat}
+    check               check an ai_component hard contract or recursive agent
+                        structure
+    replay              compare AI runtime JSONL events to ai_component
+                        declarations
+    eval                evaluate precomputed AI eval JSONL against
+                        statistical_property thresholds
+    regress             check ai_migration no_regression metrics
+    compare             compare two precomputed AI eval JSONL files
+    drift               check observed_property thresholds and drift from
+                        runtime telemetry
+    compat              generate an AI artifact capability profile for dbsystem
 
 options:
   -h, --help            show this help message and exit
-  --strict-tags
-  --requirements REQUIREMENTS
-  --edition {current,next}
-</pre></div></details>
-<details><summary>fslc verify</summary><div class="tree-body"><pre>usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--exclude-property EXCLUDE_PROPERTY_NAMES] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS] [--from-state FROM_STATE] [--edition {current,next}] file
-
-positional arguments:
-  file
-
-options:
-  -h, --help            show this help message and exit
-  --depth DEPTH
-  --engine {bmc,induction}
-  --k K_IND             max induction depth (induction engine only)
-  --deadlock {warn,error,ignore}
-  --vacuity {warn,error,ignore}
-  --property PROPERTY_NAME
-                        check a single named property in isolation; resolves
-                        across invariant/trans/leadsTo/reachable declarations
-  --exclude-property EXCLUDE_PROPERTY_NAMES
-                        skip a named property; repeat to omit
-                        invariants/trans/leadsTo/reachable declarations
-  --instances INSTANCES
-                        override a verify-block &#x27;instances NAME = N&#x27; bound
-                        (NAME=N; repeatable) — e.g. shrink to 1 entity for
-                        liveness
-  --values VALUES       override a verify-block &#x27;values NAME = LO..HI&#x27; bound
-                        (NAME=LO..HI; repeatable)
-  --strict-tags
-  --requirements REQUIREMENTS
-  --no-cache            skip the persistent verdict cache for this run (neither
-                        reads nor writes it)
-  --lemma LEMMAS        candidate auxiliary invariant expression (induction
-                        only; repeatable)
-  --from-state FROM_STATE
-                        replace spec init with a complete Monitor/replay
-                        logical-state JSON snapshot (BMC only)
-  --edition {current,next}
-</pre></div></details>
-<details><summary>fslc sweep</summary><div class="tree-body"><pre>usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] file
-
-positional arguments:
-  file
-
-options:
-  -h, --help            show this help message and exit
-  --depth DEPTH         depth range LO..HI to sweep (default: 0..8)
-  --engine {bmc,induction}
-  --k K_IND             max induction depth (induction engine only)
-  --deadlock {warn,error,ignore}
-  --vacuity {warn,error,ignore}
-  --property PROPERTY_NAME
-                        check a single named property in isolation
-  --instances INSTANCES
-                        sweep an entity bound (NAME=LO..HI; repeatable)
-  --values VALUES       sweep a number upper bound as LO..LO through LO..HI
-  --strict-tags
-  --requirements REQUIREMENTS
-</pre></div></details>
-<details><summary>fslc scenarios</summary><div class="tree-body"><pre>usage: fslc scenarios [-h] [--depth DEPTH] [--deadlock {warn,error,ignore}] file
-
-positional arguments:
-  file
-
-options:
-  -h, --help            show this help message and exit
-  --depth DEPTH
-  --deadlock {warn,error,ignore}
-</pre></div></details>
-<details><summary>fslc replay</summary><div class="tree-body"><pre>usage: fslc replay [-h] (--trace TRACE | --from-log FROM_LOG) [--mapping MAPPING] file
-
-positional arguments:
-  file
-
-options:
-  -h, --help           show this help message and exit
-  --trace TRACE
-  --from-log FROM_LOG  production JSONL records to map and replay
-  --mapping MAPPING    refinement-syntax log mapping (required with --from-log)
-</pre></div></details>
-<details><summary>fslc testgen</summary><div class="tree-body"><pre>usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT] [--target {pytest,vitest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] file
-
-positional arguments:
-  file
-
-options:
-  -h, --help            show this help message and exit
-  --depth DEPTH
-  -o, --output OUTPUT
-  --target {pytest,vitest,swift,kotlin,dart,phpunit}
-                        test harness to emit (default: pytest)
-  --deadlock {warn,error,ignore}
-  --strict
-</pre></div></details>
-<details><summary>fslc mutate</summary><div class="tree-body"><pre>usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement] [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM] file
-
-positional arguments:
-  file
-
-options:
-  -h, --help            show this help message and exit
-  --depth DEPTH
-  --by-requirement
-  --max-mutants MAX_MUTANTS
-  --from MUTANTS_FROM   adjudicate external JSONL mutants in addition to the
-                        built-in catalog
-</pre></div></details>
-<details><summary>fslc explain</summary><div class="tree-body"><pre>usage: fslc explain [-h] [--depth DEPTH] [--readable] file
-
-positional arguments:
-  file
-
-options:
-  -h, --help     show this help message and exit
-  --depth DEPTH
-  --readable
-</pre></div></details>
-<details><summary>fslc html</summary><div class="tree-body"><pre>usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] file
-
-positional arguments:
-  file
-
-options:
-  -h, --help            show this help message and exit
-  --depth DEPTH
-  -o, --output OUTPUT
-  --deadlock {warn,error,ignore}
-  --engine {bmc,induction}
-                        use k-induction so a proved report can show assurance
-                        class &#x27;proved&#x27;
-</pre></div></details>
-<details><summary>fslc ledger</summary><div class="tree-body"><pre>usage: fslc ledger [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--impl-log IMPL_LOG] [--engine {bmc,induction}] [--evidence EVIDENCE] file
-
-positional arguments:
-  file
-
-options:
-  -h, --help            show this help message and exit
-  --depth DEPTH
-  -o, --output OUTPUT
-  --deadlock {warn,error,ignore}
-  --impl-log IMPL_LOG   optional implementation trace JSON to score conformance
-                        (fslc replay)
-  --engine {bmc,induction}
-                        use k-induction so a requirement&#x27;s assurance class can
-                        reach &#x27;proved&#x27; (#171)
-  --evidence EVIDENCE   path to a saved stdout envelope (JSON) from an external-
-                        evidence producer (fslc ai eval/replay/drift, fslc db
-                        observe, fslc domain replay, ...); repeatable
-</pre></div></details>
-<details><summary>fslc refine</summary><div class="tree-body"><pre>usage: fslc refine [-h] [--depth DEPTH] impl abs mapping [rest ...]
-
-positional arguments:
-  impl
-  abs
-  mapping
-  rest           chain check: appending more (abs map) pairs runs an end-to-end
-                 composed check
-
-options:
-  -h, --help     show this help message and exit
-  --depth DEPTH
-</pre></div></details>
-<details><summary>fslc diff</summary><div class="tree-body"><pre>usage: fslc diff [-h] [--git BASE..HEAD] [--depth DEPTH] [--mapping MAPPING] [--forbid FORBID] [old] [new]
-
-positional arguments:
-  old
-  new
-
-options:
-  -h, --help         show this help message and exit
-  --git BASE..HEAD   compare a spec (or every changed .fsl file) across two Git
-                     revisions
-  --depth DEPTH
-  --mapping MAPPING  optional refinement mapping for one comparison direction
-  --forbid FORBID    comma-separated finding kinds that should fail the gate
-</pre></div></details>
-<details><summary>fslc chain</summary><div class="tree-body"><pre>usage: fslc chain [-h] [--keep-going] [path]
-
-positional arguments:
-  path
-
-options:
-  -h, --help    show this help message and exit
-  --keep-going
-</pre></div></details>
-<details><summary>fslc typestate</summary><div class="tree-body"><pre>usage: fslc typestate [-h] [--ts] file
-
-positional arguments:
-  file
-
-options:
-  -h, --help  show this help message and exit
-  --ts        emit only the derivable entities&#x27; TypeScript to stdout instead of
-              JSON
-</pre></div></details>
-<details><summary>fslc analyze</summary><div class="tree-body"><pre>usage: fslc analyze [-h] [--projection {tsg,action_dependency_graph,action_state_graph,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}] [--profile {ai-review}] [--export {tag-review}] [--focus FOCUS] [--format {dot,json,mermaid}] file [file ...]
-
-positional arguments:
-  file
-
-options:
-  -h, --help            show this help message and exit
-  --projection {tsg,action_dependency_graph,action_state_graph,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}
-                        structural projection to emit
-  --profile {ai-review}
-                        emit AI-readable structural review findings
-  --export {tag-review}
-                        export declaration-level tag/formula review tuples
-  --focus FOCUS         node id for --projection impact_graph, e.g. state:stock
-                        or action:checkout
-  --format {dot,json,mermaid}
-</pre></div></details>
-<details><summary>fslc db <span class="tree-blurb">— 3 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc db check</summary><div class="tree-body"><pre>usage: fslc db check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] file
+</pre><div class="disclosure-tree"><details><summary>fslc ai check</summary><div class="tree-body"><pre>usage: fslc ai check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] file
 
 positional arguments:
   file
@@ -310,48 +78,26 @@ options:
   --engine {bmc,induction}
   --deadlock {warn,error,ignore}
 </pre></div></details>
-<details><summary>fslc db observe</summary><div class="tree-body"><pre>usage: fslc db observe [-h] --trace TRACE file
-
-positional arguments:
-  file
+<details><summary>fslc ai compare</summary><div class="tree-body"><pre>usage: fslc ai compare [-h] --from FROM_RECORDS --to TO_RECORDS [--from-label FROM_LABEL] [--to-label TO_LABEL] [--dataset DATASET]
 
 options:
-  -h, --help     show this help message and exit
-  --trace TRACE
+  -h, --help            show this help message and exit
+  --from FROM_RECORDS
+  --to TO_RECORDS
+  --from-label FROM_LABEL
+  --to-label TO_LABEL
+  --dataset DATASET
 </pre></div></details>
-<details><summary>fslc db import</summary><div class="tree-body"><pre>usage: fslc db import [-h] [--name NAME] [--source {auto,sql,prisma}] [-o OUTPUT] file
+<details><summary>fslc ai compat</summary><div class="tree-body"><pre>usage: fslc ai compat [-h] [--environment ENVIRONMENT] file
 
 positional arguments:
   file
 
 options:
   -h, --help            show this help message and exit
-  --name NAME
-  --source {auto,sql,prisma}
-                        source format to import (default: auto by extension)
-  -o, --output OUTPUT
-</pre></div></details></div></div></details>
-<details><summary>fslc compat <span class="tree-blurb">— 1 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc compat check</summary><div class="tree-body"><pre>usage: fslc compat check [-h] [--include-ai] file
-
-positional arguments:
-  file
-
-options:
-  -h, --help    show this help message and exit
-  --include-ai
-</pre></div></details></div></div></details>
-<details><summary>fslc ai <span class="tree-blurb">— 7 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc ai check</summary><div class="tree-body"><pre>usage: fslc ai check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] file
-
-positional arguments:
-  file
-
-options:
-  -h, --help            show this help message and exit
-  --depth DEPTH
-  --engine {bmc,induction}
-  --deadlock {warn,error,ignore}
+  --environment ENVIRONMENT
 </pre></div></details>
-<details><summary>fslc ai replay</summary><div class="tree-body"><pre>usage: fslc ai replay [-h] --logs LOGS [--component COMPONENT] file
+<details><summary>fslc ai drift</summary><div class="tree-body"><pre>usage: fslc ai drift [-h] --logs LOGS [--baseline-logs BASELINE_LOGS] [--window WINDOW] [--baseline BASELINE] [--property PROPERTY_NAME] file
 
 positional arguments:
   file
@@ -359,9 +105,10 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --logs LOGS
-  --component COMPONENT
-                        ai_component to replay when FILE is a project-level fsl-
-                        ai file
+  --baseline-logs BASELINE_LOGS
+  --window WINDOW
+  --baseline BASELINE
+  --property PROPERTY_NAME
 </pre></div></details>
 <details><summary>fslc ai eval</summary><div class="tree-body"><pre>usage: fslc ai eval [-h] [--records RECORDS] [--dataset DATASET] [--slice SLICE_NAME] [--property PROPERTY_NAME] file
 
@@ -387,17 +134,7 @@ options:
   --after-records AFTER_RECORDS
   --dataset DATASET
 </pre></div></details>
-<details><summary>fslc ai compare</summary><div class="tree-body"><pre>usage: fslc ai compare [-h] --from FROM_RECORDS --to TO_RECORDS [--from-label FROM_LABEL] [--to-label TO_LABEL] [--dataset DATASET]
-
-options:
-  -h, --help            show this help message and exit
-  --from FROM_RECORDS
-  --to TO_RECORDS
-  --from-label FROM_LABEL
-  --to-label TO_LABEL
-  --dataset DATASET
-</pre></div></details>
-<details><summary>fslc ai drift</summary><div class="tree-body"><pre>usage: fslc ai drift [-h] --logs LOGS [--baseline-logs BASELINE_LOGS] [--window WINDOW] [--baseline BASELINE] [--property PROPERTY_NAME] file
+<details><summary>fslc ai replay</summary><div class="tree-body"><pre>usage: fslc ai replay [-h] --logs LOGS [--component COMPONENT] file
 
 positional arguments:
   file
@@ -405,21 +142,230 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --logs LOGS
-  --baseline-logs BASELINE_LOGS
-  --window WINDOW
-  --baseline BASELINE
-  --property PROPERTY_NAME
-</pre></div></details>
-<details><summary>fslc ai compat</summary><div class="tree-body"><pre>usage: fslc ai compat [-h] [--environment ENVIRONMENT] file
+  --component COMPONENT
+                        ai_component to replay when FILE is a project-level fsl-
+                        ai file
+</pre></div></details></div></div></details>
+<details><summary>fslc analyze</summary><div class="tree-body"><pre>usage: fslc analyze [-h] [--projection {tsg,action_dependency_graph,action_state_graph,code_audit,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}] [--profile {ai-review}] [--export {tag-review}] [--code CODE] [--focus FOCUS] [--format {dot,json,mermaid}] file [file ...]
 
 positional arguments:
   file
 
 options:
   -h, --help            show this help message and exit
-  --environment ENVIRONMENT
+  --projection {tsg,action_dependency_graph,action_state_graph,code_audit,impact_graph,property_state_graph,requirement_property_graph,refinement_graph,traceability_graph}
+                        structural projection to emit
+  --profile {ai-review}
+                        emit AI-readable structural review findings
+  --export {tag-review}
+                        export declaration-level tag/formula review tuples
+  --code CODE           source file or directory for --projection code_audit
+  --focus FOCUS         node id for --projection impact_graph, e.g. state:stock
+                        or action:checkout
+  --format {dot,json,mermaid}
+</pre></div></details>
+<details><summary>fslc causal <span class="tree-blurb">— 6 subcommands</span></summary><div class="tree-body"><pre>usage: fslc causal [-h] {check,analyze,verify-expectations,observe-expectations,diff,ledger}
+
+positional arguments:
+  {check,analyze,verify-expectations,observe-expectations,diff,ledger}
+    check               check a causal review model
+    analyze             project or review a causal model
+    verify-expectations
+                        bounded-check declared causal expectations
+    observe-expectations
+                        replay observations into causal expectation evidence
+    diff                compare causal models by stable claim identity
+    ledger              project claims, plans, and evidence into a causal ledger
+
+options:
+  -h, --help            show this help message and exit
+</pre><div class="disclosure-tree"><details><summary>fslc causal analyze</summary><div class="tree-body"><pre>usage: fslc causal analyze [-h] (--projection {causal_graph,causal_timeline,causal_traceability_graph,causal_evidence_graph} | --profile {causal-review}) [--format {json,dot,mermaid}] [--evidence EVIDENCE] [--lifecycle LIFECYCLE] [--as-of AS_OF] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --projection {causal_graph,causal_timeline,causal_traceability_graph,causal_evidence_graph}
+  --profile {causal-review}
+  --format {json,dot,mermaid}
+  --evidence EVIDENCE
+  --lifecycle LIFECYCLE
+  --as-of AS_OF
+</pre></div></details>
+<details><summary>fslc causal check</summary><div class="tree-body"><pre>usage: fslc causal check [-h] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help  show this help message and exit
+</pre></div></details>
+<details><summary>fslc causal diff</summary><div class="tree-body"><pre>usage: fslc causal diff [-h] [--format {json}] before after
+
+positional arguments:
+  before
+  after
+
+options:
+  -h, --help       show this help message and exit
+  --format {json}
+</pre></div></details>
+<details><summary>fslc causal ledger</summary><div class="tree-body"><pre>usage: fslc causal ledger [-h] [--plans PLANS] [--evidence EVIDENCE] [--lifecycle LIFECYCLE] [--as-of AS_OF] [--format {json}] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --plans PLANS
+  --evidence EVIDENCE
+  --lifecycle LIFECYCLE
+  --as-of AS_OF
+  --format {json}
+</pre></div></details>
+<details><summary>fslc causal observe-expectations</summary><div class="tree-body"><pre>usage: fslc causal observe-expectations [-h] --from-log FROM_LOG --mapping MAPPING --scope SCOPE --period-start PERIOD_START --period-end PERIOD_END [--out OUT] [--lifecycle-out LIFECYCLE_OUT] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --from-log FROM_LOG
+  --mapping MAPPING
+  --scope SCOPE
+  --period-start PERIOD_START
+  --period-end PERIOD_END
+  --out OUT
+  --lifecycle-out LIFECYCLE_OUT
+</pre></div></details>
+<details><summary>fslc causal verify-expectations</summary><div class="tree-body"><pre>usage: fslc causal verify-expectations [-h] [--depth DEPTH] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help     show this help message and exit
+  --depth DEPTH
 </pre></div></details></div></div></details>
-<details><summary>fslc domain <span class="tree-blurb">— 6 subcommands</span></summary><div class="tree-body"><div class="disclosure-tree"><details><summary>fslc domain check</summary><div class="tree-body"><pre>usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] [--edition {current,next}] file
+<details><summary>fslc chain</summary><div class="tree-body"><pre>usage: fslc chain [-h] [--keep-going] [path]
+
+positional arguments:
+  path
+
+options:
+  -h, --help    show this help message and exit
+  --keep-going
+</pre></div></details>
+<details><summary>fslc check</summary><div class="tree-body"><pre>usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] [--edition {current,next}] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --strict-tags
+  --requirements REQUIREMENTS
+  --edition {current,next}
+</pre></div></details>
+<details><summary>fslc compat <span class="tree-blurb">— 1 subcommands</span></summary><div class="tree-body"><pre>usage: fslc compat [-h] {check}
+
+positional arguments:
+  {check}
+    check     check dbsystem compatibility, optionally including AI capability
+              profiles
+
+options:
+  -h, --help  show this help message and exit
+</pre><div class="disclosure-tree"><details><summary>fslc compat check</summary><div class="tree-body"><pre>usage: fslc compat check [-h] [--include-ai] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help    show this help message and exit
+  --include-ai
+</pre></div></details></div></div></details>
+<details><summary>fslc db <span class="tree-blurb">— 3 subcommands</span></summary><div class="tree-body"><pre>usage: fslc db [-h] {check,observe,import}
+
+positional arguments:
+  {check,observe,import}
+    check               check a dbsystem and emit fsl-db findings
+    observe             compare runtime observation logs to dbsystem
+                        declarations
+    import              import SQL DDL or a minimal ORM schema into dbsystem
+
+options:
+  -h, --help            show this help message and exit
+</pre><div class="disclosure-tree"><details><summary>fslc db check</summary><div class="tree-body"><pre>usage: fslc db check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --depth DEPTH
+  --engine {bmc,induction}
+  --deadlock {warn,error,ignore}
+</pre></div></details>
+<details><summary>fslc db import</summary><div class="tree-body"><pre>usage: fslc db import [-h] [--name NAME] [--source {auto,sql,prisma}] [-o OUTPUT] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --name NAME
+  --source {auto,sql,prisma}
+                        source format to import (default: auto by extension)
+  -o, --output OUTPUT
+</pre></div></details>
+<details><summary>fslc db observe</summary><div class="tree-body"><pre>usage: fslc db observe [-h] --trace TRACE file
+
+positional arguments:
+  file
+
+options:
+  -h, --help     show this help message and exit
+  --trace TRACE
+</pre></div></details></div></div></details>
+<details><summary>fslc diff</summary><div class="tree-body"><pre>usage: fslc diff [-h] [--git BASE..HEAD] [--depth DEPTH] [--mapping MAPPING] [--forbid FORBID] [old] [new]
+
+positional arguments:
+  old
+  new
+
+options:
+  -h, --help         show this help message and exit
+  --git BASE..HEAD   compare a spec (or every changed .fsl file) across two Git
+                     revisions
+  --depth DEPTH
+  --mapping MAPPING  optional refinement mapping for one comparison direction
+  --forbid FORBID    comma-separated finding kinds that should fail the gate
+</pre></div></details>
+<details><summary>fslc domain <span class="tree-blurb">— 6 subcommands</span></summary><div class="tree-body"><pre>usage: fslc domain [-h] {check,analyze,expand,generate,replay,testgen}
+
+positional arguments:
+  {check,analyze,expand,generate,replay,testgen}
+    check               check domain/effect structure and verify generated
+                        kernel
+    analyze             emit aggregate/effect ownership findings
+    expand              expand domain/effect dialect to kernel FSL
+    generate            generate Functional DDD implementation scaffold
+    replay              replay runtime command/event/effect logs
+    testgen             generate domain adapter/conformance scaffold
+
+options:
+  -h, --help            show this help message and exit
+</pre><div class="disclosure-tree"><details><summary>fslc domain analyze</summary><div class="tree-body"><pre>usage: fslc domain analyze [-h] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help  show this help message and exit
+</pre></div></details>
+<details><summary>fslc domain check</summary><div class="tree-body"><pre>usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] [--edition {current,next}] file
 
 positional arguments:
   file
@@ -430,14 +376,6 @@ options:
   --engine {bmc,induction}
   --deadlock {warn,error,ignore}
   --edition {current,next}
-</pre></div></details>
-<details><summary>fslc domain analyze</summary><div class="tree-body"><pre>usage: fslc domain analyze [-h] file
-
-positional arguments:
-  file
-
-options:
-  -h, --help  show this help message and exit
 </pre></div></details>
 <details><summary>fslc domain expand</summary><div class="tree-body"><pre>usage: fslc domain expand [-h] [-o OUTPUT] file
 
@@ -480,7 +418,433 @@ options:
   --deadlock {warn,error,ignore}
   --strict
   -o, --output OUTPUT
-</pre></div></details></div></div></details></div>
+</pre></div></details></div></div></details>
+<details><summary>fslc explain</summary><div class="tree-body"><pre>usage: fslc explain [-h] [--depth DEPTH] [--readable] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help     show this help message and exit
+  --depth DEPTH
+  --readable
+</pre></div></details>
+<details><summary>fslc html</summary><div class="tree-body"><pre>usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --depth DEPTH
+  -o, --output OUTPUT
+  --deadlock {warn,error,ignore}
+  --engine {bmc,induction}
+                        use k-induction so a proved report can show assurance
+                        class &#x27;proved&#x27;
+</pre></div></details>
+<details><summary>fslc approval <span class="tree-blurb">— 3 subcommands</span></summary><div class="tree-body"><pre>usage: fslc approval [-h] {create,check,diff}
+
+positional arguments:
+  {create,check,diff}
+    create              bind a reviewed artifact to the normalized spec digest
+    check               compare a spec and regenerated artifact to an approval record
+    diff                run semantic diff from the approved Git baseline
+
+options:
+  -h, --help            show this help message and exit
+</pre><div class="disclosure-tree"><details><summary>fslc approval create</summary><div class="tree-body"><pre>usage: fslc approval create [-h] --kind {ledger,html,scenarios,requirements_document} --artifact ARTIFACT --approver APPROVER [--requirement ID] [--signing-key PRIVATE_KEY] [--depth DEPTH] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] [--glossary GLOSSARY] [--evidence EVIDENCE] [-o OUTPUT] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --kind {ledger,html,scenarios,requirements_document}
+  --artifact ARTIFACT   reviewed artifact generated with the recorded inputs
+  --approver APPROVER
+  --requirement ID      requirement ID to approve; repeatable, defaults to all
+  --signing-key PRIVATE_KEY
+                        create a signed record (v2 for ledger/html/scenarios,
+                        v4 for requirements_document) with a PKCS#8 Ed25519 key
+  --depth DEPTH         ledger/html/scenarios only
+  --deadlock {warn,error,ignore}
+                        ledger/html/scenarios only
+  --engine {bmc,induction}
+                        ledger/html/scenarios only
+  --glossary GLOSSARY   requirements_document only; the same glossary sidecar
+                        the reviewed document was generated with
+  --evidence EVIDENCE   requirements_document only; the same evidence file(s)
+                        the reviewed document was generated with; repeatable
+  -o, --output OUTPUT
+</pre></div></details>
+<details><summary>fslc approval check</summary><div class="tree-body"><pre>usage: fslc approval check [-h] --record RECORD [--trust-key PUBLIC_KEY] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --record RECORD
+  --trust-key PUBLIC_KEY
+                        trusted SPKI Ed25519 public key; repeatable
+</pre></div></details>
+<details><summary>fslc approval diff</summary><div class="tree-body"><pre>usage: fslc approval diff [-h] --record RECORD [--depth DEPTH] [--trust-key PUBLIC_KEY] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --record RECORD
+  --depth DEPTH
+  --trust-key PUBLIC_KEY
+                        trusted SPKI Ed25519 public key; repeatable
+</pre></div></details></div></div></details>
+<details><summary>fslc ledger</summary><div class="tree-body"><pre>usage: fslc ledger [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--impl-log IMPL_LOG] [--engine {bmc,induction}] [--evidence EVIDENCE] [--approval RECORD] [--trust-key PUBLIC_KEY] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --depth DEPTH
+  -o, --output OUTPUT
+  --deadlock {warn,error,ignore}
+  --impl-log IMPL_LOG   optional implementation trace JSON to score conformance
+                        (fslc replay)
+  --engine {bmc,induction}
+                        use k-induction so a requirement&#x27;s assurance class can
+                        reach &#x27;proved&#x27; (#171)
+  --evidence EVIDENCE   path to a saved stdout envelope (JSON) from an external-
+                        evidence producer (fslc ai eval/replay/drift, fslc db
+                        observe, fslc domain replay, ...); repeatable
+  --approval RECORD     digest-bound approval record to check; repeatable
+  --trust-key PUBLIC_KEY
+                        trusted SPKI Ed25519 public key; repeatable
+</pre></div></details>
+<details><summary>fslc document <span class="tree-blurb">— 3 subcommands</span></summary><div class="tree-body"><pre>usage: fslc document [-h] {generate,claims,check}
+
+positional arguments:
+  {generate,claims,check}
+    generate            render a controlled-language requirements document
+                        (ja/en) from the checked spec
+    claims              emit the Requirement Claim IR (RCIR) claim set as
+                        JSON
+    check               detect drift between a generated document and a
+                        fresh re-render of its spec
+
+options:
+  -h, --help            show this help message and exit
+</pre><div class="disclosure-tree"><details><summary>fslc document generate</summary><div class="tree-body"><pre>usage: fslc document generate [-h] [--view {requirements}] [--lang {ja,en}] [--strict] [--strict-rendering] [--glossary GLOSSARY] [--evidence EVIDENCE] [--approval RECORD] [--trust-key PUBLIC_KEY] [-o OUTPUT] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --view {requirements}
+                        v1 supports only requirements; reserved for
+                        business/design (#334)
+  --lang {ja,en}        controlled-language locale (default: ja)
+  --strict              fail if an authored target is unattributed or
+                        unsupported (FSL-DOC-UNTAGGED-TARGET /
+                        FSL-DOC-UNSUPPORTED-TARGET), or a glossary target
+                        does not exist (FSL-DOC-LABEL-UNKNOWN)
+  --strict-rendering    fail if an expression falls back to canonical FSL
+                        text (FSL-DOC-FORMULA-FALLBACK)
+  --glossary GLOSSARY   presentation-only display-label sidecar
+                        (fslc.document-glossary.v1); a duplicate target is
+                        always an error (FSL-DOC-LABEL-CONFLICT)
+  --evidence EVIDENCE   saved evidence envelope (JSON, same shape as &#x27;fslc
+                        ledger --evidence&#x27;) overlaid onto the document as a
+                        per-requirement assurance class
+                        (proved/bounded/replay-observed/statistical); does
+                        not run any verification itself; repeatable; an
+                        unmatched file is a warning by default, an error
+                        under --strict (FSL-DOC-EVIDENCE-UNMATCHED)
+  --approval RECORD     a requirements_document approval record (from &#x27;fslc
+                        approval create --kind requirements_document&#x27;) to
+                        display as an &quot;Approval records&quot; section; repeatable;
+                        must match the current rendering exactly or this
+                        fails closed (FSL-DOC-APPROVAL-DRIFTED); a signed
+                        record requires a matching --trust-key
+                        (FSL-DOC-APPROVAL-INVALID otherwise)
+  --trust-key PUBLIC_KEY
+                        trusted SPKI Ed25519 public key for a signed
+                        --approval record; repeatable
+  -o, --output OUTPUT
+</pre></div></details>
+<details><summary>fslc document claims</summary><div class="tree-body"><pre>usage: fslc document claims [-h] [--view {requirements}] [-o OUTPUT] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --view {requirements}
+                        v1 supports only requirements; reserved for
+                        business/design (#334)
+  -o, --output OUTPUT
+</pre></div></details>
+<details><summary>fslc document check</summary><div class="tree-body"><pre>usage: fslc document check [-h] [--glossary GLOSSARY] [--evidence EVIDENCE] [--approval RECORD] file document
+
+positional arguments:
+  file      the FSL spec the document was generated from
+  document  the generated Markdown artifact (from &#x27;fslc document generate&#x27;)
+
+options:
+  -h, --help            show this help message and exit
+  --glossary GLOSSARY   the same glossary sidecar &#x27;generate&#x27; was given, if
+                        any; a mismatch (missing, extra, or different
+                        content) is reported as glossary_changed
+                        (FSL-DOC-GLOSSARY-CHANGED), not a hard error
+  --evidence EVIDENCE   the same evidence files &#x27;generate&#x27; was given, if
+                        any; a mismatch is reported as evidence_changed
+                        (FSL-DOC-EVIDENCE-CHANGED), not a hard error;
+                        repeatable
+  --approval RECORD     the same approval record(s) &#x27;generate&#x27; was given, if
+                        any; a mismatch is reported as approval_changed
+                        (FSL-DOC-APPROVAL-CHANGED), not a hard error;
+                        repeatable; never verifies a signature (admission
+                        is &#x27;generate&#x27;s job, this only reproduces display text)
+
+Structural drift check only: no natural language is interpreted. Reads the
+locale and source label back from the artifact&#x27;s own frontmatter, re-projects
+and re-renders the spec, and compares claim/slot marker structure and
+claim-block digests. Exit codes: 0 document_conformant, 1 document_drifted,
+2 parse/type/semantics/schema/I/O error, 3 internal error.
+</pre></div></details></div></div></details>
+<details><summary>fslc mutate</summary><div class="tree-body"><pre>usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement] [--oracle-attribution] [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --depth DEPTH
+  --by-requirement
+  --oracle-attribution  emit full killer sets and per-oracle sole/shared counts
+                        keyed by oracle display names (opt-in; default output
+                        unchanged)
+  --max-mutants MAX_MUTANTS
+  --from MUTANTS_FROM   adjudicate external JSONL mutants in addition to the
+                        built-in catalog
+</pre></div></details>
+<details><summary>fslc refine</summary><div class="tree-body"><pre>usage: fslc refine [-h] [--depth DEPTH] impl abs mapping [rest ...]
+
+positional arguments:
+  impl
+  abs
+  mapping
+  rest           chain check: appending more (abs map) pairs runs an end-to-end
+                 composed check
+
+options:
+  -h, --help     show this help message and exit
+  --depth DEPTH
+</pre></div></details>
+<details><summary>fslc replay</summary><div class="tree-body"><pre>usage: fslc replay [-h] (--trace TRACE | --from-log FROM_LOG) [--mapping MAPPING] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help           show this help message and exit
+  --trace TRACE
+  --from-log FROM_LOG  production JSONL records to map and replay
+  --mapping MAPPING    refinement-syntax log mapping (required with --from-log)
+</pre></div></details>
+<details><summary>fslc scenarios</summary><div class="tree-body"><pre>usage: fslc scenarios [-h] [--depth DEPTH] [--deadlock {warn,error,ignore}] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --depth DEPTH
+  --deadlock {warn,error,ignore}
+</pre></div></details>
+<details><summary>fslc sweep</summary><div class="tree-body"><pre>usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --depth DEPTH         depth range LO..HI to sweep (default: 0..8)
+  --engine {bmc,induction}
+  --k K_IND             max induction depth (induction engine only)
+  --deadlock {warn,error,ignore}
+  --vacuity {warn,error,ignore}
+  --property PROPERTY_NAME
+                        check a single named property in isolation
+  --instances INSTANCES
+                        sweep an entity bound (NAME=LO..HI; repeatable)
+  --values VALUES       sweep a number upper bound as LO..LO through LO..HI
+  --strict-tags
+  --requirements REQUIREMENTS
+</pre></div></details>
+<details><summary>fslc testgen</summary><div class="tree-body"><pre>usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT] [--target {pytest,vitest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --depth DEPTH
+  -o, --output OUTPUT
+  --target {pytest,vitest,swift,kotlin,dart,phpunit}
+                        test harness to emit (default: pytest)
+  --deadlock {warn,error,ignore}
+  --strict
+</pre></div></details>
+<details><summary>fslc typestate</summary><div class="tree-body"><pre>usage: fslc typestate [-h] [--ts] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help  show this help message and exit
+  --ts        emit only the derivable entities&#x27; TypeScript to stdout instead of
+              JSON
+</pre></div></details>
+<details><summary>fslc verify</summary><div class="tree-body"><pre>usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction,explicit,auto}] [--k K_IND] [--explicit-budget EXPLICIT_BUDGET] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--exclude-property EXCLUDE_PROPERTY_NAMES] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS] [--from-state FROM_STATE] [--edition {current,next}] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --depth DEPTH
+  --engine {bmc,induction,explicit,auto}
+  --k K_IND             max induction depth (induction engine only)
+  --explicit-budget EXPLICIT_BUDGET
+                        max visited states for the explicit engine (default
+                        1000000); exceeding returns unknown_budget
+  --deadlock {warn,error,ignore}
+  --vacuity {warn,error,ignore}
+  --property PROPERTY_NAME
+                        select one named property obligation; resolves across
+                        invariant/trans/leadsTo/reachable declarations; under
+                        induction, a selected trans keeps all invariant
+                        hypotheses
+  --exclude-property EXCLUDE_PROPERTY_NAMES
+                        skip a named property; repeat to omit
+                        invariants/trans/leadsTo/reachable declarations
+  --instances INSTANCES
+                        override a verify-block &#x27;instances NAME = N&#x27; bound
+                        (NAME=N; repeatable) — e.g. shrink to 1 entity for
+                        liveness
+  --values VALUES       override a verify-block &#x27;values NAME = LO..HI&#x27; bound
+                        (NAME=LO..HI; repeatable)
+  --strict-tags
+  --requirements REQUIREMENTS
+  --no-cache            skip the persistent verdict cache for this run (neither
+                        reads nor writes it)
+  --lemma LEMMAS        candidate auxiliary invariant expression (induction
+                        only; repeatable)
+  --from-state FROM_STATE
+                        replace spec init with a complete Monitor/replay
+                        logical-state JSON snapshot (BMC only)
+  --edition {current,next}
+</pre></div></details>
+<details><summary>fslc conformance</summary><div class="tree-body"><pre>usage: fslc conformance [-h] [--depth DEPTH] [--kernel-version {1,2}] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --depth DEPTH         maximum transition depth (default: 4)
+  --kernel-version {1,2}
+                        public Kernel major (default: 1)
+</pre></div></details>
+<details><summary>fslc testplan</summary><div class="tree-body"><pre>usage: fslc testplan [-h] [--depth DEPTH] file
+
+Select bounded conformance vectors into a closed test-plan.v1 JSON plan.
+Pass the spec at the same FSL layer granularity as the implementation you are checking; from an upper layer reuse forbidden (negative) scenarios only.
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --depth DEPTH         maximum transition depth (default: 4)
+</pre></div></details>
+<details><summary>fslc counterexample <span class="tree-blurb">— 1 subcommands</span></summary><div class="tree-body"><pre>usage: fslc counterexample [-h] {export}
+
+positional arguments:
+  {export}            export a bounded safety-invariant counterexample to reproducer.v1
+
+options:
+  -h, --help            show this help message and exit
+</pre><div class="disclosure-tree"><details><summary>fslc counterexample export</summary><div class="tree-body"><pre>usage: fslc counterexample export [-h] [--depth DEPTH] [--engine {bmc,explicit,auto,induction}] [--deadlock {warn,error,ignore}] -o OUTPUT file
+
+Export a bounded safety-invariant counterexample as a closed reproducer.v1 JSON artifact.
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --depth DEPTH         maximum transition depth (default: 8)
+  --engine {bmc,explicit,auto,induction}
+                        verification engine (default: bmc)
+  --deadlock {warn,error,ignore}
+                        deadlock reporting policy (default: warn)
+  -o OUTPUT, --output OUTPUT
+                        reproducer artifact output path (required)
+</pre></div></details></div></div></details>
+<details><summary>fslc kernel</summary><div class="tree-body"><pre>usage: fslc kernel [-h] [--kernel-version {1,2}] file
+
+positional arguments:
+  file
+
+options:
+  -h, --help            show this help message and exit
+  --kernel-version {1,2}
+                        public Kernel major (default: 1)
+</pre></div></details>
+<details><summary>fslc fmt</summary><div class="tree-body"><pre>usage: fslc fmt [-h] [--check] [--edition {current,next}] path [path ...]
+
+Format one registered FSL document to stdout without mutating it. Multiple paths are accepted only with --check. Use &#x27;-&#x27; for stdin.
+
+positional arguments:
+  path
+
+options:
+  -h, --help            show this help message and exit
+  --check               report whether formatting is required (exit 0 clean, 1 changed)
+  --edition {current,next}
+                        formatting policy (default: current)
+</pre></div></details>
+<details><summary>fslc lint</summary><div class="tree-body"><pre>usage: fslc lint [-h] [--edition {current,next}] [--project PROJECT] path [path ...]
+
+Report stable edition and ID-policy diagnostics without mutating source files.
+
+positional arguments:
+  path
+
+options:
+  -h, --help            show this help message and exit
+  --edition {current,next}
+                        lint policy (default: current)
+  --project PROJECT     explicit fsl-project.toml ID-policy manifest
+</pre></div></details>
+<details><summary>fslc migrate</summary><div class="tree-body"><pre>usage: fslc migrate [-h] [--edition {current,next}] [--write] path [path ...]
+
+Plan machine-applicable edition edits without mutation. --write applies the validated file set atomically.
+
+positional arguments:
+  path
+
+options:
+  -h, --help            show this help message and exit
+  --edition {current,next}
+                        target edition (default: next)
+  --write               atomically replace every validated input file
+</pre></div></details></div>
   </div>
 </section>
 

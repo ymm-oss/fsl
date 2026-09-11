@@ -38,7 +38,11 @@ use serde_json::{Map, Value, json};
 pub enum SpecLoadError {
     Io(String),
     Parse(Box<fsl_syntax::ParseError>),
-    Semantic(SemanticDiagnostic),
+    // Boxed for the same reason as `Parse` above: #698 added a diagnostic
+    // code, hint and quick-fix edit to the typed-model error this carries,
+    // which pushed the inline variant past clippy's `result_large_err`
+    // threshold for every `Result<_, SpecLoadError>` in the crate.
+    Semantic(Box<SemanticDiagnostic>),
 }
 
 /// A typed-model spec-load failure with the location the model recorded for the
@@ -50,6 +54,9 @@ pub struct SemanticDiagnostic {
     /// Whether the failure was resolving a name, which `docs/DESIGN-v1.md`
     /// §7.2 classifies `kind:"name"` (issue 565).
     pub name_resolution: bool,
+    pub diagnostic_code: Option<&'static str>,
+    pub hint: Option<String>,
+    pub quick_fix: Option<fsl_core::DiagnosticEdit>,
 }
 
 impl SemanticDiagnostic {
@@ -61,6 +68,9 @@ impl SemanticDiagnostic {
             message: message.into(),
             loc: None,
             name_resolution: false,
+            diagnostic_code: None,
+            hint: None,
+            quick_fix: None,
         }
     }
 
@@ -73,6 +83,9 @@ impl SemanticDiagnostic {
             message: message.into(),
             loc: crate::verification_output::origin_loc(origin),
             name_resolution: false,
+            diagnostic_code: None,
+            hint: None,
+            quick_fix: None,
         }
     }
 
@@ -96,6 +109,9 @@ impl SemanticDiagnostic {
             },
             loc: crate::verification_output::origin_loc(error.origin.as_deref()),
             name_resolution: error.name_resolution,
+            diagnostic_code: None,
+            hint: None,
+            quick_fix: None,
         }
     }
 
@@ -108,6 +124,9 @@ impl SemanticDiagnostic {
             message: error.to_string(),
             loc: crate::verification_output::model_error_loc(error),
             name_resolution: error.name_resolution,
+            diagnostic_code: error.diagnostic_code,
+            hint: error.hint.as_deref().cloned(),
+            quick_fix: error.quick_fix.as_deref().cloned(),
         }
     }
 }
@@ -117,7 +136,7 @@ impl SpecLoadError {
     /// rejected CLI selection, a whole-document shape mismatch, or a diagnostic
     /// whose span belongs to a different file than the one being reported on.
     pub fn unlocated_semantic(message: impl Into<String>) -> Self {
-        Self::Semantic(SemanticDiagnostic::unlocated(message))
+        Self::Semantic(Box::new(SemanticDiagnostic::unlocated(message)))
     }
 }
 
@@ -155,9 +174,11 @@ pub fn kernel_load_error(source: &str, error: &fsl_core::CoreError) -> SpecLoadE
     // keeps no location; the original diagnostic keeps whatever origin the
     // frontend recorded.
     if error.message == "top-level document has not reached the kernel lowering gate" {
-        return SpecLoadError::Semantic(SemanticDiagnostic::unlocated("spec has no state block"));
+        return SpecLoadError::Semantic(Box::new(SemanticDiagnostic::unlocated(
+            "spec has no state block",
+        )));
     }
-    SpecLoadError::Semantic(SemanticDiagnostic::from_core_error(error))
+    SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_core_error(error)))
 }
 
 /// Render a classified spec-load failure into the public error envelope.
@@ -178,6 +199,8 @@ pub fn render_spec_load_error(mut output: Map<String, Value>, error: &SpecLoadEr
             &diagnostic.message,
             diagnostic.loc.clone(),
             diagnostic.name_resolution,
+            diagnostic.diagnostic_code,
+            diagnostic.hint.as_deref(),
         ),
     }
 }

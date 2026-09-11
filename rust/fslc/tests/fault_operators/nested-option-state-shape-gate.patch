@@ -1,0 +1,12 @@
+diff --git a/rust/fsl-core/src/model.rs b/rust/fsl-core/src/model.rs
+--- a/rust/fsl-core/src/model.rs
++++ b/rust/fsl-core/src/model.rs
+@@ -1125,6 +1125,6 @@ impl ModelBuilder {
+             TypeRef::Int | TypeRef::Bool | TypeRef::Range(_, _) | TypeRef::Named(_) => {
+                 self.scalar(ty)
+             }
+-            TypeRef::Option(inner) => self.optional_scalar(inner),
++            TypeRef::Option(inner) => matches!(inner.as_ref(), TypeRef::Set(_)) || self.optional_scalar(inner),
+             TypeRef::Map(_, _) | TypeRef::Relation(_, _) | TypeRef::Set(_) | TypeRef::Seq(_, _) => {
+                 false
+             }

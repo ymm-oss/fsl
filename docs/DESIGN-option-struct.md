@@ -8,9 +8,10 @@ introduced.
 ## 1. Language specification changes
 
 - Types allowed for struct fields: scalar (Int / Bool / domain type / enum) **plus
-  `Option<scalar>`**. Set / Map / Seq / struct / `Option<Option<…>>` continue to be
-  rejected at check time (the hint is updated to reflect "or use Option<scalar>" added
-  to the current wording).
+  `Option<scalar>`**. Set / Map / Seq / struct continue to be rejected at check
+  time (the hint is updated to reflect "or use Option<scalar>" added to the
+  current wording). At v2.1, `Option<Option<…>>` was also rejected; that
+  rejection is superseded by the accepted #841 recursive nested-Option design.
 - Expressions and statements use the same vocabulary as scalar Option:
   `s.v == none` / `!= none` / `s.v == some(e)` / `!= some(e)` /
   `s.v is some(x)`, `s.v = some(e)` / `= none`, and literals

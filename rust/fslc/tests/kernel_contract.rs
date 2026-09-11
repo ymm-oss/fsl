@@ -1,16 +1,96 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use fsl_core::{FsResolver, KernelExpr, ProjectionDef, build_model, parse_kernel_source};
 use serde_json::{Value, json};
+
+static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
+}
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("repository root")
+}
+
+fn scratch_dir(name: &str) -> PathBuf {
+    let id = NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed);
+    let dir = repo_root().join(format!(
+        "rust/target/kernel-contract-{name}-{}-{id}",
+        std::process::id()
+    ));
+    if dir.exists() {
+        fs::remove_dir_all(&dir).expect("clean stale scratch dir");
+    }
+    fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
+}
+
+fn run_cli(args: &[&str]) -> (Value, i32) {
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(args)
+        .current_dir(repo_root())
+        .output()
+        .expect("run native CLI");
+    let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "invalid JSON: {error}; args={args:?}; stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    (value, output.status.code().expect("exit status"))
+}
+
+fn compiled_kernel_v1_schema() -> jsonschema::Validator {
+    let schema: Value = serde_json::from_str(
+        &fs::read_to_string(repo_root().join("schemas/fslc/kernel/kernel.v1.schema.json"))
+            .expect("read Kernel v1 schema"),
+    )
+    .expect("Kernel v1 schema JSON");
+    jsonschema::validator_for(&schema).expect("Kernel v1 schema compiles")
+}
+
+fn kernel_state<'a>(contract: &'a Value, name: &str) -> &'a Value {
+    contract["state"]
+        .as_array()
+        .expect("kernel state")
+        .iter()
+        .find(|entry| entry["name"] == name)
+        .unwrap_or_else(|| panic!("missing state '{name}'"))
+}
+
+/// Returns the `init` assignment statement whose target variable is `name`.
+///
+/// `init` is an object (`origin` / `requirement` / `span` / `statements`), not an
+/// array of named entries, and each statement carries its variable under
+/// `target.name` rather than a top-level `name`. Reading it as a flat array
+/// panicked with "kernel init"; the first revision of this helper assumed the
+/// wrong shape and could not be caught while the tests still stopped at the
+/// `kernel_status` assertion.
+fn kernel_init<'a>(contract: &'a Value, name: &str) -> &'a Value {
+    contract["init"]["statements"]
+        .as_array()
+        .expect("kernel init statements")
+        .iter()
+        .find(|statement| statement["target"]["name"] == name)
+        .unwrap_or_else(|| panic!("missing init assignment for '{name}'"))
+}
+
+fn assert_empty_relation_init(init: &Value, label: &str) {
+    assert_eq!(init["value"]["kind"], "set_lit", "{label}");
+    assert_eq!(init["value"]["type"]["kind"], "relation", "{label}");
+    assert_eq!(init["value"]["items"], json!([]), "{label}");
 }
 
 fn load(path: &Path) -> (fsl_core::KernelSpec, fsl_core::KernelModel) {
@@ -230,6 +310,18 @@ spec NestedOption {
         states
             .iter()
             .any(|state| state["state"]["x"]["kind"] == "some")
+    );
+    assert!(
+        states
+            .iter()
+            .any(|state| { state["state"]["x"] == json!({"kind":"some","value":{"kind":"none"}}) }),
+        "conformance must preserve some(none): {states:#?}"
+    );
+    assert!(
+        states.iter().any(|state| {
+            state["state"]["x"] == json!({"kind":"some","value":{"kind":"some","value":1}})
+        }),
+        "conformance must preserve some(some(1)): {states:#?}"
     );
     assert!(
         output["vectors"]
@@ -576,10 +668,22 @@ fn published_schema_ids_match_the_rust_api_constants() {
             .expect("read replay trace schema"),
     )
     .expect("replay trace schema JSON");
+    let reproducer: Value = serde_json::from_str(
+        &std::fs::read_to_string(workspace.join("schemas/fslc/kernel/reproducer.v1.schema.json"))
+            .expect("read reproducer schema"),
+    )
+    .expect("reproducer schema JSON");
+    let test_plan: Value = serde_json::from_str(
+        &std::fs::read_to_string(workspace.join("schemas/fslc/kernel/test-plan.v1.schema.json"))
+            .expect("read test plan schema"),
+    )
+    .expect("test plan schema JSON");
     assert_eq!(kernel["$id"], fsl_core::KERNEL_SCHEMA_ID);
     assert_eq!(conformance["$id"], fslc_rust::CONFORMANCE_SCHEMA_ID);
     assert_eq!(testgen_trace["$id"], fsl_core::TESTGEN_TRACE_V1_SCHEMA_ID);
     assert_eq!(replay_trace["$id"], fsl_core::REPLAY_TRACE_V1_SCHEMA_ID);
+    assert_eq!(reproducer["$id"], fsl_core::REPRODUCER_V1_SCHEMA_ID);
+    assert_eq!(test_plan["$id"], fsl_core::TEST_PLAN_V1_SCHEMA_ID);
     assert_eq!(
         replay_trace["properties"]["schema_version"]["enum"],
         json!([
@@ -612,4 +716,102 @@ fn published_schema_ids_match_the_rust_api_constants() {
         .expect("expression kind enum");
     assert!(kinds.contains(&Value::String("ite".to_owned())));
     assert!(!kinds.contains(&Value::String("totally_unknown".to_owned())));
+}
+
+/// Detector: empty relation initializers must export through `fslc kernel` as
+/// schema-valid `set_lit` values. Mutation: delete the proposed empty-
+/// `TypeRef::Relation` arm in `public_kernel.rs`; before the fix that restores
+/// exit 2, `kind="semantics"`, and `message="collection literal type mismatch"`.
+#[test]
+fn empty_relation_initializer_exports_as_schema_valid_kernel() {
+    let fixture_path = "rust/fslc/tests/fixtures/issue_467_relation_demo.fsl";
+
+    let (check_output, check_status) = run_cli(&["check", fixture_path]);
+    assert_eq!(check_status, 0, "{check_output:#}");
+    assert_eq!(check_output["result"], "ok");
+
+    let (kernel_output, kernel_status) = run_cli(&["kernel", fixture_path]);
+    assert_eq!(kernel_status, 0, "{kernel_output:#}");
+    assert_eq!(kernel_output["result"], "kernel");
+    compiled_kernel_v1_schema()
+        .validate(&kernel_output)
+        .expect("kernel output validates against public Kernel v1 schema");
+
+    assert_eq!(
+        kernel_state(&kernel_output, "delegates")["type"]["kind"],
+        "relation"
+    );
+    assert_eq!(
+        kernel_state(&kernel_output, "roles")["type"]["kind"],
+        "relation"
+    );
+    assert_empty_relation_init(kernel_init(&kernel_output, "delegates"), "delegates");
+    assert_empty_relation_init(kernel_init(&kernel_output, "roles"), "roles");
+}
+
+/// Detector: the issue's minimal requirements reproduction must agree on `check`
+/// and `kernel`. Mutation: delete the proposed empty-`TypeRef::Relation` arm in
+/// `public_kernel.rs`; before the fix that restores exit 2, `kind="semantics"`,
+/// and `message="collection literal type mismatch"`.
+#[test]
+fn minimal_requirements_empty_relation_has_consistent_check_and_kernel() {
+    const SOURCE: &str = r"requirements KernelEmptyRelation {
+  entity Company
+  enum Capability { Skill }
+  state { enabled: relation Company -> Capability }
+  init { enabled = Set {} }
+}
+verify { instances Company = 1 }
+";
+    let dir = scratch_dir("minimal-empty-relation");
+    let path = dir.join("kernel_empty_relation.fsl");
+    fs::write(&path, SOURCE).expect("write minimal reproduction");
+    let path = path.to_str().expect("UTF-8 path");
+
+    let (check_output, check_status) = run_cli(&["check", path, "--strict-tags"]);
+    assert_eq!(check_status, 0, "{check_output:#}");
+    assert_eq!(check_output["result"], "ok");
+
+    let (kernel_output, kernel_status) = run_cli(&["kernel", path]);
+    assert_eq!(kernel_status, 0, "{kernel_output:#}");
+    assert_eq!(kernel_output["result"], "kernel");
+    assert_eq!(kernel_output["spec"]["name"], "KernelEmptyRelation");
+    assert_eq!(kernel_output["spec"]["source"]["dialect"], "requirements");
+    assert_eq!(
+        kernel_state(&kernel_output, "enabled")["type"]["kind"],
+        "relation"
+    );
+    assert_empty_relation_init(kernel_init(&kernel_output, "enabled"), "enabled");
+}
+
+/// Preservation control: a non-empty relation literal must remain a semantic
+/// rejection on both public paths after the projection fix.
+#[test]
+fn nonempty_relation_literal_remains_a_semantic_rejection() {
+    const SOURCE: &str = r"requirements KernelEmptyRelation {
+  entity Company
+  enum Capability { Skill }
+  state { enabled: relation Company -> Capability }
+  init { enabled = Set { 0 } }
+}
+verify { instances Company = 1 }
+";
+    const EXPECTED_MESSAGE: &str = "invalid init statement: relation literals only support the empty initializer Set {}; use r = r.add(a, b) to add pairs at 5:10";
+
+    let dir = scratch_dir("nonempty-relation-literal");
+    let path = dir.join("nonempty_relation.fsl");
+    fs::write(&path, SOURCE).expect("write rejecting source");
+    let path = path.to_str().expect("UTF-8 path");
+
+    for command in ["check", "kernel"] {
+        let (output, status) = run_cli(&[command, path]);
+        assert_eq!(status, 2, "{command}: {output:#}");
+        assert_eq!(output["result"], "error", "{command}");
+        assert_eq!(output["kind"], "semantics", "{command}");
+        assert_eq!(
+            output["message"].as_str(),
+            Some(EXPECTED_MESSAGE),
+            "{command}"
+        );
+    }
 }

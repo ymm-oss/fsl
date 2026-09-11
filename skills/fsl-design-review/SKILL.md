@@ -10,8 +10,8 @@ the starting point of the procedure; they appear as judgment lenses at each step
 This skill's job is to translate "is this design good?" into "does this design
 conform to the frozen contract?" and have fslc answer with counterexamples.
 
-**Prerequisite**: FSL syntax, the verification commands, and the repair protocol
-follow the fsl skill (SKILL.md + reference.md). This skill supplies only the
+**Prerequisite**: FSL syntax, verification commands, and repair protocol follow
+the fsl skill and its topic-specific references. This skill supplies only the
 procedure and the interpretation of results.
 If the user needs a new design-layer `.fsl` written before review, use
 `fsl-design` for authoring and return here for review/proposal judgment.

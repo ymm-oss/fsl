@@ -1,0 +1,13 @@
+requirements SharedOnlyReq {
+  implements SharedOnly from "abs_spec_shared.fsl" { maps auto }
+
+  entity Item
+  entity Extra
+  state { st: Map<Item, Bool> }
+  init { forall i: Item { st[i] = false } }
+  action finish(i: Item) maps finish(i) { st[i] = true }
+}
+verify {
+  instances Item = 1
+  instances Extra = 1
+}

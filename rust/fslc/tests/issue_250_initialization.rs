@@ -661,7 +661,7 @@ fn domain_brace_literal_defaults_still_fail_the_770_fmt_round_trip() {
              only on #770's fix would let `migrate --write` insert a \
              `value_object` default that `check` accepts today but whose \
              generated kernel `check` rejects after the edit) -- then update \
-             docs/LANGUAGE.md, docs/LANGUAGE.ja.md, and skills/fsl/reference.md \
+             docs/LANGUAGE.md, docs/LANGUAGE.ja.md, and skills/fsl/references/syntax.md \
              accordingly."
         );
         assert_eq!(output["kind"], "parse", "{output}");

@@ -121,6 +121,18 @@ checks/time and null Z3 counters, while `cost.properties` is empty.
 `unknown_budget` additionally reports the depth reached when the budget ran
 out.
 
+Every explicit-decided result also carries `action_profile`, a deterministic
+`BTreeMap` projection keyed by declared action name. Each entry is
+`{enabled, fired, no_op}`: `enabled` counts unique explored states with at
+least one enabled instance, `fired` counts successful unique `(state, action
+instance)` edges, and `no_op` counts fired edges whose successor is the source
+state. The loop records enabled action names once per frontier state, and it
+records each successful edge before successor-state deduplication; two distinct
+actions may legitimately converge on one state and must both remain visible.
+No profile is emitted by BMC or induction, or by `auto` when it falls back to
+BMC. It is adjacent to `cost`, never nested inside solver statistics, so the
+runtime remains solver-independent.
+
 ## 4. Property semantics
 
 The engine checks the same property surface as `bmc.verify`, with identical
@@ -138,6 +150,9 @@ verdict semantics:
   `deadlock_mode` (`warn`/`error`) with BMC-equivalent behavior.
 - **Vacuity/coverage** — an action never enabled anywhere explored, honoring
   `--vacuity` the same way BMC does. Under closure this too is definitive.
+- **Action execution profile** — records how often enabled action instances
+  produce graph edges, including self-loops; it is diagnostic only and never
+  changes a verdict, warning, or coverage finding.
 - **`leadsTo`** — not supported: the concrete runtime has no complete
   liveness decision procedure, so specs with `leadsTo` properties are rejected
   fail-closed (kind `semantics`) unless the property is excluded from the run;

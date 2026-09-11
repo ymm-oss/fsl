@@ -128,7 +128,7 @@ fn ai_check_still_analyzes_a_legitimate_project() {
     assert_eq!(value["migrations"], serde_json::json!(["PromptV7ToV8"]));
     assert_eq!(value["findings"], serde_json::json!([]));
     // `raw_blocks` carries the un-descended declarations as `{kind, name}`
-    // (`skills/fsl/reference.md`), one entry per block.
+    // (`skills/fsl/references/syntax.md`), one entry per block.
     let raw_blocks = value["raw_blocks"].as_array().expect("raw_blocks array");
     assert!(
         raw_blocks.iter().any(|block| {

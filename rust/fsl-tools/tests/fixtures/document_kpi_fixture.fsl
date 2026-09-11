@@ -1,5 +1,5 @@
 // Synthetic fixture for the RCIR v1 projector (issue #325). Adapted from the
-// process+data profile example in skills/fsl/reference.md sec. 10. Exercises
+// process+data profile example in skills/fsl/references/layers.md. Exercises
 // the alternate (non-kernel-wrapper) requirements authoring surface and the
 // `kpi` projection, which RCIR v1 reports as an unsupported target rather
 // than silently omitting it.

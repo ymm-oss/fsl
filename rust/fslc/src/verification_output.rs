@@ -38,6 +38,25 @@ impl fmt::Display for RequirementsImplementsError {
 
 impl std::error::Error for RequirementsImplementsError {}
 
+/// Render a requirements `implements` diagnostic using the public JSON contract.
+///
+/// The caller supplies its delivery-surface metadata in `output`; the failure
+/// fields themselves are identical for native and browser entry points.
+#[must_use]
+pub fn render_requirements_implements_error(
+    mut output: Map<String, Value>,
+    error: &RequirementsImplementsError,
+) -> Value {
+    output.insert("result".to_owned(), json!("error"));
+    output.insert("kind".to_owned(), json!("type"));
+    output.insert("message".to_owned(), json!(error.message));
+    if let Some(span) = error.span {
+        output.insert("loc".to_owned(), span.python_loc());
+        output.insert("span".to_owned(), json!(span));
+    }
+    Value::Object(output)
+}
+
 /// Why a requirements step could not be replayed across semantic-diff models.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RequirementStepRelationError {
@@ -139,6 +158,8 @@ pub fn render_semantic_error(
     message: &str,
     loc: Option<Value>,
     name_resolution: bool,
+    diagnostic_code: Option<&str>,
+    hint: Option<&str>,
 ) -> Value {
     let kind = diagnostic_kind(message, name_resolution);
     output.insert("result".to_owned(), json!("error"));
@@ -147,10 +168,21 @@ pub fn render_semantic_error(
     if let Some(loc) = loc {
         output.insert("loc".to_owned(), loc);
     }
-    if message.starts_with("struct field '") && message.ends_with(" has non-scalar type") {
+    if let Some(code) = diagnostic_code {
+        output.insert("diagnostic_code".to_owned(), json!(code));
+    }
+    if let Some(hint) = hint {
+        output.insert("hint".to_owned(), json!(hint));
+    } else if message.starts_with("struct field '") && message.ends_with(" has non-scalar type") {
         output.insert(
             "hint".to_owned(),
-            json!("struct fields must be scalar (domain type, enum, Bool, Int) or Option<scalar>; use a separate Map for Set/Map/Seq/struct fields"),
+            json!("struct fields must be a scalar (domain type, enum, Bool, Int) or nested Option around a scalar; use a separate Map for Set, Map, Seq, relation, or struct fields"),
+        );
+    }
+    if message.starts_with("state variable '") && message.ends_with(" has unsupported state type") {
+        output.insert(
+            "hint".to_owned(),
+            json!("state types allow scalars, nested Option around a scalar, structs with those fields, Map<bounded scalar, scalar-or-nested-Option-or-struct>, Set<bounded scalar>, Seq<scalar,N>, and bounded-scalar relations; Option cannot wrap a collection or struct"),
         );
     }
     if message.starts_with("unknown ai hard-contract rule '") {
@@ -175,6 +207,8 @@ pub fn render_runtime_error(
         &error.message,
         error.span.map(fsl_syntax::Span::python_loc),
         false,
+        None,
+        None,
     )
 }
 
@@ -247,6 +281,8 @@ pub fn semantic_error_kind(message: &str) -> &'static str {
         || message.starts_with("cannot coerce symbolic value")
         || message.starts_with("Map<Int, ...> on '") && message.contains("' is rejected;")
         || message.starts_with("struct field '") && message.ends_with(" has non-scalar type")
+        || message.starts_with("state variable '")
+            && message.ends_with(" has unsupported state type")
     {
         "type"
     } else {
@@ -266,12 +302,36 @@ pub fn requirements_implements_output(
     model: &KernelModel,
     depth: usize,
 ) -> Result<Option<Value>, RequirementsImplementsError> {
+    requirements_implements_output_with_bounds(
+        source,
+        resolver,
+        model,
+        depth,
+        &std::collections::BTreeMap::new(),
+        &std::collections::BTreeMap::new(),
+    )
+}
+
+/// Evaluate inline `implements` with abstraction bounds overrides propagated
+/// from `fslc verify --instances` / `--values`.
+///
+/// # Errors
+///
+/// Returns a diagnostic when dependency resolution, lowering, or concrete
+/// refinement checking fails.
+pub fn requirements_implements_output_with_bounds(
+    source: &str,
+    resolver: &dyn fsl_core::FileResolver,
+    model: &KernelModel,
+    depth: usize,
+    instances: &std::collections::BTreeMap<String, i64>,
+    values: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> Result<Option<Value>, RequirementsImplementsError> {
     let Some(contract) =
-        fsl_core::requirements_implements(source, resolver, model).map_err(|error| {
-            RequirementsImplementsError {
-                message: error.message,
-                span: error.span,
-            }
+        fsl_core::requirements_implements_with_bounds(source, resolver, model, instances, values)
+            .map_err(|error| RequirementsImplementsError {
+            message: error.message,
+            span: error.span,
         })?
     else {
         return Ok(None);
@@ -300,6 +360,60 @@ pub fn requirements_implements_output(
     } else {
         json!({"abs": contract.abstraction.name, "result": "refines"})
     }))
+}
+
+/// Attach inline `implements` metadata and, when the command envelope is still
+/// success-class, fold a failed seam into the top-level `result`.
+///
+/// On `result:"error"` envelopes, does nothing. When the envelope is already
+/// failure-class (`violated`, `reachable_failed`, …), inserts `implements` as
+/// evidence but leaves the primary verdict and its replay fields untouched.
+/// Only success-class envelopes (`ok`, `verified`, `proved`, …) may have a
+/// failing nested seam promoted to top-level `refinement_failed` / `impl_violated`
+/// with `Some(1)`. Unknown or malformed nested results on a success-class
+/// envelope fail closed with an internal error (`Some(3)`).
+pub fn attach_requirements_implements(envelope: &mut Value, implements: Value) -> Option<i32> {
+    let already_failing = !crate::outcome::outcome_class(envelope).is_success();
+    let Value::Object(map) = envelope else {
+        return Some(3);
+    };
+    if map.get("result").and_then(Value::as_str) == Some("error") {
+        return None;
+    }
+    map.insert("implements".to_owned(), implements);
+    if already_failing {
+        return None;
+    }
+    let nested_result = map
+        .get("implements")
+        .and_then(|value| value.get("result"))
+        .and_then(Value::as_str);
+    match nested_result {
+        Some("refines") => None,
+        // Keep this `1` in step with the row-1 arm of `outcome::exit_status`:
+        // both encode the exit class of an inline `implements` failure, and
+        // changing that class means changing both. They are reached by
+        // independent paths -- `check`/`verify` fold here, while `mutate` and
+        // `ledger` re-emit a baseline envelope through `exit_status` -- so a
+        // mutation that breaks one does not make the other's tests fail
+        // (measured 2026-09-08: sending `exit_status`'s row 1 to 0 kills
+        // `issue_554_mutate_exit_status::a_violated_baseline_exits_one` and
+        // leaves `check_folds_failed_inline_refinement_into_command_failure`
+        // green). Nothing here detects the two drifting apart.
+        Some("refinement_failed" | "impl_violated") => {
+            map.insert("result".to_owned(), json!(nested_result));
+            Some(1)
+        }
+        _ => {
+            map.insert("result".to_owned(), json!("error"));
+            map.insert("kind".to_owned(), json!("internal"));
+            map.insert(
+                "message".to_owned(),
+                json!("malformed inline implements verdict"),
+            );
+            Some(3)
+        }
+    }
 }
 
 /// Render governance relationships while delegating preservation verification
@@ -1325,6 +1439,25 @@ fn add_explicit_metadata(output: &mut Value, result: &fsl_runtime::ExplicitResul
         json!(result.max_frontier_width),
     );
     output.insert("depth_reached".to_owned(), json!(result.depth_reached));
+    output.insert(
+        "action_profile".to_owned(),
+        Value::Object(
+            result
+                .action_profile
+                .iter()
+                .map(|(name, stats)| {
+                    (
+                        display_name(name),
+                        json!({
+                            "enabled": stats.enabled,
+                            "fired": stats.fired,
+                            "no_op": stats.no_op,
+                        }),
+                    )
+                })
+                .collect(),
+        ),
+    );
 }
 
 fn mark_reachables_definitively_unreachable(output: &mut Value) {
@@ -2192,6 +2325,44 @@ mod tests {
     }
 
     #[test]
+    fn state_shape_errors_are_located_type_diagnostics() {
+        let output = render_semantic_error(
+            Map::new(),
+            "state variable 'x' has unsupported state type",
+            Some(json!({"line": 3, "column": 3})),
+            false,
+            None,
+            None,
+        );
+        assert_eq!(output["result"], "error");
+        assert_eq!(output["kind"], "type");
+        assert_eq!(output["loc"], json!({"line": 3, "column": 3}));
+        assert_eq!(
+            output["hint"],
+            "state types allow scalars, nested Option around a scalar, structs with those fields, Map<bounded scalar, scalar-or-nested-Option-or-struct>, Set<bounded scalar>, Seq<scalar,N>, and bounded-scalar relations; Option cannot wrap a collection or struct"
+        );
+    }
+
+    #[test]
+    fn struct_field_shape_errors_describe_the_recursive_option_boundary() {
+        let output = render_semantic_error(
+            Map::new(),
+            "struct field 'Record.nested' has non-scalar type",
+            Some(json!({"line": 3, "column": 3})),
+            false,
+            None,
+            None,
+        );
+        assert_eq!(output["result"], "error");
+        assert_eq!(output["kind"], "type");
+        assert_eq!(output["loc"], json!({"line": 3, "column": 3}));
+        assert_eq!(
+            output["hint"],
+            "struct fields must be a scalar (domain type, enum, Bool, Int) or nested Option around a scalar; use a separate Map for Set, Map, Seq, relation, or struct fields"
+        );
+    }
+
+    #[test]
     fn explicit_renderer_rejects_a_corrupted_violation_before_rendering() {
         let model = checked_model(
             r"spec CorruptEvidence {
@@ -2269,6 +2440,11 @@ mod tests {
             false,
         )
         .expect("explicit evidence replays");
+        assert_eq!(
+            explicit_output["action_profile"],
+            json!({"toggle": {"enabled": 1, "fired": 0, "no_op": 0}})
+        );
+        assert!(bmc.get("action_profile").is_none());
         let explicit_envelope = explicit_output.as_object_mut().expect("explicit envelope");
         for key in [
             "engine",
@@ -2276,6 +2452,7 @@ mod tests {
             "states_explored",
             "max_frontier_width",
             "depth_reached",
+            "action_profile",
         ] {
             explicit_envelope.remove(key);
         }
@@ -2285,5 +2462,131 @@ mod tests {
             serde_json::to_vec_pretty(&explicit_output).expect("serialize explicit output"),
             serde_json::to_vec_pretty(&bmc).expect("serialize BMC output")
         );
+    }
+
+    /// Rejecting control for the three branches the fold treats specially and
+    /// that no other test reaches: an `error` envelope (left untouched, and the
+    /// nested field is not even attached), a `refines` verdict (attached, exit
+    /// untouched), and a nested value outside the closed vocabulary (fails
+    /// closed with an internal error rather than passing through).
+    #[test]
+    fn attach_requirements_implements_handles_error_refines_and_unknown_verdicts() {
+        // `error`: nothing is attached and the caller's exit is left alone.
+        let mut errored = Value::Object(test_envelope());
+        errored
+            .as_object_mut()
+            .expect("envelope")
+            .insert("result".to_owned(), json!("error"));
+        assert_eq!(
+            attach_requirements_implements(
+                &mut errored,
+                json!({"abs": "Abs", "result": "refines"})
+            ),
+            None
+        );
+        assert!(
+            errored.get("implements").is_none(),
+            "an error envelope must not gain an implements field: {errored}"
+        );
+
+        // `refines`: attached as evidence, exit untouched.
+        let mut passing = Value::Object(test_envelope());
+        passing
+            .as_object_mut()
+            .expect("envelope")
+            .insert("result".to_owned(), json!("verified"));
+        assert_eq!(
+            attach_requirements_implements(
+                &mut passing,
+                json!({"abs": "Abs", "result": "refines"})
+            ),
+            None
+        );
+        assert_eq!(passing["result"], "verified");
+        assert_eq!(passing["implements"]["result"], "refines");
+
+        // Outside the closed vocabulary: fail closed, never pass through.
+        let mut unknown = Value::Object(test_envelope());
+        unknown
+            .as_object_mut()
+            .expect("envelope")
+            .insert("result".to_owned(), json!("ok"));
+        assert_eq!(
+            attach_requirements_implements(
+                &mut unknown,
+                json!({"abs": "Abs", "result": "who_knows"})
+            ),
+            Some(3)
+        );
+        assert_eq!(unknown["result"], "error");
+        assert_eq!(unknown["kind"], "internal");
+    }
+
+    #[test]
+    fn attach_requirements_implements_folds_failed_seams_verbatim() {
+        let mut envelope = Value::Object(test_envelope());
+        envelope
+            .as_object_mut()
+            .expect("envelope")
+            .insert("result".to_owned(), json!("ok"));
+        assert_eq!(
+            attach_requirements_implements(
+                &mut envelope,
+                json!({
+                    "abs": "Abs",
+                    "result": "refinement_failed",
+                    "violation": {"result": "refinement_failed", "kind": "stutter_changed_abs"},
+                }),
+            ),
+            Some(1)
+        );
+        assert_eq!(envelope["result"], "refinement_failed");
+        assert_eq!(envelope["implements"]["result"], "refinement_failed");
+
+        envelope
+            .as_object_mut()
+            .expect("envelope")
+            .insert("result".to_owned(), json!("verified"));
+        assert_eq!(
+            attach_requirements_implements(
+                &mut envelope,
+                json!({
+                    "abs": "Abs",
+                    "result": "impl_violated",
+                    "violation": {"result": "violated", "kind": "invariant"},
+                }),
+            ),
+            Some(1)
+        );
+        assert_eq!(envelope["result"], "impl_violated");
+        assert_eq!(envelope["implements"]["result"], "impl_violated");
+
+        let mut violated = Value::Object(test_envelope());
+        violated
+            .as_object_mut()
+            .expect("envelope")
+            .insert("result".to_owned(), json!("violated"));
+        violated
+            .as_object_mut()
+            .expect("envelope")
+            .insert("violation_kind".to_owned(), json!("invariant"));
+        violated
+            .as_object_mut()
+            .expect("envelope")
+            .insert("trace_type".to_owned(), json!("invariant"));
+        assert_eq!(
+            attach_requirements_implements(
+                &mut violated,
+                json!({
+                    "abs": "AbsIV",
+                    "result": "impl_violated",
+                    "violation": {"result": "violated", "kind": "invariant"},
+                }),
+            ),
+            None
+        );
+        assert_eq!(violated["result"], "violated");
+        assert_eq!(violated["violation_kind"], "invariant");
+        assert_eq!(violated["implements"]["result"], "impl_violated");
     }
 }

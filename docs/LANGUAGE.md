@@ -27,7 +27,7 @@ spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata bad
   symmetric type <Name> = <lo>..<hi>   // domain whose values are interchangeable identities
   enum  <Name> { <Member>, ... }
   symmetric enum <Name> { <Member>, ... }
-  struct <Name> { <field>: <scalar type | Option<scalar type>>, ... }
+  struct <Name> { <field>: <scalar type | nested Option<scalar type>>, ... }
 
   def <name>(<p>: <type name>, ...) = <expr> // non-recursive named predicate; frontend-inlined
 
@@ -339,8 +339,9 @@ one authored-source `String`, parse their `DomainSpec` with
 replacement cannot make either command validate a different source version
 before returning output. They reject unresolved identifiers with the original
 source location instead of emitting a partial analysis or unusable Kernel text.
-`domain generate` uses the same typed lowering but does not yet have this
-single-snapshot contract; #808 tracks that separate TOCTOU follow-up.
+`domain generate`, `domain replay`, `domain testgen`, and `domain check` use the
+same captured source for checked-kernel scaffolding, Monitor replay,
+generic/adapter test generation, and edition post-processing respectively (#808).
 `fslc domain generate --target typescript|python|kotlin|swift|rust` for
 Functional DDD scaffolds, `fslc domain testgen` for adapter/conformance
 scaffolds, and `fslc domain replay --logs events.jsonl` for runtime command /
@@ -383,6 +384,11 @@ declares — so the refinement check runs at the same world size on both sides
 and a full-size abstract would fail with `map_out_of_bounds`). An impl-only
 carried number (e.g. `Amount`, absent from a business abstract) applies to the
 impl only.
+
+`fslc verify` still evaluates inline `implements` when only `--instances` /
+`--values` scope overrides are present. `--property`, `--exclude-property`, and
+`--from-state` continue to omit the `implements` field without recording a reason;
+that behavior is not treated as safe and remains an open contract decision.
 
 `acceptance`/`forbidden` scenarios often hardcode ids/numbers from the spec's
 original world (`accept(2)`), which can fall outside a shrunken override
@@ -534,8 +540,8 @@ by itself prove the per-entity decrease required by the `helpful` form.)
 | Entity kind | `entity Claim` / `process Claim ...` | Finite identity sort. Allowed in any layer incl. kernel `spec`; size set by `verify { instances Claim = N }`; desugars to `type Claim = 0..N-1` |
 | Number kind | `number Amount` | Finite numeric sort. Allowed in any layer incl. kernel `spec`; range set by `verify { values Amount = lo..hi }`; desugars to `type` |
 | enum | `enum St { Open, Closed }` | Members are referenced by their bare name in expressions |
-| struct | `struct Order { st: St, item: Option<ItemId>, qty: Qty }` | Fields are scalars or `Option<scalar>` |
-| `Option<T>` | `cart: Option<ItemId>` | `none` / `some(e)`. Used instead of a sentinel value |
+| struct | `struct Order { st: St, item: Option<Option<ItemId>>, qty: Qty }` | Fields are scalars or nested `Option<scalar>` |
+| `Option<T>` | `cart: Option<Option<ItemId>>` | `none` / `some(e)`. Used instead of a sentinel value; nesting is supported around a scalar payload |
 | `Map<K, V>` | `stock: Map<ItemId, Qty>` | K must be a bounded scalar (domain type / enum / Bool) |
 | `Set<T>` | `shipped: Set<OrderId>` | T is a bounded scalar |
 | `Seq<T, N>` | `queue: Seq<JobId, 3>` | A sequence (FIFO) of capacity N. T is a scalar, N is a constant |
@@ -557,14 +563,22 @@ error that reports both source locations. See
 [`DESIGN-initialization.md`](DESIGN-initialization.md).
 
 **Types legal as state variables** (anything else is rejected by `check` as a type error):
-scalar | `Option<scalar>` | struct (scalar / `Option<scalar>` fields)
-| `Map<bounded scalar, scalar | Option<scalar> | struct>`
+scalar | nested `Option<scalar>` | struct (scalar / nested `Option<scalar>` fields)
+| `Map<bounded scalar, scalar | nested Option<scalar> | struct>`
 | `Set<bounded scalar>` | `Seq<scalar, N>` | `relation bounded-scalar -> bounded-scalar`
 
 - Nesting structs, Set/Map/Seq inside a struct field,
-  `Option<Option<...>>`, and `Option<Set/Map/Seq/struct>` are not allowed
+  and `Option<Set/Map/Seq/struct>` are not allowed
   (rejected at check time with a hint). Optional scalar fields can be written
   directly inside a struct as of v2.1.
+- A Map value may be a scalar, nested `Option<scalar>`, or a struct with those
+  fields; nested Map/Set/Seq/relation values are rejected. In particular,
+  `Map<Id, Map<K, Bool>>` is rejected because explicit-state execution cannot
+  construct its required initial Map value. This is a breaking removal of a
+  shape that earlier `check` accepted without an end-to-end execution path.
+- The shared CLI/LSP state and struct-field type hints name this recursive
+  `Option<scalar>` boundary, including the rejected relation and collection
+  forms; this replaces the earlier one-level `Option<scalar>` wording.
 - `Map<Int, V>` is rejected by `check`. Declare a bounded key type, for example
   `type ItemId = 0..<max>`, and use `Map<ItemId, V>`.
 - `symmetric type` and `symmetric enum` mark values as interchangeable entity
@@ -685,6 +699,9 @@ variable.
 - Assignment: `x = expr`, `m[k] = expr`, `m[k].field = expr`, `o.field = expr`
 - Updating a Set/Seq/relation uses the **reassignment idiom**:
   `s = s.add(x)`, `q = q.pop()`, `r = r.add(a, b)`
+- A relation-typed field's **literal** initializer must be the empty `Set {}` — a non-empty
+  Set literal is rejected in both `init` and an inline initializer — and pairs are added with
+  the reassignment idiom `r = r.add(a, b)`, which is also allowed inside `init`.
 - `if expr { stmt... } else { stmt... }` is allowed in both `init` and action bodies
   (can be nested with an if inside the else)
 - `forall x: T { stmt... }` (bulk initialization / bulk update)
@@ -701,6 +718,17 @@ variable.
   of an if are separate paths, so you may assign in both. Assigning to the same
   variable **after** an if is also an error (to prevent the writes inside the
   branches from being lost).
+- **Conservative write-alias rejection**: when a `forall` body writes an indexed
+  location whose indices are not provably distinct across iterations, native
+  `check`/`verify` and the browser Worker reject the spec before any verifier
+  backend runs. This is distinct from a **proven duplicate write** (for example
+  `m[0]` twice, or `forall c { m[0] = ... }`), which keeps the legacy
+  `an action may not assign the same state location more than once` message.
+  Unproved injectivity is reported as
+  `cannot prove write-index distinctness across forall iterations` with
+  `diagnostic_code: FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED`, the offending
+  assignment `loc`, and—when a safe repair exists—a `hint` such as
+  `forall k: Cell { if k >= BASE and k < BASE + 4 { m[k] = ... } }`.
 - For `Map<K, Struct>` values, field writes are tracked per field. Updating two
   different fields of the same element in one action, such as `m[k].f1 = 1`
   followed by `m[k].f2 = 2`, is allowed. Repeating the same field on the same
@@ -779,6 +807,8 @@ fslc fmt       <path>... --check                 # JSON format_check; exit 0 cle
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexample is shortest)
+fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+                                               # slice 1: export a safety-invariant counterexample to reproducer.v1
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -802,6 +832,7 @@ fslc replay    <file.fsl> --trace <events.json>  # spec-action trace conformance
 fslc replay    <file.fsl> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                  # production log mapping + conformance (§12)
 fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
+fslc testplan  <file.fsl> [--depth K]             # closed test-plan.v1 vector selection (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
 fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
                [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
@@ -809,7 +840,7 @@ fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
 fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
                                                  # revision-consistent tree materialization; omit spec for all changed .fsl
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
-fslc mutate    <file.fsl> [--by-requirement] [--max-mutants N]
+fslc mutate    <file.fsl> [--by-requirement] [--oracle-attribution] [--max-mutants N]
                [--from mutants.jsonl]             # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
@@ -1004,10 +1035,16 @@ mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) 
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
-refinement_failed / sweep_failed / observed_mismatch,
+refinement_failed / impl_violated / sweep_failed / observed_mismatch,
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
-result; `imported`/`imported_with_warnings` is `fslc db import`'s. The same
+result; `imported`/`imported_with_warnings` is `fslc db import`'s. `impl_violated` is listed
+because inline `implements` propagates that seam verdict to the top-level `result`. The fold
+happens where the verification envelope is produced, so it is not confined to `check` and
+`verify`: on a spec whose seam fails, `mutate` re-emits the baseline verdict (generating no
+mutants, because its baseline is no longer `verified`), `ledger` inherits the same exit, and
+`sweep` reports `sweep_failed`. `fslc html` embeds the folded envelope; its exit code is
+unchanged. The same
 `2` mapping is fail-closed for `chain`'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
 `docs/DESIGN-layers.md` §7) and for `ledger --impl-log`'s replay input (a
@@ -1128,6 +1165,28 @@ The blocking requires clause is identified by a minimized unsat core when that i
 cheap. For requirements `branches`, a false coverage diagnostic keeps the
 internal split-action `name` and adds `display_name`.
 
+### Explicit action execution profile
+
+When `--engine explicit` decides a run, its envelope additionally carries an
+`action_profile` alongside `cost` and `action_coverage`:
+
+```json
+"action_profile": {
+  "checkout": {"enabled": 5, "fired": 4, "no_op": 1}
+}
+```
+
+For each declared action, `enabled` is the number of unique explored states
+where at least one action instance was enabled; `fired` is the number of unique
+successful `(state, action instance)` edges actually explored; and `no_op` is
+the subset of fired edges whose successor equals the source state. This is
+diagnostic coverage evidence, not a verdict or a solver metric. A bounded run
+includes enabled states at its final depth but cannot fire their outgoing edges,
+so `enabled` and `fired` need not be equal. The profile is deterministic because
+explicit BFS visits canonical states and action instances once; it remains
+present for `--engine auto` only when `engine:"explicit"` decided the result.
+Symbolic BMC and induction results do not carry `action_profile`.
+
 For `reachable_failed`, each `unreached` entry carries:
 
 ```json
@@ -1182,16 +1241,32 @@ a literate `.md` may `use`/compose `.fsl` files this way, but using another
 `.md` file as a compose target is not supported.
 
 `check`, `verify`, and `scenarios` are the only commands that extract fences
-this way. Every other command that reads a spec path (`lint`, `migrate`,
+this way. Most other commands that read a spec path (`lint`, `migrate`,
 `fmt`, `kernel`, `conformance`, `explain`, `mutate`, `typestate`, `testgen`,
-`html`, `ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, and
-`document generate`/`claims`/`check`) rejects a `.md` input as an input-kind
+`testplan`, `html`, `ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, `counterexample export`,
+`db check`/`observe`, `compat check`, `domain check`/`analyze`/`expand`/`generate`/`replay`/`testgen`,
+`ai check`/`replay`/`compat`,
+`causal check`/`analyze`/`diff`/`ledger`/`observe-expectations`/`verify-expectations`, and
+`document generate`/`claims`/`check`) reject a `.md` input as an input-kind
 error instead: `result: "error"`, `kind: "usage"`,
 `diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"`, a message naming the
 commands that do support literate input, and a `loc` that names the input
 file rather than a spec position. This keeps a Markdown document passed to an
 unsupported command from being misreported as a spec syntax error at the
-position of the Markdown's own first non-fsl character.
+position of the Markdown's own first non-fsl character. `chain` (its
+positional is a project manifest, not a spec) and `db import` (its positional is
+a SQL/Prisma schema artifact) are not spec-path commands in this sense.
+`approval create` cannot produce a record whose `spec.path` is `.md` (measured:
+`approval create <.md> --kind requirements_document|ledger ...` fails with
+`FSL-PARSE` before any record is written). `approval check`/`diff` parse their
+positional as an FSL spec when the record's `spec.path` matches it and then
+reproduce the same `1:2` lie (measured with a hand-forged record); excluded
+pending issue #980. `ai eval`/`regress`/`drift`
+already parse `.md` input through their own `load_ai_project` frontend
+(success on a valid literate AI project, a clean semantic error otherwise)
+and are unaffected by this change. See
+`rust/fslc/src/literate_access.rs`'s `LITERATE_EXCLUDED` for the measured
+reason each is excluded.
 
 ## 8. Recommended workflow: make proved the standard
 
@@ -1652,11 +1727,25 @@ implementation (see `DESIGN-bridge.md`).
 |---|---|
 | `fslc.runtime.Monitor` | A concrete interpreter of the spec (no Z3 needed). Embed it in the implementation for runtime checking |
 | `fslc replay` | Check a real system's event-log JSON against the spec |
+| `fslc counterexample export` | Export a bounded safety-invariant verifier counterexample to a closed `reproducer.v1` JSON artifact (slice 1 of #885; not `replay-trace` or `testgen-trace`) |
 | `fslc testgen` | Generate a conformance-test scaffold — pytest (default), Vitest (`--target vitest`), Swift Testing (`--target swift`), kotlin.test (`--target kotlin`), Dart `package:test` (`--target dart`), or PHPUnit (`--target phpunit`) (wire the implementation into the Adapter) |
+| `fslc testplan` | Select the bounded `conformance` vectors — the accepting ones **and** the `requires_failed` ones `testgen` never emitted — into a closed `test-plan.v1` JSON plan. Pass a spec at the implementation's layer granularity |
 
 Recommended workflow: **`verify` / `prove` the spec → generate the scaffold with
 `testgen` → wire the implementation into the `Adapter` → run the tests**. `Monitor`
 is used as an oracle in random-walk testing.
+
+**Layer selection:** generate conformance tests from the spec at the **same layer
+granularity as the implementation** you are checking. From an **upper** layer you
+may reuse **`forbidden` (negative) scenarios only** — forbidden traces remain
+sound under refinement, but upper-layer **positive** scenarios (`acceptance`,
+`cover`, random-walk witnesses) can falsely fail a legitimately refined
+implementation because refinement is forward simulation, not backward replay of
+every abstract positive trace. **Example:** `examples/refinement_chain/top.fsl`
+lets `finish` from initial `TOpen`; `mid.fsl` requires `MOpen → MReview` first —
+a `ChainTop` positive `finish` trace must not be used as a `ChainMid`
+implementation test. See `docs/DESIGN-layers.md` (refinement chain → design-layer
+testgen/replay; requirements `acceptance` → that layer's scenarios/testgen).
 
 `testgen` separates a language-independent scenario-collection core (`scenarios`)
 from per-target emitters, so the same scenarios render to multiple harnesses. In
@@ -1676,6 +1765,15 @@ recording that step would state that the action is a no-op -- an expectation no
 FSL contract makes. `testgen` instead reports the violation with the same
 `result:"violated"` envelope, exit code, property, step, and replayable trace
 `verify` reports, and writes no harness.
+
+`fslc counterexample export` (reproducer slice 1) runs the same bounded
+verification as `verify`, but when the result is a **safety invariant**
+violation it also writes a closed `reproducer.v1` JSON file (`-o` required).
+The stdout envelope remains the violated `verify` result plus
+`reproducer.exported_to`; it is not a replay-trace or testgen-trace input.
+v1 rejects `leadsTo`, refinement documents, induction/CTI, nondeterministic
+`init`, and non-invariant violations with exit 2. Stage-2
+`testgen --reproducer` (slice 2) is not implemented yet.
 
 - `--target pytest` (default): emits Python tests that import `fslc.runtime.Monitor`
   and drive the random walk live as the oracle.
@@ -1732,7 +1830,21 @@ fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # s
 fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self-contained kotlin.test scaffold
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
+fslc testplan specs/cart_v1.fsl --depth 4                     # closed test-plan.v1 JSON to stdout
 ```
+
+`fslc testplan` emits a closed `test-plan.v1` document
+(`schemas/fslc/kernel/test-plan.v1.schema.json`) built from the same checked
+model as the Kernel and `conformance` JSON, so a plan cannot pair vectors from
+two different snapshots. A plan is a *selection*, never a verdict: it always
+carries `formal_result: "not_run"`, `assurance_effect: "none"`, and a
+`do_not_assume` list recording that it is not proof of implementation
+correctness, not exhaustive beyond the declared depth and finite scope, that
+selection coverage is not completeness, and that it does not replace `verify`,
+induction, `replay`, or refinement. `layer_selection.requirement` repeats what
+the CLI help states: pass the spec at the same FSL layer granularity as the
+implementation you are checking; from an upper layer reuse forbidden
+(negative) scenarios only.
 
 External compilers emit the native replay contract as a closed versioned JSON
 object (`schemas/fslc/kernel/replay-trace.v1.schema.json`):
@@ -2048,19 +2160,27 @@ verify {
 - `kpi NAME = count ENTITY in STAGE` is a declarative projection in both
   business and requirements. It does not create a ghost counter or an automatic
   `_kpi_*` invariant.
-- With `implements`, `fslc verify` **also runs the refine to the upper layer
-  simultaneously**, and the result carries `implements: {abs, result}`, whose
-  values are `refines` / `refinement_failed` / `impl_violated`. **That verdict is
-  reported only in this field. It is not folded into the top-level `result` or
-  the exit code**, so a broken seam still returns `result:"ok"`/`"verified"` and
-  exit 0 — the one exception to the exit-code table above, and the reason
-  `implements` has no row in it. Gate on `implements.result == "refines"`, or run
-  `fslc chain`, which applies exactly that gate to the layer and exits 1
-  (`docs/DESIGN-design-family.md` states the same rule for orchestrators).
-  Standalone `fslc refine` does exit 1 on `refinement_failed`; only the inline
-  seam is silent. An empty
-  body (`implements X from "..." { }`) auto-generates identity refinement when
-  process/action/stage names match. Inside the `implements { }` block you write
+- With `implements`, `fslc check` and `fslc verify` both run the refinement to the upper layer
+  as well, and the result carries `implements: {abs, result}`, whose values are `refines`,
+  `refinement_failed`, and `impl_violated`. **A failing seam is not confined to this field.**
+  `refines` leaves the command's own top-level `result` and exit code untouched; either failure
+  value becomes the top-level `result` verbatim — `refinement_failed` stays `refinement_failed`
+  and `impl_violated` stays `impl_violated`, so the two remain distinguishable at both levels —
+  and the process exits 1, the same class standalone `fslc refine` already uses for
+  `refinement_failed`. `implements.violation` keeps the seam-specific evidence, except under
+  `--vacuity error`, which replaces the whole envelope with its own `error` result and does not
+  carry `implements` over.
+  `fslc chain` applies the same gate to the layer and exits 1
+  (`docs/DESIGN-design-family.md` states the same rule for orchestrators); a caller no longer
+  needs a second gate of its own for the inline seam. An empty body
+  (`implements X from "..." { }`) auto-generates identity refinement when process/action/stage
+  names match. Inline refinement is **not** evaluated when `verify` is scoped with
+  `--property`, `--exclude-property`, or `--from-state`; the envelope omits `implements`
+  on those runs. **A scoped run therefore cannot gate the seam**: with `implements` absent,
+  `result` and the exit code speak only for the selected properties, so a broken seam passes
+  such a run. Gate on an unscoped `check`/`verify`, or on `fslc chain`. Whether those three
+  options should project the refinement or record why they skipped it is undecided
+  ([#1008](https://github.com/ymm-oss/fsl/issues/1008)). Inside the `implements { }` block you write
   state `map` entries, `maps auto`, `preserve progress`, and — since #73 —
   `action <impl_act>(<params>) -> <abs_act>(<args>) | stutter`, the same
   correspondence syntax as a separate refinement file's `refinement_action`
@@ -2569,7 +2689,14 @@ declared `observed`/`drift` requirements over runtime telemetry
 (`observed_supported` / `observed_mismatch`); and `fslc ai compat` emits a
 finite `dbsystem artifact` capability profile for one `ai_component` or every
 `ai_component` a project declares, rejecting non-AI input and an AI project
-with no `ai_component` at all (exit 2). All of these use
+with no `ai_component` at all (exit 2). Before `fslc ai check`, `fslc ai
+compat`, or `fslc ai replay` may emit a success verdict, every `ai_component`
+in the input -- standalone or embedded in a project -- is checked for the same
+semantic constraints as `fslc verify` on a lone component: undeclared tools
+referenced in `authority`, and unknown `check hard { rule ... }` names (exit
+2, `kind:"semantics"`). `fslc ai replay` on a project file uses the same
+checked project parser as `fslc ai check`, so malformed project syntax cannot
+report `replay_conformant`. All of these use
 `formal_result:"not_run"`. A `require` clause matching none of the known
 evidence-clause grammars (`min_samples`, `ci_lower`, `ci_upper`, a point
 estimate, `observed`, `drift`) is a spec error (exit 2) at `check` time, in
@@ -2736,7 +2863,10 @@ DESIGN-*.md).
   lower bounds within the chosen mutant set and depth. Acceptance and forbidden
   kills use explicit requirement annotations on the failed trace declaration;
   AC/FB case IDs are not implicit requirements. Trace case IDs are unique
-  within each declaration kind.
+  within each declaration kind. `--oracle-attribution` (opt-in) adds per-mutant
+  `killers` arrays and `by_obligation` sole/shared counts keyed by oracle display
+  names; default output is unchanged and these counts are observed lower bounds,
+  not completeness or correctness measures.
   → [`DESIGN-mutate.md`](DESIGN-mutate.md)
 - **`fslc explain --readable`** — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,
@@ -2896,7 +3026,11 @@ per-claim `causal_support`: `untested`, `supported`, `challenged`,
 that pin the current claim version, whose scope `subsumes` the claim scope,
 with declared freshness, an `active` lifecycle, and an observation window at
 least the claim's minimum lag count; one source lineage collapses to one vote
-(contradictions inside a lineage are `inconclusive`). Staleness is judged only
+(contradictions inside a lineage are `inconclusive`). An observation window
+that cannot be converted, or a claim whose `lag` is `unknown` so there is no
+`lag_min` to compare against, leaves timing eligibility not evaluable: the
+edge stays in history and in the graph but is excluded from current support
+with `evidence_timing_not_evaluable` and casts no vote. Staleness is judged only
 against an explicit `--as-of` date — never the wall clock. A scope dimension
 present on only the claim or artifact side is `unassessable`; absence is never
 treated as universal. **`causal_support`

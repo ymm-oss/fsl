@@ -48,8 +48,24 @@ canonical sequence `1..N`, `action` is either an exact Public Kernel action name
 or the v1.1 stutter value `null`, and `state` is the complete resulting logical
 state. Action parameters are exact; stutter requires the empty object `{}`.
 State values use the ordinary Monitor/Public Kernel representation: enum member
-strings, `null`/value for Option, objects for struct and complete Map values,
-arrays for Set/Seq, and pair arrays for relations.
+strings, objects for struct and complete Map values, arrays for Set/Seq, and
+pair arrays for relations. Option values use this canonical, type-directed
+encoding:
+
+| Logical value | Canonical ordinary JSON |
+|---|---|
+| `Option<T> = none` | `null` |
+| `Option<T> = some(1)` | `1` |
+| `Option<Option<T>> = none` | `null` |
+| `Option<Option<T>> = some(none)` | `{"kind":"some","value":null}` |
+| `Option<Option<T>> = some(some(1))` | `{"kind":"some","value":1}` |
+
+An Option value is tagged only when its declared payload is itself an Option;
+therefore every previously supported `Option<scalar>` value retains its
+`null`/value bytes. This ordinary replay representation is distinct from the
+fully tagged, versioned conformance-vector contract, which continues to use
+`{"kind":"none"}` and `{"kind":"some","value":...}` for every Option
+layer as specified in [`DESIGN-kernel-contract.md`](DESIGN-kernel-contract.md).
 
 `timestamp` is optional, non-empty, opaque producer metadata. Replay ignores it;
 it has no ordering, deadline, or formal-time meaning. Consumers use `tick` for

@@ -37,6 +37,12 @@ pub const REPLAY_TRACE_V1_STUTTER_SCHEMA_VERSION: &str = "1.1.0";
 pub const REPLAY_TRACE_V1_SCHEMA_VERSION: &str = "1.2.0";
 pub const REPLAY_TRACE_V1_SCHEMA_ID: &str =
     "https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json";
+pub const REPRODUCER_V1_SCHEMA_VERSION: &str = "1.0.0";
+pub const REPRODUCER_V1_SCHEMA_ID: &str =
+    "https://fsl.dev/schemas/fslc/kernel/reproducer.v1.schema.json";
+pub const TEST_PLAN_V1_SCHEMA_VERSION: &str = "1.0.0";
+pub const TEST_PLAN_V1_SCHEMA_ID: &str =
+    "https://fsl.dev/schemas/fslc/kernel/test-plan.v1.schema.json";
 
 /// Backwards-compatible aliases for the default Public Kernel v1 contract.
 pub const KERNEL_SCHEMA_VERSION: &str = KERNEL_V1_SCHEMA_VERSION;
@@ -297,21 +303,43 @@ fn expr_json_inner(
             );
         }
         Expr::Set(items) | Expr::Seq(items) => {
-            let (kind, item_ty) = match resolve(model, &ty)? {
-                TypeRef::Set(item) => ("set_lit", item),
-                TypeRef::Seq(item, _) => ("seq_lit", item),
-                _ => return Err(error("collection literal type mismatch")),
-            };
-            output.insert("kind".to_owned(), json!(kind));
-            output.insert(
-                "items".to_owned(),
-                Value::Array(
-                    items
-                        .iter()
-                        .map(|item| expr_json(item, env, model, path, span, Some(&item_ty)))
-                        .collect::<Result<_, _>>()?,
-                ),
-            );
+            let resolved = resolve(model, &ty)?;
+            if matches!(resolved, TypeRef::Relation(_, _)) {
+                // Relation literals only support the empty initializer `Set {}`;
+                // there is no per-element type to project against.
+                //
+                // This guard is kept as a fail-closed defense: the branch never reads
+                // `items`, so without it a non-empty literal would project as
+                // `set_lit` with `items: []` and silently drop its pairs. The `_` arm
+                // below is kept on the same grounds.
+                //
+                // Whether either arm can be reached today, which sites enforce the
+                // emptiness rule, which only record it, and what would have to change
+                // -- all of that depends on the call graph and is recorded in #1000,
+                // not here. Four attempts to state it in this comment were each
+                // corrected by review.
+                if !items.is_empty() {
+                    return Err(error("collection literal type mismatch"));
+                }
+                output.insert("kind".to_owned(), json!("set_lit"));
+                output.insert("items".to_owned(), Value::Array(vec![]));
+            } else {
+                let (kind, item_ty) = match resolved {
+                    TypeRef::Set(item) => ("set_lit", item),
+                    TypeRef::Seq(item, _) => ("seq_lit", item),
+                    _ => return Err(error("collection literal type mismatch")),
+                };
+                output.insert("kind".to_owned(), json!(kind));
+                output.insert(
+                    "items".to_owned(),
+                    Value::Array(
+                        items
+                            .iter()
+                            .map(|item| expr_json(item, env, model, path, span, Some(&item_ty)))
+                            .collect::<Result<_, _>>()?,
+                    ),
+                );
+            }
         }
         Expr::Struct { name, fields } => {
             output.insert("kind".to_owned(), json!("struct_lit"));
@@ -595,7 +623,7 @@ fn lvalue_json(
     path: &str,
     span: Span,
 ) -> Result<Value, PublicKernelError> {
-    let ty = lvalue_type(target, env, model)?;
+    let ty = lvalue_type(target, env, model, span)?;
     Ok(match target {
         LValue::Var(name) => json!({
             "kind":"var","type":type_json(&ty),"span":span_json(path,span),"name":name
@@ -633,7 +661,7 @@ fn statement_json(
             value,
             span,
         } => {
-            let ty = lvalue_type(target, env, model)?;
+            let ty = lvalue_type(target, env, model, *span)?;
             ensure_assignable(value, &ty, env, model, *span)?;
             Ok(json!({
                 "kind":"assign","type":{"kind":"statement"},"span":span_json(path,*span),

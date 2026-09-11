@@ -86,8 +86,8 @@ omit failed rows:
 2. Run `fslc document claims` for the contract and every variant. Check the
    declared symbol and retain `fsl-kernel-ast-v1+sha256` semantic identity.
 3. Run native `check` and configured `verify` for the contract and every variant.
-4. Treat `implements.result != refines` as failure even when the top-level
-   process exits zero.
+4. Treat `implements.result != refines` as a command failure (exit 1) reflected in
+   the top-level `result`, not only in the nested field.
 5. Run every declared `fslc refine VARIANT CONTRACT MAPPING --depth K`; check
    that the producer names the same abstract contract and retain
    `checked_to_depth`.
@@ -201,8 +201,9 @@ mapping that must return `refinement_failed`. The shared controls establish:
 - changing only a checked imported dependency changes the source-bundle digest;
 - depth-1 comparison remains explicitly bounded and is never called equivalent;
 - reversing OLD/NEW changes the directed result while retaining both identities;
-- a top-level successful `check` with nested `implements.result:
-  refinement_failed` maps to a gated exit 1 rather than family success;
+- a `check` whose nested `implements.result` is `refinement_failed` reports that
+  value as its own top-level `result` and exits 1, so the family gate reads a
+  command failure instead of deriving one from an otherwise successful envelope;
 - a failed variant refinement yields a failed Gate A/family report without
   omitting other variants, comparison results, or raw evidence;
 - an unknown manifest field and an unknown comparison endpoint fail closed;

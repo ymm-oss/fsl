@@ -311,7 +311,7 @@ projections requires its own versioned contract and tests; this editorial
 convention does not imply that projection.
 
 See `docs/LANGUAGE.md` §13.1.2 (mirrored in `docs/LANGUAGE.ja.md`) and
-`skills/fsl/reference.md` for the consumer-facing guidance. This convention
+`skills/fsl/references/layers.md` for the consumer-facing guidance. This convention
 adds no grammar, no IR variant, no Kernel/JSON schema change, and no
 Python-parity impact; it only documents how to use `Kind`/`Custom`, both
 already accepted by this design.

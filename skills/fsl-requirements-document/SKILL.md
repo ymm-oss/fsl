@@ -9,8 +9,8 @@ This skill turns a checked `requirements` (or direct `spec`) dialect file into a
 requirements document stakeholders can read, using the Requirement Claim IR (RCIR)
 pipeline: `fslc document claims` (the machine-readable contract), `fslc document
 generate` (deterministic ja/en Markdown), and `fslc document check` (structural
-drift detection). See `../fsl/SKILL.md` and `../fsl/reference.md` for FSL syntax,
-verification, and the general repair protocol — this skill only covers the
+drift detection). See `../fsl/SKILL.md` and use its reference index only as needed
+for FSL syntax, verification, and repair — this skill only covers the
 document layer built on top of an already-checked spec. If the `.fsl` itself still
 needs authoring or repair, use `fsl-requirements` (or `fsl-design`) first and come
 back here once `fslc check`/`fslc verify` are green.

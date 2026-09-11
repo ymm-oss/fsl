@@ -30,7 +30,9 @@ When sources disagree, stop and resolve the contract conflict instead of silentl
 - `src/fslc`: frozen Python compatibility reference.
 - `tests`: Python-driven Rust contract, parity, and compatibility tests.
 - `specs` and `examples`: FSL corpus and reproducing cases.
-- `skills`: canonical agent skills; `.claude/skills/fsl*` and `.agents/skills/fsl*` symlink here.
+- `skills`: distributable canonical agent skills. Put repository-internal workflow skills in
+  `.claude/skills` or `.codex/skills`; `.claude/skills/fsl*` and `.agents/skills/fsl*` remain
+  symlinks to the distributable FSL skills.
 
 ## Build and verification commands
 
@@ -77,7 +79,7 @@ inventory, and promotion changes run the `scheduled` tier.
 - Native CLI and Worker output must preserve the JSON envelope, exit codes, locations, and replayable
   evidence contract. Do not allowlist verdict, location, assurance, or exit-code differences.
 - A language feature moves with its grammar/lowering, typed model, symbolic and concrete semantics,
-  regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/reference.md`, a design
+  regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/references/`, a design
   note, and a `changelog.d/` fragment (see `changelog.d/README.md`; `CHANGELOG.md`'s `[Unreleased]`
   body itself is aggregated from fragments at release time and must not be hand-edited). A new
   declaration, binder, or reference form additionally moves with
@@ -101,12 +103,27 @@ inventory, and promotion changes run the `scheduled` tier.
   `rust/fslc/tests/corpus_check_sweep.rs` inside the required `rust workspace` job
   (`.github/workflows/ci.yml`). That native sweep will not catch a missing `tests/dialect_registry.py`
   entry or a Monitor/native disagreement; register the construct because the rule says so, not
-  because something will always catch you if you don't.
+  because something will always catch you if you don't. A new `tests/test_*.py` module additionally
+  moves with `tools/check_ci_validator_inventory.py generate` and
+  `docs/DESIGN-ci-validator-inventory.md` so required-gate reachability is recorded before merge.
 - Top-level dialect counts and parser parity do not establish nested semantic coverage. When porting
   or auditing an AST/enum sum type, inventory every behavior-bearing variant and bind each accepted
   variant to executable native semantics with accepting/rejecting controls, or to an explicit
   fail-closed diagnostic. Prefer a total lowering expression whose arms all return the same semantic
   output type; an empty unit arm must not compile as a valid implementation.
+- A placement matrix or state-shape whitelist does not establish that existing accepted forms are
+  preserved. A change that rewrites a type-boundary gate must `check`, with binaries built from the
+  named base SHA and from head, every `.fsl` under `specs/`, `examples/`, and
+  `rust/fslc/tests/fixtures/` in the materialized tree of each SHA (so `use ... from` imports
+  resolve against that SHA's own siblings), plus the inline fixtures of every required test the
+  change rewrites, renames, removes, or stops from running. Record every `ok`→`error` transition as a
+  breaking removal in the design note, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`,
+  `skills/fsl/references/syntax.md`, and a `changed` fragment; an empty transition set is stated with
+  the command, both SHAs, and the form count, never assumed. Breaking this rule fails no gate:
+  `rust/fslc/tests/corpus_check_sweep.rs` reports only a `specs/` or `examples/` form that stops
+  checking, and a fixture-pinned acceptance surfaces only as the required test the change itself
+  rewrites (`docs/DESIGN-nested-option-support.md`, "Amendment (#925): matrix rows that change an
+  existing verdict").
 - Do not weaken or hollow out `.fsl` specs to make checks pass. Verify mutation/vacuity evidence.
 - Every formal-to-implementation conformance anchor must include a negative control that rejects a
   known contract-violating trace, transition, or mutation. A green positive path alone does not
@@ -134,11 +151,13 @@ inventory, and promotion changes run the `scheduled` tier.
   control at least twice in one session before reporting it green — the first fix for this class
   commonly inverts the flake rather than removing it, and a single run cannot tell those apart.
 - Confirm what a state *is* before reporting an observation about it. Name the commit, the built
-  binary, and any mutation currently applied. A working tree under a calibration mutation is not the
-  committed implementation; a worktree behind `origin/main` is not `main`; a binary built before the
-  change does not exercise the change; a run's creation timestamp is not a job's elapsed time. Each of
-  these has produced a confidently reported defect that did not exist, or a passing verdict that the
-  change had not earned.
+  binary, and any mutation currently applied. Before scoping an issue or making a current-state claim,
+  fetch `origin` and inspect recently merged pull requests that touch the same contract surface; a
+  locally cached remote-tracking ref is not freshness evidence. A working tree under a calibration
+  mutation is not the committed implementation; a worktree behind `origin/main` is not `main`; a
+  binary built before the change does not exercise the change; a run's creation timestamp is not a
+  job's elapsed time. Each of these has produced a confidently reported defect that did not exist, or
+  a passing verdict that the change had not earned.
 - A soundness-critical claim marked triangulated must follow
   `docs/DESIGN-triangulated-assurance.md`: preserve the pre-classification raw observation, declare
   two reviewably independent semantic lineages, execute all three agreement edges, and calibrate
@@ -179,6 +198,15 @@ New source files must carry the repository's Apache-2.0 SPDX header.
 
 - In Codex sessions, `tasks/active.md` is the worktree-local current task packet. It is ignored by Git
   and must be reconciled with the branch, working tree, implementation, and observed command results.
+- When Codex prompts for hook trust, approve the entry for local feedback if appropriate; trust is bound
+  to the hook source's absolute path, does not transfer to linked worktrees, and must not be relied on
+  as repository enforcement.
+- When a task packet declares append-only history or a no-amend rule, create a new commit rather than
+  using `git commit --amend`; an exception requires explicit approval recorded in the task packet.
+- A single successful or partial verification command is not completion evidence. The task packet must
+  name every required command, its expected and produced result, and the current commit/binary identity;
+  whoever delegated the task judges whether that evidence is sufficient. A delegated worker does
+  not declare the task complete on its own.
 - Use `$task-start` before substantial Codex work and `$checkpoint` before compaction, clearing,
   handoff, independent review, or ending the task.
 - Keep durable decisions in accepted `docs/DESIGN-*.md`; task packets, conversations, plans, and Codex

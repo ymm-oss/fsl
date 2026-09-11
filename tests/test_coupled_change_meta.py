@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Ryoichi Izumita
 
-"""Python compatibility and DESIGN-doc coupled-change metatests (issue #168).
+"""Python compatibility, checklist-presence, and DESIGN-doc coupled-change metatests (issue #168).
 
 The authoritative LSP corpus/index gate moved to `rust/fsl-lsp/tests/corpus.rs`.
-This module retains only the frozen Python compatibility checks and the
-DESIGN-doc map checks that still inspect Python-owned surfaces.
+This module retains frozen Python compatibility, language-neutral checklist-presence,
+and DESIGN-doc map checks that do not claim native LSP behavior.
 """
 from __future__ import annotations
 
@@ -20,6 +20,25 @@ from fslc.grammar import GRAMMAR
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
+LANGUAGE_FEATURE_CHECKLISTS = (
+    "CONTRIBUTING.md",
+    ".claude/skills/add-language-feature/SKILL.md",
+    ".claude/agents/fsl-coupled-change-reviewer.md",
+)
+LANGUAGE_FEATURE_CHECKLIST_MEMBERS = (
+    "docs/LANGUAGE.ja.md",
+    "rust/fsl-lsp/src/index.rs",
+    "targeted role/scope test",
+)
+
+
+def language_feature_checklist_missing_pairs():
+    return tuple(
+        (member, copy)
+        for copy in LANGUAGE_FEATURE_CHECKLISTS
+        for member in LANGUAGE_FEATURE_CHECKLIST_MEMBERS
+        if member not in " ".join((ROOT / copy).read_text(encoding="utf-8").split())
+    )
 
 
 def test_retained_python_dialect_registry_matches_native_authority():
@@ -40,6 +59,14 @@ def test_native_ai_project_block_gate_matches_retained_parser():
     assert block is not None
     native = set(re.findall(r'"([a-z_]+)"', block.group("body")))
     assert native == PROJECT_BLOCKS
+
+
+def test_language_feature_checklists_include_coupled_obligations():
+    missing_pairs = language_feature_checklist_missing_pairs()
+    assert not missing_pairs, ",".join(
+        f"missing={member},copy={copy}" for member, copy in missing_pairs
+    )
+
 
 # DESIGN-doc coverage
 

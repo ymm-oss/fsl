@@ -1,0 +1,13 @@
+diff --git a/rust/fsl-verifier/src/eval.rs b/rust/fsl-verifier/src/eval.rs
+--- a/rust/fsl-verifier/src/eval.rs
++++ b/rust/fsl-verifier/src/eval.rs
+@@ -1612,8 +1612,6 @@ pub(crate) fn eval_expected<S: SmtSolver>(
+             ty: expected.clone(),
+             present: solver.bool_value(true),
+-            value: Box::new(eval_expected(
+-                solver, model, inner, inner_ty, state, bindings, old_state,
+-            )?),
++            value: Box::new(eval(solver, model, inner, state, bindings, old_state)?),
+         });
+     }
+     let value = eval(solver, model, expr, state, bindings, old_state)?;

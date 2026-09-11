@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-//! Cross-command validation controls for #796.
+//! Cross-command validation controls for domain projection commands.
 //!
 //! `domain analyze` projects the domain AST and `domain expand` renders
 //! generated Kernel text, but neither may accept a source document that typed
-//! domain lowering rejects. In particular, renderer string normalization can
-//! leave an unknown authored identifier unchanged and previously produced a
-//! Kernel source that `fslc check` rejected. Both commands must instead return
-//! the same located semantic diagnostic as `check`.
+//! domain lowering rejects. #798 slice 1 made the renderer agree with direct
+//! lowering; slice 2 retired the #796 post-validation that previously masked
+//! renderer divergence at the CLI boundary.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -121,8 +120,8 @@ fn assert_rejected_like_check(fixture: &str) {
 
 /// Rejecting control: before #796 both commands returned exit 0 for this
 /// unknown state reference, while `check` rejected it at the authored
-/// expression. Keeping all three envelopes aligned prevents either command
-/// from again producing a false-green analysis or an invalid Kernel export.
+/// expression. After #798 slice 2 the renderer rejects directly; the former
+/// #796 `load_kernel_model_from_source` guard is no longer needed.
 #[test]
 fn domain_analyze_and_expand_reject_unknown_names_like_check() {
     assert_rejected_like_check(
@@ -155,11 +154,9 @@ fn domain_expand_rejection_does_not_write_output() {
     std::fs::remove_file(&output_path).expect("remove sentinel");
 }
 
-/// #798 is the sibling generated-name case: direct lowering rejects authored
-/// use of a generated enum member, but the renderer still leaves that already
-/// qualified text unchanged. Before #796 the CLI emitted that falsely valid
-/// Kernel; shared lowering validation now rejects it before either command
-/// emits a success envelope.
+/// #798 generated-name case: direct lowering rejects authored use of a
+/// generated enum member. Slice 1 made path B reject it during rendering;
+/// slice 2 retired the #796 CLI guard that previously masked the divergence.
 #[test]
 fn domain_analyze_and_expand_reject_generated_kernel_names_like_check() {
     assert_rejected_like_check(
@@ -185,11 +182,10 @@ fn domain_analyze_and_expand_still_accept_valid_domain_specs() {
     );
 }
 
-/// Deterministic external TOCTOU control for both #796 commands. A FIFO
-/// observes filesystem reads directly: the fixed implementation reads it
-/// once, so the first authored-invalid source must produce exit 2. Restoring
-/// `validate_domain_command_input` to `load_kernel_model(path)` performs the
-/// second read, receives the valid source, and makes this test fail.
+/// Deterministic external TOCTOU control for both domain projection commands.
+/// A FIFO observes filesystem reads directly: the fixed implementation reads it
+/// once, so the first authored-invalid source must produce exit 2. A second
+/// read of the replacement inode would make this test fail.
 ///
 /// This control is Unix-only because Windows has no FIFO equivalent. The
 /// non-Unix test below deliberately names that absence, so a Windows green

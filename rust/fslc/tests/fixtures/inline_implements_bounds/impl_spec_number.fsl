@@ -1,0 +1,13 @@
+requirements CountedReq {
+  implements CountedFlow from "abs_spec_number.fsl" { maps auto }
+
+  number Limit
+  state { n: Limit }
+  init { n = 0 }
+  action bump() maps bump() {
+    n = 0
+  }
+}
+verify {
+  values Limit = 0..3
+}

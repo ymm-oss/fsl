@@ -44,7 +44,7 @@ const NESTED_BLOCKS: &[&str] = &["slice", "preserve", "no_regression"];
 
 /// Top-level kinds recognized only as block *boundaries*: the parser never
 /// descends into their body, so their contents carry no checked meaning and
-/// are echoed as bare `{kind, name}` entries (`skills/fsl/reference.md`).
+/// are echoed as bare `{kind, name}` entries (`skills/fsl/references/syntax.md`).
 const RAW_BLOCKS: &[&str] = &[
     "ai_action",
     "ai_contract",
@@ -168,7 +168,7 @@ pub struct AiProject {
     /// checks an evaluator's body against evidence (issue #563).
     pub evaluators: Vec<String>,
     /// Declared `failure_mode` names, modelled for the same reason as
-    /// [`AiProject::evaluators`] -- `skills/fsl/reference.md` calls these
+    /// [`AiProject::evaluators`] -- `skills/fsl/references/syntax.md` calls these
     /// tracked metadata, not a verified claim.
     pub failure_modes: Vec<String>,
     pub statistical_properties: Vec<AiStatisticalProperty>,

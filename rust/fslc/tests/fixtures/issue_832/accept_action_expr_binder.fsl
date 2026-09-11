@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
+compose AcceptActionBinder {
+  use Core as core from "core.fsl"
+  state { x: Int }
+  init { x = 0 }
+  action set() = core.noop() {
+    requires forall u: core.RealType { true }
+    x = 1
+  }
+}

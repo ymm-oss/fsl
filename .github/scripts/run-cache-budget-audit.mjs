@@ -35,6 +35,20 @@ function validNonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
 }
 
+const ISO_TIMESTAMP_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+
+function validIsoTimestamp(value) {
+  // `Date.parse` alone is not a validator: it is lenient enough to accept
+  // "0" (epoch year 0) and to roll a nonexistent calendar date like
+  // "2026-02-30" over to 2026-03-02 rather than reject it. Require the exact
+  // shape GitHub's API emits, then require the constructed date's own ISO day
+  // to match the input day -- a rolled-over date fails that round trip.
+  if (typeof value !== "string" || !ISO_TIMESTAMP_SHAPE.test(value)) return false;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return false;
+  return new Date(parsed).toISOString().slice(0, 10) === value.slice(0, 10);
+}
+
 function listingRequests(totalCount) {
   return Math.max(1, Math.ceil(totalCount / CACHE_PAGE_SIZE)) + 1;
 }
@@ -113,6 +127,9 @@ export async function fetchCacheCollection(api) {
       if (!validNonNegativeSafeInteger(cache.size_in_bytes)) {
         throw new Error(`cache listing page ${page} has an entry with no valid size_in_bytes`);
       }
+      if (!validIsoTimestamp(cache.created_at)) {
+        throw new Error(`cache listing page ${page} has an entry with no valid created_at`);
+      }
       if (cacheIds.has(cache.id)) {
         throw new Error(`cache listing page ${page} repeats cache id ${cache.id}`);
       }
@@ -153,7 +170,12 @@ export function sameCacheCollection(first, second) {
       other &&
       entry.key === other.key &&
       entry.ref === other.ref &&
-      entry.size_in_bytes === other.size_in_bytes
+      entry.size_in_bytes === other.size_in_bytes &&
+      // `created_at` now feeds the pure audit's generation-coexistence
+      // de-duplication (issue #926): a differing value between the two
+      // paired observations is compared for the same reason the three
+      // fields above already are, not left as an unexplained exclusion.
+      entry.created_at === other.created_at
     );
   });
 }

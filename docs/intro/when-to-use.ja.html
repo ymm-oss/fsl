@@ -81,17 +81,17 @@
     <div class="layers reveal" style="margin-top:24px">
       <div class="layer">
         <h3>① 状態遷移があるか</h3>
-        <p>箱（状態）と矢印（操作）で描けるか。<br><b style="color:var(--danger)">No → 静的表示・純粋な装飾・自由文コンテンツ。対象外——そもそも検証すべきものも、仕様として書くべきものもありません。</b></p>
+        <p>箱（状態）と矢印（操作）で描けるか。<br><b style="color:var(--danger-text)">No → 静的表示・純粋な装飾・自由文コンテンツ。対象外——そもそも検証すべきものも、仕様として書くべきものもありません。</b></p>
       </div>
       <div class="arrow-down">↓ Yes</div>
       <div class="layer">
         <h3>② 相互作用で「危険な状態」に入り得るか</h3>
-        <p>順序・フラグ・権限・非同期・再試行が絡んで、あってはならない状態へ滑り込めるか。<br><b style="color:var(--warn)">No → 検証としての効きどころは薄い。でも、どのみち文書化するものなら薄い仕様として書くのが基本方針です。文書化もせず検証もしないものだけがFSLを見送ってよい対象です。</b></p>
+        <p>順序・フラグ・権限・非同期・再試行が絡んで、あってはならない状態へ滑り込めるか。<br><b style="color:var(--warn-text)">No → 検証としての効きどころは薄い。でも、どのみち文書化するものなら薄い仕様として書くのが基本方針です。文書化もせず検証もしないものだけがFSLを見送ってよい対象です。</b></p>
       </div>
       <div class="arrow-down">↓ Yes</div>
       <div class="layer">
         <h3>③ 有限・離散で表現できるか</h3>
-        <p>実時間の値・確率・連続量・自由文が「核心」でないか。<br><b style="color:var(--danger)">No → モデルの核心が乗らない。対象外（下の表）。</b></p>
+        <p>実時間の値・確率・連続量・自由文が「核心」でないか。<br><b style="color:var(--danger-text)">No → モデルの核心が乗らない。対象外（下の表）。</b></p>
       </div>
       <div class="arrow-down">↓ Yes</div>
       <div class="layer" style="border-left-color:var(--ok)">
@@ -116,7 +116,7 @@
     <p class="lead narrow reveal">いちばん大事なのは、<b>「検証としては薄いが、どのみち自分のドキュメント」</b>と<b>「そもそも表現できない（対象外）」</b>を混同しないこと。薄さは仕様を小さく保つ理由にはなっても、どのみち文書化するものを書かない理由にはなりません。</p>
     <div class="syntax-grid reveal">
       <div class="syntax-card">
-        <h3 style="color:var(--ok)">✅ 効きやすい（高利得）</h3>
+        <h3 style="color:var(--ok-text)">✅ 効きやすい（高利得）</h3>
         <ul>
           <li>決済・返金・請求</li>
           <li>申請・承認・差戻し</li>
@@ -129,7 +129,7 @@
         </ul>
       </div>
       <div class="syntax-card">
-        <h3 style="color:var(--warn)">△ 検証としては薄い——それでも書く</h3>
+        <h3 style="color:var(--warn-text)">△ 検証としては薄い——それでも書く</h3>
         <ul>
           <li>静的表示だけの画面</li>
           <li>単純CRUD</li>
@@ -139,7 +139,7 @@
         <p style="margin-top:10px">検証すべき抜け穴が見つかることはまずありません。でも、どのみち設計メモや要件メモを書くようなものなら、その代わりに薄いFSL仕様を書いてください——コストは変わらず、しかも検証つきになります。テストだけで済ませてよいのは、文書化もせず検証もしないものだけです。<br><span class="dim">また<b>上位層との整合</b>（効きどころ②）の一部なら、単発で薄くても書く価値があります。</span></p>
       </div>
       <div class="syntax-card">
-        <h3 style="color:var(--danger)">⛔ 対象外（表現できない）</h3>
+        <h3 style="color:var(--danger-text)">⛔ 対象外（表現できない）</h3>
         <ul>
           <li>実時間の値・連続的なお金の量</li>
           <li>確率・期待値・統計的性質</li>

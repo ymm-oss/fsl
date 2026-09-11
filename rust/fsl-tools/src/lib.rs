@@ -37,6 +37,7 @@ mod mutate;
 mod public_kernel;
 mod refinement_analysis;
 mod testgen;
+mod testplan;
 mod typestate;
 mod undecided;
 
@@ -121,6 +122,7 @@ pub use testgen::{
     TestgenInput, TestgenPathContext, compose_testgen_input, generate_testgen,
     public_kernel_testgen_input,
 };
+pub use testplan::{build_test_plan_v1, validate_test_plan_v1};
 pub use typestate::analyze_typestate;
 pub use undecided::{UndecidedRecord, undecided_declarations, undecided_records};
 

@@ -40,7 +40,7 @@ fn kill_rate_definition_is_stated_in_mutation_docs() {
     for relative in [
         "docs/DESIGN-mutate.md",
         "docs/LANGUAGE.md",
-        "skills/fsl/reference.md",
+        "skills/fsl/references/commands.md",
     ] {
         let text = normalized(relative);
         assert!(
@@ -58,7 +58,7 @@ fn mutation_score_is_framed_as_bounded_sensitivity() {
     for relative in [
         "docs/DESIGN-mutate.md",
         "docs/LANGUAGE.md",
-        "skills/fsl/reference.md",
+        "skills/fsl/references/commands.md",
     ] {
         let text = normalized(relative);
         assert!(
@@ -80,7 +80,7 @@ fn stronger_survivor_claim_does_not_return() {
         "docs/DESIGN-mutate.md",
         "docs/LANGUAGE.md",
         "docs/LANGUAGE.ja.md",
-        "skills/fsl/reference.md",
+        "skills/fsl/references/commands.md",
         "README.md",
     ] {
         // Normalize hard-wrapped prose so a reflowed reintroduction of the

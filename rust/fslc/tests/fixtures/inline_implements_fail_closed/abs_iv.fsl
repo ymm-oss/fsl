@@ -1,0 +1,2 @@
+spec AbsIV { entity Item state { flag: Map<Item, Bool> } init { forall i: Item { flag[i] = false } } action flip(i: Item) { flag[i] = true } }
+verify { instances Item = 1 }

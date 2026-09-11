@@ -10,8 +10,8 @@ use sha2::{Digest, Sha256};
 use super::{
     CliVerifyOptions, ScopeBounds, SpecLoadError, add_strict_tag_warnings, apply_vacuity_mode,
     block_on_native, display, envelope, error_output, implements_error_output,
-    implements_result_from_source, invariant_names, load_kernel_model_from_source, load_model,
-    load_model_from_source, load_model_scoped, load_model_scoped_from_source,
+    implements_result_from_source_with_bounds, invariant_names, load_kernel_model_from_source,
+    load_model, load_model_from_source, load_model_scoped, load_model_scoped_from_source,
     load_snapshot_value_object, load_state_snapshot, read_spec_source, select_properties,
     selected_implicit_bounds, semantic_error_output, spec_load_error_output,
     surface_parse_error_output, validate_requirement_traces_from_source,
@@ -1816,7 +1816,6 @@ struct PreparedCliVerification {
     is_agent_document: bool,
     model: Result<KernelModel, SpecLoadError>,
     initial_state: Option<std::collections::BTreeMap<String, FslValue>>,
-    has_trace_contract: bool,
     /// Compose-lowering warnings (e.g. `fair_not_inherited`), computed while
     /// lowering the surface document, before `build_model` drops the per-
     /// component information (like constituent `fair` markers) that produced
@@ -1834,6 +1833,19 @@ pub(super) fn run_verify_cli(
         Err(error) => return (spec_load_error_output(&error), 2),
     };
     run_verify_cli_from_source(path, cache_identity_path, &source, options)
+}
+
+/// Whether this run selects a subset of the model, and therefore does not
+/// evaluate the inline `implements` seam.
+///
+/// This is the whole population of seam suppressors: `docs/LANGUAGE.md` names
+/// these three options and nothing else, and both call sites read it from here
+/// so the list cannot drift in one of them. #1008 is open against the semantics
+/// of these three, so a change there has to land in one place.
+fn seam_is_suppressed(options: &CliVerifyOptions, prepared: &PreparedCliVerification) -> bool {
+    options.property.is_some()
+        || !options.exclude_properties.is_empty()
+        || prepared.initial_state.is_some()
 }
 
 pub(super) fn run_verify_cli_from_source(
@@ -1873,7 +1885,36 @@ pub(super) fn run_verify_cli_from_source(
         Err(output) => return output,
     };
     if !options.lemmas.is_empty() {
-        let (output, status) = run_induction_with_lemmas(path, options, &prepared);
+        let (mut output, mut status) = run_induction_with_lemmas(path, options, &prepared);
+        // The `--lemma` path returns before `execute_cli_verification`, so the
+        // inline `implements` seam has to be evaluated and folded here as well.
+        // Without this, `verify --engine induction --lemma ...` is another way
+        // to pass a broken seam with exit 0 (#1002), and the suppressor list in
+        // `docs/LANGUAGE.md` would be missing an entry.
+        if !seam_is_suppressed(options, &prepared)
+            && let Ok(model) = &prepared.model
+        {
+            match implements_result_from_source_with_bounds(
+                path,
+                source,
+                model,
+                options.depth,
+                &options.scope,
+            ) {
+                Ok(Some(implements)) => {
+                    if let Some(code) =
+                        fslc_rust::verification_output::attach_requirements_implements(
+                            &mut output,
+                            implements,
+                        )
+                    {
+                        status = code;
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => return (implements_error_output(&error), 2),
+            }
+        }
         return finalize_cli_verification(path, options, &prepared, None, output, status);
     }
     // `auto` never keys a cache entry under the literal string "auto": a
@@ -1940,11 +1981,10 @@ fn prepare_cli_verification_from_source(
     } else {
         None
     };
-    let mut has_trace_contract = false;
     if !has_scope && let Ok(model) = &snapshot_model {
         match validate_requirement_traces_from_source(path, source, model) {
             Ok((Some(failure), _)) => return Err((failure, 2)),
-            Ok((None, has_contract)) => has_trace_contract = has_contract,
+            Ok((None, _)) => {}
             Err(error) => return Err((semantic_error_output(&error), 2)),
         }
     }
@@ -1971,7 +2011,6 @@ fn prepare_cli_verification_from_source(
         is_agent_document,
         model: snapshot_model,
         initial_state,
-        has_trace_contract,
         compose_warnings,
     })
 }
@@ -2213,11 +2252,8 @@ fn execute_cli_verification(
     options: &CliVerifyOptions,
     prepared: &PreparedCliVerification,
 ) -> CommandResult {
-    let filtered = prepared.has_scope
-        || options.property.is_some()
-        || !options.exclude_properties.is_empty()
-        || prepared.initial_state.is_some();
-    if !filtered && prepared.is_agent_document {
+    let selection_filtered = seam_is_suppressed(options, prepared);
+    if !(selection_filtered || prepared.has_scope) && prepared.is_agent_document {
         return (
             error_output(
                 "parse",
@@ -2234,10 +2270,16 @@ fn execute_cli_verification(
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(error), 2),
     };
-    let implements = if filtered {
+    let implements = if selection_filtered {
         None
     } else {
-        match implements_result_from_source(path, source, model, options.depth) {
+        match implements_result_from_source_with_bounds(
+            path,
+            source,
+            model,
+            options.depth,
+            &options.scope,
+        ) {
             Ok(implements) => implements,
             Err(error) => return (implements_error_output(&error), 2),
         }
@@ -2293,39 +2335,36 @@ fn execute_cli_verification(
         }),
         Err(error) => return (error_output("usage", &error), 2),
     };
-    if !filtered {
-        decorate_default_cli_verification(
+    if !selection_filtered
+        && let Some(code) = decorate_default_cli_verification(
             &mut output,
+            source,
+            model,
             implements,
-            prepared.has_trace_contract,
             &prepared.compose_warnings,
-        );
+        )
+    {
+        return (output, code);
     }
     (output, status)
 }
 
 fn decorate_default_cli_verification(
     output: &mut Value,
+    source: &str,
+    model: &KernelModel,
     implements: Option<Value>,
-    has_trace_contract: bool,
     compose_warnings: &[Value],
-) {
+) -> Option<i32> {
+    let implements_exit = implements.and_then(|implements| {
+        fslc_rust::verification_output::attach_requirements_implements(output, implements)
+    });
+    if let Ok(ctx) = fsl_core::ModelWarningContext::from_source(model, source) {
+        fsl_core::finalize_envelope_model_warnings(output, &ctx);
+    }
     let Value::Object(envelope) = output else {
-        return;
+        return Some(3);
     };
-    if envelope.get("result").and_then(Value::as_str) != Some("error")
-        && let Some(implements) = implements
-    {
-        envelope.insert("implements".to_owned(), implements);
-    }
-    if (envelope.contains_key("implements") || has_trace_contract)
-        && let Some(Value::Array(warnings)) = envelope.get_mut("warnings")
-    {
-        warnings.retain(|warning| {
-            warning.get("message").and_then(Value::as_str)
-                != Some("spec declares no user invariants (only implicit type bounds are checked)")
-        });
-    }
     if !compose_warnings.is_empty()
         && envelope.get("result").and_then(Value::as_str) != Some("error")
         && let Some(Value::Array(warnings)) = envelope.get_mut("warnings")
@@ -2336,6 +2375,7 @@ fn decorate_default_cli_verification(
         // recovered from `model`/`fsl_runtime::verification_warnings` alone.
         warnings.splice(0..0, compose_warnings.iter().cloned());
     }
+    implements_exit
 }
 
 fn finalize_cli_verification(

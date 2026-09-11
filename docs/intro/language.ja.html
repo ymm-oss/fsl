@@ -77,7 +77,7 @@
   symmetric type &lt;Name&gt; = &lt;lo&gt;..&lt;hi&gt;   // domain whose values are interchangeable identities
   enum  &lt;Name&gt; { &lt;Member&gt;, ... }
   symmetric enum &lt;Name&gt; { &lt;Member&gt;, ... }
-  struct &lt;Name&gt; { &lt;field&gt;: &lt;scalar type | Option&lt;scalar type&gt;&gt;, ... }
+  struct &lt;Name&gt; { &lt;field&gt;: &lt;scalar type | nested Option&lt;scalar type&gt;&gt;, ... }
 
   def &lt;name&gt;(&lt;p&gt;: &lt;type name&gt;, ...) = &lt;expr&gt; // non-recursive named predicate; frontend-inlined
 
@@ -362,9 +362,10 @@ supported semantics」)。per-key init は <code>Map</code> 値型に対して�
 parse し、さらにその同じ String を <code>load_kernel_model_from_source</code> に渡して検査済み
 Kernel を構築します。atomic な path replacement が起きても、出力前に別の source
 version を検証することはありません。未解決識別子は部分的な分析や使用不能な Kernel
-text を出力せず、元の source location 付きで棄却されます。<code>domain generate</code> は同じ
-typed lowering を使いますが、この single-snapshot 契約はまだ持ちません。別個の
-TOCTOU follow-up は #808 が追跡します。Functional DDD スキャフォールドには
+text を出力せず、元の source location 付きで棄却されます。<code>domain generate</code>、
+<code>domain replay</code>、<code>domain testgen</code>、<code>domain check</code> は、検査済み Kernel の scaffold、
+Monitor replay、generic/adapter の test generation、edition の後処理をそれぞれ同じ
+capture 済み source から導きます (#808)。Functional DDD スキャフォールドには
 <code>fslc domain generate --target typescript|python|kotlin|swift|rust</code> を、
 アダプタ/コンフォーマンスのスキャフォールドには <code>fslc domain testgen</code> を、
 ランタイムの command / event / effect エビデンスには
@@ -399,6 +400,10 @@ fslc verify spec.fsl --values Amount=0..3
 これがないと、縮小した impl とフルサイズの抽象は <code>map_out_of_bounds</code> で失敗します)。
 impl 側だけの carried number(例: business の抽象には存在しない <code>Amount</code>)は impl
 のみに適用されます。</p>
+<p><code>fslc verify</code> は <code>--instances</code> / <code>--values</code> の scope override だけが付いている場合でも
+インライン <code>implements</code> を評価します。<code>--property</code>、<code>--exclude-property</code>、
+<code>--from-state</code> は引き続き理由を記録せず <code>implements</code> フィールドを省略します。
+この挙動は安全とみなされておらず、契約上の未決定事項として残ります。</p>
 <p><code>acceptance</code>/<code>forbidden</code> シナリオは、spec の元の世界の id や数値をハードコード
 しがちで(<code>accept(2)</code>)、それが縮小された上書き(<code>--instances Case=1</code>)の外に出る
 ことがあります。上書きが有効なとき、replay の失敗が<em>純粋に</em>上書き後の境界の外の値を
@@ -561,13 +566,13 @@ instances 数から独立です — <code>Case</code> のサイズが <code>veri
 </tr>
 <tr>
 <td>struct</td>
-<td><code>struct Order { st: St, item: Option&lt;ItemId&gt;, qty: Qty }</code></td>
-<td>フィールドはスカラーまたは <code>Option&lt;スカラー&gt;</code></td>
+<td><code>struct Order { st: St, item: Option&lt;Option&lt;ItemId&gt;&gt;, qty: Qty }</code></td>
+<td>フィールドはスカラーまたは入れ子の <code>Option&lt;スカラー&gt;</code></td>
 </tr>
 <tr>
 <td><code>Option&lt;T&gt;</code></td>
-<td><code>cart: Option&lt;ItemId&gt;</code></td>
-<td><code>none</code> / <code>some(e)</code>。番兵値の代わりに使う</td>
+<td><code>cart: Option&lt;Option&lt;ItemId&gt;&gt;</code></td>
+<td><code>none</code> / <code>some(e)</code>。番兵値の代わりに使う。スカラー payload の周りの入れ子をサポートする</td>
 </tr>
 <tr>
 <td><code>Map&lt;K, V&gt;</code></td>
@@ -603,14 +608,22 @@ induction、Public Kernel v1 は、等価な <code>init</code> ブロックと�
 インラインと <code>init</code> の両方で代入するのは意味論エラーで、両方のソース位置を報告
 します。<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-initialization.md"><code>DESIGN-initialization.md</code></a> を参照。</p>
 <p><strong>状態変数として合法な型</strong>(それ以外は <code>check</code> が型エラーとして拒否します):
-スカラー | <code>Option&lt;scalar&gt;</code> | struct(スカラー / <code>Option&lt;scalar&gt;</code> フィールド)
-| <code>Map&lt;bounded scalar, scalar | Option&lt;scalar&gt; | struct&gt;</code>
+スカラー | 入れ子の <code>Option&lt;scalar&gt;</code> | struct(スカラー / 入れ子の <code>Option&lt;scalar&gt;</code> フィールド)
+| <code>Map&lt;bounded scalar, scalar | nested Option&lt;scalar&gt; | struct&gt;</code>
 | <code>Set&lt;bounded scalar&gt;</code> | <code>Seq&lt;scalar, N&gt;</code> | <code>relation bounded-scalar -&gt; bounded-scalar</code></p>
 <ul>
 <li>struct のネスト、struct フィールドの中の Set/Map/Seq、
-  <code>Option&lt;Option&lt;...&gt;&gt;</code>、<code>Option&lt;Set/Map/Seq/struct&gt;</code> は許されません
+  <code>Option&lt;Set/Map/Seq/struct&gt;</code> は許されません
   (check 時にヒント付きで拒否されます)。省略可能なスカラーのフィールドは、
   v2.1 以降 struct の中に直接書けます。</li>
+<li>Map の値はスカラー、入れ子の <code>Option&lt;scalar&gt;</code>、またはそれらのフィールドだけを持つ
+  struct でなければなりません。入れ子の Map/Set/Seq/relation は拒否されます。特に
+  <code>Map&lt;Id, Map&lt;K, Bool&gt;&gt;</code> は explicit-state 実行で必要な初期 Map 値を構築できないため
+  拒否されます。これは、過去の <code>check</code> が end-to-end の実行経路なしに受理していた形を
+  削除する破壊的変更です。</li>
+<li>共有された CLI/LSP の state/struct-field 型ヒントは、拒否される relation と collection
+  の形も含めて、この再帰的な <code>Option&lt;scalar&gt;</code> 境界を示します。これは従来の 1 段だけの
+  <code>Option&lt;scalar&gt;</code> という文言を置き換えます。</li>
 <li><code>Map&lt;Int, V&gt;</code> は <code>check</code> で拒否されます。<code>type ItemId = 0..&lt;max&gt;</code> のような
   有界キー型を宣言し、<code>Map&lt;ItemId, V&gt;</code> を使ってください。</li>
 <li><code>symmetric type</code> と <code>symmetric enum</code> は、liveness の対称性簡約のために、値を
@@ -715,6 +728,9 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 <li>代入: <code>x = expr</code>、<code>m[k] = expr</code>、<code>m[k].field = expr</code>、<code>o.field = expr</code></li>
 <li>Set/Seq/relation の更新は<strong>再代入イディオム</strong>を使います:
   <code>s = s.add(x)</code>、<code>q = q.pop()</code>、<code>r = r.add(a, b)</code></li>
+<li>relation 型フィールドの<strong>リテラル</strong>初期化子は空の <code>Set {}</code> でなければならず、空でない Set
+  リテラルは <code>init</code> と inline 初期化子の両方で拒否される。対の追加は再代入イディオム
+  <code>r = r.add(a, b)</code> で行い、これは <code>init</code> の中でも使える。</li>
 <li><code>if expr { stmt... } else { stmt... }</code> は <code>init</code> と action 本体の両方で使えます
   (else の内側の if でネストできます)</li>
 <li><code>forall x: T { stmt... }</code>(一括初期化 / 一括更新)</li>
@@ -728,6 +744,18 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
   代入するのは意味論エラーです。if の then/else は別々のパスなので、両方で代入して
   かまいません。if の<strong>後</strong>に同じ変数へ代入するのもエラーです(分岐の内側の書き込み
   が失われるのを防ぐため)。</li>
+<li><strong>保守的な write-alias 拒否</strong>: <code>forall</code> 本体が反復間で相異性を証明できない
+  インデックス付き location へ書き込む場合、ネイティブの <code>check</code>/<code>verify</code> と
+  ブラウザ Worker は検証器バックエンドより前に spec を拒否します。これは
+  <strong>確定した重複 write</strong>(例: <code>m[0]</code> を 2 回、<code>forall c { m[0] = ... }</code>)とは別で、
+  後者は従来の
+  <code>an action may not assign the same state location more than once</code> メッセージを
+  維持します。injectivity 未証明は
+  <code>cannot prove write-index distinctness across forall iterations</code> と
+  <code>diagnostic_code: FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED</code>、問題の代入 <code>loc</code>、
+  安全な修復が存在する場合は
+  <code>forall k: Cell { if k &gt;= BASE and k &lt; BASE + 4 { m[k] = ... } }</code> のような
+  <code>hint</code> で報告されます。</li>
 <li><code>Map&lt;K, Struct&gt;</code> の値については、フィールドの書き込みはフィールド単位で追跡され
   ます。1 つの action の中で同じ要素の異なる 2 つのフィールドを更新すること、例えば
   <code>m[k].f1 = 1</code> に続く <code>m[k].f2 = 2</code> は許されます。同じパスで同じフィールドを繰り返す
@@ -833,6 +861,8 @@ fslc fmt       &lt;path&gt;... --check                 # JSON format_check; exit
 fslc kernel    &lt;file.fsl&gt; [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance &lt;file.fsl&gt; [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, counterexample is shortest)
+fslc counterexample export &lt;file.fsl&gt; [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+                                               # slice 1: safety-invariant counterexample を reproducer.v1 へ export
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -856,6 +886,7 @@ fslc replay    &lt;file.fsl&gt; --trace &lt;events.json&gt;  # spec-action trace
 fslc replay    &lt;file.fsl&gt; --from-log &lt;events.jsonl&gt; --mapping &lt;mapping.fsl&gt;
                                                  # production log mapping + conformance (§12)
 fslc testgen   &lt;file.fsl&gt; [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
+fslc testplan  &lt;file.fsl&gt; [--depth K]             # 閉じた test-plan.v1 の vector 選択 (§12)
 fslc refine    &lt;impl&gt; &lt;abs&gt; &lt;mapping&gt; [--depth K]# fidelity check of a detailed spec (§10)
 fslc diff      &lt;old&gt; &lt;new&gt; [--depth K] [--mapping map.fsl]
                [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
@@ -863,7 +894,7 @@ fslc diff      &lt;old&gt; &lt;new&gt; [--depth K] [--mapping map.fsl]
 fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
                                                  # revision-consistent tree materialization; omit spec for all changed .fsl
 fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
-fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--max-mutants N]
+fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--oracle-attribution] [--max-mutants N]
                [--from mutants.jsonl]             # built-in + external spec mutation (§15)
 fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
@@ -1036,10 +1067,15 @@ mutated / explained / analyzed / semantic_diff(明示的なゲートが失敗し
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings、
 <code>1</code> = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
-refinement_failed / sweep_failed / observed_mismatch、
+refinement_failed / impl_violated / sweep_failed / observed_mismatch、
 <code>2</code> = spec エラー(parse / type / semantics / io / vacuous / acceptance / forbidden /
 <code>--vacuity error</code>)、<code>3</code> = 内部エラー。<code>observed_*</code> は <code>fslc db observe</code> の結果、
-<code>imported</code>/<code>imported_with_warnings</code> は <code>fslc db import</code> の結果です。同じ <code>2</code> の
+<code>imported</code>/<code>imported_with_warnings</code> は <code>fslc db import</code> の結果です。<code>impl_violated</code> は
+inline <code>implements</code> が top-level <code>result</code> へ伝播するため列挙しています。畳み込みは検証封筒を
+生成する場所で起きるので、<code>check</code> / <code>verify</code> に閉じません。seam が失敗する spec では、<code>mutate</code> は
+baseline の verdict をそのまま返し(baseline が <code>verified</code> でなくなるため変異を1つも生成しません)、
+<code>ledger</code> は同じ exit を引き継ぎ、<code>sweep</code> は <code>sweep_failed</code> を返します。<code>fslc html</code> は畳み込まれた
+封筒を埋め込みます(exit code は変わりません)。同じ <code>2</code> の
 対応付けは <code>chain</code> のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な <code>depth</code>/<code>refine_depth</code> — <code>docs/DESIGN-layers.md</code> §7)
 と、<code>ledger --impl-log</code> の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -1181,6 +1217,22 @@ witness のコントラクトを使わなければなりません。</p>
 <p>ブロックしている requires 節は、それが安価な場合、最小化された unsat core によって
 特定されます。requirements の <code>branches</code> については、偽のカバレッジ診断は内部の
 分割 action の <code>name</code> を保持し、<code>display_name</code> を追加します。</p>
+<h3 id="explicit-action">explicit action 実行プロファイル</h3>
+<p><code>--engine explicit</code> が結果を判定した場合、エンベロープには <code>cost</code> および
+<code>action_coverage</code> と並んで <code>action_profile</code> が追加されます:</p>
+<pre><code class="language-json">&quot;action_profile&quot;: {
+  &quot;checkout&quot;: {&quot;enabled&quot;: 5, &quot;fired&quot;: 4, &quot;no_op&quot;: 1}
+}
+</code></pre>
+<p>各 action について、<code>enabled</code> は少なくとも1つの action 実体が enabled だった
+探索済みユニーク状態数、<code>fired</code> は実際に探索された成功したユニークな
+<code>(state, action 実体)</code> 辺の数、<code>no_op</code> は後続状態が元状態と等しい fired 辺の部分集合
+です。これは verdict や solver metric ではなく、診断用のカバレッジエビデンスです。
+有界実行は最終深さの enabled 状態を含みますが、その出辺は発火できないため、
+<code>enabled</code> と <code>fired</code> は一致するとは限りません。explicit BFS が正準状態と action 実体を
+それぞれ一度だけ訪れるためプロファイルは決定的です。<code>--engine auto</code> では
+<code>engine:"explicit"</code> が結果を判定した場合にだけ含まれます。symbolic BMC と induction の
+結果には <code>action_profile</code> は含まれません。</p>
 <p><code>reachable_failed</code> については、各 <code>unreached</code> エントリは以下を運びます:</p>
 <pre><code class="language-json">{
   &quot;name&quot;: &quot;SoldOut&quot;,
@@ -1225,15 +1277,30 @@ fsl 以外のフェンス付きブロック(<code>```python</code> など)は無
 literate な <code>.md</code> はこの方法で <code>.fsl</code> ファイルを <code>use</code>/compose できますが、別の
 <code>.md</code> ファイルを compose のターゲットにすることはサポートされません。</p>
 <p>このフェンス抽出を行うのは <code>check</code>・<code>verify</code>・<code>scenarios</code> の 3 コマンドだけです。
-仕様パスを読み取る他のすべてのコマンド(<code>lint</code>・<code>migrate</code>・<code>fmt</code>・<code>kernel</code>・
-<code>conformance</code>・<code>explain</code>・<code>mutate</code>・<code>typestate</code>・<code>testgen</code>・<code>html</code>・<code>ledger</code>・
-<code>analyze</code>・<code>diff</code>・<code>refine</code>・<code>replay</code>・<code>sweep</code>、および
+仕様パスを読み取る他のほとんどのコマンド(<code>lint</code>・<code>migrate</code>・<code>fmt</code>・<code>kernel</code>・
+<code>conformance</code>・<code>explain</code>・<code>mutate</code>・<code>typestate</code>・<code>testgen</code>・<code>testplan</code>・<code>html</code>・<code>ledger</code>・
+<code>analyze</code>・<code>diff</code>・<code>refine</code>・<code>replay</code>・<code>sweep</code>・<code>counterexample export</code>・
+<code>db check</code>/<code>observe</code>・<code>compat check</code>・<code>domain check</code>/<code>analyze</code>/<code>expand</code>/<code>generate</code>/<code>replay</code>/<code>testgen</code>・
+<code>ai check</code>/<code>replay</code>/<code>compat</code>・
+<code>causal check</code>/<code>analyze</code>/<code>diff</code>/<code>ledger</code>/<code>observe-expectations</code>/<code>verify-expectations</code>、および
 <code>document generate</code>/<code>claims</code>/<code>check</code>)は、<code>.md</code> 入力を代わりに入力種別の誤りとして
 拒否します: <code>result: "error"</code>、<code>kind: "usage"</code>、
 <code>diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"</code>、対応コマンドを挙げたメッセージ、
 そして仕様上の位置ではなく入力ファイル自体を指す <code>loc</code> です。これにより、非対応
 コマンドに渡された Markdown ドキュメントが、その Markdown 自身の最初の非 fsl 文字の
-位置にある仕様の構文エラーとして誤報されることを防ぎます。</p></div></details>
+位置にある仕様の構文エラーとして誤報されることを防ぎます。<code>chain</code>(位置引数は
+プロジェクトマニフェストであり仕様ではない)と<code>db import</code>(位置引数は SQL/Prisma
+スキーマ成果物)は、この意味での仕様パスコマンドではありません。
+<code>approval create</code>は<code>spec.path</code>が<code>.md</code>のレコードを生成できません(実測:
+<code>approval create &lt;.md&gt; --kind requirements_document|ledger ...</code>はレコード
+書き込み前に<code>FSL-PARSE</code>で失敗)。<code>approval check</code>/<code>diff</code>はレコードの
+<code>spec.path</code>が位置引数と一致するとき位置引数を FSL 仕様としてパースし、同じ
+<code>1:2</code>の誤報を再現します(手作りレコードで実測); issue #980 まで除外。
+<code>ai eval</code>/<code>regress</code>/<code>drift</code>は独自の
+<code>load_ai_project</code> フロントエンドで <code>.md</code> を既にパースします(有効な literate AI
+project では成功し、それ以外は明確な意味エラー)ため、この変更の対象外です。各
+コマンドの除外理由の実測値は
+<code>rust/fslc/src/literate_access.rs</code> の <code>LITERATE_EXCLUDED</code> を参照してください。</p></div></details>
 <details id="8-recommended-workflow-make-proved-the-standard"><summary>8. 推奨ワークフロー: proved を標準にする<span class="tree-blurb"> — BMC から帰納法へ、proved を標準にする推奨ワークフロー。</span></summary><div class="tree-body"><ol>
 <li>spec を書く → <code>fslc check</code>(高速な構文/型のループ)</li>
 <li><code>fslc verify --depth 8</code> → violated ならトレースを使って直す。
@@ -1629,14 +1696,34 @@ fslc scenarios specs/order_system.fsl
 <td>実システムのイベントログ JSON を spec に対して検査する</td>
 </tr>
 <tr>
+<td><code>fslc counterexample export</code></td>
+<td>有界な安全性不変式の verifier 反例を閉じた <code>reproducer.v1</code> JSON アーティファクトとして export する(#885 slice 1; <code>replay-trace</code> / <code>testgen-trace</code> ではない)</td>
+</tr>
+<tr>
 <td><code>fslc testgen</code></td>
 <td>コンフォーマンステストのスキャフォールドを生成する — pytest(デフォルト)、Vitest(<code>--target vitest</code>)、Swift Testing(<code>--target swift</code>)、kotlin.test(<code>--target kotlin</code>)、Dart <code>package:test</code>(<code>--target dart</code>)、PHPUnit(<code>--target phpunit</code>)(実装を Adapter に結線する)</td>
+</tr>
+<tr>
+<td><code>fslc testplan</code></td>
+<td>bounded な <code>conformance</code> vector を、受理側だけでなく <code>testgen</code> が生成していなかった <code>requires_failed</code> 側も含めて、閉じた <code>test-plan.v1</code> JSON プランへ選択する。実装と同じ層の粒度の spec を渡すこと</td>
 </tr>
 </tbody>
 </table>
 <p>推奨ワークフロー: <strong>spec を <code>verify</code> / <code>prove</code> する → <code>testgen</code> でスキャフォールド
 を生成する → 実装を <code>Adapter</code> に結線する → テストを実行する</strong>。<code>Monitor</code> は
 ランダムウォークテストのオラクルとして使われます。</p>
+<p><strong>層の選び方:</strong> コンフォーマンステストは、検査対象の実装と<strong>同じ粒度の層</strong>の spec
+から生成する。上位層から流用してよいのは <strong><code>forbidden</code>(負例)シナリオだけ</strong>である。
+負例トレースは精緻化(refinement)のあとも健全だが、上位層の<strong>正例</strong>
+(<code>acceptance</code>、<code>cover</code>、ランダムウォークの witness)を下位実装のテストにそのまま使うと、
+正当に精緻化された実装を誤って落としうる。refinement は抽象モデルを下位が再現できるか
+を見る<strong>前向きシミュレーション</strong>であり、抽象側の正例トレースをすべて下位で再生できる
+ことを要求する<strong>逆向き再生</strong>ではないからである。<strong>例:</strong>
+<code>examples/refinement_chain/top.fsl</code> では初期 <code>TOpen</code> からすぐ <code>finish</code> できるが、
+<code>mid.fsl</code> では <code>MOpen → MReview</code> のあとでなければ <code>finish</code> できない。<code>ChainTop</code> の
+正例 <code>finish</code> トレースを <code>ChainMid</code> 実装のテストに使ってはならない。詳細は
+<code>docs/DESIGN-layers.md</code> を参照(refinement 連鎖の末端は design 層への testgen/replay;
+requirements の <code>acceptance</code> は<strong>その層</strong>の scenarios/testgen へ流れる)。</p>
 <p><code>testgen</code> は、言語非依存のシナリオ収集コア(<code>scenarios</code>)をターゲットごとの
 エミッタから分離しているので、同じシナリオが複数のハーネスへレンダリングされます。
 ネイティブ実装では、6 つのエミッタすべてが、Public Kernel v1、シナリオ JSON、
@@ -1654,6 +1741,13 @@ enabled な action が無くなればそこで止まります。<code>--depth</c
 これは FSL のどの契約も述べていない期待値です。<code>testgen</code> は代わりに、<code>verify</code> が
 返すのと同じ <code>result:"violated"</code> エンベロープ、終了コード、プロパティ、ステップ、
 再生可能なトレースで違反を報告し、ハーネスを書きません。</p>
+<p><code>fslc counterexample export</code>(reproducer slice 1)は <code>verify</code> と同じ有界検証を実行し、
+結果が<strong>安全性不変式</strong>違反のときだけ閉じた <code>reproducer.v1</code> JSON ファイルを
+<code>-o</code> で書き出します(必須)。stdout は violated な <code>verify</code> エンベロープに
+<code>reproducer.exported_to</code> を足したものであり、replay-trace / testgen-trace の
+入力ではありません。v1 では <code>leadsTo</code>、refinement 文書、induction/CTI、
+非決定的 <code>init</code>、不変式以外の違反を exit 2 で明示拒否します。stage-2 の
+<code>testgen --reproducer</code>(slice 2)は未実装です。</p>
 <ul>
 <li><code>--target pytest</code>(デフォルト): <code>fslc.runtime.Monitor</code> をインポートし、オラクル
   としてランダムウォークをライブで駆動する Python テストを出力します。</li>
@@ -1708,7 +1802,19 @@ fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # s
 fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self-contained kotlin.test scaffold
 fslc testgen specs/cart_v1.fsl --target dart -o cart_conformance_test.dart  # self-contained package:test scaffold
 fslc testgen specs/cart_v1.fsl --target phpunit -o CartConformanceTest.php  # self-contained PHPUnit scaffold
+fslc testplan specs/cart_v1.fsl --depth 4                     # 閉じた test-plan.v1 JSON を stdout へ
 </code></pre>
+<p><code>fslc testplan</code> は閉じた <code>test-plan.v1</code> ドキュメント
+(<code>schemas/fslc/kernel/test-plan.v1.schema.json</code>)を出力します。Kernel JSON と
+<code>conformance</code> JSON と同一の検査済みモデルから作るため、別スナップショット同士の
+vector が混ざることはありません。プランは<strong>選択であって判定ではありません</strong>。
+常に <code>formal_result: "not_run"</code>、<code>assurance_effect: "none"</code>、および
+<code>do_not_assume</code> を持ち、そこには「実装の正しさの証明ではない」「宣言した深さと
+有限スコープを超えて網羅的ではない」「選択被覆は完全性ではない」「<code>verify</code>・
+帰納法・<code>replay</code>・refinement を置き換えない」ことが記録されます。
+<code>layer_selection.requirement</code> は CLI ヘルプと同じ規則を繰り返します——
+実装と同じ FSL 層の粒度の spec を渡すこと、上位層からは forbidden(negative)
+シナリオのみを再利用すること。</p>
 <p>外部のコンパイラは、ネイティブの replay コントラクトを、閉じたバージョン付き JSON
 オブジェクト(<code>schemas/fslc/kernel/replay-trace.v1.schema.json</code>)として出力します:</p>
 <pre><code class="language-json">{&quot;$schema&quot;:&quot;https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json&quot;,&quot;schema_version&quot;:&quot;1.2.0&quot;,&quot;kernel_schema_version&quot;:&quot;1.0.0&quot;,&quot;spec&quot;:&quot;ShoppingCart&quot;,&quot;initial&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}},&quot;events&quot;:[{&quot;tick&quot;:1,&quot;action&quot;:null,&quot;params&quot;:{},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:1},&quot;cart&quot;:{&quot;0&quot;:0}}},{&quot;tick&quot;:2,&quot;action&quot;:&quot;add_to_cart&quot;,&quot;params&quot;:{&quot;u&quot;:0,&quot;i&quot;:0},&quot;state&quot;:{&quot;stock&quot;:{&quot;0&quot;:0},&quot;cart&quot;:{&quot;0&quot;:1}}}]}
@@ -2004,19 +2110,26 @@ verify {
 <li><code>kpi NAME = count ENTITY in STAGE</code> は、business と requirements の両方における
   宣言的な射影です。ghost のカウンターや自動の <code>_kpi_*</code> invariant を作ることは
   ありません。</li>
-<li><code>implements</code> があると、<code>fslc verify</code> は<strong>上位レイヤーへの refine も同時に実行</strong>
-  し、結果は <code>implements: {abs, result}</code> を運びます。値は
-  <code>refines</code> / <code>refinement_failed</code> / <code>impl_violated</code> のいずれかです。<strong>この判定は
-  このフィールドにしか現れません。トップレベルの <code>result</code> にも exit code にも
-  畳み込まれない</strong>ため、seam が壊れていても <code>result:"ok"</code>/<code>"verified"</code> と exit 0 を
-  返します — 上の exit code 表の唯一の例外であり、<code>implements</code> が表に無い理由です。
-  <code>implements.result == "refines"</code> でゲートするか、<code>fslc chain</code> を使ってください
-  (chain はまさにこのゲートをレイヤーに適用し exit 1 します。
-  <code>docs/DESIGN-design-family.md</code> がオーケストレータ向けに同じ規則を述べています)。
-  スタンドアロンの <code>fslc refine</code> は <code>refinement_failed</code> で exit 1 します。
-  黙るのはインラインの seam だけです。空のボディ
-  (<code>implements X from "..." { }</code>)は、process/action/stage の名前が一致するとき、
-  恒等の refinement を自動生成します。<code>implements { }</code> ブロックの内側には、状態の
+<li><code>implements</code> があると、<code>fslc check</code> と <code>fslc verify</code> はどちらも上位レイヤーへの refinement も
+  実行し、結果は <code>implements: {abs, result}</code> を持ちます。値は <code>refines</code> / <code>refinement_failed</code> /
+  <code>impl_violated</code> の3つです。<strong>失敗した seam はこのフィールドの中に閉じません。</strong>
+  <code>refines</code> のときはコマンド自身の top-level <code>result</code> と exit code をそのまま保ちます。
+  どちらの失敗値も<strong>そのまま</strong> top-level <code>result</code> になり（<code>refinement_failed</code> は
+  <code>refinement_failed</code>、<code>impl_violated</code> は <code>impl_violated</code>。両者はどちらの階層でも区別できます）、
+  process は 1 で終了します。これは standalone の <code>fslc refine</code> が <code>refinement_failed</code> に対して
+  既に使っているクラスと同じです。seam 固有の証拠は <code>implements.violation</code> に残ります（ただし <code>--vacuity error</code> は封筒全体を自身の <code>error</code> 結果へ置き換え、<code>implements</code> を引き継ぎません）。
+  <code>fslc chain</code> は同じゲートをレイヤーへ適用して 1 で終了します
+  （<code>docs/DESIGN-design-family.md</code> がオーケストレーター向けに同じ規則を述べています）。
+  呼び出し側が inline seam のために独自の第二のゲートを持つ必要はなくなりました。
+  空のボディ（<code>implements X from "..." { }</code>）は、process / action / stage の名前が一致するとき
+  恒等の refinement を自動生成します。<code>verify</code> が <code>--property</code>、<code>--exclude-property</code>、
+  または <code>--from-state</code> でスコープされている run では inline refinement は評価されず、
+  封筒から <code>implements</code> は省略されます。<strong>したがってスコープされた run で seam を
+  ゲートすることはできません</strong>——<code>implements</code> が無いので、<code>result</code> と exit code は
+  選択されたプロパティについてしか述べておらず、壊れた seam はその run を通過します。
+  スコープ無しの <code>check</code> / <code>verify</code>、または <code>fslc chain</code> でゲートしてください。
+  この3つのオプションが refinement を射影すべきか、省略した理由を記録すべきかは未決です
+  （<a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>）。<code>implements { }</code> ブロックの内側には、状態の
   <code>map</code> エントリ、<code>maps auto</code>、<code>preserve progress</code>、そして — #73 以降 —
   <code>action &lt;impl_act&gt;(&lt;params&gt;) -&gt; &lt;abs_act&gt;(&lt;args&gt;) | stutter</code> を書きます。これは
   別の refinement ファイルの <code>refinement_action</code>
@@ -2500,7 +2613,13 @@ fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 そして <code>fslc ai compat</code> は、1 つの <code>ai_component</code>、またはプロジェクトが
 宣言するすべての <code>ai_component</code> について有限の <code>dbsystem artifact</code>
 ケイパビリティプロファイルを出力し、AI ではない入力や <code>ai_component</code> を
-1 つも宣言しない AI プロジェクトは拒否します（exit 2）。これらはすべて
+1 つも宣言しない AI プロジェクトは拒否します（exit 2）。<code>fslc ai check</code>、
+<code>fslc ai compat</code>、<code>fslc ai replay</code> が成功 verdict を返す前に、入力内のすべての
+<code>ai_component</code>（単体でもプロジェクト内でも）について、単体 <code>ai_component</code> に対する
+<code>fslc verify</code> と同じ意味制約（<code>authority</code> が参照する未宣言 tool、未知の
+<code>check hard { rule ... }</code> 名）を検査します（exit 2、<code>kind:"semantics"</code>）。
+<code>fslc ai replay</code> のプロジェクト入力は <code>fslc ai check</code> と同じ checked パーサを使うため、
+壊れたプロジェクト構文は <code>replay_conformant</code> になりません。これらはすべて
 <code>formal_result:"not_run"</code> を使います。既知のエビデンス節文法
 （<code>min_samples</code>、<code>ci_lower</code>、<code>ci_upper</code>、点推定、<code>observed</code>、<code>drift</code>）の
 いずれにも一致しない <code>require</code> 節は、<code>fslc ai check</code> と <code>fslc check</code> の
@@ -2651,7 +2770,10 @@ DESIGN-*.md があります)。</p>
   拡張)。要件ごとのキル数とこの警告は、選択されたミュータント集合と深さの中で
   観測された下界です。acceptance と forbidden の kill は、失敗した trace 宣言の
   明示的な requirement annotation を使います。AC/FB case ID は暗黙の requirement
-  ではなく、trace case ID は宣言種別ごとに一意です。→
+  ではなく、trace case ID は宣言種別ごとに一意です。<code>--oracle-attribution</code>
+  (opt-in) はミュータントごとの <code>killers</code> 配列と、oracle 表示名をキーにした
+  <code>by_obligation</code> の sole/shared 集計を追加します。既定出力は変わらず、これらの
+  カウントは観測された下界であり、完全性や正しさの尺度ではありません。→
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
 - <strong><code>fslc explain --readable</code></strong> — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement
@@ -2800,7 +2922,10 @@ claim ごとの <code>causal_support</code> を集約します: <code>untested</
 <code>challenged</code>、<code>inconclusive</code>、<code>mixed</code>、<code>unsupported_by_current_evidence</code>。
 現行 claim version を pin し、scope が claim scope を <code>subsumes</code> し、
 freshness が宣言され、lifecycle が <code>active</code> で、観測 window が claim の最小
-lag 以上の artifact だけが票になります。同一 source lineage は 1 票に
+lag 以上の artifact だけが票になります。換算できない観測 window、または claim の
+lag が <code>unknown</code> で比較する <code>lag_min</code> が無い場合は、timing eligibility が評価不能に
+なります: その edge は履歴とグラフには残りますが、<code>evidence_timing_not_evaluable</code>
+で current support から除外され、票を投じません。同一 source lineage は 1 票に
 collapse されます(lineage 内の矛盾は <code>inconclusive</code>)。staleness は明示的な
 <code>--as-of</code> 日付に対してだけ判定され、実行環境の時計は決して使いません。
 claim 側または artifact 側の片方だけに存在する scope dimension は

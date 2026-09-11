@@ -3,7 +3,7 @@
 
 """Regression coverage for `decreases sum(...)` (#91).
 
-`docs/LANGUAGE.md` and `skills/fsl/reference.md` wrongly claimed no `sum()`
+`docs/LANGUAGE.md` and `skills/fsl/references/syntax.md` wrongly claimed no `sum()`
 aggregate is usable in a ranking `decreases` measure, steering readers to
 hand-written sums (`decreases level[0] + level[1]`) that only scale to
 domains small enough to enumerate by hand. The kernel's bounded

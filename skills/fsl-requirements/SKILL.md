@@ -10,8 +10,8 @@ FSL file. The deliverable is a requirements contract that development can consum
 requirement IDs, source text, operations, guards, acceptance criteria, forbidden
 flows, and optional conformance to an upper business layer.
 
-Before writing syntax, read `../fsl/SKILL.md` and `../fsl/reference.md` for the
-shared FSL verifier workflow and language rules. When working inside this
+Before writing syntax, read `../fsl/SKILL.md`, then use its reference index to
+load only the needed language and verifier detail. When working inside this
 repository, read `examples/pm/`, `examples/layers/return_system.fsl`, and
 `examples/e2e/2_requirements.fsl` for the requirements dialect. Read
 `examples/nfr/` only when SLA/deadline behavior is in scope.
@@ -152,10 +152,9 @@ skill produced.
   or API shape unless the source explicitly requires them.
 - A green `implements` result means the requirements contract conforms to the
   agreed business layer. It does not prove any design or implementation. Green
-  means `implements.result == "refines"` in the result JSON: the seam's verdict
-  is not folded into the top-level `result` or the exit code, so a
-  `refinement_failed` / `impl_violated` seam still exits 0 on `check`/`verify`.
-  Assert the field, or gate with `fslc chain`.
+  means `implements.result == "refines"` in the result JSON. A
+  `refinement_failed` / `impl_violated` seam makes `check`/`verify` exit 1 with
+  that value at the top level. Assert the field, or gate with `fslc chain`.
 - When a counterexample suggests a repair, decide whether it is a missing
   requirement, a wrong interpretation, or an intentional exception before changing
   guards or invariants.

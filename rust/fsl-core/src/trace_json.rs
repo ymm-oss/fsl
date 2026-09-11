@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value, json};
 
@@ -81,6 +81,13 @@ pub fn fsl_value_json(value: &FslValue) -> Value {
         FslValue::Bool(value) => json!(value),
         FslValue::Enum { member, .. } => json!(member),
         FslValue::None => Value::Null,
+        // State values cannot contain an Option around a struct or collection,
+        // so an untyped value can identify a nested Option from its payload.
+        // Keep the legacy scalar bytes, but retain the outer presence bit when
+        // that payload is itself an Option.
+        FslValue::Some(value) if matches!(value.as_ref(), FslValue::None | FslValue::Some(_)) => {
+            json!({"kind":"some", "value":fsl_value_json(value)})
+        }
         FslValue::Some(value) => fsl_value_json(value),
         FslValue::Struct { fields, .. } => Value::Object(
             fields
@@ -134,14 +141,17 @@ fn format_value(model: &KernelModel, value: &FslValue, ty: &TypeRef) -> String {
         FslValue::Int(value) => value.to_string(),
         FslValue::Bool(value) => value.to_string(),
         FslValue::Enum { member, .. } => member.clone(),
-        FslValue::None => "null".to_owned(),
-        FslValue::Some(value) => format_value(
-            model,
-            value,
-            match ty {
-                TypeRef::Option(inner) => inner,
-                _ => ty,
-            },
+        FslValue::None => "none".to_owned(),
+        FslValue::Some(value) => format!(
+            "some({})",
+            format_value(
+                model,
+                value,
+                match ty {
+                    TypeRef::Option(inner) => inner,
+                    _ => ty,
+                },
+            )
         ),
         FslValue::Struct { type_name, fields } => {
             let declared = model.struct_fields(type_name).unwrap_or(&[]);
@@ -267,10 +277,7 @@ pub fn trace_json(model: &KernelModel, trace: &[TraceStep]) -> Value {
                         trace.get(entry.step.saturating_sub(1)).map_or_else(
                             || Value::Object(Map::new()),
                             |previous| {
-                                Value::Object(compute_changes(
-                                    &state_json(&previous.state),
-                                    &state_json(&entry.state),
-                                ))
+                                Value::Object(compute_changes(&previous.state, &entry.state))
                             },
                         ),
                     );
@@ -281,34 +288,100 @@ pub fn trace_json(model: &KernelModel, trace: &[TraceStep]) -> Value {
     )
 }
 
-fn compute_changes(previous: &Value, current: &Value) -> Map<String, Value> {
-    fn walk(path: &str, previous: &Value, current: &Value, out: &mut Map<String, Value>) {
+fn compute_changes(
+    previous: &BTreeMap<String, FslValue>,
+    current: &BTreeMap<String, FslValue>,
+) -> Map<String, Value> {
+    fn insert_change(
+        path: &str,
+        previous: Option<&FslValue>,
+        current: Option<&FslValue>,
+        out: &mut Map<String, Value>,
+    ) {
+        out.insert(
+            path.to_owned(),
+            json!({
+                "from": previous.map_or(Value::Null, fsl_value_json),
+                "to": current.map_or(Value::Null, fsl_value_json),
+            }),
+        );
+    }
+
+    fn walk(
+        path: &str,
+        previous: Option<&FslValue>,
+        current: Option<&FslValue>,
+        out: &mut Map<String, Value>,
+    ) {
         if previous == current {
             return;
         }
-        if let (Value::Object(previous), Value::Object(current)) = (previous, current) {
-            let mut keys = previous.keys().chain(current.keys()).collect::<Vec<_>>();
-            keys.sort_unstable();
-            keys.dedup();
+
+        // Option values are atomic public values. In particular, do not
+        // descend into the canonical {kind,value} encoding: those fields can
+        // also occur in a legal struct and are not logical state paths.
+        if matches!(previous, Some(FslValue::None | FslValue::Some(_)))
+            || matches!(current, Some(FslValue::None | FslValue::Some(_)))
+        {
+            insert_change(path, previous, current, out);
+            return;
+        }
+
+        if let (
+            Some(FslValue::Struct {
+                fields: previous, ..
+            }),
+            Some(FslValue::Struct {
+                fields: current, ..
+            }),
+        ) = (previous, current)
+        {
+            let keys = previous
+                .keys()
+                .chain(current.keys())
+                .collect::<BTreeSet<_>>();
             for key in keys {
-                let next = if path.is_empty() {
-                    key.clone()
-                } else {
-                    format!("{path}[{key}]")
-                };
                 walk(
-                    &next,
-                    previous.get(key).unwrap_or(&Value::Null),
-                    current.get(key).unwrap_or(&Value::Null),
+                    &format!("{path}[{key}]"),
+                    previous.get(key),
+                    current.get(key),
                     out,
                 );
             }
-        } else if !path.is_empty() {
-            out.insert(path.to_owned(), json!({"from": previous, "to": current}));
+            return;
         }
+
+        if let (Some(FslValue::Map(previous)), Some(FslValue::Map(current))) = (previous, current) {
+            let keys = previous
+                .keys()
+                .chain(current.keys())
+                .collect::<BTreeSet<_>>();
+            for key in keys {
+                walk(
+                    &format!("{path}[{}]", map_key(key)),
+                    previous.get(key),
+                    current.get(key),
+                    out,
+                );
+            }
+            return;
+        }
+
+        insert_change(path, previous, current, out);
     }
 
     let mut changes = Map::new();
-    walk("", previous, current, &mut changes);
+    let keys = previous
+        .keys()
+        .chain(current.keys())
+        .collect::<BTreeSet<_>>();
+    for key in keys {
+        walk(
+            &display_name(key),
+            previous.get(key),
+            current.get(key),
+            &mut changes,
+        );
+    }
     changes
 }

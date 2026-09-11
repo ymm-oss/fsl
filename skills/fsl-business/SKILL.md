@@ -9,8 +9,8 @@ Use this skill to turn business process material into a `business Name { ... }`
 FSL file. Keep the output at the business/consulting level: process stages,
 business transitions, policies, KPIs, goals, and control preservation evidence.
 
-Before writing syntax, read `../fsl/SKILL.md` and `../fsl/reference.md` for the
-shared FSL verifier workflow and language rules. When working inside this
+Before writing syntax, read `../fsl/SKILL.md`, then use its reference index to
+load only the needed language and verifier detail. When working inside this
 repository, read `examples/consulting/` for As-Is/To-Be work,
 `examples/pm/cancel_flow.fsl` for a PM-friendly business flow, and
 `examples/e2e/1_business.fsl` when this business layer will be chained downstream.
@@ -86,5 +86,5 @@ the work to `fsl-requirements` or `fsl-design` after the business layer is agree
   that only a later weakening could satisfy.
 - The business spec is the readable, verified process document — consultants and
   reviewers read the `.fsl` (or its `fslc explain --readable` rendering) directly
-  instead of a separate prose write-up. See `skills/fsl/reference.md` → "Authoring
+  instead of a separate prose write-up. See `skills/fsl/references/layers.md` → "Authoring
   specs as readable documentation" for the shared tagging/ID conventions.

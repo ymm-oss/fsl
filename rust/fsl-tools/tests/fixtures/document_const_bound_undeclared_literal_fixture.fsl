@@ -1,0 +1,15 @@
+// Issue #993. Undeclared number name with integer-literal bounds must still
+// project via the literal fallback path.
+//
+// Detector cited for the mutation "return `Err` when `KernelModel::types` has
+// no entry for the name" — that implementation turns this input's exit 0 into
+// exit 2 and the test fails. It is a *preservation control* with respect to
+// reverting this issue's change: every bound here is an integer literal, so
+// the pre-fix projector produces byte-identical output (measured: exit 0,
+// `Amount 0..2` + `Ghost 1..3`). Do not cite it as a detector for the revert.
+requirements UndeclaredLiteralBound {
+  number Amount
+  state { amount: Amount }
+  init { amount = 0 }
+}
+verify { values Amount = 0..2; values Ghost = 1..3 }

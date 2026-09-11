@@ -6,7 +6,6 @@ from fnmatch import fnmatchcase
 import json
 import os
 from pathlib import Path
-import runpy
 import subprocess
 import sys
 from typing import Optional
@@ -122,6 +121,8 @@ def test_settings_use_project_root_and_protect_snapshot() -> None:
     assert commands
     assert all("${CLAUDE_PROJECT_DIR}" in command for command in commands)
     assert "Edit(/tests/snapshots/corpus_snapshot.json)" in settings["permissions"]["deny"]
+    assert all("fslc_check.py" not in command for command in commands)
+    assert all("changelog_reminder.py" not in command for command in commands)
 
 
 def test_session_start_returns_bounded_context() -> None:
@@ -158,40 +159,6 @@ def test_spdx_guard_checks_new_python_source(tmp_path: Path) -> None:
     )
     proc = run_hook("spdx_guard.py", {"tool_input": {"file_path": str(source)}})
     assert proc.returncode == 0, proc.stderr
-
-
-def test_native_check_hook_ignores_non_fsl_edits() -> None:
-    proc = run_hook("fslc_check.py", {"tool_input": {"file_path": "README.md"}})
-    assert proc.returncode == 0
-    assert not proc.stderr
-
-
-def test_native_check_command_targets_rust_cli() -> None:
-    namespace = runpy.run_path(str(CLAUDE / "hooks" / "fslc_check.py"))
-    command = namespace["native_check_command"](ROOT, "specs/cart_v1.fsl")
-    assert command[:2] == ["cargo", "run"]
-    assert "fslc-rust" in command
-    assert command[command.index("--bin") + 1] == "fslc"
-    assert str(ROOT / "rust" / "Cargo.toml") in command
-    assert ".venv" not in " ".join(command)
-
-
-def test_changelog_reminder_covers_rust_and_python_product_paths() -> None:
-    namespace = runpy.run_path(str(CLAUDE / "hooks" / "changelog_reminder.py"))
-    needs_reminder = namespace["needs_reminder"]
-    assert needs_reminder(["rust/fsl-core/src/lib.rs"])
-    assert needs_reminder(["src/fslc/model.py"])
-    assert not needs_reminder(["rust/fsl-core/src/lib.rs", "CHANGELOG.md"])
-    assert not needs_reminder(["docs/README.md"])
-    # A notable change now lands as a new changelog.d/ fragment
-    # (docs/DESIGN-changelog-fragments.md), not a direct CHANGELOG.md edit.
-    # Unmigrated, this reminder would misfire on every fragment-only product
-    # change -- exactly the routine false positive the decision's reversal
-    # condition (a) treats as grounds for no-go.
-    assert not needs_reminder(
-        ["rust/fsl-core/src/lib.rs", "changelog.d/691-x.added.md"]
-    )
-    assert needs_reminder(["rust/fsl-core/src/lib.rs", "changelog.dx/691-x.added.md"])
 
 
 def test_active_task_is_worktree_local() -> None:

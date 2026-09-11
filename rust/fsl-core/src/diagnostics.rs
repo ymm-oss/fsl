@@ -4,7 +4,83 @@
 use fsl_syntax::{Annotations, MetaTag};
 use serde_json::{Map, Value, json};
 
-use crate::{KernelModel, TypeRef, display_name};
+use crate::dialect::{requirements_has_implements, requirements_trace_contract};
+use crate::{CoreError, KernelModel, TypeRef, display_name};
+
+/// Typed `kind` for the model-level "no user invariants" warning.
+pub const NO_USER_INVARIANTS_KIND: &str = "no_user_invariants";
+
+const NO_USER_INVARIANTS_MESSAGE: &str =
+    "spec declares no user invariants (only implicit type bounds are checked)";
+
+/// Source-aware inputs for finalizing model-level warnings.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ModelWarningContext<'a> {
+    pub model: &'a KernelModel,
+    pub has_forbidden: bool,
+    pub has_implements: bool,
+}
+
+impl<'a> ModelWarningContext<'a> {
+    /// Build the context needed to apply #961's safety-bearing suppression rule.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError`] when the source cannot be parsed as requirements metadata.
+    pub fn from_source(model: &'a KernelModel, source: &str) -> Result<Self, CoreError> {
+        let has_forbidden = requirements_trace_contract(source)?
+            .is_some_and(|contract| !contract.forbidden.is_empty());
+        let has_implements = requirements_has_implements(source)?;
+        Ok(Self {
+            model,
+            has_forbidden,
+            has_implements,
+        })
+    }
+}
+
+/// Whether safety-bearing declarations suppress the no-user-invariants warning.
+#[must_use]
+pub fn suppresses_no_user_invariants_warning(ctx: &ModelWarningContext<'_>) -> bool {
+    !ctx.model.invariants.is_empty()
+        || !ctx.model.transitions.is_empty()
+        || ctx.has_forbidden
+        || ctx.has_implements
+}
+
+/// Whether `warning` is the model-level no-user-invariants diagnostic.
+#[must_use]
+pub fn is_no_user_invariants_warning(warning: &Value) -> bool {
+    warning.get("kind").and_then(Value::as_str) == Some(NO_USER_INVARIANTS_KIND)
+        || warning.get("message").and_then(Value::as_str) == Some(NO_USER_INVARIANTS_MESSAGE)
+}
+
+/// Apply the shared #961 suppression rule to model-level warnings.
+#[must_use]
+pub fn finalize_model_warnings(
+    mut warnings: Vec<Value>,
+    ctx: &ModelWarningContext<'_>,
+) -> Vec<Value> {
+    if suppresses_no_user_invariants_warning(ctx) {
+        warnings.retain(|warning| !is_no_user_invariants_warning(warning));
+    }
+    warnings
+}
+
+/// Finalize warnings already attached to a CLI/Worker envelope.
+pub fn finalize_envelope_model_warnings(output: &mut Value, ctx: &ModelWarningContext<'_>) {
+    let Value::Object(envelope) = output else {
+        return;
+    };
+    if envelope.get("result").and_then(Value::as_str) == Some("error") {
+        return;
+    }
+    let Some(Value::Array(warnings)) = envelope.get_mut("warnings") else {
+        return;
+    };
+    let finalized = finalize_model_warnings(std::mem::take(warnings), ctx);
+    *warnings = finalized;
+}
 
 /// Return implementation versions for native and Worker check/verify envelopes.
 #[must_use]
@@ -40,13 +116,10 @@ pub fn model_warnings(model: &KernelModel) -> Vec<Value> {
             })
         })
         .collect::<Vec<_>>();
-    if model.invariants.is_empty()
-        && model.transitions.is_empty()
-        && model.reachables.is_empty()
-        && model.leadstos.is_empty()
-    {
+    if model.invariants.is_empty() && model.transitions.is_empty() {
         warnings.push(json!({
-            "message": "spec declares no user invariants (only implicit type bounds are checked)",
+            "kind": NO_USER_INVARIANTS_KIND,
+            "message": NO_USER_INVARIANTS_MESSAGE,
         }));
     }
     warnings

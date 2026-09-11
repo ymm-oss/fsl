@@ -8,6 +8,15 @@ use serde_json::json;
 
 const BUDGET: &str = "1000000";
 
+fn action_profile() -> serde_json::Value {
+    json!({
+        "advance": {"enabled": 2, "fired": 1, "no_op": 0},
+        "limited_reset": {"enabled": 1, "fired": 0, "no_op": 0},
+        "set_one": {"enabled": 1, "fired": 1, "no_op": 0},
+        "stutter": {"enabled": 2, "fired": 2, "no_op": 2},
+    })
+}
+
 fn repository_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -179,6 +188,30 @@ fn explicit_cli_exit_codes_cover_bounded_proved_violated_budget_and_semantics() 
     assert_eq!(status, 2);
     assert_eq!(vacuous_error["result"], "error");
     assert_eq!(vacuous_error["kind"], "vacuous_implication");
+}
+
+#[test]
+fn explicit_action_profile_is_deterministic_and_keeps_coverage_compatible() {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/explicit_action_profile.fsl");
+    let fixture = fixture.to_str().expect("UTF-8 fixture path");
+
+    let (first, first_status) = verify(fixture, "explicit", 1, &[]);
+    let (second, second_status) = verify(fixture, "explicit", 1, &[]);
+    assert_eq!(first_status, 0, "{first:#}");
+    assert_eq!(second_status, 0, "{second:#}");
+    assert_eq!(first["engine"], "explicit");
+    assert_eq!(first["action_profile"], action_profile());
+    assert_eq!(first["action_profile"], second["action_profile"]);
+    assert!(
+        first["action_coverage"]
+            .as_object()
+            .is_some_and(|coverage| coverage.values().all(serde_json::Value::is_boolean))
+    );
+
+    let (bmc, bmc_status) = verify(fixture, "bmc", 1, &[]);
+    assert_eq!(bmc_status, 0, "{bmc:#}");
+    assert!(bmc.get("action_profile").is_none());
 }
 
 #[test]

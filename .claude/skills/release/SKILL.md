@@ -99,8 +99,12 @@ a feature-flag system solely to accommodate this flow.
 ## Promote main to production
 
 1. Verify `production` is an ancestor of, or can be merged cleanly with, `main`.
-2. Freeze the candidate by recording the exact `main` SHA in the promotion pull
-   request. If unrelated changes land, rerun the gate or replace the candidate.
+2. Freeze the candidate by recording the exact `main` SHA. Follow the canonical
+   pinned-head and pre-/post-merge tree-identity procedure in
+   `docs/RELEASE.md` §2, steps 3–4: create the candidate branch at that SHA,
+   use it as the promotion pull request head, and perform both identity checks.
+   Do not open a moving `main -> production` pull request. If unrelated changes
+   land, rerun the gate or replace the candidate.
 3. Confirm the release commit preparation is already on `main`:
    - bump `rust/Cargo.toml`'s workspace version and regenerate `rust/Cargo.lock`
      with Cargo; do not bump the frozen `pyproject.toml` package for a native
@@ -119,15 +123,18 @@ a feature-flag system solely to accommodate this flow.
    `workflow_dispatch` is non-publishing and must never attach Release assets, even for a tag ref. Add
    focused formal, mutation, platform, or compatibility evidence when the
    changed contract requires it.
-5. Open `main -> production`. State the candidate SHA, version, included changes,
-   known residual risk, exact gates, and artifact evidence.
-6. Merge without squashing away the promoted history. Verify the resulting
-   `production` tree matches the approved `main` tree. Record the new production
-   merge SHA; it is distinct from the gated candidate SHA unless promotion was a
-   true fast-forward.
+5. Open the promotion pull request from the pinned candidate branch to
+   `production`. State the candidate SHA, version, included changes, known
+   residual risk, exact gates, and artifact evidence.
+6. Complete the canonical checks in `docs/RELEASE.md` §2, step 4 before and
+   after merge. Record the new production merge SHA; it is distinct from the
+   gated candidate SHA unless promotion was a true fast-forward.
 
 Do not merge newer `main` work into an open promotion implicitly. Close or update
-the promotion and rerun its evidence against the new SHA.
+the promotion and rerun its evidence against the new SHA. Before the next
+promotion, also follow `docs/RELEASE.md` §2's required v4.4.1 carry-forward:
+explicitly reapply `docs/DESIGN-nested-option-support.md` and verify that it
+exists on `production` after merge.
 
 ## Cut the release
 
@@ -161,6 +168,62 @@ After the promotion is approved and merged:
     tag/version assertion on every native runner.
 11. If publication has begun and a defect is found, fix it upstream, promote it,
     and cut a new patch version. Never rewrite the published release.
+
+## Classify a failed gate before retrying
+
+This is the sole classification rule for the release procedure. Apply it before
+calling a job failure transient or rerunning it; `docs/RELEASE.md` retains the
+command and publication contract.
+
+1. Record the exact commit, the binary that ran, and the run ID/status before
+   interpreting a failure. A run still in progress is not evidence from the
+   completed run; do not mix their observations.
+2. For a mutation lane, read the outcome classes before its exit code.
+   `outcomes.json` supplies the `CaughtMutant`, `MissedMutant`, `Timeout`, and
+   `Unviable` counts and per-phase durations; read `missed.txt` and
+   `timeout.txt` separately. A surviving mutant is a coverage defect, whereas
+   a timeout is a budget/performance observation.
+3. Compare a local failure with the same commit's completed CI run for the same
+   lane, and record both observed values. Do not conclude that a local failure
+   is a code defect before making that comparison.
+4. Classify the evidence and act on the matching branch:
+   - A missing release-procedure or release-bump-path requirement is a real
+     procedure defect. The v4.4.1 candidate exposed this when #906's
+     `rust/fslc/tests/goldens/induction_cli_contract.json` golden recorded the
+     version block; #914 added its regeneration step and the
+     `is_release_bump_path` entry in `tools/aggregate_changelog.sh`.
+   - A local timeout that does not reproduce in that CI lane is an environment
+     difference. The v4.4.1 local mutation run had 14 `Timeout`, 0
+     `MissedMutant`, 775 s mutant builds against the 600 s build timeout, and a
+     322 s baseline build; CI on the same commit had 55 tested, 47 caught, 8
+     unviable, and 0 timeouts. Record both sets of numbers. Never widen a
+     timeout or threshold to make a local gate pass: record the environment
+     difference instead.
+   - A `cancelled` job is not a failing job, but decide *why* it was cancelled
+     before rerunning: GitHub reports a job killed by its own
+     `timeout-minutes` as `cancelled`, not as a timeout. Compute the job's
+     elapsed time from its `startedAt` and `completedAt` and compare it with
+     that job's configured `timeout-minutes`.
+     - Elapsed well under the budget, and the aggregate's only non-success
+       input is the cancellation: transient. Rerun only failed jobs. On
+       `d9e9710`, one `native Z3 4.16 (windows-latest)` job was cancelled
+       while the other 15 jobs succeeded; `gh run rerun --failed` succeeded.
+     - Elapsed at the budget: this is a timeout wearing a cancellation label.
+       Rerunning without establishing why the job exceeded its budget repeats
+       it; `.github/workflows/ci.yml`'s `rust-native-z3` comment records six
+       consecutive scheduled `windows-latest` timeouts from 2026-08-07 through
+       2026-08-11, with cache absence as an observed material correlate. Establish the cause first, then rerun
+       at most once when the cause is known to have changed. On `ca2d5e7d`,
+       that job ran 06:45:55Z to 07:46:59Z — 61 minutes against
+       `.github/workflows/ci.yml`'s `timeout-minutes: 60` — with a cache key
+       (`v0-rust-rust-native-z3-Windows_NT-x64-368f6b88-...`) that had not
+       existed before the run, so it built cold. It saved that cache as it
+       exited, which is what made a single warm rerun worth attempting.
+       Never widen the budget to make the lane pass.
+   - A reproducing failure, a surviving non-equivalent mutant, or other failed
+     job is a defect until evidence establishes a different branch. Fix it
+     upstream and repeat the applicable release evidence; do not retag to
+     retry a different commit.
 
 ## Stabilize while main advances
 

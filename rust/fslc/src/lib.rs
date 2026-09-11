@@ -25,11 +25,17 @@ pub mod origin_coverage;
 // declared on the library side rather than as a `main.rs` bin module so the
 // corpus conservation sweep under `tests/` can defer to it instead of carrying
 // its own copy of the vocabulary -- integration tests link the library, not
-// the binary. `fsl-lsp` and `fsl-wasm` both depend on this crate with
-// `default-features = false`, so the gate leaves their surface unchanged.
-#[cfg(feature = "native-cli")]
+// the binary.
+//
+// It is no longer behind `native-cli`: `verification_output`'s inline
+// `implements` fold asks this module whether an envelope has already failed,
+// and `verification_output` is compiled for `fsl-lsp` and `fsl-wasm` too. The
+// alternative was a second copy of the classifier on the non-native side, which
+// is the drift this module exists to prevent. It depends on `serde_json` only,
+// so making it unconditional adds no dependency to those crates.
 pub mod outcome;
 pub mod replay_trace;
+pub mod reproducer;
 pub mod source_diagnostic;
 pub mod spec_load;
 pub mod verification_output;

@@ -14,17 +14,49 @@ violated). The default (no flag) output is byte-for-byte as before.
 
 ## 2. Two-way reconciliation (`strict_tag_warnings(spec, requirement_ids=None)`)
 
-1. **`untagged`**: user invariants / actions / leadsTo / reachable that have no `meta`
+1. **`untagged`**: user invariants / actions / trans / leadsTo / reachable that nothing tags
    (= fabrication candidates with no basis in an NL requirement). Including `MODEL: …` /
-   `ASSUME-n: …`, anything with some meta counts as tagged (the lint does not do prefix
-   judgment).
-2. **`unreferenced_requirement`**: declared requirement IDs that appear in no declaration tag,
-   acceptance ID, or forbidden ID (= omission candidates that were forgotten to be formalized).
+   `ASSUME-n: …`, anything counts as tagged (the lint does not do prefix judgment).
+   **What "nothing tags" means is where the two implementations differ.** Native asks whether the
+   declaration's annotation set is empty (`main.rs:5983`), so **any** annotation makes it tagged --
+   `@undecided` and `@kind` included, not only `@requirement`, because `Annotations::source_order`
+   returns every variant (`annotation.rs:166-185`, `:320-322`). The frozen Python reference asks
+   only whether the legacy `meta` slot is present (`model.py:1446`), having no annotation concept at
+   all (`DESIGN-annotations.md:129-136`). ⚠️ So neither "no requirement metadata" nor "no `meta`"
+   states the native criterion: an invariant carrying only `@undecided(...)` is **not**
+   reported.
+2. **`unreferenced_requirement`**: declared requirement IDs that no declaration and no
+   trace case references (= omission candidates that were forgotten to be formalized).
    - **Declared** = `--requirements ids.txt` (one ID per line) ∪ requirement-block IDs of the
      requirements dialect (auto-collected via `__requirement_ids` — this also catches an
      **empty requirement block** "declared but forgotten to formalize." Collection is essential
-     because the trace disappears after expansion).
-   - **Referenced** = the `meta.id` of every element ∪ acceptance IDs ∪ forbidden IDs.
+     because the trace disappears after expansion). **The native implementation does not perform
+     that auto-collection**: it treats the `--requirements` lines as the whole declared side
+     (#1020).
+   - **Referenced** = every requirement ID in the annotation set of a declaration whose
+     annotations lowering binds to a target key, plus every requirements trace case's own set.
+     Two channels union into each set -- the typed `@requirement(...)` annotation and the legacy
+     `"ID: text"` slot -- because lowering binds both to the same target
+     (`DESIGN-annotations.md:116-127`; `model.rs::collect_declaration_annotations` extends the
+     parsed annotations and binds the legacy `meta` to that same target). A trace case's own ID
+     is in its set because lowering synthesises it there (`dialect.rs::trace_case_annotations`),
+     so it needs no separate term. This replaces the `meta.id`-only wording this line used to
+     carry, which `DESIGN-annotations.md:116-127` had already superseded for the native side -- in
+     particular "acceptance/forbidden block annotations extend the trace case's own
+     `Requirement{id,text}` relation", which the old wording did not cover (#1001).
+     **This is the native contract.** The frozen Python reference still reconciles exactly the old
+     wording -- `meta.id` over the same five collections ∪ acceptance IDs ∪ forbidden IDs
+     (`model.py:1470-1477`) -- because it has no annotation concept at all
+     (`DESIGN-annotations.md:129-136`). So the old wording was not stale, it was accurate about the
+     frozen side; what it lacked was saying which side. That divergence is a consequence of the
+     freeze and is recorded there, unlike the `Declared` side above, where nothing recorded the gap
+     until #1020 -- which is the test for whether such a divergence needs an issue.
+   - Two limits of that definition, stated because neither follows from it. A `requirement`
+     block references only through the action/property targets its contents bind to, so an
+     **empty** requirement block references nothing. And the collector enumerates the model
+     collections that carry annotations, plus the trace cases: binding to a target key is
+     necessary, not sufficient, so a newly added annotation-bearing collection has to be added
+     to that enumeration.
 
 ## 3. Excluding generated elements (mandatory)
 

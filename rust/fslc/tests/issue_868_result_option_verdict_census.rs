@@ -307,10 +307,24 @@ const CLASSIFICATIONS: &[Classification] = &[
         ResultOption
     ),
     entry!(
+        Ordinary,
+        "rust/fsl-core/src/refinement.rs",
+        1268,
+        "requirements_implements_with_bounds",
+        ResultOption
+    ),
+    entry!(
         Verdict,
         "rust/fslc/src/verification_output.rs",
         253,
         "requirements_implements_output",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fslc/src/verification_output.rs",
+        322,
+        "requirements_implements_output_with_bounds",
         ResultOption
     ),
     entry!(
@@ -344,14 +358,7 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fslc/src/main.rs",
-        14760,
-        "validate_requirement_traces",
-        ResultTupleOption
-    ),
-    entry!(
-        Verdict,
-        "rust/fslc/src/main.rs",
-        14769,
+        14872,
         "validate_requirement_traces_from_source",
         ResultTupleOption
     ),
@@ -435,22 +442,22 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fslc/src/main.rs",
-        14790,
-        "governance_result",
+        14937,
+        "governance_result_from_source",
         ResultOption
     ),
     entry!(
         Verdict,
         "rust/fslc/src/main.rs",
-        14824,
-        "implements_result",
-        ResultOption
-    ),
-    entry!(
-        Verdict,
-        "rust/fslc/src/main.rs",
-        14839,
+        14968,
         "implements_result_from_source",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fslc/src/main.rs",
+        15592,
+        "implements_result_from_source_with_bounds",
         ResultOption
     ),
     entry!(
@@ -458,6 +465,16 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fsl-wasm/src/lib.rs",
         223,
         "governance_output",
+        ResultOption
+    ),
+    // `Ok(None)` means "this guard is not a parameter-vs-literal comparison",
+    // a structural non-match rather than a verdict, and every caller consumes
+    // it with `let ... else { continue }`.
+    entry!(
+        Ordinary,
+        "rust/fsl-tools/src/testplan.rs",
+        381,
+        "comparison_threshold",
         ResultOption
     ),
     entry!(
@@ -535,6 +552,7 @@ macro_rules! unresolved_ordinary {
 // shape. They are explicitly ordinary rather than silently omitted: a return
 // whose alias becomes relevant to optional verdicts must be reconsidered here.
 const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
+    unresolved_ordinary!("rust/fsl-core/src/domain.rs", 417, "build_normalize_scope"),
     unresolved_ordinary!("rust/fsl-core/src/domain_lowering.rs", 2712, "saga_scope"),
     unresolved_ordinary!(
         "rust/fsl-core/src/lib.rs",

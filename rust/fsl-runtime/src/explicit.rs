@@ -32,6 +32,19 @@ pub struct ExplicitReachableWitness {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use]
+pub struct ActionStats {
+    /// Number of unique explored states in which at least one instance of the
+    /// action was enabled.
+    pub enabled: usize,
+    /// Number of unique explored `(state, action instance)` transition edges
+    /// that completed without a verification violation.
+    pub fired: usize,
+    /// Number of fired edges whose successor state is identical to the source.
+    pub no_op: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use]
 pub struct ExplicitResult {
     pub spec: String,
     pub depth: usize,
@@ -45,6 +58,7 @@ pub struct ExplicitResult {
     pub deadlock_step: Option<usize>,
     pub deadlock_trace: Option<Vec<TraceStep>>,
     pub action_coverage: BTreeMap<String, bool>,
+    pub action_profile: BTreeMap<String, ActionStats>,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -110,6 +124,14 @@ pub fn deterministic_initial_state(model: &KernelModel) -> Result<State, Runtime
 /// # Errors
 ///
 /// Returns the same errors as [`verify_explicit`].
+///
+/// # Panics
+///
+/// Panics if an action the Monitor reported as enabled, or one it just stepped,
+/// is absent from `model.actions`. Both names come from the same model this
+/// function was handed, so either would mean the Monitor and the model had
+/// disagreed about which actions exist — a state the profile counters cannot be
+/// attributed under, and one no input can reach through the public API.
 #[allow(clippy::too_many_lines)]
 pub fn verify_explicit_selected(
     model: KernelModel,
@@ -155,6 +177,21 @@ pub fn verify_explicit_selected(
             .iter()
             .map(|action| (action.name.clone(), false))
             .collect(),
+        action_profile: scratch
+            .model
+            .actions
+            .iter()
+            .map(|action| {
+                (
+                    action.name.clone(),
+                    ActionStats {
+                        enabled: 0,
+                        fired: 0,
+                        no_op: 0,
+                    },
+                )
+            })
+            .collect(),
     };
     let mut frontier = BTreeSet::from([initial_state.clone()]);
     let mut seen = BTreeSet::from([initial_state]);
@@ -190,6 +227,19 @@ pub fn verify_explicit_selected(
             let enabled = scratch.enabled()?;
             for instance in &enabled {
                 result.action_coverage.insert(instance.action.clone(), true);
+            }
+            // `enabled` may contain several parameter instances of one action;
+            // this counter deliberately measures states, not instances.
+            for action in enabled
+                .iter()
+                .map(|instance| &instance.action)
+                .collect::<BTreeSet<_>>()
+            {
+                result
+                    .action_profile
+                    .get_mut(action)
+                    .expect("enabled action belongs to the model")
+                    .enabled += 1;
             }
             if enabled.is_empty() && result.deadlock_step.is_none() {
                 let terminal = match terminal_holds(&scratch) {
@@ -236,6 +286,18 @@ pub fn verify_explicit_selected(
                     return Ok(result);
                 }
                 let child_state = scratch.state.clone();
+                // A frontier state is unique and `Monitor::enabled` enumerates
+                // each action instance once, so this is exactly one unique
+                // `(state, action instance)` edge. Record it before child
+                // deduplication: distinct edges may converge on one child.
+                let stats = result
+                    .action_profile
+                    .get_mut(&instance.action)
+                    .expect("stepped action belongs to the model");
+                stats.fired += 1;
+                if child_state == *state {
+                    stats.no_op += 1;
+                }
                 if seen.contains(&child_state) {
                     continue;
                 }

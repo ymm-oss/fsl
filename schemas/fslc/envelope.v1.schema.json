@@ -8,6 +8,10 @@
     "fsl": { "const": "1.0" },
     "result": { "type": "string", "minLength": 1 },
     "cost": { "$ref": "#/$defs/verificationCost" },
+    "action_profile": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/actionProfile" }
+    },
     "versions": {
       "type": "object",
       "additionalProperties": false,
@@ -85,6 +89,16 @@
         "name": { "type": "string", "minLength": 1 },
         "checks": { "type": "integer", "minimum": 1 },
         "elapsed_s": { "type": "number", "minimum": 0 }
+      }
+    },
+    "actionProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "fired", "no_op"],
+      "properties": {
+        "enabled": { "type": "integer", "minimum": 0 },
+        "fired": { "type": "integer", "minimum": 0 },
+        "no_op": { "type": "integer", "minimum": 0 }
       }
     },
     "nullableCount": {

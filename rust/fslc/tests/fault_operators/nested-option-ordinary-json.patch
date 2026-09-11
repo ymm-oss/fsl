@@ -1,0 +1,11 @@
+diff --git a/rust/fsl-core/src/trace_json.rs b/rust/fsl-core/src/trace_json.rs
+--- a/rust/fsl-core/src/trace_json.rs
++++ b/rust/fsl-core/src/trace_json.rs
+@@ -85,6 +85,6 @@ pub fn fsl_value_json(value: &FslValue) -> Value {
+         // Keep the legacy scalar bytes, but retain the outer presence bit when
+         // that payload is itself an Option.
+-        FslValue::Some(value) if matches!(value.as_ref(), FslValue::None | FslValue::Some(_)) => {
++        FslValue::Some(value) if matches!(value.as_ref(), FslValue::Some(_)) => {
+             json!({"kind":"some", "value":fsl_value_json(value)})
+         }
+         FslValue::Some(value) => fsl_value_json(value),

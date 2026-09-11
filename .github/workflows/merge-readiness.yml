@@ -149,6 +149,9 @@ jobs:
         run: python -m pip install ".[dev]"
 
       - name: Test post-merge issue reconciliation
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: ./tools/check-merge-readiness.sh automation
 
       - name: Check changelog fragments (control 1, control 4)

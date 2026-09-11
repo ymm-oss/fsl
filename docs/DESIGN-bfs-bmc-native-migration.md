@@ -321,7 +321,7 @@ The safe removal sequence is:
    (`rust/fslc/tests/liveness_witness_replay.rs:124-147,167-242`). Do **not** delete
    `fsl-replay-actions` merely because BFS/BMC/scenarios are gone: the retained
    Python consumer still imports its path and executes it
-   (`tools/check_rust_leadsto_parity.py:22,70-100,148-155`). Remove the binary in
+   (`tools/check_rust_leadsto_parity.py:28,76-105,154-161`). Remove the binary in
    the cleanup that deletes that consumer, or after deliberately migrating the
    retained consumer to a production replay surface. This is a hard dependency,
    not optional cleanup.

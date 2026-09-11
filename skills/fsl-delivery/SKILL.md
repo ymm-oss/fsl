@@ -38,11 +38,11 @@ Before authoring a layer, read and follow the corresponding skill:
 - Cross-cutting dialect concerns — DB migration compatibility (`dbsystem`,
   `fslc db`), Functional DDD / async effects (`domain`, `fslc domain`), AI
   tool-boundary and agent contracts plus statistical evidence (`ai_component`/
-  `agent`, `fslc ai`): `../fsl/SKILL.md` → "Advanced features". These sit
+  `agent`, `fslc ai`): `../fsl/references/advanced.md`. These sit
   outside the business→requirements→design progression and are not stage-gated
   by this skill.
-- Syntax, verifier commands, JSON repair protocol: `../fsl/SKILL.md` and
-  `../fsl/reference.md`
+- Syntax, verifier commands, JSON repair protocol: `../fsl/SKILL.md`, then its
+  topic-specific references as needed
 
 Load only the skills needed for the current stage. Do not duplicate their syntax
 rules in this skill.
@@ -78,6 +78,12 @@ rules in this skill.
    - design refines requirements with an explicit mapping (`fslc refine`)
    - implementation conforms through generated tests or event-log replay
    - gate the whole chain at once with `fslc chain` when a manifest exists
+   - **testgen layer selection:** run `fslc testgen` on the spec at the **same
+     layer granularity as the implementation** (design `spec` for design-aligned
+     code). From upper layers, reuse **`forbidden` negatives only** — they stay
+     sound under refinement; upper **positive** scenarios can falsely fail a
+     sound refinement (see `../fsl/references/impl.md` §9 and
+     `examples/refinement_chain/{top,mid}.fsl`).
 6. Report proof categories separately. Never collapse "model is verified",
    "design refines requirements", and "implementation conforms" into one claim.
 
@@ -86,7 +92,7 @@ rules in this skill.
 | Stage | Deliverable | Required checks |
 |---|---|---|
 | Business | `business` spec with policies, KPIs, goals | check, verify, induction |
-| Requirements | `requirements` spec with REQ IDs, acceptance, forbidden, NFRs | check, verify, induction, scenarios; when `implements` is present, assert `implements.result == "refines"` in the JSON (or gate with `fslc chain`) — a failed business seam still exits 0 |
+| Requirements | `requirements` spec with REQ IDs, acceptance, forbidden, NFRs | check, verify, induction, scenarios; when `implements` is present, assert `implements.result == "refines"` in the JSON (or gate with `fslc chain`) — a failed seam exits 1 with top-level `refinement_failed` or `impl_violated` |
 | Design | kernel `spec` plus mapping to requirements | check, verify, induction, refine |
 | Implementation | Adapter or event log connected to real behavior | testgen pytest or replay; do not claim conformance before this |
 | Review/change | proposal spec or before/after contract | verify each side, refine against frozen contract, optional mutate/vacuity |
@@ -113,8 +119,8 @@ For high-risk contracts, add the more expensive checks:
   the stated interpretation.
 - A green requirements layer means the requirements model is internally
   consistent; if `implements` is green, it also preserves the business contract's
-  checked safety obligations. "Green" here means `implements.result == "refines"`
-  in the JSON — not exit 0, which stays 0 even when the seam fails.
+  checked safety obligations. "Green" here means `implements.result == "refines"` in the JSON — a failed seam exits 1 with
+  top-level `refinement_failed` or `impl_violated`, not a silent exit 0.
 - A green design layer means the design model is internally consistent.
 - A green `refine` means lower-layer observable behavior conforms to the upper
   contract for checked safety behavior.

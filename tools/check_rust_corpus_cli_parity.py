@@ -3,9 +3,15 @@
 
 """Compare stable Python/Rust CLI verdicts across the complete FSL corpus.
 
-Deletion deferred (F1): no native corpus control binds every
-``verify`` envelope result class to its process exit. Deletion requires that
-native control plus a rejecting mutation.
+Deletion deferred (docs/RUST-PORTING.md F1). ``rust/fslc/tests/
+corpus_check_sweep.rs``'s ``verify_result_and_exit_status_never_contradict``
+now binds every corpus ``verify`` result class to its process exit, with
+rejecting mutations calibrated in ``fault_operators/{unknown-result-to-
+success,failure-verdict-exits-zero}.patch``; #900 recorded this row as only
+partially closed, and this script did not track the residual scope down
+before this comment was last touched. Confirm that scope before retiring
+this script -- do not treat the native test landing as sufficient on its
+own.
 """
 from __future__ import annotations
 

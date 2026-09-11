@@ -4,9 +4,17 @@
 
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
-import tomllib
+import warnings
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +83,38 @@ def test_session_start_hook_is_root_relative_and_bounded() -> None:
     assert "## Active Task State" in proc.stdout
     assert str(ROOT) not in proc.stdout
     assert len(proc.stdout.splitlines()) <= 280
+
+
+def test_untrusted_checked_in_hook_entries_are_reported_locally() -> None:
+    user_config = Path.home() / ".codex" / "config.toml"
+    # Persisted hook trust is machine-local and absent in CI. Skip there rather
+    # than failing: this diagnostic reports local untrusted entries only, and a
+    # trust requirement would make every clean CI environment permanently red.
+    if not user_config.is_file():
+        pytest.skip("local Codex configuration is unavailable")
+
+    hooks_path = (CODEX / "hooks.json").resolve()
+    hooks = json.loads(hooks_path.read_text(encoding="utf-8"))["hooks"]
+    user_state = tomllib.loads(user_config.read_text(encoding="utf-8"))
+    trusted_entries = user_state.get("hooks", {}).get("state", {})
+    untrusted_entries = []
+
+    for event, groups in hooks.items():
+        event_key = re.sub(r"(?<!^)(?=[A-Z])", "_", event).lower()
+        for group_index, group in enumerate(groups):
+            for hook_index, _hook in enumerate(group["hooks"]):
+                state_key = f"{hooks_path}:{event_key}:{group_index}:{hook_index}"
+                if state_key not in trusted_entries:
+                    untrusted_entries.append(
+                        f"{event_key}:{group_index}:{hook_index}"
+                    )
+
+    if untrusted_entries:
+        warnings.warn(
+            "untrusted checked-in Codex hook entries (not a test failure): "
+            + ", ".join(untrusted_entries),
+            stacklevel=1,
+        )
 
 
 def test_task_skills_require_explicit_invocation() -> None:

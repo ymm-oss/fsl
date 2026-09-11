@@ -1,0 +1,13 @@
+diff --git a/rust/fsl-core/src/model.rs b/rust/fsl-core/src/model.rs
+--- a/rust/fsl-core/src/model.rs
++++ b/rust/fsl-core/src/model.rs
+@@ -671,8 +671,7 @@ impl ModelBuilder {
+                                 "state variable '{}' has unsupported state type",
+                                 field.name
+                             ))
+-                            .with_origin(origin)
+-                            .at(field.span));
++                            .with_origin(origin));
+                         }
+                         if let Some(initializer) = &field.initializer {
+                             if let Some(form) = unsupported_inline_form(initializer) {

@@ -6,7 +6,7 @@
 //! `dialect`, `evaluators`, `failure_modes`. `evaluators` and `failure_modes`
 //! were not merely unprojected: the Rust project parser did not descend into
 //! `evaluator` / `failure_mode` blocks at all, so the data did not exist.
-//! `skills/fsl/reference.md` states `failure_mode` is listed under
+//! `skills/fsl/references/syntax.md` states `failure_mode` is listed under
 //! `failure_modes`, so the skill promised agents output native never produced.
 //!
 //! Key presence alone cannot distinguish an empty array from a missing

@@ -118,8 +118,8 @@ fn every_spec_reading_command_reports_the_same_corrected_location() {
 
 #[test]
 fn an_unreadable_component_is_located_at_its_own_use_declaration() {
-    // Same class: the read failure carried `1:1`, which in the parent is the
-    // `compose` keyword rather than the import that failed.
+    // The parent `use` owns the public `loc`; the unreadable component owns no
+    // source location, so its message must not invent one.
     let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "issue-567-{}-{:?}",
         std::process::id(),
@@ -136,11 +136,11 @@ fn an_unreadable_component_is_located_at_its_own_use_declaration() {
     assert_eq!(status, 2, "{value}");
     assert_eq!(value["loc"]["line"], 2, "{value}");
     assert_eq!(value["loc"]["column"], 3, "{value}");
+    let message = value["message"].as_str().expect("message");
+    assert!(message.contains("absent.fsl"), "{value}");
     assert!(
-        value["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("absent.fsl")),
-        "{value}"
+        !message.contains("absent.fsl:"),
+        "unlocated component error fabricated a coordinate: {value}"
     );
 }
 

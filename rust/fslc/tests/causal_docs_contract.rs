@@ -27,7 +27,7 @@ fn normalized(relative: &str) -> String {
 
 #[test]
 fn skill_reference_states_the_review_only_hard_rule() {
-    let text = normalized("skills/fsl/reference.md");
+    let text = normalized("skills/fsl/references/impl.md");
     for required in [
         "never describe a causal claim, causal model, or expectation result as `proved`, `verified`, or otherwise formally established real-world causality",
         "`formal_assurance` (what the verifier checked) and `causal_support` (what external evidence says) are two separate axes",
@@ -37,7 +37,7 @@ fn skill_reference_states_the_review_only_hard_rule() {
         let required = required.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
             text.contains(&required),
-            "skills/fsl/reference.md must contain: {required}"
+            "skills/fsl/references/impl.md must contain: {required}"
         );
     }
 }

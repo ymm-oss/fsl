@@ -5,7 +5,7 @@ description: Author a new or substantially changed .fsl spec and take it through
 
 # Author a meaningful FSL spec
 
-Read `skills/fsl/reference.md` before writing syntax. Use the working-tree native prefix:
+Read `skills/fsl/SKILL.md` and only its relevant topical reference before writing syntax. Use the working-tree native prefix:
 
 ```text
 cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --

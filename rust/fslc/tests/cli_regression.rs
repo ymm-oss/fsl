@@ -201,15 +201,112 @@ fn native_check_accepts_a_bounded_map_key() {
 }
 
 #[test]
-fn native_check_accepts_nested_bounded_map_keys() {
+fn native_check_rejects_nested_bounded_map_values_with_a_located_state_type_contract() {
     let (value, status) = run_cli(&[
         "check",
-        "rust/fslc/tests/fixtures/map_nested_bounded_key_accepted.fsl",
+        "rust/fslc/tests/fixtures/map_nested_bounded_value_rejected.fsl",
     ]);
 
-    assert_eq!(status, 0, "{value}");
-    assert_eq!(value["result"], "ok");
-    assert!(value["warnings"].as_array().is_some_and(Vec::is_empty));
+    assert_eq!(status, 2, "{value}");
+    assert_eq!(value["result"], "error");
+    assert_eq!(value["kind"], "type");
+    assert_eq!(
+        value["message"],
+        "state variable 'm' has unsupported state type"
+    );
+    assert_eq!(value["loc"], serde_json::json!({"line": 7, "column": 5}));
+    assert_eq!(
+        value["hint"],
+        "state types allow scalars, nested Option around a scalar, structs with those fields, Map<bounded scalar, scalar-or-nested-Option-or-struct>, Set<bounded scalar>, Seq<scalar,N>, and bounded-scalar relations; Option cannot wrap a collection or struct"
+    );
+}
+
+#[test]
+fn unsupported_nested_option_payloads_fail_check_with_locations() {
+    const STATE_HINT: &str = "state types allow scalars, nested Option around a scalar, structs with those fields, Map<bounded scalar, scalar-or-nested-Option-or-struct>, Set<bounded scalar>, Seq<scalar,N>, and bounded-scalar relations; Option cannot wrap a collection or struct";
+    const STRUCT_HINT: &str = "struct fields must be a scalar (domain type, enum, Bool, Int) or nested Option around a scalar; use a separate Map for Set, Map, Seq, relation, or struct fields";
+    let directory = std::env::temp_dir().join(format!(
+        "fslc-nested-option-payloads-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).expect("create nested Option fixture directory");
+
+    for (position, payload) in [
+        ("state", "Inner"),
+        ("state", "Set<Bit>"),
+        ("state", "Map<Key, Bit>"),
+        ("state", "Seq<Bit, 1>"),
+        ("state", "relation Key -> Key"),
+        ("struct", "Inner"),
+        ("struct", "Set<Bit>"),
+        ("struct", "Map<Key, Bit>"),
+        ("struct", "Seq<Bit, 1>"),
+        ("struct", "relation Key -> Key"),
+        ("map_value", "Inner"),
+        ("map_value", "Set<Bit>"),
+        ("map_value", "Map<Key, Bit>"),
+        ("map_value", "Seq<Bit, 1>"),
+        ("map_value", "relation Key -> Key"),
+    ] {
+        let (source, name, expected_location, hint, message) = match position {
+            "state" => (
+                format!(
+                    "spec Unsupported {{\n  type Bit = 0..1\n  type Key = 0..1\n  struct Inner {{ value: Bit }}\n  state {{\n    value: Option<{payload}>\n  }}\n}}\n"
+                ),
+                "value",
+                serde_json::json!({"line": 6, "column": 5}),
+                STATE_HINT,
+                "state variable",
+            ),
+            "struct" => (
+                format!(
+                    "spec Unsupported {{\n  type Bit = 0..1\n  type Key = 0..1\n  struct Inner {{ value: Bit }}\n  struct Outer {{\n    value: Option<{payload}>\n  }}\n  state {{ outer: Outer }}\n}}\n"
+                ),
+                "Outer.value",
+                serde_json::json!({"line": 5, "column": 3}),
+                STRUCT_HINT,
+                "struct field",
+            ),
+            "map_value" => (
+                format!(
+                    "spec Unsupported {{\n  type Bit = 0..1\n  type Key = 0..1\n  struct Inner {{ value: Bit }}\n  state {{\n    values: Map<Key, Option<{payload}>>\n  }}\n}}\n"
+                ),
+                "values",
+                serde_json::json!({"line": 6, "column": 5}),
+                STATE_HINT,
+                "state variable",
+            ),
+            _ => unreachable!("listed unsupported nested Option position"),
+        };
+        let path =
+            directory.join(format!("{position}-{payload}.fsl").replace(['<', '>', ',', ' '], "_"));
+        std::fs::write(&path, source).expect("write nested Option fixture");
+        let path = path.to_str().expect("UTF-8 fixture path");
+        let (value, status) = run_cli(&["check", path]);
+
+        assert_eq!(status, 2, "{position} Option<{payload}>: {value}");
+        assert_eq!(value["result"], "error", "{position} Option<{payload}>");
+        assert_eq!(value["kind"], "type", "{position} Option<{payload}>");
+        assert_eq!(
+            value["message"],
+            format!(
+                "{message} '{name}' has {}",
+                if position == "struct" {
+                    "non-scalar type"
+                } else {
+                    "unsupported state type"
+                }
+            ),
+            "{position} Option<{payload}>"
+        );
+        assert_eq!(value["hint"], hint, "{position} Option<{payload}>");
+        assert_eq!(
+            value["loc"], expected_location,
+            "{position} Option<{payload}>"
+        );
+    }
+
+    std::fs::remove_dir_all(directory).expect("remove nested Option fixture directory");
 }
 
 #[test]
@@ -839,4 +936,121 @@ fn native_cli_preserves_induction_outcomes() {
     assert_eq!(cti["invariant"], "Sync");
     assert_eq!(cti["completeness"], "bounded");
     assert!(cti["cost"]["solver"]["checks"].as_u64().unwrap_or(0) > 0);
+}
+
+const STRICT_TAG_UNREFERENCED_HINT: &str =
+    "no declaration tag, acceptance, or forbidden block references this requirement ID";
+const STRICT_TAG_UNTAGGED_HINT: &str = "tag the declaration with a typed annotation such as @requirement(\"REQ-SCOPE-001\", \"original requirement\"); use a MODEL-/ASSUME-prefixed id for modeling intent, or process `covers` in the business/requirements dialects. The legacy \"REQ-1: text\" string slot is non-canonical (fslc lint reports it as legacy_string_metadata)";
+
+fn strict_tag_traceability_only_missing_warning() -> serde_json::Value {
+    serde_json::json!([{
+        "kind": "unreferenced_requirement",
+        "element": "requirement",
+        "name": "MISSING-001",
+        "loc": null,
+        "hint": STRICT_TAG_UNREFERENCED_HINT
+    }])
+}
+
+fn strict_tag_traceability_annotation_removed_warnings() -> Vec<serde_json::Value> {
+    let unreferenced = [
+        "INIT-001",
+        "DECL-001",
+        "INVARIANT-001",
+        "TRANS-001",
+        "BLOCK-001",
+        "ACCEPT-001",
+        "FORBID-001",
+        "MISSING-001",
+    ]
+    .iter()
+    .map(|name| {
+        serde_json::json!({
+            "kind": "unreferenced_requirement",
+            "element": "requirement",
+            "name": name,
+            "loc": null,
+            "hint": STRICT_TAG_UNREFERENCED_HINT
+        })
+    });
+    serde_json::json!([
+        {
+            "kind": "untagged",
+            "element": "action",
+            "name": "bump",
+            "loc": {"line": 21, "column": 3},
+            "hint": STRICT_TAG_UNTAGGED_HINT
+        },
+        {
+            "kind": "untagged",
+            "element": "invariant",
+            "name": "ReadyBounded",
+            "loc": {"line": 17, "column": 3},
+            "hint": STRICT_TAG_UNTAGGED_HINT
+        },
+        {
+            "kind": "untagged",
+            "element": "trans",
+            "name": "Monotone",
+            "loc": {"line": 26, "column": 3},
+            "hint": STRICT_TAG_UNTAGGED_HINT
+        },
+    ])
+    .as_array()
+    .expect("untagged warnings")
+    .iter()
+    .cloned()
+    .chain(unreferenced)
+    .collect()
+}
+
+#[test]
+fn strict_tag_traceability_counts_init_block_and_trace_case_annotations() {
+    let requirements = "rust/fslc/tests/fixtures/strict_tag_traceability_requirements.txt";
+    let annotated = "rust/fslc/tests/fixtures/strict_tag_traceability_annotated.fsl";
+    let unannotated = "rust/fslc/tests/fixtures/strict_tag_traceability_unannotated.fsl";
+    let only_missing = strict_tag_traceability_only_missing_warning();
+    let annotation_removed_warnings = strict_tag_traceability_annotation_removed_warnings();
+
+    for (command, extra_args, expected_result) in [
+        ("check", vec![], "ok"),
+        (
+            "verify",
+            vec!["--depth", "2", "--deadlock", "ignore", "--no-cache"],
+            "verified",
+        ),
+    ] {
+        let mut annotated_args = vec![
+            command,
+            annotated,
+            "--strict-tags",
+            "--requirements",
+            requirements,
+        ];
+        annotated_args.extend(extra_args.iter().copied());
+        let (checked, status) = run_cli(&annotated_args);
+        assert_eq!(status, 0, "{command}: {checked}");
+        assert_eq!(checked["result"], expected_result, "{command}: {checked}");
+        assert_eq!(
+            checked["warnings"], only_missing,
+            "{command} annotated: {checked}"
+        );
+
+        let mut unannotated_args = vec![
+            command,
+            unannotated,
+            "--strict-tags",
+            "--requirements",
+            requirements,
+        ];
+        unannotated_args.extend(extra_args.iter().copied());
+        let (stripped, status) = run_cli(&unannotated_args);
+        assert_eq!(status, 0, "{command}: {stripped}");
+        assert_eq!(stripped["result"], expected_result, "{command}: {stripped}");
+        assert_eq!(
+            stripped["warnings"],
+            serde_json::Value::Array(annotation_removed_warnings.clone()),
+            "{command} annotation-removed: {stripped}"
+        );
+    }
 }

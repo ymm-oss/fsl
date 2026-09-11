@@ -162,6 +162,7 @@ pub fn outcome_class(output: &Value) -> OutcomeClass {
         | "conformance"
         | "conformance_coverage"
         | "testgen_trace"
+        | "testplan"
         | "conformance_checked"
         | "document_conformant"
         | "observed_conformant"
@@ -250,6 +251,21 @@ fn class_of(success: bool) -> OutcomeClass {
 /// are all failure-class *and* cacheable. The two predicates live in the same
 /// file so the vocabulary has one home, and stay distinct so that a new result
 /// value forces an explicit decision in both.
+///
+/// **Decision for the two values #1002 made reachable here
+/// (`refinement_failed`, `impl_violated`): not admitted.** They are settled
+/// verdicts, so the reason is not their failure class. It is that the read side
+/// validates the *shape* of every cached verdict before replaying it —
+/// `verification::cached_output_status` requires a `trace` and a
+/// `violated_at_step` for `violated`, a `cti` for `unknown_cti`, and so on —
+/// and the seam's evidence lives under `implements.violation`, for which no
+/// such validator exists. Admitting the verdict without one would put an
+/// unvalidated envelope on the replay path, which is the direction this
+/// predicate exists to avoid. The cost is that a failing seam re-verifies every
+/// time; the alternative is tracked in #1022, not decided by omission.
+/// `cached_output_status` has no arm for either value either, so the two sides
+/// agree and both fail closed. `cacheability_records_the_seam_verdict_decision`
+/// fails if one side is changed without the other.
 #[must_use]
 pub fn verify_cache_admits(output: &Value) -> bool {
     matches!(
@@ -441,6 +457,11 @@ pub fn classify_kernel_key(key: &str) -> Option<KernelKeyFate> {
         | "states_explored"
         | "max_frontier_width"
         | "depth_reached"
+        // Per-action counts from the concrete explicit-state exploration.
+        // Unlike `action_coverage` (kept), this is engine-specific run
+        // diagnostics rather than a confidence qualification or replayable
+        // evidence for the verdict, so it stays outside the Public Kernel.
+        | "action_profile"
         // Coverage bookkeeping (which named properties this run checked),
         // not evidence of a specific finding. Distinct from `action_coverage`
         // (kept, #641), which qualifies the verdict's own confidence rather
@@ -553,11 +574,13 @@ pub fn exit_status(output: &Value, error_status: i32) -> i32 {
     }
     match output.get("result").and_then(Value::as_str) {
         Some("error") => error_status,
-        // Row 1, restricted to the members a baseline `verify` envelope can
-        // actually carry. The row's remaining members (`nonconformant`,
-        // `refinement_failed`, `sweep_failed`, `observed_mismatch`) belong to
-        // other commands and cannot appear here.
-        Some("violated" | "reachable_failed" | "unknown_cti" | "unknown_budget") => 1,
+        // Row 1: kernel verification verdicts plus inline `implements` failures
+        // folded into `check` / `verify` / `mutate` baselines. `nonconformant`,
+        // `sweep_failed`, and `observed_mismatch` still belong to other commands.
+        Some(
+            "violated" | "reachable_failed" | "unknown_cti" | "unknown_budget"
+            | "refinement_failed" | "impl_violated",
+        ) => 1,
         // A failure-class value outside this command's vocabulary, or one
         // nobody registered at all, is an internal inconsistency -- never a
         // silent success.
@@ -569,7 +592,9 @@ pub fn exit_status(output: &Value, error_status: i32) -> i32 {
 mod tests {
     use serde_json::json;
 
-    use super::{OutcomeClass, is_definitive_kernel_verdict, outcome_class, verify_cache_admits};
+    use super::{
+        OutcomeClass, exit_status, is_definitive_kernel_verdict, outcome_class, verify_cache_admits,
+    };
 
     /// The rule `run_db_check` and `run_domain_check` share, pinned where it
     /// now lives. Both once carried it separately and one of them carried it
@@ -760,6 +785,35 @@ mod tests {
         assert_eq!(outcome_class(&generated), OutcomeClass::Success);
     }
 
+    /// #1002 made `refinement_failed` and `impl_violated` reachable as
+    /// top-level `verify` results, and this predicate's contract is that a new
+    /// result value forces an explicit decision here. The decision is "not
+    /// admitted" (see the doc comment); this test is what makes the difference
+    /// between deciding that and forgetting it visible. It fails if either
+    /// value is added here without the matching shape validation on the read
+    /// side in `verification::cached_output_status`.
+    #[test]
+    fn cacheability_records_the_seam_verdict_decision() {
+        for result in ["refinement_failed", "impl_violated"] {
+            let envelope = json!({"result": result});
+            assert!(
+                !verify_cache_admits(&envelope),
+                "{result} is deliberately not cacheable: the replay side has no \
+                 shape validator for `implements.violation` (#1022)"
+            );
+            assert_eq!(
+                outcome_class(&envelope),
+                OutcomeClass::Failure,
+                "{result} is still failure-class"
+            );
+            assert_eq!(
+                exit_status(&envelope, 3),
+                1,
+                "{result} still exits 1 -- not caching it changes nothing about the verdict"
+            );
+        }
+    }
+
     /// The exit-code derivation is separate from the classification: the
     /// class says whether zero is allowed, `error_status` chooses which
     /// non-zero code an error envelope carries.
@@ -775,6 +829,8 @@ mod tests {
             "reachable_failed",
             "unknown_cti",
             "unknown_budget",
+            "refinement_failed",
+            "impl_violated",
         ] {
             assert_eq!(exit_status(&json!({"result": result}), 2), 1);
         }
@@ -783,8 +839,8 @@ mod tests {
         // An unmapped result is an internal inconsistency, never a silent
         // success -- and keeps the table's distinct code for it.
         assert_eq!(exit_status(&json!({"result": "who_knows"}), 2), 3);
-        // A registered failure outside a verify baseline's vocabulary is the
-        // same kind of inconsistency when it reaches `mutate`.
+        // A registered failure outside the baseline vocabulary folded here is
+        // still an internal inconsistency when it reaches `mutate`.
         assert_eq!(exit_status(&json!({"result": "nonconformant"}), 2), 3);
     }
 }

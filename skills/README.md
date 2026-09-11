@@ -63,7 +63,7 @@ whole job; use `fsl-delivery/` whenever keeping the layers aligned is the delive
 
 - [`fsl/SKILL.md`](fsl/SKILL.md) — shared workflow, result→next-move repair
   protocol, minimal syntax, and structural rules
-- [`fsl/reference.md`](fsl/reference.md) — condensed full language reference card
+- `fsl/references/` — topical language and verifier references, indexed from the core skill
   for kernel FSL, compose, refinement, business/requirements dialects, and NFR
 - [`fsl-business/SKILL.md`](fsl-business/SKILL.md) — business-layer procedure and
   guardrails

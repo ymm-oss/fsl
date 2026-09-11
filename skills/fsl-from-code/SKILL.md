@@ -15,8 +15,8 @@ rather than against an upper spec. If the user later wants an upper requirements
 contract, building that *upward* refinement seam is `fsl-design`'s job, not this
 skill's.
 
-Before writing syntax, read `../fsl/SKILL.md` and `../fsl/reference.md` for the
-shared language rules, verifier workflow, and repair protocol. Inside this
+Before writing syntax, read `../fsl/SKILL.md`, then use its reference index to
+load only the needed language rules, verifier workflow, and repair detail. Inside this
 repository, study the canonical triple **in reverse**: `examples/e2e/impl/expense.py`
 (plain code) → `examples/e2e/3_design.fsl` (the spec) → `examples/e2e/impl/test_conformance.py`
 (the generated Adapter + random-walk Monitor). That triple is exactly the artifact
@@ -157,6 +157,6 @@ natural-language rendering is an option for high-stakes specs, too costly to man
   as separate claims; make the second only after the harness ran green against the
   real implementation.
 - **Author the extracted spec as documentation, not just a checkable model.** See
-  `skills/fsl/reference.md` → "Authoring specs as readable documentation" for the
+  `skills/fsl/references/layers.md` → "Authoring specs as readable documentation" for the
   tagging, ID-prefix, and quantifier conventions that keep it readable, not just
   passing.

@@ -34,9 +34,16 @@ fn text(value: &Value) -> String {
 fn status_class(status: &str) -> &'static str {
     match status {
         "verified" | "proved" | "ok" | "covered" | "refines" | "generated" => "ok",
-        "violated" | "reachable_failed" | "nonconformant" | "refinement_failed" | "uncovered" => {
-            "bad"
-        }
+        "violated"
+        | "reachable_failed"
+        | "nonconformant"
+        | "refinement_failed"
+        // #1002 folds a failed inline `implements` seam into the top-level
+        // `result`, so `impl_violated` reaches this classifier for the first
+        // time. Without this arm it falls to `_ => "info"` and the report
+        // renders a failing seam as a neutral badge.
+        | "impl_violated"
+        | "uncovered" => "bad",
         "warning" | "unknown_cti" => "warn",
         _ => "info",
     }
@@ -1266,4 +1273,25 @@ pub fn render_html_report(
         "</html>".to_owned(),
     ]
     .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::status_class;
+
+    /// Both inline-`implements` failure verdicts reach the top-level `result`
+    /// since #1002, and `html` renders that value through `status_class`
+    /// (`("Result", badge(&verification["result"]))`). Before `impl_violated`
+    /// was listed, it fell through to `_ => "info"` and a failing seam was
+    /// drawn as a neutral badge. The nested `implements` field is rendered as
+    /// JSON, not as a badge, so this position is new for that value.
+    #[test]
+    fn seam_failure_verdicts_render_as_failures() {
+        assert_eq!(status_class("refinement_failed"), "bad");
+        assert_eq!(status_class("impl_violated"), "bad");
+        // Rejecting control: the passing seam value must not be "bad", or the
+        // assertion above would pass under a classifier that calls everything
+        // a failure.
+        assert_eq!(status_class("refines"), "ok");
+    }
 }

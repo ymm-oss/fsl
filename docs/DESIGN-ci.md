@@ -12,6 +12,10 @@ short-latency fail-fast lane, plus `rust workspace` and `WASM`. Only the **cross
 `product gate` context; that matrix also runs on schedule, on manual dispatch, and before promotion
 to `production`.
 
+The regular cross-platform matrix deliberately uses one macOS architecture: the Apple Silicon
+`macos-15` runner. Add an Intel macOS lane only when an explicit platform-support requirement
+calls for it.
+
 This changes `main` from "every supported platform was green before merge" to "every change was
 fully tested on Linux before merge, and the remaining platforms are validated immediately after."
 A post-merge failure can therefore still expose a temporarily broken `main`, but only for a
@@ -23,12 +27,17 @@ because they match that name. The five bounded frozen-Python compatibility check
 `RUST-PORTING.md` are developer-run only, triggered by an intentional change to their shared
 projection. They are outside merge readiness, the product gate, scheduled promotion, and release,
 and a manual pass cannot replace or waive native evidence. Native/Worker full-envelope comparison
-is owned by `rust/fsl-wasm/test-browser.mjs`; native semantic agreement is owned by the Rust
-agreement and replay suites. The Phase-3 Python comparison is separately parked until `ai compare`
-has a focused native contract test. #761's documentation phase deletes no harness:
-`check_rust_full_envelope.py` is deletion-ready only after its shared helpers move safely; seven
-parity harnesses remain because related native coverage does not yet detect their exact drift
-(F1–F7 in `RUST-PORTING.md`); and the BFS/BMC/scenarios trio remains pending native semantic migration.
+(native build vs. WASM build, not vs. the frozen Python side) is owned by
+`rust/fsl-wasm/test-browser.mjs`; native semantic agreement is owned by the Rust agreement and replay
+suites. The Phase-3 Python comparison is separately parked until `ai compare` has a focused native
+contract test. #761's documentation phase deletes no harness: eight parity harnesses remain deletion-
+deferred, for reasons recorded per-harness (F1–F8 in `RUST-PORTING.md`) rather than a blanket rule —
+some still lack matching native coverage, and two (F2, F4) have landed native coverage for part of
+what they check but retain a frozen-Python-vs-native comparison edge nothing native-only replaces.
+`check_rust_full_envelope.py` (F8) holds the only such edge for the *full* envelope, with no
+replacement edge identified yet, so retiring it needs a separate compatibility decision (#988); and
+the BFS/BMC/scenarios trio remains pending native semantic
+migration.
 
 ### Why the split falls here
 
@@ -247,7 +256,7 @@ event.
 Growing the exempt list is a contract change to this decision, not a script tweak, and each
 candidate needs the same evidence sweep: name every path that reads it and show that path keeps
 unfiltered pre-merge or fail-loud coverage. `skills/**` and `docs/**` must never join it:
-`skills/fsl/reference.md` moves with language features under the coupled-change contract,
+`skills/fsl/references/` moves with language features under the coupled-change contract,
 `docs/LANGUAGE*.md` feeds the site-reference freshness gate, and product-gate literate
 doc-contract tests read documentation files directly.
 
@@ -1143,6 +1152,95 @@ lookup. It cannot rehash an original writer that squash merge has removed, so th
 auditable review record rather than a run-time source verification. Both the full-history automation
 checkout and a shallow developer clone therefore exercise the same persisted output.
 
+### Generation coexistence (issue #926, measured 2026-09-04)
+
+Issue #926 reported a budget-exhausted audit on `ca2d5e7d` (2026-09-03) caused by two coexisting
+generations of `semantic-mutation`, `rust-workspace`, and `wasm` (hash suffixes `718c915e` and
+`0b9fd15e`), and recorded that deleting the older generation traded `budget-exhausted` for
+`main-cache-absent` on `wasm`, whose only `refs/heads/main` entry was the one just deleted.
+
+**Re-measured against `a3703211` (2026-09-04): that specific coexistence is gone** -- all three keys
+now have exactly one generation (`0b9fd15e`) -- but usage is still **9.07 GiB / 10 GiB (91%)**,
+matching the live `cache budget audit` run `33732507864`'s own report verbatim. The coexistence
+reappeared on a different key the issue did not name: `rust-native-z3` Darwin/arm64 held two
+generations simultaneously, `cf75cde1` (created 2026-08-27, 1.16 GiB) and `2bc65c5a` (created
+2026-09-02, 1.16 GiB) -- together 2.32 GiB against 1.16 GiB for one. Removing the duplicate would
+return usage to roughly 7.91 GiB (79%), back under the 85% threshold; that arithmetic is this
+section's only claim about a fix, not a recommendation to delete (below).
+
+**Root cause, confirmed by reading both jobs' own restore-step logs, not inferred:**
+`rust/Cargo.lock` and `.github/workflows/ci.yml` are byte-identical across the entire window between
+the two saves (`git diff --stat` empty both ways), and the pinned toolchain
+(`dtolnay/rust-toolchain@1.98.0`) resolved to the identical rustc commit both times
+(`88d9e12ae178fab0fb5cc050a94da85685d449ea`). What changed is `Swatinem/rust-cache`'s own logged
+`Environment considered` -> `Rust Versions` list: the 2026-08-27 run reported **two** entries
+(`1.97.1 ... 8bab26f4...` and `1.98.0 ... 88d9e12ae...`), the 2026-09-02 run reported **one**
+(`1.98.0 ... 88d9e12ae...` only). `Swatinem/rust-cache` hashes the runner's entire installed-toolchain
+list into its key, not only the one this workflow pins, so a `macos-15` runner-image update that
+changes which toolchains ship preinstalled shifts the key even though nothing this repository
+controls changed. This is the mechanism the cache-budget-audit incident notes already generalize
+from ("do not manually delete"; see the cache-budget audit reporter workflow) -- confirmed here for a
+key the original incident did not name, and confirmed by direct log comparison rather than by
+re-asserting the general rule.
+
+**A candidate audit rule was considered and rejected.** "Flag 2+ live generations of the same
+`{key, platform}` on `refs/heads/main` while usage is >= 85%" fails this repository's own
+test-quality bar for a new check: the shortest way to make it pass is to delete the older
+generation, which is exactly the action the issue's own experiment (above) showed trades one
+failure mode for a worse one. A check whose easiest passing implementation is the action it exists
+to prevent is not added.
+
+**Not fixed by `shared-key`.** A `shared-key` on the `rust-native-z3` job would let two *different*
+jobs share one cache; no other job builds this cache (confirmed: grepped every workflow for
+`Swatinem/rust-cache` steps naming a `rust-native-z3`-shaped key), so there is nothing for it to
+consolidate. This was this session's first hypothesis and it was wrong; recorded here so it is not
+re-proposed without this evidence.
+
+**An initial fix subtracting de-duplicated bytes from judgment was reviewed and reverted.** The
+first version of `auditCacheBudget()`'s response to this issue computed a "controllable footprint" --
+one generation per `{sharedKey, platform}` on `refs/heads/main` -- and judged *that* value instead
+of the raw total. Independent review executed two counterexamples against it: (1) two generations
+sharing one identity, 5 GiB each, physically filling the entire 10 GiB budget, judged as 5 GiB and
+passed; (2) an independently-observed `usageBytes` total already higher than the listing sum, with
+listing-derived "stale" bytes subtracted from it on the unproven assumption that the two
+observations -- which the pre-existing `max(usageBytes, rawSummed)` comment already treats as
+non-atomic -- share the same bytes. GitHub's budget and its least-recently-used eviction act on
+physical bytes sitting in the account; a repository-side classification of which generation is
+"current" does not change what physically occupies budget, so it must not be subtracted from
+judgment. **The rule now judges the raw total exactly as it did before #926** (`Math.max(usageBytes,
+rawSummed)`, unchanged), and reports generation coexistence as a strictly additional
+`generation-coexistence-partial-explanation` finding -- present only alongside a real
+`budget-exhausted` finding, phrased as "up to N GiB *may* be" self-healing churn rather than as a
+subtraction, and never reducing `ok`. A `generation-coexistence` entry in the always-reported,
+non-gating `informational` array separately states the raw entry count and superseded-generation
+byte count regardless of whether the budget is exhausted. The practical consequence: this audit
+still reports `budget-exhausted` at 9.07 GiB / 91% for the exact 2026-09-04 measurement above, and
+that is correct -- the fix is making the red result actionable (which part is self-healing and which
+is not), not making it green.
+
+**Total-size reduction, not only generation reduction, was checked for its *composition* -- not for
+every lever.** `z3 = { version = "=0.20.2", features = ["vendored", "z3_4_16"] }` (`rust/Cargo.toml`)
+compiles the full Z3 C++ solver from source; the ~1.16-1.24 GiB per-platform `rust-native-z3` cache
+entry is that vendored build's external dependency output, not accumulated build-artifact debt. This
+mirrors the already-settled `semantic-mutation` case above (2.719 GiB, "an observed clean size, not
+accumulated dead weight -- two successive size predictions to the contrary were both wrong"): the
+repository's two largest non-workspace cache entries have each, independently, had their size traced
+to what is actually built, not to slack accumulating in a build-artifact tree. Neither check
+establishes that no smaller build is possible -- one concrete, untested lever remains: no `[profile]`
+section in `rust/Cargo.toml` or any crate's `Cargo.toml` currently trims debug info
+(`debug = "line-tables-only"` or similar), so the vendored Z3 object files plausibly carry full debug
+symbols uncompressed. Validating that this would shrink the cache *without* changing cold-build time
+requires an actual `cargo`/CI build to measure both, which is outside this measurement's scope; filed
+separately as #984.
+
+**Self-healing, not permanent.** `cf75cde1` was last accessed 2026-09-03T05:10; absent further access
+it is eligible for GitHub's 7-day-no-access staleness eviction around 2026-09-10, or sooner under LRU
+pressure. This resolves *this* coexistence, not the mechanism: any future `macos-15` (or
+`windows-latest`) runner-image update that changes the ambient installed-toolchain list will produce
+the same transient two-generation overlap again, on whichever `{key, platform}` pair happens to be
+built next after the change. The issue's title calls the budget overrun constant; the recurring
+mechanism, not any one incident, is why.
+
 ## Required pre-merge contexts, and why the merge queue was rejected
 
 ### Automation contracts use parser-backed workflow inspection
@@ -1168,6 +1266,15 @@ project-block, grammar, and CLI registries coupled to their native or
 DESIGN-document counterparts, and keep the DESIGN-document index bidirectional.
 This is required pre-merge repository/compatibility evidence, not product
 evidence, and it does not add Python to `./tools/check-native-integration.sh`.
+
+The automation lane also runs `tools/check_ci_validator_inventory.py` and
+`tests/test_ci_validator_inventory.py`. The committed
+`.github/ci-validator-inventory.json` records every tracked `tests/test_*.py`
+module as `required` or explicitly `exempt`, and `check` fails closed when a
+new module appears without required-gate wiring or an `--exempt path:reason`
+classification. Wiring a module is the shortest path to `required`
+classification; inventory-only exempt rows cannot satisfy required-gate wiring.
+See `docs/DESIGN-ci-validator-inventory.md`.
 
 The privileged post-merge reporter receives `issues: write`, so its workflow
 also has a deliberately narrow parser-backed shape contract. It requires the
@@ -1196,6 +1303,51 @@ deferred precisely because they never report on an ordinary pull request.
 `strict_required_status_checks_policy` is `true` and `bypass_actors` is empty, so
 `current_user_can_bypass` is `"never"` for every account — an administrator cannot merge past a
 failing or missing required context.
+
+### Site reference context scope
+
+`site reference freshness` remains one required, unfiltered, non-product
+documentation-artifact context. It has three deliberately separate checks: the
+generated-reference freshness snapshots for `language.{ja,en}.html` and
+`cli.{ja,en}.html`, static manual-route integrity for
+`index.{ja,en}.html` and `examples.{ja,en}.html`, and the sitewide refresh
+contract. That third check covers, exhaustively as of this writing: shell CSS/JS
+wiring, playground asset isolation, palette single-source wiring, docs-sidebar
+gutter survival, the sitewide correctness-backbone structure in `site.js` and the
+home page's own backbone markup, the hub journey contract, the
+static playground skip link and its focusable landmark, the landmark attributes
+`site.js` assigns on its skip-link injection path, the locale toggle's
+`aria-current`, the breadcrumb's accessible name, and CLI pages that no longer
+cite frozen Python as authority. Keep this list in step with the module: a
+branch added to one of its `audit_*` functions extends what a required context
+enforces, so an unlisted branch makes this paragraph under-describe the gate.
+
+The workflow invokes `tests/test_site_reference_snapshot.py`,
+`tests/test_site_manual_integrity.py`, and
+`tests/test_site_refresh_contract.py` explicitly. The snapshot module remains
+generated-reference-only; the manual test checks ordered static routes, unique labels,
+local fragments, and pinned blob objects in checked-out Git history without fetching URLs;
+the refresh-contract test reads checked-out static files only, with no live server, no URL
+fetching, and no browser-automation or subprocess dependency, and carries rejecting mutant
+controls alongside its positive assertions. Those controls establish that each checker
+returns a non-empty offender list under the mutation it is cited for; several of the
+checks are substring searches over `site.js`, so they do not establish that the marker
+they find is reached at runtime. They are no longer satisfied by a marker left
+behind in a *whole-line* comment: every such check first blanks lines whose first
+non-space characters are `//`, and lines inside a `/* */` block opening at line start.
+Commenting out an assignment is a calibrated rejecting mutation for the skip-link,
+backbone, locale-nav, and breadcrumb checks. The stripper is deliberately line-oriented: it does not
+tokenize, so it cannot be defeated by a string, a regex literal, or a division. It is
+**not** immune to altering a code line — a multi-line template literal whose inner line
+begins with `//` has that line blanked, and `*/ realCode();` loses the whole line. Both
+are measured, and neither occurs in the current `site.js`: of its 64 blanked lines, zero
+fall outside a comment region. A **trailing** comment after code is also not stripped.
+Issue #1006 records all three gaps. Being reached at runtime is still not established --
+only that a line of code, not a whole-line comment, contains the marker. None of the three checks establishes
+Rust/solver behavior, native CLI parity, browser rendering,
+or assistive-technology behavior. This expands the context's bounded documentation-artifact scope
+without changing its name, ruleset membership, job, triggers, Python package dependencies,
+permissions, timeout, or concurrency; `fetch-depth: 0` supplies local Git history for pinned blobs.
 
 This closes the gap issue #707 opened: the Safe rollout section below has always required the
 Linux evidence to be *required*, not merely running, and until this change only `merge readiness`

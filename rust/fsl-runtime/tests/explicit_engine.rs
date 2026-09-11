@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-use fsl_core::{FsResolver, TypeDef, TypeRef, build_model, parse_kernel_source};
+use fsl_core::{FsResolver, FslValue, TypeDef, TypeRef, build_model, parse_kernel_source};
+use fsl_runtime::ActionStats;
 
 fn model(source: &str) -> fsl_core::KernelModel {
     build_model(parse_kernel_source(source, &FsResolver::new(".")).expect("parse kernel"))
@@ -22,6 +23,58 @@ fn explicit_bfs_proves_at_state_space_closure() {
     assert_eq!(result.states_explored, 2);
     assert_eq!(result.depth_reached, 1);
     assert_eq!(result.deadlock_step, None);
+}
+
+#[test]
+fn nested_options_remain_distinct() {
+    let model = model(
+        "spec NestedOptionAssignment {
+           type Bit = 0..1
+           state { x: Option<Option<Bit>> }
+           init { x = none }
+           action wrap() { requires x == none x = some(none) }
+           action fill() { requires x == some(none) x = some(some(1)) }
+           action clear() { requires x == some(some(1)) x = none }
+           reachable Wrapped { x == some(none) }
+           reachable Filled { x == some(some(1)) }
+         }",
+    );
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("create monitor");
+    let expected = [
+        FslValue::None,
+        FslValue::Some(Box::new(FslValue::None)),
+        FslValue::Some(Box::new(FslValue::Some(Box::new(FslValue::Int(1))))),
+        FslValue::None,
+    ];
+    assert_eq!(monitor.state["x"], expected[0]);
+    for expected_value in expected.into_iter().skip(1) {
+        let enabled = monitor
+            .enabled()
+            .expect("enumerate action")
+            .into_iter()
+            .next()
+            .expect("one action is enabled");
+        let result = monitor.step(&enabled).expect("step monitor");
+        assert_eq!(result.violation, None);
+        assert_eq!(result.state["x"], expected_value);
+    }
+
+    let result = fsl_runtime::verify_explicit(model, 3, 100).expect("explicit verification");
+    assert!(result.closure);
+    assert_eq!(
+        result.reachables["Wrapped"]
+            .as_ref()
+            .expect("Wrapped witness")
+            .step,
+        1
+    );
+    assert_eq!(
+        result.reachables["Filled"]
+            .as_ref()
+            .expect("Filled witness")
+            .step,
+        2
+    );
 }
 
 /// DESIGN-divmod.md §2.1/§2.3: an invariant's own `5 / 0` must not turn
@@ -58,6 +111,59 @@ fn explicit_bfs_fails_closed_at_the_state_budget() {
     assert!(result.violation.is_none());
     assert_eq!(result.states_explored, 1);
     assert_eq!(result.depth_reached, 0);
+}
+
+#[test]
+fn explicit_action_profile_counts_states_edges_and_no_op_edges_separately() {
+    let model = model(
+        "spec ExplicitActionProfile { type Count = 0..2 type Bit = 0..1 state { count: Count } \
+         init { count = 0 } \
+         action advance() { requires count < 2 count = count + 1 } \
+         action set_one() { requires count == 0 count = 1 } \
+         action stutter(bit: Bit) { requires count < 2 count = count } \
+         action limited_reset() { requires count == 1 count = 0 } \
+         invariant InRange { count >= 0 } }",
+    );
+    let result = fsl_runtime::verify_explicit(model, 1, 100).expect("explicit verification");
+
+    assert_eq!(
+        result.action_profile,
+        std::collections::BTreeMap::from([
+            (
+                "advance".to_owned(),
+                ActionStats {
+                    enabled: 2,
+                    fired: 1,
+                    no_op: 0,
+                },
+            ),
+            (
+                "limited_reset".to_owned(),
+                ActionStats {
+                    enabled: 1,
+                    fired: 0,
+                    no_op: 0,
+                },
+            ),
+            (
+                "set_one".to_owned(),
+                ActionStats {
+                    enabled: 1,
+                    fired: 1,
+                    no_op: 0,
+                },
+            ),
+            (
+                "stutter".to_owned(),
+                ActionStats {
+                    enabled: 2,
+                    fired: 2,
+                    no_op: 2,
+                },
+            ),
+        ]),
+    );
+    assert!(result.action_coverage.values().all(|covered| *covered));
 }
 
 #[test]

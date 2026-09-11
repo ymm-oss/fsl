@@ -1,4 +1,4 @@
-# FSL — coupled-change metatests (native LSP corpus/index + DESIGN-doc coverage)
+# FSL — coupled-change metatests (native LSP corpus/index + checklist presence + DESIGN-doc coverage)
 
 Motivation: issue #168. The repository rule that a language feature moves with
 its parser, model, runtime, documentation, and tests began as a human checklist.
@@ -6,11 +6,12 @@ The original Python metatest caught dialects and grammar productions that the
 Python LSP index silently omitted. Issue #310 moved the language server and its
 coverage gate to the authoritative Rust implementation.
 
-The coupled-change checks now have two owners:
+The coupled-change checks have two owners:
 
 - `rust/fsl-lsp/tests/corpus.rs` owns native LSP corpus and index coverage.
-- `tests/test_coupled_change_meta.py` retains compatibility checks for the
-  frozen Python reference and the DESIGN-document map.
+- `tests/test_coupled_change_meta.py` owns two native-to-frozen-Python
+  compatibility comparisons, two frozen-Python-sourced DESIGN-map checks, and
+  two language-neutral checks.
 
 ## 1. Native LSP corpus and index coverage
 
@@ -35,10 +36,20 @@ reference, rename, and semantic-token behavior. Server unit tests and
 `rust/fsl-lsp/tests/stdio.rs` cover request handling, unsaved buffers, workspace
 resolution, and the stdio lifecycle.
 
-## 2. DESIGN-doc coverage (dialect/feature ↔ docs/DESIGN-*.md)
+## 2. Language-feature checklist presence
 
-`tests/test_coupled_change_meta.py` keeps five tests whose inspected surfaces
-remain frozen-Python-owned or language-neutral:
+`test_language_feature_checklists_include_coupled_obligations` checks three
+authored checklists for the required Japanese language reference and conditional
+LSP index plus targeted role/scope-test obligations. It is a fail-closed,
+additive documentation-presence control: it reports each exact missing member
+and copy, but does not establish LSP semantics, translation freshness, or
+product verification.
+
+## 3. DESIGN-doc coverage (dialect/feature ↔ docs/DESIGN-*.md)
+
+The module's other five checks comprise two native-to-frozen-Python
+compatibility comparisons, two frozen-Python-sourced DESIGN-map checks, and one
+language-neutral check:
 
 1. **`test_retained_python_dialect_registry_matches_native_authority`** — the
    frozen Python dialect registry exactly matches the native dispatch registry.
@@ -54,7 +65,7 @@ remain frozen-Python-owned or language-neutral:
    compatibility CLI command maps to an existing design document or a reviewed
    waiver reason.
 
-These five Python tests run as required pre-merge repository/compatibility
+Together, these six Python tests run as required pre-merge repository/compatibility
 evidence through `tools/check-merge-readiness.sh automation` and the
 `merge readiness / automation contracts` job. They are not product evidence
 and are not invoked by the Rust-native `./tools/check-native-integration.sh`

@@ -106,6 +106,34 @@ mod negative_controls {
         );
     }
 
+    /// A zero-argument function anchor must resolve to an actual item
+    /// definition, not merely appear inside a registration string literal.
+    #[test]
+    fn a_function_anchor_without_a_definition_fails_recheck() {
+        let broken = Citation {
+            path: "rust/fslc/tests/triangulated/p2_witness_replay.rs",
+            anchor: "fn fabricated_p2_rejecting_control_without_definition()",
+        };
+        assert!(
+            broken.recheck().is_err(),
+            "a function anchor must resolve to an actual definition"
+        );
+    }
+
+    /// A zero-argument function anchor must pass when exactly one definition
+    /// exists in the cited file.
+    #[test]
+    fn a_function_anchor_with_a_definition_passes_recheck() {
+        let good = Citation {
+            path: "rust/fslc/tests/triangulated/p2_witness_replay.rs",
+            anchor: "fn corrupting_state_step_kind_or_location_cuts_a_p2_edge()",
+        };
+        assert!(
+            good.recheck().is_ok(),
+            "an actual function definition must satisfy recheck"
+        );
+    }
+
     /// A citation pointing at a nonexistent file must fail `recheck()`.
     #[test]
     fn a_citation_to_a_nonexistent_file_fails_recheck() {

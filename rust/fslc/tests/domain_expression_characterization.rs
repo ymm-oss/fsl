@@ -473,7 +473,7 @@ fn baseline() -> Value {
         "generated_kernel_source_fragments":{
             "expressions_valid.fsl":generated_fragments(&expressions,&[
                 "requires order_status == OrderStatus_Draft and not",
-                "requires order_status != OrderStatus_Cancelled and order_quantity >= 0",
+                "requires order_status != OrderStatus_Cancelled and quantity >= 0",
                 "order_audit.status = order_status",
                 "Order_legacyImplication",
                 "Order_legacyDisjunction",
