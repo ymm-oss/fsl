@@ -1,1 +1,0 @@
-Documented (#920): release promotion pull requests now use a branch pinned to the approved candidate SHA, with tree-identity checks before and after merge and an explicit carry-forward for the v4.4.1 revert.

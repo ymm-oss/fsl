@@ -55,6 +55,14 @@ It also rejects a dynamic dependency on `libz3`.
    version section; nothing here should be missing from either source.
 3. Choose `X.Y.Z` using SemVer. Confirm that local and remote tag `vX.Y.Z` and
    the corresponding GitHub Release do not exist.
+
+   This project has consistently shipped Conventional-Commit breaking changes (`type(scope)!:`)
+   in **minor** releases, not major: `fix(domain)!` (2026-08-08) shipped in v4.3.0,
+   `fix(domain)!`/`fix(syntax)!` (2026-07-29/30) in v4.2.0, and several `!` commits
+   (2026-07-25..27) in v4.1.0. A CLI exit-code or envelope change is therefore a minor
+   bump here unless the release also removes a documented command or contract surface.
+   **Record the reason in the release pull request when a release contains any `!` commit**,
+   so the choice is not re-derived from git log each time.
 4. On a short-lived branch from `main`, change
    `[workspace.package].version` in `rust/Cargo.toml`. Regenerate
    `rust/Cargo.lock` with Cargo, then prove the lockfile and CLI version agree:

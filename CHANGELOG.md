@@ -5,6 +5,324 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.5.0] - 2026-09-11
+
+- Added (#316): explicit-state verification now reports deterministic per-action
+  `enabled`, `fired`, and `no_op` execution-profile counts without changing the
+  existing action-coverage contract.
+- Added (#841): native typed-state support for nested `Option` values around scalar payloads, with matching symbolic, Monitor, and explicit-state semantics.
+- Added (#844): `fslc testplan SPEC [--depth N]` selects the bounded
+  `conformance` vectors — the accepting ones and the `requires_failed` ones no
+  test-generation path consumed — into a closed `test-plan.v1` JSON document
+  (`schemas/fslc/kernel/test-plan.v1.schema.json`). Kernel and conformance JSON
+  are built from one checked model, so a plan cannot pair two snapshots. A plan
+  is a selection, never a verdict: it carries `formal_result: "not_run"`,
+  `assurance_effect: "none"`, and a `do_not_assume` list, and it records the
+  requirement to pass a spec at the implementation's layer granularity.
+- Added (#848): add opt-in `--oracle-attribution` to `fslc mutate`, exposing per-mutant `killers`
+  arrays and `by_obligation` sole/shared counts keyed by oracle display names while
+  leaving default output unchanged.
+- Added (#885): add `fslc counterexample export` and the versioned `reproducer.v1` JSON artifact
+  for bounded safety-invariant counterexamples (issue #885 slice 1).
+- Added (#1007): the intro site manual gained a sitewide orientation layer. A
+  four-stage correctness backbone (business, requirements, design, implementation)
+  renders on every manual chapter and names each stage's intent, seam, evidence,
+  and *limitation*, highlighting the current chapter's position without claiming
+  whole-system proof. Category hubs gained an audience/problem to FSL-contract to
+  evidence-readout to next-action journey, and the reference hub states the four
+  canonical sources in authority order so the frozen Python reference under
+  `src/fslc/` is never presented as the CLI authority. The home page gained a
+  bounded correctness-chain route into the example gallery with commit-pinned
+  example links. The shared top bar now carries the five official sections, and
+  every page gained a localized skip link to a focusable `<main>` landmark.
+- Changed (#798, slice 2): retired the #796 CLI post-validation on `domain
+  analyze` and `domain expand` now that scope-aware AST normalization makes the
+  renderer agree with direct lowering; rejecting controls in
+  `issue_796_domain_command_validation` still pass without the guard.
+- Changed (#800)!: `fslc ai check`, `fslc ai compat`, and `fslc ai replay` now
+  reject invalid `ai_component` declarations (undeclared authority tools and
+  unknown `check hard` rule names, plus checked project parsing for `ai replay`)
+  with exit 2 instead of returning `ai_project_analyzed`,
+  `compat_profile_generated`, or `replay_conformant` on false greens.
+- Changed (#841): reject nested Map state values that native `check` previously
+  accepted but explicit-state execution could not initialize; the shared CLI/LSP
+  type hints now describe the recursive nested-Option boundary for struct fields
+  and state values.
+- Changed (#926): the Actions cache budget audit reports a `generation-coexistence-partial-explanation`
+  finding alongside `budget-exhausted` when at least one `refs/heads/main` `{sharedKey, platform}` pair
+  holds more than one live generation (measured 2026-09-04: `rust-native-z3` Darwin/arm64 held two,
+  driven by `Swatinem/rust-cache` hashing the runner's entire installed-toolchain list rather than
+  anything this repository controls). This is diagnostic only: `budget-exhausted` itself continues to
+  judge the same raw physical total it always has (`Math.max(usageBytes, rawSummed)`, unchanged),
+  because GitHub's budget and least-recently-used eviction act on physical bytes regardless of which
+  generation this repository considers current. An earlier version of this change instead subtracted
+  the superseded generation's bytes from judgment; independent review executed two counterexamples
+  against it (a same-identity pair physically filling the whole budget judged as half; a listing-derived
+  subtraction applied to an independently-observed usage total already higher than the listing, on the
+  unproven assumption the two non-atomic observations share the same bytes) and it was reverted before
+  merge. A `generation-coexistence` entry in the always-reported, non-gating `informational` array
+  separately states the raw entry count and superseded-generation byte count whether or not the budget
+  is exhausted. Every non-main-branch entry, including any `refs/pull/*` cache, is still counted
+  individually and in full for every existing rule, so the original #747 incident shape (many
+  different refs each holding their own cache) remains fully detected.
+- Changed (#941, #763): Split the FSL skill reference into topical, indexed resources and route authoring skills to load only the needed guidance.
+- Changed (#961): the `no_user_invariants` model warning is suppressed only for
+  safety-bearing declarations (`invariant`, `trans`, `forbidden`, `implements`);
+  `reachable`, `leadsTo`, and `acceptance` alone no longer suppress it. Shared
+  finalization in `fsl-core` replaces frontend message-string filters.
+- Fixed (#694): literate Markdown FSL's dialect-command diagnostic gap: 18 `db`/`compat`/`domain`/`ai check`/`ai replay`/`ai compat`/`causal` spec-path commands that used to hand raw `.md` input to their dialect frontends and report the Markdown's own first character as a spec syntax error now fail closed with `FSL-INPUT-LITERATE-UNSUPPORTED` (`kind:"usage"`, `loc` naming the input file only), matching `lint` and the other registry-gated commands via `fslc_rust::literate_access::literate_access`. `ai eval`/`ai regress`/`ai drift` keep their existing `load_ai_project` literate `.md` frontend and are unchanged. No exit code changed.
+- Fixed (#698): distinguish proven duplicate writes from conservative `forall` index-distinctness
+  rejections in native `check`/`verify`, the browser Worker, and LSP diagnostics.
+  Unproved injectivity now reports `FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED` with
+  `loc` and a safe repair `hint` when one exists; acceptance is unchanged.
+
+  Known limit: an affine write inside an `if` within the `forall` is still reported with the previous duplicate-write message, because `assignment_for_target` only scans top-level assignments. That shape is unchanged from before this fix, not a regression.
+
+  The quick-fix is withheld rather than guessed: the RHS scan is built on the shared `expr_children`/`binder_exprs` walk instead of a second hand-written match, a binder whose domain does not start at zero contributes its own lower bound, a filtered binder is refused outright, and an RHS that already names `k` blocks the rewrite. The classification, code and location still arrive in every one of those cases.
+
+  The hint is emitted only for a shape it can render correctly: a named key type (an inline `Map<lo..hi, _>` key would render as `forall k: lo..hi`, which the grammar does not accept after `:`), and an offset that is bracketed unless it is already a single token.
+- Fixed (#773): `domain generate` now preserves the typed source-diagnostic
+  location for invalid domain guards, matching the checked-Kernel envelope.
+- Fixed (#798, slice 1): `domain_kernel_source` now normalizes domain expressions
+  through scope-aware AST composition instead of blind `str::replace`, so path B
+  agrees with `lower_domain` on generated-name misuse and command-input shadowing.
+  `KNOWN_DIVERGENT_DOMAIN_FIXTURES` is empty; slice 2 retires the legacy string
+  path and #796 CLI suppression.
+- Fixed (#801): prevent error-envelope parity coverage from silently dropping AI project input shapes by separating the semantic input-shape population from cell classification.
+- Fixed (#808): native `fslc domain generate`, `domain replay`, `domain testgen`, and `domain check` now derive their AST, checked Kernel/model, generated scaffolds, replay monitor, and edition metadata from one captured root-source snapshot, preventing concurrent atomic replacements from mixing document revisions in one result.
+- Fixed (#831): compose diagnostics no longer invent a `1:1` component location
+  for unreadable files; alias-qualified type resolution and synchronized-reference
+  errors now carry authored source spans into the public envelope.
+- Fixed (#841): ordinary trace, replay, testgen, and Worker JSON no longer collapse
+  `none` and `some(none)` for a nested `Option` state value; the tagged form
+  `{"kind":"some","value":…}` is introduced only where the declared payload is
+  itself an `Option`, so every previously supported `Option<scalar>` byte is
+  unchanged, and trace changes are computed from typed values so a struct's own
+  `kind`/`value` fields are never mistaken for an `Option` tag.
+- Fixed (#928): `fslc check` now returns the AI authority unknown-tool semantic envelope instead of panicking during its diagnostic preflight.
+- Fixed (#932): native `fslc check`, `fslc db check`, `fslc explain`, and `fslc html` now derive their validation, checked Kernel/model, verification, rendering, and post-processing from one captured root-source snapshot, preventing concurrent atomic replacements from mixing document revisions in one result.
+- Fixed (#945): routed FSL skill citations to the split references and aligned the changelog-fragment surface contract with its enforced glob.
+- Fixed (#946): the Codex Cargo lock wrapper no longer waits for the lock its own
+  parent holds. The lock-owning wrapper marks its child with
+  `FSL_CARGO_LOCK_HELD=<absolute path of the lock file>` -- in the environment and
+  again inside the shell, after the login profile runs, specifically so that a
+  login profile which unsets the marker cannot reintroduce the self-deadlock: the
+  re-export inside the shell restores it before the command runs, so a nested call
+  still bypasses acquisition instead of waiting on its own parent. Acquisition is
+  bypassed only when the marker names *this* lock and the lock is still held. A
+  marker from another repository falls back to ordinary serialization, because it
+  never matches this lock's path. A marker left behind after the owner released
+  the lock is stale: the next call finds the lock free, takes it, and becomes the
+  new holder like any ordinary invocation. A `flock` failure that is not
+  contention is still reported at once rather than waited out. The outer
+  invocation keeps the Git common-directory lock for the whole command, so
+  serialization across worktrees is unchanged. Known limitation: a descendant
+  that outlives its own wrapper can still bypass while an *unrelated* invocation
+  holds the same lock; closing that needs owner identity, which is not attempted
+  here.
+- Fixed (#947): keep Codex edits unblocked when the changelog advisory checker cannot run, while preserving fragment-violation blocking.
+- Fixed (#956): zero-argument function citations now require an actual item
+  definition instead of accepting registration string literals, and P2's missing
+  `corrupting_state_step_kind_or_location_cuts_a_p2_edge` rejecting control is
+  implemented.
+- Fixed (#989): causal evidence whose timing eligibility cannot be established
+  is now excluded from current support, as the applicability rule already
+  required. An unconvertible observation window, or a claim whose `lag` is
+  `unknown` so there is no `lag_min` to compare against, previously recorded a
+  `not_evaluable` entry while the same evidence/claim edge stayed
+  `applicable: true` and cast its vote, so an artifact whose timing could not be
+  checked could still decide a claim's `causal_support` between `supported`,
+  `mixed` and `challenged`. The edge now excludes with
+  `evidence_timing_not_evaluable`, and the record and the vote agree.
+
+  Each independent cause is named rather than collapsed into one sentence:
+  `period_start_missing`, `period_end_missing`, `period_date_unparsable`,
+  `period_end_before_start`, `timebase_not_convertible`,
+  `week_window_not_whole_weeks`, and `claim_lag_unknown`. A window that cannot
+  convert for a claim whose lag is also unknown reports both, which the previous
+  single branch dropped. The records now also travel on the evidence/claim edge
+  itself in `causal_evidence_graph` output, not only in the envelope-level
+  `not_evaluable` array.
+
+  Unchanged: `w == lag_min` still passes and votes, `w < lag_min` still excludes
+  with `evidence_window_shorter_than_lag`, and no support-vocabulary value is
+  new -- a claim left with no applicable artifact is
+  `unsupported_by_current_evidence` exactly as before.
+
+  Known limit, unchanged by this fix: a period date is parsed as `YYYY-MM-DD` with a month in
+  1..12 and a day in 1..31, and day-of-month validity against the month is not checked, so an
+  impossible date such as `2026-02-31` converts as its normalized value instead of reporting
+  `period_date_unparsable` — the edge then votes on a window computed from that normalization.
+  That is pre-existing `civil_days` behaviour, it also governs `valid_until` staleness, and it is
+  tracked as #1011 rather than widened into this fix.
+- Fixed (#993): `fslc document claims` no longer rejects a `verify { values N =
+  lo..hi }` bound written with compile-time consts. The projector now reads the
+  evaluated `KernelModel::types` domain bounds the model already built, so RCIR
+  v1's `analysis_scope.values[].lo/hi` carry plain integers and the renderer
+  shows `-1` to `2`. This aligns the projector with `docs/LANGUAGE.md`, which has
+  always written the bound as `values <Number> = <lo>..<hi>` without restricting
+  it to integer literals — it does not widen a documented contract. RCIR v1's
+  schema is unchanged, and existing literal bounds project byte-identically. A
+  `values` bound naming a number the spec never declares is not rejected either,
+  so no `values` bound makes `document claims` refuse a `requirements` spec that
+  `fslc check` accepts; a dialect RCIR v1 has no adapter for is still refused, as
+  a scope boundary. Rejection of a
+  non-constant bound is unchanged and now carries the model's own message
+  (`unknown constant 'LO'` rather than `must be an integer literal`); a
+  preservation control pins that, and separate detectors cover the evaluated,
+  literal-fallback, and omitted cases. `fslc diff` still drops such a bound
+  silently — that surface is tracked in #997, not fixed here.
+- Fixed (#1000): `fslc kernel` now projects relation state fields initialized with
+  `Set {}` as `set_lit` with relation-typed `type` and empty `items`, matching
+  `fslc check`; non-empty relation literals remain rejected.
+- Fixed (#1001): `fslc check|verify --strict-tags --requirements` now counts a requirement
+  ID linked by a typed `@requirement(...)` annotation on an `init` block or on an
+  `acceptance`/`forbidden` block as referenced, instead of reporting it as
+  `unreferenced_requirement`; a genuinely unreferenced ID still warns.
+- Fixed (#1002)!: a requirements spec can declare an inline `implements Abs from
+  "..." { ... }`, which makes `check` and `verify` refine that spec against the
+  upper layer as part of the ordinary run. A failed refinement used to be
+  reported only under the nested `implements` key: the top-level `result` stayed
+  successful and the process still exited 0, so a gate reading either of them
+  passed a spec whose refinement had failed. The failing seam verdict
+  (`refinement_failed` or `impl_violated`) now becomes the top-level `result`
+  verbatim and the process exits 1, while `implements.violation` keeps the
+  seam-specific evidence. Five subcommands change their exit code from 0 to 1 on
+  such a spec: `check`, `verify`, `sweep` (whose `sweep_passed` becomes
+  `sweep_failed`), `mutate`, and `ledger`. `mutate` is worth naming separately
+  because its loss is silent rather than wrong: it re-emits the failing baseline
+  envelope and generates no mutants at all, so a spec with a broken seam stops
+  having a kill rate rather than having a lower one. `db check` and `domain
+  check` are unaffected because neither reaches verification on this input: both
+  reject a requirements document by kind (`expected a dbsystem document` /
+  `expected a domain document`, exit 2) before any kernel projection. A `verify`
+  scoped with `--property`, `--exclude-property`, or `--from-state` still omits
+  `implements` entirely and therefore still cannot gate the seam (#1008).
+
+  Those seven exit codes were measured, not derived: with a binary built from
+  `81b40e3b` (the previous `main`) and one built from `71613598`, each run in
+  its own checkout, against
+  `tests/fixtures/chain/requirements_broken_implements.fsl` -- blob `71510f81`
+  at the former and `e1129ccb` at the latter, differing by two added comment
+  lines and nothing else -- whose `implements ... from "business.fsl"` import
+  resolves to blob `ce15ac77` in both. The five went 0 -> 1; `db check` and
+  `domain check` returned exit 2 with the quoted messages on both binaries.
+
+  `fslc html` is worth one more line, because its report was actively misleading
+  rather than merely incomplete: on the same spec its top-level Result went from
+  a green `verified` badge to a red `refinement_failed` one. Its exit code is
+  unchanged -- `html` still exits 0 over a failing spec, which is #1009 and is
+  not fixed here -- so the badge and the exit code now disagree deliberately,
+  and only the badge has been corrected.
+- Fixed (#1003): propagate `fslc verify --instances` / `--values` overrides into inline `implements`
+  abstract specs, filtered to names the abstraction declares, so refinement keeps
+  running at the same world size on both sides.
+
+  Scoped runs now apply the same model-warning finalization as unscoped runs, so a
+  spec's `warnings` no longer depend on whether `--instances` / `--values` were
+  passed. Measured on the #1003 reproducer, this removes a `no_user_invariants`
+  warning that only scoped runs emitted.
+- Fixed (#1007): the business-layer manual pages
+  (`docs/intro/business-layer.{en,ja}.html`) no longer print the flagship e2e
+  chain with `--deadlock ignore`. The flag was suppressing a diagnostic that
+  passes: measured with `--no-cache`, twice, `verify examples/e2e/1_business.fsl
+  --engine induction` and `verify examples/e2e/2_requirements.fsl --engine
+  induction` both exit 0 with `result: "proved"` without it, and `2_requirements`
+  checks a real `deadlock` property while doing so. The pages sat directly under a
+  callout telling the reader not to weaken business intent to make a check pass.
+  This covers the site pages only -- the same suppression survives in
+  `examples/e2e/README.md` and twelve other `examples/` documents, tracked in #979
+  and #998.
+- Replaced (#688): site CLI reference pages (`docs/intro/cli.{en,ja}.html`) now
+  render from the native `rust/fslc/cli-contract.json` contract instead of
+  frozen Python reference argparse introspection (`src/fslc/cli.py`), so the
+  public site stops describing the native CLI from a surface that is not its
+  authority. The move surfaces `fslc testplan`, `fslc counterexample`, and
+  `fslc mutate --oracle-attribution`, and drops no command: 29 of the
+  contract's 30 prog entries render on the page, `fslc version` staying
+  deliberately excluded as before.
+- Required (#761): `tools/check_ci_validator_inventory.py` now discovers and requires classification for
+  `tools/check_rust_*.py` in addition to `tests/test_*.py`, reserved as future scope by slice 1
+  (`docs/DESIGN-ci-validator-inventory.md`, "Scope boundaries"). A new, unclassified harness now fails
+  `check` closed with `untracked validator module`, exactly as an unclassified `tests/test_*.py` module
+  already did -- the shape #761 itself demonstrated is otherwise possible (17 harnesses existed with no
+  record of why any were unwired). Three new `exempt_reason` values (plus the existing
+  `frozen-python-compatibility`, reused) distinguish the actual reasons found in issue #761's
+  classification table instead of collapsing them into one:
+  `manual-developer-run` (5 self-declared "Optional developer-run" harnesses), `frozen-python-compatibility`
+  (reused; the 8 F1-F8 parity harnesses, whose precise pipeline stage remains `docs/RUST-PORTING.md`'s
+  record, not this inventory's), `parked-pending-unrelated-work` (1 harness blocked on an unrelated,
+  currently-parked feature), and `pending-native-migration` (3 harnesses blocked on a tracked,
+  not-yet-complete migration). This tool establishes only that a classification was recorded, not that
+  it is correct; `docs/DESIGN-ci-validator-inventory.md` states that guarantee boundary explicitly. The
+  17 harnesses in the inventory were seeded via explicit `--exempt path:reason` pairs matched to #761's
+  own classification table, not via the filename-pattern default (`default_exempt_reason`), which was
+  not relied on here. That default is reached both via `--bootstrap` for a genuinely new module and,
+  pre-existing and unrelated to this change, via an ordinary `generate` for a module whose `wiring`/
+  `prior` tier falls through every more specific branch (for example a previously `required` module
+  that is no longer wired anywhere) -- confirmed directly, not merely inferred from the source.
+
+  16 of the 17 were seeded in one `--bootstrap --exempt` call against a clean prior. `full_envelope`
+  was classified separately, one commit later in review: an earlier version of this pull request also
+  deleted `tools/check_rust_full_envelope.py`, reasoning that its `_diff`/`_normalize` helpers had no
+  other consumers after #913; independent review found that answers "is the helper still used," not "is
+  the comparison it performs still needed," and that `test-browser.mjs`'s native-vs-WASM parity is a
+  different edge that does not observe the frozen Python side either -- so it was restored, classified
+  `frozen-python-compatibility` like the other seven F-numbered harnesses, and its retirement decision
+  moved to a dedicated follow-up issue (#988) instead of being bundled with this change.
+- Required (#810): native/Worker error-envelope comparisons now cover AI-project and
+  surface parsing, guard, and name failures with calibrated one-sided rejecting controls.
+- Required (#841): calibrated nested-Option cross-engine, diagnostic-location,
+  and fault-operator controls, including exact nested-state comparator detection.
+- Required (#922): serialize Codex Cargo launches across repository worktrees, and use shared snapshot and SPDX enforcement detectors in agent hooks and merge readiness.
+- Required (#932): `explain` and `html` each carry a FIFO control that fails when the CLI opens a second root source, plus a platform-neutral control without `#[cfg(unix)]` so Windows holds the same guarantee; the HTML parity comparison's two wall-clock exclusions are themselves asserted present in both rendered reports, so the exclusion cannot go dead unnoticed.
+- Required (#937): Worker `check` and pre-solver `verify` error routes now have
+  full native-envelope comparisons, an explicit route registry, and calibrated
+  detectors for requirement traces, build failures, boundary violations, and
+  implements finalization.
+- Required (#962): add a machine-generated CI validator inventory and
+  reachability metatest so new `tests/test_*.py` modules fail closed unless they
+  are wired into a required gate or explicitly classified as exempt; slice 1
+  records the existing 98 unwired modules without wiring them.
+- Required (#1007): the `site reference freshness` context now also enforces
+  static manual-route integrity (`tests/test_site_manual_integrity.py`) and the
+  sitewide refresh contract (`tests/test_site_refresh_contract.py`) alongside the
+  existing generated-reference freshness snapshots. The context keeps its name,
+  ruleset membership, job, triggers, permissions, timeout, and concurrency, and
+  still runs on every pull request with no path filter; `fetch-depth: 0` was added
+  so the pinned-blob check can read local Git history. None of the three checks
+  establishes Rust/solver behavior, native CLI parity, browser rendering, or
+  assistive-technology behavior -- they are bounded documentation-artifact checks.
+- Unified (#932): `ledger` and `analyze` now derive their root-level reports from one captured input snapshot instead of multiple independent root-path reads.
+- Documented (#643): conformance-test layer-selection norm — generate from the
+  implementation's layer granularity; reuse upper-layer `forbidden` negatives only,
+  not upper positive scenarios (forward-simulation rationale and
+  `examples/refinement_chain` example in `docs/LANGUAGE.md` §12 and
+  `skills/fsl/references/impl.md` §9).
+- Documented (#841): accepted the implementation design for full recursive nested `Option` support, including fail-closed type boundaries, lossless JSON/replay, and cross-engine agreement.
+- Documented (#915): a release-gate failure-classification rule that distinguishes procedure defects, environment differences, cancellations, and reproducible defects before retrying.
+- Documented (#920): release promotion pull requests now use a branch pinned to the approved candidate SHA, with tree-identity checks before and after merge and an explicit carry-forward for the v4.4.1 revert.
+- Documented (#925): recorded the nested Map state-value removal as a breaking change in `docs/DESIGN-nested-option-support.md`, corrected its coupled-surface inventory to the fragments and surfaces that exist, and added the contributor rule that a type-boundary gate change measures `check` verdicts over `specs/`, `examples/`, and `rust/fslc/tests/fixtures/` at the named base and head SHAs, plus the inline fixtures of any required test the change rewrites, renames, removes, or stops from running.
+- Documented (#926): recorded the 2026-09-04 re-measurement of the Actions cache budget audit
+  (9.07 GiB / 91%, above the 85% threshold) in `docs/DESIGN-ci.md`, "Actions cache budget" --
+  the issue's originally-reported generation coexistence (`semantic-mutation`/`rust-workspace`/`wasm`)
+  no longer reproduces, but the same mechanism now affects `rust-native-z3` Darwin/arm64 instead,
+  driven by the GitHub-hosted runner's ambient installed-toolchain list rather than by anything this
+  repository controls. Recorded why a coexistence-detecting audit rule was rejected (its easiest
+  passing implementation is the prohibited manual deletion), why `shared-key` does not apply (only one
+  job builds this cache), and that the cache's size reflects the vendored Z3 C++ build rather than
+  accumulated debt.
+- Documented (#929): Codex hook activation now records machine-local entry trust,
+  the resulting enforcement boundary, and a non-failing local diagnostic for
+  untrusted checked-in hooks.
+- Documented (#961): `docs/DESIGN-no-user-invariants-warning.md` records the
+  suppression contract that supersedes the `CHANGELOG.md` v1.5.0 note on this
+  warning.
+- Documented (#990): align `docs/DESIGN-assurance-classes.md` classifier rules
+  with the keys and values `assurance.py` / `ledger.rs` actually accept; record
+  that FSL core classifies external evidence for display only and does not verify
+  it (confirmation rules remain issue #994).
+
 ## [4.4.1] - 2026-08-26
 
 - Fixed (#761): the legacy replay trace object wrapper is now exactly `{"events": [...]}` —
@@ -5702,7 +6020,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.4.1...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.5.0...HEAD
+[4.5.0]: https://github.com/ymm-oss/fsl/compare/v4.4.1...v4.5.0
 [4.4.1]: https://github.com/ymm-oss/fsl/compare/v4.4.0...v4.4.1
 [4.4.0]: https://github.com/ymm-oss/fsl/compare/v4.3.0...v4.4.0
 [4.3.0]: https://github.com/ymm-oss/fsl/compare/v4.2.0...v4.3.0
