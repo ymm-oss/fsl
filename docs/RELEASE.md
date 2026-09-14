@@ -229,27 +229,6 @@ The preceding promotion rule is canonical here; the release skill's `Promote
 main to production` procedure refers to these steps so there is one source of
 truth for the pinned-head and tree-identity requirements.
 
-### Required carry-forward after the v4.4.1 revert
-
-**Drop this section once `production` again contains
-`docs/DESIGN-nested-option-support.md` natively** — that is, when
-`git cat-file -e origin/production:docs/DESIGN-nested-option-support.md` succeeds
-on the current `production` HEAD without explicit reapplication after a promotion
-merge. Until that condition is met, keep following it.
-
-The revert on `production` does not make the reverted content reappear in a
-later promotion merge: Git will silently retain that omission unless it is
-explicitly reapplied. For each promotion while the condition above is unmet,
-explicitly reapply `docs/DESIGN-nested-option-support.md` from the approved
-candidate, then verify on `production` after the merge that the file exists:
-
-```bash
-git cat-file -e origin/production:docs/DESIGN-nested-option-support.md
-```
-
-Treat that verification as part of the post-merge tree-identity check; do not
-infer reapplication merely from the candidate branch containing the file.
-
 ## 3. Revalidate and tag production
 
 1. On the exact `production` HEAD, verify `rust/Cargo.toml`, `rust/Cargo.lock`,
