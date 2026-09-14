@@ -196,21 +196,22 @@ It also rejects a dynamic dependency on `libz3`.
    pinned branch keeps the pull request head and its CI evidence bound to the
    approved candidate.
 4. Before merging, verify that the promotion pull request's source branch still
-   carries the recorded candidate tree and that its HEAD's first parent is the
-   recorded candidate SHA:
+   carries the recorded candidate tree and still pins the recorded candidate SHA
+   as either its HEAD or its HEAD's first parent:
 
    ```bash
    git fetch origin "refs/heads/release/vX.Y:refs/remotes/origin/release/vX.Y"
    test "$(git rev-parse origin/release/vX.Y^{tree})" = "$(git rev-parse CANDIDATE_SHA^{tree})"
-   test "$(git rev-parse origin/release/vX.Y^1)" = "CANDIDATE_SHA"
+   test "$(git rev-parse origin/release/vX.Y)" = "CANDIDATE_SHA" \
+     || test "$(git rev-parse origin/release/vX.Y^1)" = "CANDIDATE_SHA"
    ```
 
-   A promotion branch created directly at `CANDIDATE_SHA` satisfies both checks.
-   When `production` still carries a revert that must not reintroduce omitted
-   content, prepare the branch with a sanctioned `-s ours --no-ff` merge of
-   `production` into `release/vX.Y` before opening the pull request: the merge
-   commit's first parent remains the candidate while the tree stays candidate
-   identical.
+   A promotion branch created directly at `CANDIDATE_SHA` satisfies both checks
+   via the first disjunct. When `production` still carries a revert that must not
+   reintroduce omitted content, prepare the branch with a sanctioned `-s ours
+   --no-ff` merge of `production` into `release/vX.Y` before opening the pull
+   request: the merge commit's first parent remains the candidate while the tree
+   stays candidate identical, satisfying the second disjunct.
 
    Merge without squashing away promoted history. Then verify the resulting
    `production` tree matches the approved candidate tree and record the new
