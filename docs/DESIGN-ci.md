@@ -649,7 +649,10 @@ lineage, replay, shrink, and exclusion contract is in
 Scheduled and manual runs use the same evidence. Pull requests into `production` also run the
 complete product gate and emit the Linux native-Z3 compatibility context expected by the production
 ruleset. Release jobs retain their independent four-target build, smoke, ABI, LSP, and packaging
-checks. An always-running `product gate` aggregator fails unless every required lane emitted
+checks. The `build` job installs the MSRV toolchain (`1.88.0`, commit-pinned per
+`validate_toolchain_pin.py`) and runs `cargo test --release --locked` on that toolchain before
+assembling release binaries; development workflows (`ci.yml`, `merge-readiness.yml`,
+`pages.yml`) continue to pin `dtolnay/rust-toolchain@1.98.0`. An always-running `product gate` aggregator fails unless every required lane emitted
 successful evidence; an accidentally skipped lane cannot make the workflow confidently green.
 
 Product-gate runs for merged commits are not cancelled. Each merged state therefore retains its own

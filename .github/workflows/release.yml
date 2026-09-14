@@ -55,6 +55,10 @@ jobs:
         with:
           toolchain: 1.88.0
 
+      - name: Test release toolchain (MSRV)
+        working-directory: rust
+        run: cargo test --release --locked
+
       - name: Build native Rust binary
         working-directory: rust
         run: cargo build --release --locked -p fslc-rust -p fsl-lsp
