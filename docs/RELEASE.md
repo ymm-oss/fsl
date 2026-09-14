@@ -180,11 +180,13 @@ It also rejects a dynamic dependency on `libz3`.
    changes.
 3. Create a branch fixed at the recorded candidate SHA, then open the
    release-promotion pull request from that branch to `production` — never from
-   moving `main`:
+   moving `main`. Name the branch `release/vX.Y` (for example, `release/v4.5`
+   for version `4.5.0`) so the required `production source policy` check accepts
+   it:
 
    ```bash
-   git branch release/vX.Y.Z-candidate CANDIDATE_SHA
-   git push origin release/vX.Y.Z-candidate
+   git branch release/vX.Y CANDIDATE_SHA
+   git push origin release/vX.Y
    ```
 
    State the candidate SHA, version, changes, residual risk, gate results, and
@@ -194,13 +196,21 @@ It also rejects a dynamic dependency on `libz3`.
    pinned branch keeps the pull request head and its CI evidence bound to the
    approved candidate.
 4. Before merging, verify that the promotion pull request's source branch still
-   resolves to the recorded candidate and that their trees are identical:
+   carries the recorded candidate tree and that its HEAD's first parent is the
+   recorded candidate SHA:
 
    ```bash
-   git fetch origin "refs/heads/release/vX.Y.Z-candidate:refs/remotes/origin/release/vX.Y.Z-candidate"
-   test "$(git rev-parse origin/release/vX.Y.Z-candidate)" = "CANDIDATE_SHA"
-   test "$(git rev-parse origin/release/vX.Y.Z-candidate^{tree})" = "$(git rev-parse CANDIDATE_SHA^{tree})"
+   git fetch origin "refs/heads/release/vX.Y:refs/remotes/origin/release/vX.Y"
+   test "$(git rev-parse origin/release/vX.Y^{tree})" = "$(git rev-parse CANDIDATE_SHA^{tree})"
+   test "$(git rev-parse origin/release/vX.Y^1)" = "CANDIDATE_SHA"
    ```
+
+   A promotion branch created directly at `CANDIDATE_SHA` satisfies both checks.
+   When `production` still carries a revert that must not reintroduce omitted
+   content, prepare the branch with a sanctioned `-s ours --no-ff` merge of
+   `production` into `release/vX.Y` before opening the pull request: the merge
+   commit's first parent remains the candidate while the tree stays candidate
+   identical.
 
    Merge without squashing away promoted history. Then verify the resulting
    `production` tree matches the approved candidate tree and record the new
@@ -220,11 +230,17 @@ truth for the pinned-head and tree-identity requirements.
 
 ### Required carry-forward after the v4.4.1 revert
 
+**Drop this section once `production` again contains
+`docs/DESIGN-nested-option-support.md` natively** — that is, when
+`git cat-file -e origin/production:docs/DESIGN-nested-option-support.md` succeeds
+on the current `production` HEAD without explicit reapplication after a promotion
+merge. Until that condition is met, keep following it.
+
 The revert on `production` does not make the reverted content reappear in a
 later promotion merge: Git will silently retain that omission unless it is
-explicitly reapplied. For the next promotion, explicitly reapply
-`docs/DESIGN-nested-option-support.md` from the approved candidate, then verify
-on `production` after the merge that the file exists:
+explicitly reapplied. For each promotion while the condition above is unmet,
+explicitly reapply `docs/DESIGN-nested-option-support.md` from the approved
+candidate, then verify on `production` after the merge that the file exists:
 
 ```bash
 git cat-file -e origin/production:docs/DESIGN-nested-option-support.md
