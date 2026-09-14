@@ -27,6 +27,7 @@ jobs:
   build:
     name: build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -57,7 +58,7 @@ jobs:
 
       - name: Test release toolchain (MSRV)
         working-directory: rust
-        run: cargo test --release --locked
+        run: cargo test --release --locked -p fslc-rust -p fsl-lsp
 
       - name: Build native Rust binary
         working-directory: rust

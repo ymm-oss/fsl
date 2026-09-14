@@ -650,9 +650,13 @@ Scheduled and manual runs use the same evidence. Pull requests into `production`
 complete product gate and emit the Linux native-Z3 compatibility context expected by the production
 ruleset. Release jobs retain their independent four-target build, smoke, ABI, LSP, and packaging
 checks. The `build` job installs the MSRV toolchain (`1.88.0`, commit-pinned per
-`validate_toolchain_pin.py`) and runs `cargo test --release --locked` on that toolchain before
-assembling release binaries; development workflows (`ci.yml`, `merge-readiness.yml`,
-`pages.yml`) continue to pin `dtolnay/rust-toolchain@1.98.0`. An always-running `product gate` aggregator fails unless every required lane emitted
+`validate_toolchain_pin.py`) and runs `cargo test --release --locked -p fslc-rust -p fsl-lsp` on
+that toolchain before assembling release binaries; only the shipped-unit crates are exercised at
+MSRV, while library-crate semantics remain the responsibility of PR/main CI at `1.98.0`.
+Development workflows (`ci.yml`, `merge-readiness.yml`, `pages.yml`) continue to pin
+`dtolnay/rust-toolchain@1.98.0`. The job sets `timeout-minutes: 90` to make the four-way matrix
+budget visible — measured from issue #1025 (`windows-latest` hit 61 minutes on a debug three-crate
+subset) plus `fslc-rust` test volume, not to add slack. An always-running `product gate` aggregator fails unless every required lane emitted
 successful evidence; an accidentally skipped lane cannot make the workflow confidently green.
 
 Product-gate runs for merged commits are not cancelled. Each merged state therefore retains its own
