@@ -131,10 +131,7 @@ a feature-flag system solely to accommodate this flow.
    gated candidate SHA unless promotion was a true fast-forward.
 
 Do not merge newer `main` work into an open promotion implicitly. Close or update
-the promotion and rerun its evidence against the new SHA. Before the next
-promotion, also follow `docs/RELEASE.md` §2's required v4.4.1 carry-forward:
-explicitly reapply `docs/DESIGN-nested-option-support.md` and verify that it
-exists on `production` after merge.
+the promotion and rerun its evidence against the new SHA.
 
 ## Cut the release
 

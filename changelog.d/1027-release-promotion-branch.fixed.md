@@ -5,4 +5,5 @@ equivalence plus candidate identity as either HEAD or first parent (covering bot
 a direct pin and a sanctioned `-s ours --no-ff` preparation). The v4.4.1
 carry-forward section is removed; production (`99f150e9`) again contains
 `docs/DESIGN-nested-option-support.md` natively after the v4.5.0 promotion
-completed the carry-forward.
+completed the carry-forward. The release skill no longer points at the removed
+carry-forward steps.
