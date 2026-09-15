@@ -1008,8 +1008,8 @@ refinement_failed / impl_violated / sweep_failed / observed_mismatch、
 inline `implements` が top-level `result` へ伝播するため列挙しています。畳み込みは検証封筒を
 生成する場所で起きるので、`check` / `verify` に閉じません。seam が失敗する spec では、`mutate` は
 baseline の verdict をそのまま返し(baseline が `verified` でなくなるため変異を1つも生成しません)、
-`ledger` は同じ exit を引き継ぎ、`sweep` は `sweep_failed` を返します。`fslc html` は畳み込まれた
-封筒を埋め込みます(exit code は変わりません)。同じ `2` の
+`ledger` と `fslc html` は畳み込まれた検証封筒から同じ exit を引き継ぎ、`sweep` は
+`sweep_failed` を返します。同じ `2` の
 対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な `depth`/`refine_depth` — `docs/DESIGN-layers.md` §7)
 と、`ledger --impl-log` の replay 入力(replay エラーは実装ログの証跡ではなく、

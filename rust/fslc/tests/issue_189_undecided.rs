@@ -71,8 +71,12 @@ fn undecided_declarations_surface_in_reports_and_acknowledge_without_suppression
     assert!(!ledger.contains("| undecided |"));
 
     let html = run(&["html", spec]);
-    assert!(
-        html.status.success(),
+    // This fixture's verification baseline is `violated`, so `html` exits 1
+    // since #1009 while still rendering the full report — the content
+    // assertions below are unchanged.
+    assert_eq!(
+        html.status.code(),
+        Some(1),
         "{}",
         String::from_utf8_lossy(&html.stderr)
     );
