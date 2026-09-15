@@ -1245,8 +1245,8 @@ this way. Most other commands that read a spec path (`lint`, `migrate`,
 `testplan`, `html`, `ledger`, `analyze`, `diff`, `refine`, `replay`, `sweep`, `counterexample export`,
 `db check`/`observe`, `compat check`, `domain check`/`analyze`/`expand`/`generate`/`replay`/`testgen`,
 `ai check`/`replay`/`compat`,
-`causal check`/`analyze`/`diff`/`ledger`/`observe-expectations`/`verify-expectations`, and
-`document generate`/`claims`/`check`) reject a `.md` input as an input-kind
+`causal check`/`analyze`/`diff`/`ledger`/`observe-expectations`/`verify-expectations`,
+`document generate`/`claims`/`check`, and `approval create`/`check`/`diff`) reject a `.md` input as an input-kind
 error instead: `result: "error"`, `kind: "usage"`,
 `diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"`, a message naming the
 commands that do support literate input, and a `loc` that names the input
@@ -1255,12 +1255,12 @@ unsupported command from being misreported as a spec syntax error at the
 position of the Markdown's own first non-fsl character. `chain` (its
 positional is a project manifest, not a spec) and `db import` (its positional is
 a SQL/Prisma schema artifact) are not spec-path commands in this sense.
-`approval create` cannot produce a record whose `spec.path` is `.md` (measured:
-`approval create <.md> --kind requirements_document|ledger ...` fails with
-`FSL-PARSE` before any record is written). `approval check`/`diff` parse their
-positional as an FSL spec when the record's `spec.path` matches it and then
-reproduce the same `1:2` lie (measured with a hand-forged record); excluded
-pending issue #980. `ai eval`/`regress`/`drift`
+`approval create`/`check`/`diff`'s positional is always parsed as an FSL spec
+regardless of `--kind` -- `--kind requirements_document`'s legitimately
+`.md`-shaped input is `--artifact`, never the positional -- so the guard
+above applies to their positional the same way it does for every other
+registered command, checked immediately after the positional is resolved and
+before `check`/`diff` read `--record` (#980). `ai eval`/`regress`/`drift`
 already parse `.md` input through their own `load_ai_project` frontend
 (success on a valid literate AI project, a clean semantic error otherwise)
 and are unaffected by this change. See

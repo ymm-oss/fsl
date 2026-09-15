@@ -1839,6 +1839,16 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
         args.next()
             .ok_or_else(|| format!("fslc approval {subcommand} requires a spec"))?,
     );
+    // The positional is always parsed as an FSL spec regardless of `--kind`
+    // (`--kind requirements_document`'s legitimately `.md`-shaped input is
+    // `--artifact`, never the positional; #980). Gate immediately after
+    // resolving the positional and before any record is read, the same
+    // seam `document_command` uses.
+    if matches!(subcommand.as_str(), "create" | "check" | "diff")
+        && let Err(early_return) = literate_access(&format!("approval {subcommand}"), &path)
+    {
+        return Ok(early_return);
+    }
     match subcommand.as_str() {
         "create" => {
             let mut kind = None;
@@ -6009,6 +6019,16 @@ fn strict_tag_warnings_from_source(
     }
 
     let referenced = referenced_requirement_ids(model, source);
+    // `Declared` = requirement-block IDs auto-collected from the requirements dialect
+    // (docs/DESIGN-strict-tags.md section 2 calls this "essential" for catching an
+    // empty block) union `--requirements` file IDs. Both halves run regardless of
+    // whether `--requirements` was passed; only the file half is optional. The file
+    // half keeps reporting in its original file-line order, so an established
+    // `--requirements` file's warning order is undisturbed; IDs that reach
+    // `Declared` only through auto-collection are reported afterward, in a fixed
+    // (sorted) order.
+    let declared_from_blocks = fsl_core::requirements_declared_ids(source).unwrap_or_default();
+    let mut declared_from_file: Vec<String> = Vec::new();
     if let Some(path) = requirements {
         let source = std::fs::read_to_string(path).map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
@@ -6017,20 +6037,37 @@ fn strict_tag_warnings_from_source(
                 error.to_string()
             }
         })?;
-        for requirement in source
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-        {
-            if !referenced.contains(requirement) {
-                warnings.push(json!({
-                    "kind": "unreferenced_requirement",
-                    "element": "requirement",
-                    "name": requirement,
-                    "loc": Value::Null,
-                    "hint": "no declaration tag, acceptance, or forbidden block references this requirement ID",
-                }));
-            }
+        declared_from_file.extend(
+            source
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_owned),
+        );
+    }
+    for requirement in &declared_from_file {
+        if !referenced.contains(requirement.as_str()) {
+            warnings.push(json!({
+                "kind": "unreferenced_requirement",
+                "element": "requirement",
+                "name": requirement,
+                "loc": Value::Null,
+                "hint": "no declaration tag, acceptance, or forbidden block references this requirement ID",
+            }));
+        }
+    }
+    for requirement in &declared_from_blocks {
+        if declared_from_file.iter().any(|line| line == requirement) {
+            continue;
+        }
+        if !referenced.contains(requirement.as_str()) {
+            warnings.push(json!({
+                "kind": "unreferenced_requirement",
+                "element": "requirement",
+                "name": requirement,
+                "loc": Value::Null,
+                "hint": "no declaration tag, acceptance, or forbidden block references this requirement ID",
+            }));
         }
     }
     Ok(warnings)

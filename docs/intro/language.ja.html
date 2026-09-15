@@ -1282,8 +1282,8 @@ literate な <code>.md</code> はこの方法で <code>.fsl</code> ファイル�
 <code>analyze</code>・<code>diff</code>・<code>refine</code>・<code>replay</code>・<code>sweep</code>・<code>counterexample export</code>・
 <code>db check</code>/<code>observe</code>・<code>compat check</code>・<code>domain check</code>/<code>analyze</code>/<code>expand</code>/<code>generate</code>/<code>replay</code>/<code>testgen</code>・
 <code>ai check</code>/<code>replay</code>/<code>compat</code>・
-<code>causal check</code>/<code>analyze</code>/<code>diff</code>/<code>ledger</code>/<code>observe-expectations</code>/<code>verify-expectations</code>、および
-<code>document generate</code>/<code>claims</code>/<code>check</code>)は、<code>.md</code> 入力を代わりに入力種別の誤りとして
+<code>causal check</code>/<code>analyze</code>/<code>diff</code>/<code>ledger</code>/<code>observe-expectations</code>/<code>verify-expectations</code>、
+<code>document generate</code>/<code>claims</code>/<code>check</code>、および <code>approval create</code>/<code>check</code>/<code>diff</code>)は、<code>.md</code> 入力を代わりに入力種別の誤りとして
 拒否します: <code>result: "error"</code>、<code>kind: "usage"</code>、
 <code>diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"</code>、対応コマンドを挙げたメッセージ、
 そして仕様上の位置ではなく入力ファイル自体を指す <code>loc</code> です。これにより、非対応
@@ -1291,11 +1291,11 @@ literate な <code>.md</code> はこの方法で <code>.fsl</code> ファイル�
 位置にある仕様の構文エラーとして誤報されることを防ぎます。<code>chain</code>(位置引数は
 プロジェクトマニフェストであり仕様ではない)と<code>db import</code>(位置引数は SQL/Prisma
 スキーマ成果物)は、この意味での仕様パスコマンドではありません。
-<code>approval create</code>は<code>spec.path</code>が<code>.md</code>のレコードを生成できません(実測:
-<code>approval create &lt;.md&gt; --kind requirements_document|ledger ...</code>はレコード
-書き込み前に<code>FSL-PARSE</code>で失敗)。<code>approval check</code>/<code>diff</code>はレコードの
-<code>spec.path</code>が位置引数と一致するとき位置引数を FSL 仕様としてパースし、同じ
-<code>1:2</code>の誤報を再現します(手作りレコードで実測); issue #980 まで除外。
+<code>approval create</code>/<code>check</code>/<code>diff</code> の位置引数は <code>--kind</code> に関わらず常に FSL 仕様として
+パースされます -- <code>--kind requirements_document</code> の下で正当に <code>.md</code> を受け取るのは
+<code>--artifact</code> であって位置引数ではありません -- そのため上記のガードは他の全登録
+コマンドと同様に、位置引数を解決した直後・<code>check</code>/<code>diff</code> が <code>--record</code> を読む前に
+適用されます(#980)。
 <code>ai eval</code>/<code>regress</code>/<code>drift</code>は独自の
 <code>load_ai_project</code> フロントエンドで <code>.md</code> を既にパースします(有効な literate AI
 project では成功し、それ以外は明確な意味エラー)ため、この変更の対象外です。各

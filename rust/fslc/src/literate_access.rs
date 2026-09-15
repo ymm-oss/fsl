@@ -48,21 +48,19 @@
 //!   message `"invalid TOML at line 1..."`, not the Markdown-as-spec lie
 //!   this issue is about). It is not "a command that takes a spec path" in
 //!   this issue's sense.
-//! - `approval create`/`check`/`diff` share the same defect as the
-//!   registered commands, but stay excluded (tracked as #980). Measured on
-//!   `a3703211`: `approval create` always parses its positional as an FSL
-//!   spec regardless of `--kind` (`approval create toggle.md
-//!   --kind requirements_document|ledger …` both report `kind:"parse"`,
-//!   `diagnostic_code:"FSL-PARSE"`, `unexpected character '!'` at `1:2`;
-//!   the legitimately `.md`-shaped input under `requirements_document` is
-//!   `--artifact`, not the positional) and cannot produce a record whose
-//!   `spec.path` is `.md` (it fails with `FSL-PARSE` before any record is
-//!   written). `approval check`/`diff` compare the record's `spec.path`
-//!   against the positional first; a mismatch short-circuits to a clean
-//!   target-mismatch message, but when they match -- including a hand-forged
-//!   record whose `spec.path` is a `.md` file, which `create` cannot
-//!   construct -- they reach the FSL frontend and reproduce the exact `1:2`
-//!   lie (measured with such a forged record).
+//! - `approval create`/`check`/`diff` share the same defect the registered
+//!   commands had before #694: the positional is always parsed as an FSL
+//!   spec regardless of `--kind` (measured on `a3703211`: `approval create
+//!   toggle.md --kind requirements_document|ledger …` both report
+//!   `kind:"parse"`, `diagnostic_code:"FSL-PARSE"`, `unexpected character
+//!   '!'` at `1:2`; the legitimately `.md`-shaped input under
+//!   `requirements_document` is `--artifact`, never the positional). #694
+//!   excluded these three on the premise that the positional's meaning
+//!   depends on `--kind`; that premise does not hold -- no contract ties
+//!   `--kind` to positional parsing -- so they are registered
+//!   [`LiterateSupport::Unsupported`] and gated in `approval_command`
+//!   immediately after the positional is resolved, before `--kind` is even
+//!   parsed and before `check`/`diff` read the `--record` file (#980).
 //! - `db`/`compat check`/`ai check`/`ai replay`/`ai compat`/`causal`/`domain`'s
 //!   dialect-specific spec arguments used to hit the same Markdown-as-spec-syntax
 //!   lie; they are now registered [`LiterateSupport::Unsupported`] and gated at
@@ -173,6 +171,9 @@ pub const LITERATE_REGISTRY: &[(&str, LiterateSupport)] = &[
     ("check", LiterateSupport::Supported),
     ("verify", LiterateSupport::Supported),
     ("scenarios", LiterateSupport::Supported),
+    ("approval create", LiterateSupport::Unsupported),
+    ("approval check", LiterateSupport::Unsupported),
+    ("approval diff", LiterateSupport::Unsupported),
     ("lint", LiterateSupport::Unsupported),
     ("migrate", LiterateSupport::Unsupported),
     ("kernel", LiterateSupport::Unsupported),
@@ -226,18 +227,6 @@ pub const LITERATE_EXCLUDED: &[(&str, &str)] = &[
     (
         "chain",
         "positional is a project manifest (TOML), not a spec; a .md there fails TOML parsing, never the FSL frontend",
-    ),
-    (
-        "approval create",
-        "the positional is always parsed as an FSL spec regardless of `--kind`; measured on a3703211: `approval create toggle.md --kind requirements_document|ledger ...` both report kind:\"parse\", diagnostic_code:\"FSL-PARSE\", unexpected character '!' at 1:2. Tracked as #980.",
-    ),
-    (
-        "approval check",
-        "approval create cannot produce a record whose spec.path is a .md file (measured on a3703211: approval create <.md> --kind requirements_document|ledger ... fails with FSL-PARSE before a record is written); if such a record exists from any other source, the record's spec.path must match the positional before parsing, and when it does, approval check/diff reach the FSL frontend and reproduce the exact 1:2 lie (measured with a hand-forged record whose spec.path matches a .md positional -- a mismatched record short-circuits to a clean target mismatch instead). Same defect this PR fixes elsewhere; gated because create cannot construct the precondition today. Tracked as #980.",
-    ),
-    (
-        "approval diff",
-        "approval create cannot produce a record whose spec.path is a .md file (measured on a3703211: approval create <.md> --kind requirements_document|ledger ... fails with FSL-PARSE before a record is written); if such a record exists from any other source, the record's spec.path must match the positional before parsing, and when it does, approval check/diff reach the FSL frontend and reproduce the exact 1:2 lie (measured with a hand-forged record whose spec.path matches a .md positional -- a mismatched record short-circuits to a clean target mismatch instead). Same defect this PR fixes elsewhere; gated because create cannot construct the precondition today. Tracked as #980.",
     ),
     (
         "db import",
