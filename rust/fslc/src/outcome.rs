@@ -19,7 +19,8 @@
 //! - **It takes the envelope, not the result string.** Five values cannot be
 //!   classified from `result` alone — they carry their verdict in a sibling
 //!   field (`approval check`'s `status`, `fmt --check`'s `changed`, `lint`'s
-//!   `finding_count`, `diff`'s `violations` and `gate.passed`). A `&str`
+//!   `finding_count`, and `diff`'s `gate.passed`, shared by its single-file
+//!   and batch forms). A `&str`
 //!   signature would force a second classifier beside this one, which is the
 //!   defect being removed. `docs/LANGUAGE.md`'s exit-code table says the same
 //!   thing from the outside: `approval_check`/`approval_diff` are absent from
@@ -112,12 +113,16 @@ pub fn outcome_class(output: &Value) -> OutcomeClass {
                 .and_then(Value::as_u64)
                 .is_none_or(|count| count == 0),
         ),
-        // `main.rs` `run_diff`: `i32::from(!violations.is_empty())`.
+        // `main.rs` `run_diff`: `i32::from(!violations.is_empty())`. The
+        // envelope publishes the decision only under `gate.passed`
+        // (`main.rs:15227-15230`) -- never as a top-level `violations` array
+        // (issue #1043; the batch arm below already read this correctly).
         "semantic_diff" => class_of(
             output
-                .get("violations")
-                .and_then(Value::as_array)
-                .is_none_or(Vec::is_empty),
+                .get("gate")
+                .and_then(|gate| gate.get("passed"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         ),
         // `main.rs` `run_diff_git` batch: the same gate, aggregated. The
         // envelope publishes the decision as `gate.passed`.
@@ -689,13 +694,31 @@ mod tests {
             OutcomeClass::Failure
         );
 
-        // `diff`: `i32::from(!violations.is_empty())`.
+        // `diff`: `run_diff` (`main.rs:15231`) computes
+        // `i32::from(!violations.is_empty())` from the same `violations` it
+        // writes only under `gate` (`main.rs:15227-15230`) -- never as a
+        // top-level field. These two envelopes are not hand-invented: they
+        // are the actual `fslc diff` output, trimmed to the fields this
+        // classifier reads, captured via
+        // `fslc diff specs/cart_v1.fsl specs/cart_v1.fsl --depth 1` (exit 0)
+        // and
+        // `fslc diff examples/db/unsafe_annotated_drop_with_old_server.fsl \
+        //  examples/db/unsafe_annotated_drop_with_old_server.fsl --depth 1`
+        // (exit 1). Issue #1043: a classifier reading a top-level
+        // `violations` field -- which `run_diff` never writes -- silently
+        // misclassified the second envelope as `Success`.
         assert_eq!(
-            outcome_class(&json!({"result": "semantic_diff", "violations": []})),
+            outcome_class(&json!({
+                "result": "semantic_diff",
+                "gate": {"forbidden": [], "violations": [], "passed": true}
+            })),
             OutcomeClass::Success
         );
         assert_eq!(
-            outcome_class(&json!({"result": "semantic_diff", "violations": ["R1"]})),
+            outcome_class(&json!({
+                "result": "semantic_diff",
+                "gate": {"forbidden": [], "violations": ["impl_violated"], "passed": false}
+            })),
             OutcomeClass::Failure
         );
 
