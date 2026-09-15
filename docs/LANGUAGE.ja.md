@@ -1033,7 +1033,7 @@ baseline の verdict をそのまま返し(baseline が `verified` でなくな�
 | `violated` | 反例が存在する。`violation_kind` と最短トレースつき | トレースを読んで spec を直す |
 | `reachable_failed` | reachable が深さ K 以内に到達されなかった | 各 `unreached[].classification` を読む: `insufficient_depth` なら `--depth` を上げ、`over_constrained` ならブロックしている制約を直す |
 | `unknown_cti` | invariant は違反されないが帰納的でない | **CTI を読んで補助 invariant を追加する**(§8)か、`--engine explicit` を試す(closure はレンマなしで証明する) |
-| `unknown_budget` | `--engine explicit` が閉じる前に `--explicit-budget` を超えた | 予算を上げるか、この spec には `--engine bmc`/`induction` を使う |
+| `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または inline `implements Abs from "file" { }` seam の対応探索が固定の内部状態予算を超えた(`check`/`verify`、CLI フラグ無し) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。inline `implements` seam の場合: domain を縮めるか、結合検査ではなく `fslc refine`/`fslc verify` で層を分けて検証する |
 | `error` | parse / type / semantics / io | `loc` / `expected` / `hint` に従って直す |
 
 `--engine auto` は explicit と bmc を合成します: まず explicit を試し(より速く、

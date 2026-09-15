@@ -86,11 +86,15 @@ producing command.
 **Inline `implements` failures are fail-closed.** A requirements spec with
 `implements Abs from "business.fsl" { ... }` has its refinement to the upper
 layer checked during `check`/`verify`. A `refines` verdict preserves the
-command's ordinary top-level `result` and exit code. Either failing nested value
-(`refinement_failed` or `impl_violated`) becomes the top-level `result` verbatim
-and the process exits 1, while `implements.violation` keeps the seam-specific
-evidence. Gate on `implements.result == "refines"` (the only passing value), or
-run `fslc chain`, which applies that gate for you.
+command's ordinary top-level `result` and exit code. Any of the three failing
+nested values (`refinement_failed`, `impl_violated`, or `unknown_budget` — the
+correspondence search hit its fixed internal state-count budget before
+deciding; no CLI flag raises it, narrow the domain or verify the layers
+separately) becomes the top-level `result` verbatim and the process exits 1,
+while `implements.violation` (or `implements.states_explored` for
+`unknown_budget`) keeps the seam-specific evidence. Gate on
+`implements.result == "refines"` (the only passing value), or run
+`fslc chain`, which applies that gate for you.
 
 ## Before writing a spec: source fidelity and the formalization memo
 

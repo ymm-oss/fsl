@@ -1125,8 +1125,8 @@ baseline の verdict をそのまま返し(baseline が <code>verified</code> �
 </tr>
 <tr>
 <td><code>unknown_budget</code></td>
-<td><code>--engine explicit</code> が閉じる前に <code>--explicit-budget</code> を超えた</td>
-<td>予算を上げるか、この spec には <code>--engine bmc</code>/<code>induction</code> を使う</td>
+<td>いずれか: <code>--engine explicit</code> が閉じる前に <code>--explicit-budget</code> を超えた。または inline <code>implements Abs from "file" { }</code> seam の対応探索が固定の内部状態予算を超えた(<code>check</code>/<code>verify</code>、CLI フラグ無し)</td>
+<td>explicit engine の場合: 予算を上げるか、この spec には <code>--engine bmc</code>/<code>induction</code> を使う。inline <code>implements</code> seam の場合: domain を縮めるか、結合検査ではなく <code>fslc refine</code>/<code>fslc verify</code> で層を分けて検証する</td>
 </tr>
 <tr>
 <td><code>error</code></td>
