@@ -375,6 +375,7 @@ jobs:
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
+          shared-key: rust-native-z3
           # Run 31527197290 attempt 1's old 40-minute cold Windows job was cancelled and its
           # post step was skipped (`9 skipped Post Run Swatinem/rust-cache@v2`).
           # `cache-on-failure: true` enables rust-cache's non-success post-save path;
@@ -442,6 +443,7 @@ jobs:
           # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
+          shared-key: rust-native-z3
           # Run 31527197290 attempt 1's old 40-minute cold Windows job was cancelled and its
           # post step was skipped (`9 skipped Post Run Swatinem/rust-cache@v2`).
           # `cache-on-failure: true` enables rust-cache's non-success post-save path;
@@ -803,7 +805,8 @@ jobs:
     needs:
       - rust-workspace
       - wasm
-      - rust-native-z3
+      - rust-native-z3-macos
+      - rust-native-z3-windows
       - production-native-z3-linux
       - semantic-mutation
       - fsl-logic
@@ -814,7 +817,8 @@ jobs:
         env:
           RUST_WORKSPACE: ${{ needs.rust-workspace.result }}
           WASM: ${{ needs.wasm.result }}
-          NATIVE_Z3: ${{ needs.rust-native-z3.result }}
+          NATIVE_Z3_MACOS: ${{ needs.rust-native-z3-macos.result }}
+          NATIVE_Z3_WINDOWS: ${{ needs.rust-native-z3-windows.result }}
           PRODUCTION_NATIVE_Z3_LINUX: ${{ needs.production-native-z3-linux.result }}
           SEMANTIC_MUTATION: ${{ needs.semantic-mutation.result }}
           FSL_LOGIC: ${{ needs.fsl-logic.result }}
@@ -822,6 +826,17 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |
+          # Aggregate the split macos/windows jobs into one value matching the
+          # former matrix job `needs.rust-native-z3.result`.
+          if [ "$NATIVE_Z3_MACOS" = "skipped" ] && [ "$NATIVE_Z3_WINDOWS" = "skipped" ]; then
+            NATIVE_Z3="skipped"
+          elif [ "$NATIVE_Z3_MACOS" = "failure" ] || [ "$NATIVE_Z3_WINDOWS" = "failure" ]; then
+            NATIVE_Z3="failure"
+          elif [ "$NATIVE_Z3_MACOS" = "cancelled" ] || [ "$NATIVE_Z3_WINDOWS" = "cancelled" ]; then
+            NATIVE_Z3="cancelled"
+          else
+            NATIVE_Z3="success"
+          fi
           failures=0
           for result in "$RUST_WORKSPACE" "$WASM" "$NATIVE_Z3"; do
             if [ "$result" != "success" ]; then
