@@ -1591,6 +1591,46 @@ fn verify_cache_keys_with_solver_version(
     )
 }
 
+/// The option-derived (non-source) half of the `verify` cache key. Split out
+/// from [`verify_cache_keys_with_fingerprints`] so a test can inspect this
+/// blob directly rather than only the opaque digest built from it -- the
+/// only way to prove a given field actually participates in the hash
+/// without duplicating the hashing algorithm in the test.
+///
+/// `implements_search_budget` is issue #1041's fix: the inline `implements`
+/// correspondence walk (`fsl_runtime::check_refinement`) is now bounded by
+/// `fsl_runtime::IMPLEMENTS_SEARCH_BUDGET`, and that verdict
+/// (`unknown_budget` included) is cacheable like any other
+/// (`outcome.rs`'s `exit_status`/`outcome_class`), so a budget change must
+/// invalidate stale entries the same way `explicit_budget` already does
+/// two lines below -- the #1023 class of defect (a cache key blind to an
+/// input that changes the verdict) applies here too. This is a *separate*
+/// input from #1023's own source-set fix: that one changed which *files*
+/// this function reads above; this one is a fixed constant with no CLI
+/// flag, added to the options blob instead.
+fn verify_cache_base_options(
+    canonical_identity: &Path,
+    engine: &str,
+    options: &CliVerifyOptions,
+) -> Value {
+    json!({
+        "path": canonical_identity,
+        "deadlock": options.deadlock,
+        "engine": engine,
+        "explicit_budget": options.explicit_budget,
+        "implements_search_budget": fsl_runtime::IMPLEMENTS_SEARCH_BUDGET,
+        "k": options.k_ind,
+        "vacuity": options.vacuity,
+        "property": options.property,
+        "exclude_properties": options.exclude_properties,
+        "instances": options.scope.instances,
+        "values": options.scope.values,
+        "strict_tags": options.strict_tags,
+        "lemmas": options.lemmas,
+        "edition": options.edition,
+    })
+}
+
 fn verify_cache_keys_with_fingerprints(
     source_path: &Path,
     identity_path: &Path,
@@ -1640,21 +1680,7 @@ fn verify_cache_keys_with_fingerprints(
         digest.update(b"requirements\0");
         digest.update(std::fs::read(requirements).map_err(|error| error.to_string())?);
     }
-    let base_options = json!({
-        "path": canonical_identity,
-        "deadlock": options.deadlock,
-        "engine": engine,
-        "explicit_budget": options.explicit_budget,
-        "k": options.k_ind,
-        "vacuity": options.vacuity,
-        "property": options.property,
-        "exclude_properties": options.exclude_properties,
-        "instances": options.scope.instances,
-        "values": options.scope.values,
-        "strict_tags": options.strict_tags,
-        "lemmas": options.lemmas,
-        "edition": options.edition,
-    });
+    let base_options = verify_cache_base_options(&canonical_identity, engine, options);
     digest.update(serde_json::to_vec(&base_options).map_err(|error| error.to_string())?);
     let xdepth = format!("{:x}", digest.clone().finalize());
     digest.update(b"\0depth=");
@@ -2616,6 +2642,31 @@ mod tests {
 
         assert_ne!(bmc_keys, explicit_keys);
         assert_ne!(explicit_keys, smaller_keys);
+    }
+
+    /// Issue #1041: `fsl_runtime::IMPLEMENTS_SEARCH_BUDGET` has no CLI flag
+    /// (unlike `explicit_budget` above, which the test above already
+    /// covers), so it cannot be varied through `CliVerifyOptions` to prove
+    /// inclusion by `assert_ne!` between two keys. Asserting the blob
+    /// `verify_cache_keys_with_fingerprints` actually hashes contains the
+    /// current constant's value is the direct, non-duplicating way to
+    /// prove it participates in the digest: removing the field from
+    /// `verify_cache_base_options` (issue #1041's #1023-class regression)
+    /// makes this assertion fail immediately, since the key would then be
+    /// absent.
+    #[test]
+    fn verify_cache_base_options_includes_the_implements_search_budget() {
+        let path = repository_path("examples/gallery/valid/tiny_turnstile.fsl");
+        let options = CliVerifyOptions::default();
+        let canonical = path.canonicalize().expect("canonicalize fixture path");
+
+        let base_options = verify_cache_base_options(&canonical, "bmc", &options);
+
+        assert_eq!(
+            base_options["implements_search_budget"],
+            json!(fsl_runtime::IMPLEMENTS_SEARCH_BUDGET),
+            "{base_options:#}"
+        );
     }
 
     #[test]

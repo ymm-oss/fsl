@@ -1067,7 +1067,7 @@ records why, and why `fslc document check`'s `document_drifted` differs. Gate on
 | `violated` | A counterexample exists. Comes with `violation_kind` and the shortest trace | Read the trace and fix the spec |
 | `reachable_failed` | reachable not reached within depth K | Read each `unreached[].classification`: raise `--depth` for `insufficient_depth`, or fix the blocking constraint for `over_constrained` |
 | `unknown_cti` | The invariant is not violated but is not inductive | **Read the CTI and add an auxiliary invariant** (§8), or try `--engine explicit` (closure proves without lemmas) |
-| `unknown_budget` | `--engine explicit` exceeded `--explicit-budget` before closing | Raise the budget, or use `--engine bmc`/`induction` for this spec |
+| `unknown_budget` | Either: `--engine explicit` exceeded `--explicit-budget` before closing; or an inline `implements Abs from "file" { }` seam's correspondence search exceeded its fixed internal state budget (`check`/`verify`, no CLI flag) | For the explicit engine: raise the budget, or use `--engine bmc`/`induction` for this spec. For an inline `implements` seam: narrow the domain, or verify the layers separately with `fslc refine`/`fslc verify` instead of the combined check |
 | `error` | parse / type / semantics / io | Fix per `loc` / `expected` / `hint` |
 
 `--engine auto` composes explicit and bmc: it tries explicit first (faster,

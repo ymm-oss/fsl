@@ -758,3 +758,24 @@ shape until a separate compatibility decision says otherwise.
 Aligning Python with Rust is a **follow-up compatibility task**, not part of
 #1018. Whether to open that follow-up is a maintainer decision; this design
 note does not authorize or schedule it.
+
+### Issue #1041 divergence: inline `implements` has a search budget only in native Rust
+
+Native `check_refinement`'s correspondence walk (`rust/fsl-runtime/src/lib.rs`)
+is now bounded by `IMPLEMENTS_SEARCH_BUDGET` (50,000 states; no CLI flag).
+Exceeding it folds to top-level `unknown_budget` / exit 1 on both `check` and
+`verify`, the same fail-closed shape #1026 established for
+`refinement_failed`/`impl_violated` above.
+
+The frozen Python reference's inline-`implements` refinement check has no
+budget and no `unknown_budget` verdict for this seam: a domain large enough to
+exceed the native budget still runs to completion (or exhaustion of process
+memory) under frozen Python, unbounded, exactly the behavior #1041 fixed in
+Rust. This is the same class of divergence as the fold-to-top-level one above
+(a native-only product correction on a frozen surface), not re-measured with a
+fresh CLI run in this worktree — confirmed by reading
+`src/fslc/analysis/refinement.py`, which has no `budget`/`visited`-cap match
+at all (`grep -n "budget\|visited"` finds nothing there), per `CLAUDE.md`'s
+frozen-Python-moves-only-for-an-explicit-compatibility-decision rule.
+Aligning Python is the same kind of follow-up compatibility task as above,
+not decided here.

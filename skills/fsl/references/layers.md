@@ -325,9 +325,14 @@ verify {
   verdict is reported as `implements: {abs, result}` with `result` one of
   `refines` / `refinement_failed` / `impl_violated` (the last one meaning the
   requirements spec breaks its own bounds/invariants, so no refinement verdict
-  was reached), plus `violation` on the two failing values. A failing seam makes
-  the command exit 1 with the same top-level `result` (`refinement_failed` or
-  `impl_violated`). Read `implements.violation` for seam-specific evidence. Gate on
+  was reached) / `unknown_budget` (the correspondence search hit its fixed
+  internal state-count budget before deciding, with `implements.states_explored`
+  — narrow the domain, or verify the layers separately with `fslc refine`/
+  `fslc verify`; there is no CLI flag to raise this budget), plus `violation`
+  on the two failing (not budget-exhausted) values. A failing seam makes the
+  command exit 1 with the same top-level `result`
+  (`refinement_failed`/`impl_violated`/`unknown_budget`). Read
+  `implements.violation` for seam-specific evidence. Gate on
   `implements.result == "refines"`, or use `fslc chain`, which applies exactly
   that gate to the layer and exits 1.
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
