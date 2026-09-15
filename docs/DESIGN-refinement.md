@@ -685,3 +685,72 @@ verified at each layer (see the note in `DESIGN-layers.md` §6,
 `faithfulness_class: "liveness_not_refined"` for leadsTo-refinement failures, but
 today the cleanly derivable signal is still the separate lower-layer
 `violated` / `leadsTo` verification result.
+
+## Frozen Python reference divergence
+
+Native Rust and the frozen Python compatibility reference disagree on whether
+a failed inline `implements` seam folds into the top-level `check` / `verify`
+verdict. Before `feedaefa`, both implementations kept the primary command result
+(`ok` / `verified`) and recorded the seam only under nested `implements`. PR
+#1026 (`246f0987`, building on #1002) made native `fslc check` and `fslc
+verify` fail closed: a broken seam on an otherwise-successful envelope is
+promoted to top-level `refinement_failed` or `impl_violated` with exit 1. The
+frozen Python reference was not updated and still leaves the primary result
+unchanged.
+
+Issue #1018 CLI measurements were **not re-run in this worktree** (no `cargo`
+build). The table below is backed by source reading at `44922cfa` only.
+
+| Command / envelope field | Native Rust (#1002, #1026) | Frozen Python |
+|---|---|---|
+| `check` top-level `result` / exit | `refinement_failed` / 1 | `ok` / 0 |
+| `verify` top-level `result` / exit | `refinement_failed` / 1 | `verified` / 0 |
+| `chain` layer `detail.result` | `refinement_failed` | `ok` |
+
+`fslc chain` itself still agrees on the outcome that matters for the pipeline:
+exit 1, top-level `violated`, the failing layer `status=failed`, and nested
+`detail.implements.result=refinement_failed`. Native folds the seam into
+`detail.result` before `chain` assembles the layer; frozen Python keeps
+`detail.result` at `ok` / `verified` and detects the failure through
+`detail.implements.violation` instead (`src/fslc/chain.py:42-50`).
+
+Concrete example: `tests/fixtures/chain/requirements_broken_implements.fsl`
+declares a deliberately broken inline `implements` mapping. Native `fslc check`
+on that file exits 1 with top-level `refinement_failed`; frozen Python `fslc
+check` exits 0 with top-level `ok` and
+`implements.result=refinement_failed`. The same fixture drives
+`tests/test_chain.py::test_chain_treats_nested_implements_failure_as_layer_failure`,
+which runs the frozen Python `chain` path in-process.
+
+### Why this is allowed
+
+`CLAUDE.md` names the native Rust workspace as authoritative and `src/fslc/` as
+a **frozen** compatibility/LSP surface: new product behavior lands in Rust
+first; the frozen Python reference moves only when an explicit compatibility
+decision requires both implementations to move. The nearest precedent is
+`docs/DESIGN-no-user-invariants-warning.md` `## Frozen Python reference
+divergence` (#967).
+
+`tests/agreement.py` exercises symbolic/concrete expression agreement
+(`bmc.eval_expr` vs the Monitor). It does not compare CLI `check` / `verify`
+top-level `result` values or process exit codes between native and frozen
+Python. No existing parity gate therefore fails closed on this verdict
+difference.
+
+`tests/snapshots/corpus_snapshot.json` is likewise pinned to frozen Python
+(`tests/test_corpus_snapshot.py` imports `run_check` / `run_verify` from
+`fslc.cli`). For `check`, the snapshot projection records nested
+`implements.result` when present but keeps the frozen Python top-level
+`result`; a native-only fold into `refinement_failed` therefore does not move
+that snapshot. That absence of movement is expected, not a missed
+regeneration.
+
+### Permanence
+
+This divergence is **intentional for #1002 / #1026**: fail-closed folding is a
+native product correction; the frozen reference retains the pre-#1026 envelope
+shape until a separate compatibility decision says otherwise.
+
+Aligning Python with Rust is a **follow-up compatibility task**, not part of
+#1018. Whether to open that follow-up is a maintainer decision; this design
+note does not authorize or schedule it.
