@@ -799,7 +799,7 @@ variable.
 ## 7. The verifier `fslc`
 
 ```
-fslc check     <file.fsl|file.md>                  # syntax / names / types only (fast; .md = literate FSL)
+fslc check     <file.fsl|file.md>                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
 fslc lint      <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
 fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input

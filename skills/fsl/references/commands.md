@@ -76,7 +76,7 @@ As needed: `fslc explain file.fsl --depth 8 --readable`
 ## 7. CLI and JSON essentials
 
 ```
-fslc check <f>                                  # syntax / names / types only; f = .fsl or .md (literate)
+fslc check <f>                                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)
 fslc lint <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
                                                  # exit 0 no findings, 1 findings exist, 2 I/O or check failure (unconditional per input, refused legacy tokens excepted)
 fslc migrate <path>... --edition next [--write] # dry run by default; atomic validated write set

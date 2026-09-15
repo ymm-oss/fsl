@@ -853,7 +853,7 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 <li>満杯の Seq への <code>push</code> も <code>type_bound</code> として自動で検出されます
   (ガードするには <code>requires q.size() &lt; N</code> と書きます)。</li>
 </ul></div></details>
-<details id="7-the-verifier-fslc"><summary>7. 検証器 `fslc`<span class="tree-blurb"> — fslc コマンド一覧、結果種別、終了コード、カバレッジ診断。</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types only (fast)
+<details id="7-the-verifier-fslc"><summary>7. 検証器 `fslc`<span class="tree-blurb"> — fslc コマンド一覧、結果種別、終了コード、カバレッジ診断。</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
 fslc lint      &lt;path&gt;... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   &lt;path&gt;... --edition next [--write] # dry-run edits; --write applies validated set
 fslc fmt       &lt;file.fsl|-&gt; [--edition current|next] # canonical FSL to stdout; never mutates input

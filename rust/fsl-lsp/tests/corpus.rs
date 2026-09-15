@@ -1,14 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::{Path, PathBuf};
+use std::{
+    ffi::OsStr,
+    path::{Path, PathBuf},
+};
 
 use fsl_lsp::DocumentIndex;
+
+fn is_gallery_errors_directory(path: &Path) -> bool {
+    let mut previous_was_gallery = false;
+    for component in path.components() {
+        if previous_was_gallery && component.as_os_str() == OsStr::new("errors") {
+            return true;
+        }
+        previous_was_gallery = component.as_os_str() == OsStr::new("gallery");
+    }
+    false
+}
 
 fn collect(path: &Path, files: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(path).expect("read corpus directory") {
         let path = entry.expect("read corpus entry").path();
         if path.is_dir() {
-            if !path.to_string_lossy().contains("gallery/errors") {
+            if !is_gallery_errors_directory(&path) {
                 collect(&path, files);
             }
         } else if path.extension().and_then(|extension| extension.to_str()) == Some("fsl") {

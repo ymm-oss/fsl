@@ -773,7 +773,7 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 ## 7. 検証器 `fslc`
 
 ```
-fslc check     <file.fsl>                        # syntax / names / types only (fast)
+fslc check     <file.fsl>                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
 fslc lint      <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
 fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input
