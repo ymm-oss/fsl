@@ -3178,6 +3178,31 @@ pub fn requirements_trace_contract(
     }))
 }
 
+/// Every requirement-block ID a requirements-layer source declares (`requirement
+/// REQ-ID "text" { ... }`), whether or not the block has any children to formalize
+/// it. `docs/DESIGN-strict-tags.md` section 2 requires this collection for
+/// `Declared` independently of `Referenced`, because an empty block reaches no
+/// annotation and would otherwise never surface as "declared but forgotten to
+/// formalize."
+///
+/// # Errors
+///
+/// Returns [`CoreError`] when the source cannot be parsed.
+pub fn requirements_declared_ids(source: &str) -> Result<BTreeSet<String>, CoreError> {
+    let document = fsl_syntax::parse_surface_document(source)?;
+    let SurfaceDocument::Requirements(requirements) = document else {
+        return Ok(BTreeSet::new());
+    };
+    Ok(requirements
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            RequirementsItem::Requirement { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect())
+}
+
 /// Whether a requirements-layer source declares an `implements` block.
 ///
 /// # Errors

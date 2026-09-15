@@ -1054,3 +1054,89 @@ fn strict_tag_traceability_counts_init_block_and_trace_case_annotations() {
         );
     }
 }
+
+/// #1020 case A: `fslc check --strict-tags` (no `--requirements`) must report an
+/// empty requirement block as `unreferenced_requirement`. `docs/DESIGN-strict-tags.md`
+/// section 2 calls the auto-collection of requirement-block IDs into `Declared`
+/// "essential" for catching exactly this "declared but forgotten to formalize" case.
+#[test]
+fn strict_tags_check_reports_empty_requirement_block_without_requirements_flag() {
+    let fixture = "rust/fslc/tests/fixtures/strict_tag_empty_requirement_block.fsl";
+    let (checked, status) = run_cli(&["check", fixture, "--strict-tags"]);
+    assert_eq!(status, 0, "{checked}");
+    assert_eq!(checked["result"], "ok", "{checked}");
+    assert_eq!(
+        checked["warnings"],
+        serde_json::json!([
+            {
+                "kind": "no_user_invariants",
+                "message": "spec declares no user invariants (only implicit type bounds are checked)"
+            },
+            {
+                "kind": "unreferenced_requirement",
+                "element": "requirement",
+                "name": "REQ-EMPTY",
+                "loc": null,
+                "hint": STRICT_TAG_UNREFERENCED_HINT
+            }
+        ]),
+        "{checked}"
+    );
+}
+
+/// #1020 case B: the same collection must run from `fslc verify`, which parses
+/// `--strict-tags`/`--requirements` through an independent option-parsing path
+/// (`parse_verify_options`, not `check`'s inline loop). Case A alone would still
+/// pass an implementation that only wires the collection into `check`; this proves
+/// the fix is not flag- or subcommand-dependent.
+#[test]
+fn strict_tags_verify_reports_empty_requirement_block_without_requirements_flag() {
+    let fixture = "rust/fslc/tests/fixtures/strict_tag_empty_requirement_block.fsl";
+    let (verified, status) = run_cli(&[
+        "verify",
+        fixture,
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore",
+        "--no-cache",
+        "--strict-tags",
+    ]);
+    assert_eq!(status, 0, "{verified}");
+    assert_eq!(verified["result"], "verified", "{verified}");
+    assert_eq!(
+        verified["warnings"],
+        serde_json::json!([
+            {
+                "kind": "no_user_invariants",
+                "message": "spec declares no user invariants (only implicit type bounds are checked)"
+            },
+            {
+                "kind": "unreferenced_requirement",
+                "element": "requirement",
+                "name": "REQ-EMPTY",
+                "loc": null,
+                "hint": STRICT_TAG_UNREFERENCED_HINT
+            }
+        ]),
+        "{verified}"
+    );
+}
+
+/// #1020 preservation control: a non-empty requirement block's own ID keeps
+/// reaching `Referenced` through the targets its contents bind to (the design
+/// document's documented fan-out), so it must not start warning as a side effect
+/// of auto-collecting block IDs into `Declared`.
+#[test]
+fn strict_tags_non_empty_requirement_block_stays_unwarned() {
+    let fixture = "rust/fslc/tests/fixtures/typed_annotation_outputs.fsl";
+    let (checked, status) = run_cli(&["check", fixture, "--strict-tags"]);
+    assert_eq!(status, 0, "{checked}");
+    assert_eq!(checked["result"], "ok", "{checked}");
+    assert!(
+        checked["warnings"]
+            .as_array()
+            .is_none_or(std::vec::Vec::is_empty),
+        "{checked}"
+    );
+}
