@@ -916,6 +916,32 @@ mod tests {
     use lsp_server::RequestId;
     use lsp_types::Range;
 
+    fn fixture_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "fsl-lsp-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("create fixture directory");
+        root
+    }
+
+    fn fixture_uri(root: &Path, name: &str, source: &str) -> Url {
+        let path = root.join(name);
+        std::fs::write(&path, source).expect("write fixture");
+        Url::from_file_path(path).expect("fixture URI")
+    }
+
+    fn fixture_pair(name: &str, first: &str, second: &str) -> (PathBuf, Url, Url) {
+        let root = fixture_root(name);
+        let first_uri = fixture_uri(&root, "lib.fsl", first);
+        let second_uri = fixture_uri(&root, "main.fsl", second);
+        (root, first_uri, second_uri)
+    }
+
     struct CompletionKeywordExclusion {
         keywords: &'static [&'static str],
         reason: &'static str,
@@ -1223,21 +1249,7 @@ mod tests {
   action run() = lib.bump() { n = n + 1 }
   internal lib.bump
 }"#;
-        let root = std::env::temp_dir().join(format!(
-            "fsl-lsp-cross-file-import-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock after epoch")
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&root).expect("create cross-file fixture");
-        let lib_path = root.join("lib.fsl");
-        let main_path = root.join("main.fsl");
-        std::fs::write(&lib_path, lib).expect("write library fixture");
-        std::fs::write(&main_path, main).expect("write main fixture");
-        let lib_uri = Url::from_file_path(&lib_path).expect("lib URI");
-        let main_uri = Url::from_file_path(&main_path).expect("main URI");
+        let (root, lib_uri, main_uri) = fixture_pair("cross-file-import", lib, main);
         let state = ServerState {
             documents: HashMap::from([
                 (
@@ -1344,9 +1356,9 @@ mod tests {
 
     #[test]
     fn protocol_queries_project_one_authoritative_index() {
-        let uri = Url::parse("file:///tmp/fsl-lsp-queries.fsl").expect("URI");
-        let legacy_uri = Url::parse("file:///tmp/fsl-lsp-legacy.fsl").expect("legacy URI");
         let source = "spec Shop {\n  enum Status { Open, Closed }\n  state { ready: Bool }\n  init { ready = false }\n  action flip() { ready = true }\n  invariant safe { ready or not ready }\n}";
+        let legacy = "domain Orders { type Status = Pending | Approved aggregate Order { state { status: Status = Pending; } } }";
+        let (root, uri, legacy_uri) = fixture_pair("queries", source, legacy);
         let state = ServerState {
             documents: HashMap::from([
                 (
@@ -1359,7 +1371,7 @@ mod tests {
                 (
                     legacy_uri.clone(),
                     OpenDocument {
-                        text: "domain Orders { type Status = Pending | Approved aggregate Order { state { status: Status = Pending; } } }".to_owned(),
+                        text: legacy.to_owned(),
                         version: 1,
                     },
                 ),
@@ -1443,6 +1455,7 @@ mod tests {
             }),
         );
         assert!(actions.as_array().is_some_and(|items| !items.is_empty()));
+        std::fs::remove_dir_all(root).expect("remove query fixture");
     }
 
     #[test]
@@ -1469,7 +1482,12 @@ mod tests {
 
     #[test]
     fn unresolved_rename_returns_null() {
-        let uri = Url::parse("file:///tmp/fsl-lsp-unresolved.fsl").expect("URI");
+        let root = fixture_root("unresolved");
+        let uri = fixture_uri(
+            &root,
+            "unresolved.fsl",
+            "spec Empty { state { ready: Bool } init { ready = false } }",
+        );
         let state = ServerState {
             documents: HashMap::from([(
                 uri.clone(),
@@ -1490,6 +1508,7 @@ mod tests {
             }),
         );
         assert!(result.is_null());
+        std::fs::remove_dir_all(root).expect("remove unresolved fixture");
     }
 
     #[test]

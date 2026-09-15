@@ -1,1 +1,1 @@
-Fixed (#1044): use filesystem-derived file URIs for the cross-file LSP import fixture so it is portable to Windows.
+Fixed (#1044): exclude intentionally malformed gallery examples with path-component matching on Windows and prevent three latent LSP fixture URI portability issues with filesystem-derived URIs.
