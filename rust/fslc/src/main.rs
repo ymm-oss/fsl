@@ -14935,28 +14935,36 @@ fn forbidden_diff_findings(
         .collect())
 }
 
-fn add_verify_items(scope: &mut ScopeBounds, items: &[fsl_syntax::VerifyItem]) {
+/// Source-level verify bounds, kept as unevaluated expressions. The `values`
+/// side is resolved against a built [`KernelModel`] by [`resolve_scope`],
+/// which is the single const-evaluation owner (`check`'s own model
+/// construction) instead of a second, AST-only fold.
+#[derive(Default)]
+struct RawScope {
+    instances: std::collections::BTreeMap<String, i64>,
+    values: std::collections::BTreeMap<String, (fsl_syntax::Expr, fsl_syntax::Expr)>,
+}
+
+fn add_verify_items(scope: &mut RawScope, items: &[fsl_syntax::VerifyItem]) {
     for item in items {
         match item {
             fsl_syntax::VerifyItem::Instances(name, value, _) => {
                 scope.instances.insert(name.clone(), *value);
             }
             fsl_syntax::VerifyItem::Values(name, lo, hi, _) => {
-                if let (fsl_syntax::Expr::Num(lo), fsl_syntax::Expr::Num(hi)) =
-                    (lo.as_ref(), hi.as_ref())
-                {
-                    scope.values.insert(name.clone(), (*lo, *hi));
-                }
+                scope
+                    .values
+                    .insert(name.clone(), (lo.as_ref().clone(), hi.as_ref().clone()));
             }
         }
     }
 }
 
-fn declared_scope(source: &str) -> ScopeBounds {
+fn declared_raw_scope(source: &str) -> RawScope {
     let Ok(document) = fsl_syntax::parse_surface_document(source) else {
-        return ScopeBounds::default();
+        return RawScope::default();
     };
-    let mut scope = ScopeBounds::default();
+    let mut scope = RawScope::default();
     let mut add_spec_item = |item: &fsl_syntax::SpecItem| {
         if let fsl_syntax::SpecItem::VerifyBounds { items, .. } = item {
             add_verify_items(&mut scope, items);
@@ -14994,6 +15002,34 @@ fn declared_scope(source: &str) -> ScopeBounds {
     scope
 }
 
+/// Resolve a source-level `values` bound against the model's own evaluated
+/// domain. A name the model gave a `TypeDef::Domain` (every declared
+/// `number` has one; see `dialect.rs`/`lib.rs` `SpecItem::Type` lowering)
+/// uses that evaluated `(lo, hi)`, the same integers `check` reports,
+/// regardless of whether the source expression was a literal, a named
+/// const, or `-1..HI`. A name absent from the model (issue #1058's
+/// undeclared-`values`-name territory, intentionally untouched here) keeps
+/// the prior literal-only fallback so that scope is unchanged.
+fn resolve_scope(raw: RawScope, model: &KernelModel) -> ScopeBounds {
+    let values = raw
+        .values
+        .into_iter()
+        .filter_map(|(name, (lo, hi))| {
+            if let Some(TypeDef::Domain { lo, hi, .. }) = model.types.get(&name) {
+                return Some((name, (*lo, *hi)));
+            }
+            if let (fsl_syntax::Expr::Num(lo), fsl_syntax::Expr::Num(hi)) = (&lo, &hi) {
+                return Some((name, (*lo, *hi)));
+            }
+            None
+        })
+        .collect();
+    ScopeBounds {
+        instances: raw.instances,
+        values,
+    }
+}
+
 fn public_scope(scope: &ScopeBounds) -> Value {
     json!({
         "instances":scope.instances,
@@ -15019,8 +15055,20 @@ fn run_diff(
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
-    let old_scope = declared_scope(&old_source);
-    let new_scope = declared_scope(&new_source);
+    // The declared scope's `values` bounds are resolved against each spec's
+    // own built model (the same evaluator `check` uses for
+    // `SpecItem::Type`), not re-folded from the raw AST here, so a const
+    // bound compares and overrides the same way a literal one does.
+    let old_model_declared = match load_model(old) {
+        Ok(model) => model,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let new_model = match load_model(new) {
+        Ok(model) => model,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let old_scope = resolve_scope(declared_raw_scope(&old_source), &old_model_declared);
+    let new_scope = resolve_scope(declared_raw_scope(&new_source), &new_model);
     let scope_changed = old_scope != new_scope;
     let overrides = ScopeBounds {
         instances: new_scope
@@ -15036,17 +15084,13 @@ fn run_diff(
             .map(|(name, value)| (name.clone(), *value))
             .collect(),
     };
-    let old_model = match if scope_changed {
-        load_model_scoped(old, &overrides)
+    let old_model = if scope_changed {
+        match load_model_scoped(old, &overrides) {
+            Ok(model) => model,
+            Err(error) => return (spec_load_error_output(&error), 2),
+        }
     } else {
-        load_model(old)
-    } {
-        Ok(model) => model,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let new_model = match load_model(new) {
-        Ok(model) => model,
-        Err(error) => return (spec_load_error_output(&error), 2),
+        old_model_declared
     };
     let mapping_source = match mapping.map(std::fs::read_to_string).transpose() {
         Ok(source) => source,
