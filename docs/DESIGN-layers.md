@@ -270,8 +270,10 @@ connect to the implementation via testgen/replay/Monitor (all implemented).
 2. **Traceability metadata** (new; plumbing only): put `req_id`/`policy_id` on
    nodes of the kernel AST and pass them through into all JSON output. From the
    design layer's counterexample, "violates REQ-1 (original text)" comes out
-   directly. A cross-cutting query `fslc trace REQ-1` (which element in which
-   layer derives from REQ-1) is also generated from the same metadata.
+   directly. A cross-cutting query such as
+   `fslc analyze fsl-project.toml --projection traceability_graph --format json`
+   (which element in which layer derives from REQ-1) is also generated from the
+   same metadata.
 3. **Downward flow of artifacts**: business-layer leadsTo → a template for the
    requirements-layer respond requirement, requirements-layer acceptance →
    design-layer scenarios → implementation testgen. The reverse direction is the

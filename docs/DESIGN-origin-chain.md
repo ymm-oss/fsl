@@ -2,7 +2,9 @@
 
 # Internal origin chains and diagnostic tracing
 
-Status: implemented by issue #240. Public Kernel v2 publication remains issue #256.
+Status: implemented by issue #240. Public Kernel v2 publication is implemented by
+issue #256; callers opt in through `PublicKernelVersion::V2` or
+`fslc kernel --kernel-version 2` (see `DESIGN-kernel-origin-v2.md`).
 
 ## Contract boundary
 
