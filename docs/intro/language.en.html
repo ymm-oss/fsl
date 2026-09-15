@@ -1107,9 +1107,8 @@ result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc 
 because inline <code>implements</code> propagates that seam verdict to the top-level <code>result</code>. The fold
 happens where the verification envelope is produced, so it is not confined to <code>check</code> and
 <code>verify</code>: on a spec whose seam fails, <code>mutate</code> re-emits the baseline verdict (generating no
-mutants, because its baseline is no longer <code>verified</code>), <code>ledger</code> inherits the same exit, and
-<code>sweep</code> reports <code>sweep_failed</code>. <code>fslc html</code> embeds the folded envelope; its exit code is
-unchanged. The same
+mutants, because its baseline is no longer <code>verified</code>), <code>ledger</code> and <code>fslc html</code> inherit the
+same exit from the folded verification envelope, and <code>sweep</code> reports <code>sweep_failed</code>. The same
 <code>2</code> mapping is fail-closed for <code>chain</code>'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable <code>depth</code>/<code>refine_depth</code> —
 <code>docs/DESIGN-layers.md</code> §7) and for <code>ledger --impl-log</code>'s replay input (a

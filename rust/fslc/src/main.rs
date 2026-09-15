@@ -11756,7 +11756,7 @@ fn run_html_report_from_source(
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let (verification, _) = run_verify_from_source(
+    let (verification, verification_status) = run_verify_from_source(
         path,
         source,
         depth,
@@ -11787,7 +11787,7 @@ fn run_html_report_from_source(
         &verification,
         &fsl_tools::undecided_declarations(&model),
     );
-    generated_content_result(
+    let (result, status) = generated_content_result(
         "html_report",
         &model.name,
         format!(
@@ -11798,6 +11798,13 @@ fn run_html_report_from_source(
         ),
         &html,
         output_path,
+    );
+    if status != 0 {
+        return (result, status);
+    }
+    (
+        result,
+        mutate_exit_status(&verification, verification_status),
     )
 }
 
