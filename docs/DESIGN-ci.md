@@ -649,7 +649,14 @@ lineage, replay, shrink, and exclusion contract is in
 Scheduled and manual runs use the same evidence. Pull requests into `production` also run the
 complete product gate and emit the Linux native-Z3 compatibility context expected by the production
 ruleset. Release jobs retain their independent four-target build, smoke, ABI, LSP, and packaging
-checks. An always-running `product gate` aggregator fails unless every required lane emitted
+checks. The `build` job installs the MSRV toolchain (`1.88.0`, commit-pinned per
+`validate_toolchain_pin.py`) and runs `cargo test --release --locked -p fslc-rust -p fsl-lsp` on
+that toolchain before assembling release binaries; only the shipped-unit crates are exercised at
+MSRV, while library-crate semantics remain the responsibility of PR/main CI at `1.98.0`.
+Development workflows (`ci.yml`, `merge-readiness.yml`, `pages.yml`) continue to pin
+`dtolnay/rust-toolchain@1.98.0`. The job sets `timeout-minutes: 90` to make the four-way matrix
+budget visible — measured from issue #1025 (`windows-latest` hit 61 minutes on a debug three-crate
+subset) plus `fslc-rust` test volume, not to add slack. An always-running `product gate` aggregator fails unless every required lane emitted
 successful evidence; an accidentally skipped lane cannot make the workflow confidently green.
 
 Product-gate runs for merged commits are not cancelled. Each merged state therefore retains its own
@@ -1195,6 +1202,10 @@ jobs share one cache; no other job builds this cache (confirmed: grepped every w
 `Swatinem/rust-cache` steps naming a `rust-native-z3`-shaped key), so there is nothing for it to
 consolidate. This was this session's first hypothesis and it was wrong; recorded here so it is not
 re-proposed without this evidence.
+
+Setting `shared-key: rust-native-z3` on the split `rust-native-z3-macos` / `rust-native-z3-windows`
+jobs preserves the existing cache key identity after the matrix was split into two job ids; that is a
+different purpose from consolidating cache between unrelated jobs, which this paragraph rejects.
 
 **An initial fix subtracting de-duplicated bytes from judgment was reviewed and reverted.** The
 first version of `auditCacheBudget()`'s response to this issue computed a "controllable footprint" --
