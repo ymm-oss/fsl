@@ -1317,8 +1317,8 @@ this way. Most other commands that read a spec path (<code>lint</code>, <code>mi
 <code>testplan</code>, <code>html</code>, <code>ledger</code>, <code>analyze</code>, <code>diff</code>, <code>refine</code>, <code>replay</code>, <code>sweep</code>, <code>counterexample export</code>,
 <code>db check</code>/<code>observe</code>, <code>compat check</code>, <code>domain check</code>/<code>analyze</code>/<code>expand</code>/<code>generate</code>/<code>replay</code>/<code>testgen</code>,
 <code>ai check</code>/<code>replay</code>/<code>compat</code>,
-<code>causal check</code>/<code>analyze</code>/<code>diff</code>/<code>ledger</code>/<code>observe-expectations</code>/<code>verify-expectations</code>, and
-<code>document generate</code>/<code>claims</code>/<code>check</code>) reject a <code>.md</code> input as an input-kind
+<code>causal check</code>/<code>analyze</code>/<code>diff</code>/<code>ledger</code>/<code>observe-expectations</code>/<code>verify-expectations</code>,
+<code>document generate</code>/<code>claims</code>/<code>check</code>, and <code>approval create</code>/<code>check</code>/<code>diff</code>) reject a <code>.md</code> input as an input-kind
 error instead: <code>result: "error"</code>, <code>kind: "usage"</code>,
 <code>diagnostic_code: "FSL-INPUT-LITERATE-UNSUPPORTED"</code>, a message naming the
 commands that do support literate input, and a <code>loc</code> that names the input
@@ -1327,12 +1327,12 @@ unsupported command from being misreported as a spec syntax error at the
 position of the Markdown's own first non-fsl character. <code>chain</code> (its
 positional is a project manifest, not a spec) and <code>db import</code> (its positional is
 a SQL/Prisma schema artifact) are not spec-path commands in this sense.
-<code>approval create</code> cannot produce a record whose <code>spec.path</code> is <code>.md</code> (measured:
-<code>approval create &lt;.md&gt; --kind requirements_document|ledger ...</code> fails with
-<code>FSL-PARSE</code> before any record is written). <code>approval check</code>/<code>diff</code> parse their
-positional as an FSL spec when the record's <code>spec.path</code> matches it and then
-reproduce the same <code>1:2</code> lie (measured with a hand-forged record); excluded
-pending issue #980. <code>ai eval</code>/<code>regress</code>/<code>drift</code>
+<code>approval create</code>/<code>check</code>/<code>diff</code>'s positional is always parsed as an FSL spec
+regardless of <code>--kind</code> -- <code>--kind requirements_document</code>'s legitimately
+<code>.md</code>-shaped input is <code>--artifact</code>, never the positional -- so the guard
+above applies to their positional the same way it does for every other
+registered command, checked immediately after the positional is resolved and
+before <code>check</code>/<code>diff</code> read <code>--record</code> (#980). <code>ai eval</code>/<code>regress</code>/<code>drift</code>
 already parse <code>.md</code> input through their own <code>load_ai_project</code> frontend
 (success on a valid literate AI project, a clean semantic error otherwise)
 and are unaffected by this change. See

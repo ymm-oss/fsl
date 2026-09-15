@@ -1839,6 +1839,16 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
         args.next()
             .ok_or_else(|| format!("fslc approval {subcommand} requires a spec"))?,
     );
+    // The positional is always parsed as an FSL spec regardless of `--kind`
+    // (`--kind requirements_document`'s legitimately `.md`-shaped input is
+    // `--artifact`, never the positional; #980). Gate immediately after
+    // resolving the positional and before any record is read, the same
+    // seam `document_command` uses.
+    if matches!(subcommand.as_str(), "create" | "check" | "diff")
+        && let Err(early_return) = literate_access(&format!("approval {subcommand}"), &path)
+    {
+        return Ok(early_return);
+    }
     match subcommand.as_str() {
         "create" => {
             let mut kind = None;
