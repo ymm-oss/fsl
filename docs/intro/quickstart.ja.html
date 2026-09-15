@@ -45,7 +45,7 @@ fslc --version</code></pre>
   <div class="wrap">
     <p class="kicker reveal">1. check</p>
     <h2 class="reveal">まず速いループ：構文と型だけを見る</h2>
-    <p class="lead narrow reveal"><code>fslc check</code> はZ3を呼ばず、構文・名前・型だけを検査します。編集のたびに叩く最速のループです。</p>
+    <p class="lead narrow reveal"><code>fslc check</code> はZ3を呼ばず、構文・名前・型に加えて、インラインの <code>implements</code> ブロックを固定深さまで検査します。編集のたびに叩く最速のループです。</p>
     <pre><code>$ fslc check docs/intro/specs/order_buggy.fsl</code></pre>
     <pre><code>{
   "fsl": "1.0",

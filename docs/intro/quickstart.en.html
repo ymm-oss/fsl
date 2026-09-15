@@ -45,7 +45,7 @@ fslc --version</code></pre>
   <div class="wrap">
     <p class="kicker reveal">1. check</p>
     <h2 class="reveal">The fast loop first: syntax and types only</h2>
-    <p class="lead narrow reveal"><code>fslc check</code> never calls Z3 — it only checks syntax, names, and types. Run it on every edit.</p>
+    <p class="lead narrow reveal"><code>fslc check</code> never calls Z3 — it checks syntax, names and types, and an inline <code>implements</code> block up to a fixed depth. Run it on every edit.</p>
     <pre><code>$ fslc check docs/intro/specs/order_buggy.fsl</code></pre>
     <pre><code>{
   "fsl": "1.0",
