@@ -1203,6 +1203,10 @@ jobs share one cache; no other job builds this cache (confirmed: grepped every w
 consolidate. This was this session's first hypothesis and it was wrong; recorded here so it is not
 re-proposed without this evidence.
 
+Setting `shared-key: rust-native-z3` on the split `rust-native-z3-macos` / `rust-native-z3-windows`
+jobs preserves the existing cache key identity after the matrix was split into two job ids; that is a
+different purpose from consolidating cache between unrelated jobs, which this paragraph rejects.
+
 **An initial fix subtracting de-duplicated bytes from judgment was reviewed and reverted.** The
 first version of `auditCacheBudget()`'s response to this issue computed a "controllable footprint" --
 one generation per `{sharedKey, platform}` on `refs/heads/main` -- and judged *that* value instead
