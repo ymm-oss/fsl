@@ -45,57 +45,135 @@ itself; it does not inspect whether an interval was produced.
 | `statistical` | a Wilson bound at the stated confidence supports (or fails) the threshold over the **fixed evaluated dataset** | per-case correctness; out-of-distribution inputs; sample independence and evaluator calibration (assumed via `AI-ASSUME-*`, not proved); never displayable as `proved`/`verified` (DESIGN-stochastic) |
 | `not_run` | nothing — structural analysis, profiles, comparisons, or errored/gated runs carry no requirement-level guarantee | everything; `agent_analyzed`/`ai_project_analyzed`/`compat_profile_generated`/`compared` are useful artifacts but not requirement evidence |
 
-## Shared classifier — `src/fslc/assurance.py` (new module)
+## Shared classifier — native Rust (`rust/fsl-tools`)
 
-One classifier, two consumers (`ledger.py`, `html_report.py`); neither may
-re-derive classes locally.
+Per `AGENTS.md`, the **authoritative** assurance vocabulary lives in the native
+Rust workspace. `fslc ledger`, `fslc html`, and `fslc document` all consume the
+same rules from `rust/fsl-tools/src/ledger.rs` (and, for document evidence
+overlay, `rust/fsl-tools/src/document_evidence.rs`); neither command surface
+may re-derive classes locally.
 
-- `classify_result(result: dict) -> str` — one command's result dict (envelope
-  or bare) to a token. Ordered rules, first match wins:
-  1. formal completeness (`completeness` or nested `kernel.completeness`):
-     `"unbounded"` → `proved`; `"bounded"` → `bounded`. Keys such as
-     `formal_result` and the top-level `result` token are **not** read for
-     this step — e.g. `{"result":"proved",...}` without `completeness` does
-     not upgrade assurance class.
-  2. observation markers (`guarantee_kind:"runtime_observed"`,
-     `evidence.kind` in `runtime_replay`/`runtime_telemetry`, or `result` in
-     `conformant`/`nonconformant`/`replay_conformant`/`replay_nonconformant`/
-     `observed_conformant`/`observed_mismatch`/`observed_supported`/
-     `conformance_checked`/`evidence_supported`/`evidence_failed`) →
-     `replay-observed`.
-  3. statistical: `status` (when absent, fall back to `result`) in
-     `statistically_supported`/`statistically_unsupported` → `statistical`;
-     `dataset_invalid`/`evaluator_untrusted`/`insufficient_samples`/
-     `slice_missing`/`inconclusive` → `not_run`. Schema names such as
-     `fsl-ai-statistical-result.v0` are not consulted.
-  4. else → `not_run`.
-- `classify_source` — **not** in `src/fslc/assurance.py` (none of its `def`s
-  map a result dict to a pass/fail verdict). Issue #508's verdict
-  mapping lives in the native ledger as `evidence_verdict`
-  (`rust/fsl-tools/src/ledger.rs`), which returns `Option<bool>`:
-  `Some(true)` / `Some(false)` on rule 2's same 10 `result` tokens —
-  `Some(true)`: `conformant`/`replay_conformant`/`observed_conformant`/
-  `conformance_checked`/`observed_supported`/`evidence_supported`;
-  `Some(false)`: `nonconformant`/`replay_nonconformant`/`observed_mismatch`/
-  `evidence_failed` — or from `status` `statistically_supported` /
-  `statistically_unsupported`;
-  `None` when the envelope carries no verdict (gate failures like
+The frozen Python reference (`src/fslc/assurance.py`) is listed in
+[Frozen Python reference](#frozen-python-reference-srcfslcassurancepy) below for
+parity inspection only — it is **not** the contract surface.
+
+### Envelope classifier — `ledger::assurance_token`
+
+`pub(crate) fn assurance_token(value: &Value) -> &'static str`
+(`rust/fsl-tools/src/ledger.rs`) — one command's result envelope (or bare JSON
+object) to a token. Ordered rules, first match wins:
+
+1. formal completeness (`completeness` or nested `kernel.completeness`):
+   `"unbounded"` → `proved`; `"bounded"` → `bounded`. Keys such as
+   `formal_result` and the top-level `result` token are **not** read for
+   this step — e.g. `{"result":"proved",...}` without `completeness` does
+   not upgrade assurance class.
+2. observation markers (`guarantee_kind:"runtime_observed"`,
+   `evidence.kind` in `runtime_replay`/`runtime_telemetry`, or `result` in
+   `conformant`/`nonconformant`/`replay_conformant`/`replay_nonconformant`/
+   `observed_conformant`/`observed_mismatch`/`observed_supported`/
+   `conformance_checked`/`evidence_supported`/`evidence_failed`) →
+   `replay-observed`.
+3. statistical: `status` (when absent, fall back to `result`) in
+   `statistically_supported`/`statistically_unsupported` → `statistical`;
+   gate statuses such as `dataset_invalid`/`evaluator_untrusted`/
+   `insufficient_samples`/`slice_missing`/`inconclusive` fall through to
+   step 4. Schema names such as `fsl-ai-statistical-result.v0` are not
+   consulted.
+4. else → `not_run`.
+
+### Verdict mapping — `ledger::evidence_verdict` (issue #508)
+
+`fn evidence_verdict(value: &Value) -> Option<bool>`
+(`rust/fsl-tools/src/ledger.rs`, module-private) — whether an evidence
+envelope's own `result`/`status` token is a definitive pass, a definitive
+fail, or carries no verdict at all. Deliberately independent of
+[`assurance_token`](#envelope-classifier--ledgerassurance_token): class
+(method strength) and verdict (outcome) are orthogonal, so a failing source
+must never change the assurance label, only add a finding.
+
+- `Some(true)` on `result` `conformant`/`replay_conformant`/
+  `observed_conformant`/`conformance_checked`/`observed_supported`/
+  `evidence_supported`, or on `status` `statistically_supported`.
+- `Some(false)` on `result` `nonconformant`/`replay_nonconformant`/
+  `observed_mismatch`/`evidence_failed`, or on `status`
+  `statistically_unsupported`.
+- `None` when the envelope carries no verdict (gate failures like
   `dataset_invalid`, structural output like `compared`). It does **not**
-  return a dict. Class (method strength) and verdict (outcome) remain
-  orthogonal — a failing source must never change the assurance label, only
-  add a finding.
-- `classify_element(group, name, verification) -> str` — per spec element.
-  Under BMC everything is `bounded`. Under `result:"proved"`: `invariants`,
-  `transitions` → `proved`; a `leadstos` entry → `proved` iff
-  `verification["leads_to"][name]["completeness"] == "unbounded"` (ranked),
-  else `bounded`; `reachables` and action coverage → `bounded` (base BMC only —
-  `prove()` already notes this). `result:"error"` without `completeness` →
-  `not_run`.
-- `strongest(classes) -> str`, `weakest(classes) -> str`, `ASSURANCE_ORDER`,
-  `assurance_label(token, *, depth=None, confidence=None,
-  under_assumptions=False) -> str`, `confidence_of(result) -> float | None`.
-- `requirement_assurance(registry, verification, evidence_results=()) -> dict`
-  — `{req_id: {"assurance", "sources": [...], "under_assumptions"}}`.
+  return a dict.
+
+### Per-element classifier — `ledger::formal_assurance`
+
+`pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) -> &'static str`
+(`rust/fsl-tools/src/ledger.rs`) — per spec element against a `verify`/`prove`
+result. Under `result:"proved"`: `invariants`/`transitions` → `proved`; a
+`leadstos` entry → `proved` iff
+`verification["leads_to"][name]["completeness"] == "unbounded"` (ranked),
+else `bounded`; `reachables` and action coverage → `bounded` (base BMC only).
+When `result` is not `"proved"`: if `result == "error"` → `not_run`; else if
+`completeness == "unbounded"` → `proved`; else → `bounded`.
+
+**Rust vs frozen Python — evaluation order (#995, unadjudicated).** The frozen
+Python `classify_element` checks `completeness` **before** `result == "error"`.
+Rust `formal_assurance` returns `not_run` on `result == "error"` **before**
+reading `completeness`. Neither side is declared authoritative here; issue
+#995 records the defect. Until it is adjudicated, do not treat either
+implementation alone as the contract for this corner:
+
+| Input | Rust `formal_assurance` | Python `classify_element` / prior doc |
+|---|---|---|
+| `result:"error"` + `completeness:"bounded"` | `not_run` | `bounded` |
+| `result:"error"` + `completeness:"unbounded"` | `not_run` | `proved` |
+
+### Display label — `ledger::assurance_label`
+
+`pub(crate) fn assurance_label(token: &str, depth: Option<u64>) -> String`
+(`rust/fsl-tools/src/ledger.rs`) — `"bounded"` + `Some(k)` →
+`"bounded(BMC depth k)"`; `"proved"` → `"proved(induction)"`; other tokens
+pass through unchanged.
+
+### Requirement-id matching — `ledger::evidence_requirement_ids`
+
+`pub(crate) fn evidence_requirement_ids(item: &Value) -> Vec<&str>`
+(`rust/fsl-tools/src/ledger.rs`) — every requirement ID an evidence envelope
+declares at its root (`requirements` string array plus singular
+`requirement.id`). Shared with `document_evidence.rs` so claim-level evidence
+matching cannot diverge from ledger. Ledger additionally walks nested
+`findings`/`checks` via private `evidence_attached_requirement_ids`.
+
+### Ledger row aggregation — `ledger::assurance_cell` (private)
+
+`fn assurance_cell(...)` (`rust/fsl-tools/src/ledger.rs`) — combines
+`formal_assurance` over a requirement's registry elements with
+`assurance_token` on attached `--evidence` envelopes, then renders joined
+`assurance_label` strings. Precedence order is fixed:
+`proved > bounded > replay-observed > statistical > not_run` (display only,
+not subsumption).
+
+### Document evidence overlay — `document_evidence::requirement_assurance`
+
+`pub fn requirement_assurance(requirement_id: &str, evidence: &[(String, Value)]) -> RequirementAssurance`
+(`rust/fsl-tools/src/document_evidence.rs`) — classifies **external evidence
+only** for one requirement ID, routing matched envelopes into three fixed
+dimensions (`formal`, `conformance`, `statistical`) by `assurance_token`.
+Performs no live verify pass and no formal-verification aggregation; that
+remains `fslc ledger`'s job. Companion: `unmatched_evidence_paths` flags
+evidence files that name requirement IDs not present in the spec.
+
+### Frozen Python reference (`src/fslc/assurance.py`)
+
+Observable parity reference only (AGENTS.md evidence order, rank 3). Approximate
+name map:
+
+| Rust (authoritative) | Frozen Python |
+|---|---|
+| `assurance_token` | `classify_result` |
+| `formal_assurance` | `classify_element` (see #995 table above) |
+| `evidence_verdict` | *(no equivalent `def`)* |
+| `assurance_label(token, depth)` | `assurance_label(token, *, depth, confidence, under_assumptions)` |
+| `document_evidence::requirement_assurance` | `requirement_assurance(registry, verification, evidence_results)` — different signature and responsibility |
+| `assurance_cell` precedence | `strongest` / `weakest` / `ASSURANCE_ORDER` |
+| — | `confidence_of` (Wilson confidence extraction; no Rust counterpart in this module) |
 
 ### External evidence — classification without verification (issue #990)
 
@@ -174,9 +252,9 @@ not adopt a future trust model or Adapter contract (issue #994).
 
 - CLI: `--engine {bmc,induction}` (default `bmc`; without it a ledger can never
   show `proved`) and repeatable `--evidence <result.json>` (a saved stdout
-  envelope of any producer above). `run_ledger(file, depth=8, output=None,
-  deadlock_mode="ignore", impl_log=None, write_file=True, engine="bmc",
-  evidence=None)`; `render_ledger(..., evidence_results=None)`.
+  envelope of any producer above). Native renderer:
+  `ledger::render_ledger` / `render_ledger_with_approvals` (Rust); frozen
+  Python `run_ledger` / `render_ledger` remain compatibility surfaces only.
 - Header: a legend line under 保証限界 naming the five labels and pointing at
   this document.
 - リスク一覧 gains a 保証クラス column after 状態:
@@ -190,12 +268,12 @@ not adopt a future trust model or Adapter contract (issue #994).
 
 ## `fslc html` changes
 
-- `_status_section` adds an "Assurance" row: `assurance_label(classify_result
-  (verification), ...)` — same labels as the ledger.
-- `_properties_section(properties, auto_checks, verification)` gains an
-  Assurance column per property row via `classify_element` (kind→group:
-  invariant→invariants, leadsTo→leadstos, reachable→reachables,
-  trans→transitions).
+- Status section adds an "Assurance" row:
+  `ledger::assurance_label(ledger::assurance_token(verification), depth)` —
+  same labels as the ledger.
+- Property rows gain an Assurance column via `ledger::formal_assurance` per
+  element (kind→group: invariant→invariants, leadsTo→leadstos,
+  reachable→reachables, trans→transitions).
 - `fslc html --engine {bmc,induction}` for parity, so a proved report can
   render `proved(induction)`.
 
