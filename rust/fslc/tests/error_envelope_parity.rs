@@ -867,6 +867,13 @@ const APPROVAL_CREATE_INPUT_SHAPE_PROFILE: InputShapeProfile = InputShapeProfile
     parse: APPROVAL_CREATE_PARSE_INPUT_SHAPES,
     ..SOURCE_INPUT_SHAPE_PROFILE
 };
+/// `kernel` reaches the same AI-component frontend `check` does (issue
+/// #1015), so it needs the same `Component` Name-class population `check`
+/// declares in [`CHECK_NAME_INPUT_SHAPES`].
+const KERNEL_INPUT_SHAPE_PROFILE: InputShapeProfile = InputShapeProfile {
+    name: CHECK_NAME_INPUT_SHAPES,
+    ..SOURCE_INPUT_SHAPE_PROFILE
+};
 
 // This is the closed set of commands whose production dispatch distinguishes
 // fsl-ai component and project documents. It is intentionally not inferred
@@ -933,7 +940,7 @@ const INPUT_SHAPE_POPULATIONS: &[CommandInputShapePopulation] = &[
     input_shape_population!("explain", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("fmt", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("html", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("kernel", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("kernel", KERNEL_INPUT_SHAPE_PROFILE),
     input_shape_population!("ledger", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("lint", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("migrate", SOURCE_INPUT_SHAPE_PROFILE),
@@ -1492,6 +1499,16 @@ const KERNEL_GUARD_COVERAGE: &[FailureCoverage] = &[
         fixture: NAME_FIXTURE,
         uniform: SEMANTIC_UNIFORM,
     },
+    // issue #1015: `kernel` reaches `lower_ai_component` through the same
+    // shared lowering gate as `check`, so an authority block naming an
+    // undeclared tool must return the same envelope `check` already pins
+    // for this fixture in `CHECK_COVERAGE`, not panic before any JSON is
+    // written.
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_NAME_FIXTURE,
+        uniform: AI_UNKNOWN_TOOL_SEMANTIC,
+    },
 ];
 
 struct KnownAsymmetry {
@@ -1805,6 +1822,9 @@ fn coverage_input_shape(command: &str, fixture: &str) -> InputShape {
     }
     if command == "approval create" && fixture == PARSE_APPROVAL_REQUIREMENTS_DOCUMENT_FIXTURE {
         return InputShape::RequirementsDocument;
+    }
+    if command == "kernel" && fixture == AI_NAME_FIXTURE {
+        return InputShape::Component;
     }
     if is_ai_dispatch_command(command) {
         if fixture == PARSE_AI_PROJECT_FIXTURE

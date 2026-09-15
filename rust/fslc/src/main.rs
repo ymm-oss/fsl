@@ -5757,6 +5757,23 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
+    // `lower_ai_component` indexes `members[tool_name]` for every
+    // authority-block tool reference and panics if the tool is undeclared
+    // (issue #1015). Validate an `ai_component` document's authority names
+    // before lowering, the same way `run_check_from_source` does through
+    // `validate_specialized_document_from_source` — but narrowed to the AI
+    // frontend alone, so this stays scoped to the one lowering path that can
+    // panic and does not also start rejecting a `dbsystem` document `kernel`
+    // previously accepted (`validate_specialized_document_from_source` would
+    // additionally run `validate_db`, which `kernel` has never called). A
+    // parse failure or any other document kind falls through unchanged to
+    // `parse_kernel_source` below, keeping its own `kind:"parse"` envelope.
+    if let Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) =
+        parse_surface_document_from_source(path, &source)
+        && let Err(error) = fsl_core::validate_ai_component(&component)
+    {
+        return (semantic_error_output(&error.to_string()), 2);
+    }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
     let portable_path = if version == fsl_core::PublicKernelVersion::V2 {
