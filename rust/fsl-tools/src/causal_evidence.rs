@@ -100,6 +100,25 @@ pub fn lifecycle_record_digest(
     sha256_of(&canonical_json(&payload))
 }
 
+fn is_leap_year(year: i64) -> bool {
+    year % 400 == 0 || (year % 4 == 0 && year % 100 != 0)
+}
+
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if is_leap_year(year) {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 0,
+    }
+}
+
 /// Days since the civil epoch for a `YYYY-MM-DD` date (Gregorian).
 fn civil_days(date: &str) -> Option<i64> {
     let bytes = date.as_bytes();
@@ -110,6 +129,9 @@ fn civil_days(date: &str) -> Option<i64> {
     let month: i64 = date.get(5..7)?.parse().ok()?;
     let day: i64 = date.get(8..10)?.parse().ok()?;
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    if day > days_in_month(year, month) {
         return None;
     }
     // Howard Hinnant's days_from_civil.
@@ -1267,6 +1289,20 @@ mod tests {
 
     #[test]
     fn civil_days_handles_gregorian_dates() {
+        // Defect detector: impossible calendar dates must not normalize.
+        assert_eq!(civil_days("2026-02-31"), None);
+        assert_eq!(civil_days("2026-02-29"), None);
+        assert_eq!(civil_days("2026-04-31"), None);
+        assert_eq!(civil_days("1900-02-29"), None);
+
+        // Negative controls: valid leap-year and month-length boundaries must still parse.
+        assert_eq!(civil_days("2024-02-29"), Some(19_782));
+        assert_eq!(civil_days("2000-02-29"), Some(11_016));
+        assert_eq!(civil_days("2026-01-31"), Some(20_484));
+
+        // Preservation control: unchanged conversion for a valid date (pre-fix: Some(20_454)).
+        assert_eq!(civil_days("2026-01-01"), Some(20_454));
+
         assert_eq!(civil_days("1970-01-01"), Some(0));
         assert_eq!(civil_days("1970-01-02"), Some(1));
         assert_eq!(
@@ -1274,6 +1310,8 @@ mod tests {
             89
         );
         assert_eq!(civil_days("2026-13-01"), None);
+        assert_eq!(civil_days("2026-00-10"), None);
+        assert_eq!(civil_days("2026-01-00"), None);
         assert_eq!(civil_days("garbage"), None);
     }
 }
