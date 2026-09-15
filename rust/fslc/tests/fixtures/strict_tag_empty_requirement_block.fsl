@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
+requirements EmptyRequirementBlockDeclared {
+  state { n: 0..3 }
+  @requirement("REF-001", "a referenced requirement")
+  init { n = 0 }
+  @requirement("REF-002", "a referenced requirement on an action")
+  action bump() { requires n < 3
+    n = n + 1 }
+  requirement REQ-EMPTY "declared but never formalized" {
+  }
+}
