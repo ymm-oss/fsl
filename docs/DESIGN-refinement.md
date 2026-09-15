@@ -682,6 +682,10 @@ at depth K" (demonstrated by `examples/refinement_chain`; a spike confirmed
 only safety propagates. The top-level liveness (`leadsTo`/`responds`) is re-
 verified at each layer (see the note in `DESIGN-layers.md` §6,
 `examples/refinement_liveness`). The diagnostic routing table reserves
-`faithfulness_class: "liveness_not_refined"` for leadsTo-refinement failures, but
-today the cleanly derivable signal is still the separate lower-layer
-`violated` / `leadsTo` verification result.
+`faithfulness_class: "liveness_not_refined"` for leadsTo-refinement failures.
+When a refinement declares `preserve progress`, `fslc refine` additionally pulls
+the named abstract `leadsTo` through the state mapping and runs bounded progress
+search on the implementation model (`check_refinement_progress` in
+`fsl-verifier`), surfacing `kind: "progress_lost"` directly in refine output
+(see §1 above). Without `preserve progress`, liveness failures still appear only
+as separate lower-layer `violated` / `leadsTo` verification results.
