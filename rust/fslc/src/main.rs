@@ -16759,8 +16759,19 @@ fn load_kernel_model_from_source(
 ) -> Result<(KernelSpec, KernelModel), SpecLoadError> {
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
+    load_kernel_model_from_source_with_resolver(path, source, &resolver)
+}
+
+/// `load_kernel_model_from_source` with a caller-owned resolver, so a
+/// cache-key computation can observe the dependency reads (issue #1023) by
+/// passing a recording resolver instead of a plain `FsResolver`.
+fn load_kernel_model_from_source_with_resolver(
+    path: &Path,
+    source: &str,
+    resolver: &dyn fsl_core::FileResolver,
+) -> Result<(KernelSpec, KernelModel), SpecLoadError> {
     let kernel =
-        match fsl_core::parse_kernel_source_with_file(source, &resolver, path.to_string_lossy()) {
+        match fsl_core::parse_kernel_source_with_file(source, resolver, path.to_string_lossy()) {
             Ok(kernel) => kernel,
             Err(error) => return Err(kernel_load_error(source, &error)),
         };
