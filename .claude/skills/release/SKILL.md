@@ -101,7 +101,8 @@ a feature-flag system solely to accommodate this flow.
 1. Verify `production` is an ancestor of, or can be merged cleanly with, `main`.
 2. Freeze the candidate by recording the exact `main` SHA. Follow the canonical
    pinned-head and pre-/post-merge tree-identity procedure in
-   `docs/RELEASE.md` §2, steps 3–4: create the candidate branch at that SHA,
+   `docs/RELEASE.md` §2, steps 3–4: create the candidate branch `release/vX.Y`
+   at that SHA — the name the required `production source policy` check accepts —
    use it as the promotion pull request head, and perform both identity checks.
    Do not open a moving `main -> production` pull request. If unrelated changes
    land, rerun the gate or replace the candidate.
