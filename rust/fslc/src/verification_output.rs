@@ -327,13 +327,48 @@ pub fn requirements_implements_output_with_bounds(
     instances: &std::collections::BTreeMap<String, i64>,
     values: &std::collections::BTreeMap<String, (i64, i64)>,
 ) -> Result<Option<Value>, RequirementsImplementsError> {
-    let Some(contract) =
-        fsl_core::requirements_implements_with_bounds(source, resolver, model, instances, values)
-            .map_err(|error| RequirementsImplementsError {
+    let contract = resolve_requirements_implements(source, resolver, model, instances, values)?;
+    check_requirements_implements(contract, model, depth)
+}
+
+/// Resolve an inline `implements` declaration into its abstraction and
+/// refinement mapping, without checking it. This is the read+parse half of
+/// what `requirements_implements_output_with_bounds` does, split out so a
+/// cache-key computation can observe the dependency read (issue #1023)
+/// before the (comparatively expensive) refinement check runs.
+///
+/// # Errors
+///
+/// Returns a diagnostic when dependency resolution or lowering fails.
+pub fn resolve_requirements_implements(
+    source: &str,
+    resolver: &dyn fsl_core::FileResolver,
+    model: &KernelModel,
+    instances: &std::collections::BTreeMap<String, i64>,
+    values: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> Result<Option<fsl_core::ImplementsContract>, RequirementsImplementsError> {
+    fsl_core::requirements_implements_with_bounds(source, resolver, model, instances, values)
+        .map_err(|error| RequirementsImplementsError {
             message: error.message,
             span: error.span,
-        })?
-    else {
+        })
+}
+
+/// Check an already-resolved inline `implements` contract and render its
+/// verdict. This is the (comparatively expensive) check half of
+/// `requirements_implements_output_with_bounds`, run separately so it can
+/// stay after a cache lookup while `resolve_requirements_implements` moves
+/// ahead of it.
+///
+/// # Errors
+///
+/// Returns a diagnostic when concrete refinement checking fails.
+pub fn check_requirements_implements(
+    contract: Option<fsl_core::ImplementsContract>,
+    model: &KernelModel,
+    depth: usize,
+) -> Result<Option<Value>, RequirementsImplementsError> {
+    let Some(contract) = contract else {
         return Ok(None);
     };
     let checked =

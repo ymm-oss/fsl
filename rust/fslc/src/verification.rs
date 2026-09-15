@@ -10,12 +10,12 @@ use sha2::{Digest, Sha256};
 use super::{
     CliVerifyOptions, ScopeBounds, SpecLoadError, add_strict_tag_warnings, apply_vacuity_mode,
     block_on_native, display, envelope, error_output, implements_error_output,
-    implements_result_from_source_with_bounds, invariant_names, load_kernel_model_from_source,
-    load_model, load_model_from_source, load_model_scoped, load_model_scoped_from_source,
-    load_snapshot_value_object, load_state_snapshot, read_spec_source, select_properties,
-    selected_implicit_bounds, semantic_error_output, spec_load_error_output,
-    surface_parse_error_output, validate_requirement_traces_from_source,
-    validate_specialized_document_from_source,
+    implements_result_from_source_with_bounds, invariant_names,
+    load_kernel_model_from_source_with_resolver, load_model, load_model_from_source,
+    load_model_scoped, load_model_scoped_from_source, load_snapshot_value_object,
+    load_state_snapshot, read_spec_source, select_properties, selected_implicit_bounds,
+    semantic_error_output, spec_load_error_output, surface_parse_error_output,
+    validate_requirement_traces_from_source, validate_specialized_document_from_source,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1498,61 +1498,19 @@ fn cache_root() -> Option<PathBuf> {
         })
 }
 
-fn collect_fsl_sources(path: &Path, output: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    if path.is_file() {
-        if is_fsl_source(path) && !is_literate_materialization(path) {
-            output.push(path.to_path_buf());
-        }
-        return Ok(());
-    }
-    for entry in std::fs::read_dir(path)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        if file_type.is_symlink() {
-            continue;
-        }
-        if file_type.is_dir() || file_type.is_file() {
-            collect_fsl_sources(&entry.path(), output)?;
-        }
-    }
-    Ok(())
-}
-
-fn is_fsl_source(path: &Path) -> bool {
-    match path.extension().and_then(std::ffi::OsStr::to_str) {
-        Some("fsl") => true,
-        Some("md") => std::fs::read_to_string(path)
-            .ok()
-            .and_then(|source| fsl_syntax::extract_literate_fsl(&source))
-            .is_some(),
-        _ => false,
-    }
-}
-
-/// True for the transient sibling `fslc` materializes next to a literate `.md`
-/// file (see `materialize_literate` in `main.rs`). This file's content is
-/// already represented by the `.md` file itself via `is_fsl_source`'s Markdown
-/// branch above, so it must be excluded from the cache-key directory walk —
-/// otherwise a run-local artifact would spuriously appear as a dependency.
-fn is_literate_materialization(path: &Path) -> bool {
-    let Some(pid) = path
-        .file_name()
-        .and_then(std::ffi::OsStr::to_str)
-        .and_then(|name| name.strip_prefix('.'))
-        .and_then(|name| name.strip_suffix(".fsl"))
-        .and_then(|name| name.rsplit_once(".literate-").map(|(_, pid)| pid))
-    else {
-        return false;
-    };
-    !pid.is_empty() && pid.bytes().all(|byte| byte.is_ascii_digit())
-}
-
 fn verify_cache_keys(
     source_path: &Path,
     identity_path: &Path,
     options: &CliVerifyOptions,
+    sources: &[(PathBuf, String)],
 ) -> Result<(String, String), String> {
-    verify_cache_keys_for_engine(source_path, identity_path, options, &options.engine)
+    verify_cache_keys_for_engine(
+        source_path,
+        identity_path,
+        options,
+        &options.engine,
+        sources,
+    )
 }
 
 /// Cache keys are always computed for a concrete engine. The `auto` engine
@@ -1564,6 +1522,7 @@ fn verify_cache_keys_for_engine(
     identity_path: &Path,
     options: &CliVerifyOptions,
     engine: &str,
+    sources: &[(PathBuf, String)],
 ) -> Result<(String, String), String> {
     verify_cache_keys_with_solver_version(
         source_path,
@@ -1571,6 +1530,7 @@ fn verify_cache_keys_for_engine(
         options,
         engine,
         fsl_solver_z3::version(),
+        sources,
     )
 }
 
@@ -1580,6 +1540,7 @@ fn verify_cache_keys_with_solver_version(
     options: &CliVerifyOptions,
     engine: &str,
     solver_version: &str,
+    sources: &[(PathBuf, String)],
 ) -> Result<(String, String), String> {
     verify_cache_keys_with_fingerprints(
         source_path,
@@ -1588,6 +1549,7 @@ fn verify_cache_keys_with_solver_version(
         engine,
         solver_version,
         env!("FSLC_IMPLEMENTATION_FINGERPRINT"),
+        sources,
     )
 }
 
@@ -1605,9 +1567,11 @@ fn verify_cache_keys_with_solver_version(
 /// invalidate stale entries the same way `explicit_budget` already does
 /// two lines below -- the #1023 class of defect (a cache key blind to an
 /// input that changes the verdict) applies here too. This is a *separate*
-/// input from #1023's own source-set fix: that one changed which *files*
-/// this function reads above; this one is a fixed constant with no CLI
-/// flag, added to the options blob instead.
+/// input from #1023's own source-set fix below: that one changed which
+/// *files* this function reads (`sources`, replacing a directory walk);
+/// this one is a fixed constant with no CLI flag, added to the options
+/// blob instead. Both are inputs to the same single key derivation -- they
+/// do not compete for one slot.
 fn verify_cache_base_options(
     canonical_identity: &Path,
     engine: &str,
@@ -1631,26 +1595,35 @@ fn verify_cache_base_options(
     })
 }
 
+/// `sources` is the resolved-absolute-path/content set actually read while
+/// resolving this run's dependencies (issue #1023): the recorder wrapping
+/// `FsResolver` during `prepare_cli_verification_from_source`'s model build
+/// and, when the inline `implements` seam is active, during
+/// `resolve_requirements_implements`. It replaces walking `source_path`'s
+/// parent directory, which was a proxy for "what this spec depends on" that
+/// was both too narrow (a dependency outside the parent directory was never
+/// walked) and too broad (an unrelated sibling `.fsl` file was).
 fn verify_cache_keys_with_fingerprints(
-    source_path: &Path,
+    // The dependency domain now comes entirely from `sources` (what was
+    // actually read); this key no longer walks a directory rooted at the
+    // checked spec's own path, so it is unused here. Kept as a parameter
+    // because every caller still has it on hand and the signature reads as
+    // "the key for verifying this source, given these deps" either way.
+    _source_path: &Path,
     identity_path: &Path,
     options: &CliVerifyOptions,
     engine: &str,
     solver_version: &str,
     implementation_fingerprint: &str,
+    sources: &[(PathBuf, String)],
 ) -> Result<(String, String), String> {
     let canonical_identity = identity_path
         .canonicalize()
         .map_err(|error| error.to_string())?;
-    let canonical_source = source_path
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    let base = canonical_source.parent().unwrap_or_else(|| Path::new("."));
-    let mut sources = Vec::new();
-    collect_fsl_sources(base, &mut sources).map_err(|error| error.to_string())?;
-    sources.sort();
+    let mut sorted_sources = sources.to_vec();
+    sorted_sources.sort();
     let mut digest = Sha256::new();
-    digest.update(b"fslc-rust-verify-cache-v2\0");
+    digest.update(b"fslc-rust-verify-cache-v3\0");
     digest.update(env!("CARGO_PKG_VERSION").as_bytes());
     digest.update(b"\0identity-source\0");
     digest.update(std::fs::read(identity_path).map_err(|error| error.to_string())?);
@@ -1664,16 +1637,10 @@ fn verify_cache_keys_with_fingerprints(
     digest.update(b"implementation\0");
     digest.update(implementation_fingerprint.as_bytes());
     digest.update(b"\0");
-    for source in sources {
-        digest.update(
-            source
-                .strip_prefix(base)
-                .unwrap_or(&source)
-                .as_os_str()
-                .as_encoded_bytes(),
-        );
+    for (path, content) in &sorted_sources {
+        digest.update(path.as_os_str().as_encoded_bytes());
         digest.update(b"\0");
-        digest.update(std::fs::read(&source).map_err(|error| error.to_string())?);
+        digest.update(content.as_bytes());
         digest.update(b"\0");
     }
     if let Some(requirements) = options.requirements.as_deref() {
@@ -1694,7 +1661,7 @@ fn verify_cache_path(key: &str) -> Option<PathBuf> {
     }
     Some(
         cache_root()?
-            .join("verify/v2")
+            .join("verify/v3")
             .join(&key[..2])
             .join(format!("{key}.json")),
     )
@@ -1723,7 +1690,7 @@ fn verify_cache_lookup(key: &str, xdepth: &str, depth: usize) -> Option<Value> {
         return Some(output);
     }
     let pointer_path = cache_root()?
-        .join("verify/v2/xdepth")
+        .join("verify/v3/xdepth")
         .join(format!("{xdepth}.json"));
     let pointer: Value = serde_json::from_slice(&std::fs::read(pointer_path).ok()?).ok()?;
     if pointer.get("schema").and_then(Value::as_str) != Some("fslc-rust-cache-pointer.v2")
@@ -1817,7 +1784,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
         && let Some(step) = output.get("violated_at_step").and_then(Value::as_u64)
         && let Some(root) = cache_root()
     {
-        let directory = root.join("verify/v2/xdepth");
+        let directory = root.join("verify/v3/xdepth");
         if std::fs::create_dir_all(&directory).is_ok() {
             let pointer = directory.join(format!("{xdepth}.json"));
             let temporary = directory.join(format!(".{xdepth}.{}.tmp", std::process::id()));
@@ -1874,6 +1841,61 @@ fn seam_is_suppressed(options: &CliVerifyOptions, prepared: &PreparedCliVerifica
         || prepared.initial_state.is_some()
 }
 
+/// A `FileResolver` decorator that records every dependency it actually
+/// reads, as (path relative to `base`, content). This is the cache key's
+/// dependency domain (issue #1023): passing this single instance into every
+/// place `run_verify_cli_from_source` resolves a `from`/`use` dependency —
+/// `prepare_cli_verification_from_source`'s model build and, when the
+/// inline `implements` seam is active, `resolve_requirements_implements` —
+/// makes the key's domain match what the verdict actually depends on by
+/// construction, instead of a directory-walk proxy for it.
+///
+/// Recorded relative to `base` rather than as a resolved absolute path
+/// (unlike the checked spec's own identity, which is hashed by content):
+/// every `read` on one `RecordingResolver` shares the same fixed `base`
+/// (nested `from`/`use` reuses the same resolver instance all the way
+/// down), so the relative path is already unambiguous, and it matches what
+/// the pre-#1023 directory walk hashed for an in-parent dependency
+/// (`source.strip_prefix(base)`). A checked literate `.md` document is
+/// verified through a per-process `.{stem}.literate-{pid}.fsl`
+/// materialization (`literate_access.rs`) sitting beside it; that sibling
+/// was excluded from the old walk for exactly this reason
+/// (`is_literate_materialization`) and never reaches this resolver at all
+/// (its own root source is read directly, by content, never through a
+/// `from`/`use` clause) — but recording relative-to-base keeps that
+/// property true by construction rather than by a second exclusion list,
+/// instead of an absolute path that would embed a directory a symlinked
+/// alias resolves through.
+struct RecordingResolver {
+    base: PathBuf,
+    reads: std::cell::RefCell<Vec<(PathBuf, String)>>,
+}
+
+impl RecordingResolver {
+    fn new(base: impl Into<PathBuf>) -> Self {
+        Self {
+            base: base.into(),
+            reads: std::cell::RefCell::new(Vec::new()),
+        }
+    }
+
+    fn take_sources(&self) -> Vec<(PathBuf, String)> {
+        self.reads.borrow().clone()
+    }
+}
+
+impl fsl_core::FileResolver for RecordingResolver {
+    fn read(&self, path: &str) -> Result<String, fsl_core::CoreError> {
+        let content = std::fs::read_to_string(self.base.join(path))
+            .map_err(|error| fsl_core::CoreError::unlocated(error.to_string()))?;
+        self.reads
+            .borrow_mut()
+            .push((PathBuf::from(path), content.clone()));
+        Ok(content)
+    }
+}
+
+#[allow(clippy::too_many_lines)]
 pub(super) fn run_verify_cli_from_source(
     path: &Path,
     cache_identity_path: &Path,
@@ -1906,7 +1928,8 @@ pub(super) fn run_verify_cli_from_source(
     {
         return super::causal::causal_parse_error_output(&error, false);
     }
-    let prepared = match prepare_cli_verification_from_source(path, source, options) {
+    let recorder = RecordingResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+    let prepared = match prepare_cli_verification_from_source(path, source, options, &recorder) {
         Ok(prepared) => prepared,
         Err(output) => return output,
     };
@@ -1943,6 +1966,35 @@ pub(super) fn run_verify_cli_from_source(
         }
         return finalize_cli_verification(path, options, &prepared, None, output, status);
     }
+    // The inline `implements` seam's dependency is read here, before the
+    // cache key below, rather than inside `execute_cli_verification`
+    // (issue #1023): the cache key must be able to see it, and the key is
+    // computed before `execute_cli_verification` ever runs on a cache miss.
+    // `selection_filtered` is computed exactly once here and threaded into
+    // `execute_cli_verification` instead of being recomputed there, so
+    // "is the seam active" stays a single fact rather than two copies of the
+    // same check that could drift.
+    let selection_filtered = seam_is_suppressed(options, &prepared);
+    let implements_contract = if selection_filtered {
+        None
+    } else {
+        match &prepared.model {
+            Ok(model) => match fslc_rust::verification_output::resolve_requirements_implements(
+                source,
+                &recorder,
+                model,
+                &options.scope.instances,
+                &options.scope.values,
+            ) {
+                Ok(contract) => contract,
+                Err(error) => return (implements_error_output(&error), 2),
+            },
+            // `execute_cli_verification` reports this itself before it would
+            // ever reach the implements seam.
+            Err(_) => None,
+        }
+    };
+    let sources = recorder.take_sources();
     // `auto` never keys a cache entry under the literal string "auto": a
     // lookup consults the explicit/bmc keys directly
     // (`cached_auto_verification`) and a store writes under whichever engine
@@ -1950,7 +2002,7 @@ pub(super) fn run_verify_cli_from_source(
     // with plain `--engine explicit`/`--engine bmc` runs of the same spec.
     let is_auto = options.engine == "auto";
     let cache_keys = (!is_auto && cache_enabled(options))
-        .then(|| verify_cache_keys(path, cache_identity_path, options).ok())
+        .then(|| verify_cache_keys(path, cache_identity_path, options, &sources).ok())
         .flatten();
     if let Some(output) = cached_verification(options, cache_keys.as_ref()) {
         return output;
@@ -1958,11 +2010,18 @@ pub(super) fn run_verify_cli_from_source(
     if is_auto
         && cache_enabled(options)
         && let Some(output) =
-            cached_auto_verification(path, cache_identity_path, options, &prepared)
+            cached_auto_verification(path, cache_identity_path, options, &prepared, &sources)
     {
         return output;
     }
-    let (output, status) = execute_cli_verification(path, source, options, &prepared);
+    let (output, status) = execute_cli_verification(
+        path,
+        source,
+        options,
+        &prepared,
+        selection_filtered,
+        implements_contract,
+    );
     let (output, status) = finalize_cli_verification(
         path,
         options,
@@ -1972,7 +2031,7 @@ pub(super) fn run_verify_cli_from_source(
         status,
     );
     if is_auto && cache_enabled(options) {
-        store_auto_verification(path, cache_identity_path, options, &output);
+        store_auto_verification(path, cache_identity_path, options, &output, &sources);
     }
     (output, status)
 }
@@ -1981,6 +2040,7 @@ fn prepare_cli_verification_from_source(
     path: &Path,
     source: &str,
     options: &CliVerifyOptions,
+    recorder: &RecordingResolver,
 ) -> Result<PreparedCliVerification, CommandResult> {
     let is_agent_document = match fsl_syntax::parse_surface_document(source) {
         Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,
@@ -1991,10 +2051,14 @@ fn prepare_cli_verification_from_source(
     if let Err(error) = validate_specialized_document_from_source(path, source) {
         return Err((semantic_error_output(&error), 2));
     }
+    // `--instances`/`--values` scope overrides go through
+    // `parse_kernel_source_with_bounds` (`load_model_scoped_from_source`),
+    // which does not take a resolver at all: compose/`from` is not resolved
+    // on this path, so there is nothing for `recorder` to observe here.
     let snapshot_model = if has_scope {
         load_model_scoped_from_source(path, source, &options.scope)
     } else {
-        load_model_from_source(path, source)
+        load_kernel_model_from_source_with_resolver(path, source, recorder).map(|(_, model)| model)
     };
     let initial_state = if let Some(snapshot_path) = options.from_state.as_deref() {
         let model = snapshot_model
@@ -2021,7 +2085,7 @@ fn prepare_cli_verification_from_source(
     let compose_warnings = if has_scope {
         Vec::new()
     } else {
-        load_kernel_model_from_source(path, source)
+        load_kernel_model_from_source_with_resolver(path, source, recorder)
             .map(|(kernel, _)| kernel.diagnostics().to_vec())
             .unwrap_or_default()
     };
@@ -2205,12 +2269,13 @@ fn cached_auto_verification(
     identity_path: &Path,
     options: &CliVerifyOptions,
     prepared: &PreparedCliVerification,
+    sources: &[(PathBuf, String)],
 ) -> Option<CommandResult> {
     if std::env::var("FSLC_CACHE_VERIFY").as_deref() == Ok("1") {
         return None;
     }
     let explicit_cached =
-        verify_cache_keys_for_engine(source_path, identity_path, options, "explicit")
+        verify_cache_keys_for_engine(source_path, identity_path, options, "explicit", sources)
             .ok()
             .and_then(|(key, xdepth)| verify_cache_lookup(&key, &xdepth, options.depth));
     if let Some(output) = &explicit_cached
@@ -2228,7 +2293,7 @@ fn cached_auto_verification(
         return None;
     };
     let (key, xdepth) =
-        verify_cache_keys_for_engine(source_path, identity_path, options, "bmc").ok()?;
+        verify_cache_keys_for_engine(source_path, identity_path, options, "bmc", sources).ok()?;
     let mut output = verify_cache_lookup(&key, &xdepth, options.depth)?;
     annotate_auto_fallback(&mut output, &reason, kind);
     let status = cached_output_status(&output)?;
@@ -2247,12 +2312,17 @@ fn store_auto_verification(
     identity_path: &Path,
     options: &CliVerifyOptions,
     output: &Value,
+    sources: &[(PathBuf, String)],
 ) {
     match output.get("engine").and_then(Value::as_str) {
         Some("explicit") => {
-            if let Ok((key, xdepth)) =
-                verify_cache_keys_for_engine(source_path, identity_path, options, "explicit")
-            {
+            if let Ok((key, xdepth)) = verify_cache_keys_for_engine(
+                source_path,
+                identity_path,
+                options,
+                "explicit",
+                sources,
+            ) {
                 verify_cache_store(&key, &xdepth, output);
             }
         }
@@ -2263,7 +2333,7 @@ fn store_auto_verification(
                 envelope.remove("engine_fallback");
             }
             if let Ok((key, xdepth)) =
-                verify_cache_keys_for_engine(source_path, identity_path, options, "bmc")
+                verify_cache_keys_for_engine(source_path, identity_path, options, "bmc", sources)
             {
                 verify_cache_store(&key, &xdepth, &plain);
             }
@@ -2277,8 +2347,9 @@ fn execute_cli_verification(
     source: &str,
     options: &CliVerifyOptions,
     prepared: &PreparedCliVerification,
+    selection_filtered: bool,
+    implements_contract: Option<fsl_core::ImplementsContract>,
 ) -> CommandResult {
-    let selection_filtered = seam_is_suppressed(options, prepared);
     if !(selection_filtered || prepared.has_scope) && prepared.is_agent_document {
         return (
             error_output(
@@ -2296,19 +2367,16 @@ fn execute_cli_verification(
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(error), 2),
     };
-    let implements = if selection_filtered {
-        None
-    } else {
-        match implements_result_from_source_with_bounds(
-            path,
-            source,
-            model,
-            options.depth,
-            &options.scope,
-        ) {
-            Ok(implements) => implements,
-            Err(error) => return (implements_error_output(&error), 2),
-        }
+    // The seam's dependency was already read in `run_verify_cli_from_source`
+    // (issue #1023), before the cache key; only the (comparatively
+    // expensive) refinement check runs here, after a cache miss.
+    let implements = match fslc_rust::verification_output::check_requirements_implements(
+        implements_contract,
+        model,
+        options.depth,
+    ) {
+        Ok(implements) => implements,
+        Err(error) => return (implements_error_output(&error), 2),
     };
     let selection = ModelSelection {
         path,
@@ -2634,11 +2702,11 @@ mod tests {
         let mut smaller_budget = explicit.clone();
         smaller_budget.explicit_budget -= 1;
 
-        let bmc_keys = verify_cache_keys(&path, &path, &bmc).expect("BMC cache keys");
+        let bmc_keys = verify_cache_keys(&path, &path, &bmc, &[]).expect("BMC cache keys");
         let explicit_keys =
-            verify_cache_keys(&path, &path, &explicit).expect("explicit cache keys");
-        let smaller_keys =
-            verify_cache_keys(&path, &path, &smaller_budget).expect("budget-specific cache keys");
+            verify_cache_keys(&path, &path, &explicit, &[]).expect("explicit cache keys");
+        let smaller_keys = verify_cache_keys(&path, &path, &smaller_budget, &[])
+            .expect("budget-specific cache keys");
 
         assert_ne!(bmc_keys, explicit_keys);
         assert_ne!(explicit_keys, smaller_keys);
@@ -2674,12 +2742,24 @@ mod tests {
         let path = repository_path("examples/gallery/valid/tiny_turnstile.fsl");
         let options = CliVerifyOptions::default();
 
-        let current =
-            verify_cache_keys_with_solver_version(&path, &path, &options, "bmc", "Z3 4.16.0.0")
-                .expect("current solver cache keys");
-        let updated =
-            verify_cache_keys_with_solver_version(&path, &path, &options, "bmc", "Z3 4.17.0.0")
-                .expect("updated solver cache keys");
+        let current = verify_cache_keys_with_solver_version(
+            &path,
+            &path,
+            &options,
+            "bmc",
+            "Z3 4.16.0.0",
+            &[],
+        )
+        .expect("current solver cache keys");
+        let updated = verify_cache_keys_with_solver_version(
+            &path,
+            &path,
+            &options,
+            "bmc",
+            "Z3 4.17.0.0",
+            &[],
+        )
+        .expect("updated solver cache keys");
 
         assert_ne!(current, updated);
     }
@@ -2744,6 +2824,52 @@ mod tests {
         .is_none());
     }
 
+    /// Parses `source` (rooted at `path`) through `resolver`, returning the
+    /// dependency `sources` the recorder observed. A minimal stand-in for
+    /// what `prepare_cli_verification_from_source` does in production, used
+    /// here so a unit test can drive `verify_cache_keys` without the full
+    /// CLI path.
+    fn recorded_sources(
+        path: &Path,
+        source: &str,
+        resolver: &RecordingResolver,
+    ) -> Vec<(PathBuf, String)> {
+        load_kernel_model_from_source_with_resolver(path, source, resolver)
+            .expect("lower compose source");
+        resolver.take_sources()
+    }
+
+    const SYMLINK_ALIAS_COMPOSE_SOURCE: &str = r#"compose Example {
+  use DependencyA as dep from "dependency.fsl"
+  invariant DepNonNeg { dep.n >= 0 }
+}
+"#;
+
+    const SYMLINK_ALIAS_DEPENDENCY_SOURCE_A: &str = "spec DependencyA {
+  state { n: 0..3 }
+  init { n = 0 }
+  action bump() { n = 0 }
+}
+";
+    const SYMLINK_ALIAS_DEPENDENCY_SOURCE_B: &str = "spec DependencyA {
+  state { n: 0..3 }
+  init { n = 0 }
+  action bump() { n = 1 }
+}
+";
+
+    /// #1023's cache key is built from what the resolver actually reads, not
+    /// a directory walk, so this test drives the same resolution production
+    /// uses (`load_kernel_model_from_source_with_resolver`) instead of
+    /// asserting on an unreferenced sibling file (the pre-#1023 version of
+    /// this test hashed `dependency.fsl` only because the directory walk
+    /// swept it up, whether or not `materialized` actually depended on it —
+    /// exactly the "too broad" side of the domain mismatch #1023 fixes).
+    /// `dependency.fsl` is now a real `use ... from` dependency of the
+    /// composed `materialized` document, so editing it must still change the
+    /// key — preserving this test's original concern (a dependency beside a
+    /// symlinked alias is tracked) as a requirement on the *resolved* set,
+    /// not a side effect of walking `alias`'s directory.
     #[cfg(unix)]
     #[test]
     fn literate_cache_keys_track_dependencies_beside_a_symlink_alias() {
@@ -2758,23 +2884,57 @@ mod tests {
         std::fs::create_dir_all(&real).expect("create real directory");
         std::fs::create_dir_all(&alias).expect("create alias directory");
         let real_document = real.join("spec.md");
-        std::fs::write(&real_document, "```fsl\nspec Example {}\n```\n")
-            .expect("write real document");
+        std::fs::write(
+            &real_document,
+            format!("```fsl\n{SYMLINK_ALIAS_COMPOSE_SOURCE}```\n"),
+        )
+        .expect("write real document");
         let alias_document = alias.join("spec.md");
         symlink(&real_document, &alias_document).expect("create document alias");
         let materialized = alias.join(".spec.literate-1.fsl");
-        std::fs::write(&materialized, "spec Example {}\n").expect("write materialization");
-        let dependency = alias.join("dependency.fsl");
-        std::fs::write(&dependency, "spec DependencyA {}\n").expect("write dependency");
+        std::fs::write(&materialized, SYMLINK_ALIAS_COMPOSE_SOURCE).expect("write materialization");
+        std::fs::write(
+            alias.join("dependency.fsl"),
+            SYMLINK_ALIAS_DEPENDENCY_SOURCE_A,
+        )
+        .expect("write dependency");
 
         let options = CliVerifyOptions::default();
-        let before = verify_cache_keys(&materialized, &alias_document, &options)
+        let resolver = RecordingResolver::new(&alias);
+        let sources = recorded_sources(&materialized, SYMLINK_ALIAS_COMPOSE_SOURCE, &resolver);
+        let before = verify_cache_keys(&materialized, &alias_document, &options, &sources)
             .expect("cache key before dependency edit");
-        std::fs::write(&dependency, "spec DependencyB {}\n").expect("edit dependency");
-        let after = verify_cache_keys(&materialized, &alias_document, &options)
+        std::fs::write(
+            alias.join("dependency.fsl"),
+            SYMLINK_ALIAS_DEPENDENCY_SOURCE_B,
+        )
+        .expect("edit dependency");
+        let resolver = RecordingResolver::new(&alias);
+        let sources = recorded_sources(&materialized, SYMLINK_ALIAS_COMPOSE_SOURCE, &resolver);
+        let after = verify_cache_keys(&materialized, &alias_document, &options, &sources)
             .expect("cache key after dependency edit");
-
         assert_ne!(before, after);
+
+        // Calibration: resolving from the symlink's *real* target directory
+        // instead of the alias directory the checked document actually
+        // lives beside must fail to find `dependency.fsl` at all (it was
+        // only ever written under `alias/`), proving this test's resolution
+        // is exercising the alias side and not vacuously passing.
+        let wrong_base_resolver = RecordingResolver::new(&real);
+        let wrong_base_result = load_kernel_model_from_source_with_resolver(
+            &materialized,
+            SYMLINK_ALIAS_COMPOSE_SOURCE,
+            &wrong_base_resolver,
+        );
+        let wrong_base_error = wrong_base_result.expect_err(
+            "resolving from the real (non-alias) directory should fail to find \
+             dependency.fsl, which only exists under alias/",
+        );
+        assert!(
+            format!("{wrong_base_error:?}").contains("dependency"),
+            "expected the failure to name dependency.fsl, not an unrelated error: {wrong_base_error:?}"
+        );
+
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2790,6 +2950,7 @@ mod tests {
             "bmc",
             "Z3 4.16.0.0",
             "implementation-a",
+            &[],
         )
         .expect("current implementation cache keys");
         let updated = verify_cache_keys_with_fingerprints(
@@ -2799,44 +2960,54 @@ mod tests {
             "bmc",
             "Z3 4.16.0.0",
             "implementation-b",
+            &[],
         )
         .expect("updated implementation cache keys");
 
         assert_ne!(current, updated);
     }
 
+    /// Preservation control (issue #1023, not a detector): the per-process
+    /// literate materialization (`literate_access.rs`, `.{stem}.literate-
+    /// {pid}.fsl`) sitting beside the checked `.md` document is never read
+    /// through `RecordingResolver` (it is the checked document's own root
+    /// source, read directly by content, never a `from`/`use` target), so
+    /// its run-local PID-bearing name cannot enter the key's dependency set
+    /// by construction. This already passes before #1023 (the pre-existing
+    /// `is_literate_materialization` exclusion, now removed as dead code,
+    /// covered the same case for the directory walk), and must keep passing
+    /// after: a literate document verified twice must hit the cache the
+    /// second time.
     #[test]
-    fn literate_materialization_requires_a_numeric_process_suffix() {
-        assert!(is_literate_materialization(Path::new(
-            ".model.literate-123.fsl"
-        )));
-        assert!(!is_literate_materialization(Path::new(
-            ".shared.literate-model.fsl"
-        )));
-        assert!(!is_literate_materialization(Path::new(
-            ".model.literate-.fsl"
-        )));
-    }
+    fn literate_materialization_never_enters_the_cache_key_dependency_set() {
+        const SOURCE: &str = "spec Example { state { x: Int } init { x = 0 } }\n";
+        let root = std::env::temp_dir().join(format!(
+            "fslc-literate-materialization-cache-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("create fixture directory");
+        let document = root.join("doc.md");
+        std::fs::write(&document, format!("```fsl\n{SOURCE}```\n")).expect("write document");
+        let materialized = root.join(".doc.literate-1.fsl");
+        std::fs::write(&materialized, SOURCE).expect("write materialization");
 
-    #[test]
-    fn cache_keys_include_hidden_sources_with_literate_in_their_name() {
-        let directory =
-            std::env::temp_dir().join(format!("fslc-hidden-literate-cache-{}", std::process::id()));
-        std::fs::create_dir_all(&directory).expect("create cache-key fixture directory");
-        let root = directory.join("root.fsl");
-        let hidden = directory.join(".shared.literate-model.fsl");
-        std::fs::write(&root, "spec Root { state { x: Int } init { x = 0 } }")
-            .expect("write root source");
-        std::fs::write(&hidden, "first").expect("write hidden source");
         let options = CliVerifyOptions::default();
+        let resolver = RecordingResolver::new(&root);
+        let sources = recorded_sources(&materialized, SOURCE, &resolver);
+        assert!(
+            sources.is_empty(),
+            "a root document with no from/use dependency must record none: {sources:?}"
+        );
+        let first = verify_cache_keys(&materialized, &document, &options, &sources)
+            .expect("first cache key");
+        let second = verify_cache_keys(&materialized, &document, &options, &sources)
+            .expect("second cache key");
+        assert_eq!(
+            first, second,
+            "re-verifying the same literate document must reach the same key \
+             (a run-local PID in the materialization's name must not leak in): {first:?} vs {second:?}"
+        );
 
-        let before = verify_cache_keys_with_solver_version(&root, &root, &options, "bmc", "test")
-            .expect("initial cache keys");
-        std::fs::write(&hidden, "second").expect("update hidden source");
-        let after = verify_cache_keys_with_solver_version(&root, &root, &options, "bmc", "test")
-            .expect("updated cache keys");
-        std::fs::remove_dir_all(&directory).expect("remove cache-key fixture directory");
-
-        assert_ne!(before, after);
+        let _ = std::fs::remove_dir_all(root);
     }
 }
