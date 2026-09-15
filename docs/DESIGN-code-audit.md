@@ -46,8 +46,17 @@ The code input is one regular file or a recursively scanned directory. Paths
 are sorted deterministically; `.git` directories and symbolic links are not
 traversed. All regular files are eligible, so the convention remains
 language-independent. A binary file without the sentinel is harmless. A line
-containing the sentinel must be UTF-8 and contain exactly one valid closed JSON
-object through end of line. Locations are one-based Unicode line/column pairs.
+containing the sentinel is an annotation attempt only when the text after the
+sentinel, with leading whitespace stripped, starts with `{`; any other line
+(a prose mention of the sentinel with no following JSON object) is not an
+annotation and is skipped without a finding or an error. Once a line qualifies
+as an annotation attempt, it must be UTF-8 and contain exactly one valid
+closed JSON object through end of line, or the scan fails. Locations are
+one-based Unicode line/column pairs. The `{`-prefix discriminator cannot
+distinguish a prose mention from a malformed annotation whose payload never
+reaches JSON shape (for example a typo like `@fsl.trace requirement=REQ-1`
+with no `{`): both are skipped silently, so that narrower class of broken
+annotation is no longer reported as a scan failure.
 
 Unknown requirement IDs produce `orphan_code_annotation`; known IDs paired
 with another target produce `annotation_target_mismatch`; expected pairs with

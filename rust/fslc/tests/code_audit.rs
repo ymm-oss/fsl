@@ -131,6 +131,46 @@ fn reports_missing_orphan_and_mismatched_annotations_without_failing() {
 }
 
 #[test]
+fn parses_prose_mentions_of_the_marker_without_registering_or_failing() {
+    let root = std::env::temp_dir().join(format!("fsl-code-audit-prose-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let code = root.join("audit.rs");
+    std::fs::write(
+        &code,
+        concat!(
+            "// See the @fsl.trace convention for how emitters annotate source.\n",
+            "// @fsl.trace is written as a marker followed by a JSON object.\n",
+        ),
+    )
+    .unwrap();
+    let spec = fixture("typed_annotation_outputs.fsl");
+    let (output, status) = run(&[
+        "analyze",
+        spec.to_str().unwrap(),
+        "--projection",
+        "code_audit",
+        "--code",
+        code.to_str().unwrap(),
+    ]);
+    std::fs::remove_dir_all(root).unwrap();
+
+    assert_eq!(status, 0);
+    assert_eq!(output["result"], "analyzed");
+    assert_eq!(output["coverage"]["requirement_targets"]["covered"], 0);
+    let kinds = output["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| finding["finding_type"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(
+        kinds
+            .iter()
+            .all(|kind| *kind == "missing_requirement_implementation")
+    );
+}
+
+#[test]
 fn rejects_malformed_annotations_and_invalid_cli_combinations() {
     let root = std::env::temp_dir().join(format!("fsl-code-audit-bad-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();

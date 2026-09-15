@@ -84,6 +84,11 @@ fn parse_file(path: &Path, traces: &mut Vec<LocatedTrace>) -> Result<(), CodeAud
             ))
         })?;
         let json_text = &text[marker_index + MARKER.len()..];
+        if !json_text.trim_start().starts_with('{') {
+            // A prose mention of the sentinel with no JSON object after it is not an
+            // annotation attempt: skip it instead of treating absent JSON as malformed.
+            continue;
+        }
         let trace: CodeTrace = serde_json::from_str(json_text).map_err(|error| {
             CodeAuditError::Semantics(format!(
                 "{}:{}: malformed code trace annotation: {error}",
