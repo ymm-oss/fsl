@@ -1215,8 +1215,6 @@ mod tests {
 
     #[test]
     fn imported_definition_references_and_completion_cross_files() {
-        let lib_uri = Url::parse("file:///tmp/fsl-lsp-workspace/lib.fsl").expect("lib URI");
-        let main_uri = Url::parse("file:///tmp/fsl-lsp-workspace/main.fsl").expect("main URI");
         let lib = "spec Lib { state { n: Int } init { n = 0 } action bump() { n = n + 1 } }";
         let main = r#"compose Main {
   use Lib as lib from "lib.fsl"
@@ -1225,6 +1223,21 @@ mod tests {
   action run() = lib.bump() { n = n + 1 }
   internal lib.bump
 }"#;
+        let root = std::env::temp_dir().join(format!(
+            "fsl-lsp-cross-file-import-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("create cross-file fixture");
+        let lib_path = root.join("lib.fsl");
+        let main_path = root.join("main.fsl");
+        std::fs::write(&lib_path, lib).expect("write library fixture");
+        std::fs::write(&main_path, main).expect("write main fixture");
+        let lib_uri = Url::from_file_path(&lib_path).expect("lib URI");
+        let main_uri = Url::from_file_path(&main_path).expect("main URI");
         let state = ServerState {
             documents: HashMap::from([
                 (
@@ -1278,6 +1291,8 @@ mod tests {
                 .iter()
                 .any(|(name, _)| *name == "bump")
         );
+
+        std::fs::remove_dir_all(root).expect("remove cross-file fixture");
     }
 
     #[test]
