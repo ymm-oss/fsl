@@ -1373,7 +1373,34 @@ pub struct RefinementCheck {
     /// broken on its own), not a refinement fidelity verdict, so it must
     /// never be reported as `refines` or folded into `refinement_failed`.
     pub impl_violation: Option<(Violation, Vec<TraceStep>)>,
+    /// Set to the walk's `visited.len()` at the cutoff when the
+    /// correspondence walk hit its state-count budget before exhausting the
+    /// reachable set within `depth` (issue #1041): the search stopped
+    /// early, so neither `refines` nor a decided `failure`/`impl_violation`
+    /// would be true -- reporting either would be a false result.
+    pub budget_exhausted: Option<usize>,
 }
+
+/// Bounded-search budget for [`check_refinement`]'s correspondence walk
+/// (issue #1041). Unlike [`find_boundary_violation`]'s `budget` parameter,
+/// this one has no CLI-facing knob (`fslc check` stays a flag-free fast
+/// check; `fslc verify` does not reuse `--explicit-budget` here either,
+/// because that flag governs a different search and one knob covering two
+/// searches would let a change to either one silently change the other).
+/// Bounds `visited.len()` only, not memory: the co-growing `parents` map
+/// and `queue` frontier are not capped by this constant (`SIGMA-P1.md`/
+/// `PLAN-1041.md` §10: `parents.len() <= IMPLEMENTS_SEARCH_BUDGET +
+/// |frontier|`, `|queue| <= IMPLEMENTS_SEARCH_BUDGET * b_max`, both
+/// derived properties, not enforced ones).
+///
+/// Value: matches [`CONCRETE_PROBE_BUDGET`] (a different search's budget,
+/// not reused here as a value -- only as a precedent for the order of
+/// magnitude). P1 measured `visited.len() == 132,302` at ~3.8 GB RSS for
+/// one corpus-scale inline `implements` domain (`Amount = 0..3` /
+/// `ClaimId = 0..2`); 50,000 states caps the same domain shape at roughly
+/// 1.4 GB using P1's own upper bound (~28,756 B/state, RSS-difference
+/// derived, includes other allocations).
+pub const IMPLEMENTS_SEARCH_BUDGET: usize = 50_000;
 
 fn merged_refinement_model(
     implementation: &KernelModel,
@@ -1634,12 +1661,39 @@ fn concrete_initial_states(model: &KernelModel) -> Result<Vec<State>, RuntimeErr
 ///
 /// Returns [`RuntimeError`] for mapping evaluation, incompatible shared types,
 /// or concrete Monitor failures.
-#[allow(clippy::too_many_lines)]
 pub fn check_refinement(
     implementation: &KernelModel,
     abstraction: &KernelModel,
     mapping: &Refinement,
     depth: usize,
+) -> Result<RefinementCheck, RuntimeError> {
+    check_refinement_with_budget(
+        implementation,
+        abstraction,
+        mapping,
+        depth,
+        IMPLEMENTS_SEARCH_BUDGET,
+    )
+}
+
+/// [`check_refinement`] with an injectable state-count budget, so a test
+/// can calibrate the cutoff (a small budget against a small fixture)
+/// without needing a corpus-scale domain. Production callers use
+/// [`check_refinement`], which always passes [`IMPLEMENTS_SEARCH_BUDGET`];
+/// there is no CLI-facing way to change the budget (see that constant's
+/// doc comment).
+///
+/// # Errors
+///
+/// Returns [`RuntimeError`] for mapping evaluation, incompatible shared types,
+/// or concrete Monitor failures.
+#[allow(clippy::too_many_lines)]
+pub fn check_refinement_with_budget(
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    mapping: &Refinement,
+    depth: usize,
+    budget: usize,
 ) -> Result<RefinementCheck, RuntimeError> {
     // The impl spec must be internally consistent before its transitions are
     // compared against the abstraction at all: refinement fidelity is
@@ -1664,6 +1718,7 @@ pub fn check_refinement(
             abs_has_ensures: false,
             failure: None,
             impl_violation: Some((violation, trace)),
+            budget_exhausted: None,
         });
     }
     let eval_model = merged_refinement_model(implementation, abstraction)?;
@@ -1695,6 +1750,7 @@ pub fn check_refinement(
             .any(|action| !action.ensures.is_empty()),
         failure: None,
         impl_violation: None,
+        budget_exhausted: None,
     };
 
     // §2 step 1 (init correspondence): for *every* impl initial valuation
@@ -1779,8 +1835,17 @@ pub fn check_refinement(
             let Some((state, _)) = queue.pop() else {
                 unreachable!("queue front was present");
             };
-            if visited.insert(state.clone()) && step < depth {
+            let inserted = visited.insert(state.clone());
+            if inserted && step < depth {
                 layer.push(state);
+            }
+            // Checked right after a genuine new insert (mirroring
+            // `find_boundary_violation`'s own placement), so a duplicate
+            // pop of an already-visited state cannot re-trigger this and
+            // the budget bounds exactly `visited.len()`, not pop count.
+            if inserted && visited.len() >= budget {
+                check.budget_exhausted = Some(visited.len());
+                return Ok(check);
             }
         }
         // `alpha_before` for each layer state is computed once here, in

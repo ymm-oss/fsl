@@ -1158,8 +1158,8 @@ records why, and why <code>fslc document check</code>'s <code>document_drifted</
 </tr>
 <tr>
 <td><code>unknown_budget</code></td>
-<td><code>--engine explicit</code> exceeded <code>--explicit-budget</code> before closing</td>
-<td>Raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec</td>
+<td>Either: <code>--engine explicit</code> exceeded <code>--explicit-budget</code> before closing; or an inline <code>implements Abs from "file" { }</code> seam's correspondence search exceeded its fixed internal state budget (<code>check</code>/<code>verify</code>, no CLI flag)</td>
+<td>For the explicit engine: raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec. For an inline <code>implements</code> seam: narrow the domain, or verify the layers separately with <code>fslc refine</code>/<code>fslc verify</code> instead of the combined check</td>
 </tr>
 <tr>
 <td><code>error</code></td>

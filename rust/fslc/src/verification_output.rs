@@ -327,13 +327,48 @@ pub fn requirements_implements_output_with_bounds(
     instances: &std::collections::BTreeMap<String, i64>,
     values: &std::collections::BTreeMap<String, (i64, i64)>,
 ) -> Result<Option<Value>, RequirementsImplementsError> {
-    let Some(contract) =
-        fsl_core::requirements_implements_with_bounds(source, resolver, model, instances, values)
-            .map_err(|error| RequirementsImplementsError {
+    let contract = resolve_requirements_implements(source, resolver, model, instances, values)?;
+    check_requirements_implements(contract, model, depth)
+}
+
+/// Resolve an inline `implements` declaration into its abstraction and
+/// refinement mapping, without checking it. This is the read+parse half of
+/// what `requirements_implements_output_with_bounds` does, split out so a
+/// cache-key computation can observe the dependency read (issue #1023)
+/// before the (comparatively expensive) refinement check runs.
+///
+/// # Errors
+///
+/// Returns a diagnostic when dependency resolution or lowering fails.
+pub fn resolve_requirements_implements(
+    source: &str,
+    resolver: &dyn fsl_core::FileResolver,
+    model: &KernelModel,
+    instances: &std::collections::BTreeMap<String, i64>,
+    values: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> Result<Option<fsl_core::ImplementsContract>, RequirementsImplementsError> {
+    fsl_core::requirements_implements_with_bounds(source, resolver, model, instances, values)
+        .map_err(|error| RequirementsImplementsError {
             message: error.message,
             span: error.span,
-        })?
-    else {
+        })
+}
+
+/// Check an already-resolved inline `implements` contract and render its
+/// verdict. This is the (comparatively expensive) check half of
+/// `requirements_implements_output_with_bounds`, run separately so it can
+/// stay after a cache lookup while `resolve_requirements_implements` moves
+/// ahead of it.
+///
+/// # Errors
+///
+/// Returns a diagnostic when concrete refinement checking fails.
+pub fn check_requirements_implements(
+    contract: Option<fsl_core::ImplementsContract>,
+    model: &KernelModel,
+    depth: usize,
+) -> Result<Option<Value>, RequirementsImplementsError> {
+    let Some(contract) = contract else {
         return Ok(None);
     };
     let checked =
@@ -342,24 +377,43 @@ pub fn requirements_implements_output_with_bounds(
                 message: error.to_string(),
                 span: None,
             })?;
-    Ok(Some(if let Some((violation, _)) = checked.impl_violation {
-        // The impl itself violates its own type bounds/invariants (#466):
-        // a property of the refinement input, not a refinement fidelity
-        // verdict, so it must not be reported `refines`.
-        json!({
-            "abs": contract.abstraction.name,
-            "result": "impl_violated",
-            "violation": {"result": "violated", "kind": violation.kind},
-        })
-    } else if let Some(failure) = checked.failure {
-        json!({
-            "abs": contract.abstraction.name,
-            "result": "refinement_failed",
-            "violation": {"result": "refinement_failed", "kind": failure.kind},
-        })
-    } else {
-        json!({"abs": contract.abstraction.name, "result": "refines"})
-    }))
+    Ok(Some(
+        if let Some(states_explored) = checked.budget_exhausted {
+            // The correspondence walk hit `IMPLEMENTS_SEARCH_BUDGET` states
+            // (issue #1041) before deciding `refines`/`refinement_failed`/
+            // `impl_violated` within `depth`: reporting any of those would be a
+            // false result, since the unvisited rest of the reachable set was
+            // never actually explored. Checked first, ahead of
+            // `impl_violation`/`failure`, because those fields are only
+            // meaningful on a walk that actually reached a decision --
+            // `check_refinement_with_budget` never sets more than one of the
+            // three outcomes.
+            json!({
+                "abs": contract.abstraction.name,
+                "result": "unknown_budget",
+                "states_explored": states_explored,
+                "hint": "inline implements correspondence search reached its state budget; \
+                         narrow the domain, or verify the layers separately with `fslc refine`/`fslc verify`",
+            })
+        } else if let Some((violation, _)) = checked.impl_violation {
+            // The impl itself violates its own type bounds/invariants (#466):
+            // a property of the refinement input, not a refinement fidelity
+            // verdict, so it must not be reported `refines`.
+            json!({
+                "abs": contract.abstraction.name,
+                "result": "impl_violated",
+                "violation": {"result": "violated", "kind": violation.kind},
+            })
+        } else if let Some(failure) = checked.failure {
+            json!({
+                "abs": contract.abstraction.name,
+                "result": "refinement_failed",
+                "violation": {"result": "refinement_failed", "kind": failure.kind},
+            })
+        } else {
+            json!({"abs": contract.abstraction.name, "result": "refines"})
+        },
+    ))
 }
 
 /// Attach inline `implements` metadata and, when the command envelope is still
@@ -369,9 +423,9 @@ pub fn requirements_implements_output_with_bounds(
 /// failure-class (`violated`, `reachable_failed`, …), inserts `implements` as
 /// evidence but leaves the primary verdict and its replay fields untouched.
 /// Only success-class envelopes (`ok`, `verified`, `proved`, …) may have a
-/// failing nested seam promoted to top-level `refinement_failed` / `impl_violated`
-/// with `Some(1)`. Unknown or malformed nested results on a success-class
-/// envelope fail closed with an internal error (`Some(3)`).
+/// failing nested seam promoted to top-level `refinement_failed` / `impl_violated` /
+/// `unknown_budget` with `Some(1)`. Unknown or malformed nested results on a
+/// success-class envelope fail closed with an internal error (`Some(3)`).
 pub fn attach_requirements_implements(envelope: &mut Value, implements: Value) -> Option<i32> {
     let already_failing = !crate::outcome::outcome_class(envelope).is_success();
     let Value::Object(map) = envelope else {
@@ -402,6 +456,16 @@ pub fn attach_requirements_implements(envelope: &mut Value, implements: Value) -
         // green). Nothing here detects the two drifting apart.
         Some("refinement_failed" | "impl_violated") => {
             map.insert("result".to_owned(), json!(nested_result));
+            Some(1)
+        }
+        // The correspondence walk hit its state budget (issue #1041)
+        // instead of deciding a verdict. `unknown_budget` is already a
+        // non-success, cacheable failure class (`outcome.rs`'s
+        // `exit_status` row 1 and `outcome_class`), so folding it here
+        // reuses that existing exit-1 vocabulary rather than adding a new
+        // verdict string.
+        Some("unknown_budget") => {
+            map.insert("result".to_owned(), json!("unknown_budget"));
             Some(1)
         }
         _ => {

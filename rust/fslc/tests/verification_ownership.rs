@@ -62,7 +62,7 @@ impl CacheDir {
     }
 
     fn exact_entry(&self) -> PathBuf {
-        let root = self.path.join("verify/v2");
+        let root = self.path.join("verify/v3");
         std::fs::read_dir(root)
             .expect("read cache root")
             .filter_map(Result::ok)
