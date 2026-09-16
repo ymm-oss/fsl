@@ -5,6 +5,168 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.6.0] - 2026-09-16
+
+- Fixed (#980): `approval create`/`check`/`diff` now reject a `.md` positional
+  with `kind:"usage"`/`FSL-INPUT-LITERATE-UNSUPPORTED` (exit 2), the same
+  input-kind guard `check`/`verify`/`db`/`ai`/`causal`/`domain` already apply
+  (#694), instead of parsing it as an FSL spec and reporting a false
+  `FSL-PARSE` syntax error at `1:2`. `--kind requirements_document`'s
+  legitimately `.md`-shaped input is `--artifact`, never the positional, so
+  `--kind` does not change this. The guard runs immediately after the
+  positional is resolved and before `check`/`diff` read `--record`, so a
+  mismatched record no longer masks the same defect. `kind` and
+  `diagnostic_code` change for this previously-incorrect input; `result` and
+  exit code (2) do not.
+- Fixed (#992): refresh stale design notes for Public Kernel v2 publication,
+  refinement `preserve progress` checking, and cross-layer traceability (replace
+  the nonexistent `fslc trace` subcommand with `fslc analyze --projection
+  traceability_graph`).
+- Fixed (#996): `docs/DESIGN-assurance-classes.md` now documents the native Rust
+  assurance classifier (`ledger::assurance_token`, `formal_assurance`,
+  `evidence_verdict`, and related APIs) as the authoritative contract; the frozen
+  Python `src/fslc/assurance.py` surface is retained as a reference-only parity
+  map. Rust/Python `formal_assurance` vs `classify_element` evaluation-order
+  divergence on `result:"error"` with `completeness` set remains explicitly
+  unadjudicated (issue #995).
+- Fixed (#997): `fslc diff` no longer silently drops a `verify { values X = lo..hi }`
+  bound from `scope.old`/`scope.new`/`scope.applied_to_old` when `lo`/`hi` is a
+  declared const or a compound expression (e.g. `-1..HI`) instead of a bare
+  integer literal. The bound is now resolved against the same evaluated
+  domain `check` reports (`TypeDef::Domain`), so a const-only bound change is
+  recorded as `scope_changed`, applied to OLD, and rejected by
+  `--forbid scope_changed` the same way a literal bound change already was.
+- Fixed (#1009)!: `fslc html` now exits according to the embedded verification
+  verdict instead of always returning 0 after generating the report. Pipelines
+  that gated only on the process exit code while ignoring `result` will see exit
+  1 for `violated`, `reachable_failed`, `unknown_cti`, `unknown_budget`,
+  `refinement_failed`, and `impl_violated`; successful verification still exits
+  0 and the HTML artifact is still written on failure.
+- Fixed (#1011): `civil_days` now rejects impossible calendar dates such as
+  `2026-02-31` and non-leap `2026-02-29` instead of normalizing them, so timing
+  eligibility cannot admit unparsable evidence periods; leap-year and valid-date
+  controls confirm the fix does not over-reject.
+- Fixed (#1015): `fslc kernel` no longer panics on an `ai_component` whose
+  `authority` block names an undeclared tool; it now returns the same
+  `{"result":"error","kind":"semantics"}` envelope and exit 2 that `fslc check`
+  already returned for this input, instead of exiting 101 with no JSON. A
+  negative control in `error_envelope_parity.rs`'s `kernel` coverage pins this
+  envelope so the lookup panic cannot be reintroduced silently; `fslc check`'s
+  envelope for the same input is unchanged.
+- Fixed (#1018): documented the native-vs-frozen-Python divergence for inline
+  `implements` fail-closed folding into `check` / `verify` top-level verdicts
+  (#1002, PR #1026 `246f0987`). Native is authoritative; the frozen reference
+  retains the pre-folding `ok` / `verified` primary result with the seam under
+  nested `implements`.
+- Fixed (#1020): `--strict-tags`'s `Declared` side now auto-collects requirement-block
+  IDs from the requirements dialect, not only the lines of an optional
+  `--requirements ids.txt` file. `docs/DESIGN-strict-tags.md` section 2 defines
+  `Declared` as `--requirements` union the requirements dialect's requirement-block
+  IDs, and calls that union "essential" for catching an empty requirement block --
+  one declared but never formalized, whose trace disappears after expansion. The
+  native implementation collected only the file half, so without `--requirements`
+  the `Declared` side never ran at all and an unformalized empty requirement block
+  passed silently. `check`/`verify` (independent option-parsing paths for
+  `--strict-tags`/`--requirements`) now both report such a block as
+  `unreferenced_requirement` with no `--requirements` flag needed. Exit codes are
+  unchanged: no path in the codebase branches exit status on the `warnings` array's
+  contents, so a spec that starts warning here still exits the same as before. An
+  existing `--requirements` file's already-referenced IDs keep their original
+  file-line warning order; only IDs that reach `Declared` solely through
+  auto-collection are appended afterward, so established exact-match warning-array
+  expectations are undisturbed.
+- Fixed (#1023)!: `fslc verify`'s cache key is now built from the dependencies
+  actually read while resolving `use`/`from`/inline `implements` (including
+  across a symlinked alias), not from walking the checked spec's parent
+  directory. A `from "../x.fsl"` dependency outside that directory used to be
+  invisible to the key, so a stale `verified`/exit 0 cache entry kept being
+  served after the dependency started violating the refinement contract;
+  editing an unrelated sibling `.fsl` file that nothing depended on used to
+  invalidate the entry too. Both are fixed: the key's dependency domain now
+  matches what the verdict actually depends on. Because a cache hit now has to
+  read those dependencies to know its key is still valid, a spec whose
+  dependency has since become unreadable now fails closed (`error`, exit 2) on
+  what used to be a cache hit, instead of replaying the stale pre-removal
+  verdict. The on-disk cache generation moved from `verify/v2` to `verify/v3`
+  (orphaning any existing `verify/v2` entries on disk; nothing removes them).
+- Fixed (#1027, #1029): `docs/RELEASE.md` §2 promotion branch names now match the
+  `production-policy` required check (`release/vX.Y` instead of
+  `release/vX.Y.Z-candidate`), and pre-merge pin verification requires tree
+  equivalence plus candidate identity as either HEAD or first parent (covering both
+  a direct pin and a sanctioned `-s ours --no-ff` preparation). The v4.4.1
+  carry-forward section is removed; production (`99f150e9`) again contains
+  `docs/DESIGN-nested-option-support.md` natively after the v4.5.0 promotion
+  completed the carry-forward. The release skill no longer points at the removed
+  carry-forward steps.
+- Fixed (#1031): the release workflow now runs `cargo test --release --locked -p fslc-rust
+  -p fsl-lsp` on the MSRV toolchain (`1.88.0`) before building release binaries, so shipped
+  artifacts are no longer built from a toolchain that never exercised their tests; library crates
+  remain covered by PR/main CI at `1.98.0`.
+- Fixed (#1032): split the `rust-native-z3` matrix job into two statically named
+  jobs so skipped checks no longer appear as unexpanded `native Z3 4.16 (${{
+  matrix.os }})` in the pull request checks list.
+- Fixed (#1041)!: `check`/`verify`'s inline `implements` correspondence search
+  (`check_refinement`) is now bounded by a fixed internal state-count budget
+  (`IMPLEMENTS_SEARCH_BUDGET`, 50,000 states; no CLI flag, and not shared with
+  `--explicit-budget`, a different search). Exceeding it reports top-level
+  `unknown_budget` and exit 1 on both entry points instead of running
+  unbounded. Observable change: an inline `implements` search over a large
+  enough domain now exits 1 with `unknown_budget` where it previously grew RSS
+  without bound (P1 measured ~3.8 GB on one corpus-scale domain, with a flat
+  control run confirming the growth was specific to the search). A search over
+  50,000 states now ends in `unknown_budget` / exit 1 where an environment with
+  enough memory could previously have run it to completion and exited 0, so this
+  is recorded as breaking even though no spec in this repository's corpus reaches
+  the budget: the population that would be affected is users' own specs, which
+  cannot be measured from here. The budget
+  constant is included in `verify`'s cache key so a future change to it cannot
+  replay a stale verdict.
+- Fixed (#1043): `outcome_class`'s `semantic_diff` arm now reads the
+  `gate.passed` field `run_diff` actually publishes, instead of a top-level
+  `violations` array `run_diff` never writes (it only appears nested under
+  `gate`). This is a latent-defect fix in the shared classifier: no in-tree
+  caller currently folds a `semantic_diff` envelope through `outcome_class`,
+  and `fslc diff`'s own process exit already computed its status independently
+  and correctly. There is no observable CLI behavior change.
+- Fixed (#1044): exclude intentionally malformed gallery examples with path-component matching on Windows and prevent three latent LSP fixture URI portability issues with filesystem-derived URIs.
+- Fixed (#1051): Updated `fslc check` documentation to describe its inline `implements` checking scope and depth-bounded, solver-free behavior.
+- Fixed (#1061): the #1023 cache-key regression test no longer collides with
+  itself. Its temporary fixture roots were separated only by a `SystemTime`
+  nonce, and `{name}` (`inside`, `outside`) is shared by a matrix column's
+  tests while `process::id()` is constant within a test binary. The clock has
+  microsecond resolution, so two tests that start concurrently read the same
+  value, build the same root, and -- because `create_dir_all` succeeds on an
+  existing directory -- share one tree silently: one test's write overwrites
+  the other's input and the first `Drop` deletes the other's spec mid-run,
+  surfacing as an unrelated `io` error. The root now carries a process-wide
+  `AtomicU64` counter, so uniqueness comes from construction rather than from
+  clock resolution, and it is created with `create_dir`, so a future
+  collision fails where it happens instead of several assertions later.
+  Measured on the same binary and harness: 3 failures in 30 runs before, 0 in
+  30 after, with the distinct-root count observed from outside the process
+  staying at the expected 2 (`inside`) and 3 (`outside`) in every run after
+  the fix. No product code changed.
+- Fixed (#1065)!: `analyze --projection code_audit` no longer misreads a prose
+  mention of the `@fsl.trace ` sentinel (for example, a comment describing the
+  annotation convention itself) as a broken annotation. A line is now treated
+  as an annotation attempt only when the text following the sentinel, after
+  stripping leading whitespace, starts with `{`; any other line is skipped
+  without a finding or an error. A line where the sentinel is followed by `{`
+  but the JSON is malformed, or where the JSON parses but fails
+  schema/kernel-target/`origin_assurance` validation, still fails with the
+  same `CodeAuditError::Semantics` exit-2 error as before -- only the
+  discriminator for "is this an annotation attempt at all" changed. Recorded
+  as breaking because it changes the CLI's exit code for an existing
+  observable input: a source tree containing a prose mention of the sentinel
+  with no following JSON object, which previously exited 2 (`error`), now
+  exits 0 (`analyzed`) with the mention simply absent from `findings` and
+  `coverage`. This is a known cost of the `{`-prefix discriminator, not an
+  unverified gap: a malformed annotation whose payload does not start with `{`
+  (for example a typo like `@fsl.trace requirement=REQ-1`) previously failed
+  with the same `malformed code trace` error and is now skipped as well --
+  the rule cannot distinguish it from a prose mention, so the fix trades
+  detecting that narrower class of broken annotation for not misreading prose.
+
 ## [4.5.0] - 2026-09-11
 
 - Added (#316): explicit-state verification now reports deterministic per-action
@@ -6020,7 +6182,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.5.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.6.0...HEAD
+[4.6.0]: https://github.com/ymm-oss/fsl/compare/v4.5.0...v4.6.0
 [4.5.0]: https://github.com/ymm-oss/fsl/compare/v4.4.1...v4.5.0
 [4.4.1]: https://github.com/ymm-oss/fsl/compare/v4.4.0...v4.4.1
 [4.4.0]: https://github.com/ymm-oss/fsl/compare/v4.3.0...v4.4.0
