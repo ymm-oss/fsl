@@ -49,6 +49,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -60,17 +61,33 @@ struct DirFixture {
     root: PathBuf,
 }
 
+/// Distinguishes two fixtures built inside one test binary (issue #1061).
+/// `{name}` is shared by the tests of a matrix column (`inside` by two,
+/// `outside` by three) and `std::process::id()` is constant within the
+/// binary, so the roots used to be separated only by the `SystemTime`
+/// nonce -- which has microsecond resolution. Tests that start
+/// concurrently read the same microsecond and build the same root, and the
+/// two fixtures then share one tree: one test's `write` overwrites the
+/// other's input, and whichever `Drop` runs first deletes the other's
+/// `proj/impl.fsl` mid-run.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
 impl DirFixture {
     fn new(name: &str) -> Self {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock after epoch")
             .as_nanos();
+        let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
-            "fsl-issue-1023-{name}-{}-{nonce}",
+            "fsl-issue-1023-{name}-{}-{nonce}-{sequence}",
             std::process::id()
         ));
-        std::fs::create_dir_all(&root).expect("create fixture root");
+        // Not `create_dir_all`: an already-existing root means the
+        // per-fixture isolation the four-cell matrix depends on has been
+        // lost, and reusing it silently is what made #1061 surface as an
+        // unrelated `io` error several assertions later.
+        std::fs::create_dir(&root).expect("fixture root must not already exist");
         Self { root }
     }
 
