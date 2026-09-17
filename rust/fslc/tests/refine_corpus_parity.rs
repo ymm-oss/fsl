@@ -298,7 +298,7 @@ const CASES: &[Case] = &[
         // that drops `fair` still refines. The failing counterpart is the
         // `_progress_refines` row below, which opts in to progress
         // preservation.
-        declared_by: "examples/refinement_liveness/README.md:33 (`# refines`) and :54 \
+        declared_by: "examples/refinement_liveness/README.md:33 (`# refines`) and :55 \
                       (`design_drops_liveness` returns `refines` (safety OK))",
     },
     Case {
@@ -312,7 +312,7 @@ const CASES: &[Case] = &[
         depth: 8,
         expected_result: "refines",
         expected_kind: None,
-        declared_by: "examples/refinement_liveness/README.md:38 (`# refines`)",
+        declared_by: "examples/refinement_liveness/README.md:39 (`# refines`)",
     },
     Case {
         implementation: "examples/refinement_liveness/design_drops_liveness.fsl",
@@ -325,7 +325,7 @@ const CASES: &[Case] = &[
         depth: 8,
         expected_result: "refinement_failed",
         expected_kind: Some("progress_lost"),
-        declared_by: "examples/refinement_liveness/README.md:43 \
+        declared_by: "examples/refinement_liveness/README.md:44 \
                       (`# refinement_failed / progress_lost`)",
     },
     Case {
@@ -339,7 +339,7 @@ const CASES: &[Case] = &[
         depth: 8,
         expected_result: "refines",
         expected_kind: None,
-        declared_by: "examples/refinement_liveness/README.md:45 (`# refines + progress`)",
+        declared_by: "examples/refinement_liveness/README.md:46 (`# refines + progress`)",
     },
     Case {
         implementation: "examples/refinement_liveness/design_bypasses_control.fsl",
@@ -352,7 +352,7 @@ const CASES: &[Case] = &[
         depth: 8,
         expected_result: "refinement_failed",
         expected_kind: Some("abs_requires_failed"),
-        declared_by: "examples/refinement_liveness/README.md:49 \
+        declared_by: "examples/refinement_liveness/README.md:50 \
                       (`# refinement_failed / abs_requires_failed`)",
     },
     Case {
