@@ -31,6 +31,7 @@ fslc verify $E/policy.fsl --engine induction        # proved
 # ① Liveness does not propagate: refine passes, yet verifying the same policy at the design layer breaks
 fslc refine $E/design_drops_liveness.fsl $E/policy.fsl \
             $E/design_drops_liveness_refines.fsl --depth 8            # refines
+<!-- deadlock-ignore-rationale: The deliberate liveness-failure demonstration needs the lasso, not a deadlock warning. -->
 fslc verify $E/design_drops_liveness.fsl --depth 8 --deadlock ignore  # violated / leadsTo (lasso)
 
 # ② Resolution: add fair to the progress action and re-verify at each layer, and liveness holds too

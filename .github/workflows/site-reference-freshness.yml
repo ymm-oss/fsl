@@ -77,5 +77,8 @@ jobs:
       - name: Install the generator's test dependencies
         run: pip install ".[dev]"
 
+      - name: Check examples explain deadlock-ignore commands
+        run: python3 tools/check-example-deadlock-ignore.py
+
       - name: Check site reference, manual-route, and refresh contracts
         run: python3 -m pytest tests/test_site_reference_snapshot.py tests/test_site_manual_integrity.py tests/test_site_refresh_contract.py -v

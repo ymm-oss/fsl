@@ -1,3 +1,4 @@
+// deadlock-ignore-rationale: This valid cancellation fixture intentionally stops after its guarded terminal transition.
 // expected-command: verify --depth 6 --deadlock ignore
 // expected-result: verified
 // `forbidden` (must-forbid) — positive example. Because cancel is guarded to Paid only,

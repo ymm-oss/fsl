@@ -30,6 +30,7 @@ request → present retention offer → accept (continue) or decline (cancel).
 fslc verify examples/pm/cancel_flow.fsl --engine induction
 
 # Requirements layer: requirement checking + consistency check against the business flow (implements) in one command, simultaneously
+<!-- deadlock-ignore-rationale: Temporary until the terminal-state modeling change makes this requirement flow explicit. -->
 fslc verify examples/pm/cancel_system.fsl --deadlock ignore
 
 # Emit the acceptance criteria and representative scenarios as test templates for development

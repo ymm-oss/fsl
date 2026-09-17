@@ -1,3 +1,4 @@
+// deadlock-ignore-rationale: The intended liveness counterexample is a starvation lasso rather than a deadlock result.
 // expected-command: verify --depth 4 --deadlock ignore
 // expected-result: violated
 // expected-kind: leadsTo
