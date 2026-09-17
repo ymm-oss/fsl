@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: Apache-2.0
+
+refinement InsuranceClaimLRefinesBusiness {
+  impl InsuranceClaimL
+  abs  InsuranceClaimBusiness
+
+  map stage[c: Claim] =
+    if claim[c].st == Intake then BReceived
+    else if claim[c].st == Assessment or claim[c].st == Reassessment then BUnderReview
+    else if claim[c].st == Approved then BApproved
+    else if claim[c].st == Paid then BPaid
+    else if claim[c].st == Posted then BPosted
+    else if claim[c].st == Returned then BReturned
+    else if claim[c].st == Withdrawn then BWithdrawn
+    else BLapsed
+
+  action receive(c, a) -> intake(c)
+  action assess(c) -> approve(c)
+  action return_to_claimant(c) -> return_case(c)
+  action resubmit(c) -> resubmit(c)
+  action pay(c) -> pay(c)
+  action post_ledger(c) -> post(c)
+  action withdraw(c) -> withdraw(c)
+  action advance_day(c) -> stutter
+  action lapse(c) -> lapse(c)
+}

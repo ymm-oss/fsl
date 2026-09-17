@@ -1,0 +1,16 @@
+[business]
+file = "claims_L_business.fsl"
+depth = 6
+
+[requirements]
+file = "claims_L_requirements.fsl"
+depth = 6
+
+[design]
+file = "claims_L_design.fsl"
+depth = 6
+refine_against = "requirements"
+mapping = "claims_L_design_refines_requirements.fsl"
+
+[impl]
+command = "python3 -c \"print('impl ok')\""
