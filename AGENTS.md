@@ -1,42 +1,47 @@
-# Repository Guidelines
+# FSL repository contract
 
-## Project and authority
+## Authority and scope
 
-`fslc` is the verifier for FSL, an AI-native formal specification language. The native Rust
-workspace under `rust/` is the authoritative implementation and distribution surface, including
-the `fslc-lsp` language server. The Python package under `src/fslc/` is a frozen compatibility
-reference; do not add product behavior there unless a compatibility change explicitly requires it.
+`fslc` is the verifier for FSL. The native Rust workspace under `rust/` is the
+authoritative implementation and distribution surface, including `fslc-lsp`.
+`src/fslc/` is a frozen Python compatibility reference; add product behavior
+there only when a compatibility change explicitly requires it.
 
-Interpret evidence in this order:
+Resolve evidence in this order:
 
-1. Language and CLI contracts in `docs/LANGUAGE.md`, accepted `docs/DESIGN-*.md`, tests, and CI.
-2. The native Rust implementation and its public Kernel/JSON contracts.
-3. Observable behavior of the frozen Python reference where a parity contract applies.
-4. Proposals, task notes, conversation history, and agent memory.
+1. `docs/LANGUAGE.md`, accepted `docs/DESIGN-*.md`, tests, and CI contracts.
+2. Native Rust implementation and public Kernel/JSON contracts.
+3. Observable frozen-Python behavior where parity applies.
+4. Proposals, task notes, conversations, and agent memory.
 
-When sources disagree, stop and resolve the contract conflict instead of silently choosing one.
+Stop on a conflict instead of silently choosing a source. Keep durable
+decisions in accepted contracts or executable tests, not temporary reports.
 
-## Project structure
+## Work discipline
 
-- `rust/fsl-syntax`: lexer, parsers, source locations, and surface AST.
-- `rust/fsl-core`: typed kernel model, validation, resolution, and dialect lowering.
-- `rust/fsl-runtime`: solver-independent Monitor and explicit-state/BFS behavior.
-- `rust/fsl-solver*`: backend-neutral solver boundary plus native and browser Z3 backends.
-- `rust/fsl-verifier`: BMC, induction, refinement, liveness, and scenarios.
-- `rust/fsl-tools`: analysis, mutation, report, typestate, and test generation tools.
-- `rust/fslc`: native CLI and JSON/process contract.
-- `rust/fsl-wasm`: browser Worker surface.
-- `rust/fsl-lsp`: native language server and document index.
-- `src/fslc`: frozen Python compatibility reference.
-- `tests`: Python-driven Rust contract, parity, and compatibility tests.
-- `specs` and `examples`: FSL corpus and reproducing cases.
-- `skills`: distributable canonical agent skills. Put repository-internal workflow skills in
-  `.claude/skills` or `.codex/skills`; `.claude/skills/fsl*` and `.agents/skills/fsl*` remain
-  symlinks to the distributable FSL skills.
+- Start with `git status --short`, named paths/issues/symbols, and `rg`.
+  Read the smallest useful ranges; widen only when evidence requires it.
+- Preserve unrelated user changes. Use a dedicated branch/worktree for
+  non-trivial work. Do not inspect secrets, unrelated user data, generated
+  trees, vendor/build output, snapshots, or full logs without a task-specific
+  reason.
+- Make the smallest coherent diff. Do not perform opportunistic refactors,
+  dependency upgrades, formatting sweeps, or unrelated cleanup.
+- `skills/` holds distributable canonical skills; repository-internal workflow
+  skills go in `.claude/skills` or `.codex/skills`. `.claude/skills/fsl*` and
+  `.agents/skills/fsl*` stay symlinks to the distributable ones.
+- For bounded implementation, bug-fix, test, or refactor work, use
+  `$focused-change`. It routes soundness-sensitive FSL work to the complete
+  repository contract only when needed.
+- Use `$task-start` before substantial Codex work and `$checkpoint` before
+  compaction, handoff, independent review, or ending the task.
+- Delegate broad read-heavy exploration to `evidence_explorer` and independent
+  final review to `independent_reviewer`. Keep iterative implementation in the
+  main thread unless writes can be isolated.
 
-## Build and verification commands
+## Build and verification
 
-Run the native CLI from the working tree:
+Run the working-tree CLI with:
 
 ```bash
 cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- check specs/cart_v1.fsl
@@ -53,177 +58,77 @@ cargo test --manifest-path rust/Cargo.toml --workspace --locked
 cargo build --manifest-path rust/Cargo.toml --workspace --locked
 ```
 
-The complete required product gate has one Rust-native entrypoint and does not execute Python:
+The complete product gate is `./tools/check-native-integration.sh`. Merge
+readiness is bounded PR evidence, not a substitute for product verification on
+merged `main` or release/production promotion. Python checks are required only
+for explicit compatibility-reference or Python-hook changes. Solver changes
+also run focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests;
+semantic changes run the applicable logic/scheduled tier.
 
-```bash
-./tools/check-native-integration.sh
-```
+Use `./scripts/cx-log <label> -- <command...>` for noisy commands. Keep complete
+logs in `.codex/tmp/`; report only exact commands, exit codes, failing tests,
+essential lines, and the log path. Do not rerun an unchanged failure without a
+new hypothesis, code/config change, or narrower reproducer.
 
-Pull requests into `main` may use the bounded `merge readiness` gate defined in
-`docs/DESIGN-ci.md`; it is not product verification. Every merged `main` state and every
-production/release promotion must still receive the complete product evidence. Do not hide a
-post-merge product-gate failure or treat its automatically created issue as a waiver.
+## Non-negotiable correctness
 
-Python is optional and is used only for changes explicitly scoped to the frozen compatibility
-reference or Python-based repository hooks. Native solver changes should also run
-the focused `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust` tests.
-Changes to concrete/symbolic semantics additionally run
-`./tools/check-native-integration.sh fsl-logic pr`; generator, comparator,
-inventory, and promotion changes run the `scheduled` tier.
+- `fsl-runtime` stays independent of solvers/Z3/JavaScript bridges. Symbolic
+  verification, Monitor, and solver-free BFS must agree.
+- Preserve native CLI and Worker JSON envelopes, locations, exit codes, replay
+  evidence, and public Kernel contracts. Do not allowlist verdict, location,
+  assurance, or exit-code drift.
+- Do not weaken or hollow out specs to obtain green checks. Every conformance
+  anchor needs a rejecting negative control; calibrate mutation/vacuity evidence
+  and report produced versus expected results.
+- Compare agreement outputs in full. Every excluded field needs an observed,
+  written reason and a live exclusion check. Separate stable values from ambient
+  cache/environment values and run new controls at least twice.
+- Identify the exact commit, binary, worktree, and active mutation behind every
+  observation. Evidence measured on another state does not transfer. Before
+  scoping an issue or claiming current state, fetch `origin` and read recently
+  merged pull requests touching the same contract surface; a cached
+  remote-tracking ref is not freshness evidence.
+- A language feature moves with grammar/lowering, typed model, symbolic and
+  concrete semantics, regression corpus, both language references, FSL skill
+  references, design note, changelog fragment, and—when applicable—LSP indexing
+  plus role/scope tests and dialect registry coverage.
+- Soundness-critical triangulation follows
+  `docs/DESIGN-triangulated-assurance.md`; shared parsing/classification is not
+  independent evidence and triangulation does not promote assurance or exit
+  status.
+- ⚠️ **No gate enforces this one.** A change that rewrites a type-boundary gate
+  must `check` every `.fsl` under `specs/`, `examples/`, and
+  `rust/fslc/tests/fixtures/` with binaries built from the named base SHA and
+  from head, in each SHA's own materialized tree, plus the inline fixtures of
+  every required test it rewrites, renames, removes, or stops running. Record
+  each `ok`→`error` transition as a breaking removal in the design note, both
+  language references, `skills/fsl/references/syntax.md`, and a `changed`
+  fragment; state an empty transition set with the command, both SHAs, and the
+  form count rather than assuming it. `corpus_check_sweep.rs` reports only a
+  `specs/`/`examples/` form that stops checking
+  (`docs/DESIGN-nested-option-support.md`, "Amendment (#925)").
+- Never hand-edit generated compatibility snapshots. An accepted construct with
+  missing/placeholder semantics is a soundness defect: fix it in scope or record
+  an issue/follow-up with explicit authority.
 
-## Correctness invariants
+Gate-enforced detail (coupled-change lists, CI validator inventory, failure
+classes, mutation controls, knowledge-distillation rules, task-state) lives in
+`.agents/skills/focused-change/references/fsl-repository-contract.md` and must
+be read through `$focused-change` for affected work.
 
-- `fsl-runtime` must remain independent of `fsl-solver`, Z3, and JavaScript solver bridges.
-- Symbolic verification, the concrete Monitor, and solver-free BFS must agree. A confidently green
-  false negative is more dangerous than a crash.
-- Native CLI and Worker output must preserve the JSON envelope, exit codes, locations, and replayable
-  evidence contract. Do not allowlist verdict, location, assurance, or exit-code differences.
-- A language feature moves with its grammar/lowering, typed model, symbolic and concrete semantics,
-  regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/references/`, a design
-  note, and a `changelog.d/` fragment (see `changelog.d/README.md`; `CHANGELOG.md`'s `[Unreleased]`
-  body itself is aggregated from fragments at release time and must not be hand-edited). A new
-  declaration, binder, or reference form additionally moves with
-  `rust/fsl-lsp/src/index.rs` and a targeted role/scope test, or it silently loses
-  definition/references/rename/documentSymbol with no parse failure to surface the gap;
-  `rust/fsl-lsp/tests/corpus.rs` only asserts that every identifier is indexed as something.
-  `docs/LANGUAGE.ja.md` is a second canonical source kept section-aligned
-  1:1 with `docs/LANGUAGE.md` (same count/order of `## ` sections) — `tools/build_site_reference.py`
-  fails loudly on drift; see `docs/DESIGN-docs-site.md` D7 (this one *is* a required CI check:
-  `.github/workflows/site-reference-freshness.yml`). A new dialect's top-level construct (and any new
-  `examples/`/`specs/` directory) additionally moves with `tests/dialect_registry.py` (`DIALECTS`,
-  `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS`). The frozen-Python conformance harness
-  (`docs/DESIGN-conformance-harness.md`, `tests/test_dialect_conformance.py`) is written to fail
-  loudly on an unregistered construct instead of silently excluding the corpus, but — unlike the
-  `docs/LANGUAGE.ja.md` check above — **no CI workflow and no `./tools/check-native-integration.sh`
-  lane currently invokes it**; it is a developer-run manual/reference check, not a machine-enforced
-  gate (see the design doc's "Cost and CI wiring"). Scope that precisely: registering the construct
-  in `tests/dialect_registry.py` and the harness's dual-evaluator (Monitor/BMC/oracle) agreement
-  checks have no mechanical enforcement today. A narrower obligation is enforced regardless — every
-  `.fsl` under `specs/`/`examples/` must `check` cleanly or declare/exclude its error — by
-  `rust/fslc/tests/corpus_check_sweep.rs` inside the required `rust workspace` job
-  (`.github/workflows/ci.yml`). That native sweep will not catch a missing `tests/dialect_registry.py`
-  entry or a Monitor/native disagreement; register the construct because the rule says so, not
-  because something will always catch you if you don't. A new `tests/test_*.py` module additionally
-  moves with `tools/check_ci_validator_inventory.py generate` and
-  `docs/DESIGN-ci-validator-inventory.md` so required-gate reachability is recorded before merge.
-- Top-level dialect counts and parser parity do not establish nested semantic coverage. When porting
-  or auditing an AST/enum sum type, inventory every behavior-bearing variant and bind each accepted
-  variant to executable native semantics with accepting/rejecting controls, or to an explicit
-  fail-closed diagnostic. Prefer a total lowering expression whose arms all return the same semantic
-  output type; an empty unit arm must not compile as a valid implementation.
-- A placement matrix or state-shape whitelist does not establish that existing accepted forms are
-  preserved. A change that rewrites a type-boundary gate must `check`, with binaries built from the
-  named base SHA and from head, every `.fsl` under `specs/`, `examples/`, and
-  `rust/fslc/tests/fixtures/` in the materialized tree of each SHA (so `use ... from` imports
-  resolve against that SHA's own siblings), plus the inline fixtures of every required test the
-  change rewrites, renames, removes, or stops from running. Record every `ok`→`error` transition as a
-  breaking removal in the design note, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`,
-  `skills/fsl/references/syntax.md`, and a `changed` fragment; an empty transition set is stated with
-  the command, both SHAs, and the form count, never assumed. Breaking this rule fails no gate:
-  `rust/fslc/tests/corpus_check_sweep.rs` reports only a `specs/` or `examples/` form that stops
-  checking, and a fixture-pinned acceptance surfaces only as the required test the change itself
-  rewrites (`docs/DESIGN-nested-option-support.md`, "Amendment (#925): matrix rows that change an
-  existing verdict").
-- Do not weaken or hollow out `.fsl` specs to make checks pass. Verify mutation/vacuity evidence.
-- Every formal-to-implementation conformance anchor must include a negative control that rejects a
-  known contract-violating trace, transition, or mutation. A green positive path alone does not
-  establish that the anchor can detect drift.
-- Label each control by what it establishes, and prove the label by executing the mutation. A
-  *detector* fails under the mutation it is cited for; a *preservation control* correctly keeps passing
-  when the change is reverted and establishes only that unrelated behavior was not disturbed. A
-  preservation control presented as a detector is a false coverage claim. Report the produced value
-  beside the expected one — "the test failed" does not establish that it failed for the right reason.
-  Isolate mutations unless a compound mutant's compound expectation is stated before it is applied.
-  Prove the revert by exact equality to the named baseline — an empty `git diff` against it. A `grep -c`
-  returning zero is supporting evidence only when the mutation introduced a unique token: a mutation
-  that edits or deletes text leaves a correct revert with a nonzero count, and a pattern can match a
-  sibling site rather than the mutated one.
-- A comparison control's scope is part of the control. When a control asserts that two outputs agree,
-  compare them in full. Give every excluded field a written reason it *cannot* be compared, not a
-  category label asserting that it varies; build the exclusion list from the observed output, never
-  from a type's field names; and pair it with a check that fails when an excluded key is absent from
-  both sides. A dead exclusion weakens nothing while looking deliberate, so reading cannot distinguish
-  it from a considered one. A hand-picked field list has let two opposite-direction wrong
-  implementations both pass.
-- A control whose verdict depends on ambient state is not a control. If an observable it compares can
-  vary with cache state, environment, filesystem residue, or execution order, split it: compare stable
-  observables exactly and check ambient ones for membership rather than equality. Run a new or changed
-  control at least twice in one session before reporting it green — the first fix for this class
-  commonly inverts the flake rather than removing it, and a single run cannot tell those apart.
-- Confirm what a state *is* before reporting an observation about it. Name the commit, the built
-  binary, and any mutation currently applied. Before scoping an issue or making a current-state claim,
-  fetch `origin` and inspect recently merged pull requests that touch the same contract surface; a
-  locally cached remote-tracking ref is not freshness evidence. A working tree under a calibration
-  mutation is not the committed implementation; a worktree behind `origin/main` is not `main`; a
-  binary built before the change does not exercise the change; a run's creation timestamp is not a
-  job's elapsed time. Each of these has produced a confidently reported defect that did not exist, or
-  a passing verdict that the change had not earned.
-- A soundness-critical claim marked triangulated must follow
-  `docs/DESIGN-triangulated-assurance.md`: preserve the pre-classification raw observation, declare
-  two reviewably independent semantic lineages, execute all three agreement edges, and calibrate
-  accepting/rejecting controls. Consumer parity through one parser/classifier is not independence,
-  and triangulation never promotes the public assurance class or process exit.
-- Do not hand-edit generated compatibility snapshots. Regenerate them only when the corresponding
-  contract change is intentional and review the resulting diff.
-- An accepted construct with absent, placeholder, or hollow semantics is a soundness defect, even if
-  it is outside the current edit. Before reporting a task complete, either fix it in scope or record
-  an existing/new issue URL in the task packet. If external issue creation is not authorized, leave
-  an explicit unresolved follow-up and request authorization; do not let the finding survive only in
-  chat, a review transcript, or agent memory.
+## Change and completion
 
-## Knowledge distillation
+Use `cargo fmt`; keep Clippy warning-free; do not introduce unsafe Rust.
+Python uses four-space style. New source files require the Apache-2.0 SPDX
+header.
 
-Treat field-trial logs, spike notes, task packets, and audit transcripts as temporary evidence, not
-repository authority. Before closing the work, promote every durable result to the smallest relevant
-authoritative surface: a language/design contract, an agent or contributor rule, an executable test,
-or a maintained example. Then remove the temporary report and its backlinks. Keep a standalone
-experiment record only when its method or raw data is itself a maintained product artifact; Git and
-pull-request history preserve chronology.
+Keep one topic per commit with a Conventional Commit-style subject. Add notable
+changes as new `changelog.d/<id>-<slug>.<category>.md` fragments; do not edit
+`CHANGELOG.md` directly. PRs state the problem, contract change, test evidence,
+linked issue, and documentation/skill impact.
 
-For an explicitly requested local Referance semantic-drift audit, follow
-`docs/DESIGN-referance-local-audit.md`: begin with a verified task-local Store and provenance-bearing
-behavior/freshness evidence, then use the repo-owned bounded CodeReferance profile only as an auxiliary
-read-only detector. Confirm both Store path and audited root, keep every observation shadow/local, and
-complete authority-ordered triage before filing a finding. Referance is not a CI, merge, product,
-promotion, or release gate, and its symbol/parity results never establish nested executable semantics
-or authorize automatic ground/promote/issue.
-
-## Coding and change conventions
-
-Use `cargo fmt` and keep Clippy warning-free. The workspace forbids unsafe Rust. Python code follows
-standard four-space style, but changes to the frozen implementation require an explicit reason.
-New source files must carry the repository's Apache-2.0 SPDX header.
-
-## Codex task state and context discipline
-
-- In Codex sessions, `tasks/active.md` is the worktree-local current task packet. It is ignored by Git
-  and must be reconciled with the branch, working tree, implementation, and observed command results.
-- When Codex prompts for hook trust, approve the entry for local feedback if appropriate; trust is bound
-  to the hook source's absolute path, does not transfer to linked worktrees, and must not be relied on
-  as repository enforcement.
-- When a task packet declares append-only history or a no-amend rule, create a new commit rather than
-  using `git commit --amend`; an exception requires explicit approval recorded in the task packet.
-- A single successful or partial verification command is not completion evidence. The task packet must
-  name every required command, its expected and produced result, and the current commit/binary identity;
-  whoever delegated the task judges whether that evidence is sufficient. A delegated worker does
-  not declare the task complete on its own.
-- Use `$task-start` before substantial Codex work and `$checkpoint` before compaction, clearing,
-  handoff, independent review, or ending the task.
-- Keep durable decisions in accepted `docs/DESIGN-*.md`; task packets, conversations, plans, and Codex
-  memories are not architectural authority.
-- Delegate broad read-heavy exploration to `evidence_explorer` and independent final review to
-  `independent_reviewer`. Keep iterative implementation in the main thread unless work can be isolated
-  without shared write coordination.
-- Do not return raw search output or full build logs to the main thread. Preserve exact paths, symbols,
-  commands, exit codes, failing test names, and a full-log path when one exists.
-- Use `/compact` at investigation, implementation, and verification boundaries. Use `/clear` only after
-  checkpointing when switching to unrelated work.
-
-For non-trivial changes, use a dedicated branch/worktree so unrelated local state is not mixed into
-the task. Use repository-relative paths in committed files and delegation briefs; never embed a
-developer's absolute path or username. Preserve unrelated user changes.
-
-Keep one topic per commit, use Conventional Commit-style subjects, and add a notable change as a new
-`changelog.d/<id>-<slug>.<category>.md` fragment (see `changelog.d/README.md`) in the same pull
-request, rather than editing `CHANGELOG.md` directly. A pull request should state the problem,
-contract change, test evidence, linked issue, and any documentation or skill updates.
+Before finishing, inspect `git diff --stat` and the relevant diff. Completion
+requires satisfied acceptance conditions, sufficient checks (or an explained
+failure), reviewed scope, current state identity, and explicit remaining risks.
+Final responses should report changed behavior, files, checks/results, and
+unresolved risk without reproducing source files or full logs.
