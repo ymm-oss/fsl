@@ -37,7 +37,7 @@ system prompt + agent prompts
 
 ```bash
 fslc testgen examples/multi_agent_system/multi_agent_design.fsl \
-  --depth 6 --deadlock ignore \
+  --depth 6 \
   -o examples/multi_agent_system/test_multi_agent_design_conformance.py
 ```
 

@@ -1,7 +1,7 @@
 // topic: bounded counter
 // scale: tiny
 // features: domain type, requires guard, reachable
-// expected-command: verify --depth 4 --engine induction --deadlock ignore
+// expected-command: verify --depth 4 --engine induction
 // expected-result: proved
 spec GalleryTinyBoundedCounter {
   type Count = 0..3

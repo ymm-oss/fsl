@@ -1,7 +1,7 @@
 // topic: vending machine
 // scale: small
 // features: Map, Option, bounded inventory, ensures, reachable
-// expected-command: verify --depth 6 --deadlock ignore
+// expected-command: verify --depth 6
 // expected-result: verified
 spec GallerySmallVendingMachine {
   type Item = 0..1

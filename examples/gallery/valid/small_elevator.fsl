@@ -1,7 +1,7 @@
 // topic: single-car elevator
 // scale: small
 // features: enum, bounded floor, guarded movement, reachable
-// expected-command: verify --depth 7 --engine induction --deadlock ignore
+// expected-command: verify --depth 7 --engine induction
 // expected-result: proved
 spec GallerySmallElevator {
   type Floor = 0..2

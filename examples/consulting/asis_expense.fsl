@@ -5,7 +5,7 @@
 // regulations) written directly in a verifiable form. Run:
 //
 //   fslc verify examples/consulting/asis_expense.fsl \
-//        --engine induction --deadlock ignore
+//        --engine induction
 //
 // proved = "the current regulations are consistent under any processing order".
 // If the regulations contradict each other, the ID, original text, and

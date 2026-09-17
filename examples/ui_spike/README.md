@@ -15,7 +15,7 @@ go/no-go are in [`../../docs/DESIGN-ui.md`](../../docs/DESIGN-ui.md).
 fslc verify examples/ui_spike/return_ui.fsl --engine induction         # proved
 fslc refine examples/ui_spike/return_ui.fsl examples/ui_spike/return_req_min.fsl \
             examples/ui_spike/ui_refines_req.fsl --depth 8             # refines
-fslc verify examples/ui_spike/navstack.fsl --deadlock ignore           # verified
+fslc verify examples/ui_spike/navstack.fsl           # verified
 ```
 
 Conclusion of the spike: screen flows can be expressed without changing the
