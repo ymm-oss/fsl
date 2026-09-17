@@ -1406,6 +1406,45 @@ no headroom: compile is only ~3.5 min of the ~33 min `rust workspace` measured o
 better hit rate could not have bought back more than that. The remaining lever is moving specific
 lanes post-merge under a new accepted decision.
 
+### Required contexts no longer have to run against current `main`
+
+`main safety and CI` (ruleset `19090811`) carried
+`strict_required_status_checks_policy: true`, which required each of its six contexts to have
+succeeded on a head that already contained the tip of `main`. That flag is now `false`. The six
+contexts are unchanged and still required; what changed is only *which head* they may have run
+against.
+
+The cost was measured on this repository, not reasoned about. Merging #1073 moved `main`, which put
+#1075 and #1076 into `BEHIND` and invalidated eighteen already-succeeded checks on each. Both had to
+be updated and re-run before either could land. With N pull requests open, every merge costs N
+re-runs of the heavy Linux evidence — and `rust workspace` is ~33 min on a warm cache, measured
+above. The queue that normally absorbs this cost is unavailable here for reasons that are about
+human review policy rather than CI, recorded in "The merge queue was tried, measured against this
+repository's workflow, and rejected" above. That left the strict flag paying its full price with no
+way to batch it.
+
+**What is given up.** Two pull requests can each be green against an older `main` and break when
+combined — one renames a surface, the other adds a caller. That class now lands on `main` and is
+caught by the post-merge push run and its failure reporter, not before merge.
+
+That is a real loss, and it is narrower than it sounds. It is not the *confidently-green false
+negative* the queue experiment above was rejected for: the six contexts still run, still block, and
+still report against the pull request's own head. What is lost is the guarantee that the head
+included whatever landed in the meantime. This repository also already accepts post-merge detection
+for a comparable class — issue #806 records platform-specific defects reaching `main` because the
+native-Z3 matrix is promotion-only — so the shape is not new here.
+
+**Why the trade is acceptable for this repository specifically.** Merges are serialized by a single
+maintainer, so the interleaving that makes stale bases dangerous is rare: the second pull request is
+usually rebased by the same person who just merged the first. Against that, the strict flag charged
+for the possibility on every merge regardless.
+
+**Reversal.** Set the flag back if any of these becomes true: a second maintainer starts landing
+changes concurrently, the post-merge reporter stops catching integration breaks that the strict flag
+would have caught pre-merge, or the review policy changes such that the merge queue becomes
+enqueueable. The first two are observable from the failure-issue history; the third is the condition
+the section above already names.
+
 ### Ruleset drift audit
 
 Issue #707 has two halves. The first — making the Linux evidence *required*, not merely running —
