@@ -1,0 +1,1 @@
+Changed (#852): Cache-budget audit reports now separate listing-derived, superseded-generation recoverability from unattributed net growth while retaining the physical-byte budget verdict and non-atomic-observation caveat.

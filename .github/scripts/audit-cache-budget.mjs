@@ -225,7 +225,11 @@ export function auditCacheBudget({
       staleGenerationCount === 1 ? "" : "s"
     } beyond the newest per {sharedKey, platform} pair on \`${defaultBranchRef}\` (${formatGiB(
       staleGenerationBytes,
-    )}) -- diagnostic visibility only, not subtracted from the budget judgment below.`,
+    )}). Report split: recoverable (superseded-generation-derived): up to ${formatGiB(
+      Math.min(staleGenerationBytes, rawEffective),
+    )}; net-growth (not diagnosed as superseded-generation-derived): ${formatGiB(
+      rawEffective - Math.min(staleGenerationBytes, rawEffective),
+    )}. This is diagnostic visibility only, not subtracted from the budget judgment below; the listing and the independently-observed usage total are separate, non-atomic observations, so this split does not prove that either amount is in the usage total or that net-growth is repository-controllable.`,
   });
 
   if (rawEffective >= limitBytes * warnFraction) {
