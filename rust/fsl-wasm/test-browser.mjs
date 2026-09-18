@@ -13,7 +13,24 @@ import "./build.mjs";
 import { assertNormalizerContract, differences, normalizeEnvelope } from "./parity.mjs";
 import { workerMessageError } from "./web/worker-protocol.mjs";
 
-assertNormalizerContract();
+const probeTimeoutExitStatus = 124;
+const parityViolationExitStatus = 65;
+
+class ProbeTimeoutError extends Error {
+  constructor(mode, diagnostic) {
+    super(diagnostic);
+    this.mode = mode;
+  }
+}
+
+class ParityViolationError extends Error {
+  constructor(report, reportPath) {
+    super(`${report}\nfull report: ${reportPath}`);
+  }
+}
+
+async function main() {
+  assertNormalizerContract();
 
 const protocolError = workerMessageError({
   transportError: { kind: "initialization", message: "probe" },
@@ -388,7 +405,7 @@ function cdp(socket, method, params = {}) {
       pending.delete(id);
       const state = READY_STATE[socket.readyState] ?? `unknown(${socket.readyState})`;
       const chromeStderr = stderr.trim();
-      reject(new Error(
+      reject(new ProbeTimeoutError("cdp",
         `CDP method "${method}" timed out after ${cdpTimeoutMs}ms `
         + `(call id ${id}, socket ${state}, ${pending.size} other request(s) outstanding); `
         + `see issue 587. Chrome stderr: `
@@ -439,7 +456,12 @@ try {
     await delay(250);
   }
   socket.close();
-  if (details?.done !== "true") throw new Error(`browser probe timed out: ${stderr}`);
+  if (details?.done !== "true") {
+    throw new ProbeTimeoutError(
+      "poll",
+      `browser probe timed out after 360 attempts; last observation: ${JSON.stringify(details)}`,
+    );
+  }
 } finally {
   if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
   await childClosed;
@@ -526,7 +548,7 @@ if (mismatches.length > 0) {
   }, null, 2);
   const reportPath = join(tmpdir(), "fsl-native-wasm-parity-failure.json");
   await writeFile(reportPath, `${report}\n`, "utf8");
-  throw new Error(`${report}\nfull report: ${reportPath}`);
+  throw new ParityViolationError(report, reportPath);
 }
 console.log(JSON.stringify({
   schema: "fsl-wasm-browser.v1",
@@ -536,3 +558,25 @@ console.log(JSON.stringify({
   parityCases: parityCases.length,
   exclusionProbes: exclusionProbes.length,
 }, null, 2));
+}
+
+try {
+  await main();
+} catch (error) {
+  let outcome = "harness_failure";
+  let status = 1;
+  const diagnostic = { schema: "fsl-wasm-browser-outcome.v1", outcome };
+  if (error instanceof ProbeTimeoutError) {
+    outcome = "probe_timeout";
+    status = probeTimeoutExitStatus;
+    diagnostic.outcome = outcome;
+    diagnostic.mode = error.mode;
+  } else if (error instanceof ParityViolationError) {
+    outcome = "parity_violation";
+    status = parityViolationExitStatus;
+    diagnostic.outcome = outcome;
+  }
+  console.error(JSON.stringify(diagnostic));
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = status;
+}

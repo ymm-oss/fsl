@@ -316,7 +316,19 @@ check_wasm() {
   npm --prefix rust/spikes/z3js-worker run probe:browser
   cargo build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --locked
   npm --prefix rust/fsl-wasm ci
-  npm --prefix rust/fsl-wasm run test:browser
+  local status
+  if npm --prefix rust/fsl-wasm run test:browser; then
+    status=0
+  else
+    status=$?
+  fi
+  case "$status" in
+    0) echo "check-native-integration: wasm browser outcome=pass status=0" ;;
+    124) echo "check-native-integration: wasm browser outcome=probe_timeout status=124" >&2 ;;
+    65) echo "check-native-integration: wasm browser outcome=parity_violation status=65" >&2 ;;
+    *) echo "check-native-integration: wasm browser outcome=harness_failure status=$status" >&2 ;;
+  esac
+  return "$status"
 }
 
 case "${1:-all}" in

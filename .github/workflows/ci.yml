@@ -267,6 +267,8 @@ jobs:
     name: WASM
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      outcome: ${{ steps.integration.outputs.outcome }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -324,8 +326,23 @@ jobs:
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
 
       - name: Check WASM integration
+        id: integration
         if: steps.scope.outputs.run == 'true'
-        run: ./tools/check-native-integration.sh wasm
+        shell: bash
+        run: |
+          set +e
+          ./tools/check-native-integration.sh wasm
+          status=$?
+          set -e
+          case "$status" in
+            0) outcome=pass ;;
+            124) outcome=probe_timeout ;;
+            65) outcome=parity_violation ;;
+            *) outcome=harness_failure ;;
+          esac
+          echo "outcome=$outcome" >>"$GITHUB_OUTPUT"
+          echo "WASM integration outcome: $outcome (exit $status)" >>"$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
   rust-native-z3-macos:
     name: native Z3 4.16 (macos-15)
@@ -817,6 +834,7 @@ jobs:
         env:
           RUST_WORKSPACE: ${{ needs.rust-workspace.result }}
           WASM: ${{ needs.wasm.result }}
+          WASM_OUTCOME: ${{ needs.wasm.outputs.outcome }}
           NATIVE_Z3_MACOS: ${{ needs.rust-native-z3-macos.result }}
           NATIVE_Z3_WINDOWS: ${{ needs.rust-native-z3-windows.result }}
           PRODUCTION_NATIVE_Z3_LINUX: ${{ needs.production-native-z3-linux.result }}
@@ -856,6 +874,6 @@ jobs:
             failures=1
           fi
           if [ "$failures" -ne 0 ]; then
-            echo "product gate failed: rust=$RUST_WORKSPACE wasm=$WASM native-z3=$NATIVE_Z3 production-linux=$PRODUCTION_NATIVE_Z3_LINUX semantic-mutation=$SEMANTIC_MUTATION fsl-logic=$FSL_LOGIC" >&2
+            echo "product gate failed: rust=$RUST_WORKSPACE wasm=$WASM wasm-outcome=${WASM_OUTCOME:-unavailable} native-z3=$NATIVE_Z3 production-linux=$PRODUCTION_NATIVE_Z3_LINUX semantic-mutation=$SEMANTIC_MUTATION fsl-logic=$FSL_LOGIC" >&2
             exit 1
           fi
