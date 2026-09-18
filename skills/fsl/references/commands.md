@@ -71,7 +71,10 @@ As needed: `fslc explain file.fsl --depth 8 --readable`
    against execution logs).
    For scope-sensitive failures, use `fslc sweep file.fsl --instances Case=1..3
    --depth 1..8 [--property Name]`; it reports each run under `sweep.results` and
-   the first failing scope under `sweep.minimal_counterexample`.
+   the first true failing scope under `sweep.minimal_counterexample`. A grid
+   with only `insufficient_depth` reachability observations is
+   `sweep_inconclusive`/exit 1 (and has a null minimal counterexample); a grid
+   with a determinate success and no true failure is `sweep_passed`/exit 0.
 
 ## 7. CLI and JSON essentials
 
@@ -546,14 +549,19 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   abstract fails `map_out_of_bounds`; an impl-only carried number applies to
   the impl only.
 - `sweep` is opt-in bounded honesty for scope exploration. It calls normal
-  `verify` repeatedly over instance/value/depth ranges and returns
-  `result:"sweep_passed"` or `"sweep_failed"`, with every run under
-  `sweep.results` and the first failing scope under
-  `sweep.minimal_counterexample`. For `--values NAME=LO..HI`, it fixes `LO` and
-  expands `LO..LO`, `LO..LO+1`, ..., `LO..HI`. A spec `error` from any scope
+  `verify` repeatedly over instance/value/depth ranges and preserves every run
+  under `sweep.results`. A true failure produces `result:"sweep_failed"` and
+  its first scope under `sweep.minimal_counterexample`. A `reachable_failed`
+  cell is inconclusive only when its nonempty `unreached` array contains only
+  `classification:"insufficient_depth"`: it remains in the results but is not
+  a counterexample. With no true failure, a determinate success yields
+  `sweep_passed`/exit 0; all-inconclusive yields `sweep_inconclusive`/exit 1
+  with a null minimal counterexample. Missing, unknown, or mixed
+  classifications, including `over_constrained`, fail closed as
+  `sweep_failed`. For `--values NAME=LO..HI`, it fixes `LO` and expands
+  `LO..LO`, `LO..LO+1`, ..., `LO..HI`. A spec `error` from any scope
   (parse/type/semantics/io/vacuous, a mistyped `--instances`/`--values` name,
-  a missing file) is returned verbatim — exit code and `kind` unchanged —
-  instead of being folded into `sweep_passed`/`sweep_failed`.
+  a missing file) is returned verbatim — exit code and `kind` unchanged.
 - `explain` is deterministic formatting with no LLM. JSON mode enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest

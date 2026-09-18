@@ -118,7 +118,7 @@ const ROWS: &[Row] = &[
         construct: Construct::Causal,
         command: &["causal", "check"],
         expected_result: "causal_model_checked",
-        declared_by: "docs/LANGUAGE.md:2726-2730 (`causal <Name> { ... }` is evaluated by \
+        declared_by: "docs/LANGUAGE.md:2974-2984 (`causal <Name> { ... }` is evaluated by \
                       `fslc causal check model.fsl`) and docs/DESIGN-causal.md:475 (the \
                       command's success envelope: `\"result\": \"causal_model_checked\"`)",
         declaration: Declaration {
@@ -131,7 +131,7 @@ const ROWS: &[Row] = &[
         construct: Construct::Causal,
         command: &["causal", "check"],
         expected_result: "causal_model_checked",
-        declared_by: "docs/LANGUAGE.md:2726-2730 and docs/DESIGN-causal.md:475, as for \
+        declared_by: "docs/LANGUAGE.md:2974-2984 and docs/DESIGN-causal.md:475, as for \
                       incident_response.fsl above -- one command contract, three fixtures",
         declaration: Declaration {
             path: "docs/DESIGN-causal.md",
@@ -143,7 +143,7 @@ const ROWS: &[Row] = &[
         construct: Construct::Causal,
         command: &["causal", "check"],
         expected_result: "causal_model_checked",
-        declared_by: "docs/LANGUAGE.md:2726-2730 and docs/DESIGN-causal.md:475, as above",
+        declared_by: "docs/LANGUAGE.md:2974-2984 and docs/DESIGN-causal.md:475, as above",
         declaration: Declaration {
             path: "docs/DESIGN-causal.md",
             anchor: "\"result\": \"causal_model_checked\"",
@@ -182,7 +182,7 @@ const ROWS: &[Row] = &[
         construct: Construct::AiProject,
         command: &["ai", "check"],
         expected_result: "ai_project_analyzed",
-        declared_by: "docs/LANGUAGE.md:2459-2462 (`fslc ai check` parses a project-level \
+        declared_by: "docs/LANGUAGE.md:2689-2692 (`fslc ai check` parses a project-level \
                       fsl-ai evidence declaration -- combining `ai_component`, `dataset`, \
                       `evaluator`, `failure_mode`, `statistical_property`, `ai_migration`, \
                       `observed_property` -- with the same parser the evidence commands run, \

@@ -971,14 +971,23 @@ error. Candidate text/order is part of the verification cache key.
 `sweep` is an opt-in wrapper around `verify`; it does not change normal
 verification. It evaluates a deterministic grid of `--instances NAME=lo..hi`,
 `--values NAME=lo..hi`, and `--depth lo..hi` overrides, records each underlying
-verification result under `sweep.results`, and returns the first failing scope
-under `sweep.minimal_counterexample`. For `--values`, the sweep fixes the lower
-bound and expands the upper bound (`lo..lo`, `lo..lo+1`, ..., `lo..hi`). A
-passing sweep means "no counterexample in this grid", not an unbounded proof.
+verification result under `sweep.results`, and returns the first true failing
+scope under `sweep.minimal_counterexample`. For `--values`, the sweep fixes the
+lower bound and expands the upper bound (`lo..lo`, `lo..lo+1`, ..., `lo..hi`).
+A passing sweep means "no counterexample in this grid", not an unbounded proof.
 A spec `error` (parse / type / semantics / io / vacuous / …) from any scope in
 the grid is not a counterexample: `sweep` returns that underlying error
 envelope verbatim (`result`, `kind`, `message`, `loc`, exit code unchanged)
 instead of folding it into `sweep_passed`/`sweep_failed`.
+
+A `reachable_failed` cell is inconclusive only when its nonempty `unreached`
+array contains only `classification:"insufficient_depth"`. Such a cell remains
+in `sweep.results` but is not a counterexample: a grid with at least one
+determinate success and no true failure returns `sweep_passed`/exit 0; a grid
+containing only inconclusive cells returns `sweep_inconclusive`/exit 1 with
+`minimal_counterexample:null`. Missing, unknown, or mixed classifications,
+including `over_constrained`, are true failures and return `sweep_failed`/exit
+1.
 
 `diff` compares state-machine meaning instead of source text. It runs bounded
 refinement in both directions: NEW→OLD failure is `behavior_added`, while
@@ -1035,7 +1044,7 @@ mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) 
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
-refinement_failed / impl_violated / sweep_failed / observed_mismatch,
+refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch,
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
 result; `imported`/`imported_with_warnings` is `fslc db import`'s. `impl_violated` is listed
@@ -1043,7 +1052,8 @@ because inline `implements` propagates that seam verdict to the top-level `resul
 happens where the verification envelope is produced, so it is not confined to `check` and
 `verify`: on a spec whose seam fails, `mutate` re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer `verified`), `ledger` and `fslc html` inherit the
-same exit from the folded verification envelope, and `sweep` reports `sweep_failed`. The same
+same exit from the folded verification envelope, and `sweep` reports `sweep_failed` for a true
+failure or `sweep_inconclusive` when every cell is depth-limited. The same
 `2` mapping is fail-closed for `chain`'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
 `docs/DESIGN-layers.md` §7) and for `ledger --impl-log`'s replay input (a
@@ -1066,6 +1076,9 @@ records why, and why `fslc document check`'s `document_drifted` differs. Gate on
 | `proved` | **The invariant holds in all executions** (unbounded depth); `completeness:"unbounded"`. From `--engine induction`, or from `--engine explicit` when exploration closes (`closure:true`) | Done |
 | `violated` | A counterexample exists. Comes with `violation_kind` and the shortest trace | Read the trace and fix the spec |
 | `reachable_failed` | reachable not reached within depth K | Read each `unreached[].classification`: raise `--depth` for `insufficient_depth`, or fix the blocking constraint for `over_constrained` |
+| `sweep_passed` | A sweep grid has no true failure and at least one determinate success; depth-limited observations remain in `sweep.results` | Inspect the recorded grid; this is not an unbounded proof |
+| `sweep_inconclusive` | Every sweep cell is `reachable_failed` with only `insufficient_depth` classifications; `minimal_counterexample` is null | Raise `--depth` or adjust the sweep bounds, then rerun |
+| `sweep_failed` | A sweep cell has a counterexample or a fail-closed reachability classification | Inspect `sweep.minimal_counterexample` and fix the reported problem |
 | `unknown_cti` | The invariant is not violated but is not inductive | **Read the CTI and add an auxiliary invariant** (§8), or try `--engine explicit` (closure proves without lemmas) |
 | `unknown_budget` | Either: `--engine explicit` exceeded `--explicit-budget` before closing; or an inline `implements Abs from "file" { }` seam's correspondence search exceeded its fixed internal state budget (`check`/`verify`, no CLI flag) | For the explicit engine: raise the budget, or use `--engine bmc`/`induction` for this spec. For an inline `implements` seam: narrow the domain, or verify the layers separately with `fslc refine`/`fslc verify` instead of the combined check |
 | `error` | parse / type / semantics / io | Fix per `loc` / `expected` / `hint` |
