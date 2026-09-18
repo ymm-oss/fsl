@@ -203,6 +203,14 @@ preflight_command_link() {
   fi
 }
 
+payload_skill_names() {
+  local dir
+  for dir in "$RELEASE_DIR"/skills/*/; do
+    [ -d "$dir" ] || continue
+    basename "$dir"
+  done | sort
+}
+
 preflight_skill_link() {
   local skill_name="$1"
   local source="$CURRENT_LINK/skills/$skill_name"
@@ -222,7 +230,9 @@ preflight_skill_link() {
 preflight_command_link fslc "$FSL_BIN"
 preflight_command_link fslc-lsp "$FSL_LSP_BIN"
 if [ "$INSTALL_SKILL" -eq 1 ]; then
-  for SKILL_NAME in fsl fsl-business fsl-requirements fsl-design fsl-design-review fsl-delivery; do
+  SKILL_NAMES=$(payload_skill_names)
+  [ -n "$SKILL_NAMES" ] || fail "$RELEASE_DIR/skills contains no skill to install."
+  for SKILL_NAME in $SKILL_NAMES; do
     preflight_skill_link "$SKILL_NAME"
   done
 fi
@@ -278,7 +288,7 @@ esac
 
 if [ "$INSTALL_SKILL" -eq 1 ]; then
   mkdir -p "$HOME/.claude/skills"
-  for SKILL_NAME in fsl fsl-business fsl-requirements fsl-design fsl-design-review fsl-delivery; do
+  for SKILL_NAME in $SKILL_NAMES; do
     SKILL_SRC="$CURRENT_LINK/skills/$SKILL_NAME"
     SKILL_DST="$HOME/.claude/skills/$SKILL_NAME"
     [ -d "$RELEASE_DIR/skills/$SKILL_NAME" ] \
