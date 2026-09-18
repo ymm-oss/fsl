@@ -27,8 +27,10 @@ for a map of all the documentation see [`docs/README.md`](docs/README.md).
 
 Most people should use **the install script** — it sets up `fslc`, `fslc-lsp`, and the
 Claude Code Agent Skills together, and is the only route that also gets you skill
-integration. Use one of the other two routes only if it specifically fits you:
+integration. Use one of the other routes only if it specifically fits you:
 
+- Already managing tools with [mise](https://mise.jdx.dev/)? [Install it as a mise
+  tool](#with-mise).
 - Just want the `fslc` binary, nothing else (no PATH setup, no skills)? [Download a single
   executable](#download-a-single-executable-instead).
 - Building `fslc` yourself, or need the frozen Python reference for compatibility work?
@@ -80,6 +82,35 @@ change.
 
 Maintainers cut releases using the documented [`docs/RELEASE.md`](docs/RELEASE.md)
 procedure and the internal [`release` Agent Skill](.claude/skills/release/SKILL.md).
+
+### With mise
+
+[mise](https://mise.jdx.dev/) installs both commands straight from the GitHub releases.
+Put this in your `mise.toml`, then run `mise install`:
+
+```toml
+[tool_alias]
+fslc     = "github:ymm-oss/fsl"
+fslc-lsp = "github:ymm-oss/fsl"
+
+[tools]
+fslc     = { version = "4.6.0", matching_regex = "^fslc-(macos|linux|windows)" }
+fslc-lsp = { version = "4.6.0", matching = "fslc-lsp" }
+```
+
+mise verifies the release checksum, the GitHub artifact attestations, and the SLSA
+provenance before installing.
+
+One repository publishes both commands, so each command needs its own alias under
+`[tool_alias]`. Two `[tools]` entries naming the same backend resolve to one install
+directory, and the second entry becomes a no-op.
+
+> **Note**: `matching = "fslc-"` does not select `fslc`. The test is a case-sensitive
+> substring, so it also matches `fslc-lsp-macos-arm64`. Use the anchored `matching_regex`
+> shown above.
+
+This route installs the two commands only. It does not install the Claude Code Agent
+Skills. Use the install script above if you want those as well.
 
 ### Download a single executable instead
 
