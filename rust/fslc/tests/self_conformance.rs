@@ -852,6 +852,7 @@ fn fold_result_class(output: &Value) -> Result<FoldClass, String> {
         | "nonconformant"
         | "impl_violated"
         | "sweep_failed"
+        | "sweep_inconclusive"
         | "observed_mismatch"
         | "replay_nonconformant"
         | "document_drifted"
@@ -888,7 +889,7 @@ fn finalize_action(command: CompoundCommand, top: &RawCliOutput) -> Result<Value
         (CompoundCommand::Sweep, "sweep_passed", 0)
         | (CompoundCommand::Chain, "verified", 0)
         | (CompoundCommand::AnalyzeBatch, "analyzed", 0) => "finalize_pass",
-        (CompoundCommand::Sweep, "sweep_failed", 1)
+        (CompoundCommand::Sweep, "sweep_failed" | "sweep_inconclusive", 1)
         | (CompoundCommand::Chain, "violated", 1)
         | (CompoundCommand::Chain | CompoundCommand::AnalyzeBatch, "error", 2) => "finalize_fail",
         _ => {
@@ -1086,6 +1087,32 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         FOLD_SPEC,
         &rejected_finalize_pass(&failed_trace),
         "failed sweep cannot finalize pass",
+    );
+
+    let inconclusive = run_cli(&strings(&[
+        "sweep",
+        "specs/cart_v1.fsl",
+        "--depth",
+        "0..0",
+    ]));
+    assert_eq!(
+        inconclusive.output["result"], "sweep_inconclusive",
+        "{}",
+        inconclusive.output
+    );
+    let inconclusive_items = inconclusive.output["sweep"]["results"]
+        .as_array()
+        .expect("inconclusive sweep results")
+        .iter()
+        .map(|entry| entry["summary"].clone())
+        .collect::<Vec<_>>();
+    let inconclusive_trace =
+        fold_trace(CompoundCommand::Sweep, &inconclusive_items, &inconclusive)
+            .expect("map inconclusive sweep");
+    assert_conformant(
+        FOLD_SPEC,
+        &inconclusive_trace,
+        "inconclusive sweep fold",
     );
 }
 

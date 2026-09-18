@@ -120,3 +120,42 @@ fn sweep_still_passes_clean_specs_and_fails_genuine_counterexamples() {
     assert_eq!(failed["result"], "sweep_failed");
     assert!(!failed["sweep"]["minimal_counterexample"].is_null());
 }
+
+#[test]
+fn sweep_cart_v1_passes_after_insufficient_depth_cells() {
+    let (swept, status) = run_cli(&["sweep", "specs/cart_v1.fsl"]);
+    assert_eq!(status, 0, "swept: {swept:#}");
+    assert_eq!(swept["result"], "sweep_passed");
+    assert!(swept["sweep"]["minimal_counterexample"].is_null());
+}
+
+#[test]
+fn sweep_all_insufficient_depth_cells_are_inconclusive() {
+    let (swept, status) = run_cli(&["sweep", "specs/cart_v1.fsl", "--depth", "0..0"]);
+    assert_eq!(status, 1, "swept: {swept:#}");
+    assert_eq!(swept["result"], "sweep_inconclusive");
+    assert!(swept["sweep"]["minimal_counterexample"].is_null());
+    assert!(swept["sweep"]["results"].is_array());
+    assert!(swept["sweep"]["ranges"].is_object());
+}
+
+#[test]
+fn sweep_mixed_reachability_classifications_remain_failed() {
+    let path = fixture("issue_634_reachable_classification.fsl");
+    let (swept, status) = run_cli(&["sweep", &path, "--depth", "0..0"]);
+    assert_eq!(status, 1, "swept: {swept:#}");
+    assert_eq!(swept["result"], "sweep_failed");
+}
+
+#[test]
+fn sweep_cart_controls_keep_genuine_failure_and_clean_success() {
+    let (buggy, buggy_status) = run_cli(&["sweep", "specs/cart_buggy.fsl"]);
+    assert_eq!(buggy_status, 1, "buggy: {buggy:#}");
+    assert_eq!(buggy["result"], "sweep_failed");
+    assert!(!buggy["sweep"]["minimal_counterexample"].is_null());
+
+    let (implemented, implemented_status) = run_cli(&["sweep", "specs/cart_impl.fsl"]);
+    assert_eq!(implemented_status, 0, "implemented: {implemented:#}");
+    assert_eq!(implemented["result"], "sweep_passed");
+    assert!(implemented["sweep"]["minimal_counterexample"].is_null());
+}

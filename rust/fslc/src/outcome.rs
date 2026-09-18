@@ -67,6 +67,47 @@ impl OutcomeClass {
     }
 }
 
+/// Sweep-specific classification of an underlying verification envelope.
+///
+/// The shared [`OutcomeClass`] remains binary: an inconclusive reachability
+/// observation is still a failing `verify` verdict. Only a sweep grid needs to
+/// distinguish it from a counterexample so later, determinate cells can settle
+/// the aggregate result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub enum SweepCellClass {
+    Success,
+    Inconclusive,
+    Failure,
+}
+
+/// Classify one full verification envelope for a sweep grid.
+///
+/// Missing, empty, mixed, or unrecognized reachability classifications are
+/// failures. All non-reachability outcomes defer to [`outcome_class`] so the
+/// sweep cannot drift into a hand-maintained result vocabulary.
+pub fn sweep_cell_class(verification: &Value) -> SweepCellClass {
+    let insufficient_depth_only = verification.get("result").and_then(Value::as_str)
+        == Some("reachable_failed")
+        && verification
+            .get("unreached")
+            .and_then(Value::as_array)
+            .is_some_and(|unreached| {
+                !unreached.is_empty()
+                    && unreached.iter().all(|entry| {
+                        entry.get("classification").and_then(Value::as_str)
+                            == Some("insufficient_depth")
+                    })
+            });
+    if insufficient_depth_only {
+        SweepCellClass::Inconclusive
+    } else if outcome_class(verification).is_success() {
+        SweepCellClass::Success
+    } else {
+        SweepCellClass::Failure
+    }
+}
+
 /// Classify a CLI output envelope.
 ///
 /// The class is the one the producing site's exit code already implies, so
@@ -212,6 +253,7 @@ pub fn outcome_class(output: &Value) -> OutcomeClass {
         | "nonconformant"
         | "impl_violated"
         | "sweep_failed"
+        | "sweep_inconclusive"
         // Dialect-level failures.
         | "observed_mismatch"
         | "replay_nonconformant"
@@ -598,7 +640,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        OutcomeClass, exit_status, is_definitive_kernel_verdict, outcome_class, verify_cache_admits,
+        OutcomeClass, SweepCellClass, exit_status, is_definitive_kernel_verdict, outcome_class,
+        sweep_cell_class, verify_cache_admits,
     };
 
     /// The rule `run_db_check` and `run_domain_check` share, pinned where it
@@ -779,6 +822,61 @@ mod tests {
                 "{result} must not be readable as a failure"
             );
         }
+    }
+
+    #[test]
+    fn sweep_reachability_with_empty_unreached_is_failure() {
+        assert_eq!(
+            sweep_cell_class(&json!({"result": "reachable_failed", "unreached": []})),
+            SweepCellClass::Failure
+        );
+    }
+
+    #[test]
+    fn sweep_reachability_with_missing_classification_is_failure() {
+        assert_eq!(
+            sweep_cell_class(&json!({
+                "result": "reachable_failed",
+                "unreached": [{"name": "Target"}]
+            })),
+            SweepCellClass::Failure
+        );
+    }
+
+    #[test]
+    fn sweep_reachability_with_unknown_classification_is_failure() {
+        assert_eq!(
+            sweep_cell_class(&json!({
+                "result": "reachable_failed",
+                "unreached": [{"classification": "future_kind"}]
+            })),
+            SweepCellClass::Failure
+        );
+    }
+
+    #[test]
+    fn sweep_reachability_with_mixed_classifications_is_failure() {
+        assert_eq!(
+            sweep_cell_class(&json!({
+                "result": "reachable_failed",
+                "unreached": [
+                    {"classification": "insufficient_depth"},
+                    {"classification": "over_constrained"}
+                ]
+            })),
+            SweepCellClass::Failure
+        );
+    }
+
+    #[test]
+    fn sweep_reachability_with_only_insufficient_depth_is_inconclusive() {
+        assert_eq!(
+            sweep_cell_class(&json!({
+                "result": "reachable_failed",
+                "unreached": [{"classification": "insufficient_depth"}]
+            })),
+            SweepCellClass::Inconclusive
+        );
     }
 
     /// Cacheability is not success. If these two ever collapse into one

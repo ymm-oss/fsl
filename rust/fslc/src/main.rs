@@ -14,7 +14,7 @@ use fsl_core::{
     finalize_model_warnings, insert_requirement_metadata, model_warnings, requirement_metadata,
 };
 use fslc_rust::literate_access::literate_access;
-use fslc_rust::outcome::{OutcomeClass, outcome_class};
+use fslc_rust::outcome::{OutcomeClass, SweepCellClass, outcome_class, sweep_cell_class};
 use fslc_rust::spec_load::{
     SemanticDiagnostic, SpecLoadError, kernel_load_error, surface_parse_failure,
 };
@@ -3564,6 +3564,7 @@ fn run_sweep(
     let mut results = Vec::new();
     let mut minimal = None;
     let mut spec_name = None;
+    let mut has_success = false;
     for instances in instance_combinations {
         for upper_values in &value_upper_combinations {
             let values = upper_values
@@ -3652,32 +3653,31 @@ fn run_sweep(
                     "summary": summary,
                     "verification": verification,
                 });
-                // Issue #594: this was a hand-written failure list that had
-                // silently lost `unknown_budget`, so a grid whose only failing
-                // scope reported it collapsed into `sweep_passed`/exit 0.
-                // Deferring to the shared classifier removes the whole class
-                // of omission -- a new result value cannot be forgotten here
-                // without also being forgotten in `outcome.rs`, where it falls
-                // to the failure class anyway.
-                if minimal.is_none()
-                    && !outcome_class(&entry["summary"]).is_success()
-                    && entry["summary"]["result"].is_string()
-                {
-                    minimal = Some(entry.clone());
+                match sweep_cell_class(&entry["verification"]) {
+                    SweepCellClass::Success => has_success = true,
+                    SweepCellClass::Inconclusive => {}
+                    // The helper delegates every non-exempt result to the
+                    // shared classifier, preserving #594's fail-closed rule.
+                    SweepCellClass::Failure if minimal.is_none() => {
+                        minimal = Some(entry.clone());
+                    }
+                    SweepCellClass::Failure => {}
                 }
                 results.push(entry);
             }
         }
     }
-    let failed = minimal.is_some();
+    let result = if minimal.is_some() {
+        "sweep_failed"
+    } else if has_success {
+        "sweep_passed"
+    } else {
+        "sweep_inconclusive"
+    };
     let mut output = envelope();
     output.insert(
         "result".to_owned(),
-        json!(if failed {
-            "sweep_failed"
-        } else {
-            "sweep_passed"
-        }),
+        json!(result),
     );
     output.insert("spec".to_owned(), json!(spec_name));
     output.insert(
@@ -3697,7 +3697,7 @@ fn run_sweep(
             "minimal_counterexample": minimal,
         }),
     );
-    (Value::Object(output), i32::from(failed))
+    (Value::Object(output), i32::from(result != "sweep_passed"))
 }
 
 #[derive(Clone, Debug, Default)]
