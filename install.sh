@@ -101,38 +101,6 @@ stage_release_asset() {
   rm -f "$destination.sha256.download"
 }
 
-stage_skills() {
-  local archive source_root skill_name
-  archive="$STAGING_DIR/fsl-skills.tar.gz"
-  mkdir -p "$STAGING_DIR/skills"
-  if [ "$RELEASE_TAG" != "v3.0.0" ]; then
-    stage_release_asset "fsl-skills.tar.gz" "$archive" \
-      || fail "Failed to download the checksummed skill bundle from $RELEASE_TAG."
-    tar -xzf "$archive.download" -C "$STAGING_DIR"
-    rm -f "$archive.download"
-    return
-  fi
-
-  # v3.0.0 predates the checksummed skill bundle. Keep compatibility by
-  # extracting only the skills from the immutable release tag archive.
-  rm -f "$archive.download" "$archive.sha256.download"
-  echo "The release has no skill bundle; extracting skills from source tag $RELEASE_TAG."
-  archive="$STAGING_DIR/source.tar.gz"
-  download_file "https://github.com/ymm-oss/fsl/archive/refs/tags/$RELEASE_TAG.tar.gz" "$archive" \
-    || fail "Failed to download the source archive for $RELEASE_TAG."
-  [ "$(hash_file "$archive")" = "d2d691a98af28f4aaa77ded08b35978539a0d1e3c65e8b7f29783f143a447598" ] \
-    || fail "Checksum verification failed for the v3.0.0 source archive."
-  mkdir -p "$STAGING_DIR/source"
-  tar -xzf "$archive" -C "$STAGING_DIR/source"
-  source_root=$(find "$STAGING_DIR/source" -mindepth 1 -maxdepth 1 -type d | head -n 1)
-  [ -n "$source_root" ] || fail "The source archive for $RELEASE_TAG is empty."
-  for skill_name in fsl fsl-business fsl-requirements fsl-design fsl-design-review fsl-delivery; do
-    [ -d "$source_root/skills/$skill_name" ] || fail "The $skill_name skill is missing from $RELEASE_TAG."
-    cp -R "$source_root/skills/$skill_name" "$STAGING_DIR/skills/$skill_name"
-  done
-  rm -rf "$STAGING_DIR/source" "$archive"
-}
-
 RELEASE_TAG=$(latest_release_tag)
 RELEASE_URL="https://github.com/ymm-oss/fsl/releases/download/$RELEASE_TAG"
 TARGET=$(native_target)
@@ -150,7 +118,6 @@ stage_release_asset "fslc-lsp-$TARGET" "$STAGING_DIR/bin/fslc-lsp" \
 mv "$STAGING_DIR/bin/fslc.download" "$STAGING_DIR/bin/fslc"
 mv "$STAGING_DIR/bin/fslc-lsp.download" "$STAGING_DIR/bin/fslc-lsp"
 chmod +x "$STAGING_DIR/bin/fslc" "$STAGING_DIR/bin/fslc-lsp"
-stage_skills
 
 EXPECTED_VERSION="fslc ${RELEASE_TAG#v}"
 ACTUAL_VERSION=$("$STAGING_DIR/bin/fslc" --version) \
@@ -162,10 +129,20 @@ CLI_HASH=$(hash_file "$STAGING_DIR/bin/fslc")
 RELEASE_NAME="$RELEASE_TAG-${CLI_HASH:0:12}"
 RELEASE_DIR="$RELEASES_DIR/$RELEASE_NAME"
 if [ -e "$RELEASE_DIR" ]; then
-  [ -x "$RELEASE_DIR/bin/fslc" ] && [ -x "$RELEASE_DIR/bin/fslc-lsp" ] \
-    || fail "$RELEASE_DIR does not contain an executable native pair."
-  diff -qr "$STAGING_DIR" "$RELEASE_DIR" >/dev/null \
-    || fail "$RELEASE_DIR differs from the verified $RELEASE_TAG payload. Move it and re-run."
+  # `fslc skills install --user` names this same directory and writes only
+  # skills/ into it, so a release directory without bin/ is a payload waiting
+  # for its binaries, not a broken install. Demanding the pair here made every
+  # later install.sh run fail for anyone who installed the skills first.
+  if [ -e "$RELEASE_DIR/bin" ]; then
+    [ -x "$RELEASE_DIR/bin/fslc" ] && [ -x "$RELEASE_DIR/bin/fslc-lsp" ] \
+      || fail "$RELEASE_DIR does not contain an executable native pair."
+    # Only bin/ is staged here. skills/ beside it belongs to `fslc skills`,
+    # which records what it wrote and checks it itself.
+    diff -qr "$STAGING_DIR/bin" "$RELEASE_DIR/bin" >/dev/null \
+      || fail "$RELEASE_DIR differs from the verified $RELEASE_TAG payload. Move it and re-run."
+  else
+    mv "$STAGING_DIR/bin" "$RELEASE_DIR/bin"
+  fi
   rm -rf "$STAGING_DIR"
 else
   mv "$STAGING_DIR" "$RELEASE_DIR"
@@ -203,39 +180,8 @@ preflight_command_link() {
   fi
 }
 
-payload_skill_names() {
-  local dir
-  for dir in "$RELEASE_DIR"/skills/*/; do
-    [ -d "$dir" ] || continue
-    basename "$dir"
-  done | sort
-}
-
-preflight_skill_link() {
-  local skill_name="$1"
-  local source="$CURRENT_LINK/skills/$skill_name"
-  local destination="$HOME/.claude/skills/$skill_name"
-  local backup="$destination.pre-native-v3"
-  [ -d "$RELEASE_DIR/skills/$skill_name" ] \
-    || fail "$RELEASE_DIR is missing the $skill_name skill."
-  if [ -L "$destination" ] && [ "$(readlink "$destination")" = "$source" ]; then
-    return
-  fi
-  if [ -e "$destination" ] || [ -L "$destination" ]; then
-    [ ! -e "$backup" ] && [ ! -L "$backup" ] \
-      || fail "$backup already exists. Move it and re-run."
-  fi
-}
-
 preflight_command_link fslc "$FSL_BIN"
 preflight_command_link fslc-lsp "$FSL_LSP_BIN"
-if [ "$INSTALL_SKILL" -eq 1 ]; then
-  SKILL_NAMES=$(payload_skill_names)
-  [ -n "$SKILL_NAMES" ] || fail "$RELEASE_DIR/skills contains no skill to install."
-  for SKILL_NAME in $SKILL_NAMES; do
-    preflight_skill_link "$SKILL_NAME"
-  done
-fi
 
 link_command() {
   local cmd_name="$1"
@@ -286,31 +232,6 @@ case ":$PATH:" in
     ;;
 esac
 
-if [ "$INSTALL_SKILL" -eq 1 ]; then
-  mkdir -p "$HOME/.claude/skills"
-  for SKILL_NAME in $SKILL_NAMES; do
-    SKILL_SRC="$CURRENT_LINK/skills/$SKILL_NAME"
-    SKILL_DST="$HOME/.claude/skills/$SKILL_NAME"
-    [ -d "$RELEASE_DIR/skills/$SKILL_NAME" ] \
-      || fail "$RELEASE_DIR is missing the $SKILL_NAME skill."
-    if [ -L "$SKILL_DST" ] && [ "$(readlink "$SKILL_DST")" = "$SKILL_SRC" ]; then
-      echo "The Claude Code skill link is current: $SKILL_DST"
-    elif [ -e "$SKILL_DST" ] || [ -L "$SKILL_DST" ]; then
-      SKILL_BACKUP="$SKILL_DST.pre-native-v3"
-      [ ! -e "$SKILL_BACKUP" ] && [ ! -L "$SKILL_BACKUP" ] \
-        || fail "$SKILL_BACKUP already exists. Move it and re-run."
-      mv "$SKILL_DST" "$SKILL_BACKUP"
-      ln -s "$SKILL_SRC" "$SKILL_DST"
-      echo "Linked Claude Code skill: $SKILL_DST (previous copy preserved at $SKILL_BACKUP)"
-    else
-      ln -s "$SKILL_SRC" "$SKILL_DST"
-      echo "Linked Claude Code skill: $SKILL_DST"
-    fi
-  done
-else
-  echo "Skipped linking the Claude Code skills."
-fi
-
 # Every destination has been checked and prepared. Rename a same-filesystem
 # temporary link over current to activate the complete payload atomically.
 ACTIVATION_DIR=$(mktemp -d "$INSTALL_DIR/.activate.XXXXXX")
@@ -326,6 +247,34 @@ rm -rf "$ACTIVATION_DIR"
 trap - EXIT
 [ "$("$FSL_BIN" --version)" = "$EXPECTED_VERSION" ] \
   || fail "The active native binary does not report $EXPECTED_VERSION."
+
+# The skills come from the binary, not from a second download, so the two
+# cannot disagree. This runs after activation: `fslc skills install --user`
+# points `current` itself, and doing that here would undo the atomic switch
+# above. The links it places point through `current`, so they stay correct
+# across every later upgrade.
+if [ "$INSTALL_SKILL" -eq 1 ]; then
+  # An install leaves anything it did not put there alone, and reports that as
+  # exit 1. That is a refusal, not a failure, and the binaries are already
+  # installed and active, so ending the whole script over somebody else's
+  # skill directory would be the wrong trade. Only exit 2 or worse is fatal.
+  skills_exit=0
+  FSL_DATA_DIR="$INSTALL_DIR" "$FSL_BIN" skills install --user >/dev/null || skills_exit=$?
+  if [ "$skills_exit" -ge 2 ]; then
+    echo "The native commands are installed and active at $LOCAL_BIN." >&2
+    fail "Installing the Claude Code skills failed. Re-run with: FSL_DATA_DIR=$INSTALL_DIR $FSL_BIN skills install --user"
+  fi
+  # Then ask `status`, which re-reads the result from disk rather than trusting
+  # what the install just said it did.
+  if FSL_DATA_DIR="$INSTALL_DIR" "$FSL_BIN" skills status --user >/dev/null; then
+    echo "Installed the Claude Code skills into $HOME/.claude/skills."
+  else
+    echo "Warning: $HOME/.claude/skills holds entries this install did not place." >&2
+    echo "Inspect them with: FSL_DATA_DIR=$INSTALL_DIR $FSL_BIN skills status --user" >&2
+  fi
+else
+  echo "Skipped installing the Claude Code skills."
+fi
 if command -v fslc >/dev/null 2>&1; then
   RESOLVED_FSL=$(command -v fslc)
   RESOLVED_VERSION=$(fslc --version 2>/dev/null || true)
