@@ -76,6 +76,10 @@ As needed: `fslc explain file.fsl --depth 8 --readable`
 ## 7. CLI and JSON essentials
 
 ```
+fslc skills install [--dir D] [--user] [--force] [--dry-run]  # write the Agent Skills this binary carries
+fslc skills status [--dir D] [--user]           # exit 0 matching, 1 stale/drifted/not installed
+fslc skills uninstall [--dir D] [--user] [--force] [--dry-run] # remove exactly what an install recorded
+                                                # no --dir/--user: search from the working directory, bounded at the repository root
 fslc check <f>                                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)
 fslc lint <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
                                                  # exit 0 no findings, 1 findings exist, 2 I/O or check failure (unconditional per input, refused legacy tokens excepted)

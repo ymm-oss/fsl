@@ -1225,6 +1225,7 @@ fn command() -> Result<(Value, i32), String> {
         }
         "ai" => ai_command(args),
         "causal" => causal_command(args),
+        "skills" => fsl_skills::cli::run(args, env!("CARGO_PKG_VERSION")),
         "domain" => domain_command(args),
         "explain" | "mutate" | "typestate" => {
             let path = PathBuf::from(

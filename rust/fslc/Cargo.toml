@@ -17,6 +17,7 @@ default = ["native-cli"]
 native-cli = [
     "dep:base64",
     "dep:ed25519-dalek",
+    "dep:fsl-skills",
     "dep:fsl-solver-z3",
     "dep:fsl-tools",
     "dep:sha2",
@@ -27,6 +28,7 @@ base64 = { workspace = true, optional = true }
 ed25519-dalek = { workspace = true, optional = true }
 fsl-core = { path = "../fsl-core" }
 fsl-runtime = { path = "../fsl-runtime" }
+fsl-skills = { path = "../fsl-skills", optional = true }
 fsl-solver = { path = "../fsl-solver" }
 fsl-solver-z3 = { path = "../fsl-solver-z3", optional = true }
 fsl-syntax = { path = "../fsl-syntax" }

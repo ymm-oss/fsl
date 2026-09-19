@@ -12,6 +12,10 @@ sections 3, 8, and 10.
 Keep the current eleven-crate structure for the next twelve months and make its ownership rules
 explicit. No split, merge, or new crate is justified by the available evidence.
 
+> [!NOTE]
+> Amended by section 11. `fsl-skills` (#1082) makes twelve. It is a new payload
+> surface, not a split of an existing crate, and one listed trigger fired for it.
+
 The selected intervention is non-structural: this document consolidates the component contracts
 already enforced by accepted design documents, Cargo dependencies, and executable tests. The
 decision is provisional because production telemetry, organizational ownership, roadmap data, and
@@ -28,7 +32,7 @@ corresponding function/type and in-crate module design is recorded in
 | Item | Value |
 |---|---|
 | Question | Should any current Rust crate be split, merged, or have state/responsibility moved, or is boundary clarification sufficient? |
-| Scope | The eleven members of `rust/Cargo.toml`; the frozen `src/fslc` package is excluded. |
+| Scope | The eleven members of `rust/Cargo.toml` at the baseline, twelve after section 11; the frozen `src/fslc` package is excluded. |
 | Horizon | Twelve months of language evolution, verification work, editor support, and native/browser releases. |
 | Outcome | Preserve semantic agreement while keeping changes attributable and delivery surfaces thin. |
 | Decision owner | Maintainers; no business or operational owner was identified in repository evidence. |
@@ -273,6 +277,18 @@ authorization to move source; section 8 remains the selection gate.
 - `main.rs` is a real change hotspot. A local extraction is a C2 candidate only when a command
   family could move with unchanged process contracts and a narrow rollback; it still requires the
   separate authorization gate in section 8. Do not create a new crate from line count alone.
+
+### `fsl-skills` — embedded payload owner
+
+Added by section 11.
+
+- Owns the build-time table of files under `skills/`, the two placement mechanisms, the manifest
+  that records what a run wrote, and the `fslc skills` argument and envelope surface.
+- It owns no FSL meaning. It depends on no other `fsl` crate, and no other `fsl` crate may depend
+  on it. Section 9 makes both directions executable.
+- `fslc-rust` reaches it through one function, `cli::run`, behind the `native-cli` feature.
+- Primary oracles are its own placement, envelope, and embedding tests, plus the subprocess tests
+  that `fslc-rust` keeps because they need the built binary.
 
 ### `fsl-wasm` — browser composition owner
 
@@ -631,6 +647,8 @@ Existing fitness functions remain authoritative:
 | Keep Public Kernel complete and fail closed. | Kernel schema, conformance coverage, and negative tests | Every registered semantic/outcome feature is covered; unsupported nodes fail. |
 | Keep replay evidence executable. | replay schema/goldens and Monitor replay tests | Complete typed observations conform; malformed input and wrong states fail with the contracted exit. |
 | Keep delivery projections stable. | native integration, LSP stdio/corpus, and browser parity tests | CLI, LSP, and Worker preserve their shared identities and transport-specific contracts. |
+| Keep the skills payload out of the Worker and the editor. | `tools/check-native-integration.sh` dependency inspection | No `fsl-skills` in the normal `fsl-wasm` or `fsl-lsp` tree. |
+| Keep the skills crate out of the FSL stack. | Same dependency inspection | No `fsl-core`, `fsl-syntax`, `fsl-runtime`, `fsl-solver`, or `fsl-verifier` in the normal `fsl-skills` tree. |
 
 ## 10. Residual risk and reevaluation
 
@@ -673,3 +691,65 @@ changes, neither a representative family-scoped change — so, as section 8 stat
 extraction's effect remains unconfirmed, not disproven, and the falsification test is no longer
 untested but its one run is too small to confirm anything. Documentation, executable boundary
 checks, and single-owner policy modules retain greater option value than a structural migration.
+
+## 11. Amendment: `fsl-skills` (#1082)
+
+Section 1 froze the crate count. This amendment adds one crate, `fsl-skills`.
+C1 remains selected for every crate section 1 covers.
+
+### The trigger
+
+Section 10 lists a trigger that fired:
+
+> LSP or Worker cannot reuse a shared diagnostic/result without importing inappropriate native
+> dependencies.
+
+The `fslc skills` work put an embedded skills module in the `fslc-rust` library.
+That library is what `fsl-lsp` and `fsl-wasm` link, with default features off.
+The module needs `sha2`, which `fslc-rust` declares optional under `native-cli`.
+Both builds broke.
+
+| Command | Before the amendment | After |
+|---|---|---|
+| `cargo check -p fslc-rust --no-default-features --lib` | `error[E0432]: unresolved import sha2` | passes |
+| `cargo check -p fsl-wasm` | same error, through the library | passes |
+| `cargo check -p fsl-lsp` | same error, through the library | passes |
+
+> [!IMPORTANT]
+> `cargo build --workspace` passed the whole time. Feature unification turns
+> `native-cli` on for the binary, and every other crate then sees `sha2`. The
+> workspace gate cannot observe this class of break. Section 9 now names the
+> per-package check that can.
+
+Making `sha2` unconditional would have hidden the break rather than fixed it.
+The Worker and the editor would still compile every embedded file, into builds
+that can never install one.
+
+### Why this is not C2
+
+C2 proposes moving command families out of `main.rs`. Those families compose the
+FSL stack, and section 8 rejects a crate for them on measurement: no independent
+consumer, and one workspace version.
+
+`fsl-skills` fails neither test, because it is not that kind of code.
+
+| C2 rejection ground | Does it apply here? |
+|---|---|
+| A new crate adds a dependency boundary without consumer need | No. The boundary is the need. It is what keeps the payload out of two consumers |
+| One workspace version, so no independent lifecycle | Unchanged. `fsl-skills` shares the workspace version |
+| Moved code duplicates composition policy | No. The crate composes nothing and holds no FSL meaning |
+
+The crate direction is the evidence. `fsl-skills` depends on `serde`,
+`serde_json`, and `sha2`. It names no `fsl` crate, and no `fsl` crate names it
+except `fslc-rust`. Section 9 checks both directions.
+
+### What moved
+
+Nothing changed shape. `rust/fslc/src/skills/` became `rust/fsl-skills/src/`,
+and the skill-walking half of `rust/fslc/build.rs` became the new crate's
+`build.rs`. The fingerprint half stayed, and `fsl-skills` is deliberately absent
+from `IMPLEMENTATION_CRATES` for the reason the skills payload always was.
+
+One visibility effect is worth recording. `pub(crate)` inside the module used to
+mean all of `fslc-rust`. It now means `fsl-skills`, so the placement types are
+reachable from less code than before, without a single declaration changing.

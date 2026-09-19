@@ -843,7 +843,48 @@ options:
   --edition {current,next}
                         target edition (default: next)
   --write               atomically replace every validated input file
-</pre></div></details></div>
+</pre></div></details>
+<details><summary>fslc skills <span class="tree-blurb">— 3 subcommands</span></summary><div class="tree-body"><pre>usage: fslc skills [-h] {install,status,uninstall}
+
+positional arguments:
+  {install,status,uninstall}
+    install             write the Agent Skills this binary carries
+    status              report whether the installed skills match this binary
+    uninstall           remove exactly what an install recorded
+
+options:
+  -h, --help            show this help message and exit
+</pre><div class="disclosure-tree"><details><summary>fslc skills install</summary><div class="tree-body"><pre>usage: fslc skills install [-h] [--dir DIR] [--user] [--force] [--dry-run]
+
+write the Agent Skills this binary carries into a skills directory
+
+options:
+  -h, --help            show this help message and exit
+  --dir DIR             install into DIR instead of searching for one
+  -u, --user            install for this user, as links through `current`
+  --force               replace a file this install recorded and you edited
+  --dry-run             report the plan without writing anything
+</pre></div></details>
+<details><summary>fslc skills status</summary><div class="tree-body"><pre>usage: fslc skills status [-h] [--dir DIR] [--user]
+
+report whether the installed skills match this binary; exit 1 when they do not
+
+options:
+  -h, --help            show this help message and exit
+  --dir DIR             install into DIR instead of searching for one
+  -u, --user            install for this user, as links through `current`
+</pre></div></details>
+<details><summary>fslc skills uninstall</summary><div class="tree-body"><pre>usage: fslc skills uninstall [-h] [--dir DIR] [--user] [--force] [--dry-run]
+
+remove exactly what an install recorded, and nothing else
+
+options:
+  -h, --help            show this help message and exit
+  --dir DIR             install into DIR instead of searching for one
+  -u, --user            install for this user, as links through `current`
+  --force               remove a file this install recorded and you edited
+  --dry-run             report the plan without removing anything
+</pre></div></details></div></div></details></div>
   </div>
 </section>
 

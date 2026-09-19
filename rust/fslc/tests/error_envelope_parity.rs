@@ -675,6 +675,39 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         not_applicable: CHECK_PARSE_SHAPE_BOUNDARIES,
     },
     CommandRegistration {
+        key: "skills install",
+        scope: ParityScope::Excluded {
+            reason: "takes a directory to install into, never a spec: it has no frontend entry point",
+        },
+        literate: LiterateCoverage::NotApplicable {
+            reason: "its path names a skills directory, never a spec",
+        },
+        coverage: NO_COVERAGE,
+        not_applicable: NOT_APPLICABLE_PARSE_GUARD_NAME,
+    },
+    CommandRegistration {
+        key: "skills status",
+        scope: ParityScope::Excluded {
+            reason: "takes a directory to install into, never a spec: it has no frontend entry point",
+        },
+        literate: LiterateCoverage::NotApplicable {
+            reason: "its path names a skills directory, never a spec",
+        },
+        coverage: NO_COVERAGE,
+        not_applicable: NOT_APPLICABLE_PARSE_GUARD_NAME,
+    },
+    CommandRegistration {
+        key: "skills uninstall",
+        scope: ParityScope::Excluded {
+            reason: "takes a directory to install into, never a spec: it has no frontend entry point",
+        },
+        literate: LiterateCoverage::NotApplicable {
+            reason: "its path names a skills directory, never a spec",
+        },
+        coverage: NO_COVERAGE,
+        not_applicable: NOT_APPLICABLE_PARSE_GUARD_NAME,
+    },
+    CommandRegistration {
         key: "version",
         scope: ParityScope::Excluded {
             reason: "has no input path or frontend entry point",
@@ -957,6 +990,9 @@ const INPUT_SHAPE_POPULATIONS: &[CommandInputShapePopulation] = &[
     input_shape_population!("testplan", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("typestate", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("verify", VERIFY_INPUT_SHAPE_PROFILE),
+    input_shape_population!("skills install", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("skills status", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("skills uninstall", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("version", SOURCE_INPUT_SHAPE_PROFILE),
 ];
 

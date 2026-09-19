@@ -43,6 +43,9 @@ Current covered slice:
   artifacts, and broad HTML byte-identical static content plus full
   tag/attribute structure. Solver-selected dynamic witnesses are validated by
   bidirectional replay instead of unstable raw bytes;
+- `fsl-skills`: the Agent Skills the binary carries, and the `fslc skills` install,
+  status, and uninstall surface. It depends on no other `fsl` crate, and only
+  `fslc-rust` depends on it, so the Worker and the LSP never carry the payload;
 - `fsl-wasm`: production `wasm32-unknown-unknown` Worker using the official
   `z3-solver` 4.16.0 npm backend, with COOP/COEP playground assets, forced
   cancellation/reinitialization, and native CLI verdict parity in headless

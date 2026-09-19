@@ -58,7 +58,7 @@ jobs:
 
       - name: Test release toolchain (MSRV)
         working-directory: rust
-        run: cargo test --release --locked -p fslc-rust -p fsl-lsp
+        run: cargo test --release --locked -p fslc-rust -p fsl-lsp -p fsl-skills
 
       - name: Build native Rust binary
         working-directory: rust

@@ -249,6 +249,13 @@ check_rust_tests() {
 check_boundaries() {
   assert_dependency_absent fsl-runtime 'fsl-solver|z3' 'fsl-runtime must remain solver-independent'
   assert_dependency_absent fsl-wasm 'fsl-solver-z3 v' 'fsl-wasm must not depend on the native Z3 backend'
+  # The Agent Skills are a payload for the native binary. The Worker and the
+  # editor link the `fslc` library, so a skills dependency there would compile
+  # every embedded file into builds that can never install one.
+  assert_dependency_absent fsl-wasm 'fsl-skills v' 'fsl-wasm must not carry the embedded skills'
+  assert_dependency_absent fsl-lsp 'fsl-skills v' 'fsl-lsp must not carry the embedded skills'
+  assert_dependency_absent fsl-skills 'fsl-core|fsl-syntax|fsl-runtime|fsl-solver|fsl-verifier' \
+    'fsl-skills must stay independent of the FSL stack'
 }
 
 # Implementation fault operators (#537 C5): would the suite notice if the
