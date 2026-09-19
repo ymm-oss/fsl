@@ -15,11 +15,15 @@ paths:
 - Preserve the owner map: `fsl-syntax` owns source fidelity; `fsl-core` owns checked models and
   Public Kernel; `fsl-runtime` owns concrete Monitor/replay/BFS semantics; `fsl-solver` owns the
   backend-neutral boundary; `fsl-solver-z3` and `fsl-solver-z3js` are native and browser adapters;
-  `fsl-verifier` owns symbolic engines; `fsl-tools` owns derived artifacts; and `fslc-rust`,
+  `fsl-verifier` owns symbolic engines; `fsl-tools` owns derived artifacts;
+  `fsl-skills` owns the embedded Agent Skills and their placement; and `fslc-rust`,
   `fsl-wasm`, and `fsl-lsp` own native delivery, Worker delivery, and editor projection.
 - Keep dependency direction explicit: `fsl-runtime -> fsl-core -> fsl-syntax`, while
   `fsl-verifier -> fsl-solver` and `fsl-verifier -> fsl-core`.
 - `fsl-runtime` must not depend directly or transitively on solver or Z3 crates.
+- `fsl-skills` must not depend on any other `fsl` crate, and only `fslc-rust` may depend on it.
+  `fsl-wasm` and `fsl-lsp` link the `fslc-rust` library, so a dependency there would compile
+  the whole skills payload into builds that can never install one.
 - A semantic construct implemented symbolically must have matching concrete/explicit-state behavior.
   Add a negative case capable of exposing a false-green result.
 - Preserve raw-output modes as raw, JSON envelopes, exit codes, Public Kernel and replay contracts,

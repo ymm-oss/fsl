@@ -27,9 +27,11 @@ for a map of all the documentation see [`docs/README.md`](docs/README.md).
 
 Most people should use **the install script** — it sets up `fslc`, `fslc-lsp`, and the
 Claude Code Agent Skills together, and is the only route that also gets you skill
-integration. Use one of the other two routes only if it specifically fits you:
+integration. Use one of the other routes only if it specifically fits you:
 
-- Just want the `fslc` binary, nothing else (no PATH setup, no skills)? [Download a single
+- Already managing tools with [mise](https://mise.jdx.dev/)? [Install it as a mise
+  tool](#with-mise).
+- Just want the `fslc` binary, nothing else (no PATH setup)? [Download a single
   executable](#download-a-single-executable-instead).
 - Building `fslc` yourself, or need the frozen Python reference for compatibility work?
   [Developer setup](#developer-setup-building-from-source).
@@ -60,19 +62,24 @@ What gets installed:
 The installer verifies both native checksums and rejects a binary whose reported version
 differs from the latest Release tag. It also migrates recognized command links that point
 at the old `~/.fsl/.venv/bin` or `~/.fsl/.native/bin` installs (the pre-Rust, fslc
-2.7-era layout). Use `--no-skill` to skip creating the Claude Code skill links.
+2.7-era layout). The skills come from the binary it just verified, through
+`fslc skills install --user`, so the two cannot disagree. Use `--no-skill`
+to skip them.
 
 Uninstall:
 
 ```bash
-rm -rf ~/.local/share/fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery
+fslc skills uninstall --user
+rm -rf ~/.local/share/fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp
 ```
+
+`fslc skills uninstall` removes the links it recorded and nothing else, so a
+skill you wrote yourself stays where it is.
 
 See the [Releases](https://github.com/ymm-oss/fsl/releases) page for the current version. Official releases contain checksummed native binaries,
 the VSCode extension, and Kernel bundles; every release after v3.0.0 also contains a
-checksummed Agent Skill bundle, and the installer separately verifies a pinned
-source-archive checksum for the v3.0.0 compatibility path (v3.0.0 predates the checksummed
-skill bundle). The Python compatibility reference
+checksummed Agent Skill bundle, for anyone distributing the skills separately. The
+installer no longer reads it: `fslc` carries the skills. The Python compatibility reference
 remains in this repository at version 2.7.0, but this installer does not install it and it
 is not published to PyPI. The Rust workspace crates are not published to crates.io.
 Publishing either surface requires an explicit manifest, workflow, and documentation
@@ -81,11 +88,69 @@ change.
 Maintainers cut releases using the documented [`docs/RELEASE.md`](docs/RELEASE.md)
 procedure and the internal [`release` Agent Skill](.claude/skills/release/SKILL.md).
 
+### With mise
+
+[mise](https://mise.jdx.dev/) installs both commands straight from the GitHub releases.
+Put this in your `mise.toml`, then run `mise install`:
+
+```toml
+[tool_alias]
+fslc     = "github:ymm-oss/fsl"
+fslc-lsp = "github:ymm-oss/fsl"
+
+[tools]
+fslc     = { version = "4.6.0", matching_regex = "^fslc-(macos|linux|windows)" }
+fslc-lsp = { version = "4.6.0", matching = "fslc-lsp" }
+```
+
+mise verifies the release checksum, the GitHub artifact attestations, and the SLSA
+provenance before installing.
+
+One repository publishes both commands, so each command needs its own alias under
+`[tool_alias]`. Two `[tools]` entries naming the same backend resolve to one install
+directory, and the second entry becomes a no-op.
+
+> **Note**: `matching = "fslc-"` does not select `fslc`. The test is a case-sensitive
+> substring, so it also matches `fslc-lsp-macos-arm64`. Use the anchored `matching_regex`
+> shown above.
+
+This route installs the two commands only. Run `fslc skills install` afterwards
+for the Claude Code Agent Skills, which the binary already carries.
+
+### Installing the skills from any `fslc`
+
+Every `fslc` carries the Agent Skills. The install script places them for you,
+and the command below is the same one it calls, for the routes that have no
+install script.
+
+```bash
+fslc skills install              # into this project's .claude/skills
+fslc skills install --user       # into ~/.claude/skills, as links
+fslc skills status               # exits non-zero when stale or changed
+fslc skills uninstall            # removes what it recorded, nothing else
+```
+
+Without `--dir` or `--user`, the search starts in the working directory and
+stops at the repository root, so it cannot reach `~/.claude`. `--dir` names a
+directory outright, which is how to reach `.agents/skills`.
+
+An install records what it wrote. A file you edited afterwards is reported
+rather than overwritten, and `--force` is the way past that.
+
+> [!WARNING]
+> `--force` means different things in the two scopes. A project install
+> replaces the individual files it is about to write. A user install replaces
+> whatever sits at `~/.claude/skills/<skill>`, and when that is a real
+> directory it is removed with everything under it. The envelope reports such
+> a path as `"state": "occupied"`, apart from a foreign link, so the two can
+> be told apart before you reach for `--force`.
+
 ### Download a single executable instead
 
 `fslc` is a **single native executable**. You need neither a Python install, `pip`, nor a
 separately installed Z3 — grab the one file for your OS from GitHub **Releases** and it
-runs, with no skill integration and no PATH setup.
+runs, with no PATH setup. It carries the Agent Skills, so `fslc skills install`
+places them without downloading anything further.
 
 | OS / arch | File to download |
 | --- | --- |
@@ -296,12 +361,11 @@ discovery, the canonical copies live under [`skills/`](skills/) at the repositor
 - [`skills/fsl-from-code/SKILL.md`](skills/fsl-from-code/SKILL.md) — reverse-engineer a design-layer spec from existing source code
 - [`skills/fsl-requirements-document/SKILL.md`](skills/fsl-requirements-document/SKILL.md) — generate and re-verify a human-readable requirements document from a checked spec
 
-The install script above links the first six into `~/.claude/skills/`; `fsl-from-code` and
-`fsl-requirements-document` are not part of that installed set today, but are checked into
-this repository's own `.claude/skills/` and `.agents/skills/` as symlinks to `skills/*`. To
-use any of them in another project, copy the relevant `skills/fsl*` directories into that
-project's `.claude/skills/` or into `~/.claude/skills/`, or point the `gh` skill extension
-at `skills/` as the distribution source. See [`skills/README.md`](skills/README.md) for
+The install script above links every skill above into `~/.claude/skills/`. They are also
+checked into this repository's own `.claude/skills/` and `.agents/skills/` as symlinks to
+`skills/*`. To use any of them in another project, copy the relevant `skills/fsl*`
+directories into that project's `.claude/skills/` or into `~/.claude/skills/`, or point the
+`gh` skill extension at `skills/` as the distribution source. See [`skills/README.md`](skills/README.md) for
 details.
 
 ## Repository layout
@@ -316,6 +380,7 @@ fsl/
 │   ├── fsl-solver*/        #   backend-neutral solver boundary plus native and browser Z3 backends
 │   ├── fsl-verifier/       #   BMC, induction, refinement, liveness, and scenarios
 │   ├── fsl-tools/          #   analysis, mutation, report, typestate, and test generation tools
+│   ├── fsl-skills/         #   the Agent Skills the binary carries, and where they go
 │   ├── fslc/               #   native CLI and JSON/process contract
 │   ├── fsl-wasm/           #   browser Worker surface
 │   └── fsl-lsp/            #   native language server and document index

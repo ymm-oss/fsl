@@ -3,6 +3,8 @@
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
+// `fsl-skills` is deliberately absent. The fingerprint identifies what the
+// verifier proves with, and skill prose does not change that.
 const IMPLEMENTATION_CRATES: &[&str] = &[
     "fsl-core",
     "fsl-runtime",
@@ -15,7 +17,17 @@ const IMPLEMENTATION_CRATES: &[&str] = &[
 ];
 
 fn collect_files(path: &Path, files: &mut Vec<PathBuf>) {
-    if path.is_file() {
+    let kind = std::fs::symlink_metadata(path)
+        .unwrap_or_else(|error| panic!("failed to inspect {}: {error}", path.display()))
+        .file_type();
+    // Refuse rather than follow. Embedding a link means embedding whatever it
+    // aims at, without saying so, and a loop never finishes walking.
+    assert!(
+        !kind.is_symlink(),
+        "{} is a symbolic link; the embedded payload must be plain files",
+        path.display()
+    );
+    if kind.is_file() {
         files.push(path.to_path_buf());
         return;
     }
@@ -32,6 +44,7 @@ fn collect_files(path: &Path, files: &mut Vec<PathBuf>) {
 fn main() {
     let manifest = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let workspace = manifest.parent().expect("Rust workspace root");
+
     let mut files = vec![workspace.join("Cargo.toml"), workspace.join("Cargo.lock")];
     for package in IMPLEMENTATION_CRATES {
         collect_files(&workspace.join(package), &mut files);

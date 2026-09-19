@@ -3,6 +3,7 @@ members = [
     "fsl-core",
     "fsl-lsp",
     "fsl-runtime",
+    "fsl-skills",
     "fsl-solver",
     "fsl-solver-z3",
     "fsl-solver-z3js",

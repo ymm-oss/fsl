@@ -1,0 +1,1 @@
+Unified (#1082): `install.sh` and `fslc` no longer place the Agent Skills separately. The installer runs `fslc skills install --user` with the binary it just verified, so the skills and the `fslc` that reads them cannot disagree, and one code path builds the layout.

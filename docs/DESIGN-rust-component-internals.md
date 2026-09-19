@@ -33,6 +33,13 @@ public schema, language behavior, solver protocol, or process contract.
 This decision is at function/type and in-crate module level (L0/L1), with a twelve-month horizon.
 It supersedes neither feature-specific accepted design notes nor the parent crate-boundary record.
 
+> [!NOTE]
+> `fsl-skills`, added by section 11 of
+> [`DESIGN-rust-components.md`](DESIGN-rust-components.md), is outside this record. Every count
+> and claim below was measured on the eleven crates of the baseline. That crate holds no FSL
+> meaning and composes nothing, so the directed-transformation model here has nothing to order
+> in it.
+
 ## 2. Decision frame and hard gates
 
 | Item | Value |

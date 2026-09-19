@@ -225,6 +225,18 @@ pub const LITERATE_REGISTRY: &[(&str, LiterateSupport)] = &[
 /// this change.
 pub const LITERATE_EXCLUDED: &[(&str, &str)] = &[
     (
+        "skills install",
+        "takes a skills directory, not a spec; `--dir` names where the embedded Agent Skills go, and the command never reaches the FSL frontend",
+    ),
+    (
+        "skills status",
+        "takes a skills directory, not a spec; `--dir` names where the embedded Agent Skills go, and the command never reaches the FSL frontend",
+    ),
+    (
+        "skills uninstall",
+        "takes a skills directory, not a spec; `--dir` names where the embedded Agent Skills go, and the command never reaches the FSL frontend",
+    ),
+    (
         "chain",
         "positional is a project manifest (TOML), not a spec; a .md there fails TOML parsing, never the FSL frontend",
     ),

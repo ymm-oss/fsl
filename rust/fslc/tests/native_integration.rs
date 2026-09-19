@@ -45,18 +45,38 @@ fn assert_installer_release_contract(root: &Path) {
     assert!(installer.contains("mktemp -d \"$INSTALL_DIR/.activate.XXXXXX\""));
     assert!(installer.contains("mv -fh \"$ACTIVATION_LINK\" \"$CURRENT_LINK\""));
     assert!(installer.contains("mv -fT \"$ACTIVATION_LINK\" \"$CURRENT_LINK\""));
-    assert!(installer.contains("stage_release_asset \"fsl-skills.tar.gz\""));
-    assert!(installer.contains("[ \"$RELEASE_TAG\" != \"v3.0.0\" ]"));
-    assert!(installer.contains("archive/refs/tags/$RELEASE_TAG.tar.gz"));
-    assert!(installer.contains("d2d691a98af28f4aaa77ded08b35978539a0d1e3c65e8b7f29783f143a447598"));
     assert!(installer.contains("EXPECTED_VERSION=\"fslc ${RELEASE_TAG#v}\""));
     assert!(installer.contains("RESOLVED_VERSION=$(fslc --version"));
-    assert!(installer.contains("diff -qr \"$STAGING_DIR\" \"$RELEASE_DIR\""));
     assert!(installer.contains("FSL_DATA_DIR must be an absolute path"));
     assert!(installer.contains("$HOME/.fsl/.venv/bin/$cmd_name"));
     assert!(!installer.contains("*\"/.venv/bin/$cmd_name\""));
-    assert!(installer.contains("ln -s \"$SKILL_SRC\" \"$SKILL_DST\""));
-    assert!(installer.contains("$SKILL_DST.pre-native-v3"));
+
+    // The skills come from the binary this script just verified, not from a
+    // second download that could disagree with it. Nothing here may fetch or
+    // place them itself.
+    assert!(!installer.contains("fsl-skills.tar.gz"));
+    assert!(!installer.contains("archive/refs/tags/$RELEASE_TAG.tar.gz"));
+    assert!(!installer.contains("$SKILL_DST.pre-native-v3"));
+    assert!(installer.contains("\"$FSL_BIN\" skills install --user"));
+    assert!(installer.contains("\"$FSL_BIN\" skills status --user"));
+    // Only bin/ is staged, so the tamper check compares only bin/. Comparing
+    // the whole directory would reject a release whose skills/ this script
+    // did not write.
+    assert!(installer.contains("diff -qr \"$STAGING_DIR/bin\" \"$RELEASE_DIR/bin\""));
+
+    // The delegation runs after the atomic activation: `fslc skills install
+    // --user` points `current` itself, and doing that before the rename
+    // would undo it.
+    let activation = installer
+        .find("mv -fh \"$ACTIVATION_LINK\" \"$CURRENT_LINK\"")
+        .expect("the activation rename");
+    let delegation = installer
+        .find("\"$FSL_BIN\" skills install --user")
+        .expect("the skills delegation");
+    assert!(
+        activation < delegation,
+        "the skills are placed after the payload is active"
+    );
     let stage_cli = installer
         .find("stage_release_asset \"fslc-$TARGET\"")
         .unwrap();
@@ -120,7 +140,7 @@ fn native_cli_help_matches_the_embedded_contract_at_every_command_path() {
             .iter()
             .filter(|node| node["commands"].as_array().is_some_and(Vec::is_empty))
             .count(),
-        52,
+        55,
         "the public contract must enumerate every live native leaf"
     );
     let mut paths = BTreeSet::new();

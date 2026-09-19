@@ -36,10 +36,18 @@ Intel macOS (`macos-x64`) is not supported. Releases also contain the
 checksummed Agent Skill bundle, VS Code extension, and Public Kernel contract
 bundles produced by `.github/workflows/release.yml`.
 `install.sh` resolves the latest published tag once and uses that same tag for
-the skill bundle and both native binaries. It installs only those payloads into
-the user's data directory; it does not clone the repository. The v3.0.0
-compatibility path extracts only the skills from that exact tag's source archive
-because the first native release predates the checksummed skill bundle.
+both native binaries. It installs only those payloads into the user's data
+directory; it does not clone the repository. It then runs
+`fslc skills install --user` with the binary it just verified, so the skills
+and the `fslc` that reads them cannot disagree. The skill bundle is still
+published for anyone distributing the skills separately; the installer does not
+read it.
+
+> [!IMPORTANT]
+> `install.sh` is served from `main` and installs the latest published
+> release, so it requires a release whose `fslc` has the `skills` subcommand.
+> Merging an installer that delegates before cutting that release leaves every
+> run failing at the delegation step.
 
 Linux artifacts target glibc 2.39 or newer. The release workflow pins both Linux
 runners to Ubuntu 24.04 and rejects binaries that require a newer GLIBC symbol.

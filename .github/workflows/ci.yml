@@ -391,9 +391,9 @@ jobs:
           # flag with timeout increases; see docs/DESIGN-ci.md, "Actions cache budget".
           cache-on-failure: true
 
-      - name: Test pinned native solver and BMC crates
+      - name: Test pinned native solver, BMC, and skills crates
         working-directory: rust
-        run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
+        run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust -p fsl-skills
 
   rust-native-z3-windows:
     name: native Z3 4.16 (windows-latest)
@@ -459,9 +459,9 @@ jobs:
           # flag with timeout increases; see docs/DESIGN-ci.md, "Actions cache budget".
           cache-on-failure: true
 
-      - name: Test pinned native solver and BMC crates
+      - name: Test pinned native solver, BMC, and skills crates
         working-directory: rust
-        run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
+        run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust -p fsl-skills
 
   production-native-z3-linux:
     name: native Z3 4.16 (ubuntu-latest)
@@ -496,9 +496,9 @@ jobs:
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
 
-      - name: Test pinned native solver and BMC crates
+      - name: Test pinned native solver, BMC, and skills crates
         working-directory: rust
-        run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
+        run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust -p fsl-skills
 
   # M13 semantic mutation gate (#672), split into two lanes (docs/DESIGN-ci.md,
   # "Sharded pre-merge Linux evidence"). Pull requests run the complete
