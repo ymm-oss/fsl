@@ -32,6 +32,64 @@ fn assert_windows_release_smoke(workflow: &str) {
     assert!(workflow.contains("$verifyResult.result -ne \"verified\""));
 }
 
+/// The signed release manifest mise reads, and the two things that can make it
+/// describe something other than this release.
+fn assert_packslip_release_contract(workflow: &str, root: &Path) {
+    // One run per command, because the release publishes two commands as
+    // separate bare executables and one project cannot hold two `raw`
+    // artifacts for one platform.
+    assert_eq!(workflow.matches("uses: jdx/packslip@").count(), 2);
+    assert!(workflow.contains("project: github.com/ymm-oss/fsl/fslc"));
+    assert!(workflow.contains("project: github.com/ymm-oss/fsl/fsl-lsp"));
+    assert!(workflow.contains("id-token: write"));
+    assert!(workflow.contains("attestations: write"));
+
+    // Every asset named in full. A `fslc-*` glob also matches every
+    // `fslc-lsp-*` asset, which is the trap the mise `matching` option sets.
+    for command in ["fslc", "fslc-lsp"] {
+        for target in ["macos-arm64", "linux-x64", "linux-arm64", "windows-x64.exe"] {
+            let asset = format!("release-assets/{command}-{target}\n");
+            assert!(workflow.contains(&asset), "packslip lost {asset}");
+        }
+    }
+    assert!(!workflow.contains("release-assets/fslc-*"));
+
+    // The skills come from the directory, never from a list beside it.
+    assert!(workflow.contains("skill/&=repo:skills/&"));
+    assert!(workflow.contains("resources: ${{ steps.skill-resources.outputs.value }}"));
+    assert!(workflow.contains("diff -u present-skills.txt declared-skills.txt"));
+
+    // The bundle is not in `release-assets/`, so signing before the asset
+    // check below would fail that check.
+    let assets_checked = workflow
+        .find("diff -u expected-assets.txt remote-assets.txt")
+        .expect("the remote asset check");
+    let signed = workflow
+        .find("uses: jdx/packslip@")
+        .expect("the packslip step");
+    let public = workflow
+        .find("--draft=false --latest")
+        .expect("the step that makes the release public");
+    assert!(
+        assets_checked < signed && signed < public,
+        "the packslip is signed after the asset check and before the release is public"
+    );
+
+    // The platform of an artifact is read off its file name, and that is what
+    // selects the binary a user is handed.
+    for claim in [
+        r#"{"name":"fslc-macos-arm64","os":"darwin","arch":"aarch64","libc":null,"format":"raw"}"#,
+        r#"{"name":"fslc-lsp-windows-x64.exe","os":"windows","arch":"x86_64","libc":null,"format":"raw"}"#,
+    ] {
+        assert!(workflow.contains(claim), "packslip lost the claim {claim}");
+    }
+
+    // mise reads the manifest. The README has to name the backend that does.
+    let readme = std::fs::read_to_string(root.join("README.md")).expect("README");
+    assert!(readme.contains("packslip:github.com/ymm-oss/fsl/fslc"));
+    assert!(readme.contains("mise skills sync"));
+}
+
 fn assert_installer_release_contract(root: &Path) {
     let installer = std::fs::read_to_string(root.join("install.sh")).expect("installer");
     assert!(!installer.contains("echo \"macos-x64\""));
@@ -57,6 +115,28 @@ fn assert_installer_release_contract(root: &Path) {
     assert!(!installer.contains("*\"/.venv/bin/$cmd_name\""));
     assert!(installer.contains("ln -s \"$SKILL_SRC\" \"$SKILL_DST\""));
     assert!(installer.contains("$SKILL_DST.pre-native-v3"));
+
+    // A symbolic link this installer did not create belongs to whatever put it
+    // there. `mise skills sync` links into its own versioned payload exactly as
+    // this installer does, and taking that link leaves the other tool pointing
+    // at nothing it knows about. A link whose target is gone is abandoned, so
+    // `[ -e ... ]` keeps it replaceable.
+    assert!(installer.contains("foreign_skill_link() {"));
+    assert!(installer.contains("which another tool placed."));
+    let guard = installer.find("foreign_skill_link() {").expect("the guard");
+    let preflight = installer
+        .find("if foreign_skill_link \"$destination\" \"$source\"; then")
+        .expect("the guard runs before any write");
+    let backup = installer
+        .find("SKILL_BACKUP=\"$SKILL_DST.pre-native-v3\"")
+        .expect("the backup path");
+    let placement = installer
+        .find("elif foreign_skill_link \"$SKILL_DST\" \"$SKILL_SRC\"; then")
+        .expect("the guard runs before the backup");
+    assert!(
+        guard < preflight && preflight < placement && placement < backup,
+        "a link another tool placed must be reached before the move aside"
+    );
     let stage_cli = installer
         .find("stage_release_asset \"fslc-$TARGET\"")
         .unwrap();
@@ -437,6 +517,7 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
         "uses: actions/download-artifact@v4",
         "uses: dtolnay/rust-toolchain@stable",
         "uses: softprops/action-gh-release@v2",
+        "uses: jdx/packslip@v1",
     ] {
         assert!(
             !workflow.contains(mutable),
@@ -444,6 +525,7 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
         );
     }
     assert!(workflow.contains("toolchain: 1.88.0"));
+    assert_packslip_release_contract(&workflow, &root);
     assert_vendored_z3(&root, &workflow);
     assert_installer_release_contract(&root);
 
