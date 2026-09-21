@@ -260,13 +260,29 @@ truth for the pinned-head and tree-identity requirements.
    section.
 2. Confirm `fslc`, `fslc-lsp`, and their checksum files exist for exactly the
    four supported suffixes. Confirm no `macos-x64` asset exists. Also confirm
-   the Agent Skill bundle/checksum pair, VS Code extension, and both Kernel
-   bundle/checksum pairs are present.
+   the Agent Skill bundle/checksum pair, VS Code extension, both Kernel
+   bundle/checksum pairs, and both packslip bundles
+   (`packslip.fslc.sigstore.json` and `packslip.fsl-lsp.sigstore.json`) are
+   present.
 3. Download the current machine's supported binary and checksum, verify the
    checksum, and run `fslc --version`. It must print `fslc X.Y.Z`.
-4. Report the promotion pull request, production SHA, tag SHA, release URL,
-   workflow runs, non-empty notes, asset inventory, checksum, and version smoke
-   test.
+4. Install the release through mise and confirm the skills arrive with it. The
+   packslip is what mise reads, and nothing before this point consumes one.
+
+   ```bash
+   cd "$(mktemp -d)"
+   mise use "packslip:github.com/ymm-oss/fsl/fslc@X.Y.Z"
+   mise skills ls
+   ```
+
+   Run it in a throwaway directory. `mise use` writes a `mise.toml` where it
+   runs, and this step is a check rather than an install.
+
+   `skills ls` must name every directory under `skills/`. A packslip the
+   workflow signed but mise rejects is a release defect, not a local one.
+5. Report the promotion pull request, production SHA, tag SHA, release URL,
+   workflow runs, non-empty notes, asset inventory, checksum, version smoke
+   test, and the skills mise listed.
 
 ## Failure handling
 
