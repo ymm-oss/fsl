@@ -211,6 +211,19 @@ payload_skill_names() {
   done | sort
 }
 
+# A symbolic link this installer did not create belongs to whatever put it
+# there. Another tool that installs skills, such as `mise skills sync`, links
+# into its own versioned payload exactly as this installer does, and taking
+# that link would leave the other tool pointing at nothing it knows about.
+# A link whose target no longer exists is abandoned, so it is replaced.
+foreign_skill_link() {
+  local destination="$1"
+  local source="$2"
+  [ -L "$destination" ] || return 1
+  [ "$(readlink "$destination")" != "$source" ] || return 1
+  [ -e "$destination" ]
+}
+
 preflight_skill_link() {
   local skill_name="$1"
   local source="$CURRENT_LINK/skills/$skill_name"
@@ -219,6 +232,9 @@ preflight_skill_link() {
   [ -d "$RELEASE_DIR/skills/$skill_name" ] \
     || fail "$RELEASE_DIR is missing the $skill_name skill."
   if [ -L "$destination" ] && [ "$(readlink "$destination")" = "$source" ]; then
+    return
+  fi
+  if foreign_skill_link "$destination" "$source"; then
     return
   fi
   if [ -e "$destination" ] || [ -L "$destination" ]; then
@@ -295,6 +311,8 @@ if [ "$INSTALL_SKILL" -eq 1 ]; then
       || fail "$RELEASE_DIR is missing the $SKILL_NAME skill."
     if [ -L "$SKILL_DST" ] && [ "$(readlink "$SKILL_DST")" = "$SKILL_SRC" ]; then
       echo "The Claude Code skill link is current: $SKILL_DST"
+    elif foreign_skill_link "$SKILL_DST" "$SKILL_SRC"; then
+      echo "Skipped $SKILL_DST: it links to $(readlink "$SKILL_DST"), which another tool placed." >&2
     elif [ -e "$SKILL_DST" ] || [ -L "$SKILL_DST" ]; then
       SKILL_BACKUP="$SKILL_DST.pre-native-v3"
       [ ! -e "$SKILL_BACKUP" ] && [ ! -L "$SKILL_BACKUP" ] \
