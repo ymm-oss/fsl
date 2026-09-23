@@ -316,6 +316,9 @@ check_wasm() {
   npm --prefix rust/spikes/z3js-worker run probe:browser
   cargo build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --locked
   npm --prefix rust/fsl-wasm ci
+  # The exit-code classifier below is only meaningful while 124/65/1 stay
+  # distinct; pin it before the browser run can report through it.
+  npm --prefix rust/fsl-wasm run test:outcome
   local status
   if npm --prefix rust/fsl-wasm run test:browser; then
     status=0

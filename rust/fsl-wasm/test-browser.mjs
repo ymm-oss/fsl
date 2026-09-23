@@ -12,26 +12,13 @@ import { fileURLToPath } from "node:url";
 import "./build.mjs";
 import { assertNormalizerContract, differences, normalizeEnvelope } from "./parity.mjs";
 import { workerMessageError } from "./web/worker-protocol.mjs";
-
-const probeTimeoutExitStatus = 124;
-const parityViolationExitStatus = 65;
-
-class ProbeTimeoutError extends Error {
-  constructor(mode, diagnostic) {
-    super(diagnostic);
-    this.mode = mode;
-  }
-}
-
-class ParityViolationError extends Error {
-  constructor(report, reportPath) {
-    super(`${report}\nfull report: ${reportPath}`);
-  }
-}
+import { classifyOutcome, ParityViolationError, ProbeTimeoutError } from "./browser-outcome.mjs";
 
 async function main() {
   assertNormalizerContract();
 
+// Keep the body unindented: rust/fslc/tests/assurance/dialects.rs:31-41
+// uses source-substring anchors for Worker parity and exclusion ownership.
 const protocolError = workerMessageError({
   transportError: { kind: "initialization", message: "probe" },
 });
@@ -295,6 +282,10 @@ const server = createServer((request, response) => {
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const { port } = server.address();
+let profile;
+let child;
+let childClosed;
+try {
 
 // Playwright installs each downloaded browser under its own version-numbered
 // directory, and the platform subdirectory inside it is itself
@@ -342,14 +333,14 @@ const chrome = [
 ].filter(Boolean).find(existsSync);
 if (!chrome) throw new Error("Chrome not found; set CHROME_BIN");
 
-const profile = await mkdtemp(join(tmpdir(), "fsl-wasm-chrome-"));
-const child = spawn(chrome, [
+profile = await mkdtemp(join(tmpdir(), "fsl-wasm-chrome-"));
+child = spawn(chrome, [
   "--headless=new", "--disable-gpu", "--disable-background-networking", "--no-sandbox",
   "--password-store=basic", "--use-mock-keychain",
   "--remote-debugging-port=0", `--user-data-dir=${profile}`,
   `http://127.0.0.1:${port}/`,
 ], { stdio: ["ignore", "pipe", "pipe"] });
-const childClosed = new Promise((resolve) => child.once("close", resolve));
+childClosed = new Promise((resolve) => child.once("close", resolve));
 let stderr = "";
 child.stderr.setEncoding("utf8");
 child.stderr.on("data", (chunk) => { stderr += chunk; });
@@ -425,7 +416,7 @@ function rejectPending(error) {
   }
 }
 let details;
-try {
+{
   const debugPort = await devtoolsPort();
   const targets = await fetch(`http://127.0.0.1:${debugPort}/json/list`).then((response) => response.json());
   const page = targets.find((target) => target.type === "page");
@@ -462,13 +453,6 @@ try {
       `browser probe timed out after 360 attempts; last observation: ${JSON.stringify(details)}`,
     );
   }
-} finally {
-  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-  await childClosed;
-  await new Promise((resolve, reject) => {
-    server.close((error) => error ? reject(error) : resolve());
-  });
-  await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
 if (details.ok !== "true") {
   throw new Error(`FSL WASM Worker smoke failed: ${details.text}\n${stderr}`);
@@ -483,10 +467,25 @@ const mismatches = [];
 for (let index = 0; index < parityCases.length; index += 1) {
   const nativeEnvelope = native[index];
   const wasmEnvelope = browser.parityEnvelopes[index];
-  const envelopeDifferences = differences(
-    normalizeEnvelope(nativeEnvelope),
-    normalizeEnvelope(wasmEnvelope),
-  );
+  const normalizedNative = normalizeEnvelope(nativeEnvelope);
+  let normalizedWasm;
+  try {
+    normalizedWasm = normalizeEnvelope(wasmEnvelope);
+  } catch (error) {
+    mismatches.push({
+      schema: "fsl-native-wasm-parity-failure.v1",
+      case: {
+        path: parityCases[index].path,
+        command: parityCases[index].cmd,
+        options: parityCases[index].options,
+      },
+      differences: [{ path: "$", reason: `invalid WASM envelope: ${error.message}` }],
+      native: nativeEnvelope,
+      wasm: wasmEnvelope,
+    });
+    continue;
+  }
+  const envelopeDifferences = differences(normalizedNative, normalizedWasm);
   if (envelopeDifferences.length > 0) {
     mismatches.push({
       schema: "fsl-native-wasm-parity-failure.v1",
@@ -519,9 +518,10 @@ for (let index = 0; index < parityCases.length; index += 1) {
 const staleExclusions = [];
 function assertAgentWorkerProbeFailsClosed(probe, envelope) {
   if (probe.documentType === "agent" && envelope?.result !== "error") {
-    throw new Error(
+    throw new ParityViolationError(
       `${probe.path}: the Worker now returns ${JSON.stringify(envelope?.result)} for the agent `
       + "document, so the agent fail-closed assurance cell and unsupportedDocuments entry are stale.",
+      "",
     );
   }
 }
@@ -539,7 +539,11 @@ for (let index = 0; index < exclusionProbes.length; index += 1) {
   }
 }
 if (staleExclusions.length > 0) {
-  throw new Error(`stale parity-corpus exclusions:\n${staleExclusions.join("\n")}`);
+  mismatches.push({
+    schema: "fsl-native-wasm-parity-failure.v1",
+    case: { path: "unsupportedDocuments", command: "check", options: {} },
+    differences: staleExclusions.map((reason) => ({ path: "$.exclusion", reason })),
+  });
 }
 if (mismatches.length > 0) {
   const report = JSON.stringify({
@@ -558,24 +562,25 @@ console.log(JSON.stringify({
   parityCases: parityCases.length,
   exclusionProbes: exclusionProbes.length,
 }, null, 2));
+} finally {
+  if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  if (childClosed) await childClosed;
+  if (server.listening) {
+    await new Promise((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+  }
+  if (profile) await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
 }
 
 try {
   await main();
 } catch (error) {
-  let outcome = "harness_failure";
-  let status = 1;
-  const diagnostic = { schema: "fsl-wasm-browser-outcome.v1", outcome };
-  if (error instanceof ProbeTimeoutError) {
-    outcome = "probe_timeout";
-    status = probeTimeoutExitStatus;
-    diagnostic.outcome = outcome;
-    diagnostic.mode = error.mode;
-  } else if (error instanceof ParityViolationError) {
-    outcome = "parity_violation";
-    status = parityViolationExitStatus;
-    diagnostic.outcome = outcome;
-  }
+  const classified = classifyOutcome(error);
+  const status = classified.status;
+  const diagnostic = { schema: "fsl-wasm-browser-outcome.v1", ...classified };
+  delete diagnostic.status;
   console.error(JSON.stringify(diagnostic));
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = status;
