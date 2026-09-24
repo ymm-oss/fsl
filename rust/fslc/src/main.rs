@@ -3655,13 +3655,12 @@ fn run_sweep(
                 });
                 match sweep_cell_class(&entry["verification"]) {
                     SweepCellClass::Success => has_success = true,
-                    SweepCellClass::Inconclusive => {}
                     // The helper delegates every non-exempt result to the
                     // shared classifier, preserving #594's fail-closed rule.
                     SweepCellClass::Failure if minimal.is_none() => {
                         minimal = Some(entry.clone());
                     }
-                    SweepCellClass::Failure => {}
+                    SweepCellClass::Inconclusive | SweepCellClass::Failure => {}
                 }
                 results.push(entry);
             }

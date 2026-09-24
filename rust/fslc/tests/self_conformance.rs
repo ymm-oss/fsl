@@ -1284,13 +1284,12 @@ fn chain_layer_fold_class(layer: &Value) -> Result<FoldClass, String> {
             FoldClass::Success => 0,
             FoldClass::Failure if result == "error" && detail["kind"] == "internal" => 3,
             FoldClass::Failure if result == "error" => 2,
-            FoldClass::Failure => 1,
             // Chain layers never call `sweep_cell_class`; production
             // `chain_layer_passes` classifies a layer's `reachable_failed`
             // detail as a failure regardless of `unreached` classification,
-            // so this adapter mirrors that instead of adopting sweep's
-            // insufficient-depth carve-out here.
-            FoldClass::Inconclusive => 1,
+            // so this adapter treats `Inconclusive` like `Failure` instead of
+            // adopting sweep's insufficient-depth carve-out here.
+            FoldClass::Failure | FoldClass::Inconclusive => 1,
             FoldClass::Skipped => {
                 return Err(format!("non-skipped layer has skipped detail: {layer}"));
             }
@@ -1320,12 +1319,13 @@ fn chain_fold_trace(items: &[Value], top: &RawCliOutput) -> Result<Vec<Value>, S
         .map(|item| {
             Ok(match chain_layer_fold_class(item)? {
                 FoldClass::Success => json!({"action":"fold_sub_success"}),
-                FoldClass::Failure => json!({"action":"fold_sub_failure"}),
-                FoldClass::Skipped => json!({"action":"fold_skipped"}),
                 // `chain_layer_fold_class` itself never returns
-                // `Inconclusive` (see its own match above); this arm exists
-                // only for exhaustiveness.
-                FoldClass::Inconclusive => json!({"action":"fold_sub_failure"}),
+                // `Inconclusive` (see its own match above); it is listed only
+                // for exhaustiveness.
+                FoldClass::Failure | FoldClass::Inconclusive => {
+                    json!({"action":"fold_sub_failure"})
+                }
+                FoldClass::Skipped => json!({"action":"fold_skipped"}),
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
