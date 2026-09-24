@@ -277,13 +277,12 @@ jobs:
       - name: Package the installable Agent Skills
         run: |
           mkdir -p dist
-          tar -czf dist/fsl-skills.tar.gz \
-            skills/fsl \
-            skills/fsl-business \
-            skills/fsl-requirements \
-            skills/fsl-design \
-            skills/fsl-design-review \
-            skills/fsl-delivery
+          # Every directory under skills/ is a skill. skills/README.md is not one.
+          find skills -mindepth 1 -maxdepth 1 -type d -print0 \
+            | sort -z \
+            | tar -czf dist/fsl-skills.tar.gz --null --files-from -
+          tar -tzf dist/fsl-skills.tar.gz | grep -q '^skills/fsl/SKILL.md$' \
+            || { echo "The skill bundle is missing skills/fsl." >&2; exit 1; }
           ( cd dist && shasum -a 256 fsl-skills.tar.gz > fsl-skills.tar.gz.sha256 )
 
       - name: Upload skill bundle
