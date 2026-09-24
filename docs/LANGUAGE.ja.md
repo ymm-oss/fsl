@@ -939,15 +939,23 @@ Public Kernel v2 はオプトインで、
 
 `sweep` は `verify` のオプトインのラッパーで、通常の検証を変えません。
 `--instances NAME=lo..hi`、`--values NAME=lo..hi`、`--depth lo..hi` の上書きの
-決定的なグリッドを評価し、各基盤の検証結果を `sweep.results` に記録し、最初に失敗
-したスコープを `sweep.minimal_counterexample` として返します。`--values` に
+決定的なグリッドを評価し、各基盤の検証結果を `sweep.results` に記録し、最初の真の
+失敗スコープを `sweep.minimal_counterexample` として返します。`--values` に
 ついては、sweep は下限を固定して上限を拡大します(`lo..lo`, `lo..lo+1`, ...,
 `lo..hi`)。sweep の合格は「このグリッドに反例がない」ことを意味し、非有界の証明
 ではありません。グリッド中のいずれかのスコープが spec `error`(parse / type /
 semantics / io / vacuous / …)を返した場合、それは反例ではありません。`sweep` は
 その基盤のエラー envelope をそのまま返します(`result`、`kind`、`message`、
-`loc`、exit code は変更しません)。`sweep_passed`/`sweep_failed` に畳み込むこと
-はありません。
+`loc`、exit code は変更しません)。`sweep_passed`、`sweep_inconclusive`、
+`sweep_failed` のいずれにも畳み込みません。
+
+`reachable_failed` のセルが不確定なのは、空でない `unreached` 配列の全要素が
+`classification:"insufficient_depth"` のときだけです。このセルは
+`sweep.results` に残りますが反例ではありません。真の失敗がなく、決定済みの成功が
+1件以上あるグリッドは `sweep_passed` / exit 0 になります。全セルが不確定なら
+`sweep_inconclusive` / exit 1 となり、`minimal_counterexample:null` です。
+classification の欠落・未知・混在（`over_constrained` を含む）は真の失敗として
+`sweep_failed` / exit 1 になります。
 
 `diff` は、ソーステキストではなく状態機械の意味を比較します。有界の refinement を
 両方向に実行します: NEW→OLD の失敗は `behavior_added`、OLD→NEW の失敗は
@@ -1001,7 +1009,7 @@ mutated / explained / analyzed / semantic_diff(明示的なゲートが失敗し
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings、
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
-refinement_failed / impl_violated / sweep_failed / observed_mismatch、
+refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch、
 `2` = spec エラー(parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
 `imported`/`imported_with_warnings` は `fslc db import` の結果です。`impl_violated` は
@@ -1009,7 +1017,7 @@ inline `implements` が top-level `result` へ伝播するため列挙してい�
 生成する場所で起きるので、`check` / `verify` に閉じません。seam が失敗する spec では、`mutate` は
 baseline の verdict をそのまま返し(baseline が `verified` でなくなるため変異を1つも生成しません)、
 `ledger` と `fslc html` は畳み込まれた検証封筒から同じ exit を引き継ぎ、`sweep` は
-`sweep_failed` を返します。同じ `2` の
+真の失敗なら `sweep_failed`、全セルが深さ不足なら `sweep_inconclusive` を返します。同じ `2` の
 対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な `depth`/`refine_depth` — `docs/DESIGN-layers.md` §7)
 と、`ledger --impl-log` の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -1032,6 +1040,9 @@ baseline の verdict をそのまま返し(baseline が `verified` でなくな�
 | `proved` | **invariant がすべての実行で成立する**(深さ非有界)。`completeness:"unbounded"`。`--engine induction` から、または探索が閉じたとき(`closure:true`)の `--engine explicit` から | 完了 |
 | `violated` | 反例が存在する。`violation_kind` と最短トレースつき | トレースを読んで spec を直す |
 | `reachable_failed` | reachable が深さ K 以内に到達されなかった | 各 `unreached[].classification` を読む: `insufficient_depth` なら `--depth` を上げ、`over_constrained` ならブロックしている制約を直す |
+| `sweep_passed` | sweep グリッドに真の失敗がなく、決定済みの成功が1件以上ある。深さ不足の観測は `sweep.results` に残る | 記録されたグリッドを確認する。これは非有界の証明ではない |
+| `sweep_inconclusive` | すべての sweep セルが `insufficient_depth` だけを持つ `reachable_failed` で、`minimal_counterexample` は null | `--depth` を上げるか sweep 境界を調整して再実行する |
+| `sweep_failed` | sweep セルに反例、またはフェイルクローズドな reachable classification がある | `sweep.minimal_counterexample` を調べて報告された問題を直す |
 | `unknown_cti` | invariant は違反されないが帰納的でない | **CTI を読んで補助 invariant を追加する**(§8)か、`--engine explicit` を試す(closure はレンマなしで証明する) |
 | `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または inline `implements Abs from "file" { }` seam の対応探索が固定の内部状態予算を超えた(`check`/`verify`、CLI フラグ無し) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。inline `implements` seam の場合: domain を縮めるか、結合検査ではなく `fslc refine`/`fslc verify` で層を分けて検証する |
 | `error` | parse / type / semantics / io | `loc` / `expected` / `hint` に従って直す |

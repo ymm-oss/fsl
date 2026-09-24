@@ -120,3 +120,99 @@ fn sweep_still_passes_clean_specs_and_fails_genuine_counterexamples() {
     assert_eq!(failed["result"], "sweep_failed");
     assert!(!failed["sweep"]["minimal_counterexample"].is_null());
 }
+
+#[test]
+fn sweep_cart_v1_passes_after_insufficient_depth_cells() {
+    let (swept, status) = run_cli(&["sweep", "specs/cart_v1.fsl"]);
+    assert_eq!(status, 0, "swept: {swept:#}");
+    assert_eq!(swept["result"], "sweep_passed");
+    assert!(swept["sweep"]["minimal_counterexample"].is_null());
+}
+
+#[test]
+fn sweep_all_insufficient_depth_cells_are_inconclusive() {
+    let (swept, status) = run_cli(&["sweep", "specs/cart_v1.fsl", "--depth", "0..0"]);
+    assert_eq!(status, 1, "swept: {swept:#}");
+    assert_eq!(swept["result"], "sweep_inconclusive");
+    assert!(swept["sweep"]["minimal_counterexample"].is_null());
+    assert!(swept["sweep"]["results"].is_array());
+    assert!(swept["sweep"]["ranges"].is_object());
+}
+
+#[test]
+fn sweep_mixed_reachability_classifications_remain_failed() {
+    let path = fixture("issue_634_reachable_classification.fsl");
+    let (swept, status) = run_cli(&["sweep", &path, "--depth", "0..0"]);
+    assert_eq!(status, 1, "swept: {swept:#}");
+    assert_eq!(swept["result"], "sweep_failed");
+}
+
+#[test]
+fn sweep_cart_controls_keep_genuine_failure_and_clean_success() {
+    let (buggy, buggy_status) = run_cli(&["sweep", "specs/cart_buggy.fsl"]);
+    assert_eq!(buggy_status, 1, "buggy: {buggy:#}");
+    assert_eq!(buggy["result"], "sweep_failed");
+    assert!(!buggy["sweep"]["minimal_counterexample"].is_null());
+
+    let (implemented, implemented_status) = run_cli(&["sweep", "specs/cart_impl.fsl"]);
+    assert_eq!(implemented_status, 0, "implemented: {implemented:#}");
+    assert_eq!(implemented["result"], "sweep_passed");
+    assert!(implemented["sweep"]["minimal_counterexample"].is_null());
+}
+
+/// Regression for #1080's minimal-selection fix: a grid whose early cells are
+/// inconclusive (`reachable_failed` with an `unreached` array containing only
+/// `classification:"insufficient_depth"`) and whose later cells contain a
+/// genuine bug (`ReachTwo` is reachable at depth 2, and `BoundedBelowFour` is
+/// only violated once `x` reaches 4 at depth 4) must select the true-failure
+/// cell as `minimal_counterexample`, not the earlier inconclusive one. Before
+/// af7046cc, `sweep` chose the first cell whose `verification` was not
+/// success-classified, which would have picked the depth-0 inconclusive cell
+/// instead.
+///
+/// Per-cell classification uses `verification` (the full envelope), not
+/// `summary`: `summary` deliberately omits `unreached`
+/// (`main.rs` `run_sweep`'s summary key list), so it cannot distinguish an
+/// inconclusive `reachable_failed` cell from a true one.
+#[test]
+fn sweep_skips_inconclusive_cell_when_selecting_true_failure_scope() {
+    let (swept, status) = run_cli(&[
+        "sweep",
+        &fixture("sweep_inconclusive_then_failure.fsl"),
+        "--depth",
+        "0..4",
+    ]);
+    assert_eq!(status, 1, "swept: {swept:#}");
+    assert_eq!(swept["result"], "sweep_failed");
+    let results = swept["sweep"]["results"].as_array().expect("sweep results");
+    let first_inconclusive = results
+        .iter()
+        .position(|cell| {
+            cell["verification"]["result"] == "reachable_failed"
+                && cell["verification"]["unreached"]
+                    .as_array()
+                    .is_some_and(|unreached| {
+                        !unreached.is_empty()
+                            && unreached
+                                .iter()
+                                .all(|item| item["classification"] == "insufficient_depth")
+                    })
+        })
+        .expect("grid has an inconclusive cell");
+    let minimal = swept["sweep"]["minimal_counterexample"]
+        .as_object()
+        .expect("true failure minimal counterexample");
+    assert_eq!(
+        minimal["summary"]["result"], "violated",
+        "minimal must be the genuine invariant violation, not an inconclusive cell: {minimal:#?}"
+    );
+    let scope = &minimal["scope"];
+    let selected = results
+        .iter()
+        .position(|cell| cell["scope"] == *scope)
+        .expect("minimal's scope matches a grid cell");
+    assert!(
+        selected > first_inconclusive,
+        "minimal (index {selected}) must skip the earlier inconclusive cell (index {first_inconclusive}): {swept:#}"
+    );
+}

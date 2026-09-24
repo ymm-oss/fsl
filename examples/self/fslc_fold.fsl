@@ -4,11 +4,26 @@
 //
 // Models the aggregation shared by rust/fslc/src/main.rs run_sweep,
 // chain_layer_passes, and run_analyze_batch: per-item success may
-// accumulate, skipped items are neutral, and one observed failure permanently
-// disables a successful final verdict.
+// accumulate, skipped items are neutral, one true failure permanently
+// disables a successful final verdict, and finalizing fail no longer needs a
+// true failure -- folding zero legitimate successes (all items skipped
+// and/or inconclusive) is sufficient. This mirrors `sweep_inconclusive`,
+// which has no true failure but still exits non-zero. Symmetrically,
+// finalizing pass needs a legitimate success once any item was inconclusive:
+// an all-skipped fold may still pass (an empty/all-skipped chain or analyze
+// batch legitimately does), but an all-inconclusive fold may not, matching
+// `sweep_inconclusive` rather than `sweep_passed`.
 //
 // probe: removing `requires not any_failure_seen` from finalize_pass yields
 //        violated/FailureIsSticky after fold_sub_failure; finalize_pass.
+// probe: narrowing finalize_fail's `requires any_failure_seen or not
+//        success_seen` back to `requires any_failure_seen` yields
+//        violated/FinalizeAgreesWithFolded at depth 1 (finalize_fail with no
+//        prior fold at all).
+// probe: dropping finalize_pass's `requires success_seen or not
+//        inconclusive_seen` yields violated/FinalizeAgreesWithFolded after
+//        fold_sub_inconclusive; finalize_pass (an all-inconclusive fold
+//        wrongly finalizing pass).
 spec FslcFold {
   enum FoldStatus { Folding, FinalizedPass, FinalizedFail }
 
@@ -16,7 +31,9 @@ spec FslcFold {
     status: FoldStatus,
     any_failure_seen: Bool, // ghost: at least one folded item was failure-class
     success_seen: Bool,     // ghost: a legitimate non-skipped success was folded
-    skipped_epoch: Bool     // ghost: toggled only by fold_skipped
+    skipped_epoch: Bool,    // ghost: toggled only by fold_skipped
+    inconclusive_epoch: Bool, // ghost: toggled only by fold_sub_inconclusive
+    inconclusive_seen: Bool // ghost: at least one folded item was inconclusive
   }
 
   init {
@@ -24,6 +41,8 @@ spec FslcFold {
     any_failure_seen = false
     success_seen = false
     skipped_epoch = false
+    inconclusive_epoch = false
+    inconclusive_seen = false
   }
 
   action fold_sub_success() {
@@ -41,15 +60,22 @@ spec FslcFold {
     skipped_epoch = not skipped_epoch
   }
 
+  action fold_sub_inconclusive() {
+    requires status == Folding
+    inconclusive_epoch = not inconclusive_epoch
+    inconclusive_seen = true
+  }
+
   action finalize_pass() {
     requires status == Folding
     requires not any_failure_seen
+    requires success_seen or not inconclusive_seen
     status = FinalizedPass
   }
 
   action finalize_fail() {
     requires status == Folding
-    requires any_failure_seen
+    requires any_failure_seen or not success_seen
     status = FinalizedFail
   }
 
@@ -62,12 +88,17 @@ spec FslcFold {
   }
 
   invariant FinalizeAgreesWithFolded {
-    (status == FinalizedPass => not any_failure_seen)
-      and (status == FinalizedFail => any_failure_seen)
+    (status == FinalizedPass => (not any_failure_seen and (success_seen or not inconclusive_seen)))
+      and (status == FinalizedFail => (any_failure_seen or not success_seen))
   }
 
   trans SkippedIsNeitherPassNorFail {
     skipped_epoch != old(skipped_epoch) =>
+      (status == old(status) and any_failure_seen == old(any_failure_seen))
+  }
+
+  trans InconclusiveIsNeitherPassNorFail {
+    inconclusive_epoch != old(inconclusive_epoch) =>
       (status == old(status) and any_failure_seen == old(any_failure_seen))
   }
 
@@ -81,6 +112,14 @@ spec FslcFold {
 
   reachable ReachSkippedNeutralPath {
     status == Folding and skipped_epoch and not any_failure_seen
+  }
+
+  reachable ReachInconclusiveNeutralPath {
+    status == Folding and inconclusive_epoch and not any_failure_seen
+  }
+
+  reachable ReachSuccessAfterInconclusivePath {
+    status == FinalizedPass and success_seen and inconclusive_seen
   }
 
   terminal { status == FinalizedPass or status == FinalizedFail }

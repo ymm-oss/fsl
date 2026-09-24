@@ -186,7 +186,7 @@ const CASES: &[Case] = &[
         depth: 8,
         expected_result: "refines",
         expected_kind: None,
-        declared_by: "docs/LANGUAGE.md:1378-1381 (command line, then \
+        declared_by: "docs/LANGUAGE.md:1546-1549 (command line, then \
                       `Success: result: \"refines\" (exit 0)`)",
     },
     Case {
@@ -781,7 +781,7 @@ fn run_refine(implementation: &str, abstraction: &str, mapping: &str, depth: u32
 }
 
 /// The exit code the CLI contract binds to a `refine` result
-/// (`docs/LANGUAGE.md:1381` and `:1394`): `refines` exits 0, `refinement_failed`
+/// (`docs/LANGUAGE.md:1549` and `:1562`): `refines` exits 0, `refinement_failed`
 /// exits 1, a static `error` exits 2, and `violated` — the impl-self-
 /// violation verdict `refine` reaches before it consults the abstraction
 /// (#466) — is failure-class, so it exits 1.

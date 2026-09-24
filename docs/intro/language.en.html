@@ -1042,14 +1042,23 @@ error. Candidate text/order is part of the verification cache key.</p>
 <p><code>sweep</code> is an opt-in wrapper around <code>verify</code>; it does not change normal
 verification. It evaluates a deterministic grid of <code>--instances NAME=lo..hi</code>,
 <code>--values NAME=lo..hi</code>, and <code>--depth lo..hi</code> overrides, records each underlying
-verification result under <code>sweep.results</code>, and returns the first failing scope
-under <code>sweep.minimal_counterexample</code>. For <code>--values</code>, the sweep fixes the lower
-bound and expands the upper bound (<code>lo..lo</code>, <code>lo..lo+1</code>, ..., <code>lo..hi</code>). A
-passing sweep means "no counterexample in this grid", not an unbounded proof.
+verification result under <code>sweep.results</code>, and returns the first true failing
+scope under <code>sweep.minimal_counterexample</code>. For <code>--values</code>, the sweep fixes the
+lower bound and expands the upper bound (<code>lo..lo</code>, <code>lo..lo+1</code>, ..., <code>lo..hi</code>).
+A passing sweep means "no counterexample in this grid", not an unbounded proof.
 A spec <code>error</code> (parse / type / semantics / io / vacuous / …) from any scope in
 the grid is not a counterexample: <code>sweep</code> returns that underlying error
 envelope verbatim (<code>result</code>, <code>kind</code>, <code>message</code>, <code>loc</code>, exit code unchanged)
-instead of folding it into <code>sweep_passed</code>/<code>sweep_failed</code>.</p>
+instead of folding it into <code>sweep_passed</code>, <code>sweep_inconclusive</code>, or
+<code>sweep_failed</code>.</p>
+<p>A <code>reachable_failed</code> cell is inconclusive only when its nonempty <code>unreached</code>
+array contains only <code>classification:"insufficient_depth"</code>. Such a cell remains
+in <code>sweep.results</code> but is not a counterexample: a grid with at least one
+determinate success and no true failure returns <code>sweep_passed</code>/exit 0; a grid
+containing only inconclusive cells returns <code>sweep_inconclusive</code>/exit 1 with
+<code>minimal_counterexample:null</code>. Missing, unknown, or mixed classifications,
+including <code>over_constrained</code>, are true failures and return <code>sweep_failed</code>/exit
+1.</p>
 <p><code>diff</code> compares state-machine meaning instead of source text. It runs bounded
 refinement in both directions: NEW→OLD failure is <code>behavior_added</code>, while
 OLD→NEW failure is <code>behavior_removed</code>. It separately checks implication between
@@ -1100,7 +1109,7 @@ mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) 
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 <code>1</code> = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
-refinement_failed / impl_violated / sweep_failed / observed_mismatch,
+refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch,
 <code>2</code> = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 <code>--vacuity error</code>), <code>3</code> = internal error. <code>observed_*</code> is <code>fslc db observe</code>'s
 result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc db import</code>'s. <code>impl_violated</code> is listed
@@ -1108,7 +1117,8 @@ because inline <code>implements</code> propagates that seam verdict to the top-l
 happens where the verification envelope is produced, so it is not confined to <code>check</code> and
 <code>verify</code>: on a spec whose seam fails, <code>mutate</code> re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer <code>verified</code>), <code>ledger</code> and <code>fslc html</code> inherit the
-same exit from the folded verification envelope, and <code>sweep</code> reports <code>sweep_failed</code>. The same
+same exit from the folded verification envelope, and <code>sweep</code> reports <code>sweep_failed</code> for a true
+failure or <code>sweep_inconclusive</code> when every cell is depth-limited. The same
 <code>2</code> mapping is fail-closed for <code>chain</code>'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable <code>depth</code>/<code>refine_depth</code> —
 <code>docs/DESIGN-layers.md</code> §7) and for <code>ledger --impl-log</code>'s replay input (a
@@ -1150,6 +1160,21 @@ records why, and why <code>fslc document check</code>'s <code>document_drifted</
 <td><code>reachable_failed</code></td>
 <td>reachable not reached within depth K</td>
 <td>Read each <code>unreached[].classification</code>: raise <code>--depth</code> for <code>insufficient_depth</code>, or fix the blocking constraint for <code>over_constrained</code></td>
+</tr>
+<tr>
+<td><code>sweep_passed</code></td>
+<td>A sweep grid has no true failure and at least one determinate success; depth-limited observations remain in <code>sweep.results</code></td>
+<td>Inspect the recorded grid; this is not an unbounded proof</td>
+</tr>
+<tr>
+<td><code>sweep_inconclusive</code></td>
+<td>Every sweep cell is <code>reachable_failed</code> with only <code>insufficient_depth</code> classifications; <code>minimal_counterexample</code> is null</td>
+<td>Raise <code>--depth</code> or adjust the sweep bounds, then rerun</td>
+</tr>
+<tr>
+<td><code>sweep_failed</code></td>
+<td>A sweep cell has a counterexample or a fail-closed reachability classification</td>
+<td>Inspect <code>sweep.minimal_counterexample</code> and fix the reported problem</td>
 </tr>
 <tr>
 <td><code>unknown_cti</code></td>
