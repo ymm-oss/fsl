@@ -576,6 +576,34 @@ const CASES: &[Case] = &[
                       requirements' externally visible state without dropping progress) and \
                       README.md:84-87",
     },
+    Case {
+        implementation: "examples/claims/L/claims_L_requirements.fsl",
+        abstraction: "examples/claims/L/claims_L_business.fsl",
+        mapping: "examples/claims/L/claims_L_requirements_refines_business.fsl",
+        declaration: Some(Declaration {
+            path: "examples/claims/L/README.md",
+            anchor: "claims_L_requirements_refines_business.fsl",
+        }),
+        depth: 6,
+        expected_result: "refines",
+        expected_kind: None,
+        declared_by: "examples/claims/L/README.md:49 (`claims_L_requirements_refines_business.fsl` \
+                      — expected result: `refines`)",
+    },
+    Case {
+        implementation: "examples/claims/L/claims_L_design.fsl",
+        abstraction: "examples/claims/L/claims_L_requirements.fsl",
+        mapping: "examples/claims/L/claims_L_design_refines_requirements.fsl",
+        declaration: Some(Declaration {
+            path: "examples/claims/L/README.md",
+            anchor: "claims_L_design_refines_requirements.fsl",
+        }),
+        depth: 6,
+        expected_result: "refines",
+        expected_kind: None,
+        declared_by: "examples/claims/L/README.md:57 (`claims_L_design_refines_requirements.fsl` \
+                      — expected result: `refines`)",
+    },
 ];
 
 /// The measured fact that keeps an exclusion honest. Re-checked by

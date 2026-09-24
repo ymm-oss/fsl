@@ -1,0 +1,52 @@
+// expected-command: check
+// expected-result: error
+// expected-kind: forbidden
+// SPDX-License-Identifier: Apache-2.0
+
+// Negative control: payment guard weakened to allow Intake, so pay-before-assessment is accepted.
+requirements InsuranceClaimPayBeforeAssessment {
+  type ClaimId = 0..0
+  type LedgerCount = 0..1
+
+  enum CSt { Intake, Assessment, Approved, Paid, Posted }
+
+  struct Claim { st: CSt }
+
+  state {
+    claim: Map<ClaimId, Claim>,
+    paid: LedgerCount,
+  }
+
+  init {
+    forall c: ClaimId { claim[c] = Claim { st: Intake } }
+    paid = 0
+  }
+
+  requirement REQ-1 "Reception and assessment" {
+    fair action receive(c: ClaimId) {
+      requires claim[c].st == Intake
+      claim[c].st = Assessment
+    }
+    fair action assess(c: ClaimId) {
+      requires claim[c].st == Assessment
+      claim[c].st = Approved
+    }
+  }
+
+  requirement REQ-2 "Payment (weakened guard)" {
+    fair action pay(c: ClaimId) {
+      requires claim[c].st == Approved or claim[c].st == Intake
+      requires paid < 1
+      claim[c].st = Paid
+      paid = paid + 1
+    }
+    invariant PaidLedger {
+      paid == count(c: ClaimId where claim[c].st == Paid)
+    }
+  }
+
+  forbidden FB-1 "Payment before assessment is rejected" {
+    pay(0)
+    expect rejected
+  }
+}

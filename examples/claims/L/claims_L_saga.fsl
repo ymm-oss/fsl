@@ -1,0 +1,73 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Benefit payment saga with compensation (L tier domain layer).
+domain ClaimPaymentSaga {
+  implementation_profile functional_ddd
+
+  enum ClaimStatus { Pending, Approved, Paid, Failed }
+  enum PaymentStatus { NotRequested, Pending, Captured, Failed }
+
+  aggregate ClaimCase {
+    id ClaimId
+
+    state {
+      status: ClaimStatus = Pending;
+      payment_status: PaymentStatus = NotRequested;
+    }
+
+    command ApproveClaim {}
+
+    event ClaimApproved {}
+    event PaymentRequested {}
+    event PaymentCaptured {}
+    event PaymentFailed {}
+    event AssessmentReopened {}
+
+    decide ApproveClaim {
+      requires status == Pending
+      emits ClaimApproved
+    }
+
+    evolve ClaimApproved {
+      status = Approved
+    }
+
+    evolve PaymentRequested {
+      payment_status = Pending
+    }
+
+    evolve PaymentCaptured {
+      payment_status = Captured
+      status = Paid
+    }
+
+    evolve PaymentFailed {
+      payment_status = Failed
+      status = Failed
+    }
+
+    evolve AssessmentReopened {
+      status = Pending
+      payment_status = NotRequested
+    }
+  }
+
+  saga ClaimPayment {
+    starts_on ClaimApproved
+    outbox ClaimOutbox
+    inbox PaymentInbox
+
+    step RequestPayment {
+      async
+      emits PaymentRequested
+      awaits one_of [PaymentCaptured, PaymentFailed]
+      timeout after 5m emits PaymentFailed
+    }
+
+    compensation {
+      when PaymentFailed after ClaimApproved {
+        emits AssessmentReopened
+      }
+    }
+  }
+}
