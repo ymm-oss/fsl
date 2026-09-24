@@ -277,13 +277,12 @@ jobs:
       - name: Package the installable Agent Skills
         run: |
           mkdir -p dist
-          tar -czf dist/fsl-skills.tar.gz \
-            skills/fsl \
-            skills/fsl-business \
-            skills/fsl-requirements \
-            skills/fsl-design \
-            skills/fsl-design-review \
-            skills/fsl-delivery
+          # Every directory under skills/ is a skill. skills/README.md is not one.
+          find skills -mindepth 1 -maxdepth 1 -type d -print0 \
+            | sort -z \
+            | tar -czf dist/fsl-skills.tar.gz --null --files-from -
+          tar -tzf dist/fsl-skills.tar.gz | grep -q '^skills/fsl/SKILL.md$' \
+            || { echo "The skill bundle is missing skills/fsl." >&2; exit 1; }
           ( cd dist && shasum -a 256 fsl-skills.tar.gz > fsl-skills.tar.gz.sha256 )
 
       - name: Upload skill bundle
@@ -339,6 +338,10 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      # The packslip is signed with this workflow's own identity, and the
+      # action attests the artifacts it describes. No long-lived key exists.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -382,6 +385,90 @@ jobs:
           find release-assets -maxdepth 1 -type f -exec basename {} \; | sort > expected-assets.txt
           gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | sort > remote-assets.txt
           diff -u expected-assets.txt remote-assets.txt
+
+      # The packslip is signed and uploaded after the asset check above, which
+      # compares the remote release against `release-assets/` exactly. The
+      # bundle does not come from that directory, so signing before the check
+      # would fail it.
+      - name: Declare every skill under skills/
+        id: skill-resources
+        # Read from the directory rather than a list kept beside it. #1084
+        # removed three hardcoded six-name lists because a skill added to
+        # `skills/` reached none of them.
+        run: |
+          {
+            echo 'value<<SKILL_RESOURCES'
+            find skills -mindepth 1 -maxdepth 1 -type d -print0 \
+              | sort -z \
+              | xargs -0 -n1 basename \
+              | sed 's|.*|skill/&=repo:skills/&|'
+            echo 'SKILL_RESOURCES'
+          } >> "$GITHUB_OUTPUT"
+
+      # Each artifact is named in full. A `fslc-*` glob also matches every
+      # `fslc-lsp-*` asset, which is the same trap the mise `matching` option
+      # sets and the reason README.md uses an anchored `matching_regex`.
+      - name: Sign and publish the fslc packslip
+        id: packslip-fslc
+        uses: jdx/packslip@74c75db7d611b36dd5a157999ec16cf823ccf80c # v1.2.0
+        with:
+          project: github.com/ymm-oss/fsl/fslc
+          bin: fslc
+          artifacts: >-
+            release-assets/fslc-macos-arm64
+            release-assets/fslc-linux-x64
+            release-assets/fslc-linux-arm64
+            release-assets/fslc-windows-x64.exe
+          resources: ${{ steps.skill-resources.outputs.value }}
+
+      - name: Sign and publish the fslc-lsp packslip
+        id: packslip-lsp
+        uses: jdx/packslip@74c75db7d611b36dd5a157999ec16cf823ccf80c # v1.2.0
+        with:
+          project: github.com/ymm-oss/fsl/fsl-lsp
+          bin: fslc-lsp
+          artifacts: >-
+            release-assets/fslc-lsp-macos-arm64
+            release-assets/fslc-lsp-linux-x64
+            release-assets/fslc-lsp-linux-arm64
+            release-assets/fslc-lsp-windows-x64.exe
+
+      # packslip reads the platform and the format off each file name. That is
+      # the whole of what selects the binary a user gets, so it is asserted
+      # rather than trusted. A rename that leaves a field unrestricted, or an
+      # `.exe` read as an installer rather than the program, fails here instead
+      # of handing somebody the wrong file.
+      - name: Verify what the packslips claim
+        run: |
+          statement() {
+            jq -r .dsseEnvelope.payload "$1" | base64 -d
+          }
+          platforms() {
+            statement "$1" | jq -S -c \
+              '[.predicate.artifacts[] | {name, os, arch, libc, format}] | sort_by(.name)'
+          }
+          test "$(platforms '${{ steps.packslip-fslc.outputs.bundle }}')" = "$(jq -S -c 'sort_by(.name)' <<'EOF'
+          [{"name":"fslc-linux-arm64","os":"linux","arch":"aarch64","libc":"gnu","format":"raw"},
+           {"name":"fslc-linux-x64","os":"linux","arch":"x86_64","libc":"gnu","format":"raw"},
+           {"name":"fslc-macos-arm64","os":"darwin","arch":"aarch64","libc":null,"format":"raw"},
+           {"name":"fslc-windows-x64.exe","os":"windows","arch":"x86_64","libc":null,"format":"raw"}]
+          EOF
+          )" || { echo "The fslc packslip does not describe the platforms these names claim." >&2; exit 1; }
+          test "$(platforms '${{ steps.packslip-lsp.outputs.bundle }}')" = "$(jq -S -c 'sort_by(.name)' <<'EOF'
+          [{"name":"fslc-lsp-linux-arm64","os":"linux","arch":"aarch64","libc":"gnu","format":"raw"},
+           {"name":"fslc-lsp-linux-x64","os":"linux","arch":"x86_64","libc":"gnu","format":"raw"},
+           {"name":"fslc-lsp-macos-arm64","os":"darwin","arch":"aarch64","libc":null,"format":"raw"},
+           {"name":"fslc-lsp-windows-x64.exe","os":"windows","arch":"x86_64","libc":null,"format":"raw"}]
+          EOF
+          )" || { echo "The fslc-lsp packslip does not describe the platforms these names claim." >&2; exit 1; }
+          # Every skill under skills/, and only those.
+          statement '${{ steps.packslip-fslc.outputs.bundle }}' \
+            | jq -r '.predicate.resources[] | select(.kind == "skill") | .name' \
+            | sort > declared-skills.txt
+          find skills -mindepth 1 -maxdepth 1 -type d -print0 \
+            | xargs -0 -n1 basename | sort > present-skills.txt
+          diff -u present-skills.txt declared-skills.txt
+          test -s declared-skills.txt
 
       - name: Make the verified release public
         env:
