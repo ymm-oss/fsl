@@ -556,8 +556,8 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `classification:"insufficient_depth"`: it remains in the results but is not
   a counterexample. With no true failure, a determinate success yields
   `sweep_passed`/exit 0; all-inconclusive yields `sweep_inconclusive`/exit 1
-  with a null minimal counterexample. Missing, unknown, or mixed
-  classifications, including `over_constrained`, fail closed as
+  with a null minimal counterexample and retained per-cell results. Missing,
+  unknown, or mixed classifications, including `over_constrained`, fail closed as
   `sweep_failed`. For `--values NAME=LO..HI`, it fixes `LO` and expands
   `LO..LO`, `LO..LO+1`, ..., `LO..HI`. A spec `error` from any scope
   (parse/type/semantics/io/vacuous, a mistyped `--instances`/`--values` name,

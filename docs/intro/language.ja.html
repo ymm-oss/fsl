@@ -1018,8 +1018,8 @@ Public Kernel v2 はオプトインで、
 ではありません。グリッド中のいずれかのスコープが spec <code>error</code>(parse / type /
 semantics / io / vacuous / …)を返した場合、それは反例ではありません。<code>sweep</code> は
 その基盤のエラー envelope をそのまま返します(<code>result</code>、<code>kind</code>、<code>message</code>、
-<code>loc</code>、exit code は変更しません)。<code>sweep_passed</code>/<code>sweep_failed</code> に畳み込むこと
-はありません。</p>
+<code>loc</code>、exit code は変更しません)。<code>sweep_passed</code>、<code>sweep_inconclusive</code>、
+<code>sweep_failed</code> のいずれにも畳み込みません。</p>
 <p><code>reachable_failed</code> のセルが不確定なのは、空でない <code>unreached</code> 配列の全要素が
 <code>classification:"insufficient_depth"</code> のときだけです。このセルは
 <code>sweep.results</code> に残りますが反例ではありません。真の失敗がなく、決定済みの成功が

@@ -1049,7 +1049,8 @@ A passing sweep means "no counterexample in this grid", not an unbounded proof.
 A spec <code>error</code> (parse / type / semantics / io / vacuous / …) from any scope in
 the grid is not a counterexample: <code>sweep</code> returns that underlying error
 envelope verbatim (<code>result</code>, <code>kind</code>, <code>message</code>, <code>loc</code>, exit code unchanged)
-instead of folding it into <code>sweep_passed</code>/<code>sweep_failed</code>.</p>
+instead of folding it into <code>sweep_passed</code>, <code>sweep_inconclusive</code>, or
+<code>sweep_failed</code>.</p>
 <p>A <code>reachable_failed</code> cell is inconclusive only when its nonempty <code>unreached</code>
 array contains only <code>classification:"insufficient_depth"</code>. Such a cell remains
 in <code>sweep.results</code> but is not a counterexample: a grid with at least one

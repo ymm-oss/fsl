@@ -3675,10 +3675,7 @@ fn run_sweep(
         "sweep_inconclusive"
     };
     let mut output = envelope();
-    output.insert(
-        "result".to_owned(),
-        json!(result),
-    );
+    output.insert("result".to_owned(), json!(result));
     output.insert("spec".to_owned(), json!(spec_name));
     output.insert(
         "sweep".to_owned(),

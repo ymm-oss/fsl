@@ -159,3 +159,60 @@ fn sweep_cart_controls_keep_genuine_failure_and_clean_success() {
     assert_eq!(implemented["result"], "sweep_passed");
     assert!(implemented["sweep"]["minimal_counterexample"].is_null());
 }
+
+/// Regression for #1080's minimal-selection fix: a grid whose early cells are
+/// inconclusive (`reachable_failed` with an `unreached` array containing only
+/// `classification:"insufficient_depth"`) and whose later cells contain a
+/// genuine bug (`ReachTwo` is reachable at depth 2, and `BoundedBelowFour` is
+/// only violated once `x` reaches 4 at depth 4) must select the true-failure
+/// cell as `minimal_counterexample`, not the earlier inconclusive one. Before
+/// af7046cc, `sweep` chose the first cell whose `verification` was not
+/// success-classified, which would have picked the depth-0 inconclusive cell
+/// instead.
+///
+/// Per-cell classification uses `verification` (the full envelope), not
+/// `summary`: `summary` deliberately omits `unreached`
+/// (`main.rs` `run_sweep`'s summary key list), so it cannot distinguish an
+/// inconclusive `reachable_failed` cell from a true one.
+#[test]
+fn sweep_skips_inconclusive_cell_when_selecting_true_failure_scope() {
+    let (swept, status) = run_cli(&[
+        "sweep",
+        &fixture("sweep_inconclusive_then_failure.fsl"),
+        "--depth",
+        "0..4",
+    ]);
+    assert_eq!(status, 1, "swept: {swept:#}");
+    assert_eq!(swept["result"], "sweep_failed");
+    let results = swept["sweep"]["results"].as_array().expect("sweep results");
+    let first_inconclusive = results
+        .iter()
+        .position(|cell| {
+            cell["verification"]["result"] == "reachable_failed"
+                && cell["verification"]["unreached"]
+                    .as_array()
+                    .is_some_and(|unreached| {
+                        !unreached.is_empty()
+                            && unreached
+                                .iter()
+                                .all(|item| item["classification"] == "insufficient_depth")
+                    })
+        })
+        .expect("grid has an inconclusive cell");
+    let minimal = swept["sweep"]["minimal_counterexample"]
+        .as_object()
+        .expect("true failure minimal counterexample");
+    assert_eq!(
+        minimal["summary"]["result"], "violated",
+        "minimal must be the genuine invariant violation, not an inconclusive cell: {minimal:#?}"
+    );
+    let scope = &minimal["scope"];
+    let selected = results
+        .iter()
+        .position(|cell| cell["scope"] == *scope)
+        .expect("minimal's scope matches a grid cell");
+    assert!(
+        selected > first_inconclusive,
+        "minimal (index {selected}) must skip the earlier inconclusive cell (index {first_inconclusive}): {swept:#}"
+    );
+}

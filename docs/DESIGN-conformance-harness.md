@@ -790,9 +790,9 @@ answer and the action fed to its oracle. Instead, the test transcribes the
 frozen session corpus and mapping from
 `tests/test_self_conformance.py:39-67,85-152,314-395`, the monitor mapping from
 `:426-445`, and the negative controls from `:488-504,620-636`. Exit semantics
-come from `docs/LANGUAGE.md:940-961`. The compound table independently
-enumerates the 65 result values registered by
-`rust/fslc/src/outcome.rs:86-218`; unknown values and incomplete sibling-field
+come from `docs/LANGUAGE.md:1043-1070`. The compound table independently
+enumerates the 66 result values registered by
+`rust/fslc/src/outcome.rs:128-282`; unknown values and incomplete sibling-field
 envelopes are errors, never default successes or failures. Chain uses a
 command-specific adapter because a layer additionally depends on its integer
 `exit_code`, nested `detail.implements.result`, and the implementation-command
@@ -805,7 +805,7 @@ Three self-specs separate the contracts:
 |---|---|
 | `examples/self/fslc_session.fsl` | Real check/verify/induction and extended subcommand observations map to session actions, then replay conformantly. |
 | `examples/self/fslc_monitor.fsl` | Real cart replay observations map to `step_ok` / `step_reject` / `finish`, then replay conformantly. |
-| `examples/self/fslc_fold.fsl` | Real sweep, full five-layer chain (including nested implements and implementation-command results), and analyze-batch item verdicts map to success/failure/skipped folds; the real top-level result and exact process exit select the final action. `fold_spec_has_native_proof_vacuity_and_mutation_evidence` product-gates bounded verification, induction, vacuity, and the failure-sticky finalize-guard mutants. |
+| `examples/self/fslc_fold.fsl` | Real sweep, full five-layer chain (including nested implements and implementation-command results), and analyze-batch item verdicts map to success/failure/skipped/inconclusive folds; depth-limited sweep cells are neutral, while true failures remain sticky. The real top-level result and exact process exit select the final action. `fold_spec_has_native_proof_vacuity_and_mutation_evidence` product-gates bounded verification, induction, vacuity, and the failure-sticky finalize-guard mutants. |
 
 The C7 properties have both an accepting observation and a rejecting control:
 
