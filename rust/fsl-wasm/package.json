@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "test:browser": "node test-browser.mjs"
+    "test:browser": "node test-browser.mjs",
+    "test:outcome": "node --test test-browser-outcome.test.mjs"
   },
   "dependencies": {
     "z3-solver": "4.16.0"
