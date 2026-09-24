@@ -1311,9 +1311,10 @@ on every pull request with no path filter — `.github/workflows/site-reference-
 `pull_request`/`merge_group` triggers carry no `paths:` restriction — so requiring it cannot
 deadlock a pull request the way requiring `native Z3 4.16` or `product gate` would; those stay
 deferred precisely because they never report on an ordinary pull request.
-`strict_required_status_checks_policy` is `true` and `bypass_actors` is empty, so
-`current_user_can_bypass` is `"never"` for every account — an administrator cannot merge past a
-failing or missing required context.
+`bypass_actors` is empty, so `current_user_can_bypass` is `"never"` for every account — an
+administrator cannot merge past a failing or missing required context.
+`strict_required_status_checks_policy` is `false`; see "Required contexts no longer have to run
+against current `main`" below.
 
 ### Site reference context scope
 
@@ -1445,6 +1446,13 @@ would have caught pre-merge, or the review policy changes such that the merge qu
 enqueueable. The first two are observable from the failure-issue history; the third is the condition
 the section above already names.
 
+The ruleset was changed first and this section recorded it (#1079), but `.github/ruleset-contract.json`
+and the checker still expected `true`, so the daily drift audit reported the intended change as
+drift (#1081). The contract now records `false`, the fixture is re-captured from the live ruleset,
+and `compareRuleset` reads the expected value from the contract entry instead of hardcoding `true`.
+Reversing the decision therefore means changing the live ruleset, the contract, the fixture, and
+this section together.
+
 ### Ruleset drift audit
 
 Issue #707 has two halves. The first — making the Linux evidence *required*, not merely running —
@@ -1500,7 +1508,8 @@ contract/fixture agreement — editing one without the other fails pre-merge), t
 (a dropped context; a renamed context, which must surface as one `missing` plus one `unexpected`
 rather than being silently satisfied by name), the blind control above, and the fail-closed guards
 (empty rules, empty required-context list, missing/added `bypass_actors`, an unexpected rule type,
-wrong enforcement, flipped strict policy, retargeted conditions, a schema-invalid contract) —
+wrong enforcement, a strict policy that differs from the contract's value, retargeted conditions, a
+schema-invalid contract, including a missing or non-boolean strict policy) —
 including, for the network-facing wrapper, an injected fetch failure and a 404 against a fake
 client, both of which must still create the failure issue. This suite runs in
 `tools/check-merge-readiness.sh`'s `check_automation` lane (so a contract, fixture, or checker
