@@ -1,3 +1,4 @@
+// deadlock-ignore-rationale: This adversarial induction fixture intentionally stops after exercising the composite state transition.
 // expected-command: verify --depth 5 --engine induction --deadlock ignore
 // expected-result: proved
 spec GalleryAdversarialOptionStructSetSeqCombo {

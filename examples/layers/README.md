@@ -10,11 +10,11 @@ The final form of DESIGN-layers.md. The return domain is written in three dialec
 | `return_impl_refines.fsl` | design → requirements mapping | refines |
 
 ```bash
-fslc verify examples/layers/return_policy.fsl --engine induction --deadlock ignore
-fslc verify examples/layers/return_system.fsl --deadlock ignore       # implements is checked at the same time
+fslc verify examples/layers/return_policy.fsl --engine induction
+fslc verify examples/layers/return_system.fsl       # implements is checked at the same time
 fslc refine examples/layers/return_impl.fsl examples/layers/return_system.fsl \
             examples/layers/return_impl_refines.fsl --depth 5
-fslc scenarios examples/layers/return_system.fsl --deadlock ignore    # acceptance_AC-1 appears
+fslc scenarios examples/layers/return_system.fsl    # acceptance_AC-1 appears
 ```
 
 Highlights:

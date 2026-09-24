@@ -1,3 +1,4 @@
+// deadlock-ignore-rationale: This adversarial invariant violation must remain the reported result despite its stopped branch.
 // expected-command: verify --depth 2 --deadlock ignore --no-cache
 // expected-result: violated
 // expected-kind: invariant

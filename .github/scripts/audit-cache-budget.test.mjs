@@ -43,13 +43,24 @@ import {
 
 const MAIN = "refs/heads/main";
 const BYTES_PER_GIB = 1_073_741_824;
+function generationCoexistenceReport({ entries, staleGenerations, staleBytes, effectiveBytes }) {
+  return `${entries} cache entr${entries === 1 ? "y" : "ies"} observed; ${staleGenerations} generation${
+    staleGenerations === 1 ? "" : "s"
+  } beyond the newest per {sharedKey, platform} pair on \`refs/heads/main\` (${(
+    staleBytes / BYTES_PER_GIB
+  ).toFixed(2)} GiB). Report split: recoverable (superseded-generation-derived): up to ${(
+    Math.min(staleBytes, effectiveBytes) / BYTES_PER_GIB
+  ).toFixed(2)} GiB; net-growth (not diagnosed as superseded-generation-derived): ${(
+    (effectiveBytes - Math.min(staleBytes, effectiveBytes)) / BYTES_PER_GIB
+  ).toFixed(2)} GiB. This is diagnostic visibility only, not subtracted from the budget judgment below; the listing and the independently-observed usage total are separate, non-atomic observations, so this split does not prove that either amount is in the usage total or that net-growth is repository-controllable.`;
+}
 const PASS_REPORT =
   "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches\n" +
-  "  informational/generation-coexistence: 5 cache entries observed; 0 generations beyond the newest per {sharedKey, platform} pair on `refs/heads/main` (0.00 GiB) -- diagnostic visibility only, not subtracted from the budget judgment below.";
+  `  informational/generation-coexistence: ${generationCoexistenceReport({ entries: 5, staleGenerations: 0, staleBytes: 0, effectiveBytes: 7_836_593_125 })}`;
 const THRESHOLD_REPORT =
   "cache budget audit: FAIL -- 1 finding(s)\n" +
   "  budget-exhausted: cache usage is 8.50 GiB of a 10.00 GiB limit (85%), at or above the 85% threshold. 8.50 GiB is 1.50 GiB remaining before the limit; a sufficiently large save can trigger least-recently-used eviction, including a default-branch cache that a main-targeting pull request depends on.\n" +
-  "  informational/generation-coexistence: 5 cache entries observed; 0 generations beyond the newest per {sharedKey, platform} pair on `refs/heads/main` (0.00 GiB) -- diagnostic visibility only, not subtracted from the budget judgment below.";
+  `  informational/generation-coexistence: ${generationCoexistenceReport({ entries: 5, staleGenerations: 0, staleBytes: 0, effectiveBytes: 9_126_805_504 })}`;
 const PAGE_PATH = (page) =>
   `/actions/caches?per_page=100&sort=created_at&direction=asc&page=${page}`;
 const RUNNER_PATH = fileURLToPath(new URL("./run-cache-budget-audit.mjs", import.meta.url));
@@ -253,8 +264,7 @@ test("accepting: default-branch caches present, budget below threshold, no pull-
   assert.deepEqual(result.informational, [
     {
       code: "generation-coexistence",
-      message:
-        "5 cache entries observed; 0 generations beyond the newest per {sharedKey, platform} pair on `refs/heads/main` (0.00 GiB) -- diagnostic visibility only, not subtracted from the budget judgment below.",
+      message: generationCoexistenceReport({ entries: 5, staleGenerations: 0, staleBytes: 0, effectiveBytes: 7_836_593_125 }),
     },
   ]);
 });
@@ -336,8 +346,7 @@ test("rejecting: physical generation coexistence still fails the budget, with a 
   assert.deepEqual(result.informational, [
     {
       code: "generation-coexistence",
-      message:
-        "11 cache entries observed; 2 generations beyond the newest per {sharedKey, platform} pair on `refs/heads/main` (1.73 GiB) -- diagnostic visibility only, not subtracted from the budget judgment below.",
+      message: generationCoexistenceReport({ entries: 11, staleGenerations: 2, staleBytes: 1_860_632_687, effectiveBytes: 9_740_430_023 }),
     },
   ]);
 });
@@ -1366,7 +1375,7 @@ test("retrying runner sends exact transport metadata for usage, every listing pa
   // actual listing length rather than the unrelated fixed constant.
   assert.deepEqual(reports, [
     "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches\n" +
-      `  informational/generation-coexistence: ${listing.length} cache entries observed; 0 generations beyond the newest per {sharedKey, platform} pair on \`refs/heads/main\` (0.00 GiB) -- diagnostic visibility only, not subtracted from the budget judgment below.`,
+      `  informational/generation-coexistence: ${generationCoexistenceReport({ entries: listing.length, staleGenerations: 0, staleBytes: 0, effectiveBytes: usageOf(listing) })}`,
   ]);
   assert.deepEqual(errors, []);
 
@@ -1782,6 +1791,38 @@ test("accepting: 8.5 GiB minus one byte is below the threshold", () => {
   );
 });
 
+test("report split preserves the raw usage judgment at the audit boundary samples", () => {
+  // This is a before/after predicate snapshot: the old audit's budget rule
+  // was `rawEffective >= 9_126_805_504`, and reporting classification must
+  // not alter it.  The listing is deliberately healthy and below every
+  // sample so each verdict is driven solely by the supplied usage total.
+  const caches = healthyListing();
+  const samples = [
+    { label: "85%-1", usageBytes: 9_126_805_503, ok: true },
+    { label: "85%-exact", usageBytes: 9_126_805_504, ok: false },
+    { label: "10.57-GiB-equivalent", usageBytes: Math.ceil(10.57 * BYTES_PER_GIB), ok: false },
+    { label: "current-7.92-GiB-observation", usageBytes: Math.ceil(7.92 * BYTES_PER_GIB), ok: true },
+  ];
+
+  for (const sample of samples) {
+    const result = auditCacheBudget({ caches, usageBytes: sample.usageBytes });
+    assert.equal(result.ok, sample.ok, `${sample.label}: ${formatReport(result)}`);
+  }
+});
+
+test("report split distinguishes superseded-generation-derived bytes without claiming controllable net growth", () => {
+  const caches = generationCoexistenceListing();
+  const report = formatReport(auditCacheBudget({ caches, usageBytes: usageOf(caches) }));
+
+  // A report that retains only the old aggregate coexistence line cannot pass
+  // these controls: both named report classes and the non-atomic caveat are
+  // required, while the verdict remains the physical-budget failure.
+  assert.match(report, /recoverable \(superseded-generation-derived\): up to 1\.73 GiB/);
+  assert.match(report, /net-growth \(not diagnosed as superseded-generation-derived\): 7\.34 GiB/);
+  assert.match(report, /separate, non-atomic observations/);
+  assert.match(report, /does not prove.*net-growth is repository-controllable/);
+});
+
 test("rejecting: a newer over-threshold listing cannot be hidden by an earlier lower usage observation", () => {
   const beforeReplacementUsage = 7_516_192_768;
   const listingAfterSameCountReplacement = healthyListing();
@@ -1904,7 +1945,7 @@ test("formatReport fixes the complete default FAIL report count, order, and deli
       "  main-cache-absent: no `refs/heads/main` cache for shared key `rust-native-z3` on platform `Windows_NT`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are `refs/heads/main`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.",
       "  main-cache-absent: no `refs/heads/main` cache for shared key `rust-native-z3` on platform `Darwin`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are `refs/heads/main`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.",
       "  pull-request-cache-present: `refs/pull/9/merge` holds a cache for `ci.yml`'s shared key `rust-workspace` (1.00 GiB). This violates the current no-pull-request-save invariant. It may have been saved before the guard existed or may indicate a later guard regression; inspect created_at and workflow provenance.",
-      "  informational/generation-coexistence: 1 cache entry observed; 0 generations beyond the newest per {sharedKey, platform} pair on `refs/heads/main` (0.00 GiB) -- diagnostic visibility only, not subtracted from the budget judgment below.",
+      `  informational/generation-coexistence: ${generationCoexistenceReport({ entries: 1, staleGenerations: 0, staleBytes: 0, effectiveBytes: 9_126_805_504 })}`,
     ].join("\n"),
   );
 });

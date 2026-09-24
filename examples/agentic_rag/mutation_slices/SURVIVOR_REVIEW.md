@@ -70,7 +70,9 @@ frozen Python実測値で、`backported_constraints_slice.fsl`の3行はnative�
 （`README.md`参照、修正済み）。
 
 - `fslc check examples/agentic_rag/agentic_rag_requirements.fsl`: `ok`
+<!-- deadlock-ignore-rationale: This is a dated native measurement record, retained to reproduce the observed verdict. -->
 - `fslc verify examples/agentic_rag/agentic_rag_requirements.fsl --depth 8 --deadlock ignore --exclude-property RequestEventuallyHandled`: `verified`
+<!-- deadlock-ignore-rationale: This is a dated native measurement record, retained to reproduce the observed verdict. -->
 - `fslc verify examples/agentic_rag/agentic_rag_requirements.fsl --depth 8 --deadlock ignore --property RequestEventuallyHandled`: `verified`
 - `fslc refine examples/agentic_rag/agentic_rag_requirements.fsl examples/agentic_rag/agentic_rag_business.fsl examples/agentic_rag/agentic_rag_requirements_refines_business.fsl --depth 7`: **native では `error`**
   (`kind:"semantics"`, `"indexed progress map for 'req_stage' is not implemented"`) —
@@ -79,6 +81,7 @@ frozen Python実測値で、`backported_constraints_slice.fsl`の3行はnative�
 - `fslc refine examples/agentic_rag/agentic_rag_design.fsl examples/agentic_rag/agentic_rag_requirements.fsl examples/agentic_rag/agentic_rag_design_refines_requirements.fsl --depth 6`: **native では `error`**
   (`kind:"semantics"`, `"indexed progress map for 'req' is not implemented"`) — 同じく issue #483。
 - `fslc check examples/agentic_rag/mutation_slices/backported_constraints_slice.fsl`: `ok`
+<!-- deadlock-ignore-rationale: This is a dated native measurement record, retained to reproduce the observed verdict. -->
 - `fslc verify examples/agentic_rag/mutation_slices/backported_constraints_slice.fsl --depth 7 --deadlock ignore`: `verified`
 - `fslc mutate examples/agentic_rag/mutation_slices/backported_constraints_slice.fsl --depth 7 --by-requirement --max-mutants 180`: `180 total / 161 killed / 19 survived`
   (mutation engineの列挙順・演算子集合がPython参照実装と異なるため、絶対数はPython実測値と一致しない)

@@ -27,13 +27,14 @@ request → present retention offer → accept (continue) or decline (cancel).
 
 ```bash
 # Business layer: prove all rules (proved = holds under any operation ordering)
-fslc verify examples/pm/cancel_flow.fsl --engine induction --deadlock ignore
+fslc verify examples/pm/cancel_flow.fsl --engine induction
 
 # Requirements layer: requirement checking + consistency check against the business flow (implements) in one command, simultaneously
+<!-- deadlock-ignore-rationale: Temporary until the terminal-state modeling change makes this requirement flow explicit. -->
 fslc verify examples/pm/cancel_system.fsl --deadlock ignore
 
 # Emit the acceptance criteria and representative scenarios as test templates for development
-fslc scenarios examples/pm/cancel_system.fsl --deadlock ignore
+fslc scenarios examples/pm/cancel_system.fsl
 ```
 
 Currently all rules hold in both (the business layer is proved at unbounded depth).

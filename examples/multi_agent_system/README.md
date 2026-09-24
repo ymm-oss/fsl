@@ -57,20 +57,20 @@ fslc check examples/multi_agent_system/multi_agent_requirements.fsl
 fslc check examples/multi_agent_system/multi_agent_design.fsl
 
 fslc verify examples/multi_agent_system/multi_agent_business.fsl \
-  --engine induction --deadlock ignore
+  --engine induction
 
 # requirements層の安全性、到達性、acceptance、forbiddenを確認する。
 # livenessの進捗義務は重いので、普段のループでは除外する。
 # `until`由来のsafetyはこの検証でも確認される。
 fslc verify examples/multi_agent_system/multi_agent_requirements.fsl \
-  --depth 18 --deadlock ignore \
+  --depth 18 \
   --exclude-property WorkEventuallyHandled \
   --exclude-property WorkOpenUntilHandled
 
 # design層の浅い安全性を確認する。
 # 深い到達性はqueue工程が増えるため別ジョブまたはsliceで扱う。
 fslc verify examples/multi_agent_system/multi_agent_design.fsl \
-  --depth 12 --deadlock ignore \
+  --depth 12 \
   --exclude-property CanDeliverD \
   --exclude-property CanRejectD \
   --exclude-property CanReviewD \
@@ -87,7 +87,7 @@ fslc refine examples/multi_agent_system/multi_agent_design.fsl \
   --depth 8
 
 fslc testgen examples/multi_agent_system/multi_agent_design.fsl \
-  --depth 6 --deadlock ignore \
+  --depth 6 \
   -o examples/multi_agent_system/test_multi_agent_design_conformance.py
 
 # Adapter未実装の間はskipされる。

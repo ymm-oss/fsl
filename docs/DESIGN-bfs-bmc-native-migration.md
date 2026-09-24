@@ -248,7 +248,7 @@ existing symbolic expression-value agreement API. This preserves two reviewably
 different decision lineages.
 
 Witness trace bytes are never compared between independently selected witnesses.
-`docs/LANGUAGE.md:1098-1102` explicitly permits non-unique BMC witnesses; exact
+`docs/LANGUAGE.md:1147-1151` explicitly permits non-unique BMC witnesses; exact
 equality is valid only where P2 deliberately uses the same fixed model to bind
 identity.
 

@@ -1,6 +1,7 @@
 // topic: turnstile
 // scale: tiny
 // features: Bool, bounded counter, reachable, ensures
+// deadlock-ignore-rationale: This tiny induction fixture intentionally reaches a stopped state after a successful passage.
 // expected-command: verify --depth 4 --engine induction --deadlock ignore
 // expected-result: proved
 spec GalleryTinyTurnstile {

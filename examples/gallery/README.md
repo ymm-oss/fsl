@@ -11,13 +11,13 @@ comments, and `tests/test_gallery.py` matches them against the actual `fslc` JSO
 | tiny | `valid/tiny_turnstile.fsl` | Turnstile | Minimal state machine of `coin` and `push` | `fslc verify ... --engine induction` |
 | tiny | `valid/tiny_traffic_light.fsl` | Traffic light | Basics of `enum` and nested `if` | `fslc verify ... --engine induction` |
 | tiny | `valid/tiny_bounded_counter.fsl` | Bounded counter | Keep the bound with bounded types and `requires` | `fslc verify ... --engine induction` |
-| tiny | `valid/tiny_option_structural_equality.fsl` | Option equality | Compare `none`/`some` structurally; use `is some` to bind | `fslc verify --depth 1 --deadlock ignore` |
-| small | `valid/small_vending_machine.fsl` | Vending machine | `Map`, `Option`, stock decrement, `ensures` | `fslc verify --depth 6 --deadlock ignore` |
+| tiny | `valid/tiny_option_structural_equality.fsl` | Option equality | Compare `none`/`some` structurally; use `is some` to bind | `fslc verify --depth 1` |
+| small | `valid/small_vending_machine.fsl` | Vending machine | `Map`, `Option`, stock decrement, `ensures` | `fslc verify --depth 6` |
 | small | `valid/small_elevator.fsl` | Single elevator | Consistency of floor, door, and target floor | `fslc verify ... --engine induction` |
-| small | `valid/small_tcp_handshake.fsl` | TCP-like handshake | Entry point to `fair action` and `leadsTo` | `fslc verify --depth 6 --deadlock ignore` |
+| small | `valid/small_tcp_handshake.fsl` | TCP-like handshake | Entry point to `fair action` and `leadsTo` | `fslc verify --depth 6` |
 | medium | `valid/medium_dining_philosophers_deadlock_demo.fsl` | Philosophers | Observe a deadlock-shaped state with reachable | `fslc verify --depth 6 --deadlock warn` |
 | medium | `valid/medium_two_phase_commit.fsl` | 2PC | Voting and commit safety | `fslc verify ... --engine induction` |
-| large | `valid/large_order_workflow.fsl` | Order workflow | Order, shipment, return, ledger invariant | `fslc verify --depth 8 --deadlock ignore` |
+| large | `valid/large_order_workflow.fsl` | Order workflow | Order, shipment, return, ledger invariant | `fslc verify --depth 8` |
 
 ## errors: learning from broken examples
 

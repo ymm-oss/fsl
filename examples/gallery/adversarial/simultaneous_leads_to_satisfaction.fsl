@@ -1,3 +1,4 @@
+// deadlock-ignore-rationale: This adversarial liveness fixture intentionally stops after its simultaneous satisfaction transition.
 // expected-command: verify --depth 4 --deadlock ignore
 // expected-result: verified
 spec GalleryAdversarialSimultaneousLeadsTo {

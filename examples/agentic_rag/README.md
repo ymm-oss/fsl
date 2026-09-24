@@ -83,22 +83,22 @@ fslc check examples/agentic_rag/agentic_rag_design.fsl
 
 # business層の業務統制と到達可能性を確認する。
 fslc verify examples/agentic_rag/agentic_rag_business.fsl \
-  --engine induction --deadlock ignore
+  --engine induction
 
 # safety、到達可能性、acceptance、forbiddenを確認する。
 # livenessは重いので普段の短いループでは除外する。
 fslc verify examples/agentic_rag/agentic_rag_requirements.fsl \
-  --depth 8 --deadlock ignore --exclude-property RequestEventuallyHandled
+  --depth 8 --exclude-property RequestEventuallyHandled
 
 # livenessだけを確認する。leadsToのlasso探索は高コストなので分けて実行する。
 fslc verify examples/agentic_rag/agentic_rag_requirements.fsl \
-  --depth 8 --deadlock ignore --property RequestEventuallyHandled
+  --depth 8 --property RequestEventuallyHandled
 
 # design層の浅い安全性スモークを確認する。
 # 内部工程が増えたぶん成功pathが長いので、短い普段使いでは到達性を除外する。
 # depth 4では深いaction未到達のvacuity warningが出るが、基本不変条件の浅い破壊は拾える。
 fslc verify examples/agentic_rag/agentic_rag_design.fsl \
-  --depth 4 --deadlock ignore \
+  --depth 4 \
   --exclude-property CanAnswerD \
   --exclude-property CanReviewD \
   --exclude-property CanExecuteToolD
@@ -118,7 +118,7 @@ fslc refine examples/agentic_rag/agentic_rag_design.fsl \
 # 実装conformance testの雛形を再生成する。
 # depth 4は浅い初期ハーネス用。深いcoverシナリオは重いので別途扱う。
 fslc testgen examples/agentic_rag/agentic_rag_design.fsl \
-  --depth 4 --deadlock ignore \
+  --depth 4 \
   -o examples/agentic_rag/test_agentic_rag_design_conformance.py
 
 # Adapter未実装の間はskipされる。

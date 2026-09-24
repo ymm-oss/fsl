@@ -26,17 +26,18 @@ For details, see the note in `docs/DESIGN-layers.md` §6 and `docs/LANGUAGE.md` 
 E=examples/refinement_liveness
 
 # The contract is sound on its own (liveness leadsTo holds, payment is also reachable)
-fslc verify $E/policy.fsl --engine induction --deadlock ignore        # proved
+fslc verify $E/policy.fsl --engine induction        # proved
 
 # ① Liveness does not propagate: refine passes, yet verifying the same policy at the design layer breaks
 fslc refine $E/design_drops_liveness.fsl $E/policy.fsl \
             $E/design_drops_liveness_refines.fsl --depth 8            # refines
+# deadlock-ignore-rationale: The deliberate liveness-failure demonstration needs the lasso, not a deadlock warning.
 fslc verify $E/design_drops_liveness.fsl --depth 8 --deadlock ignore  # violated / leadsTo (lasso)
 
 # ② Resolution: add fair to the progress action and re-verify at each layer, and liveness holds too
 fslc refine $E/design_keeps_liveness.fsl $E/policy.fsl \
             $E/design_keeps_liveness_refines.fsl --depth 8            # refines
-fslc verify $E/design_keeps_liveness.fsl --depth 8 --deadlock ignore  # verified
+fslc verify $E/design_keeps_liveness.fsl --depth 8  # verified
 
 # ②b Opt in to liveness-preserving refinement: the dropped-liveness design now fails at refine time
 fslc refine $E/design_drops_liveness.fsl $E/policy.fsl \

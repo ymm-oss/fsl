@@ -21,16 +21,16 @@ fslc check examples/agentic_rag/mutation_slices/retry_liveness_slice.fsl
 fslc check examples/agentic_rag/mutation_slices/backported_constraints_slice.fsl
 
 fslc verify examples/agentic_rag/mutation_slices/answer_safety_slice.fsl \
-  --depth 6 --deadlock ignore
+  --depth 6
 
 fslc verify examples/agentic_rag/mutation_slices/tool_approval_slice.fsl \
-  --depth 7 --deadlock ignore
+  --depth 7
 
 fslc verify examples/agentic_rag/mutation_slices/retry_liveness_slice.fsl \
-  --depth 8 --deadlock ignore
+  --depth 8
 
 fslc verify examples/agentic_rag/mutation_slices/backported_constraints_slice.fsl \
-  --depth 7 --deadlock ignore
+  --depth 7
 
 fslc mutate examples/agentic_rag/mutation_slices/answer_safety_slice.fsl \
   --depth 6 --by-requirement --max-mutants 80

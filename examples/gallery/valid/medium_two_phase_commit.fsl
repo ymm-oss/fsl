@@ -1,6 +1,7 @@
 // topic: two-phase commit
 // scale: medium
 // features: coordinator phase, participant votes, count, safety invariant
+// deadlock-ignore-rationale: This induction fixture intentionally stops once every participant has reached a final vote.
 // expected-command: verify --depth 8 --engine induction --deadlock ignore
 // expected-result: proved
 spec GalleryMediumTwoPhaseCommit {

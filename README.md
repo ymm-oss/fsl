@@ -65,7 +65,7 @@ at the old `~/.fsl/.venv/bin` or `~/.fsl/.native/bin` installs (the pre-Rust, fs
 Uninstall:
 
 ```bash
-rm -rf ~/.local/share/fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery
+rm -rf ~/.local/share/fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery ~/.claude/skills/fsl-from-code ~/.claude/skills/fsl-requirements-document
 ```
 
 See the [Releases](https://github.com/ymm-oss/fsl/releases) page for the current version. Official releases contain checksummed native binaries,
@@ -296,12 +296,11 @@ discovery, the canonical copies live under [`skills/`](skills/) at the repositor
 - [`skills/fsl-from-code/SKILL.md`](skills/fsl-from-code/SKILL.md) — reverse-engineer a design-layer spec from existing source code
 - [`skills/fsl-requirements-document/SKILL.md`](skills/fsl-requirements-document/SKILL.md) — generate and re-verify a human-readable requirements document from a checked spec
 
-The install script above links the first six into `~/.claude/skills/`; `fsl-from-code` and
-`fsl-requirements-document` are not part of that installed set today, but are checked into
-this repository's own `.claude/skills/` and `.agents/skills/` as symlinks to `skills/*`. To
-use any of them in another project, copy the relevant `skills/fsl*` directories into that
-project's `.claude/skills/` or into `~/.claude/skills/`, or point the `gh` skill extension
-at `skills/` as the distribution source. See [`skills/README.md`](skills/README.md) for
+The install script above links every skill above into `~/.claude/skills/`. They are also
+checked into this repository's own `.claude/skills/` and `.agents/skills/` as symlinks to
+`skills/*`. To use any of them in another project, copy the relevant `skills/fsl*`
+directories into that project's `.claude/skills/` or into `~/.claude/skills/`, or point the
+`gh` skill extension at `skills/` as the distribution source. See [`skills/README.md`](skills/README.md) for
 details.
 
 ## Repository layout

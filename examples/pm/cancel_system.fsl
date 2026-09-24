@@ -3,7 +3,7 @@
 //
 // Refines the business layer (cancel_flow.fsl) into "system requirements".
 // The requirement blocks carry the requirement ID and original text verbatim.
-//
+// deadlock-ignore-rationale: Temporary until the terminal-state modeling change makes this requirement flow explicit.
 //   fslc verify examples/pm/cancel_system.fsl --deadlock ignore
 //
 // A single command runs both (1) the consistency check among requirements and

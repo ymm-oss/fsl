@@ -754,12 +754,13 @@ enum FoldClass {
     Success,
     Failure,
     Skipped,
+    Inconclusive,
 }
 
-/// Independent fold registry. The 65 registered result literals are
-/// transcribed from `rust/fslc/src/outcome.rs:86-218`; sibling-field semantics
-/// are documented at `docs/LANGUAGE.md:940-961`. This function deliberately
-/// does not call the production classifier.
+/// Independent fold registry. Registered result literals are transcribed
+/// from `rust/fslc/src/outcome.rs:128-282` (66 result literals); sibling-field
+/// semantics are documented at `docs/LANGUAGE.md:1043-1070`. This function
+/// deliberately does not call the production classifier.
 #[allow(clippy::too_many_lines)]
 fn fold_result_class(output: &Value) -> Result<FoldClass, String> {
     let result = output
@@ -843,15 +844,31 @@ fn fold_result_class(output: &Value) -> Result<FoldClass, String> {
         | "causal_expectations_checked"
         | "causal_expectations_observed"
         | "statistically_supported" => Ok(FoldClass::Success),
+        "reachable_failed" => {
+            let unreached = output
+                .get("unreached")
+                .and_then(Value::as_array)
+                .ok_or_else(|| format!("reachable_failed missing unreached array: {output}"))?;
+            if !unreached.is_empty()
+                && unreached.iter().all(|entry| {
+                    entry.get("classification").and_then(Value::as_str)
+                        == Some("insufficient_depth")
+                })
+            {
+                Ok(FoldClass::Inconclusive)
+            } else {
+                Ok(FoldClass::Failure)
+            }
+        }
         "error"
         | "violated"
-        | "reachable_failed"
         | "unknown_cti"
         | "unknown_budget"
         | "refinement_failed"
         | "nonconformant"
         | "impl_violated"
         | "sweep_failed"
+        | "sweep_inconclusive"
         | "observed_mismatch"
         | "replay_nonconformant"
         | "document_drifted"
@@ -873,11 +890,14 @@ fn fold_action(output: &Value) -> Result<Value, String> {
         FoldClass::Success => json!({"action":"fold_sub_success"}),
         FoldClass::Failure => json!({"action":"fold_sub_failure"}),
         FoldClass::Skipped => json!({"action":"fold_skipped"}),
+        FoldClass::Inconclusive => json!({"action":"fold_sub_inconclusive"}),
     })
 }
 
-/// Exact compound result/exit pairs follow `docs/LANGUAGE.md:940-961` and the
-/// command contracts at `main.rs:3533-3589,4000-4051,13422-13451`.
+/// Exact compound result/exit pairs follow `docs/LANGUAGE.md:1043-1070` and
+/// the command contracts at `main.rs:3491-3698` (`run_sweep`), `:4127-4159`
+/// (`run_project_chain`'s result/exit decision), and `:14444-14557`
+/// (`run_analyze_batch`).
 fn finalize_action(command: CompoundCommand, top: &RawCliOutput) -> Result<Value, String> {
     let result = top
         .output
@@ -888,7 +908,7 @@ fn finalize_action(command: CompoundCommand, top: &RawCliOutput) -> Result<Value
         (CompoundCommand::Sweep, "sweep_passed", 0)
         | (CompoundCommand::Chain, "verified", 0)
         | (CompoundCommand::AnalyzeBatch, "analyzed", 0) => "finalize_pass",
-        (CompoundCommand::Sweep, "sweep_failed", 1)
+        (CompoundCommand::Sweep, "sweep_failed" | "sweep_inconclusive", 1)
         | (CompoundCommand::Chain, "violated", 1)
         | (CompoundCommand::Chain | CompoundCommand::AnalyzeBatch, "error", 2) => "finalize_fail",
         _ => {
@@ -1002,6 +1022,25 @@ fn fold_spec_has_native_proof_vacuity_and_mutation_evidence() {
             "{operator} of the failure-sticky finalize guard survived: {}",
             mutation.output
         );
+        // finalize_pass's third guard (`requires success_seen or not
+        // inconclusive_seen`) is the all-inconclusive-cannot-pass fix; a
+        // surviving mutant here means an all-inconclusive fold could
+        // wrongly finalize pass, the same reward-test hole #1080's review
+        // flagged for the all-failure case.
+        assert!(
+            mutation.output["mutants"]
+                .as_array()
+                .expect("mutation rows")
+                .iter()
+                .any(|mutant| {
+                    mutant["op"] == operator
+                        && mutant["target"] == "finalize_pass requires #3"
+                        && mutant["status"] == "killed"
+                        && mutant["killed_by"] == "FinalizeAgreesWithFolded"
+                }),
+            "{operator} of the inconclusive-cannot-pass finalize guard survived: {}",
+            mutation.output
+        );
     }
 }
 
@@ -1043,6 +1082,22 @@ fn fold_classifier_is_fail_closed() {
 
 #[test]
 fn sweep_subverdicts_conform_to_the_fold_model() {
+    let cart_v1 = run_cli(&strings(&["sweep", "specs/cart_v1.fsl"]));
+    assert_eq!(
+        cart_v1.output["result"], "sweep_passed",
+        "{}",
+        cart_v1.output
+    );
+    let cart_v1_items = cart_v1.output["sweep"]["results"]
+        .as_array()
+        .expect("cart_v1 sweep results")
+        .iter()
+        .map(|entry| entry["verification"].clone())
+        .collect::<Vec<_>>();
+    let cart_v1_trace =
+        fold_trace(CompoundCommand::Sweep, &cart_v1_items, &cart_v1).expect("map cart_v1 sweep");
+    assert_conformant(FOLD_SPEC, &cart_v1_trace, "cart_v1 sweep fold");
+
     let passed = run_cli(&strings(&[
         "sweep",
         "rust/fslc/tests/fixtures/sweep_clean.fsl",
@@ -1053,7 +1108,7 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         .as_array()
         .expect("clean sweep results")
         .iter()
-        .map(|entry| entry["summary"].clone())
+        .map(|entry| entry["verification"].clone())
         .collect::<Vec<_>>();
     let passed_trace =
         fold_trace(CompoundCommand::Sweep, &passed_items, &passed).expect("map clean sweep");
@@ -1070,7 +1125,7 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         .as_array()
         .expect("failed sweep results")
         .iter()
-        .map(|entry| entry["summary"].clone())
+        .map(|entry| entry["verification"].clone())
         .collect::<Vec<_>>();
     assert!(
         failed_items
@@ -1086,6 +1141,27 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         FOLD_SPEC,
         &rejected_finalize_pass(&failed_trace),
         "failed sweep cannot finalize pass",
+    );
+
+    let inconclusive = run_cli(&strings(&["sweep", "specs/cart_v1.fsl", "--depth", "0..0"]));
+    assert_eq!(
+        inconclusive.output["result"], "sweep_inconclusive",
+        "{}",
+        inconclusive.output
+    );
+    let inconclusive_items = inconclusive.output["sweep"]["results"]
+        .as_array()
+        .expect("inconclusive sweep results")
+        .iter()
+        .map(|entry| entry["verification"].clone())
+        .collect::<Vec<_>>();
+    let inconclusive_trace = fold_trace(CompoundCommand::Sweep, &inconclusive_items, &inconclusive)
+        .expect("map inconclusive sweep");
+    assert_conformant(FOLD_SPEC, &inconclusive_trace, "inconclusive sweep fold");
+    assert_nonconformant(
+        FOLD_SPEC,
+        &rejected_finalize_pass(&inconclusive_trace),
+        "all-inconclusive sweep cannot finalize pass",
     );
 }
 
@@ -1132,8 +1208,8 @@ fn copy_chain_fixtures(destination: &Path) {
     }
 }
 
-/// Independent adapter for `main.rs:3638-3657::chain_layer_passes` and the
-/// layer envelopes produced at `main.rs:3812-3968`. It deliberately does not
+/// Independent adapter for `main.rs:3746-3765::chain_layer_passes` and the
+/// layer envelopes produced at `main.rs:3883-4107`. It deliberately does not
 /// call that function or the production outcome classifier.
 fn chain_layer_fold_class(layer: &Value) -> Result<FoldClass, String> {
     let status = layer
@@ -1208,7 +1284,12 @@ fn chain_layer_fold_class(layer: &Value) -> Result<FoldClass, String> {
             FoldClass::Success => 0,
             FoldClass::Failure if result == "error" && detail["kind"] == "internal" => 3,
             FoldClass::Failure if result == "error" => 2,
-            FoldClass::Failure => 1,
+            // Chain layers never call `sweep_cell_class`; production
+            // `chain_layer_passes` classifies a layer's `reachable_failed`
+            // detail as a failure regardless of `unreached` classification,
+            // so this adapter treats `Inconclusive` like `Failure` instead of
+            // adopting sweep's insufficient-depth carve-out here.
+            FoldClass::Failure | FoldClass::Inconclusive => 1,
             FoldClass::Skipped => {
                 return Err(format!("non-skipped layer has skipped detail: {layer}"));
             }
@@ -1238,7 +1319,12 @@ fn chain_fold_trace(items: &[Value], top: &RawCliOutput) -> Result<Vec<Value>, S
         .map(|item| {
             Ok(match chain_layer_fold_class(item)? {
                 FoldClass::Success => json!({"action":"fold_sub_success"}),
-                FoldClass::Failure => json!({"action":"fold_sub_failure"}),
+                // `chain_layer_fold_class` itself never returns
+                // `Inconclusive` (see its own match above); it is listed only
+                // for exhaustiveness.
+                FoldClass::Failure | FoldClass::Inconclusive => {
+                    json!({"action":"fold_sub_failure"})
+                }
                 FoldClass::Skipped => json!({"action":"fold_skipped"}),
             })
         })

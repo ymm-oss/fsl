@@ -29,19 +29,19 @@ The engineer writes a near-implementation design and real code in `3_design.fsl`
 
 ```bash
 # 1. Consultant deliverable: inductively prove the business layer
-./.venv/bin/python -m fslc verify examples/e2e/1_business.fsl --engine induction --deadlock ignore
+./.venv/bin/python -m fslc verify examples/e2e/1_business.fsl --engine induction
 
 # 2. PM deliverable: bounded-verify the requirements layer, and confirm implements against the business layer
-./.venv/bin/python -m fslc verify examples/e2e/2_requirements.fsl --deadlock ignore
+./.venv/bin/python -m fslc verify examples/e2e/2_requirements.fsl
 
 # 3. PM deliverable: inductively prove the requirements-layer generated bounds, and confirm implements: refines
-./.venv/bin/python -m fslc verify examples/e2e/2_requirements.fsl --engine induction --deadlock ignore
+./.venv/bin/python -m fslc verify examples/e2e/2_requirements.fsl --engine induction
 
 # 4. PM deliverable: confirm that the acceptance criteria appear in scenarios
-./.venv/bin/python -m fslc scenarios examples/e2e/2_requirements.fsl --deadlock ignore
+./.venv/bin/python -m fslc scenarios examples/e2e/2_requirements.fsl
 
 # 5. Engineer design: inductively prove the design layer
-./.venv/bin/python -m fslc verify examples/e2e/3_design.fsl --engine induction --deadlock ignore
+./.venv/bin/python -m fslc verify examples/e2e/3_design.fsl --engine induction
 
 # 6. Engineer design: confirm that the design layer refines the requirements layer
 ./.venv/bin/python -m fslc refine examples/e2e/3_design.fsl examples/e2e/2_requirements.fsl examples/e2e/3_refines_2.fsl --depth 8

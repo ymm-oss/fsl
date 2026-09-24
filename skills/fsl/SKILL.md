@@ -77,7 +77,7 @@ failure to 1 instead. So branch on the exit code being non-zero, and read
 `result` when you need to know which failure it was. The values you will meet most often are
 `violated`,
 `reachable_failed`, `unknown_cti`, `unknown_budget`, `nonconformant`,
-`refinement_failed`, `impl_violated`, `sweep_failed` and `observed_mismatch`,
+`refinement_failed`, `impl_violated`, `sweep_failed`, `sweep_inconclusive` and `observed_mismatch`,
 and the dialect commands add their own (`document check`'s
 `document_drifted`, `ai replay`'s `replay_nonconformant`, `ai eval`'s gate
 statuses). `docs/LANGUAGE.md` lists the verify-family values with each one's

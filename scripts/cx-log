@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Store complete command output outside the conversation and print a bounded summary.
+# Compatible with macOS Bash 3.2.
+
+set -u
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: ./scripts/cx-log <label> -- <command> [args...]
+Example: ./scripts/cx-log unit-auth -- flutter test test/auth/session_test.dart
+EOF
+  exit 64
+}
+
+[ "$#" -ge 3 ] || usage
+label=$1
+shift
+[ "${1:-}" = "--" ] || usage
+shift
+[ "$#" -ge 1 ] || usage
+
+safe_label=$(printf '%s' "$label" | tr -cs 'A-Za-z0-9._-' '_' | sed 's/^_//; s/_$//')
+[ -n "$safe_label" ] || safe_label="command"
+
+log_dir="${CODEX_LOG_DIR:-.codex/tmp}"
+mkdir -p "$log_dir"
+timestamp=$(date '+%Y%m%d-%H%M%S')
+log_file="$log_dir/${timestamp}-${safe_label}.log"
+
+printf '[cx-log] command:'
+printf ' %q' "$@"
+printf '\n[cx-log] full log: %s\n' "$log_file"
+
+set +e
+"$@" >"$log_file" 2>&1
+status=$?
+set -e
+
+if [ "$status" -eq 0 ]; then
+  printf '[cx-log] status: PASS\n'
+  printf '%s\n' '--- last 40 lines ---'
+  tail -n 40 "$log_file"
+else
+  printf '[cx-log] status: FAIL (%s)\n' "$status"
+  printf '%s\n' '--- selected failure lines (max 80) ---'
+  grep -nEi '(^|[^[:alpha:]])(error|fail(ed|ure)?|fatal|exception|panic|assert(ion)?)([^[:alpha:]]|$)' "$log_file" \
+    | head -n 80 || true
+  printf '%s\n' '--- last 120 lines ---'
+  tail -n 120 "$log_file"
+fi
+
+exit "$status"

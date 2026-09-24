@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// expected-command: verify --depth 1 --deadlock ignore
+// expected-command: verify --depth 1
 // expected-result: verified
 spec GalleryOptionStructuralEquality {
   enum K { A, B }

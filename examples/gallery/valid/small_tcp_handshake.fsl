@@ -1,7 +1,7 @@
 // topic: TCP-style handshake
 // scale: small
 // features: enum state machine, fair progress, leadsTo, reachable
-// expected-command: verify --depth 6 --deadlock ignore
+// expected-command: verify --depth 6
 // expected-result: verified
 spec GallerySmallTcpHandshake {
   enum CSt { Closed, SynSent, Established }

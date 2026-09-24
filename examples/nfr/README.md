@@ -26,8 +26,8 @@ Lowering the deadline to 3 produces a violation at the age-4 boundary.
 Useful checks:
 
 ```bash
-fslc verify examples/nfr/sla_worker.fsl --depth 10 --deadlock ignore
-fslc verify examples/nfr/sla_worker.fsl --depth 10 --deadlock ignore --engine induction
+fslc verify examples/nfr/sla_worker.fsl --depth 10
+fslc verify examples/nfr/sla_worker.fsl --depth 10 --engine induction
 fslc refine examples/nfr/sla_worker_design.fsl examples/nfr/sla_worker.fsl \
             examples/nfr/sla_worker_refines.fsl --depth 6        # => refines
 fslc replay examples/nfr/bounded_response.fsl \

@@ -38,8 +38,8 @@ workflow:
 
 ```bash
 # Prove the policies of the current and reform proposals respectively
-fslc verify examples/consulting/asis_expense.fsl --engine induction --deadlock ignore
-fslc verify examples/consulting/tobe_expense.fsl --engine induction --deadlock ignore
+fslc verify examples/consulting/asis_expense.fsl --engine induction
+fslc verify examples/consulting/tobe_expense.fsl --engine induction
 
 # Control check of the reform (To-Be ⊒ As-Is)
 fslc refine examples/consulting/tobe_expense.fsl \

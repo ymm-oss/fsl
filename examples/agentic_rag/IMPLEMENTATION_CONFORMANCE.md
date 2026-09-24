@@ -26,7 +26,7 @@ pytestで確認する。
 
 ```bash
 fslc testgen examples/agentic_rag/agentic_rag_design.fsl \
-  --depth 4 --deadlock ignore \
+  --depth 4 \
   -o examples/agentic_rag/test_agentic_rag_design_conformance.py
 ```
 

@@ -186,7 +186,7 @@ const CASES: &[Case] = &[
         depth: 8,
         expected_result: "refines",
         expected_kind: None,
-        declared_by: "docs/LANGUAGE.md:1378-1381 (command line, then \
+        declared_by: "docs/LANGUAGE.md:1546-1549 (command line, then \
                       `Success: result: \"refines\" (exit 0)`)",
     },
     Case {
@@ -298,7 +298,7 @@ const CASES: &[Case] = &[
         // that drops `fair` still refines. The failing counterpart is the
         // `_progress_refines` row below, which opts in to progress
         // preservation.
-        declared_by: "examples/refinement_liveness/README.md:33 (`# refines`) and :54 \
+        declared_by: "examples/refinement_liveness/README.md:33 (`# refines`) and :55 \
                       (`design_drops_liveness` returns `refines` (safety OK))",
     },
     Case {
@@ -312,7 +312,7 @@ const CASES: &[Case] = &[
         depth: 8,
         expected_result: "refines",
         expected_kind: None,
-        declared_by: "examples/refinement_liveness/README.md:38 (`# refines`)",
+        declared_by: "examples/refinement_liveness/README.md:39 (`# refines`)",
     },
     Case {
         implementation: "examples/refinement_liveness/design_drops_liveness.fsl",
@@ -325,7 +325,7 @@ const CASES: &[Case] = &[
         depth: 8,
         expected_result: "refinement_failed",
         expected_kind: Some("progress_lost"),
-        declared_by: "examples/refinement_liveness/README.md:43 \
+        declared_by: "examples/refinement_liveness/README.md:44 \
                       (`# refinement_failed / progress_lost`)",
     },
     Case {
@@ -339,7 +339,7 @@ const CASES: &[Case] = &[
         depth: 8,
         expected_result: "refines",
         expected_kind: None,
-        declared_by: "examples/refinement_liveness/README.md:45 (`# refines + progress`)",
+        declared_by: "examples/refinement_liveness/README.md:46 (`# refines + progress`)",
     },
     Case {
         implementation: "examples/refinement_liveness/design_bypasses_control.fsl",
@@ -352,7 +352,7 @@ const CASES: &[Case] = &[
         depth: 8,
         expected_result: "refinement_failed",
         expected_kind: Some("abs_requires_failed"),
-        declared_by: "examples/refinement_liveness/README.md:49 \
+        declared_by: "examples/refinement_liveness/README.md:50 \
                       (`# refinement_failed / abs_requires_failed`)",
     },
     Case {
@@ -781,7 +781,7 @@ fn run_refine(implementation: &str, abstraction: &str, mapping: &str, depth: u32
 }
 
 /// The exit code the CLI contract binds to a `refine` result
-/// (`docs/LANGUAGE.md:1381` and `:1394`): `refines` exits 0, `refinement_failed`
+/// (`docs/LANGUAGE.md:1549` and `:1562`): `refines` exits 0, `refinement_failed`
 /// exits 1, a static `error` exits 2, and `violated` — the impl-self-
 /// violation verdict `refine` reaches before it consults the abstraction
 /// (#466) — is failure-class, so it exits 1.

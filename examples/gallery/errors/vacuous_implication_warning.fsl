@@ -1,3 +1,4 @@
+// deadlock-ignore-rationale: This error fixture isolates vacuity diagnostics from its intentional stopped state.
 // expected-command: verify --depth 2 --deadlock ignore --vacuity error
 // expected-result: error
 // expected-kind: vacuous_implication

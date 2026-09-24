@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Built for #1080's minimal-selection regression test
+// (`sweep_skips_inconclusive_cell_when_selecting_true_failure_scope` in
+// `sweep_contract.rs`). Swept over `--depth 0..4`, this produces a grid whose
+// early cells (depth 0, 1) are `reachable_failed` with an `unreached` array
+// containing only `classification:"insufficient_depth"` for `ReachTwo`
+// (inconclusive, per decision 016) and whose later cells (depth 2, 3) are
+// determinate successes, before a genuine bug surfaces as `violated` once
+// depth reaches 4 (`x` can only pass 3 after four `bump` actions). The true
+// failure must remain the sweep's `minimal_counterexample`, not either
+// earlier inconclusive cell.
+spec SweepInconclusiveThenFailure {
+  state { x: Int }
+  init { x = 0 }
+
+  action bump() {
+    requires x >= 0
+    x = x + 1
+  }
+
+  invariant BoundedBelowFour { x < 4 }
+  reachable ReachTwo { x == 2 }
+}

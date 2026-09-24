@@ -4,7 +4,7 @@
 // This file expresses a "process diagram + business rules" in a
 // checkable form. No implementation terms appear at all. Once written:
 //
-//   fslc verify examples/pm/cancel_flow.fsl --engine induction --deadlock ignore
+//   fslc verify examples/pm/cancel_flow.fsl --engine induction
 //
 // proves that "every rule holds under every order of progression".
 // If a rule is violated, the ID and original text of the violated
