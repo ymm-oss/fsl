@@ -151,6 +151,20 @@ test("validateContract: rejects a missing bypass_actors field", () => {
   assert.ok(errors.some((e) => e.includes("bypass_actors")));
 });
 
+test("validateContract: rejects a missing strict_required_status_checks_policy field", () => {
+  const mutated = structuredClone(contract);
+  delete mutated.rulesets[0].strict_required_status_checks_policy;
+  const errors = validateContract(mutated);
+  assert.ok(errors.some((e) => e.includes("strict_required_status_checks_policy")));
+});
+
+test("validateContract: rejects a non-boolean strict_required_status_checks_policy", () => {
+  const mutated = structuredClone(contract);
+  mutated.rulesets[0].strict_required_status_checks_policy = "false";
+  const errors = validateContract(mutated);
+  assert.ok(errors.some((e) => e.includes("strict_required_status_checks_policy")));
+});
+
 // ---------------------------------------------------------------------------
 // compareRuleset: the four cases the issue demands
 // ---------------------------------------------------------------------------
@@ -263,7 +277,8 @@ test("fail-closed: enforcement other than active yields an enforcement finding",
 
 test("fail-closed: flipping strict_required_status_checks_policy yields strict-policy", () => {
   const mutated = structuredClone(fixture);
-  requiredStatusChecksRule(mutated).parameters.strict_required_status_checks_policy = false;
+  requiredStatusChecksRule(mutated).parameters.strict_required_status_checks_policy =
+    !contractEntry.strict_required_status_checks_policy;
   const comparison = compareRuleset(contractEntry, mutated);
   assert.equal(comparison.verdict, "drift");
   assert.ok(findingClasses(comparison).includes("strict-policy"));

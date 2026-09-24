@@ -104,6 +104,10 @@ export function validateContract(contract) {
     if (!Array.isArray(entry.bypass_actors)) {
       errors.push(`${label}.bypass_actors must be present and be an array`);
     }
+
+    if (typeof entry.strict_required_status_checks_policy !== "boolean") {
+      errors.push(`${label}.strict_required_status_checks_policy must be present and be a boolean`);
+    }
   });
 
   return errors;
@@ -273,10 +277,10 @@ export function compareRuleset(contractEntry, observation) {
     if (requiredStatusChecksRule) {
       const params = requiredStatusChecksRule.parameters ?? {};
 
-      if (params.strict_required_status_checks_policy !== true) {
+      if (params.strict_required_status_checks_policy !== contractEntry.strict_required_status_checks_policy) {
         findings.push({
           class: "strict-policy",
-          detail: `strict_required_status_checks_policy is ${JSON.stringify(params.strict_required_status_checks_policy)}, expected true`,
+          detail: `strict_required_status_checks_policy is ${JSON.stringify(params.strict_required_status_checks_policy)}, expected ${JSON.stringify(contractEntry.strict_required_status_checks_policy)}`,
         });
       }
       if (params.do_not_enforce_on_create !== false) {
