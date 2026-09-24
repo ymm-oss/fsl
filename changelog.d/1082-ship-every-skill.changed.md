@@ -1,1 +1,0 @@
-Changed (#1082): the release skill bundle and the installer now carry every directory under `skills/`, so `fsl-from-code` and `fsl-requirements-document` ship for the first time. The six-name list that had to be edited in both places is gone.

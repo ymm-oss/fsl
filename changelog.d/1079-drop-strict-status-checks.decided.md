@@ -1,1 +1,0 @@
-Decided: `main safety and CI` no longer requires its six contexts to have run against current `main`. The six remain required on the pull request's own head; what is given up is the guarantee that the head included whatever landed in the meantime, and why that trade was taken here is recorded in `docs/DESIGN-ci.md`.

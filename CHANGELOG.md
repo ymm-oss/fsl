@@ -5,6 +5,32 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.7.0] - 2026-09-24
+
+- Added (#1055): examples now require an adjacent rationale whenever a teaching command uses `--deadlock ignore`, preventing unexplained flag regressions.
+- Changed (#852): Cache-budget audit reports now separate listing-derived, superseded-generation recoverability from unattributed net growth while retaining the physical-byte budget verdict and non-atomic-observation caveat.
+- Changed (#1082): the release skill bundle and the installer now carry every directory under `skills/`, so `fsl-from-code` and `fsl-requirements-document` ship for the first time. The six-name list that had to be edited in both places is gone.
+- Fixed (#587): the WASM browser probe now reports why it failed instead of
+  folding every failure into one exit code. A stalled CDP call or completion
+  poll exits 124 (`probe_timeout`, with `mode` `cdp` or `poll`), a refuted
+  native/WASM parity comparison -- including a malformed WASM envelope, a stale
+  corpus exclusion, or agent fail-closed drift -- exits 65 (`parity_violation`),
+  and anything else, including a malformed native envelope, stays a harness
+  failure (exit 1). All three still fail the `WASM` job; nothing is retried or
+  downgraded. A failure before the browser starts now exits instead of hanging
+  on the open HTTP server.
+- Fixed (#998): example commands no longer suppress default deadlock warnings where that suppression was unnecessary.
+- Fixed (#1080): `fslc sweep` no longer treats depth-limited-only reachability
+  cells as counterexamples. The public CLI contract is breaking: a grid made
+  entirely of such cells now returns `sweep_inconclusive` with exit 1 and a null
+  minimal counterexample, while grids with a determinate success and no true
+  failure return `sweep_passed` with exit 0.
+  Some grids that previously returned `sweep_failed`/exit 1 now return
+  `sweep_passed`/exit 0, and `minimal_counterexample` is null when no true failure
+  exists; consumers should gate on the exit code rather than
+  `result == "sweep_failed"`.
+- Decided: `main safety and CI` no longer requires its six contexts to have run against current `main`. The six remain required on the pull request's own head; what is given up is the guarantee that the head included whatever landed in the meantime, and why that trade was taken here is recorded in `docs/DESIGN-ci.md`.
+
 ## [4.6.0] - 2026-09-16
 
 - Fixed (#980): `approval create`/`check`/`diff` now reject a `.md` positional
@@ -6182,7 +6208,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.6.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.7.0...HEAD
+[4.7.0]: https://github.com/ymm-oss/fsl/compare/v4.6.0...v4.7.0
 [4.6.0]: https://github.com/ymm-oss/fsl/compare/v4.5.0...v4.6.0
 [4.5.0]: https://github.com/ymm-oss/fsl/compare/v4.4.1...v4.5.0
 [4.4.1]: https://github.com/ymm-oss/fsl/compare/v4.4.0...v4.4.1
