@@ -2,11 +2,14 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
 struct Fixture(PathBuf);
+
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 impl Fixture {
     fn new(name: &str, source: &str) -> Self {
@@ -14,8 +17,9 @@ impl Fixture {
             .duration_since(UNIX_EPOCH)
             .expect("clock after epoch")
             .as_nanos();
+        let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "fsl-issue-250-{name}-{}-{nonce}.fsl",
+            "fsl-issue-250-{name}-{}-{nonce}-{sequence}.fsl",
             std::process::id()
         ));
         std::fs::write(&path, source).expect("write fixture");
