@@ -1616,9 +1616,15 @@ fslc refine bot.fsl  mid.fsl bot_refines_mid.fsl  top.fsl mid_refines_top.fsl --
 It composes the adjacent mappings (state α_AC = α_BC ∘ α_AB, actions a→b→c /
 stutter) and checks bottom ⊒ top. On success it returns the composed
 `action_map` and the layer ordering `chain`; on failure it returns the first
-broken link `failed_link: {from, to, kind}`. Bounded refinement is transitive at
-the same depth, so a composition check is equivalent to all adjacent links
-holding (`docs/DESIGN-refinement.md` §7, example `examples/refinement_chain`).
+broken link `failed_link: {from, to, kind}`. At the same depth K, if every
+adjacent link refines, their composition refines; the converse does not hold,
+because a direct endpoint success does not establish the middle layer's
+contract. For example, Low may stop after one step while Mid permits a second
+step that Top forbids, so direct Low→Top succeeds while Mid→Top and the chain
+fail. The chain requires every adjacent contract to hold
+(`docs/DESIGN-refinement.md` §7, example `examples/refinement_chain`). For
+manifest-driven `fslc chain`, links may use different `refine_depth` values;
+the minimum link depth is the conservative end-to-end bound.
 Only the case where an argument expression reads the state of an intermediate
 layer is unsupported.
 
