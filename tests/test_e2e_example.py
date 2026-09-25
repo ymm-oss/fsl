@@ -75,11 +75,11 @@ def test_e2e_chain_verifies_refines_and_implementation_passes():
 def test_e2e_readme_commands_and_break_demo_are_current():
     readme = (E2E / "README.md").read_text(encoding="utf-8")
     documented_commands = [
-        "./.venv/bin/python -m fslc verify examples/e2e/1_business.fsl --engine induction --deadlock ignore",
-        "./.venv/bin/python -m fslc verify examples/e2e/2_requirements.fsl --deadlock ignore",
-        "./.venv/bin/python -m fslc verify examples/e2e/2_requirements.fsl --engine induction --deadlock ignore",
-        "./.venv/bin/python -m fslc scenarios examples/e2e/2_requirements.fsl --deadlock ignore",
-        "./.venv/bin/python -m fslc verify examples/e2e/3_design.fsl --engine induction --deadlock ignore",
+        "./.venv/bin/python -m fslc verify examples/e2e/1_business.fsl --engine induction",
+        "./.venv/bin/python -m fslc verify examples/e2e/2_requirements.fsl",
+        "./.venv/bin/python -m fslc verify examples/e2e/2_requirements.fsl --engine induction",
+        "./.venv/bin/python -m fslc scenarios examples/e2e/2_requirements.fsl",
+        "./.venv/bin/python -m fslc verify examples/e2e/3_design.fsl --engine induction",
         "./.venv/bin/python -m fslc refine examples/e2e/3_design.fsl examples/e2e/2_requirements.fsl examples/e2e/3_refines_2.fsl --depth 8",
         "./.venv/bin/python -m fslc testgen examples/e2e/3_design.fsl -o examples/e2e/impl/test_conformance.py",
         "(cd examples/e2e/impl && ../../../.venv/bin/python -m pytest -q)",
@@ -89,11 +89,11 @@ def test_e2e_readme_commands_and_break_demo_are_current():
         assert command in readme
 
     command_results = [
-        _run([sys.executable, "-m", "fslc", "verify", str(E2E / "1_business.fsl"), "--engine", "induction", "--deadlock", "ignore"]),
-        _run([sys.executable, "-m", "fslc", "verify", str(E2E / "2_requirements.fsl"), "--deadlock", "ignore"]),
-        _run([sys.executable, "-m", "fslc", "verify", str(E2E / "2_requirements.fsl"), "--engine", "induction", "--deadlock", "ignore"]),
-        _run([sys.executable, "-m", "fslc", "scenarios", str(E2E / "2_requirements.fsl"), "--deadlock", "ignore"]),
-        _run([sys.executable, "-m", "fslc", "verify", str(E2E / "3_design.fsl"), "--engine", "induction", "--deadlock", "ignore"]),
+        _run([sys.executable, "-m", "fslc", "verify", str(E2E / "1_business.fsl"), "--engine", "induction"]),
+        _run([sys.executable, "-m", "fslc", "verify", str(E2E / "2_requirements.fsl")]),
+        _run([sys.executable, "-m", "fslc", "verify", str(E2E / "2_requirements.fsl"), "--engine", "induction"]),
+        _run([sys.executable, "-m", "fslc", "scenarios", str(E2E / "2_requirements.fsl")]),
+        _run([sys.executable, "-m", "fslc", "verify", str(E2E / "3_design.fsl"), "--engine", "induction"]),
         _run([
             sys.executable,
             "-m",
