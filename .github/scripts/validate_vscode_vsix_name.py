@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
 
 """Keep the documented VS Code release asset name aligned with packaging."""
 

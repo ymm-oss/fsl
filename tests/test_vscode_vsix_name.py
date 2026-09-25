@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
 
 """Calibration controls for the VS Code release-asset documentation audit."""
 
