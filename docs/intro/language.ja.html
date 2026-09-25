@@ -1599,8 +1599,13 @@ enum(または struct)は、マージされるのではなく <code>kind: "type"
 stutter)、bottom ⊒ top を検査します。成功時は合成された <code>action_map</code> とレイヤーの
 順序 <code>chain</code> を返します。失敗時は最初に壊れたリンク
 <code>failed_link: {from, to, kind}</code> を返します。有界の refinement は同じ深さで推移的
-なので、合成の検査はすべての隣接リンクが成立することと等価です
-(<code>docs/DESIGN-refinement.md</code> §7、例 <code>examples/refinement_chain</code>)。
+です。深さ K で隣接するすべてのリンクが成立すれば合成も成立しますが、逆は
+成り立ちません。直接の端点間チェックが成功しても、中間レイヤーの契約適合は示され
+ません。たとえば Low は1ステップで止まり、Mid は Top が許さない2ステップ目を許す
+ため、Low→Top は成功しても Mid→Top と chain は失敗します。chain は各隣接契約の
+成立を要求します (<code>docs/DESIGN-refinement.md</code> §7、例 <code>examples/refinement_chain</code>)。
+マニフェストによる <code>fslc chain</code> ではリンクごとに <code>refine_depth</code> を指定でき、端から
+端までの保守的な検査深度は各リンクの深度の最小値です。
 引数の式が中間レイヤーの状態を読むケースだけが未対応です。</p>
 <p>推奨ワークフロー: <strong>人間/LLM が abs をレビュー → LLM が impl を詳細化 →
 <code>refine</code> が忠実性を保証</strong>。abs の <code>ensures</code> / invariant は refine では再検査され

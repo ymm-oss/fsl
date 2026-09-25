@@ -1649,9 +1649,15 @@ sequence:</p>
 <p>It composes the adjacent mappings (state α_AC = α_BC ∘ α_AB, actions a→b→c /
 stutter) and checks bottom ⊒ top. On success it returns the composed
 <code>action_map</code> and the layer ordering <code>chain</code>; on failure it returns the first
-broken link <code>failed_link: {from, to, kind}</code>. Bounded refinement is transitive at
-the same depth, so a composition check is equivalent to all adjacent links
-holding (<code>docs/DESIGN-refinement.md</code> §7, example <code>examples/refinement_chain</code>).
+broken link <code>failed_link: {from, to, kind}</code>. At the same depth K, if every
+adjacent link refines, their composition refines; the converse does not hold,
+because a direct endpoint success does not establish the middle layer's
+contract. For example, Low may stop after one step while Mid permits a second
+step that Top forbids, so direct Low→Top succeeds while Mid→Top and the chain
+fail. The chain requires every adjacent contract to hold
+(<code>docs/DESIGN-refinement.md</code> §7, example <code>examples/refinement_chain</code>). For
+manifest-driven <code>fslc chain</code>, links may use different <code>refine_depth</code> values;
+the minimum link depth is the conservative end-to-end bound.
 Only the case where an argument expression reads the state of an intermediate
 layer is unsupported.</p>
 <p>Recommended workflow: <strong>a human/LLM reviews abs → the LLM elaborates impl →

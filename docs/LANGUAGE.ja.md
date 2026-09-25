@@ -1565,8 +1565,13 @@ fslc refine bot.fsl  mid.fsl bot_refines_mid.fsl  top.fsl mid_refines_top.fsl --
 stutter)、bottom ⊒ top を検査します。成功時は合成された `action_map` とレイヤーの
 順序 `chain` を返します。失敗時は最初に壊れたリンク
 `failed_link: {from, to, kind}` を返します。有界の refinement は同じ深さで推移的
-なので、合成の検査はすべての隣接リンクが成立することと等価です
-(`docs/DESIGN-refinement.md` §7、例 `examples/refinement_chain`)。
+です。深さ K で隣接するすべてのリンクが成立すれば合成も成立しますが、逆は
+成り立ちません。直接の端点間チェックが成功しても、中間レイヤーの契約適合は示され
+ません。たとえば Low は1ステップで止まり、Mid は Top が許さない2ステップ目を許す
+ため、Low→Top は成功しても Mid→Top と chain は失敗します。chain は各隣接契約の
+成立を要求します (`docs/DESIGN-refinement.md` §7、例 `examples/refinement_chain`)。
+マニフェストによる `fslc chain` ではリンクごとに `refine_depth` を指定でき、端から
+端までの保守的な検査深度は各リンクの深度の最小値です。
 引数の式が中間レイヤーの状態を読むケースだけが未対応です。
 
 推奨ワークフロー: **人間/LLM が abs をレビュー → LLM が impl を詳細化 →
