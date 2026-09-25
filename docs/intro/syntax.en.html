@@ -489,10 +489,8 @@ type Cell = 0..ROOMS*SLOTS-1
       </div>
       <div class="syntax-card">
         <h3>Sweep bounded scope</h3>
-        <pre><code>fslc sweep spec.fsl \
-  --instances Case=1..3 \
-  --depth 1..8 \
-  --property AtMostOne</code></pre>
+        <pre><code>fslc sweep spec.fsl --depth 1..8 --property AtMostOne</code></pre>
+        <p>Add <code>--instances &lt;Entity&gt;=1..3</code> and/or <code>--values &lt;Number&gt;=…</code> only when the spec declares an entity or number; replace the placeholders with declared names.</p>
         <p><code>sweep.results</code> records each run; <code>sweep.minimal_counterexample</code> points at the first failing scope.</p>
       </div>
     </div>
