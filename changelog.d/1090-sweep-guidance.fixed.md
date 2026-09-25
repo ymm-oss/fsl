@@ -1,0 +1,1 @@
+Fixed (#1090): the skill reference and the intro syntax pages now recommend the depth-only `fslc sweep file.fsl --depth 1..8 [--property Name]`, which works on every spec, and present `--instances <Entity>=…` / `--values <Number>=…` as an extension for specs that declare them. The old `--instances Case=1..3` form exited 2 on any spec without entity/number declarations.
