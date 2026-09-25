@@ -573,6 +573,13 @@
       "tier": "exempt"
     },
     {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_vscode_vsix_name.py",
+      "tier": "required"
+    },
+    {
       "exempt_reason": "manual-developer-run",
       "path": "tools/check_rust_ast_parity.py",
       "tier": "exempt"

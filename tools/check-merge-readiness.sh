@@ -57,6 +57,9 @@ check_automation() {
   # the live parser-backed audit.
   python3 -m pytest tests/test_toolchain_pin.py -v
   python3 .github/scripts/validate_toolchain_pin.py
+  # Keep both VS Code install instructions tied to the release packaging name.
+  python3 -m pytest tests/test_vscode_vsix_name.py -v
+  python3 .github/scripts/validate_vscode_vsix_name.py
   # The cache-budget reporter subscribes by workflow display name. Its
   # parser-backed uniqueness control must be able to block a merge, not merely
   # report red in a non-required workflow, so run its calibrated controls and
