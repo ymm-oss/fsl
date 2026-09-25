@@ -1,0 +1,1 @@
+Fixed (#1037): `ledger::evidence_verdict`'s doc comment now cites the design section that documents it ("Verdict mapping — `ledger::evidence_verdict` (issue #508)") as a quoted heading, so the design-citation check verifies it; the old `classify_source` name no longer exists anywhere.
