@@ -7340,13 +7340,19 @@ fn run_domain_generate(
     wrap_specialized(result)
 }
 
-/// Coerce a runtime-log JSON scalar to the finite integer domain that
-/// `DOMAIN-ASSUME-FINITE-DOMAIN-MODEL` models domain IDs and correlation
-/// values as, mirroring the frozen Python reference's `_coerce_int`
-/// (`src/fslc/domain_replay.py`): best-effort, defaulting to 0 rather than
-/// rejecting the log entry outright.
+/// Map a runtime-log token for an *implicit identity* domain type onto the
+/// finite integer domain `DOMAIN-ASSUME-FINITE-DOMAIN-MODEL` gives it.
+///
+/// An identity type is one the domain document only ever references and never
+/// declares (`id OrderId`, `input payment_request_id: PaymentRequestId`).
+/// `lower_domain` synthesizes it as an `external` type whose bounds are the
+/// documented placeholder (`docs/DESIGN-domain.md`: "Runtime Replay"), so a
+/// runtime identifier such as `"p1"` has no declared numeric meaning and the
+/// placeholder is the only mapping available. Declared
+/// `range`/`enum`/`Bool` parameters do have one and go through
+/// `parse_param_value` instead (#1116).
 #[allow(clippy::cast_possible_truncation)]
-fn domain_replay_coerce_int(value: &Value) -> FslValue {
+fn domain_replay_identity_value(lo: i64, value: &Value) -> FslValue {
     let parsed = match value {
         Value::Number(number) => number
             .as_i64()
@@ -7355,19 +7361,124 @@ fn domain_replay_coerce_int(value: &Value) -> FslValue {
         Value::Bool(flag) => Some(i64::from(*flag)),
         _ => None,
     };
-    FslValue::Int(parsed.unwrap_or(0))
+    FslValue::Int(parsed.unwrap_or(lo))
 }
 
+/// The placeholder lower bound of `param`'s type when, and only when, that
+/// type is an implicit identity type (see `domain_replay_identity_value`).
+fn domain_replay_identity_bound(
+    model: &KernelModel,
+    declared: &std::collections::BTreeSet<&str>,
+    param: &ParamDef,
+) -> Option<i64> {
+    let ParamDef::Typed {
+        ty: TypeRef::Named(type_name),
+        ..
+    } = param
+    else {
+        return None;
+    };
+    if declared.contains(type_name.as_str()) {
+        return None;
+    }
+    match model.types.get(type_name) {
+        Some(TypeDef::Domain { lo, .. }) => Some(*lo),
+        _ => None,
+    }
+}
+
+/// Re-spell a runtime-log enum token as the Kernel member name the lowered
+/// model uses.
+///
+/// `lower_domain` renames every domain enum member to `{Type}_{Member}`, but
+/// a runtime log is written against the *domain* vocabulary, so it carries
+/// `"Premium"` or `"Tier.Premium"`. Accept all three spellings and leave
+/// anything else untouched, so `parse_param_value` reports it as an unknown
+/// member (#1116).
+fn domain_replay_enum_token(type_name: &str, members: &[String], token: &str) -> String {
+    let member = |candidate: &str| members.iter().any(|known| known == candidate);
+    if member(token) {
+        return token.to_owned();
+    }
+    let bare = token
+        .strip_prefix(type_name)
+        .and_then(|rest| rest.strip_prefix('.'))
+        .unwrap_or(token);
+    let qualified = format!("{type_name}_{bare}");
+    if member(&qualified) {
+        return qualified;
+    }
+    token.to_owned()
+}
+
+/// Convert one runtime-log JSON value to `param`'s **declared** type.
+///
+/// This reuses `parse_param_value` — the same typed conversion `fslc replay`
+/// applies to mapped action parameters — so an enum input is read as its
+/// member name and a `Bool` input as `true`/`false`, and so a value that is
+/// not of the declared type is rejected instead of being silently read as
+/// `0` (#1116: that fallback made `{"value":"garbage"}` report
+/// `conformance_checked`).
+fn domain_replay_param_value(
+    model: &KernelModel,
+    declared: &std::collections::BTreeSet<&str>,
+    param: &ParamDef,
+    value: &Value,
+) -> Result<FslValue, String> {
+    if let Some(lo) = domain_replay_identity_bound(model, declared, param) {
+        return Ok(domain_replay_identity_value(lo, value));
+    }
+    if let ParamDef::Typed {
+        ty: TypeRef::Named(type_name),
+        ..
+    } = param
+        && let Some(TypeDef::Enum { members, .. }) = model.types.get(type_name)
+        && let Some(token) = value.as_str()
+    {
+        let member = domain_replay_enum_token(type_name, members, token);
+        return parse_param_value(model, param, &json!(member));
+    }
+    parse_param_value(model, param, value)
+}
+
+/// The log entry's `params`, converted to the target action's declared
+/// parameter types. A parameter the action does not declare, or a value that
+/// does not convert, fails closed: the caller reports the step as rejected
+/// rather than replaying a fabricated value.
 fn domain_replay_params(
+    model: &KernelModel,
+    declared: &std::collections::BTreeSet<&str>,
+    action: &fsl_core::ActionDef,
     entry: &Map<String, Value>,
-) -> std::collections::BTreeMap<String, FslValue> {
+) -> Result<std::collections::BTreeMap<String, FslValue>, String> {
     entry
         .get("params")
         .and_then(Value::as_object)
         .into_iter()
         .flatten()
-        .map(|(key, value)| (key.clone(), domain_replay_coerce_int(value)))
+        .map(|(key, value)| {
+            let param = action
+                .params
+                .iter()
+                .find(|param| param.name() == key)
+                .ok_or_else(|| format!("action '{}' has no parameter '{key}'", action.name))?;
+            Ok((
+                key.clone(),
+                domain_replay_param_value(model, declared, param, value)?,
+            ))
+        })
         .collect()
+}
+
+/// A correlation value re-read as JSON for typed conversion: correlation ids
+/// are carried as strings (`domain_replay_correlation_value` stringifies
+/// them), so a numeric one is handed back as a number and an opaque token as
+/// a string.
+fn domain_replay_correlation_json(correlation: &str) -> Value {
+    correlation
+        .trim()
+        .parse::<i64>()
+        .map_or_else(|_| json!(correlation), |number| json!(number))
 }
 
 /// `entry.get("correlation_id")`, falling back to `params.correlation_id`,
@@ -7483,6 +7594,12 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
     let mut findings = Vec::new();
     let mut steps = 0_usize;
     let name = domain.name.as_str();
+    // Types the document declares. Everything else a field or input names is
+    // an implicit identity type `lower_domain` synthesizes as an `external`
+    // placeholder domain, which `domain_replay_param_value` treats as an
+    // opaque runtime token rather than a declared numeric value.
+    let declared_types: std::collections::BTreeSet<&str> =
+        domain.types.iter().map(|ty| ty.name.as_str()).collect();
 
     for (index, event) in events.iter().enumerate() {
         let Some(entry) = event.as_object() else {
@@ -7513,10 +7630,21 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
                         .any(|command| command.name == c)
                         .then(|| format!("{}_{}", snake_case(a), snake_case(c)))
                 });
-                let params = domain_replay_params(entry);
-                let ok = action_name
-                    .as_deref()
-                    .is_some_and(|action| domain_replay_step(&mut monitor, action, &params));
+                let ok = action_name.as_deref().is_some_and(|action| {
+                    let Some(definition) = model
+                        .actions
+                        .iter()
+                        .find(|candidate| candidate.name == action)
+                    else {
+                        return false;
+                    };
+                    let Ok(params) =
+                        domain_replay_params(&model, &declared_types, definition, entry)
+                    else {
+                        return false;
+                    };
+                    domain_replay_step(&mut monitor, action, &params)
+                });
                 steps += 1;
                 if !ok {
                     findings.push(domain_replay_finding(
@@ -7677,13 +7805,32 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
                     snake_case(&effect.name),
                     snake_case(event_name)
                 );
-                let mut params = domain_replay_params(entry);
-                if let Some(field) = domain_replay_correlation_field(effect) {
-                    params
-                        .entry(field)
-                        .or_insert_with(|| domain_replay_coerce_int(&json!(correlation)));
-                }
-                let ok = domain_replay_step(&mut monitor, &action_name, &params);
+                let ok = (|| {
+                    let definition = model
+                        .actions
+                        .iter()
+                        .find(|candidate| candidate.name == action_name)?;
+                    let mut params =
+                        domain_replay_params(&model, &declared_types, definition, entry).ok()?;
+                    if let Some(field) = domain_replay_correlation_field(effect)
+                        && !params.contains_key(&field)
+                    {
+                        let param = definition
+                            .params
+                            .iter()
+                            .find(|param| param.name() == field)?;
+                        let value = domain_replay_param_value(
+                            &model,
+                            &declared_types,
+                            param,
+                            &domain_replay_correlation_json(&correlation),
+                        )
+                        .ok()?;
+                        params.insert(field, value);
+                    }
+                    Some(domain_replay_step(&mut monitor, &action_name, &params))
+                })()
+                .unwrap_or(false);
                 steps += 1;
                 if !ok {
                     findings.push(domain_replay_finding(

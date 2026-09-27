@@ -479,6 +479,28 @@ Replay returns `conformance_checked` when the finite log matches the model and
 completion without request, duplicate irreversible completion, or lifecycle
 ordering mismatch. This is runtime observation evidence, not a formal proof.
 
+A log entry's `params` are read at the target action's **declared** parameter
+types, through the same conversion `fslc replay` applies to mapped action
+parameters (`rust/fslc/src/main.rs`'s `parse_param_value`): an enum input from
+its member name, a `Bool` input from `true`/`false`, a `range` input from a
+JSON integer. An enum member is accepted in the domain spelling (`Premium`),
+the qualified spelling (`Tier.Premium`), and the Kernel spelling the lowered
+model itself uses (`Tier_Premium`). A value that is not of the declared type,
+and a parameter the action does not declare, fail closed: the step is not
+replayed and the entry is reported as rejected. Until #1116 every parameter
+was instead forced to `Int` with an unparseable value read as `0`, so an enum
+or `Bool` input could never replay and `{"value":"garbage"}` on an integer
+input reported `conformance_checked` — false conformance
+(`rust/fslc/tests/issue_1116_domain_replay_param_types.rs`).
+
+The one parameter shape with no declared representation is an *implicit
+identity type*: a type the document only references and never declares (`id
+OrderId`, `input payment_request_id: PaymentRequestId`). `lower_domain`
+synthesizes it as an `external` type over the documented placeholder domain,
+so an opaque runtime token such as `"p1"` keeps the placeholder mapping —
+numeric when the token parses as an integer, the domain's lower bound
+otherwise — rather than being rejected for not being a number.
+
 Saga `await` and compensation `after` clauses use per-step event observations in
 the kernel model and add `DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`. Durable process
 history is checked through replay evidence rather than treated as an unbounded
