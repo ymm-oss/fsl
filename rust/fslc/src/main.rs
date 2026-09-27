@@ -7600,6 +7600,44 @@ fn domain_replay_step(
     }
 }
 
+/// Whether the model's most recent accepted transition raised `event_name`
+/// (#1117). Lowering gives every declared domain event a one-hot
+/// `event_<Event>` flag, and *every* emitting action rewrites the flags of
+/// *all* declared events — `true` for the ones it emits, `false` for the
+/// rest (`event_assignments`, `rust/fsl-core/src/domain_lowering.rs`) — with
+/// `init` starting them all `false`. Reading the flag is therefore the
+/// model's own answer to "did this event just occur?", not a second
+/// implementation of `decide ... emits` inside the CLI. The variable name
+/// comes from `fsl_core::event_flag` rather than an `event_` prefix scan of
+/// the state, so a rename in lowering breaks the build instead of silently
+/// matching nothing.
+fn domain_replay_event_occurred(monitor: &fsl_runtime::Monitor, event_name: &str) -> bool {
+    matches!(
+        monitor.state.get(&fsl_core::event_flag(event_name)),
+        Some(FslValue::Bool(true))
+    )
+}
+
+/// The events the model's most recent accepted transition raised, for the
+/// mismatch witness: what the log could have recorded at this point. Empty
+/// before the first accepted transition, and after any transition that emits
+/// nothing.
+fn domain_replay_emitted_events(
+    domain: &fsl_syntax::DomainSpec,
+    monitor: &fsl_runtime::Monitor,
+) -> Vec<String> {
+    let mut names = domain
+        .aggregates
+        .iter()
+        .flat_map(|aggregate| aggregate.events.iter())
+        .filter(|event| domain_replay_event_occurred(monitor, &event.name))
+        .map(|event| event.name.clone())
+        .collect::<Vec<_>>();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
     let source = match read_domain_command_source(path) {
@@ -7706,9 +7744,7 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
                         .iter()
                         .any(|aggregate| aggregate.events.iter().any(|e| e.name == event_name))
                 });
-                if declared {
-                    observed.insert(event_name.unwrap_or_default().to_owned());
-                } else {
+                if !declared {
                     findings.push(domain_replay_finding(
                         "unknown_domain_event",
                         name,
@@ -7719,6 +7755,38 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
                             "declare event {} in an aggregate or fix the runtime log",
                             event_name.unwrap_or_default()
                         )],
+                        None,
+                    ));
+                    continue;
+                }
+                // #1117: being declared is not conformance. A `domain_event`
+                // row claims the event *occurred*, so check it against the
+                // model's own one-hot occurrence flags, which the last
+                // accepted transition (`command` or `effect_completion`) set.
+                // A row naming an event that transition did not emit — or a
+                // row with no preceding transition at all, where every flag
+                // is still `init`'s `false` — is the log disagreeing with the
+                // model, which is exactly what `conformance_checked` claims
+                // cannot happen.
+                let event_name = event_name.unwrap_or_default();
+                if domain_replay_event_occurred(&monitor, event_name) {
+                    observed.insert(event_name.to_owned());
+                } else {
+                    let emitted = domain_replay_emitted_events(&domain, &monitor);
+                    findings.push(domain_replay_finding(
+                        "unknown_domain_event",
+                        name,
+                        index,
+                        "runtime_event_emitted_by_preceding_transition",
+                        &json!({"event":event_name,"emitted_by_preceding_transition":emitted}),
+                        &[
+                            &format!(
+                                "record {event_name} only after a command whose decide emits it (or an effect completion that raises it)"
+                            ),
+                            &format!(
+                                "add {event_name} to the emitting decide/effect in the FSL model if the implementation is right"
+                            ),
+                        ],
                         None,
                     ));
                 }
