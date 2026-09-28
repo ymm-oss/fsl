@@ -354,7 +354,10 @@ kinds against a log, distinct from the static kinds above: `command_rejected_by_
 `unknown_domain_event` carries two distinct `failed_rule` values — an
 undeclared event name, and a declared event the model did not raise at that
 point (#1117) — the same one-kind/many-rules shape
-`uncorrelated_async_completion` uses. See the Runtime Replay section.
+`uncorrelated_async_completion` uses. `command_rejected_by_model` and
+`effect_completion_rejected_by_model` each carry two as well: the model's own
+refusal, and a log parameter that never converted to its declared type
+(#1133). See the Runtime Replay section.
 
 `schemas/fslc/domain/finding.v0.schema.json`'s `kind` enum lists 24 values —
 a superset of every kind on this page, reserved vocabulary the same way the
@@ -659,6 +662,47 @@ practice:
   paths, and the number `1` is accepted on both. (Request/completion pairing
   itself still keys on the stringified value, so a log that writes `1` in one
   entry and `"1"` in the other still pairs.)
+
+#### Reporting a parameter that did not convert
+
+A conversion failure and a rejection by the model are different
+disagreements, and #1116 reported them identically: both produced
+`command_rejected_by_model` with
+`failed_rule:"runtime_command_must_be_enabled_by_domain_model"` and the
+repair *"change the implementation command path or update the FSL
+decide/evolve model"*. For an ill-typed value that is advice to edit a model
+that is correct — the row never reached a guard — and the conversion's own
+message was discarded on the way (#1133).
+
+The two therefore take different `failed_rule` values on the same `kind`, and
+the message is carried in the witness
+(`domain_replay_param_mismatch_finding`, `rust/fslc/src/main.rs`):
+
+| cause | `kind` | `failed_rule` | witness | repair says |
+| --- | --- | --- | --- | --- |
+| a `command` row's `params` do not convert, or name a parameter the command does not declare | `command_rejected_by_model` | `runtime_command_parameters_match_declared_types` | `parameter_error`, `log` | fix the logged value, or the parameter's **declared type** |
+| the model refused an otherwise well-formed `command` | `command_rejected_by_model` | `runtime_command_must_be_enabled_by_domain_model` | `log` | change the command path, or the `decide`/`evolve` rules |
+| an `effect_completion` row's `params` (or the correlation value filled in for one) do not convert | `effect_completion_rejected_by_model` | `effect_completion_parameters_match_declared_types` | `parameter_error`, `log` | fix the logged value, or the parameter's **declared type** |
+| the model refused an otherwise well-formed `effect_completion` | `effect_completion_rejected_by_model` | `effect_completion_matches_pending_lifecycle` | `log` | fix the request/completion ordering |
+
+`witness.parameter_error` is the conversion's message verbatim (`parameter
+'value' must be an integer`, `action 'account_set_score' has no parameter
+'extra'`), so the envelope alone distinguishes the causes. The repair text of
+the two conversion rows deliberately names neither `decide` nor `evolve`:
+the model's transition rules were not consulted for that row, so they are not
+what disagrees — the same "do not send the reader to break a correct model"
+constraint #1117's saga case established, and
+`rust/fslc/tests/issue_1133_domain_replay_param_finding_rule.rs` pins it with
+negative controls.
+
+The `kind` enum in `schemas/fslc/domain/finding.v0.schema.json` is untouched:
+this is the one-kind/many-rules shape already used by
+`uncorrelated_async_completion` and `unknown_domain_event`. The cost is that a
+consumer branching on `kind` alone still cannot separate the two causes. A
+dedicated `kind` would need the closed enum, the kind counts stated on this
+page, and the finding census in
+[#782](https://github.com/ymm-oss/fsl/issues/782) to move together, which is
+a schema decision rather than a diagnostic fix.
 
 Saga `await` and compensation `after` clauses use per-step event observations in
 the kernel model and add `DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`. Durable process
