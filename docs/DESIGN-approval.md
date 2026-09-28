@@ -26,7 +26,6 @@ fslc approval create examples/e2e/2_requirements.fsl \
   --artifact expense-ledger.md \
   --approver alice \
   --depth 8 \
-  --signing-key alice-private.pem \
   -o expense.approval.json
 ```
 
@@ -89,12 +88,22 @@ fslc approval check examples/e2e/2_requirements.fsl --record expense.approval.js
 fslc ledger examples/e2e/2_requirements.fsl --approval expense.approval.json
 ```
 
-Signed v2 records require an explicit trust anchor on every consuming command:
+`--signing-key` turns the same creation into a signed v2 record. Signed
+records then require an explicit trust anchor on *every* consuming command —
+the examples below use an Ed25519 key pair the approver holds
+(`alice-private.pem` and its SPKI public half `alice-public.pem`):
 
 ```bash
-fslc approval check examples/e2e/2_requirements.fsl --record expense.approval.json \
+fslc approval create examples/e2e/2_requirements.fsl \
+  --kind ledger \
+  --artifact expense-ledger.md \
+  --approver alice \
+  --depth 8 \
+  --signing-key alice-private.pem \
+  -o expense-signed.approval.json
+fslc approval check examples/e2e/2_requirements.fsl --record expense-signed.approval.json \
   --trust-key alice-public.pem
-fslc ledger examples/e2e/2_requirements.fsl --approval expense.approval.json \
+fslc ledger examples/e2e/2_requirements.fsl --approval expense-signed.approval.json \
   --trust-key alice-public.pem
 ```
 
@@ -148,7 +157,7 @@ The committed sidecar follows
     "digest_algorithm": "fsl-rendered-artifact-v1+sha256",
     "digest": "sha256:<64 hex>",
     "generator": "fslc",
-    "generator_version": "2.7.0",
+    "generator_version": "4.7.0",
     "inputs": {"depth": 8, "deadlock": "ignore", "engine": "bmc"}
   },
   "approval": {
@@ -221,7 +230,7 @@ conditional branch inside v1/v2. `spec`/`approval` are byte-identical to v1's;
     "claim_set_digest_algorithm": "fsl-rcir-claim-set-v1+sha256",
     "claim_set_digest": "sha256:<64 hex>",
     "generator": "fslc",
-    "generator_version": "2.7.0",
+    "generator_version": "4.7.0",
     "inputs": {
       "view": "requirements",
       "lang": "ja",
