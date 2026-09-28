@@ -349,8 +349,12 @@ kinds against a log, distinct from the static kinds above: `command_rejected_by_
 `effect_completion_rejected_by_model`, `unknown_domain_event`, `unknown_effect`,
 `effect_completion_event_not_declared`, and `unknown_runtime_event_kind`
 (`rust/fslc/src/main.rs`, tested by
-`rust/fslc/tests/issue_518_domain_replay_detection.rs`). See the Runtime
-Replay section.
+`rust/fslc/tests/issue_518_domain_replay_detection.rs` and
+`rust/fslc/tests/issue_1117_domain_replay_event_match.rs`).
+`unknown_domain_event` carries two distinct `failed_rule` values — an
+undeclared event name, and a declared event the model did not raise at that
+point (#1117) — the same one-kind/many-rules shape
+`uncorrelated_async_completion` uses. See the Runtime Replay section.
 
 `schemas/fslc/domain/finding.v0.schema.json`'s `kind` enum lists 24 values —
 a superset of every kind on this page, reserved vocabulary the same way the
@@ -476,8 +480,126 @@ events use these kinds:
 
 Replay returns `conformance_checked` when the finite log matches the model and
 `nonconformant` with fsl-domain findings when it observes a rejected command,
-completion without request, duplicate irreversible completion, or lifecycle
-ordering mismatch. This is runtime observation evidence, not a formal proof.
+completion without request, duplicate irreversible completion, lifecycle
+ordering mismatch, or an event the model did not raise. This is runtime
+observation evidence, not a formal proof.
+
+### `domain_event` matching rule (#1117)
+
+A `domain_event` row claims that the event *occurred*, so replay checks it
+against the model, not against the declaration list. The unit of matching is
+the model's own one-hot occurrence flag: lowering rewrites `event_<Event>`
+for *every* declared event on *every* emitting transition — `true` for the
+events that transition emits, `false` for all the others
+(`event_assignments`, `rust/fsl-core/src/domain_lowering.rs`) — and `init`
+starts them all `false`. A `domain_event` row therefore conforms exactly when
+the flag for its event is `true` in the Monitor state left by the most recent
+**accepted** transition. Only `command` and `effect_completion` rows step the
+Monitor; `domain_event` and `effect_request` rows leave the flags alone, and a
+rejected `command` leaves them alone too. Four consequences follow directly,
+and are the answers to the cases where the unit is not obvious:
+
+- **Order within one transition does not matter, and multiplicity is not
+  counted.** A command whose `decide` emits `A, B` leaves both flags `true`,
+  so the log may record them in either order. `emits` is a declaration order,
+  not an execution order, and the kernel has no per-event occurrence count to
+  match a repeat against.
+- **Order across transitions does — across *accepted* ones.** The flags are
+  one-step: an event row must appear before the next accepted
+  `command`/`effect_completion` row. Re-logging an earlier event after a later
+  accepted transition is a mismatch, because the model says that event is not
+  what just happened. A **rejected** row is the exception, and it cuts the
+  other way: the model refused it, so it rewrote nothing, and the flags left
+  by the last accepted transition survive it. A stale event row after a
+  rejected command therefore still conforms. The rejection itself is reported
+  as `command_rejected_by_model`/`effect_completion_rejected_by_model`, so the
+  log is not silently accepted; the stale row after it simply is not a second
+  finding.
+- **A `domain_event` with no preceding accepted transition is always a
+  mismatch**, since `init` leaves every flag `false`. This is the decision the
+  issue asked for: a standalone event row is not tolerated as "context".
+- **Outcome events reached through an effect are covered without a special
+  case.** `{effect}_complete_{outcome}` runs the same `event_assignments`, so
+  a `domain_event` row for an effect's outcome event conforms after its
+  `effect_completion` row — the rule reads the model rather than
+  reimplementing `decide ... emits`.
+
+Events that only a saga step, saga step timeout, saga compensation, or a
+saga's observation of an externally raised event emits are the known
+boundary: the runtime log vocabulary above has no row kind that steps those
+actions, so their flags are never raised during a replay and a `domain_event`
+row naming one is reported. That report is accurate for what replay can
+observe today — the log does not match the model it was replayed against —
+and it fails closed rather than carving out a silent exemption. It carries
+its own `failed_rule` and says so in its repair text (see Reporting below),
+because the one thing that would *not* fix it is editing the FSL model.
+Driving saga history from a log is the correlation-indexed follow-up
+([issue #662](https://github.com/ymm-oss/fsl/issues/662),
+`docs/DESIGN-saga-history.md`).
+
+#### What the rule does not check
+
+The match is on the event's *name* and its position in the log, and nothing
+else. Three limits follow, and none of them is closed by this rule:
+
+- **Payloads are not compared.** `domain_event` rows carry `params`, and the
+  rule never reads them. `command SetN {v:1}` followed by
+  `domain_event NSet {v:0}` conforms, because `NSet` is what the model raised;
+  the value disagreement is invisible. Only `command` and `effect_completion`
+  rows feed their `params` to the model at all, and there only as the
+  transition's inputs. Payload conformance is a separate question
+  ([issue #1117](https://github.com/ymm-oss/fsl/issues/1117) keeps that row of
+  its reproduction table open).
+- **The `aggregate` field of a `domain_event` row is not read.** A row may
+  name the wrong aggregate, or one that does not exist, and still conform as
+  long as the event name matches; the declaration check above it also searches
+  every aggregate. The occurrence flag is `event_<Event>`, keyed by event name
+  across the whole domain, not per aggregate. Two aggregates declaring the
+  same event name do not silently share that flag — lowering rejects the
+  domain with `duplicate state variable 'event_<Event>'` (exit 2) before any
+  replay runs, which is a pre-existing bound on the naming, not a matching
+  hazard. Aggregate-scoped event identity would need a per-aggregate flag in
+  lowering, not a change in the CLI.
+- **Multiplicity is not counted** (the first bullet above): two rows for the
+  same event after one transition both conform.
+
+#### Reporting
+
+A mismatch is reported as `kind:"unknown_domain_event"`, and its witness
+carries `emitted_by_preceding_transition`: the events the model *did* raise,
+so the finding names the log's alternative rather than only its offence.
+`kind` alone would collapse three different causes into one message, so the
+witness and the `failed_rule` separate them, and the repair candidates follow
+(`domain_replay_event_mismatch_finding`, `rust/fslc/src/main.rs`):
+
+| cause | `failed_rule` | witness | repair says |
+| --- | --- | --- | --- |
+| the name is not declared in any aggregate | `runtime_event_declared_in_domain` | `event` | declare it, or fix the log |
+| only a saga step, saga step timeout, saga compensation, saga observation, effect compensation, or stale policy emits the event | `runtime_event_reachable_by_replayed_transition` | `reachable_by_replayed_transition:false`, `emitting_model_constructs` | no log can match this row; **the model is correct and must not be changed** |
+| the preceding transition row was rejected by the model | `runtime_event_emitted_by_preceding_transition` | `rejected_preceding_transition` | fix that rejection first; the event's emitter is that very row |
+| otherwise: the log is out of order, or the transition it ran really is missing the event | `runtime_event_emitted_by_preceding_transition` | `emitting_model_constructs` | reorder the log, or add the event to *the transition the log ran* |
+
+The middle two rows are why the repair text is generated rather than fixed
+(PR #1123 review): "add the event to the emitting `decide`/effect" is wrong
+advice in both — in the saga case the construct that emits it is already
+right, and in the rejected case the `decide` that emits it is the one the log
+just ran. One `kind` carrying several `failed_rule` values is the shape this
+replay already uses for `uncorrelated_async_completion` (three rules); no new
+`kind` enters `schemas/fslc/domain/finding.v0.schema.json`, whose `failed_rule`
+is an unconstrained string.
+
+`events_observed` in the replay output changed meaning with this rule. It used
+to list the declared event names the log mentioned; a `domain_event` row now
+enters it only once its occurrence flag matched, so it lists the event names
+the *model raised* and the log recorded. The field is described in the
+`docs/intro/domain.*.html` replay table. A conformant log keeps the same list;
+a nonconformant one no longer lists the `domain_event` rows that were
+rejected. One inconsistency survives and is deliberate for now: an
+`effect_completion` row whose outcome event is declared adds that event to
+`events_observed` even when the model rejected the completion, so the list is
+"raised, or claimed by a completion row" rather than strictly "raised".
+Tightening it changes `issue_518_lifecycle_mismatch`'s published output, so it
+is left to the issue that owns that fixture.
 
 A log entry's `params` are read at the target action's **declared** parameter
 types, through the same conversion `fslc replay` applies to mapped action
