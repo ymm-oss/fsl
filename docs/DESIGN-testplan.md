@@ -85,6 +85,8 @@ named `boundary_accept_<param>` and `boundary_reject_<param>`.
 id: REQ-TESTPLAN-BOUNDARY-001
 bind: fsl:specs/job_pipeline.fsl#action:submit
 evidence: cmd:fslc testplan specs/job_pipeline.fsl --depth 0 (no boundary_* case)
+verified-at: 1397c173cef3a98b6a71f799777a9c0a2143ba09
+verified-with: fsl-claim-facts@0
 facts:
   requires: jobs[j].st == New
   requires: queue.size() < QCAP
