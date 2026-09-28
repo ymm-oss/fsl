@@ -1,0 +1,14 @@
+// A business transition assignment has no lowering, so it must be rejected (#1109).
+business AssignmentsDropped {
+  actor Manager
+  entity Return
+
+  process Return {
+    stages Requested, Approved
+    initial Requested
+    transition approve Requested -> Approved by Manager set settled = true
+  }
+}
+verify {
+  instances Return = 1
+}

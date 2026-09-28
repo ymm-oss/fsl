@@ -1065,6 +1065,18 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                     transition.span,
                 ));
             }
+            if let Some(clause) = dropped_transition_clause(transition) {
+                return Err(core_error(
+                    format!(
+                        "transition '{}' declares '{clause}', which is a requirements-layer \
+                         feature: a business process is a pure stage graph, so 'with', 'when' \
+                         and 'set' have no lowering here. Declare the process in a \
+                         'requirements' spec to give the clause meaning",
+                        transition.name
+                    ),
+                    transition.span,
+                ));
+            }
         }
         processes.push(Process {
             name: process_symbol(name),
@@ -1459,6 +1471,29 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
         kernel.bind_annotation(target, annotation);
     }
     Ok(kernel)
+}
+
+/// Names the first transition clause the business dialect parses but cannot
+/// lower (issue #1109).
+///
+/// `with`, `when` and `set` carry data, and a business process is a pure stage
+/// graph, so [`lower_business`] has nowhere to put them. Silently dropping
+/// them made `check` accept a model the author never wrote --- guards absent,
+/// assignments to undeclared fields ignored --- and every later `verify`
+/// answered for that other model. Reporting them keeps the dialect fail
+/// closed; giving them meaning is a separate change.
+fn dropped_transition_clause(transition: &ProcessTransition) -> Option<&'static str> {
+    if !transition.inputs.is_empty() {
+        return Some("with");
+    }
+    if transition.guard.is_some() {
+        return Some("when");
+    }
+    if transition.assignments.is_empty() {
+        None
+    } else {
+        Some("set")
+    }
 }
 
 fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {

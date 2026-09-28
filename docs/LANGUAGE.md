@@ -2256,6 +2256,13 @@ an invariant violation, a dead process step = a coverage diagnosis, an
 unreachable business goal = reachable_failed, and a case left unattended = a
 leadsTo counterexample — all can be detected mechanically.
 
+A business process is a pure stage graph, so a `transition` accepts only its
+name, source and target stages, actor and `covers` annotations. Writing `with`,
+`when` or `set` on one is a located error: those clauses carry data, the
+business dialect has nowhere to lower them, and silently dropping them would
+verify a model the author never wrote. Declare the process in a `requirements`
+spec (§13.4) to give them meaning.
+
 For PM/consulting-facing files, use the readable stage syntax for common
 response policies and goals:
 
