@@ -2206,6 +2206,11 @@ invariant / leadsTo へ、kpi はメタデータとして記録される宣言�
 展開されます。規程の矛盾 = invariant 違反、死んだプロセスステップ = カバレッジ
 診断、到達不能な業務ゴール = reachable_failed、放置された案件 = leadsTo の反例 —
 すべて機械的に検出できます。</p>
+<p>business の process は純粋なステージグラフなので、<code>transition</code> が取るのは名前、
+遷移元と遷移先のステージ、actor、<code>covers</code> 注釈だけです。<code>with</code> / <code>when</code> / <code>set</code>
+を書くと位置付きのエラーになります。これらはデータを運ぶ節で、business ダイアレ
+クトには落とす先がなく、黙って捨てると作者が書いていないモデルを検証してしまう
+ためです。意味を与えるには <code>requirements</code> spec(§13.4)で process を宣言します。</p>
 <p>PM/コンサルタント向けのファイルでは、よくある応答ポリシーとゴールに、読みやすい
 stage 構文を使ってください:</p>
 <pre><code class="language-fsl">business ReturnHandling {

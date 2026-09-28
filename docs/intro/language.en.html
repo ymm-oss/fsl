@@ -2276,6 +2276,12 @@ declarative count projection recorded as metadata. A contradiction in the regula
 an invariant violation, a dead process step = a coverage diagnosis, an
 unreachable business goal = reachable_failed, and a case left unattended = a
 leadsTo counterexample — all can be detected mechanically.</p>
+<p>A business process is a pure stage graph, so a <code>transition</code> accepts only its
+name, source and target stages, actor and <code>covers</code> annotations. Writing <code>with</code>,
+<code>when</code> or <code>set</code> on one is a located error: those clauses carry data, the
+business dialect has nowhere to lower them, and silently dropping them would
+verify a model the author never wrote. Declare the process in a <code>requirements</code>
+spec (§13.4) to give them meaning.</p>
 <p>For PM/consulting-facing files, use the readable stage syntax for common
 response policies and goals:</p>
 <pre><code class="language-fsl">business ReturnHandling {

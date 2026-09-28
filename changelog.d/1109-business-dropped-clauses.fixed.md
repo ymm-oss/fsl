@@ -5,4 +5,5 @@ guard that was never applied and an assignment to a field that was never
 declared, and `verify` then answered for that other model. The error is
 positioned at the transition and names the `requirements` dialect, whose
 `process` gives the three clauses meaning; a control confirms the same
-process without them, and every existing business example, still passes.
+process without them, and every existing business example, still passes. `covers` is unaffected: `lower_business` does consume it into a requirement
+annotation, so it keeps working.

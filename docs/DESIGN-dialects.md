@@ -254,6 +254,11 @@ verify {
       requirement is also acceptable — for implementation simplicity it is fine
       to put "by Manager" into meta.text)
    - duplicate transition labels with the same name are a type error.
+   - `with`, `when` and `set` on a transition are a located error (issue
+     #1109). They carry data and this expansion has nowhere to put them, so
+     accepting and dropping them would lower a model the author never wrote.
+     The `requirements` dialect's `process` gives them meaning; `covers` is
+     consumed here and stays accepted.
 3. `kpi k = count X in S` follows the same typed `ProjectionDef`/
    `Aggregate::Count` path as requirements KPI declarations. Unknown entities
    and stages are rejected before model construction; native `explain` exposes
