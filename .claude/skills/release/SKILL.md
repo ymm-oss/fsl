@@ -151,8 +151,10 @@ After the promotion is approved and merged:
    notes derived from the pre-promotion candidate.
 5. Create annotated tag `vX.Y.Z` at the gated `production` HEAD.
 6. Before pushing, state the tag, commit SHA, exact notes, and that the push
-   uploads a draft, verifies its remote inventory, then makes the notes, native
-   binaries, VS Code extension, and Kernel contract bundles public.
+   uploads a draft, verifies its remote inventory, signs and uploads the
+   packslip bundles, verifies the inventory again, then makes the notes, native
+   binaries, VS Code extension, Kernel contract bundles, and packslip bundles
+   public.
 7. Push the tag only after one explicit confirmation for that complete
    publication and version.
 8. Observe every release job. If a job fails transiently, inspect it and rerun

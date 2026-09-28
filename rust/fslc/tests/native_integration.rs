@@ -44,8 +44,62 @@ fn assert_packslip_release_contract(workflow: &str, root: &Path) {
     // it, so the first release that carries a packslip fixes the name.
     assert!(workflow.contains("project: github.com/ymm-oss/fsl/fslc\n"));
     assert!(workflow.contains("project: github.com/ymm-oss/fsl/fslc-lsp\n"));
-    assert!(workflow.contains("id-token: write"));
-    assert!(workflow.contains("attestations: write"));
+
+    // Only the signing job can mint an OIDC token, and it writes nothing to
+    // the release. The job that drafts the release and the job that makes it
+    // public hold `contents: write` and nothing more.
+    // A job runs from its key to the next line indented by exactly two
+    // spaces, which is the next job or the comment above it.
+    let job = |name: &str| {
+        let start = workflow
+            .find(&format!("\n  {name}:\n"))
+            .unwrap_or_else(|| panic!("the {name} job"))
+            + 1;
+        let body = &workflow[start..];
+        let end = body
+            .match_indices("\n  ")
+            .map(|(at, _)| at)
+            .find(|&at| !body[at + 3..].starts_with(' '))
+            .unwrap_or(body.len());
+        &body[..end]
+    };
+    let (publish, sign, release) = (job("publish"), job("sign"), job("release"));
+    assert_eq!(workflow.matches("id-token: write").count(), 1);
+    assert!(sign.contains("id-token: write") && sign.contains("attestations: write"));
+    assert!(sign.contains("contents: read") && !sign.contains("contents: write"));
+    assert!(!sign.contains("gh release"));
+    for job in [publish, release] {
+        assert!(job.contains("contents: write"));
+        assert!(!job.contains("id-token") && !job.contains("attestations"));
+        assert!(!job.contains("uses: jdx/packslip@"));
+    }
+    assert!(sign.contains("needs: [publish]") && release.contains("needs: [sign]"));
+
+    // The action would upload each bundle as soon as it is signed, before the
+    // gate runs and before the other bundle exists. A bundle left on the draft
+    // by a failed attempt then fails the exact asset check when the job runs
+    // again, so the bundles stay local until the gate passes.
+    assert_eq!(workflow.matches("uses: jdx/packslip@").count(), 2);
+    assert_eq!(sign.matches("          upload: false\n").count(), 2);
+    assert!(release.contains("--clobber"));
+    let uploaded = release
+        .find("gh release upload")
+        .expect("the bundle upload");
+    let rechecked = release
+        .find("diff -u expected-assets.txt remote-assets.txt")
+        .expect("the check after the upload");
+    let made_public = release
+        .find("--draft=false --latest")
+        .expect("the step that makes the release public");
+    assert!(uploaded < rechecked && rechecked < made_public);
+    assert!(release.contains("echo packslip.fslc.sigstore.json"));
+    assert!(release.contains("echo packslip.fslc-lsp.sigstore.json"));
+    assert!(release.contains("is not the bundle the gate passed."));
+
+    // Step outputs reach `run:` through `env:`, never by expansion into the
+    // script text.
+    assert!(!workflow.contains("'${{ steps."));
+    assert!(sign.contains("FSLC_BUNDLE: ${{ steps.packslip-fslc.outputs.bundle }}"));
 
     // Every asset named in full. A `fslc-*` glob also matches every
     // `fslc-lsp-*` asset, which is the trap the mise `matching` option sets.
@@ -60,23 +114,15 @@ fn assert_packslip_release_contract(workflow: &str, root: &Path) {
     // The skills come from the directory, never from a list beside it.
     assert!(workflow.contains("skill/&=repo:skills/&"));
     assert!(workflow.contains("resources: ${{ steps.skill-resources.outputs.value }}"));
-    assert!(workflow.contains("diff -u present-skills.txt declared-skills.txt"));
 
-    // The bundle is not in `release-assets/`, so signing before the asset
-    // check below would fail that check.
-    let assets_checked = workflow
-        .find("diff -u expected-assets.txt remote-assets.txt")
-        .expect("the remote asset check");
-    let signed = workflow
-        .find("uses: jdx/packslip@")
-        .expect("the packslip step");
-    let public = workflow
-        .find("--draft=false --latest")
-        .expect("the step that makes the release public");
-    assert!(
-        assets_checked < signed && signed < public,
-        "the packslip is signed after the asset check and before the release is public"
-    );
+    // The draft is checked against `release-assets/` exactly before anything
+    // is signed.
+    assert!(publish.contains("diff -u expected-assets.txt remote-assets.txt"));
+    let gated = sign
+        .find("diff -u present-skills.txt declared-skills.txt")
+        .expect("the gate");
+    let handed_over = sign.find("name: packslips").expect("the bundle hand-over");
+    assert!(sign.find("uses: jdx/packslip@").expect("the signing") < gated && gated < handed_over);
 
     // The platform of an artifact is read off its file name, and that is what
     // selects the binary a user is handed.
@@ -492,7 +538,9 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     assert!(workflow.contains("body_path: release-notes.md"));
     assert!(workflow.contains("Verify the remote draft release unit"));
     assert!(workflow.contains("diff -u expected-assets.txt remote-assets.txt"));
-    assert!(workflow.contains("gh release edit \"$GITHUB_REF_NAME\" --draft=false --latest"));
+    assert!(workflow.contains(
+        "gh release edit \"$GITHUB_REF_NAME\" --repo \"$GITHUB_REPOSITORY\" --draft=false --latest"
+    ));
     assert!(workflow.contains("npm ci"));
     assert!(workflow.contains("cp ../../LICENSE LICENSE"));
     assert!(workflow.contains("npm exec -- vsce package"));

@@ -338,10 +338,6 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-      # The packslip is signed with this workflow's own identity, and the
-      # action attests the artifacts it describes. No long-lived key exists.
-      id-token: write
-      attestations: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -386,10 +382,29 @@ jobs:
           gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | sort > remote-assets.txt
           diff -u expected-assets.txt remote-assets.txt
 
-      # The packslip is signed and uploaded after the asset check above, which
-      # compares the remote release against `release-assets/` exactly. The
-      # bundle does not come from that directory, so signing before the check
-      # would fail it.
+  # Only this job can mint an OIDC token. It signs and gates the packslips
+  # locally and writes nothing to the release, so a failure here leaves the
+  # draft exactly as `publish` verified it and this job can be re-run alone.
+  sign:
+    name: sign the packslips
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # The packslip is signed with this workflow's own identity, and the
+      # action attests the artifacts it describes. No long-lived key exists.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download the verified release unit
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-unit
+          path: release-assets
+
       - name: Declare every skill under skills/
         id: skill-resources
         # Read from the directory rather than a list kept beside it. #1084
@@ -408,7 +423,9 @@ jobs:
       # Each artifact is named in full. A `fslc-*` glob also matches every
       # `fslc-lsp-*` asset, which is the same trap the mise `matching` option
       # sets and the reason README.md uses an anchored `matching_regex`.
-      - name: Sign and publish the fslc packslip
+      # `upload: false` keeps the bundles off the release until the gate below
+      # has passed; the `release` job uploads them.
+      - name: Sign the fslc packslip
         id: packslip-fslc
         uses: jdx/packslip@74c75db7d611b36dd5a157999ec16cf823ccf80c # v1.2.0
         with:
@@ -420,8 +437,9 @@ jobs:
             release-assets/fslc-linux-arm64
             release-assets/fslc-windows-x64.exe
           resources: ${{ steps.skill-resources.outputs.value }}
+          upload: false
 
-      - name: Sign and publish the fslc-lsp packslip
+      - name: Sign the fslc-lsp packslip
         id: packslip-lsp
         uses: jdx/packslip@74c75db7d611b36dd5a157999ec16cf823ccf80c # v1.2.0
         with:
@@ -432,6 +450,7 @@ jobs:
             release-assets/fslc-lsp-linux-x64
             release-assets/fslc-lsp-linux-arm64
             release-assets/fslc-lsp-windows-x64.exe
+          upload: false
 
       # packslip reads the platform and the format off each file name. That is
       # the whole of what selects the binary a user gets, so it is asserted
@@ -439,7 +458,12 @@ jobs:
       # `.exe` read as an installer rather than the program, fails here instead
       # of handing somebody the wrong file.
       - name: Verify what the packslips claim
+        env:
+          FSLC_BUNDLE: ${{ steps.packslip-fslc.outputs.bundle }}
+          LSP_BUNDLE: ${{ steps.packslip-lsp.outputs.bundle }}
         run: |
+          test "$FSLC_BUNDLE" = packslip/packslip.fslc.sigstore.json
+          test "$LSP_BUNDLE" = packslip/packslip.fslc-lsp.sigstore.json
           statement() {
             jq -r .dsseEnvelope.payload "$1" | base64 -d
           }
@@ -447,14 +471,14 @@ jobs:
             statement "$1" | jq -S -c \
               '[.predicate.artifacts[] | {name, os, arch, libc, format}] | sort_by(.name)'
           }
-          test "$(platforms '${{ steps.packslip-fslc.outputs.bundle }}')" = "$(jq -S -c 'sort_by(.name)' <<'EOF'
+          test "$(platforms "$FSLC_BUNDLE")" = "$(jq -S -c 'sort_by(.name)' <<'EOF'
           [{"name":"fslc-linux-arm64","os":"linux","arch":"aarch64","libc":"gnu","format":"raw"},
            {"name":"fslc-linux-x64","os":"linux","arch":"x86_64","libc":"gnu","format":"raw"},
            {"name":"fslc-macos-arm64","os":"darwin","arch":"aarch64","libc":null,"format":"raw"},
            {"name":"fslc-windows-x64.exe","os":"windows","arch":"x86_64","libc":null,"format":"raw"}]
           EOF
           )" || { echo "The fslc packslip does not describe the platforms these names claim." >&2; exit 1; }
-          test "$(platforms '${{ steps.packslip-lsp.outputs.bundle }}')" = "$(jq -S -c 'sort_by(.name)' <<'EOF'
+          test "$(platforms "$LSP_BUNDLE")" = "$(jq -S -c 'sort_by(.name)' <<'EOF'
           [{"name":"fslc-lsp-linux-arm64","os":"linux","arch":"aarch64","libc":"gnu","format":"raw"},
            {"name":"fslc-lsp-linux-x64","os":"linux","arch":"x86_64","libc":"gnu","format":"raw"},
            {"name":"fslc-lsp-macos-arm64","os":"darwin","arch":"aarch64","libc":null,"format":"raw"},
@@ -462,7 +486,7 @@ jobs:
           EOF
           )" || { echo "The fslc-lsp packslip does not describe the platforms these names claim." >&2; exit 1; }
           # Every skill under skills/, and only those.
-          statement '${{ steps.packslip-fslc.outputs.bundle }}' \
+          statement "$FSLC_BUNDLE" \
             | jq -r '.predicate.resources[] | select(.kind == "skill") | .name' \
             | sort > declared-skills.txt
           find skills -mindepth 1 -maxdepth 1 -type d -print0 \
@@ -470,7 +494,70 @@ jobs:
           diff -u present-skills.txt declared-skills.txt
           test -s declared-skills.txt
 
+      - name: Hand the verified packslips to the release job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: packslips
+          path: |
+            packslip/packslip.fslc.sigstore.json
+            packslip/packslip.fslc-lsp.sigstore.json
+          if-no-files-found: error
+
+  # Upload, then check the whole release again, then make it public. Every
+  # step can run again: `--clobber` replaces a bundle an earlier attempt left,
+  # and the check compares the release against the complete expected set.
+  release:
+    name: make the verified release public
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [sign]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download the verified release unit
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-unit
+          path: release-assets
+
+      - name: Download the verified packslips
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: packslips
+          path: packslip
+
+      - name: Upload the packslips to the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            packslip/packslip.fslc.sigstore.json \
+            packslip/packslip.fslc-lsp.sigstore.json
+
+      # The release unit plus the two bundles, and nothing else. The digests
+      # prove each bundle that reached the release is the one the gate passed.
+      - name: Verify the remote release unit with its packslips
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          {
+            find release-assets -maxdepth 1 -type f -exec basename {} \;
+            echo packslip.fslc.sigstore.json
+            echo packslip.fslc-lsp.sigstore.json
+          } | sort > expected-assets.txt
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[].name' | sort > remote-assets.txt
+          diff -u expected-assets.txt remote-assets.txt
+          for bundle in packslip.fslc.sigstore.json packslip.fslc-lsp.sigstore.json; do
+            expected="sha256:$(sha256sum "packslip/$bundle" | cut -d' ' -f1)"
+            remote="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets \
+              | jq -r --arg name "$bundle" '.assets[] | select(.name == $name) | .digest')"
+            test "$remote" = "$expected" \
+              || { echo "$bundle on the release is not the bundle the gate passed." >&2; exit 1; }
+          done
+
       - name: Make the verified release public
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

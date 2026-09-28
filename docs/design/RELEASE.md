@@ -242,9 +242,10 @@ truth for the pinned-head and tree-identity requirements.
    it, show it to the user, and stop if it is empty; do not reuse a file derived
    from the pre-promotion candidate.
 4. Show the user the production commit, annotated tag `vX.Y.Z`, the exact notes,
-   and that pushing the tag uploads a draft, verifies its remote inventory, then
-   makes the GitHub Release and notes public. Obtain one explicit confirmation
-   for that complete publication immediately before running:
+   and that pushing the tag uploads a draft, verifies its remote inventory, signs
+   the two packslip bundles, uploads them, verifies the inventory again, then
+   makes the GitHub Release, notes, and packslips public. Obtain one explicit
+   confirmation for that complete publication immediately before running:
 
    ```bash
    git tag -a vX.Y.Z PRODUCTION_SHA -m "vX.Y.Z"
@@ -300,5 +301,11 @@ truth for the pinned-head and tree-identity requirements.
   the remote inventory, and only then makes the Release public. If any publish
   step fails, leave the draft non-public until the defect is fixed upstream.
   Do not report completion.
+- The tag workflow publishes in three jobs. `publish` uploads the draft, `sign`
+  signs and checks the packslips without touching the release, and `release`
+  uploads them with `--clobber`, checks the complete inventory and the bundle
+  digests, and makes the Release public. Each job can be rerun on its own after
+  a transient failure, and a bundle an earlier attempt left on the draft does
+  not block the rerun.
 - Follow the internal release skill's `release/vX.Y` stabilization and hotfix
   procedures when `main` cannot be promoted as a whole.
