@@ -134,6 +134,8 @@ const VALID_DOMAIN_FIXTURES: &[&str] = &[
     "rust/fslc/tests/fixtures/issue_515_domain_broken_invariant.fsl",
     "rust/fslc/tests/fixtures/issue_515_domain_clean_invariant.fsl",
     "rust/fslc/tests/fixtures/issue_518_domain_replay.fsl",
+    "rust/fslc/tests/fixtures/issue_1116_declared_correlation.fsl",
+    "rust/fslc/tests/fixtures/issue_1116_domain_replay_param_types.fsl",
     "rust/fslc/tests/fixtures/issue_641_domain_clean.fsl",
     "rust/fslc/tests/fixtures/issue_641_domain_unreachable_decide.fsl",
     "rust/fslc/tests/fixtures/issue_779_saga_emit_evolve_negative_controls.fsl",

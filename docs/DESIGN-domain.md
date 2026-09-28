@@ -479,6 +479,65 @@ Replay returns `conformance_checked` when the finite log matches the model and
 completion without request, duplicate irreversible completion, or lifecycle
 ordering mismatch. This is runtime observation evidence, not a formal proof.
 
+A log entry's `params` are read at the target action's **declared** parameter
+types, through the same conversion `fslc replay` applies to mapped action
+parameters (`rust/fslc/src/main.rs`'s `parse_param_value`): an enum input from
+its member name, a `Bool` input from `true`/`false`, a `range` input from a
+JSON integer. An enum member is accepted in the domain spelling (`Premium`),
+the qualified spelling (`Tier.Premium`), and the Kernel spelling the lowered
+model itself uses (`Tier_Premium`). A value that is not of the declared type,
+and a parameter the action does not declare, fail closed: the step is not
+replayed and the entry is reported as rejected. Until #1116 every parameter
+was instead forced to `Int` with an unparseable value read as `0`, so an enum
+or `Bool` input could never replay and `{"value":"garbage"}` on an integer
+input reported `conformance_checked` — false conformance
+(`rust/fslc/tests/issue_1116_domain_replay_param_types.rs`).
+
+**This is a breaking change for logs that were passing.** A parameter of a
+declared numeric type (a `range`, or a `type X = lo..hi`) now takes a JSON
+integer and nothing else. Every one of `"2"`, `2.0`, `true`, and `null`
+replayed as a number before #1116 — as 2, 2, 1, and 0 respectively — and a
+log carrying any of them reported `conformance_checked`/exit 0. Each is now
+`nonconformant`/exit 1 with a `command_rejected_by_model` finding. That
+verdict change is the point: the earlier `conformance_checked` was evidence
+about a value the log never recorded. A `Bool` parameter likewise takes
+`true`/`false` only: the integer spelling `1` is **not** read as `true` on
+this path, even though `parse_param_value` accepts it for `fslc replay`'s
+hand-written mapped-action inputs, because a `domain replay` log is a record
+this tool did not write and reading `1` as `true` would invent the
+observation.
+
+The one parameter shape with no declared representation is an *implicit
+identity type*: a type the document only references and never declares (`id
+OrderId`, `input payment_request_id: PaymentRequestId`). `lower_domain`
+synthesizes it as an `external` type over the documented placeholder domain
+(always `lo = 0`: the synthesized type carries no bounds of its own), so an
+opaque runtime token such as `"p1"` keeps the placeholder mapping — numeric
+when the token parses as an integer, the placeholder `0` otherwise — rather
+than being rejected for not being a number. The placeholder is for tokens
+that have no *numeric* meaning, not for values that are not tokens: a JSON
+object, array, or `null` in an identity parameter is rejected like any other
+ill-typed value.
+
+Two consequences worth stating outright, because they are how this bites in
+practice:
+
+- **Declaring an identity type breaks logs that were replaying.** While
+  `PaymentRequestId` is only referenced, `"p1"` maps onto the placeholder and
+  the log replays. Add `type PaymentRequestId = 0..999;` — turning an
+  implicit identity type into a declared numeric one — and every log entry
+  carrying a non-numeric token for it becomes `nonconformant`. The cliff is
+  in the direction that looks like an improvement to the specification, so
+  declare identity types only alongside logs that carry numbers for them.
+- **A correlation id is read the same way whichever field carries it.** When
+  an `effect_completion` omits the correlation field from its `params`,
+  replay fills it in from the entry's `correlation_id`, and converts the JSON
+  the log wrote — not a re-parse of the stringified pairing key. So the
+  string `"1"` is rejected for a declared numeric correlation field on both
+  paths, and the number `1` is accepted on both. (Request/completion pairing
+  itself still keys on the stringified value, so a log that writes `1` in one
+  entry and `"1"` in the other still pairs.)
+
 Saga `await` and compensation `after` clauses use per-step event observations in
 the kernel model and add `DOMAIN-ASSUME-SAGA-OBSERVED-HISTORY`. Durable process
 history is checked through replay evidence rather than treated as an unbounded

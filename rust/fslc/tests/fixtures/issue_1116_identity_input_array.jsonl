@@ -1,0 +1,2 @@
+{"event":"command","aggregate":"Order","command":"ApproveOrder","params":{}}
+{"event":"command","aggregate":"Order","command":"RequestPaymentCapture","params":{"payment_request_id":[1,2]}}
