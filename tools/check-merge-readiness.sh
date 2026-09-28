@@ -242,6 +242,14 @@ check_automation() {
   step ./tools/aggregate_changelog.sh selftest
   step python3 tools/check-design-citation-headings.py selftest
   step python3 tools/check-design-citation-headings.py check
+  # Markdown link targets and heading anchors, repository-wide
+  # (docs/DESIGN-ci.md, "Link-target resolution"). No network, no build: the
+  # live audit reads 214 documents in about 0.1s. The pytest controls
+  # reproduce issue #1127's measured table, including the two rows a
+  # configured mystmd got wrong.
+  step python3 tools/check-doc-links.py selftest
+  step python3 tools/check-doc-links.py check .
+  step --needs-module pytest python3 -m pytest tests/test_doc_links.py -v
   # Parser-backed inventory of pytest validator modules versus required-gate
   # wiring. New unwired modules fail closed; wiring a module is the shortest
   # path to required classification, not inventory-only exempt rows.

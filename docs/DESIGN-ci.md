@@ -180,6 +180,35 @@ skipping is not offered at all: a missing tool is a hard failure. CI is detected
 that re-enables skipping, because a CI image that quietly loses a tool and still goes green is the
 false-green class this document exists to prevent.
 
+### Link-target resolution
+
+`tools/check-doc-links.py` runs in the automation lane as a selftest, a repository-wide live audit
+(`check .`), and the accepting/rejecting controls in `tests/test_doc_links.py` (issue #1127). It uses
+no network and no build; the live audit reads every Markdown document in the working tree in
+about 0.1s.
+
+What it checks: that a Markdown **link target** resolves. A path target is resolved relative to the
+linking document, a directory target resolves, an `#anchor` is resolved against GitHub's heading-slug
+algorithm **in the document the link names** -- `docs/` is read on GitHub, and a configured mystmd
+resolves a wrong-file `other.md#anchor` against a project-wide label namespace with no diagnostic
+(`docs/DESIGN-myst-spike.md`). A `.fsl` target may carry a `#<kind>:<name>` fragment naming an element
+declared in that specification; it is resolved against the declarations in that file, which is the
+forward direction of issue #1124 -- a link to a specification element that no longer exists fails the
+lane. `http(s):`, `mailto:` and other schemes are ignored.
+
+What it does not check: a bare path written in prose. `See docs/OLD-NAME.md for details` is not a
+link, and neither this gate nor a configured mystmd reports it. That is the shape of issue #1124's six
+original breakages, handled there by a naming convention rather than by a checker.
+
+What it does not claim: the backward direction. That every FSL element is discussed by some
+hand-written document is not asserted by this gate, and a specification element with no prose
+anywhere passes it. That direction is issue #1138.
+
+Scope of the file walk: every Markdown document in the working tree except generated output under
+`docs/_build/`. Unlike the citation gate, repository-root `CHANGELOG.md` is inside it -- a historical
+entry may name an old heading, but a link it makes must still resolve, and the aggregated file is
+green today (214 documents, 396 in-repository link targets, 0 findings).
+
 ## Product gate contract
 
 `.github/workflows/ci.yml` is named `product gate`. A trusted `main` push runs all of these jobs in

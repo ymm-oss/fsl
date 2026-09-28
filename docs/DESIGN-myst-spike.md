@@ -2,8 +2,9 @@
 
 Status: **spike record, stage 1 of issue #1126. Recommendation: do not adopt
 mystmd for `docs/`.** No document was migrated. The measurements below are the
-deliverable; the counter-proposal (`tools/check-doc-links.py`) is committed but
-is not wired into any gate.
+deliverable; the counter-proposal (`tools/check-doc-links.py`) is committed and
+was not wired into any gate at the time of this record (issue #1127 wired it
+afterwards; see `docs/DESIGN-ci.md`).
 
 ## What this record claims, and what it does not
 
@@ -290,7 +291,7 @@ Unchanged, and no overlap is created:
 | `tests/test_coupled_change_meta.py:116-123` | `DESIGN-*.md` ↔ docs index membership, both directions | yes |
 | `tools/check-design-citation-headings.py` | quoted DESIGN section citations (82) | yes |
 | `tools/build_site_reference.py` | generated `intro/*.html` | yes, untouched |
-| `tools/check-doc-links.py` (this record) | link-target and anchor existence | proposed, not wired |
+| `tools/check-doc-links.py` (this record) | link-target and anchor existence | yes, wired by #1127 |
 
 The first checks *membership* in an index, the second checks *quoted titles*
 against headings, the fourth checks *link targets* resolve. Three different
@@ -344,7 +345,9 @@ It is deliberately left unwired here — turning on a new required gate is an
 adoption decision, not a spike result. Run repo-wide
 (`python3 tools/check-doc-links.py check .`) it reports one pre-existing
 finding outside this directory: `CONTRIBUTING.md` line 115 links a
-code-of-conduct file that does not exist. That is not fixed here.
+code-of-conduct file that does not exist. That is not fixed here. Issue #1127
+took both decisions: the lane now runs `check .`, and the dangling
+code-of-conduct link was removed rather than the file invented.
 
 ### When to revisit
 
@@ -688,5 +691,5 @@ reference set is extractable by the same regex the script already uses, so the
 AST argument is weaker than it looked in stage 1.
 
 The disposition of the existing gates is unchanged from stage 1: all three are
-kept, and `tools/check-doc-links.py` stays unwired until someone decides to
-turn it on.
+kept, and `tools/check-doc-links.py` stayed unwired until someone decided to
+turn it on — issue #1127 did.

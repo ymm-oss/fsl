@@ -111,8 +111,7 @@ A pull request should describe the problem, the accepted contract, implementatio
 evidence, linked issue, and any documentation or agent-skill changes. Bug reports and proposals should
 include a minimal reproducing `.fsl`, the exact command, and observed versus expected behavior.
 
-Report security issues privately through [`SECURITY.md`](SECURITY.md), not a public issue. All
-participation is governed by [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+Report security issues privately through [`SECURITY.md`](SECURITY.md), not a public issue.
 
 ## License
 
