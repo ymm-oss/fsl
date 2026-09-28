@@ -144,8 +144,9 @@ independent lanes succeed:
    execution through `eval` or a variable-expanded command word is outside the static-detection
    boundary and is not included in the detection claim. Selftests pin literal `eval` and variable
    command examples as expected non-detections so this boundary cannot be mistaken for implicit
-   coverage. Local macOS development requires `brew install shellcheck`; a missing executable fails
-   the lane instead of skipping it. CI's ShellCheck version is authoritative; CI detects findings
+   coverage. Local macOS development requires `brew install shellcheck`; a missing executable is
+   reported as a skipped step and still fails the lane, and in CI it is a hard failure (see
+   "Run every step, then fail" below). CI's ShellCheck version is authoritative; CI detects findings
    that a different local version does not report, and the checker records the version it used.
    Repository-root `CHANGELOG.md` is deliberately outside that scope because it is an immutable
    historical record whose old section names must not make current automation fail.
@@ -159,6 +160,25 @@ verified product.
 Superseded runs for the same pull request are cancelled. Merge-group runs are not cancelled and the
 workflow handles GitHub's `merge_group` event directly, so a merge queue can validate the combined
 candidate against current `main`.
+
+### Run every step, then fail
+
+`tools/check-merge-readiness.sh` runs every step of a lane and fails afterwards if any of them
+failed (issue #1135). In CI the lane is a gate, where stopping at the first failure is correct and
+cheap; locally it is a checklist, and `check_automation`'s 31 steps made a checklist that stops at
+item 1 useless -- three pull requests shipped defects that its later steps would have caught
+locally. `--fail-fast` restores the stop-at-the-first-failure behaviour.
+
+`set -e` stays on. The only command exempted from it is the measured one inside the `step` helper,
+whose exit status is recorded and re-raised by the summary, so the change adds exactly one place
+where a non-zero status does not abort the lane -- and that place reports it.
+
+A step whose tool is absent is neither a pass nor a failure. It is reported as `SKIP`, listed
+separately in the summary, and the lane still exits non-zero, because a skip is not a pass. In CI
+skipping is not offered at all: a missing tool is a hard failure. CI is detected from
+`GITHUB_ACTIONS`, `CI`, or an explicit `FSL_READINESS_CI`, and there is deliberately no variable
+that re-enables skipping, because a CI image that quietly loses a tool and still goes green is the
+false-green class this document exists to prevent.
 
 ## Product gate contract
 
