@@ -420,12 +420,12 @@ detects the failure it exists for, alongside its accepting fixture.
    so the trailing fields collapsed into `$path` as `old<TAB>new` and every predicate tested the
    *source*. Reproduced live, same base, no forgery and no `CHANGELOG.md` edit: `git mv
    tools/mover.txt rust/moved.rs` with no fragment passed `check-pr` with exit 0, and so did a
-   `git mv docs/note.md specs/note.fsl` carrying an edit (`R084`). The calibrating control is
-   sharp — the *identical* content change, rendered by git as `A`/`D` because the contents were
-   dissimilar, failed closed with `changelog-fragment-missing`. Whether control 1 fired therefore
-   depended on git's similarity heuristic rather than on what changed. A rename *within* a
-   product surface still failed closed, but named the tab-joined pair
-   (`rust/keep.rs<TAB>rust/renamed.rs`) in its diagnostic instead of the destination.
+   `git mv` of a `docs/` Markdown file into `specs/` as a `.fsl` carrying an edit (`R084`). The
+   calibrating control is sharp — the *identical* content change, rendered by git as `A`/`D`
+   because the contents were dissimilar, failed closed with `changelog-fragment-missing`.
+   Whether control 1 fired therefore depended on git's similarity heuristic rather than on what
+   changed. A rename *within* a product surface still failed closed, but named the tab-joined
+   pair (`rust/keep.rs<TAB>rust/renamed.rs`) in its diagnostic instead of the destination.
    `tools/check-product-gate-scope.sh`, the sibling this tool is modelled on, is immune for free
    because `git diff --name-only` prints both sides of a rename on separate lines; this tool
    needs the status column, so the divergence from the sibling is where the defect entered.

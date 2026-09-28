@@ -20,14 +20,14 @@ This makes the recorded commit a reconstructable semantic-diff baseline. First
 generate and review an artifact using the same inputs that will be recorded:
 
 ```bash
-fslc ledger specs/order.fsl --depth 8 -o order-ledger.md
-fslc approval create specs/order.fsl \
+fslc ledger examples/e2e/2_requirements.fsl --depth 8 -o expense-ledger.md
+fslc approval create examples/e2e/2_requirements.fsl \
   --kind ledger \
-  --artifact order-ledger.md \
+  --artifact expense-ledger.md \
   --approver alice \
   --depth 8 \
   --signing-key alice-private.pem \
-  -o order.approval.json
+  -o expense.approval.json
 ```
 
 `approval create` regenerates the target before writing the record. A stale or
@@ -41,12 +41,12 @@ A generated requirements document (issue #325's `fslc document generate`) is
 approved the same way, under its own target kind:
 
 ```bash
-fslc document generate specs/order.fsl --lang ja -o order-requirements.md
-fslc approval create specs/order.fsl \
+fslc document generate examples/e2e/2_requirements.fsl --lang ja -o expense-requirements.md
+fslc approval create examples/e2e/2_requirements.fsl \
   --kind requirements_document \
-  --artifact order-requirements.md \
+  --artifact expense-requirements.md \
   --approver alice \
-  -o order-requirements.approval.json
+  -o expense-requirements.approval.json
 ```
 
 Unlike the other three kinds, `requirements_document` creation does not require
@@ -69,9 +69,9 @@ Once approved, `fslc document generate --approval` can display the record
 directly in the rendered document itself:
 
 ```bash
-fslc document generate specs/order.fsl --lang ja \
-  --approval order-requirements.approval.json \
-  -o order-requirements.md
+fslc document generate examples/e2e/2_requirements.fsl --lang ja \
+  --approval expense-requirements.approval.json \
+  -o expense-requirements.md
 ```
 
 This fails closed (`FSL-DOC-APPROVAL-DRIFTED`) if the current rendering no
@@ -85,16 +85,16 @@ admission was `generate`'s job).
 Check a record directly or include it in a ledger:
 
 ```bash
-fslc approval check specs/order.fsl --record order.approval.json
-fslc ledger specs/order.fsl --approval order.approval.json
+fslc approval check examples/e2e/2_requirements.fsl --record expense.approval.json
+fslc ledger examples/e2e/2_requirements.fsl --approval expense.approval.json
 ```
 
 Signed v2 records require an explicit trust anchor on every consuming command:
 
 ```bash
-fslc approval check specs/order.fsl --record order.approval.json \
+fslc approval check examples/e2e/2_requirements.fsl --record expense.approval.json \
   --trust-key alice-public.pem
-fslc ledger specs/order.fsl --approval order.approval.json \
+fslc ledger examples/e2e/2_requirements.fsl --approval expense.approval.json \
   --trust-key alice-public.pem
 ```
 
@@ -119,7 +119,7 @@ When drift is reported, compare the approved commit to the current working tree
 (including uncommitted edits) without manually materializing the baseline:
 
 ```bash
-fslc approval diff specs/order.fsl --record order.approval.json --depth 8
+fslc approval diff examples/e2e/2_requirements.fsl --record expense.approval.json --depth 8
 ```
 
 Pass the same repeatable `--trust-key` option when diffing a signed record.
@@ -137,14 +137,14 @@ The committed sidecar follows
 {
   "schema": "fslc.approval.v1",
   "spec": {
-    "path": "specs/order.fsl",
+    "path": "examples/e2e/2_requirements.fsl",
     "digest_algorithm": "fsl-kernel-ast-v1+sha256",
     "digest": "sha256:<64 hex>",
     "git_commit": "<full commit>"
   },
   "target": {
     "kind": "ledger",
-    "path": "order-ledger.md",
+    "path": "expense-ledger.md",
     "digest_algorithm": "fsl-rendered-artifact-v1+sha256",
     "digest": "sha256:<64 hex>",
     "generator": "fslc",
@@ -213,7 +213,7 @@ conditional branch inside v1/v2. `spec`/`approval` are byte-identical to v1's;
   "spec": { "...": "identical shape to v1" },
   "target": {
     "kind": "requirements_document",
-    "path": "order-requirements.md",
+    "path": "expense-requirements.md",
     "digest_algorithm": "fsl-rendered-requirements-document-v1+sha256",
     "digest": "sha256:<64 hex>",
     "reviewed_digest_algorithm": "fsl-reviewed-requirements-document-v1+sha256",
