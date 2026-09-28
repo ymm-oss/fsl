@@ -120,6 +120,7 @@
 | [`DESIGN-ai-hard.md`](DESIGN-ai-hard.md) | fsl-ai (`ai_component` / recursive `agent`) dialect: tool authority, human approval, forbidden tools, fallback, event replay, agent scope/grant/orchestration/visibility analysis, finding schema, and guarantee boundaries |
 | [`DESIGN-stochastic.md`](DESIGN-stochastic.md) | fsl-stochastic external evidence layer: precomputed eval JSONL, Wilson-bound threshold rules, statistical result schema, status priority, multiple-slice boundary, and external stochastic boundaries |
 | [`DESIGN-docs-site.md`](DESIGN-docs-site.md) | This manual site's information architecture, navigation chrome, and the generated-reference-page template (`intro/language.*.html`, `intro/cli.*.html`) — produced with the Relational Design plugin |
+| [`DESIGN-myst-spike.md`](DESIGN-myst-spike.md) | **Spike record for #1126 (mystmd over these documents): recommendation not to adopt**, with the measured destruction-case table for missing local documents, unresolved cross-references and heading anchors, the same rows before `error_rules` (all zero under `--strict` alone), the three non-break costs (directory links, GitHub-versus-mystmd heading slugs, prose re-parsing), the `fslc` literate line-number row, and the `tools/check-doc-links.py` counter-proposal |
 
 ## Evidence policy
 
