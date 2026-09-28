@@ -2365,6 +2365,12 @@ policy/goal requirement and the satisfied controls in JSON:</p>
   satisfies CTRL-DECISION
   every Return in Requested must eventually be Approved or Rejected or Refunded
 </code></pre>
+<p>The catalog is checked. A <code>satisfies</code> naming a control the document does not
+declare is a located error, reported at the policy or goal that wrote it, and a
+<code>control</code> that no policy or goal satisfies raises an <code>unused_control</code> warning in
+JSON <code>warnings</code>, located at the declaration. Both exist because the declaration
+and the reference used to be parsed and then dropped, so <code>check</code> answered <code>ok</code>
+for a control that was never written.</p>
 <p>For controls reused across business specs, use a <code>governance</code> catalog:</p>
 <pre><code class="language-fsl">governance EnterpriseReturnControls {
   authority Operations owns CTRL-DECISION

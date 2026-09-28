@@ -1,0 +1,18 @@
+// A goal satisfying an undeclared control must be rejected too (#1134).
+business UnknownControlGoalReference {
+  actor Agent
+  entity Item
+
+  process Item {
+    stages Open, Done
+    initial Open
+    transition finish Open -> Done by Agent
+  }
+
+  goal GOAL-CLOSE "an item can reach Done"
+    satisfies CTRL-ABSENT
+    some Item can reach Done
+}
+verify {
+  instances Item = 2
+}

@@ -4,6 +4,8 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
+use serde_json::json;
+
 use fsl_syntax::{
     ActionItem, ActionTarget, AggregateKind, Annotation, Annotations, Binder, BusinessGoalBody,
     BusinessItem, BusinessPolicyBody, Expr, GovernanceArtifactRef, GovernanceDelegateItem,
@@ -1012,6 +1014,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             _ => {}
         }
     }
+    let control_diagnostics = business_control_diagnostics(&business.items)?;
     let mut processes = Vec::new();
     for item in process_items {
         let BusinessItem::Process {
@@ -1467,10 +1470,85 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
         origins,
     )?;
     kernel.set_projections(projections);
+    kernel.diagnostics.extend(control_diagnostics);
     for (target, annotation) in explicit_annotations {
         kernel.bind_annotation(target, annotation);
     }
     Ok(kernel)
+}
+
+/// Validate a business document's control catalog and report the controls
+/// nothing satisfies (issue #1134).
+///
+/// `BusinessItem::Control` fell into the catch-all arm of [`lower_business`]'s
+/// item loop, so a `control` declaration was parsed, accepted and discarded
+/// along with every `satisfies` that named it. `check` then answered `ok` for
+/// a policy pointing at a control that did not exist --- the same shape as the
+/// transition clauses issue #1109 closed --- while `docs/DESIGN-dialects.md`
+/// §3.2 already promised both checks and `src/fslc/dialects.py` already
+/// implemented them. This closes that port gap: an unknown reference is a
+/// located error, and a declared-but-unsatisfied control is an
+/// `unused_control` warning carrying the control's own position.
+///
+/// # Errors
+///
+/// Returns [`CoreError`] positioned at the policy or goal whose `satisfies`
+/// names a control the document does not declare.
+fn business_control_diagnostics(
+    items: &[BusinessItem],
+) -> Result<Vec<serde_json::Value>, CoreError> {
+    let mut declared: Vec<(&str, fsl_syntax::Span)> = Vec::new();
+    let mut declared_ids = BTreeSet::new();
+    for item in items {
+        if let BusinessItem::Control { id, span, .. } = item
+            && declared_ids.insert(id.as_str())
+        {
+            declared.push((id.as_str(), *span));
+        }
+    }
+    let mut referenced = BTreeSet::new();
+    for item in items {
+        let (kind, id, refs, span) = match item {
+            BusinessItem::Policy {
+                id,
+                satisfies,
+                span,
+                ..
+            } => ("policy", id, satisfies, *span),
+            BusinessItem::Goal {
+                id,
+                satisfies,
+                span,
+                ..
+            } => ("goal", id, satisfies, *span),
+            _ => continue,
+        };
+        for control in refs {
+            if !declared_ids.contains(control.as_str()) {
+                return Err(core_error(
+                    format!("{kind} '{id}' satisfies unknown control '{control}'"),
+                    span,
+                ));
+            }
+            referenced.insert(control.as_str());
+        }
+    }
+    Ok(declared
+        .into_iter()
+        .filter(|(id, _)| !referenced.contains(id))
+        .map(|(id, span)| {
+            json!({
+                "kind": "unused_control",
+                "element": "control",
+                "name": id,
+                "message": format!(
+                    "control '{id}' is declared but no policy or goal satisfies it"
+                ),
+                "loc": span.python_loc(),
+                "hint": "no policy or goal declares `satisfies` for this control",
+            })
+        })
+        .collect())
 }
 
 /// Names the first transition clause the business dialect parses but cannot
