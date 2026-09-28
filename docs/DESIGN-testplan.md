@@ -81,11 +81,21 @@ For each `requires` guard of the direct form *parameter op integer-literal*
 accepting vector at the boundary and the rejecting vector one step past it,
 named `boundary_accept_<param>` and `boundary_reject_<param>`.
 
+<!-- claim
+id: REQ-TESTPLAN-BOUNDARY-001
+bind: fsl:specs/job_pipeline.fsl#action:submit
+evidence: cmd:fslc testplan specs/job_pipeline.fsl --depth 0 (no boundary_* case)
+facts:
+  requires: jobs[j].st == New
+  requires: queue.size() < QCAP
+-->
 Guards outside that shape — `q + 1 <= 2`, `queue.size() < QCAP`, state-shaped
 guards such as `jobs[j].st == New` — yield no boundary case. That is why
-`specs/job_pipeline.fsl` produces none. The omission is visible only through
+`specs/job_pipeline.fsl` produces none.
+The omission is visible only through
 `selection_coverage.uncovered`; widening the recognized shape is future work,
 not a defect of this slice.
+<!-- /claim -->
 
 ## Frontier successors are not an error
 
