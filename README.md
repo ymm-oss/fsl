@@ -120,9 +120,10 @@ Put this in your `mise.toml`, then run `mise install`:
 > mise installs from a packslip and does not guess at release assets
 > ```
 
-Each release carries a manifest signed with the release workflow's own identity. mise
-verifies that identity, remembers it, and refuses a later release signed by somebody
-else. It checks the selected file's digest and size before unpacking it.
+Each release carries a manifest signed with the release workflow's own identity. On the
+first install, mise accepts a signature from any workflow in this repository and
+remembers which workflow made it. It then refuses a later release signed by a different
+workflow. It checks the selected file's digest and size before unpacking it.
 
 Each command names its own project, so nothing has to match asset names by hand.
 
