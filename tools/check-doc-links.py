@@ -14,6 +14,10 @@ Scope, deliberately narrow:
 * ``#anchor`` is resolved against **GitHub's** heading-slug algorithm, because
   ``docs/`` is read on GitHub.  mystmd slugifies differently -- see
   ``docs/DESIGN-myst-spike.md``
+* a ``.fsl`` target may carry a ``#<kind>:<name>`` fragment naming an element
+  declared in that specification (``#action:add_to_cart``); it resolves against
+  the declarations in the file.  GitHub renders such a link normally and
+  ignores the fragment, so the same source is correct in both readers
 
 Usage::
 
@@ -41,6 +45,11 @@ INLINE_LINK = re.compile(r"!?\[(?:[^\]\\]|\\.)*\]\(\s*<?([^)\s<>]+)>?(?:\s+[\"'(
 REF_DEF = re.compile(r"^\s{0,3}\[(?:[^\]\\]|\\.)+\]:\s*<?([^\s<>]+)>?")
 HTML_ANCHOR = re.compile(r"""<a\s+(?:[^>]*\s)?(?:id|name)\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
 IGNORED_SCHEME = re.compile(r"^(?:[a-zA-Z][a-zA-Z0-9+.-]*:|//)")
+FSL_ELEMENT = re.compile(
+    r"^\s*(spec|refinement|domain|dbsystem|action|invariant|trans|forbidden)"
+    r"\s+([A-Za-z_][A-Za-z0-9_]*)",
+    re.MULTILINE,
+)
 
 
 @dataclass(frozen=True, order=True)
@@ -70,6 +79,12 @@ def github_slug(heading: str) -> str:
     text = re.sub(r"[^\w\s-]", "", text, flags=re.UNICODE)
     # GitHub replaces each whitespace character, so "a  b" slugs to "a--b".
     return re.sub(r"\s", "-", text)
+
+
+def fsl_elements_of(path: Path) -> set[str]:
+    """Every ``<kind>:<name>`` an FSL specification declares."""
+    source = path.read_text(encoding="utf-8")
+    return {f"{kind}:{name}" for kind, name in FSL_ELEMENT.findall(source)}
 
 
 def anchors_of(path: Path) -> set[str]:
@@ -136,7 +151,15 @@ def check_target(source: Path, line: int, target: str, anchor_cache: dict[Path, 
         return Finding(rel(source), line, raw, "no such path in the repository")
     if not anchor:
         return None
-    if resolved.is_dir() or resolved.suffix.lower() != ".md":
+    if resolved.is_dir():
+        return None
+    if resolved.suffix.lower() == ".fsl":
+        if resolved not in anchor_cache:
+            anchor_cache[resolved] = fsl_elements_of(resolved)
+        if unquote(anchor) not in anchor_cache[resolved]:
+            return Finding(rel(source), line, raw, "the specification declares no such element")
+        return None
+    if resolved.suffix.lower() != ".md":
         return None
     if resolved not in anchor_cache:
         anchor_cache[resolved] = anchors_of(resolved)
