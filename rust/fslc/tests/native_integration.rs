@@ -623,6 +623,94 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     );
 }
 
+/// Runs the installer's own guard against real links. A link an earlier run of
+/// the installer made must still be migrated, under any data directory, while
+/// a link another tool placed, such as one `mise skills sync` made, is kept.
+#[cfg(not(windows))]
+#[test]
+fn installer_migrates_its_own_skill_links_and_keeps_foreign_ones() {
+    let installer = std::fs::read_to_string(root().join("install.sh")).expect("installer");
+    let start = installer
+        .find("installer_skill_link() {")
+        .expect("the legacy link rule");
+    let guard = installer.find("foreign_skill_link() {").expect("the guard");
+    let end = guard + installer[guard..].find("\n}\n").expect("the guard's end") + 3;
+    let functions = &installer[start..end];
+
+    let dir = std::env::temp_dir().join(format!("fsl-installer-guard-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let make = |path: &str| {
+        std::fs::create_dir_all(dir.join(path)).unwrap();
+        dir.join(path)
+    };
+    // Each link stands where the installer puts one: named after its skill.
+    let link = |target: &Path, case: &str| {
+        let path = make(&format!("links/{case}")).join("fsl");
+        std::os::unix::fs::symlink(target, &path).unwrap();
+        path
+    };
+
+    // The payload this run installs.
+    make("data/releases/new/skills/fsl");
+    std::os::unix::fs::symlink("releases/new", dir.join("data/current")).unwrap();
+    let source = dir.join("data/current/skills/fsl");
+
+    // A pre-native clone, `~/.fsl` by default.
+    make("clone/.git");
+    std::fs::write(make("clone").join("install.sh"), "").unwrap();
+    make("clone/skills/fsl");
+    // A native payload under a data directory this run no longer uses.
+    make("old-data/releases/old/skills/fsl");
+    std::os::unix::fs::symlink("releases/old", dir.join("old-data/current")).unwrap();
+    // What `mise skills sync` links to.
+    make("mise/installs/fslc/4.8.0/.mise-packslip/repo/skills/fsl");
+    // Look-alikes that no run of this installer made.
+    make("other/current/skills/fsl");
+    make("plain/skills/fsl");
+
+    let run_guard = |destination: &Path| {
+        Command::new("bash")
+            .arg("-c")
+            .arg(format!("{functions}\nforeign_skill_link \"$1\" \"$2\""))
+            .arg("guard")
+            .arg(destination)
+            .arg(&source)
+            .status()
+            .unwrap()
+            .success()
+    };
+    let foreign = [
+        link(
+            &dir.join("mise/installs/fslc/4.8.0/.mise-packslip/repo/skills/fsl"),
+            "mise",
+        ),
+        link(&dir.join("other/current/skills/fsl"), "other"),
+        link(&dir.join("plain/skills/fsl"), "plain"),
+    ];
+    let ours = [
+        link(&dir.join("clone/skills/fsl"), "clone"),
+        link(&dir.join("old-data/current/skills/fsl"), "old-data"),
+        link(&source, "current"),
+        link(&dir.join("gone/skills/fsl"), "broken"),
+        make("links/real-directory/fsl"),
+    ];
+    for destination in &foreign {
+        assert!(
+            run_guard(destination),
+            "{} must be kept",
+            destination.display()
+        );
+    }
+    for destination in &ours {
+        assert!(
+            !run_guard(destination),
+            "{} must be migrated",
+            destination.display()
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn production_accepts_only_governed_source_branches() {
     let root = root();

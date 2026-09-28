@@ -244,8 +244,9 @@ truth for the pinned-head and tree-identity requirements.
 4. Show the user the production commit, annotated tag `vX.Y.Z`, the exact notes,
    and that pushing the tag uploads a draft, verifies its remote inventory, signs
    the two packslip bundles, uploads them, verifies the inventory again, then
-   makes the GitHub Release, notes, and packslips public. Obtain one explicit
-   confirmation for that complete publication immediately before running:
+   makes the GitHub Release, notes, and packslips public. Obtain one
+   explicit confirmation for that complete publication immediately before
+   running:
 
    ```bash
    git tag -a vX.Y.Z PRODUCTION_SHA -m "vX.Y.Z"

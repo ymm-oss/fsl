@@ -211,6 +211,28 @@ payload_skill_names() {
   done | sort
 }
 
+# A link an earlier run of this installer made, under any data directory:
+# the `current` link of a native payload, or a pre-native repository clone
+# (`~/.fsl` by default). Such a link is migrated like any other of ours, even
+# after FSL_DATA_DIR or XDG_DATA_HOME changed, and it must not outlive the
+# directory it points into.
+installer_skill_link() {
+  local target="$1"
+  local skill_name="$2"
+  local root
+  case "$target" in
+    */current/skills/"$skill_name")
+      root="${target%/current/skills/"$skill_name"}"
+      [ -L "$root/current" ] && [ -d "$root/releases" ]
+      ;;
+    */skills/"$skill_name")
+      root="${target%/skills/"$skill_name"}"
+      [ -d "$root/.git" ] && [ -f "$root/install.sh" ]
+      ;;
+    *) return 1 ;;
+  esac
+}
+
 # A symbolic link this installer did not create belongs to whatever put it
 # there. Another tool that installs skills, such as `mise skills sync`, links
 # into its own versioned payload exactly as this installer does, and taking
@@ -219,9 +241,12 @@ payload_skill_names() {
 foreign_skill_link() {
   local destination="$1"
   local source="$2"
+  local target
   [ -L "$destination" ] || return 1
-  [ "$(readlink "$destination")" != "$source" ] || return 1
-  [ -e "$destination" ]
+  target=$(readlink "$destination")
+  [ "$target" != "$source" ] || return 1
+  [ -e "$destination" ] || return 1
+  ! installer_skill_link "$target" "$(basename "$destination")"
 }
 
 preflight_skill_link() {
