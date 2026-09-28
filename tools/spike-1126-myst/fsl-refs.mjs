@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+
 // Spike experiment (#1126, rows F1/F2): a typed `{fsl}` role backed by the FSL
 // corpus, to see whether MyST can carry the doc -> FSL forward check that
 // #1124 wants, and whether the failure reaches the exit code.

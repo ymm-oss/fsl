@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+
 // Spike experiment (#1126): can a MyST plugin make heading identifiers match
 // GitHub's slug algorithm, so the anchors that already work on github.com keep
 // resolving under mystmd?  See docs/DESIGN-myst-spike.md.
