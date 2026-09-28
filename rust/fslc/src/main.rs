@@ -7611,6 +7611,17 @@ fn domain_replay_step(
 /// comes from `fsl_core::event_flag` rather than an `event_` prefix scan of
 /// the state, so a rename in lowering breaks the build instead of silently
 /// matching nothing.
+///
+/// A flag the lowering never declares reads as `false`, not as an error, so
+/// this answers "no" for an event no action ever raises. That is the right
+/// answer for an undeclared name (already rejected by the declaration check
+/// above the call site), but it also means the check is only as good as the
+/// flag's existence: dropping an `event_<Event>` variable that no property
+/// reads — the unused-flag pruning proposed in
+/// [#1118](https://github.com/ymm-oss/fsl/issues/1118) — would silently turn
+/// every `domain_event` row for that event into a mismatch. Prune with a
+/// replacement source for "did this event just occur?", not by deleting the
+/// flag.
 fn domain_replay_event_occurred(monitor: &fsl_runtime::Monitor, event_name: &str) -> bool {
     matches!(
         monitor.state.get(&fsl_core::event_flag(event_name)),
@@ -7636,6 +7647,222 @@ fn domain_replay_emitted_events(
     names.sort_unstable();
     names.dedup();
     names
+}
+
+/// Where the FSL model says an event can be raised, split by whether a
+/// `domain replay` log can step the construct that raises it. Only `command`
+/// and `effect_completion` rows step the Monitor, so `replayable` holds the
+/// `decide`s and effect outcomes a log can drive, and `unreachable` the rest:
+/// saga steps, saga step timeouts, saga compensations, the saga observation
+/// of an event some other system raises, effect compensations, and stale
+/// policies. The split is what keeps the repair text honest — when nothing
+/// replayable emits the event, "add it to the emitting decide/effect" would
+/// be telling the reader to break a model that is already right.
+#[derive(Default)]
+struct DomainEventEmitters {
+    replayable: Vec<String>,
+    unreachable: Vec<String>,
+}
+
+impl DomainEventEmitters {
+    fn all(&self) -> Vec<String> {
+        let mut names = self.replayable.clone();
+        names.extend(self.unreachable.iter().cloned());
+        names
+    }
+}
+
+fn domain_replay_event_emitters(
+    domain: &fsl_syntax::DomainSpec,
+    event_name: &str,
+) -> DomainEventEmitters {
+    let mut emitters = DomainEventEmitters::default();
+    let effect_owned = domain.effects.iter().any(|effect| {
+        effect
+            .outcome_events()
+            .iter()
+            .any(|outcome| **outcome == *event_name)
+    });
+    for aggregate in &domain.aggregates {
+        for decide in &aggregate.decides {
+            if decide.emits.iter().any(|emit| emit == event_name) {
+                emitters
+                    .replayable
+                    .push(format!("decide {}.{}", aggregate.name, decide.command));
+            }
+        }
+        for stale in &aggregate.stale_policies {
+            if stale.emits.iter().any(|emit| emit == event_name) {
+                emitters
+                    .unreachable
+                    .push(format!("stale policy {}.{}", aggregate.name, stale.event));
+            }
+        }
+    }
+    for effect in &domain.effects {
+        if effect
+            .outcome_events()
+            .iter()
+            .any(|outcome| **outcome == *event_name)
+        {
+            emitters
+                .replayable
+                .push(format!("effect {} outcome", effect.name));
+        }
+        if effect
+            .compensation_events
+            .iter()
+            .any(|emit| emit == event_name)
+        {
+            emitters
+                .unreachable
+                .push(format!("effect {} compensation", effect.name));
+        }
+    }
+    for saga in &domain.sagas {
+        let mut observes = false;
+        for step in &saga.steps {
+            if step.emits.iter().any(|emit| emit == event_name) {
+                emitters
+                    .unreachable
+                    .push(format!("saga {} step {}", saga.name, step.name));
+            }
+            if step.timeout_event.as_deref() == Some(event_name) {
+                emitters
+                    .unreachable
+                    .push(format!("saga {} step {} timeout", saga.name, step.name));
+            }
+            observes |= step
+                .awaits
+                .iter()
+                .any(|await_event| await_event == event_name);
+        }
+        for compensation in &saga.compensations {
+            if compensation.emits.iter().any(|emit| emit == event_name) {
+                emitters.unreachable.push(format!(
+                    "saga {} compensation {} after {}",
+                    saga.name, compensation.trigger_event, compensation.after_event
+                ));
+            }
+            observes |=
+                compensation.trigger_event == event_name || compensation.after_event == event_name;
+        }
+        // `lower_saga_actions` gives an awaited (or compensation-triggering)
+        // event its own `saga_<saga>_observe_<event>` action — unless an
+        // effect outcome already owns it, in which case the completion action
+        // is the single writer. That observe action raises the flag, so the
+        // event is not "emitted by nothing"; it is emitted by a construct no
+        // log row drives.
+        if observes && !effect_owned {
+            emitters
+                .unreachable
+                .push(format!("saga {} observation", saga.name));
+        }
+    }
+    emitters.replayable.sort_unstable();
+    emitters.replayable.dedup();
+    emitters.unreachable.sort_unstable();
+    emitters.unreachable.dedup();
+    emitters
+}
+
+/// The finding for a `domain_event` row the model did not just raise. The
+/// same mismatch has three different causes, and naming the wrong one sends
+/// the reader to the wrong file (#1123 review):
+///
+/// - Nothing a `command`/`effect_completion` row can step emits the event —
+///   a saga step, timeout, or compensation does. Replay has no row kind for
+///   those, so no log can make the row match and the model is not the thing
+///   to change. This gets its own `failed_rule`.
+/// - The preceding transition row was **rejected** by the model. A rejected
+///   transition raises nothing and leaves the flags where the last accepted
+///   one left them, so the offending event is often exactly the one the
+///   rejected command's `decide` emits — "record it after a command whose
+///   decide emits it" would be pointing at the row above.
+/// - Otherwise the log is genuinely out of order, or the accepted transition
+///   really is missing the event; only then is changing the model a
+///   candidate, and then it is *that* transition to change, not whatever
+///   already emits the event.
+fn domain_replay_event_mismatch_finding(
+    domain: &fsl_syntax::DomainSpec,
+    monitor: &fsl_runtime::Monitor,
+    event_name: &str,
+    index: usize,
+    last_transition: Option<&(String, bool)>,
+) -> Value {
+    let emitters = domain_replay_event_emitters(domain, event_name);
+    let emitted = domain_replay_emitted_events(domain, monitor);
+    let mut witness = json!({
+        "event": event_name,
+        "emitted_by_preceding_transition": emitted,
+        "emitting_model_constructs": emitters.all(),
+        "reachable_by_replayed_transition": !emitters.replayable.is_empty(),
+    });
+    let rejected = last_transition
+        .filter(|(_, accepted)| !accepted)
+        .map(|(label, _)| label.as_str());
+    if let Some(label) = rejected
+        && let Value::Object(object) = &mut witness
+    {
+        object.insert("rejected_preceding_transition".to_owned(), json!(label));
+    }
+    let replayable = emitters.replayable.join(", ");
+    let unreachable = emitters.unreachable.join(", ");
+    let (failed_rule, repair) = if emitters.replayable.is_empty() {
+        if emitters.unreachable.is_empty() {
+            (
+                "runtime_event_reachable_by_replayed_transition",
+                vec![format!(
+                    "no decide, effect outcome, saga step, or compensation in domain {} emits {event_name}: the log names a declared event the model never raises, so fix the runtime log or give {event_name} an emitter",
+                    domain.name
+                )],
+            )
+        } else {
+            (
+                "runtime_event_reachable_by_replayed_transition",
+                vec![
+                    format!(
+                        "{event_name} is raised only by {unreachable}, and domain replay steps the model from command and effect_completion rows only, so no log can match this row — the FSL model is correct here and must not be changed for this finding"
+                    ),
+                    "replay a log without the saga-driven rows, or wait for correlated saga history (https://github.com/ymm-oss/fsl/issues/662) to give those transitions a log row".to_owned(),
+                ],
+            )
+        }
+    } else if let Some(label) = rejected {
+        (
+            "runtime_event_emitted_by_preceding_transition",
+            vec![
+                format!(
+                    "the model rejected the preceding {label}, and a rejected transition raises nothing: fix that rejection (reported as its own finding) and this {event_name} row follows from it"
+                ),
+                format!(
+                    "{event_name} is already emitted by {replayable}, so do not add it to the model for this finding — the disagreement is the guard that rejected {label}, or the implementation logging {event_name} for a transition it refused"
+                ),
+            ],
+        )
+    } else {
+        let mut repair = vec![format!(
+            "record {event_name} only directly after the transition that raises it: {replayable}"
+        )];
+        repair.push(match last_transition {
+            Some((label, _)) => format!(
+                "if the implementation is right, {label} is the transition to change: add {event_name} to what it emits (its decide, or the effect's outcomes) rather than to a construct that already emits it"
+            ),
+            None => format!(
+                "this row has no preceding command/effect_completion row at all: add the transition row that raises {event_name}, or drop the row from the log"
+            ),
+        });
+        ("runtime_event_emitted_by_preceding_transition", repair)
+    };
+    domain_replay_finding(
+        "unknown_domain_event",
+        &domain.name,
+        index,
+        failed_rule,
+        &witness,
+        &repair.iter().map(String::as_str).collect::<Vec<_>>(),
+        None,
+    )
 }
 
 #[allow(clippy::too_many_lines)]
@@ -7675,6 +7902,12 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
     // opaque runtime token rather than a declared numeric value.
     let declared_types: std::collections::BTreeSet<&str> =
         domain.types.iter().map(|ty| ty.name.as_str()).collect();
+    // The most recent `command`/`effect_completion` row and whether the model
+    // accepted it. Only an accepted row rewrites the occurrence flags, so a
+    // rejected one leaves a following `domain_event` row matched against an
+    // *older* transition — the case a mismatch repair must not describe as
+    // "record it after a command whose decide emits it" (#1123 review).
+    let mut last_transition: Option<(String, bool)> = None;
 
     for (index, event) in events.iter().enumerate() {
         let Some(entry) = event.as_object() else {
@@ -7721,6 +7954,14 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
                     domain_replay_step(&mut monitor, action, &params)
                 });
                 steps += 1;
+                last_transition = Some((
+                    format!(
+                        "command {}.{}",
+                        aggregate_name.unwrap_or_default(),
+                        command_name.unwrap_or_default()
+                    ),
+                    ok,
+                ));
                 if !ok {
                     findings.push(domain_replay_finding(
                         "command_rejected_by_model",
@@ -7772,22 +8013,12 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
                 if domain_replay_event_occurred(&monitor, event_name) {
                     observed.insert(event_name.to_owned());
                 } else {
-                    let emitted = domain_replay_emitted_events(&domain, &monitor);
-                    findings.push(domain_replay_finding(
-                        "unknown_domain_event",
-                        name,
+                    findings.push(domain_replay_event_mismatch_finding(
+                        &domain,
+                        &monitor,
+                        event_name,
                         index,
-                        "runtime_event_emitted_by_preceding_transition",
-                        &json!({"event":event_name,"emitted_by_preceding_transition":emitted}),
-                        &[
-                            &format!(
-                                "record {event_name} only after a command whose decide emits it (or an effect completion that raises it)"
-                            ),
-                            &format!(
-                                "add {event_name} to the emitting decide/effect in the FSL model if the implementation is right"
-                            ),
-                        ],
-                        None,
+                        last_transition.as_ref(),
                     ));
                 }
             }
@@ -7937,6 +8168,10 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
                 })()
                 .unwrap_or(false);
                 steps += 1;
+                last_transition = Some((
+                    format!("effect_completion {}/{event_name}", effect.name),
+                    ok,
+                ));
                 if !ok {
                     findings.push(domain_replay_finding(
                         "effect_completion_rejected_by_model",

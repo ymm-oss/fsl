@@ -1,0 +1,3 @@
+{"event":"command","aggregate":"Order","command":"ApproveOrder","params":{}}
+{"event":"domain_event","aggregate":"Order","name":"OrderApproved","params":{}}
+{"event":"domain_event","aggregate":"Order","name":"InventoryReservationRequested","params":{}}
