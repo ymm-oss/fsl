@@ -121,6 +121,40 @@
 | [`DESIGN-stochastic.md`](DESIGN-stochastic.md) | fsl-stochastic external evidence layer: precomputed eval JSONL, Wilson-bound threshold rules, statistical result schema, status priority, multiple-slice boundary, and external stochastic boundaries |
 | [`DESIGN-docs-site.md`](DESIGN-docs-site.md) | This manual site's information architecture, navigation chrome, and the generated-reference-page template (`intro/language.*.html`, `intro/cli.*.html`) — produced with the Relational Design plugin |
 
+## Path conventions in this directory
+
+An FSL path written in `docs/**.md` **with a repository directory prefix** —
+`specs/...`, `examples/...` — names a file that exists in this repository, in
+running prose and inside fenced code blocks alike. A command shown with such a
+path is meant to run as written from the repository root.
+
+An **illustrative** FSL path is written **without** that prefix: a bare
+`spec.fsl`, or `<spec.fsl>` where the reader substitutes a name. This is the
+existing habit throughout the design documents — `fslc ledger spec.fsl`
+([`DESIGN-ledger.md`](DESIGN-ledger.md)), `fslc analyze spec.fsl --projection tsg`
+([`DESIGN-analysis.md`](DESIGN-analysis.md)), `fslc document generate <spec.fsl>`
+([`DESIGN-document-cli.md`](DESIGN-document-cli.md)), and the layer filenames in
+[`DESIGN-layers.md`](DESIGN-layers.md)'s `fsl-project.toml` example, which match
+the runnable `tests/fixtures/chain/fsl-project.toml`. A document that needs to
+talk about a path that will never exist — a hypothetical rename destination, for
+instance — describes it in words, such as "a `git mv` into `specs/` as a `.fsl`",
+instead of inventing a filename.
+
+The absence of the prefix is the whole signal, so the two cases separate
+mechanically. From the repository root:
+
+```bash
+grep -rhoE '(specs|examples)/[A-Za-z0-9_/-]+\.fsl' docs --include='*.md' |
+  sort -u | while read -r p; do [ -f "$p" ] || echo "MISSING $p"; done
+```
+
+**Claimed and not claimed.** This convention is enforced by the one-liner above,
+run by hand; no CI gate implements it yet (issue #1124), unlike the doc-to-doc
+citation gate [`tools/check-design-citation-headings.py`](../tools/check-design-citation-headings.py)
+that `tools/check-merge-readiness.sh` runs. The **backward** direction — every
+FSL element being discussed by at least one hand-written document — is **not
+claimed** here and is not checked anywhere in this repository.
+
 ## Evidence policy
 
 Field trials, spikes, and audits are temporary evidence. Reusable findings are
