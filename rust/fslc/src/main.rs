@@ -7600,6 +7600,62 @@ fn domain_replay_step(
     }
 }
 
+/// The finding for a log row whose `params` never reached the model at all
+/// (#1133).
+///
+/// #1116 made a value that is not of its declared type fail closed, but
+/// folded that failure into the same bare `false` a guard rejection
+/// produces, so both surfaced as
+/// `failed_rule:"runtime_command_must_be_enabled_by_domain_model"` with the
+/// repair "change the implementation command path or update the FSL
+/// decide/evolve model". For a log carrying `{"value":"garbage"}` on an
+/// integer input that is advice to edit a model that is right: the row was
+/// refused before any guard ran, by the conversion, and the conversion's own
+/// message (`parameter 'value' must be an integer`) was thrown away.
+///
+/// Two separate causes therefore take two separate `failed_rule` values on
+/// the one `kind` — the one-kind/many-rules shape
+/// `uncorrelated_async_completion` and (since #1117) `unknown_domain_event`
+/// already use here, so the closed `kind` enum in
+/// `schemas/fslc/domain/finding.v0.schema.json` is untouched — and the
+/// discarded conversion message is carried in the witness as
+/// `parameter_error`, which is what makes the two distinguishable from the
+/// envelope alone.
+///
+/// The repair text must not name the model's transition rules. Nothing about
+/// them was consulted for this row, so the two things that can disagree are
+/// the value the implementation logged and the type the document declared
+/// for that parameter.
+#[allow(clippy::too_many_arguments)]
+fn domain_replay_param_mismatch_finding(
+    kind: &str,
+    domain: &str,
+    index: usize,
+    failed_rule: &str,
+    transition: &str,
+    log: &Value,
+    message: &str,
+    effect: Option<&str>,
+) -> Value {
+    let repair = [
+        format!(
+            "the runtime log's parameters do not match the declared signature of {transition}: {message}"
+        ),
+        format!(
+            "fix the value the implementation logs for {transition}, or change that parameter's declared type in the FSL model if the log is right — the model's transition rules were never consulted for this row, so they are not what disagrees"
+        ),
+    ];
+    domain_replay_finding(
+        kind,
+        domain,
+        index,
+        failed_rule,
+        &json!({"log":log,"parameter_error":message}),
+        &repair.iter().map(String::as_str).collect::<Vec<_>>(),
+        effect,
+    )
+}
+
 /// Whether the model's most recent accepted transition raised `event_name`
 /// (#1117). Lowering gives every declared domain event a one-hot
 /// `event_<Event>` flag, and *every* emitting action rewrites the flags of
@@ -7938,32 +7994,39 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
                         .any(|command| command.name == c)
                         .then(|| format!("{}_{}", snake_case(a), snake_case(c)))
                 });
-                let ok = action_name.as_deref().is_some_and(|action| {
-                    let Some(definition) = model
+                // #1133: keep the two reasons a `command` row does not
+                // replay apart. `Err` is the log disagreeing with the
+                // declared *signature* — a value that is not of its type, or
+                // a parameter the command does not declare — which the
+                // conversion refuses before the model sees anything;
+                // `Ok(false)` is the model itself refusing an
+                // otherwise-well-formed call. #1116 collapsed both into
+                // `false`, so the first was reported as a guard rejection.
+                let outcome: Result<bool, String> = match action_name.as_deref() {
+                    None => Ok(false),
+                    Some(action) => match model
                         .actions
                         .iter()
                         .find(|candidate| candidate.name == action)
-                    else {
-                        return false;
-                    };
-                    let Ok(params) =
-                        domain_replay_params(&model, &declared_types, definition, entry)
-                    else {
-                        return false;
-                    };
-                    domain_replay_step(&mut monitor, action, &params)
-                });
+                    {
+                        None => Ok(false),
+                        Some(definition) => {
+                            domain_replay_params(&model, &declared_types, definition, entry)
+                                .map(|params| domain_replay_step(&mut monitor, action, &params))
+                        }
+                    },
+                };
+                let ok = outcome.as_ref().copied().unwrap_or(false);
+                let transition = format!(
+                    "command {}.{}",
+                    aggregate_name.unwrap_or_default(),
+                    command_name.unwrap_or_default()
+                );
                 steps += 1;
-                last_transition = Some((
-                    format!(
-                        "command {}.{}",
-                        aggregate_name.unwrap_or_default(),
-                        command_name.unwrap_or_default()
-                    ),
-                    ok,
-                ));
-                if !ok {
-                    findings.push(domain_replay_finding(
+                last_transition = Some((transition.clone(), ok));
+                match &outcome {
+                    Ok(true) => {}
+                    Ok(false) => findings.push(domain_replay_finding(
                         "command_rejected_by_model",
                         name,
                         index,
@@ -7971,7 +8034,17 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
                         &json!({"log":event}),
                         &["change the implementation command path or update the FSL decide/evolve model"],
                         None,
-                    ));
+                    )),
+                    Err(message) => findings.push(domain_replay_param_mismatch_finding(
+                        "command_rejected_by_model",
+                        name,
+                        index,
+                        "runtime_command_parameters_match_declared_types",
+                        &transition,
+                        event,
+                        message,
+                        None,
+                    )),
                 }
             }
             Some("domain_event") => {
@@ -8141,39 +8214,44 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
                     snake_case(&effect.name),
                     snake_case(event_name)
                 );
-                let ok = (|| {
-                    let definition = model
+                // #1133, as on the `command` branch above: an `Err` here is
+                // the log's `params` (or the correlation value standing in
+                // for one) failing to convert to the declared type, which is
+                // not the lifecycle disagreement
+                // `effect_completion_matches_pending_lifecycle` names.
+                let outcome: Result<bool, String> = (|| {
+                    let Some(definition) = model
                         .actions
                         .iter()
-                        .find(|candidate| candidate.name == action_name)?;
+                        .find(|candidate| candidate.name == action_name)
+                    else {
+                        return Ok(false);
+                    };
                     let mut params =
-                        domain_replay_params(&model, &declared_types, definition, entry).ok()?;
+                        domain_replay_params(&model, &declared_types, definition, entry)?;
                     if let Some(field) = domain_replay_correlation_field(effect)
                         && !params.contains_key(&field)
                     {
-                        let param = definition
-                            .params
-                            .iter()
-                            .find(|param| param.name() == field)?;
-                        let value = domain_replay_param_value(
-                            &model,
-                            &declared_types,
-                            param,
-                            domain_replay_correlation_raw(entry)?,
-                        )
-                        .ok()?;
+                        let Some(param) =
+                            definition.params.iter().find(|param| param.name() == field)
+                        else {
+                            return Ok(false);
+                        };
+                        let Some(raw) = domain_replay_correlation_raw(entry) else {
+                            return Ok(false);
+                        };
+                        let value = domain_replay_param_value(&model, &declared_types, param, raw)?;
                         params.insert(field, value);
                     }
-                    Some(domain_replay_step(&mut monitor, &action_name, &params))
-                })()
-                .unwrap_or(false);
+                    Ok(domain_replay_step(&mut monitor, &action_name, &params))
+                })();
+                let ok = outcome.as_ref().copied().unwrap_or(false);
+                let transition = format!("effect_completion {}/{event_name}", effect.name);
                 steps += 1;
-                last_transition = Some((
-                    format!("effect_completion {}/{event_name}", effect.name),
-                    ok,
-                ));
-                if !ok {
-                    findings.push(domain_replay_finding(
+                last_transition = Some((transition.clone(), ok));
+                match &outcome {
+                    Ok(true) => {}
+                    Ok(false) => findings.push(domain_replay_finding(
                         "effect_completion_rejected_by_model",
                         name,
                         index,
@@ -8181,7 +8259,17 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
                         &json!({"log":event}),
                         &["ensure request and completion ordering matches the fsl-effect lifecycle"],
                         Some(&effect.name),
-                    ));
+                    )),
+                    Err(message) => findings.push(domain_replay_param_mismatch_finding(
+                        "effect_completion_rejected_by_model",
+                        name,
+                        index,
+                        "effect_completion_parameters_match_declared_types",
+                        &transition,
+                        event,
+                        message,
+                        Some(&effect.name),
+                    )),
                 }
                 completed.insert(key.clone());
                 pending.remove(&key);
