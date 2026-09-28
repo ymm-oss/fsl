@@ -1,0 +1,1 @@
+Fixed (#1119): The explicit runtime no longer copies an `exists` witness scope into the caller's bindings, so a quantifier binder that shadows an action parameter can no longer overwrite it -- `explicit`/`auto` returned `proved` for a violated invariant, `bmc`/`induction` failed witness replay, and the conformance vectors recorded the witness index.

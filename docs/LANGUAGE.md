@@ -644,7 +644,11 @@ variable capture instead of inventing internal binder names. See
   only the selected branch, while name and type checking always visits both.
 - Finite binders: `x: T`, `x in lo..hi`, or `x in set_or_seq`, each optionally
   followed by `where predicate`. The predicate is `Bool` and is scoped after
-  `x` is bound. Maps and unbounded collections are not binder domains.
+  `x` is bound. Maps and unbounded collections are not binder domains. `x`'s
+  scope is exactly that predicate and the quantifier/aggregate body: naming it
+  outside is a type error, and when it shadows an enclosing name (an action
+  parameter, say) the shadowing is confined to that scope — a satisfied
+  `exists` never exports its witness to the enclosing bindings.
 - Quantification (bounded): the canonical forms are `forall binder { expr }`
   and `exists binder { expr }`. The 2.x legacy colon/no-braces spelling such as
   `forall i in lo..hi: expr` remains accepted but is non-canonical. A Seq binder

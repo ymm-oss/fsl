@@ -678,7 +678,10 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
   を実行しますが、名前と型の検査は常に両方の分岐を訪れます。</li>
 <li>有限バインダー: <code>x: T</code>、<code>x in lo..hi</code>、または <code>x in set_or_seq</code>。それぞれ省略
   可能な <code>where predicate</code> を後置できます。述語は <code>Bool</code> で、<code>x</code> が束縛された後に
-  スコープされます。Map と非有界のコレクションはバインダーのドメインになりません。</li>
+  スコープされます。Map と非有界のコレクションはバインダーのドメインになりません。
+  <code>x</code> のスコープはその述語と量化・集約の本体だけです。外で名前を挙げると型エラーに
+  なり、外側の名前(action の引数など)を隠す場合もその隠蔽はスコープ内に閉じます。
+  充足した <code>exists</code> が witness を外側の束縛へ出すことはありません。</li>
 <li>量化(有界): 正準形は <code>forall binder { expr }</code> と <code>exists binder { expr }</code>
   です。<code>forall i in lo..hi: expr</code> のような 2.x レガシーのコロン/中括弧なしの記法
   は引き続き受理されますが、非正準です。Seq のバインダーはその live なプレフィックス

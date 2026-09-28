@@ -250,7 +250,18 @@ pub fn eval(
                         continue;
                     }
                     if as_bool(eval(body, state, &mut local, model, old_state)?)? {
-                        bindings.extend(local);
+                        // The witnessing binding stays in `local` and dies with
+                        // it. Copying the satisfied scope back into `bindings`
+                        // used to overwrite a caller name the binder shadows
+                        // (an action parameter with the binder's name), so a
+                        // later `w[r] = true` wrote the witness's index instead
+                        // of the parameter's -- explicit returned `proved` for a
+                        // violated invariant while the symbolic engines rejected
+                        // the replay (#1119). `typecheck.rs`'s `Quantified` arm
+                        // types the body in a cloned env, so no expression can
+                        // legitimately name the binder outside the quantifier;
+                        // `eval_quantified` in `fsl-verifier` and the frozen
+                        // Python reference scope it the same way.
                         return Ok(Value::Bool(true));
                     }
                 }

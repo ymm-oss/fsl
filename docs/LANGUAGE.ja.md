@@ -622,6 +622,9 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
 - 有限バインダー: `x: T`、`x in lo..hi`、または `x in set_or_seq`。それぞれ省略
   可能な `where predicate` を後置できます。述語は `Bool` で、`x` が束縛された後に
   スコープされます。Map と非有界のコレクションはバインダーのドメインになりません。
+  `x` のスコープはその述語と量化・集約の本体だけです。外で名前を挙げると型エラーに
+  なり、外側の名前(action の引数など)を隠す場合もその隠蔽はスコープ内に閉じます。
+  充足した `exists` が witness を外側の束縛へ出すことはありません。
 - 量化(有界): 正準形は `forall binder { expr }` と `exists binder { expr }`
   です。`forall i in lo..hi: expr` のような 2.x レガシーのコロン/中括弧なしの記法
   は引き続き受理されますが、非正準です。Seq のバインダーはその live なプレフィックス
