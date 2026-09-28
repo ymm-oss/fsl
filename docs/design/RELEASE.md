@@ -262,7 +262,7 @@ truth for the pinned-head and tree-identity requirements.
    four supported suffixes. Confirm no `macos-x64` asset exists. Also confirm
    the Agent Skill bundle/checksum pair, VS Code extension, both Kernel
    bundle/checksum pairs, and both packslip bundles
-   (`packslip.fslc.sigstore.json` and `packslip.fsl-lsp.sigstore.json`) are
+   (`packslip.fslc.sigstore.json` and `packslip.fslc-lsp.sigstore.json`) are
    present.
 3. Download the current machine's supported binary and checksum, verify the
    checksum, and run `fslc --version`. It must print `fslc X.Y.Z`.

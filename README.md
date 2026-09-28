@@ -106,12 +106,12 @@ Put this in your `mise.toml`, then run `mise install`:
 ```toml
 [tools]
 "packslip:github.com/ymm-oss/fsl/fslc" = "latest"
-"packslip:github.com/ymm-oss/fsl/fsl-lsp" = "latest"
+"packslip:github.com/ymm-oss/fsl/fslc-lsp" = "latest"
 ```
 
 > [!IMPORTANT]
-> v4.6.0 carries no packslip. It is published from the first release after this
-> section was written, so pin a version only once the release you want carries one.
+> v4.7.0 and earlier releases carry no packslip. It is published from the first release
+> after v4.7.0, so pin a version only once the release you want carries one.
 > mise says so rather than guessing:
 >
 > ```console

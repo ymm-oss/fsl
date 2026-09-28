@@ -39,8 +39,11 @@ fn assert_packslip_release_contract(workflow: &str, root: &Path) {
     // separate bare executables and one project cannot hold two `raw`
     // artifacts for one platform.
     assert_eq!(workflow.matches("uses: jdx/packslip@").count(), 2);
-    assert!(workflow.contains("project: github.com/ymm-oss/fsl/fslc"));
-    assert!(workflow.contains("project: github.com/ymm-oss/fsl/fsl-lsp"));
+    // The project names the command, and the bundle file name follows it.
+    // Users write the project in `mise.toml` and mise keys its signer pin by
+    // it, so the first release that carries a packslip fixes the name.
+    assert!(workflow.contains("project: github.com/ymm-oss/fsl/fslc\n"));
+    assert!(workflow.contains("project: github.com/ymm-oss/fsl/fslc-lsp\n"));
     assert!(workflow.contains("id-token: write"));
     assert!(workflow.contains("attestations: write"));
 
@@ -86,7 +89,8 @@ fn assert_packslip_release_contract(workflow: &str, root: &Path) {
 
     // mise reads the manifest. The README has to name the backend that does.
     let readme = std::fs::read_to_string(root.join("README.md")).expect("README");
-    assert!(readme.contains("packslip:github.com/ymm-oss/fsl/fslc"));
+    assert!(readme.contains("\"packslip:github.com/ymm-oss/fsl/fslc\""));
+    assert!(readme.contains("\"packslip:github.com/ymm-oss/fsl/fslc-lsp\""));
     assert!(readme.contains("mise skills sync"));
 }
 

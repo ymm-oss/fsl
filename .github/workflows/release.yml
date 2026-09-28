@@ -425,7 +425,7 @@ jobs:
         id: packslip-lsp
         uses: jdx/packslip@74c75db7d611b36dd5a157999ec16cf823ccf80c # v1.2.0
         with:
-          project: github.com/ymm-oss/fsl/fsl-lsp
+          project: github.com/ymm-oss/fsl/fslc-lsp
           bin: fslc-lsp
           artifacts: >-
             release-assets/fslc-lsp-macos-arm64
