@@ -2294,6 +2294,12 @@ or Rejected</code> — そして、同じ <code>(process, waypoint-set)</code> �
   satisfies CTRL-DECISION
   every Return in Requested must eventually be Approved or Rejected or Refunded
 </code></pre>
+<p>このカタログは検査されます。宣言されていないコントロールを <code>satisfies</code> が指した
+場合は位置付きのエラーとなり、その <code>satisfies</code> を書いた policy / goal の位置で
+報告されます。どの policy / goal からも satisfies されない <code>control</code> は、宣言の
+位置を持つ <code>unused_control</code> 警告として JSON の <code>warnings</code> に出ます。どちらも、
+以前は宣言も参照も構文解析されたあと捨てられ、書かれていないコントロールに対して
+<code>check</code> が <code>ok</code> と答えていたために設けられた検査です。</p>
 <p>business の spec をまたいで再利用されるコントロールには、<code>governance</code> カタログを
 使います:</p>
 <pre><code class="language-fsl">governance EnterpriseReturnControls {

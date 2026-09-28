@@ -273,6 +273,15 @@ verify {
    declared but unused controls produce an `unused_control` warning. When a
    satisfied policy/goal fails, the JSON `requirement` object includes
    `controls: [{id, text}, ...]`.
+   Both checks are located (issue #1134): the unknown-reference error is
+   positioned at the policy or goal that wrote the `satisfies`, and the
+   `unused_control` warning at the `control` declaration nobody satisfies.
+   The native lowering reports them; before #1134 it dropped
+   `BusinessItem::Control` and every `satisfies` with it, so `check` answered
+   `ok` for a control that did not exist. The `controls` projection on the
+   `requirement` object is still emitted by the Python front end only; the
+   native lowering does not carry it yet (declared-but-unimplemented census:
+   #782).
    `policy ... responds { P ~> Q }` → leadsTo (with meta).
    `policy ... every <Entity> in <Stage> must eventually be <Stage> [or <Stage> ...]`
    is a readable alias for the common stage-response rule and expands to

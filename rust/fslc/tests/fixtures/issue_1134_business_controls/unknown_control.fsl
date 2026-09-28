@@ -1,0 +1,18 @@
+// A policy satisfying an undeclared control must be rejected (#1134).
+business UnknownControlReference {
+  actor Agent
+  entity Item
+
+  process Item {
+    stages Open, Done
+    initial Open
+    transition finish Open -> Done by Agent
+  }
+
+  policy REQ-CLOSE "every opened item is eventually finished"
+    satisfies CTRL-ABSENT
+    every Item in Open must eventually be Done
+}
+verify {
+  instances Item = 2
+}

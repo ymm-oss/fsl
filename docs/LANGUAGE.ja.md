@@ -2285,6 +2285,13 @@ policy PAY-2 "every request is eventually decided"
   every Return in Requested must eventually be Approved or Rejected or Refunded
 ```
 
+このカタログは検査されます。宣言されていないコントロールを `satisfies` が指した
+場合は位置付きのエラーとなり、その `satisfies` を書いた policy / goal の位置で
+報告されます。どの policy / goal からも satisfies されない `control` は、宣言の
+位置を持つ `unused_control` 警告として JSON の `warnings` に出ます。どちらも、
+以前は宣言も参照も構文解析されたあと捨てられ、書かれていないコントロールに対して
+`check` が `ok` と答えていたために設けられた検査です。
+
 business の spec をまたいで再利用されるコントロールには、`governance` カタログを
 使います:
 

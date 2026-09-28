@@ -2357,6 +2357,13 @@ policy PAY-2 "every request is eventually decided"
   every Return in Requested must eventually be Approved or Rejected or Refunded
 ```
 
+The catalog is checked. A `satisfies` naming a control the document does not
+declare is a located error, reported at the policy or goal that wrote it, and a
+`control` that no policy or goal satisfies raises an `unused_control` warning in
+JSON `warnings`, located at the declaration. Both exist because the declaration
+and the reference used to be parsed and then dropped, so `check` answered `ok`
+for a control that was never written.
+
 For controls reused across business specs, use a `governance` catalog:
 
 ```fsl

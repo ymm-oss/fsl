@@ -111,6 +111,9 @@ business <Name> {
   entity <Entity>                          // identity sort; size set by verify.instances
   control <ID> "<text>"                    // optional governance/control metadata
   policy <ID> "<text>" satisfies <ID> ...  // optional control traceability
+                                           // `satisfies` of an undeclared control is a
+                                           // located error; a control nothing satisfies
+                                           // is an `unused_control` warning (#1134)
 }
 requirements <Name> {
   entity <Entity>                          // optional explicit identity sort
