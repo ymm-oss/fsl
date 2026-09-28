@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+
+// #1116 review: an effect whose `correlation_id` field has a *declared*
+// numeric type, so the two paths that can supply that parameter -- the log
+// entry's own `params` and the correlation id filled in when `params` omits
+// it -- can be shown to accept and reject the same JSON values. With an
+// implicit identity type (`issue_518_domain_replay.fsl`'s `RefId`) both
+// paths accept any scalar, so the disagreement is invisible there.
+
+domain DeclaredCorrelation {
+  implementation_profile functional_ddd
+
+  type Ref = 0..9;
+  enum MsgStatus { New, Sent }
+  enum DeliveryStatus { NotRequested, Requested, Done }
+
+  aggregate Msg {
+    id MsgId
+
+    state {
+      status: MsgStatus = New;
+      delivery: DeliveryStatus = NotRequested;
+    }
+
+    command SendMsg {
+      input ref_id: Ref
+    }
+
+    event MsgSent {
+      ref_id: Ref
+    }
+    event Delivered {
+      ref_id: Ref
+    }
+    event DeliveryFailed {
+      ref_id: Ref
+    }
+
+    decide SendMsg {
+      requires status == New
+      emits MsgSent
+    }
+
+    evolve MsgSent {
+      status = Sent
+      delivery = Requested
+    }
+    evolve Delivered {
+      delivery = Done
+    }
+    evolve DeliveryFailed {
+      delivery = NotRequested
+    }
+  }
+
+  effect Deliver {
+    async
+    irreversible
+    idempotency_key Msg.id
+    correlation_id MsgSent.ref_id
+    handles MsgSent
+    emits one_of [Delivered, DeliveryFailed]
+    retry {
+      max_attempts 2
+    }
+    timeout after 5m emits DeliveryFailed
+    compensation {
+      emits DeliveryFailed
+    }
+  }
+}

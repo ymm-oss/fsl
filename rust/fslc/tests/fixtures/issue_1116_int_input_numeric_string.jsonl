@@ -1,0 +1,1 @@
+{"event":"command","aggregate":"Account","command":"SetScore","params":{"value":"2"}}

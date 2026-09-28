@@ -7351,17 +7351,32 @@ fn run_domain_generate(
 /// placeholder is the only mapping available. Declared
 /// `range`/`enum`/`Bool` parameters do have one and go through
 /// `parse_param_value` instead (#1116).
+///
+/// The placeholder exists because an opaque token has no *numeric* meaning,
+/// not because this type accepts anything: only a JSON scalar is an
+/// identifier. An object, an array, and `null` are rejected rather than
+/// folded onto `lo`, so the exception stays an exception and does not
+/// re-open, for the identity types that are the majority of real logs, the
+/// false conformance #1116 closed everywhere else.
 #[allow(clippy::cast_possible_truncation)]
-fn domain_replay_identity_value(lo: i64, value: &Value) -> FslValue {
+fn domain_replay_identity_value(
+    lo: i64,
+    param_name: &str,
+    value: &Value,
+) -> Result<FslValue, String> {
     let parsed = match value {
         Value::Number(number) => number
             .as_i64()
             .or_else(|| number.as_f64().map(|value| value as i64)),
         Value::String(text) => text.trim().parse::<i64>().ok(),
         Value::Bool(flag) => Some(i64::from(*flag)),
-        _ => None,
+        Value::Null | Value::Array(_) | Value::Object(_) => {
+            return Err(format!(
+                "parameter '{param_name}' must be an identifier token"
+            ));
+        }
     };
-    FslValue::Int(parsed.unwrap_or(lo))
+    Ok(FslValue::Int(parsed.unwrap_or(lo)))
 }
 
 /// The placeholder lower bound of `param`'s type when, and only when, that
@@ -7419,6 +7434,14 @@ fn domain_replay_enum_token(type_name: &str, members: &[String], token: &str) ->
 /// not of the declared type is rejected instead of being silently read as
 /// `0` (#1116: that fallback made `{"value":"garbage"}` report
 /// `conformance_checked`).
+///
+/// One narrowing over `parse_param_value`: a `Bool` parameter is read from
+/// `true`/`false` only. `parse_param_value` also reads an integer as `v != 0`
+/// for `fslc replay`'s hand-written mapped-action inputs, but `domain
+/// replay` produces `replay-observed` evidence about a log it did not write,
+/// and reading `1` as `true` there would invent a Boolean observation the
+/// log never recorded. `docs/DESIGN-domain.md` documents `true`/`false` as
+/// the Boolean spelling; anything else fails closed (#1116 review).
 fn domain_replay_param_value(
     model: &KernelModel,
     declared: &std::collections::BTreeSet<&str>,
@@ -7426,7 +7449,20 @@ fn domain_replay_param_value(
     value: &Value,
 ) -> Result<FslValue, String> {
     if let Some(lo) = domain_replay_identity_bound(model, declared, param) {
-        return Ok(domain_replay_identity_value(lo, value));
+        return domain_replay_identity_value(lo, param.name(), value);
+    }
+    if matches!(
+        param,
+        ParamDef::Typed {
+            ty: TypeRef::Bool,
+            ..
+        }
+    ) && !value.is_boolean()
+    {
+        return Err(format!(
+            "parameter '{}' must be `true` or `false`",
+            param.name()
+        ));
     }
     if let ParamDef::Typed {
         ty: TypeRef::Named(type_name),
@@ -7470,29 +7506,30 @@ fn domain_replay_params(
         .collect()
 }
 
-/// A correlation value re-read as JSON for typed conversion: correlation ids
-/// are carried as strings (`domain_replay_correlation_value` stringifies
-/// them), so a numeric one is handed back as a number and an opaque token as
-/// a string.
-fn domain_replay_correlation_json(correlation: &str) -> Value {
-    correlation
-        .trim()
-        .parse::<i64>()
-        .map_or_else(|_| json!(correlation), |number| json!(number))
-}
-
 /// `entry.get("correlation_id")`, falling back to `params.correlation_id`,
-/// stringified — mirrors `_correlation_value` in the Python reference.
-fn domain_replay_correlation_value(entry: &Map<String, Value>) -> Option<String> {
-    let value = entry.get("correlation_id").cloned().or_else(|| {
+/// as the JSON value the log actually wrote.
+///
+/// Request/completion pairing keys on the *stringified* form
+/// (`domain_replay_correlation_value`), but typed conversion must not read
+/// that form: re-parsing the string `"1"` back into a number would accept,
+/// on this path, exactly the JSON string a declared numeric parameter
+/// rejects when the same log carries it in `params`. Handing the original
+/// value to `domain_replay_param_value` keeps the two paths deciding alike
+/// (#1116 review).
+fn domain_replay_correlation_raw(entry: &Map<String, Value>) -> Option<&Value> {
+    entry.get("correlation_id").or_else(|| {
         entry
             .get("params")
             .and_then(Value::as_object)
             .and_then(|params| params.get("correlation_id"))
-            .cloned()
-    })?;
-    Some(match value {
-        Value::String(text) => text,
+    })
+}
+
+/// `domain_replay_correlation_raw`, stringified — mirrors
+/// `_correlation_value` in the Python reference.
+fn domain_replay_correlation_value(entry: &Map<String, Value>) -> Option<String> {
+    Some(match domain_replay_correlation_raw(entry)? {
+        Value::String(text) => text.clone(),
         Value::Number(number) => number.to_string(),
         Value::Bool(flag) => flag.to_string(),
         other => other.to_string(),
@@ -7823,7 +7860,7 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
                             &model,
                             &declared_types,
                             param,
-                            &domain_replay_correlation_json(&correlation),
+                            domain_replay_correlation_raw(entry)?,
                         )
                         .ok()?;
                         params.insert(field, value);

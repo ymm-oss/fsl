@@ -1,0 +1,1 @@
+{"event":"command","aggregate":"Account","command":"SetActive","params":{"flag":0}}
