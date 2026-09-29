@@ -1572,13 +1572,8 @@ fn verify_cache_keys_with_solver_version(
 /// this one is a fixed constant with no CLI flag, added to the options
 /// blob instead. Both are inputs to the same single key derivation -- they
 /// do not compete for one slot.
-fn verify_cache_base_options(
-    canonical_identity: &Path,
-    engine: &str,
-    options: &CliVerifyOptions,
-) -> Value {
+fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value {
     json!({
-        "path": canonical_identity,
         "deadlock": options.deadlock,
         "engine": engine,
         "explicit_budget": options.explicit_budget,
@@ -1603,6 +1598,14 @@ fn verify_cache_base_options(
 /// parent directory, which was a proxy for "what this spec depends on" that
 /// was both too narrow (a dependency outside the parent directory was never
 /// walked) and too broad (an unrelated sibling `.fsl` file was).
+///
+/// The key embeds no absolute path (issue #1148, and
+/// `docs/DESIGN-incremental-verify.md` §3): the entry spec is identified by
+/// its bytes, each dependency by its path relative to the entry spec's
+/// directory plus its bytes, and the `--requirements` file by its bytes. The
+/// entry spec's own path is deliberately not an input: no verdict-class
+/// output carries it, so hashing it only made an unchanged spec miss after a
+/// move, rename, or second checkout.
 fn verify_cache_keys_with_fingerprints(
     // The dependency domain now comes entirely from `sources` (what was
     // actually read); this key no longer walks a directory rooted at the
@@ -1617,13 +1620,10 @@ fn verify_cache_keys_with_fingerprints(
     implementation_fingerprint: &str,
     sources: &[(PathBuf, String)],
 ) -> Result<(String, String), String> {
-    let canonical_identity = identity_path
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
     let mut sorted_sources = sources.to_vec();
     sorted_sources.sort();
     let mut digest = Sha256::new();
-    digest.update(b"fslc-rust-verify-cache-v3\0");
+    digest.update(b"fslc-rust-verify-cache-v4\0");
     digest.update(env!("CARGO_PKG_VERSION").as_bytes());
     digest.update(b"\0identity-source\0");
     digest.update(std::fs::read(identity_path).map_err(|error| error.to_string())?);
@@ -1647,7 +1647,7 @@ fn verify_cache_keys_with_fingerprints(
         digest.update(b"requirements\0");
         digest.update(std::fs::read(requirements).map_err(|error| error.to_string())?);
     }
-    let base_options = verify_cache_base_options(&canonical_identity, engine, options);
+    let base_options = verify_cache_base_options(engine, options);
     digest.update(serde_json::to_vec(&base_options).map_err(|error| error.to_string())?);
     let xdepth = format!("{:x}", digest.clone().finalize());
     digest.update(b"\0depth=");
@@ -2726,9 +2726,8 @@ mod tests {
     fn verify_cache_base_options_includes_the_implements_search_budget() {
         let path = repository_path("examples/gallery/valid/tiny_turnstile.fsl");
         let options = CliVerifyOptions::default();
-        let canonical = path.canonicalize().expect("canonicalize fixture path");
 
-        let base_options = verify_cache_base_options(&canonical, "bmc", &options);
+        let base_options = verify_cache_base_options("bmc", &options);
 
         assert_eq!(
             base_options["implements_search_budget"],
@@ -2936,6 +2935,144 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The key derivation as it was before issue #1148: the checked spec's
+    /// canonicalised absolute path was hashed into the options blob, and the
+    /// key prefix was `v3`. Kept here only so the negative control below can
+    /// prove an entry written under that derivation cannot be found by the
+    /// new one.
+    fn legacy_v3_keys(
+        path: &Path,
+        options: &CliVerifyOptions,
+        engine: &str,
+        solver_version: &str,
+        fingerprint: &str,
+    ) -> (String, String) {
+        let mut base_options = verify_cache_base_options(engine, options);
+        base_options["path"] = json!(path.canonicalize().expect("canonicalize fixture path"));
+        let mut digest = Sha256::new();
+        digest.update(b"fslc-rust-verify-cache-v3\0");
+        digest.update(env!("CARGO_PKG_VERSION").as_bytes());
+        digest.update(b"\0identity-source\0");
+        digest.update(std::fs::read(path).expect("read fixture"));
+        digest.update(b"\0backend=native-z3\0solver=");
+        digest.update(solver_version.as_bytes());
+        digest.update(b"\0");
+        digest.update(b"implementation\0");
+        digest.update(fingerprint.as_bytes());
+        digest.update(b"\0");
+        digest.update(serde_json::to_vec(&base_options).expect("options"));
+        let xdepth = format!("{:x}", digest.clone().finalize());
+        digest.update(b"\0depth=");
+        digest.update(options.depth.to_string().as_bytes());
+        (format!("{:x}", digest.finalize()), xdepth)
+    }
+
+    /// Issue #1148 calibration: the key is a function of content, not of where
+    /// the spec sits. The same bytes at two different absolute paths (and
+    /// under two different file names) yield the same key; a byte that
+    /// changes, or a dependency whose content or name changes, does not.
+    #[test]
+    fn cache_keys_do_not_depend_on_the_absolute_path() {
+        let source =
+            std::fs::read_to_string(repository_path("examples/gallery/valid/tiny_turnstile.fsl"))
+                .expect("read fixture");
+        let root = std::env::temp_dir().join(format!("fslc-1148-keys-{}", std::process::id()));
+        let one = root.join("one/deep/er");
+        let two = root.join("two");
+        std::fs::create_dir_all(&one).expect("create first location");
+        std::fs::create_dir_all(&two).expect("create second location");
+        let at_one = one.join("spec.fsl");
+        let at_two = two.join("renamed.fsl");
+        std::fs::write(&at_one, &source).expect("write first copy");
+        std::fs::write(&at_two, &source).expect("write second copy");
+        let options = CliVerifyOptions::default();
+        let dep = |name: &str, body: &str| vec![(PathBuf::from(name), body.to_owned())];
+
+        let key = |path: &Path, sources: &[(PathBuf, String)]| {
+            verify_cache_keys(path, path, &options, sources).expect("cache keys")
+        };
+        assert_eq!(key(&at_one, &[]), key(&at_two, &[]));
+        assert_eq!(
+            key(&at_one, &dep("../dep.fsl", "a")),
+            key(&at_two, &dep("../dep.fsl", "a"))
+        );
+
+        // Over-detection controls: everything that does change the verdict
+        // still changes the key.
+        std::fs::write(&at_two, format!("{source}\n")).expect("edit second copy");
+        assert_ne!(key(&at_one, &[]), key(&at_two, &[]), "content edit");
+        assert_ne!(
+            key(&at_one, &dep("../dep.fsl", "a")),
+            key(&at_one, &dep("../dep.fsl", "b")),
+            "dependency content"
+        );
+        assert_ne!(
+            key(&at_one, &dep("../dep.fsl", "a")),
+            key(&at_one, &dep("../other.fsl", "a")),
+            "dependency name"
+        );
+        assert_ne!(key(&at_one, &[]), key(&at_one, &dep("../dep.fsl", "a")));
+        let mut deeper = options.clone();
+        deeper.depth += 1;
+        assert_ne!(
+            key(&at_one, &[]).0,
+            verify_cache_keys(&at_one, &at_one, &deeper, &[])
+                .expect("deeper keys")
+                .0
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Issue #1148 negative control: an entry written under the old key
+    /// derivation (absolute path in the key, `v3` prefix) is unreachable from
+    /// the new derivation. The key differs, and a legacy entry presented under
+    /// the new key is rejected by the entry's own key check, so an old
+    /// `verified` can never be replayed as a hit.
+    #[test]
+    fn entries_written_under_the_absolute_path_key_never_hit() {
+        let path = repository_path("examples/gallery/valid/tiny_turnstile.fsl");
+        let options = CliVerifyOptions::default();
+        let solver = "Z3 4.16.0.0";
+        let fingerprint = "implementation-a";
+
+        let (legacy_key, legacy_xdepth) =
+            legacy_v3_keys(&path, &options, "bmc", solver, fingerprint);
+        let (key, xdepth) = verify_cache_keys_with_fingerprints(
+            &path,
+            &path,
+            &options,
+            "bmc",
+            solver,
+            fingerprint,
+            &[],
+        )
+        .expect("current keys");
+        assert_ne!(key, legacy_key);
+        assert_ne!(xdepth, legacy_xdepth);
+
+        // A poisoned legacy entry: a verdict that is not true of the spec.
+        let legacy_entry = json!({
+            "schema": "fslc-rust-cache.v2",
+            "key": legacy_key,
+            "xdepth": legacy_xdepth,
+            "output": {
+                "fsl": "1.0",
+                "spec": "Poisoned",
+                "result": "verified",
+                "completeness": "bounded",
+            },
+        });
+        assert!(
+            verified_cache_entry_output(&legacy_entry, &legacy_key, &legacy_xdepth).is_some(),
+            "calibration: the poisoned entry is well-formed under its own key"
+        );
+        assert!(
+            verified_cache_entry_output(&legacy_entry, &key, &xdepth).is_none(),
+            "a legacy entry must not be accepted under the new key"
+        );
     }
 
     #[test]
