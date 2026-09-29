@@ -357,7 +357,7 @@ control; it does not mean it may be omitted from review.
 
 Use a checked fixture with a deterministic cycle and two reachability goals:
 
-```fsl
+```fsl check
 spec NestedOptionAssignment {
   type Bit = 0..1
   state { x: Option<Option<Bit>> }
