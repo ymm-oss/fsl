@@ -169,7 +169,7 @@ happened to exhaust the stack first, so guarding it does not fix the file, it re
 Implementing the fix took six rounds of guard-rebuild-recrash before the witness completed. Neither
 earlier count was a bad measurement; both were single measurements read as a census.
 
-Ten cycles are guarded, in three crates. **Eight are crash-witnessed; two are not**, and the table
+Eleven cycles are guarded, in three crates. **Nine are crash-witnessed; two are not**, and the table
 says which, because a reader who cannot tell them apart cannot tell this apart from the preventive
 spraying the design forbids:
 
@@ -185,8 +185,9 @@ spraying the design forbids:
 | `fsl-core` | `lib.rs` `PredicateExpander::expand_expr` | `check` on a 400-deep *invariant* (#622) | every checked command |
 | `fsl-core` | `public_kernel.rs` `expr_json` | `document claims` on the same spec (#622) | Kernel v2, document claims, digests |
 | `fsl-verifier` | `eval.rs` `eval` | #620 sample, `agentic_rag` at 1 MiB | `verify`, `refine` |
+| `fsl-verifier` | `eval.rs` `evaluation_status_with_policy` | `verify` bmc/induction on a 320-deep *invariant* (#1164) | `verify` (bmc, induction), vacuity, trace replay |
 
-The last two were found by changing the *witness*, not the code, and they are the clearest evidence
+The two #622 rows were found by changing the *witness*, not the code, and they are the clearest evidence
 for this section's thesis. #620's witness put its depth in a refinement mapping, so no amount of
 re-running it could reach predicate expansion or the Kernel v2 projection. Writing a second
 generator that puts the same depth inside an `invariant` — the shape the digests actually project —

@@ -180,7 +180,7 @@ fn run(args: &[&str]) -> Output {
 fn exit_code(label: &str, output: &Output) -> i32 {
     output.status.code().unwrap_or_else(|| {
         panic!(
-            "`fslc {label}` on a {WITNESS_STAGES}-stage witness died on a signal \
+            "`fslc {label}` on a deep witness died on a signal \
              instead of exiting -- a stack overflow returns neither an exit code \
              nor a JSON envelope, so it escapes the outcome contract entirely \
              (#620). stderr={}",
@@ -339,6 +339,62 @@ fn a_deeply_nested_invariant_reaches_the_digest_projection_without_aborting() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+/// Nesting depth of the invariant witness for the symbolic engines (#1164).
+///
+/// `WITNESS_STAGES` does not reach this cycle: `evaluation_status_with_policy`
+/// (the definedness walk in `fsl-verifier/src/eval.rs`) survives 200 levels
+/// unguarded. Measured on a debug arm64 build with the 8 MiB `fslc` thread, the
+/// unguarded binary aborts `verify` (bmc and induction alike) between N=300
+/// and N=320, at ~25 KiB per level, so 600 is above the threshold with margin. The ceiling is the other side: at N=3000 a
+/// debug build overflows in the derived `Clone` of `fsl_syntax::ast::Expr`
+/// before verification starts, which is a separate cycle every command shares
+/// and not what these two tests are about.
+const VERIFIER_WITNESS_STAGES: usize = 600;
+
+/// The largest depth the unguarded definedness walk was measured to survive.
+const VERIFIER_UNGUARDED_SURVIVES: usize = 300;
+
+/// Same reasoning as the assertion on `WITNESS_STAGES`: a witness at or below
+/// the survival depth passes on an unguarded binary and asserts nothing.
+const _: () = assert!(VERIFIER_WITNESS_STAGES > VERIFIER_UNGUARDED_SURVIVES);
+
+/// Runs `verify` under one symbolic engine on the deep invariant and requires
+/// an ordinary envelope carrying `expected` and exit 0.
+fn verify_deep_invariant(engine: &str, expected: &str) {
+    let directory = scratch_dir(&format!("verify-{engine}"));
+    let spec = deep_invariant_spec(&directory, VERIFIER_WITNESS_STAGES);
+    let path = spec.to_str().expect("spec path");
+    let label = format!("verify --engine {engine}");
+
+    let output = run(&["verify", path, "--engine", engine, "--depth", "2"]);
+    let status = exit_code(&label, &output);
+    let envelope = json(&label, &output);
+
+    assert_eq!(
+        envelope["result"], expected,
+        "every `if` arm is non-negative, so the invariant holds; a different \
+         verdict means the stack guard changed an answer rather than \
+         preserving it; envelope={envelope}"
+    );
+    assert_eq!(status, 0, "envelope={envelope}");
+}
+
+/// `verify --engine bmc` evaluates every invariant twice per step: once
+/// through `eval` (guarded since #620) and once through the definedness walk
+/// `evaluation_status_with_policy`, which recursed unguarded and aborted with
+/// exit 134 and no envelope (#1164).
+#[test]
+fn bmc_verifies_a_deeply_nested_invariant_instead_of_overflowing_the_stack() {
+    verify_deep_invariant("bmc", "verified");
+}
+
+/// `verify --engine induction` reaches the same definedness walk through its
+/// base case and step, and aborted the same way (#1164).
+#[test]
+fn induction_proves_a_deeply_nested_invariant_instead_of_overflowing_the_stack() {
+    verify_deep_invariant("induction", "proved");
 }
 
 /// Writes a spec whose *invariant* carries a right-nested `if` chain of length
